@@ -1,0 +1,144 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Helper: Admin Only
+    function isAdmin() {
+      return isAuthenticated() && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // Helper: Staff or Admin
+    function isStaff() {
+       return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'staff');
+    }
+
+    // Helper: Owner
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Products - public read, admin/staff write (staff with permission, handled in app, for rules just Admin/Staff)
+    match /products/{productId} {
+      allow read: if true;
+      allow write: if isStaff();
+    }
+    
+    // Services - same
+    match /services/{serviceId} {
+      allow read: if true;
+      allow write: if isStaff();
+    }
+    
+    // Articles - same
+    match /articles/{articleId} {
+      allow read: if true;
+      allow write: if isStaff();
+    }
+    
+    // System Config - public read, admin only write
+    match /system_config/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Analytics Dashboard
+    match /analytics/{dateStr} {
+      allow read: if true;
+      allow write: if true; // Public can increment visitors
+    }
+
+    // Users
+    match /users/{userId} {
+      // Read: owner reads own, staff/admin reads all
+      allow read: if isOwner(userId) || isStaff();
+
+      // Create: owner creates own (signup), OR admin creates for others (e.g. promoting)
+      allow create: if isOwner(userId) || isAdmin();
+
+      // Update: owner updates own profile, OR admin updates any (for role/permission management)
+      allow update: if isOwner(userId) || isAdmin();
+
+      // Delete: admin only
+      allow delete: if isAdmin();
+    }
+    
+    // Orders
+    match /orders/{orderId} {
+      // Owner read own. Staff/Admin read all.
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isStaff());
+      // Public read for Tracking (No-Auth flow). 
+      allow read: if true; 
+
+      // Anyone can create an order (guest checkout & POS)
+      allow create: if true;
+      // Staff/Admin update/delete.
+      allow update, delete: if isStaff();
+    }
+    
+    // Appointments
+    match /appointments/{appointmentId} {
+      allow create: if true;
+      allow read: if true; // Public for tracking
+      allow update, delete: if isStaff();
+    }
+
+    // Repairs
+    match /repairs/{repairId} {
+      allow read: if true; // Public for tracking
+      allow create, update: if isStaff();
+      allow delete: if isAdmin();
+    }
+
+    // Activities
+    match /activities/{activityId} {
+      allow read, write: if isStaff();
+    }
+
+    // Media Library
+    match /media_library/{mediaId} {
+      allow read: if isAuthenticated();
+      allow write: if isStaff();
+    }
+
+    // Subscribers
+    match /subscribers/{subscriberId} {
+      allow create: if true;
+      allow read, update, delete: if isAdmin();
+    }
+
+    // --- ERP Mini Modules ---
+    
+    // Inventory
+    match /import_receipts/{receiptId} {
+      allow read, write: if isStaff();
+    }
+
+    // Commissions
+    match /commission_rules/{ruleId} {
+      allow read, write: if isStaff();
+    }
+    match /commissions/{commissionId} {
+      allow read, write: if isStaff();
+    }
+
+    // Expenses
+    match /expenses/{expenseId} {
+      allow read, write: if isStaff();
+    }
+
+    // Customer Reviews
+    match /reviews/{reviewId} {
+      allow create: if true; // Public can create
+      allow read: if resource.data.status == 'approved' || request.auth != null; // Public reads approved, staff reads all
+      allow update, delete: if isStaff(); // Only staff/admin can moderate
+    }
+  }
+}

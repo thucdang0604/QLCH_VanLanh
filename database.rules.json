@@ -1,0 +1,24 @@
+{
+    "rules": {
+        "chats": {
+            "$roomId": {
+                "info": {
+                    ".read": true,
+                    ".write": true
+                },
+                "messages": {
+                    ".read": true,
+                    ".write": true,
+                    "$messageId": {
+                        ".validate": "newData.hasChildren(['text', 'senderId', 'senderType', 'timestamp'])"
+                    }
+                }
+            },
+            ".read": true
+        },
+        "online_users": {
+            ".read": true,
+            ".write": true
+        }
+    }
+}

@@ -1,0 +1,507 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import {
+    Settings, Plus, Trash2, GripVertical, Save, Loader2, ArrowRight, X, Eye
+} from 'lucide-react';
+import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+
+import type { WorkflowNode, TrackingGroup } from '@/lib/types';
+
+const defaultStatuses: WorkflowNode[] = [
+    { id: 'cho_tiep_nhan', label: 'Chờ Tiếp nhận', color: 'bg-yellow-100 text-yellow-800', allowedNext: ['dang_kiem_tra', 'out'] },
+    { id: 'dang_kiem_tra', label: 'Đang Kiểm Tra', color: 'bg-blue-100 text-blue-800', allowedNext: ['bao_tinh_trang_va_gia', 'dang_sua_chua', 'done', 'out'] },
+    { id: 'bao_tinh_trang_va_gia', label: 'Báo Tình Trạng & Giá', color: 'bg-indigo-100 text-indigo-800', allowedNext: ['doi_khach_phan_hoi', 'out'] },
+    { id: 'doi_khach_phan_hoi', label: 'Đợi Khách Phản Hồi', color: 'bg-purple-100 text-purple-800', allowedNext: ['tim_linh_kien', 'dang_sua_chua', 'hoan_phi', 'out'] },
+    { id: 'tim_linh_kien', label: 'Tìm Linh Kiện', color: 'bg-cyan-100 text-cyan-800', allowedNext: ['da_dat_linh_kien', 'hoan_phi', 'out'] },
+    { id: 'da_dat_linh_kien', label: 'Đã Đặt LK', color: 'bg-teal-100 text-teal-800', allowedNext: ['dang_sua_chua'] },
+    { id: 'dang_sua_chua', label: 'Đang Sửa Chữa', color: 'bg-orange-100 text-orange-800', allowedNext: ['done', 'hoan_phi'] },
+    { id: 'done', label: 'Hoàn Thành', color: 'bg-green-100 text-green-800', allowedNext: [] },
+    { id: 'hoan_phi', label: 'Hoàn Phí', color: 'bg-red-100 text-red-800', allowedNext: [], isTerminal: true },
+    { id: 'out', label: 'Đã Trả Máy', color: 'bg-gray-100 text-gray-800', allowedNext: [], isTerminal: true },
+    { id: 'da_tra_may', label: 'Đã Trả Máy', color: 'bg-emerald-100 text-emerald-800', allowedNext: [], isTerminal: true }
+];
+
+const colorOptions = [
+    'bg-yellow-100 text-yellow-800', 'bg-blue-100 text-blue-800', 'bg-indigo-100 text-indigo-800',
+    'bg-purple-100 text-purple-800', 'bg-cyan-100 text-cyan-800', 'bg-teal-100 text-teal-800',
+    'bg-orange-100 text-orange-800', 'bg-green-100 text-green-800', 'bg-red-100 text-red-800',
+    'bg-gray-100 text-gray-800', 'bg-pink-100 text-pink-800', 'bg-amber-100 text-amber-800',
+];
+
+export default function RepairStatusSettingsPage() {
+    const [statuses, setStatuses] = useState<WorkflowNode[]>(defaultStatuses);
+    const [trackingGroups, setTrackingGroups] = useState<TrackingGroup[]>([]);
+
+    // UI states
+    const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+
+    // Status Modal
+    const [showAddModal, setShowAddModal] = useState(false);
+    const [newId, setNewId] = useState('');
+    const [newLabel, setNewLabel] = useState('');
+    const [newColor, setNewColor] = useState(colorOptions[0]);
+    const [dragIndex, setDragIndex] = useState<number | null>(null);
+
+    // Group Modal
+    const [showAddGroupModal, setShowAddGroupModal] = useState(false);
+    const [newGroupName, setNewGroupName] = useState('');
+    const [dragGroupIndex, setDragGroupIndex] = useState<number | null>(null);
+
+    useEffect(() => {
+        const load = async () => {
+            try {
+                const snap = await getDoc(doc(db, 'system_config', 'repairs'));
+                if (snap.exists()) {
+                    const d = snap.data();
+                    if (d.statuses) setStatuses(d.statuses);
+                    // Legacy migration: sort generic arrays to trackingGroups ensuring order
+                    if (d.trackingGroups) {
+                        setTrackingGroups(d.trackingGroups.sort((a: TrackingGroup, b: TrackingGroup) => a.order - b.order));
+                    }
+                }
+            } catch (err) {
+                console.error(err);
+            } finally {
+                setLoading(false);
+            }
+        };
+        load();
+    }, []);
+
+    const handleSave = async () => {
+        setSaving(true);
+        try {
+            // Guarantee order is fixed on save
+            const orderedGroups = trackingGroups.map((g, i) => ({ ...g, order: i }));
+
+            await setDoc(doc(db, 'system_config', 'repairs'), {
+                statuses,
+                trackingGroups: orderedGroups,
+                updatedAt: serverTimestamp(),
+            }, { merge: true });
+
+            setTrackingGroups(orderedGroups);
+            alert('Đã lưu cấu hình trạng thái & theo dõi!');
+        } catch (err) {
+            console.error(err);
+            alert('Lỗi khi lưu!');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    // --- Status Logic ---
+    const handleAddStatus = () => {
+        if (!newId.trim() || !newLabel.trim()) return;
+        const id = newId.trim().toLowerCase().replace(/\s+/g, '_');
+        if (statuses.find(s => s.id === id)) {
+            alert('ID đã tồn tại!');
+            return;
+        }
+        setStatuses(prev => [...prev, { id, label: newLabel.trim(), color: newColor, allowedNext: [], isTerminal: false }]);
+        setNewId('');
+        setNewLabel('');
+        setNewColor(colorOptions[0]);
+        setShowAddModal(false);
+    };
+
+    const handleDeleteStatus = (id: string) => {
+        if (!confirm(`Xóa trạng thái "${id}"? Lưu ý: Cần gỡ khỏi nhóm tra cứu (nếu có) trước khi lưu.`)) return;
+        setStatuses(prev => prev.filter(s => s.id !== id));
+        // Remove from tracking groups as well
+        setTrackingGroups(prev => prev.map(g => ({
+            ...g,
+            mappedStatuses: g.mappedStatuses.filter(sId => sId !== id)
+        })));
+    };
+
+    const handleDragStartStatus = (index: number) => setDragIndex(index);
+    const handleDragOverStatus = (e: React.DragEvent, index: number) => {
+        e.preventDefault();
+        if (dragIndex === null || dragIndex === index) return;
+        const newList = [...statuses];
+        const [moved] = newList.splice(dragIndex, 1);
+        newList.splice(index, 0, moved);
+        setStatuses(newList);
+        setDragIndex(index);
+    };
+    const handleDragEndStatus = () => setDragIndex(null);
+
+    const updateLabel = (id: string, label: string) => setStatuses(prev => prev.map(s => s.id === id ? { ...s, label } : s));
+    const updateColor = (id: string, color: string) => setStatuses(prev => prev.map(s => s.id === id ? { ...s, color } : s));
+    const toggleNext = (id: string, nextId: string) => {
+        setStatuses(prev => prev.map(s => {
+            if (s.id !== id) return s;
+            const allowed = s.allowedNext || [];
+            return {
+                ...s,
+                allowedNext: allowed.includes(nextId) ? allowed.filter(n => n !== nextId) : [...allowed, nextId]
+            };
+        }));
+    };
+    const toggleTerminal = (id: string) => setStatuses(prev => prev.map(s => s.id === id ? { ...s, isTerminal: !s.isTerminal } : s));
+
+    // --- Tracking Group Logic ---
+    const handleAddGroup = () => {
+        if (!newGroupName.trim()) return;
+        const newGroup: TrackingGroup = {
+            id: 'idx_' + Date.now().toString(),
+            name: newGroupName.trim(),
+            mappedStatuses: [],
+            order: trackingGroups.length
+        };
+        setTrackingGroups(prev => [...prev, newGroup]);
+        setNewGroupName('');
+        setShowAddGroupModal(false);
+    };
+
+    const handleDeleteGroup = (id: string) => {
+        if (!confirm('Xóa nhóm tra cứu này?')) return;
+        setTrackingGroups(prev => prev.filter(g => g.id !== id));
+    };
+
+    const handleDragStartGroup = (index: number) => setDragGroupIndex(index);
+    const handleDragOverGroup = (e: React.DragEvent, index: number) => {
+        e.preventDefault();
+        if (dragGroupIndex === null || dragGroupIndex === index) return;
+        const newList = [...trackingGroups];
+        const [moved] = newList.splice(dragGroupIndex, 1);
+        newList.splice(index, 0, moved);
+        setTrackingGroups(newList);
+        setDragGroupIndex(index);
+    };
+    const handleDragEndGroup = () => setDragGroupIndex(null);
+
+    const updateGroupName = (id: string, name: string) => {
+        setTrackingGroups(prev => prev.map(g => g.id === id ? { ...g, name } : g));
+    };
+
+    const toggleGroupTerminal = (id: string) => {
+        setTrackingGroups(prev => prev.map(g => g.id === id ? { ...g, isTerminal: !g.isTerminal } : g));
+    };
+
+    // Toggle mapping: 1 status only belongs to 1 group
+    const toggleStatusMapping = (groupId: string, statusId: string) => {
+        setTrackingGroups(prev => {
+            return prev.map(group => {
+                if (group.id === groupId) {
+                    // Turn on/off
+                    const exists = group.mappedStatuses.includes(statusId);
+                    return {
+                        ...group,
+                        mappedStatuses: exists
+                            ? group.mappedStatuses.filter(id => id !== statusId)
+                            : [...group.mappedStatuses, statusId]
+                    };
+                } else {
+                    // If turning ON in the current `groupId`, we MUST turn OFF in all other groups
+                    // (Ensure 1 status is strictly mapped to only 1 group max)
+                    const isTargetActivating = prev.find(g => g.id === groupId) && !prev.find(g => g.id === groupId)!.mappedStatuses.includes(statusId);
+                    if (isTargetActivating && group.mappedStatuses.includes(statusId)) {
+                        return {
+                            ...group,
+                            mappedStatuses: group.mappedStatuses.filter(id => id !== statusId)
+                        };
+                    }
+                    return group;
+                }
+            });
+        });
+    };
+
+    if (loading) return (
+        <div className="flex flex-col items-center justify-center h-[60vh] gap-3">
+            <Loader2 className="animate-spin text-orange-500" size={40} />
+            <p className="text-gray-500">Đang tải cấu hình...</p>
+        </div>
+    );
+
+    return (
+        <div className="p-4 md:p-6 pb-32 space-y-10 max-w-6xl mx-auto">
+            {/* Master Header */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 sticky top-0 bg-gray-50 z-40 py-4 border-b border-gray-200">
+                <div>
+                    <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                        <Settings className="text-orange-500" /> Cài đặt Quy trình Sửa chữa
+                    </h1>
+                    <p className="text-sm text-gray-500 mt-0.5">Quản lý Workflow nội bộ và Nhóm tra cứu cho khách hàng</p>
+                </div>
+                <button onClick={handleSave} disabled={saving}
+                    className="flex justify-center items-center gap-2 px-6 py-3 bg-green-500 text-white rounded-xl font-bold hover:bg-green-600 shadow-lg shadow-green-200/50 disabled:opacity-50 transition-all active:scale-95">
+                    {saving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
+                    Lưu toàn bộ thay đổi
+                </button>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+
+                {/* ─── CỘT 1: QUẢN LÝ TRẠNG THÁI NỘI BỘ (INTERNAL) ─── */}
+                <div className="space-y-4">
+                    <div className="flex items-center justify-between border-b pb-2 border-gray-200">
+                        <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                            <span>🛠 Workflow Nội bộ (Admin)</span>
+                        </h2>
+                        <button onClick={() => setShowAddModal(true)}
+                            className="flex items-center gap-1 px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg text-sm font-semibold hover:bg-gray-200 transition-colors">
+                            <Plus size={16} /> Thêm
+                        </button>
+                    </div>
+
+                    {/* Flow Preview */}
+                    <div className="bg-gradient-to-r from-orange-50 to-amber-50 rounded-xl border border-orange-200 p-4">
+                        <p className="text-xs font-semibold text-orange-800 mb-2">Flow Hiển thị</p>
+                        <div className="flex flex-wrap items-center gap-1">
+                            {statuses.map((s, i) => (
+                                <div key={s.id} className="flex items-center gap-1">
+                                    <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${s.color}`}>
+                                        {s.label}
+                                    </span>
+                                    {i < statuses.length - 1 && <ArrowRight size={10} className="text-gray-400" />}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="space-y-2">
+                        {statuses.map((status, index) => (
+                            <div key={status.id}
+                                draggable
+                                onDragStart={() => handleDragStartStatus(index)}
+                                onDragOver={(e) => handleDragOverStatus(e, index)}
+                                onDragEnd={handleDragEndStatus}
+                                className={`bg-white rounded-xl border p-3 flex flex-col gap-2 transition-all relative ${dragIndex === index ? 'opacity-50 scale-95 z-0' : 'hover:shadow-md z-10 hover:z-20'}`}>
+
+                                <div className="flex items-center gap-3">
+                                    <div className="cursor-grab active:cursor-grabbing text-gray-300 hover:text-gray-500">
+                                        <GripVertical size={18} />
+                                    </div>
+                                    <span className="text-xs font-mono text-gray-400 w-4">{index + 1}</span>
+
+                                    <input type="text" value={status.label}
+                                        onChange={e => updateLabel(status.id, e.target.value)}
+                                        className="flex-1 px-3 py-1.5 text-sm border font-semibold text-gray-900 rounded-lg focus:border-orange-500 focus:outline-none min-w-[120px]" />
+
+                                    <button onClick={() => handleDeleteStatus(status.id)}
+                                        className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                                        <Trash2 size={16} />
+                                    </button>
+                                </div>
+
+                                <div className="flex flex-wrap items-center gap-2 pl-9">
+                                    <span className="text-xs font-mono text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">{status.id}</span>
+                                    <select value={status.color} onChange={e => updateColor(status.id, e.target.value)}
+                                        className="text-xs px-2 py-1 border rounded-md focus:outline-none">
+                                        {colorOptions.map(c => (
+                                            <option key={c} value={c}>{c.split(' ')[0].replace('bg-', '').replace('-100', '')}</option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                <div className="flex flex-col gap-1 pl-9 text-xs">
+                                    <label className="flex items-center gap-1.5 cursor-pointer w-fit">
+                                        <input type="checkbox" checked={!!status.isTerminal} onChange={() => toggleTerminal(status.id)} className="rounded border-gray-300 text-red-500 focus:ring-red-500" />
+                                        <span className={`font-semibold ${status.isTerminal ? 'text-red-600' : 'text-gray-500'}`}>Điểm kết thúc (Khóa phiếu)</span>
+                                    </label>
+
+                                    {!status.isTerminal && (
+                                        <div className="relative group mt-1">
+                                            <button className="px-3 py-1.5 border rounded-lg bg-gray-50 text-gray-700 text-left flex items-center justify-between hover:bg-gray-100 transition-colors">
+                                                <span>{status.allowedNext?.length ? `${status.allowedNext.length} luồng tiếp theo` : 'Chưa cấu hình Workflow Next'}</span>
+                                                <ArrowRight size={12} className="text-gray-400 ml-2" />
+                                            </button>
+                                            <div className="absolute top-full left-0 mt-1 w-[280px] bg-white border rounded-xl p-2 shadow-xl z-[100] hidden group-hover:block max-h-[300px] overflow-y-auto">
+                                                <p className="text-[10px] text-gray-500 font-semibold mb-2 sticky top-0 bg-white z-10 pb-1 border-b">Tick chọn các đường đi tiếp theo cho [{status.label}]:</p>
+                                                <div className="flex flex-col gap-0.5">
+                                                    {statuses.filter(s => s.id !== status.id).map(s => (
+                                                        <label key={s.id} className="flex items-center gap-2 p-1.5 hover:bg-orange-50 rounded-lg cursor-pointer transition-colors">
+                                                            <input type="checkbox"
+                                                                className="rounded border-gray-300 text-orange-500 focus:ring-orange-500"
+                                                                checked={status.allowedNext?.includes(s.id) || false}
+                                                                onChange={() => toggleNext(status.id, s.id)}
+                                                            />
+                                                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium shadow-sm ${s.color}`}>
+                                                                {s.label}
+                                                            </span>
+                                                        </label>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                {/* ─── CỘT 2: QUẢN LÝ NHÓM TRA CỨU MÀ HĐ HIỂN THỊ CHO KHÁCH (CUSTOMER) ─── */}
+                <div className="space-y-4">
+                    <div className="flex items-center justify-between border-b pb-2 border-gray-200">
+                        <div>
+                            <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                                <Eye className="text-blue-500" size={20} /> Customer Tracking Groups
+                            </h2>
+                        </div>
+                        <button onClick={() => setShowAddGroupModal(true)}
+                            className="flex items-center gap-1 px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg text-sm font-semibold hover:bg-blue-200 transition-colors">
+                            <Plus size={16} /> Thêm Nhóm
+                        </button>
+                    </div>
+
+                    <p className="text-xs text-gray-500">Khách hàng sẽ chỉ nhìn thấy các Nhóm lớn dưới đây. Bạn cần tick Map 1 Trạng thái nội bộ vào 1 Nhóm tương ứng.</p>
+
+                    <div className="space-y-3">
+                        {trackingGroups.length === 0 && (
+                            <div className="text-center p-6 border-2 border-dashed rounded-xl text-gray-400 text-sm">
+                                Chưa có nhóm tra cứu nào.
+                            </div>
+                        )}
+                        {trackingGroups.map((group, index) => (
+                            <div key={group.id}
+                                draggable
+                                onDragStart={() => handleDragStartGroup(index)}
+                                onDragOver={(e) => handleDragOverGroup(e, index)}
+                                onDragEnd={handleDragEndGroup}
+                                className={`bg-white rounded-xl border-2 border-transparent p-4 flex flex-col gap-3 shadow-sm hover:border-blue-200 transition-all ${dragGroupIndex === index ? 'opacity-50 scale-95' : ''}`}>
+
+                                <div className="flex items-center gap-3">
+                                    <div className="cursor-grab active:cursor-grabbing text-gray-300 hover:text-gray-500">
+                                        <GripVertical size={18} />
+                                    </div>
+                                    <div className="w-8 h-8 rounded-full bg-blue-50 text-blue-700 font-bold flex items-center justify-center text-sm ring-4 ring-blue-50/50">
+                                        {index + 1}
+                                    </div>
+
+                                    <input type="text" value={group.name}
+                                        onChange={e => updateGroupName(group.id, e.target.value)}
+                                        placeholder="Nhập tên nhóm tra cứu..."
+                                        className="flex-1 px-3 py-2 text-sm border font-bold text-gray-900 rounded-lg focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+
+                                    <button onClick={() => handleDeleteGroup(group.id)}
+                                        className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                                        <Trash2 size={16} />
+                                    </button>
+                                </div>
+
+                                {/* Terminal Checkbox */}
+                                <div className="pl-11 flex items-center gap-2 text-xs">
+                                    <label className="flex items-center gap-1.5 cursor-pointer w-fit">
+                                        <input type="checkbox" checked={!!group.isTerminal} onChange={() => toggleGroupTerminal(group.id)} className="rounded border-gray-300 text-blue-500 focus:ring-blue-500" />
+                                        <span className={`font-semibold ${group.isTerminal ? 'text-blue-600' : 'text-gray-500'}`}>Đánh dấu là nhóm Cuối cùng (Terminal)</span>
+                                    </label>
+                                </div>
+
+                                {/* Checkbox Mapping List */}
+                                <div className="pl-11 pr-2">
+                                    <p className="text-xs font-semibold text-gray-500 mb-2">Trạng thái con (Maps to):</p>
+                                    <div className="flex flex-wrap gap-2">
+                                        {statuses.map(s => {
+                                            const isChecked = group.mappedStatuses.includes(s.id);
+                                            // Is it mapped to SOME OTHER group?
+                                            const isMappedElsewhere = !isChecked && trackingGroups.some(g => g.mappedStatuses.includes(s.id));
+
+                                            // We allow clicking, but if it's already mapped elsewhere, we'll swap it to this group inside `toggleStatusMapping`.
+                                            return (
+                                                <label key={s.id}
+                                                    className={`
+                                                        flex items-center gap-1.5 pl-1.5 pr-2 py-1 rounded-full border cursor-pointer border-transparent shadow-sm text-[10px] font-medium transition-all
+                                                        ${isChecked ? s.color + ' ring-1 ring-black/10 scale-105' : 'bg-gray-50 text-gray-400 border-gray-200 hover:bg-gray-100'}
+                                                        ${isMappedElsewhere ? 'opacity-30 hover:opacity-100' : ''}
+                                                    `}>
+                                                    <input
+                                                        type="checkbox"
+                                                        className="rounded-full w-3 h-3 text-blue-500 focus:ring-0 cursor-pointer"
+                                                        checked={isChecked}
+                                                        onChange={() => toggleStatusMapping(group.id, s.id)}
+                                                    />
+                                                    {s.label}
+                                                </label>
+                                            )
+                                        })}
+                                    </div>
+                                </div>
+
+                            </div>
+                        ))}
+                    </div>
+
+                </div>
+            </div>
+
+            {/* Modal Internal Status */}
+            {showAddModal && (
+                <div className="fixed inset-0 bg-black/50 flex flex-col items-center justify-center z-50 p-4" onClick={() => setShowAddModal(false)}>
+                    <div className="bg-white rounded-2xl w-full max-w-md p-6 relative" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-between mb-4">
+                            <h2 className="text-lg font-bold text-gray-900">Thêm Trạng thái nội bộ</h2>
+                            <button onClick={() => setShowAddModal(false)} className="text-gray-400 hover:text-gray-600">
+                                <X size={20} />
+                            </button>
+                        </div>
+                        <div className="space-y-3 pt-2">
+                            <div>
+                                <label className="text-sm text-gray-700 font-semibold mb-1 block">ID (không dấu, snake_case)</label>
+                                <input type="text" value={newId} onChange={e => setNewId(e.target.value)}
+                                    placeholder="vd: cho_linh_kien" className="w-full px-4 py-3 border rounded-xl text-sm focus:border-orange-500 focus:outline-none" />
+                            </div>
+                            <div>
+                                <label className="text-sm text-gray-700 font-semibold mb-1 block">Tên hiển thị</label>
+                                <input type="text" value={newLabel} onChange={e => setNewLabel(e.target.value)}
+                                    placeholder="vd: Chờ linh kiện" className="w-full px-4 py-3 border rounded-xl text-sm focus:border-orange-500 focus:outline-none" />
+                            </div>
+                            <div>
+                                <label className="text-sm text-gray-700 font-semibold mb-1 block">Màu sắc</label>
+                                <div className="flex flex-wrap gap-2 mt-2">
+                                    {colorOptions.map(c => (
+                                        <button key={c} onClick={() => setNewColor(c)}
+                                            className={`px-3 py-1.5 rounded-lg text-[10px] font-bold border-2 transition-all ${c} ${newColor === c ? 'border-gray-900 shadow-md scale-105' : 'border-transparent'
+                                                }`}>
+                                            {c.split(' ')[0].replace('bg-', '').replace('-100', '')}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                            <div className="pt-4">
+                                <button onClick={handleAddStatus}
+                                    className="w-full py-3.5 bg-orange-500 text-white rounded-xl font-bold hover:bg-orange-600 transition-all shadow-lg shadow-orange-500/30">
+                                    Thêm vào Workflow
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal Tracking Group */}
+            {showAddGroupModal && (
+                <div className="fixed inset-0 bg-black/50 flex flex-col items-center justify-center z-50 p-4" onClick={() => setShowAddGroupModal(false)}>
+                    <div className="bg-white rounded-2xl w-full max-w-sm p-6 relative" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-between mb-4">
+                            <h2 className="text-lg font-bold text-gray-900 text-blue-600">Tạo Nhóm Trạng Thái</h2>
+                            <button onClick={() => setShowAddGroupModal(false)} className="text-gray-400 hover:text-gray-600">
+                                <X size={20} />
+                            </button>
+                        </div>
+                        <div className="space-y-4 pt-2">
+                            <div>
+                                <label className="text-sm text-gray-700 font-semibold mb-2 block">Tên nhóm (dành cho Khách)</label>
+                                <input type="text" value={newGroupName} onChange={e => setNewGroupName(e.target.value)} autoFocus
+                                    onKeyDown={e => e.key === 'Enter' && handleAddGroup()}
+                                    placeholder="vd: Tiếp nhận thiết bị" className="w-full px-4 py-3 border-2 focus:border-blue-500 rounded-xl text-sm font-medium focus:outline-none" />
+                            </div>
+                            <div className="pt-2">
+                                <button onClick={handleAddGroup}
+                                    className="w-full py-3.5 bg-blue-500 text-white rounded-xl font-bold hover:bg-blue-600 transition-all shadow-lg shadow-blue-500/30">
+                                    Tạo mới Group
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
