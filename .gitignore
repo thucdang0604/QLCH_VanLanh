@@ -39,3 +39,13 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Generated / temp files
+repomix-output.xml
+*.log
+ts_errors.txt
+eslint_output.json
+compile.log
+
+# Firebase & Agents
+.firebase/

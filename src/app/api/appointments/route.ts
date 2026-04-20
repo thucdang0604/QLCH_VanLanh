@@ -1,0 +1,125 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+
+// ── Rate Limiting (in-memory, per IP, 3 req/min) ──
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+const RATE_LIMIT_MAX = 3;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+
+function checkRateLimit(ip: string): boolean {
+    const now = Date.now();
+    const entry = rateLimitMap.get(ip);
+
+    if (!entry || now > entry.resetAt) {
+        rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+        return true;
+    }
+
+    if (entry.count >= RATE_LIMIT_MAX) {
+        return false;
+    }
+
+    entry.count++;
+    return true;
+}
+
+// Cleanup memory every 5 minutes
+setInterval(() => {
+    const now = Date.now();
+    for (const [ip, entry] of rateLimitMap) {
+        if (now > entry.resetAt) rateLimitMap.delete(ip);
+    }
+}, 5 * 60_000);
+
+export async function POST(request: NextRequest) {
+    try {
+        // ── 1. Rate Limiting ──
+        const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+            || request.headers.get('x-real-ip')
+            || 'unknown';
+
+        if (!checkRateLimit(ip)) {
+            return NextResponse.json(
+                { error: 'Bạn đang gửi quá nhiều yêu cầu. Vui lòng thử lại sau.' },
+                { status: 429 }
+            );
+        }
+
+        const body = await request.json();
+
+        // ── 2. Honeypot Check ──
+        if (body.website) {
+            return NextResponse.json(
+                { error: 'Invalid request' },
+                { status: 400 }
+            );
+        }
+
+        const { fullName, phone, date, timeSlot, store, serviceName, serviceId } = body;
+
+        // ── 3. Validate required fields ──
+        if (!fullName || typeof fullName !== 'string' || fullName.trim().length < 2) {
+            return NextResponse.json(
+                { error: 'Vui lòng nhập họ tên (ít nhất 2 ký tự).' },
+                { status: 400 }
+            );
+        }
+
+        if (!phone || typeof phone !== 'string') {
+            return NextResponse.json(
+                { error: 'Vui lòng nhập số điện thoại.' },
+                { status: 400 }
+            );
+        }
+
+        // Validate phone format (Vietnamese: 0xxxxxxxxx, 10-11 digits)
+        if (!/^0\d{9,10}$/.test(phone.trim())) {
+            return NextResponse.json(
+                { error: 'Số điện thoại không hợp lệ (VD: 0901234567).' },
+                { status: 400 }
+            );
+        }
+
+        if (!date || typeof date !== 'string') {
+            return NextResponse.json(
+                { error: 'Vui lòng chọn ngày.' },
+                { status: 400 }
+            );
+        }
+
+        if (!timeSlot || !['morning', 'afternoon', 'evening'].includes(timeSlot)) {
+            return NextResponse.json(
+                { error: 'Vui lòng chọn buổi hẹn.' },
+                { status: 400 }
+            );
+        }
+
+        // ── 4. Create appointment ──
+        const appointment = {
+            fullName: fullName.trim(),
+            phone: phone.trim(),
+            date,
+            timeSlot,
+            store: (store || '').trim(),
+            serviceName: (serviceName || '').trim(),
+            serviceId: (serviceId || '').trim(),
+            status: 'pending',
+            createdAt: serverTimestamp(),
+        };
+
+        const docRef = await addDoc(collection(db, 'appointments'), appointment);
+
+        return NextResponse.json({
+            success: true,
+            appointmentId: docRef.id,
+            message: 'Đặt lịch thành công!',
+        });
+    } catch (error) {
+        console.error('Appointment API error:', error);
+        return NextResponse.json(
+            { error: 'Lỗi hệ thống. Vui lòng thử lại sau.' },
+            { status: 500 }
+        );
+    }
+}
