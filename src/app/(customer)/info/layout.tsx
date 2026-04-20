@@ -103,3 +103,4 @@ export default function InfoLayout({ children }: { children: React.ReactNode }) 
         </div>
     );
 }
+

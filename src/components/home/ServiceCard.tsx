@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { Shield, Clock, Zap, Star, Flame } from 'lucide-react';
 
 interface ServiceCardProps {
@@ -68,11 +69,13 @@ export default function ServiceCard({
             {/* Image */}
             <div className="relative aspect-square bg-gray-50 overflow-hidden">
                 {displayImage ? (
-                    <img
+                    <Image
                         src={displayImage}
                         alt={name}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                        loading="lazy"
+                        fill
+                        sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
+                        quality={75}
+                        className="object-cover group-hover:scale-105 transition-transform duration-500"
                     />
                 ) : (
                     <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-gray-100 to-gray-50">

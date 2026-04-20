@@ -2,11 +2,10 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { Bell, ShoppingBag, Calendar, MessageSquare, X, Activity, DollarSign, ArrowDownToLine, FileText, Check } from 'lucide-react';
-import { collection, query, where, onSnapshot, updateDoc, doc } from 'firebase/firestore';
-import { ref, onValue } from 'firebase/database';
+import { updateDoc, doc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { rtdb } from '@/lib/firebase';
 import Link from 'next/link';
+import type { AdminBadgeCounts, ActivityItem } from '@/lib/useAdminBadges';
 
 interface NotifItem {
     type: 'order' | 'appointment' | 'chat';
@@ -15,15 +14,6 @@ interface NotifItem {
     href: string;
     icon: typeof Bell;
     color: string;
-}
-
-interface ActivityItem {
-    id: string;
-    type: 'login' | 'order' | 'import' | 'article' | 'other';
-    message: string;
-    amount?: number;
-    read: boolean;
-    createdAt: any;
 }
 
 const activityIcons: Record<string, { icon: typeof Bell; color: string }> = {
@@ -35,9 +25,10 @@ const activityIcons: Record<string, { icon: typeof Bell; color: string }> = {
 };
 
 const formatPrice = (n: number) => n.toLocaleString('vi-VN') + 'đ';
-const formatTime = (ts: any) => {
+const formatTime = (ts: unknown) => {
     if (!ts) return '';
-    const d = ts.toDate ? ts.toDate() : new Date(ts);
+    const maybe = ts as { toDate?: () => Date };
+    const d = typeof maybe?.toDate === 'function' ? maybe.toDate() : new Date(ts as string | number | Date);
     const now = new Date();
     const diff = now.getTime() - d.getTime();
     if (diff < 60000) return 'Vừa xong';
@@ -48,68 +39,15 @@ const formatTime = (ts: any) => {
     return d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
 };
 
-export default function NotificationBell() {
-    const [pendingOrders, setPendingOrders] = useState(0);
-    const [pendingAppointments, setPendingAppointments] = useState(0);
-    const [unreadChats, setUnreadChats] = useState(0);
-    const [activities, setActivities] = useState<ActivityItem[]>([]);
+interface NotificationBellProps {
+    badges: AdminBadgeCounts;
+    activities: ActivityItem[];
+}
+
+export default function NotificationBell({ badges, activities }: NotificationBellProps) {
     const [showDropdown, setShowDropdown] = useState(false);
     const [activeTab, setActiveTab] = useState<'summary' | 'activities'>('summary');
     const dropdownRef = useRef<HTMLDivElement>(null);
-
-    // Listen to pending orders
-    useEffect(() => {
-        const q = query(collection(db, 'orders'), where('status', '==', 'Pending'));
-        const unsub = onSnapshot(q, (snap) => setPendingOrders(snap.size),
-            (err) => console.error('NotifBell orders error:', err));
-        return () => unsub();
-    }, []);
-
-    // Listen to pending appointments
-    useEffect(() => {
-        const q = query(collection(db, 'appointments'), where('status', '==', 'pending'));
-        const unsub = onSnapshot(q, (snap) => setPendingAppointments(snap.size),
-            (err) => console.error('NotifBell appointments error:', err));
-        return () => unsub();
-    }, []);
-
-    // Listen to unread chats (Realtime DB)
-    useEffect(() => {
-        const chatsRef = ref(rtdb, 'chats');
-        const unsub = onValue(chatsRef, (snapshot) => {
-            const data = snapshot.val();
-            if (!data) { setUnreadChats(0); return; }
-            let count = 0;
-            Object.values(data).forEach((room: any) => {
-                if (room.info?.hasUnread) count++;
-            });
-            setUnreadChats(count);
-        }, (err) => console.error('NotifBell chats error:', err));
-        return () => unsub();
-    }, []);
-
-    // Listen to unread activities (gracefully skip if collection doesn't exist or no permissions)
-    useEffect(() => {
-        let unsub = () => { };
-        try {
-            const q = query(collection(db, 'activities'), where('read', '==', false));
-            unsub = onSnapshot(q, (snap) => {
-                const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as ActivityItem[];
-                data.sort((a, b) => {
-                    const aT = a.createdAt?.toDate?.()?.getTime?.() || 0;
-                    const bT = b.createdAt?.toDate?.()?.getTime?.() || 0;
-                    return bT - aT;
-                });
-                setActivities(data);
-            }, () => {
-                // Silently ignore - collection may not exist or permissions not set
-                setActivities([]);
-            });
-        } catch {
-            // Ignore setup errors
-        }
-        return () => unsub();
-    }, []);
 
     // Close dropdown on outside click
     useEffect(() => {
@@ -136,12 +74,12 @@ export default function NotificationBell() {
         }
     };
 
-    const total = pendingOrders + pendingAppointments + unreadChats + activities.length;
+    const total = badges.orders + badges.appointments + badges.chats + activities.length;
 
     const summaryItems: NotifItem[] = [
-        { type: 'order', count: pendingOrders, label: 'Đơn hàng chờ xử lý', href: '/admin/orders', icon: ShoppingBag, color: 'text-orange-500 bg-orange-50' },
-        { type: 'appointment', count: pendingAppointments, label: 'Lịch hẹn chờ duyệt', href: '/admin/appointments', icon: Calendar, color: 'text-blue-500 bg-blue-50' },
-        { type: 'chat', count: unreadChats, label: 'Tin nhắn chưa đọc', href: '/admin/chat', icon: MessageSquare, color: 'text-green-500 bg-green-50' },
+        { type: 'order', count: badges.orders, label: 'Đơn hàng chờ xử lý', href: '/admin/orders', icon: ShoppingBag, color: 'text-orange-500 bg-orange-50' },
+        { type: 'appointment', count: badges.appointments, label: 'Lịch hẹn chờ duyệt', href: '/admin/appointments', icon: Calendar, color: 'text-blue-500 bg-blue-50' },
+        { type: 'chat', count: badges.chats, label: 'Tin nhắn chưa đọc', href: '/admin/chat', icon: MessageSquare, color: 'text-green-500 bg-green-50' },
     ];
 
     return (
@@ -178,7 +116,7 @@ export default function NotificationBell() {
                     <div className="flex border-b">
                         <button onClick={() => setActiveTab('summary')}
                             className={`flex-1 py-2 text-xs font-medium transition-all ${activeTab === 'summary' ? 'text-orange-600 border-b-2 border-orange-500' : 'text-gray-500'}`}>
-                            Tổng quan ({pendingOrders + pendingAppointments + unreadChats})
+                            Tổng quan ({badges.orders + badges.appointments + badges.chats})
                         </button>
                         <button onClick={() => setActiveTab('activities')}
                             className={`flex-1 py-2 text-xs font-medium transition-all ${activeTab === 'activities' ? 'text-orange-600 border-b-2 border-orange-500' : 'text-gray-500'}`}>

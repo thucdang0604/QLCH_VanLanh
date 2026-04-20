@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDocs, collection, query, where, limit as firestoreLimit, orderBy } from 'firebase/firestore';
+import { getDocs, collection, query, where, limit as firestoreLimit, orderBy, type QueryConstraint } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 export async function GET(request: NextRequest) {
@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
         const status = searchParams.get('status') || 'active';
         const limitParam = parseInt(searchParams.get('limit') || '20');
 
-        const constraints: any[] = [];
+        const constraints: QueryConstraint[] = [];
 
         if (status) constraints.push(where('status', '==', status));
         if (category) constraints.push(where('category', '==', category));

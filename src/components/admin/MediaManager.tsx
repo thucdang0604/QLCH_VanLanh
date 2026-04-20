@@ -1,10 +1,14 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { collection, addDoc, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, limit } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { db, storage } from '@/lib/firebase';
 import { X, Upload, Image as ImageIcon, Film, Trash2, Loader2, Check, Search, AlertTriangle } from 'lucide-react';
+import type { FirestoreDateValue } from '@/lib/types';
+import { optimizeImage } from '@/lib/imageOptimizer';
+import { validateImageFile } from '@/lib/validateImage';
+import { cleanBrokenMedia } from '@/lib/storage';
 
 const MAX_VIDEO_SIZE_MB = 50;
 const MAX_VIDEO_SIZE_BYTES = MAX_VIDEO_SIZE_MB * 1024 * 1024;
@@ -15,14 +19,27 @@ export interface MediaItem {
     path: string;
     name: string;
     type: string;
+    folder?: string;
     size?: number;
-    createdAt: any;
+    width?: number;
+    height?: number;
+    createdAt: FirestoreDateValue;
 }
+
+export const MEDIA_FOLDERS = [
+    { id: 'general', name: 'Chung' },
+    { id: 'products', name: 'Sản phẩm' },
+    { id: 'services', name: 'Dịch vụ' },
+    { id: 'parts', name: 'Linh kiện' },
+    { id: 'articles', name: 'Tin tức' },
+    { id: 'reviews', name: 'Đánh giá' },
+    { id: 'pos', name: 'Bán hàng' }
+];
 
 interface MediaManagerProps {
     isOpen: boolean;
     onClose: () => void;
-    onSelect: (url: string) => void;
+    onSelect: (url: string, width?: number, height?: number) => void;
     title?: string;
 }
 
@@ -39,12 +56,16 @@ export default function MediaManager({ isOpen, onClose, onSelect, title = 'Chọ
     const [searchQuery, setSearchQuery] = useState('');
     const [selected, setSelected] = useState<string | null>(null);
     const [uploadError, setUploadError] = useState<string | null>(null);
+    const [cleaning, setCleaning] = useState(false);
+    const [cleanProgress, setCleanProgress] = useState('');
+    const [uploadFolder, setUploadFolder] = useState<string>('general');
+    const [filterFolder, setFilterFolder] = useState<string>('all');
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Fetch media library from Firestore
     useEffect(() => {
         if (!isOpen) return;
-        const q = query(collection(db, 'media_library'), orderBy('createdAt', 'desc'));
+        const q = query(collection(db, 'media_library'), orderBy('createdAt', 'desc'), limit(200));
         const unsub = onSnapshot(q, (snap) => {
             setItems(snap.docs.map(d => ({ id: d.id, ...d.data() } as MediaItem)));
             setLoading(false);
@@ -69,18 +90,40 @@ export default function MediaManager({ isOpen, onClose, onSelect, title = 'Chọ
                     }
                 }
 
-                const storagePath = `media/${Date.now()}_${file.name}`;
+                let fileToUpload = file;
+                let finalWidth = undefined;
+                let finalHeight = undefined;
+
+                if (file.type.startsWith('image/')) {
+                    const validationError = validateImageFile(file);
+                    if (validationError) {
+                        setUploadError(`"${file.name}": ${validationError}`);
+                        continue;
+                    }
+                    const optimized = await optimizeImage(file, 1200);
+                    fileToUpload = optimized.file;
+                    finalWidth = optimized.width;
+                    finalHeight = optimized.height;
+                }
+
+                const storagePath = `media/${uploadFolder}/${Date.now()}_${fileToUpload.name}`;
                 const storageRef = ref(storage, storagePath);
-                await uploadBytes(storageRef, file);
+
+                await uploadBytes(storageRef, fileToUpload, { 
+                    contentType: fileToUpload.type 
+                });
                 const url = await getDownloadURL(storageRef);
 
                 // Save metadata to Firestore
                 await addDoc(collection(db, 'media_library'), {
                     url,
                     path: storagePath,
-                    name: file.name,
-                    type: file.type,
-                    size: file.size,
+                    name: fileToUpload.name,
+                    type: fileToUpload.type,
+                    size: fileToUpload.size,
+                    folder: uploadFolder,
+                    ...(finalWidth !== undefined && { width: finalWidth }),
+                    ...(finalHeight !== undefined && { height: finalHeight }),
                     createdAt: serverTimestamp(),
                 });
             } catch (err) {
@@ -108,19 +151,45 @@ export default function MediaManager({ isOpen, onClose, onSelect, title = 'Chọ
         setDeleting(null);
     };
 
+    // Clean broken media entries
+    const handleCleanBroken = async () => {
+        if (!confirm('Quét toàn bộ thư viện media.\nHệ thống sẽ kiểm tra từng file trên Storage và tự động xoá các bản ghi lỗi (ảnh đã bị mất).\n\nTiếp tục?')) return;
+        setCleaning(true);
+        setCleanProgress('Đang bắt đầu quét...');
+        try {
+            const result = await cleanBrokenMedia((checked, total, broken) => {
+                setCleanProgress(`Đã kiểm tra ${checked}/${total} file • Phát hiện ${broken} lỗi`);
+            });
+            if (result.cleaned > 0) {
+                setCleanProgress(`✅ Hoàn tất! Đã dọn ${result.cleaned} file rác / ${result.total} tổng cộng.`);
+            } else {
+                setCleanProgress(`✅ Thư viện sạch! Không có file rác nào. (${result.total} file tốt)`);
+            }
+            setTimeout(() => setCleanProgress(''), 5000);
+        } catch (err) {
+            console.error('Clean error:', err);
+            setCleanProgress('❌ Có lỗi khi quét. Thử lại sau.');
+        } finally {
+            setCleaning(false);
+        }
+    };
+
     // Select and return
     const handleConfirm = () => {
         if (selected) {
-            onSelect(selected);
+            const selectedItem = items.find(i => i.url === selected);
+            onSelect(selected, selectedItem?.width, selectedItem?.height);
             onClose();
             setSelected(null);
         }
     };
 
     // Filter items
-    const filtered = items.filter(i =>
-        i.name.toLowerCase().includes(searchQuery.toLowerCase())
-    );
+    const filtered = items.filter(i => {
+        const matchSearch = i.name.toLowerCase().includes(searchQuery.toLowerCase());
+        const matchFolder = filterFolder === 'all' || i.folder === filterFolder;
+        return matchSearch && matchFolder;
+    });
 
     const videoCount = items.filter(i => isVideoType(i.type)).length;
     const imageCount = items.length - videoCount;
@@ -164,6 +233,19 @@ export default function MediaManager({ isOpen, onClose, onSelect, title = 'Chọ
                     {tab === 'upload' ? (
                         /* Upload Tab */
                         <div className="space-y-4">
+                            <div className="flex items-center gap-3 bg-gray-50 p-3 rounded-xl border">
+                                <label className="text-sm font-medium text-gray-700 min-w-max">Lưu vào thư mục:</label>
+                                <select 
+                                    value={uploadFolder}
+                                    onChange={(e) => setUploadFolder(e.target.value)}
+                                    className="flex-1 p-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:border-orange-500"
+                                >
+                                    {MEDIA_FOLDERS.map(f => (
+                                        <option key={f.id} value={f.id}>{f.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+
                             <input
                                 ref={fileInputRef}
                                 type="file"
@@ -180,7 +262,7 @@ export default function MediaManager({ isOpen, onClose, onSelect, title = 'Chọ
                                 {uploading ? (
                                     <>
                                         <Loader2 size={32} className="animate-spin text-orange-500" />
-                                        <span className="text-sm font-medium">Đang upload...</span>
+                                        <span className="text-sm font-medium">Đang xử lý ảnh & upload...</span>
                                     </>
                                 ) : (
                                     <>
@@ -192,9 +274,15 @@ export default function MediaManager({ isOpen, onClose, onSelect, title = 'Chọ
                             </button>
 
                             {/* Upload warning */}
-                            <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                                <AlertTriangle size={16} className="text-amber-500 mt-0.5 flex-shrink-0" />
-                                <p className="text-xs text-amber-700">Hệ thống tự động tối ưu hóa khi tải lên. Video nên giữ dưới {MAX_VIDEO_SIZE_MB}MB để đảm bảo tốc độ tải trang.</p>
+                            <div className="flex flex-col gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                                <div className="flex items-start gap-2">
+                                    <AlertTriangle size={16} className="text-amber-500 mt-0.5 flex-shrink-0" />
+                                    <p className="text-xs text-amber-700 font-semibold">Lưu ý quan trọng về Tốc độ & Chi phí:</p>
+                                </div>
+                                <ul className="text-xs text-amber-700 list-disc pl-6 space-y-1">
+                                    <li><strong>Ảnh:</strong> Tự động được hệ thống nén WebP siêu nhẹ khi tải lên. Không cần lo lắng.</li>
+                                    <li><strong>Video:</strong> KHÔNG được nén tự động để tránh treo máy. Vui lòng <u>tự nén video</u> bằng <strong>Capcut</strong> hoặc <strong>Handbrake</strong> trước khi tải lên! (Giới hạn: {MAX_VIDEO_SIZE_MB}MB). Video dung lượng cao sẽ làm web rất chậm và tốn phí băng thông.</li>
+                                </ul>
                             </div>
 
                             {/* Upload Error */}
@@ -208,17 +296,46 @@ export default function MediaManager({ isOpen, onClose, onSelect, title = 'Chọ
                     ) : (
                         /* Library Tab */
                         <div className="space-y-4">
-                            {/* Search */}
-                            <div className="relative">
-                                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                                <input
-                                    type="text"
-                                    placeholder="Tìm theo tên file..."
-                                    value={searchQuery}
-                                    onChange={(e) => setSearchQuery(e.target.value)}
-                                    className="w-full pl-9 pr-4 py-2.5 border rounded-lg text-sm focus:outline-none focus:border-orange-400"
-                                />
+                            {/* Search + Clean + Filter */}
+                            <div className="flex items-center gap-2">
+                                <select
+                                    value={filterFolder}
+                                    onChange={(e) => setFilterFolder(e.target.value)}
+                                    className="py-2.5 px-3 border rounded-lg text-sm bg-gray-50 focus:outline-none focus:border-orange-400 font-medium text-gray-700"
+                                >
+                                    <option value="all">Tất cả thư mục</option>
+                                    {MEDIA_FOLDERS.map(f => (
+                                        <option key={f.id} value={f.id}>{f.name}</option>
+                                    ))}
+                                </select>
+                                <div className="relative flex-1">
+                                    <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                                    <input
+                                        type="text"
+                                        placeholder="Tìm theo tên file..."
+                                        value={searchQuery}
+                                        onChange={(e) => setSearchQuery(e.target.value)}
+                                        className="w-full pl-9 pr-4 py-2.5 border rounded-lg text-sm focus:outline-none focus:border-orange-400"
+                                    />
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={handleCleanBroken}
+                                    disabled={cleaning}
+                                    className="flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium whitespace-nowrap border border-red-200 text-red-600 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
+                                    title="Quét và tự động xoá các file đã mất trên Storage"
+                                >
+                                    {cleaning ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                                    Quét rác
+                                </button>
                             </div>
+                            {/* Clean progress */}
+                            {cleanProgress && (
+                                <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-700">
+                                    {cleaning && <Loader2 size={12} className="animate-spin flex-shrink-0" />}
+                                    <span>{cleanProgress}</span>
+                                </div>
+                            )}
 
                             {/* Grid */}
                             {loading ? (
@@ -240,8 +357,14 @@ export default function MediaManager({ isOpen, onClose, onSelect, title = 'Chọ
                                     {filtered.map((item) => (
                                         <div
                                             key={item.id}
-                                            className={`relative group aspect-square rounded-lg overflow-hidden cursor-pointer border-2 transition-all ${selected === item.url ? 'border-orange-500 ring-2 ring-orange-200' : 'border-transparent hover:border-gray-300'}`}
-                                            onClick={() => setSelected(item.url)}
+                                            className={`relative group aspect-square rounded-lg overflow-hidden cursor-pointer border-2 transition-all data-[broken=true]:cursor-not-allowed data-[broken=true]:border-red-200 data-[broken=true]:bg-gray-50 ${selected === item.url ? 'border-orange-500 ring-2 ring-orange-200' : 'border-transparent hover:border-gray-300'}`}
+                                            onClick={(e) => {
+                                                if (e.currentTarget.getAttribute('data-broken') === 'true') {
+                                                    alert('Ảnh này đã bị xoá trên bộ nhớ gốc (Storage). Vui lòng nhấn biểu tượng 🗑️ thùng rác để dọn dẹp nó khỏi hệ thống.');
+                                                    return;
+                                                }
+                                                setSelected(item.url);
+                                            }}
                                         >
                                             {/* Render video or image */}
                                             {isVideoType(item.type) ? (
@@ -265,8 +388,14 @@ export default function MediaManager({ isOpen, onClose, onSelect, title = 'Chọ
                                                 <img
                                                     src={item.url}
                                                     alt={item.name}
-                                                    className="w-full h-full object-cover"
-                                                    onError={(e) => { (e.target as HTMLImageElement).src = '/placeholder.png'; }}
+                                                    className="w-full h-full object-cover data-[broken=true]:object-contain data-[broken=true]:p-8 data-[broken=true]:opacity-50"
+                                                    onError={(e) => {
+                                                        const target = e.target as HTMLImageElement;
+                                                        target.onerror = null;
+                                                        target.setAttribute('data-broken', 'true');
+                                                        target.parentElement?.setAttribute('data-broken', 'true');
+                                                        target.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ef4444' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='2' ry='2'/%3E%3Ccircle cx='8.5' cy='8.5' r='1.5'/%3E%3Cpolyline points='21 15 16 10 5 21'/%3E%3Cline x1='3' y1='3' x2='21' y2='21'/%3E%3C/svg%3E";
+                                                    }}
                                                 />
                                             )}
 

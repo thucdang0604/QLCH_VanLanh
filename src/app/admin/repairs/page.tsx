@@ -10,22 +10,31 @@ import {
     X, Save, Calendar,
     DollarSign, AlertTriangle, ArrowRight,
     ClipboardList, TrendingUp, Loader2, Eye, Upload, Image as ImageIcon, Video, Camera,
-    Ban, RotateCcw, AlertCircle
+    Ban, RotateCcw, AlertCircle, Package
 } from 'lucide-react';
 import {
     collection, query, where, getDocs, addDoc, updateDoc,
-    doc, serverTimestamp, orderBy, deleteDoc, onSnapshot, Timestamp, getDoc
+    doc, serverTimestamp, orderBy, deleteDoc, onSnapshot, Timestamp, getDoc, setDoc,
+    limit, startAfter, DocumentSnapshot, writeBatch, increment
 } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { db, storage } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
 import { useConfig } from '@/lib/ConfigContext';
 import type { RepairTicket, RepairStatus, PaymentStatus, DeviceChecklist, StatusTimelineEntry, WorkflowNode } from '@/lib/types';
+import { calculateAndSaveCommissions } from '@/lib/commissionUtils';
 import { uploadImage, uploadMedia } from '@/lib/storage';
+import { isChecklistComplete, isYouTubeUrl, getYouTubeEmbedUrl, areAllPartsReady } from '@/lib/workflowFeatures';
 import PrintableReceipt from '@/components/admin/PrintableReceipt';
+import PrintableRepairInvoice from '@/components/admin/PrintableRepairInvoice';
 import type { ReceiptConfig } from '@/components/admin/PrintableReceipt';
+import { toastError, toastSuccess, toastWarning } from '@/lib/toast';
+import { stampWarrantyOnParts } from '@/lib/warrantyUtils';
+import { useClientPagination } from '@/lib/useClientPagination';
+import PaginationBar from '@/components/admin/PaginationBar';
+import Modal from '@/components/admin/Modal';
 
-// ── Terminal Statuses (Cố định cho doanh thu) ──
-const TERMINAL_STATUSES: RepairStatus[] = ['da_tra_may', 'out', 'hoan_phi'];
+
+// Removal of hardcoded TERMINAL_STATUSES since we use Workflow settings now.
 
 const paymentLabels: Record<PaymentStatus, { label: string; color: string }> = {
     unpaid: { label: 'Chưa thanh toán', color: 'text-red-600 bg-red-50' },
@@ -34,6 +43,61 @@ const paymentLabels: Record<PaymentStatus, { label: string; color: string }> = {
     pay_later: { label: 'Thanh toán sau', color: 'text-purple-600 bg-purple-50' },
     refunded: { label: 'Đã hoàn tiền', color: 'text-orange-600 bg-orange-50' },
 };
+
+async function ensureConsolidatedImportReceiptForTicket(
+    ticket: RepairTicket,
+    actor: { uid?: string; displayName?: string | null } | null
+) {
+    const requestedParts = (ticket.parts || []).filter(p => p.status === 'requested');
+    if (requestedParts.length === 0) return;
+
+    // ID cố định: 1 phiếu draft duy nhất cho mỗi phiếu SC
+    const receiptId = `draft_${ticket.id}`;
+    const receiptRef = doc(db, 'import_receipts', receiptId);
+
+    const items = requestedParts.map((p) => ({
+        productId: p.productId || '',
+        productName: p.productName || p.partName || p.name || 'Linh kiện',
+        quantity: p.quantity || 1,
+        importPrice: 0,
+        quality: p.quality || 'Zin',
+        isNewProduct: (p.productId || '').startsWith('custom_'),
+        category: 'Linh kiện',
+    }));
+
+    const existingSnap = await getDoc(receiptRef);
+
+    if (existingSnap.exists()) {
+        const existingData = existingSnap.data();
+        if (existingData.status !== 'draft') return; // đã ordered/completed → không sửa
+
+        const existingItems: typeof items = existingData.items || [];
+        const existingProductIds = new Set(existingItems.map((i: { productId: string }) => i.productId));
+
+        // Chỉ thêm các parts mới chưa có trong phiếu
+        const newItems = items.filter(i => !existingProductIds.has(i.productId));
+        if (newItems.length === 0) return; // không có gì mới
+
+        await updateDoc(receiptRef, {
+            items: [...existingItems, ...newItems],
+            note: `Tổng hợp linh kiện yêu cầu từ phiếu SC #${ticket.id.slice(-6).toUpperCase()} — ${ticket.customer?.name || ''} — ${ticket.deviceInfo?.model || ''}`,
+            updatedAt: serverTimestamp(),
+        });
+    } else {
+        // Tạo mới với ID cố định
+        await setDoc(receiptRef, {
+            supplier: `Yêu cầu từ KTV — Phiếu SC #${ticket.id.slice(-6).toUpperCase()}`,
+            items,
+            totalAmount: 0,
+            note: `Tổng hợp ${requestedParts.length} linh kiện yêu cầu từ phiếu SC #${ticket.id.slice(-6).toUpperCase()} — ${ticket.customer?.name || ''} — ${ticket.deviceInfo?.model || ''}`,
+            status: 'draft',
+            repairTicketId: ticket.id,
+            createdBy: actor?.uid || 'system',
+            createdByName: actor?.displayName || 'Admin',
+            createdAt: serverTimestamp(),
+        });
+    }
+}
 
 const formatPrice = (p: number) => p > 0 ? p.toLocaleString('vi-VN') + 'đ' : '—';
 
@@ -72,8 +136,10 @@ export default function RepairPage() {
     // Data
     const [tickets, setTickets] = useState<RepairTicket[]>([]);
     const [loading, setLoading] = useState(true);
+    const [lastDoc, setLastDoc] = useState<DocumentSnapshot | null>(null);
+    const [hasMore, setHasMore] = useState(true);
+    const [isSearchingDB, setIsSearchingDB] = useState(false);
     const [staffs, setStaffs] = useState<{ uid: string; displayName: string }[]>([]);
-    const [appointments, setAppointments] = useState<Appointment[]>([]);
     const [services, setServices] = useState<ServiceModel[]>([]);
     const [receiptConfig, setReceiptConfig] = useState<ReceiptConfig | undefined>(undefined);
 
@@ -86,24 +152,32 @@ export default function RepairPage() {
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState<string>('all');
     const [techFilter, setTechFilter] = useState<string>('all');
+    const [ticketTypeFilter, setTicketTypeFilter] = useState<'all' | 'repair' | 'warranty'>('all');
 
     // Modals
     const [showModal, setShowModal] = useState(false);
     const [editingTicket, setEditingTicket] = useState<RepairTicket | null>(null);
-    const [, setPrintMode] = useState<'receipt' | 'invoice' | null>(null);
+    const [printMode, setPrintMode] = useState<'receipt' | 'invoice' | null>(null);
     const [printTicket, setPrintTicket] = useState<RepairTicket | null>(null);
 
     // Delivery / Cancel note modal
     const [noteModal, setNoteModal] = useState<{ ticket: RepairTicket; targetStatus: RepairStatus } | null>(null);
     const [deliveryNote, setDeliveryNote] = useState('');
 
-    // Handover modal (Done → 3 actions)
-    const [handoverModal, setHandoverModal] = useState<{ ticket: RepairTicket; action: 'tra_may' | 'out' | 'hoan_phi' } | null>(null);
+    // Handover modal (Payment Gate)
+    const [handoverModal, setHandoverModal] = useState<{ ticket: RepairTicket; action: 'done' | 'out' | 'refund', targetStatus?: string } | null>(null);
     const [handoverNote, setHandoverNote] = useState('');
     const [paymentConfirmed, setPaymentConfirmed] = useState(false);
+    const [handoverAdditionalFees, setHandoverAdditionalFees] = useState<string>('');
+    const [handoverDiscountAmount, setHandoverDiscountAmount] = useState<string>('');
 
     // Detail Modal (Eye Icon)
     const [viewingTicket, setViewingTicket] = useState<RepairTicket | null>(null);
+
+    // Warranty Modal
+    const [warrantyModal, setWarrantyModal] = useState<RepairTicket | null>(null);
+    const [warrantySelectedIndexes, setWarrantySelectedIndexes] = useState<number[]>([]);
+    const [warrantyCreating, setWarrantyCreating] = useState(false);
 
     // Form
     const emptyForm = {
@@ -143,16 +217,20 @@ export default function RepairPage() {
     const [formData, setFormData] = useState(emptyForm);
 
     const [dynamicStatuses, setDynamicStatuses] = useState<WorkflowNode[]>([]);
-    const [, setStatusLoading] = useState(true);
+    const [warrantyStatuses, setWarrantyStatuses] = useState<WorkflowNode[]>([]);
+    const [statusLoading, setStatusLoading] = useState(true);
 
-
-    const endGameTrigger = dynamicStatuses.length > 0 ? dynamicStatuses[dynamicStatuses.length - 1].id : 'done';
+    const getWorkflowForTicket = (ticket: RepairTicket): WorkflowNode[] => {
+        return ticket.ticketType === 'warranty' ? warrantyStatuses : dynamicStatuses;
+    };
 
     // ── Realtime Tickets & Statuses ──
     useEffect(() => {
-        const q = query(collection(db, 'repairs'), orderBy('createdAt', 'desc'));
+        const q = query(collection(db, 'repairs'), orderBy('createdAt', 'desc'), limit(50));
         const unsubTickets = onSnapshot(q, (snap) => {
             setTickets(snap.docs.map(d => ({ id: d.id, ...d.data() } as RepairTicket)));
+            setLastDoc(snap.docs[snap.docs.length - 1] || null);
+            setHasMore(snap.docs.length === 50);
             setLoading(false);
         }, (err) => {
             console.error('Repairs listener error:', err);
@@ -160,8 +238,10 @@ export default function RepairPage() {
         });
 
         const unsubStatuses = onSnapshot(doc(db, 'system_config', 'repairs'), (docSnap) => {
-            if (docSnap.exists() && docSnap.data().statuses) {
-                setDynamicStatuses(docSnap.data().statuses);
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                setDynamicStatuses(data.repairStatuses ?? data.statuses ?? []);
+                setWarrantyStatuses(data.warrantyStatuses ?? []);
             }
             setStatusLoading(false);
         });
@@ -177,6 +257,79 @@ export default function RepairPage() {
         };
     }, []);
 
+    const loadMoreData = async () => {
+        if (!lastDoc || !hasMore) return;
+        setLoading(true);
+        const q = query(collection(db, 'repairs'), orderBy('createdAt', 'desc'), startAfter(lastDoc), limit(50));
+        const snap = await getDocs(q);
+        
+        if (!snap.empty) {
+            const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as RepairTicket));
+            setTickets(prev => {
+                const existingIds = new Set(prev.map(p => p.id));
+                const newItems = data.filter(d => !existingIds.has(d.id));
+                return [...prev, ...newItems];
+            });
+            setLastDoc(snap.docs[snap.docs.length - 1]);
+            setHasMore(snap.docs.length === 50);
+        } else {
+            setHasMore(false);
+        }
+        setLoading(false);
+    };
+
+    const searchInDatabase = async () => {
+        if (!searchTerm.trim()) {
+            toastWarning('Vui lòng nhập số điện thoại, IMEI hoặc mã phiếu để tìm trên máy chủ.');
+            return;
+        }
+        setIsSearchingDB(true);
+        try {
+            const s = searchTerm.trim();
+            // Try fetching by phone OR imei OR ticket ID
+            const queries = [
+                getDocs(query(collection(db, 'repairs'), where('customer.phone', '==', s))),
+                getDocs(query(collection(db, 'repairs'), where('deviceInfo.imei', '==', s)))
+            ];
+            const snaps = await Promise.all(queries);
+            let combined: RepairTicket[] = [];
+            
+            snaps.forEach(snap => {
+                const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as RepairTicket));
+                combined = [...combined, ...data];
+            });
+            
+            // Try retrieving ticket directly by id if it looks like one
+            try {
+                const docSnap = await getDoc(doc(db, 'repairs', s));
+                if (docSnap.exists()) {
+                    combined.push({ id: docSnap.id, ...docSnap.data() } as RepairTicket);
+                }
+            } catch (e) {
+                // Ignore
+            }
+            
+            if (combined.length > 0) {
+                setTickets(prev => {
+                    const map = new Map(prev.map(p => [p.id, p]));
+                    combined.forEach(c => map.set(c.id, c));
+                    return Array.from(map.values()).sort((a,b) => {
+                        const tA = (a.createdAt as any)?.toMillis?.() || 0;
+                        const tB = (b.createdAt as any)?.toMillis?.() || 0;
+                        return tB - tA;
+                    });
+                });
+                toastSuccess('Đã tìm thấy dữ liệu trên máy chủ!');
+            } else {
+                toastWarning('Không tìm thấy dữ liệu trên máy chủ!');
+            }
+        } catch (e) {
+            console.error('Lỗi tìm kiếm DB', e);
+            toastError('Lỗi tìm kiếm!');
+        }
+        setIsSearchingDB(false);
+    };
+
     // ── Fetch Staffs ──
     useEffect(() => {
         (async () => {
@@ -187,16 +340,7 @@ export default function RepairPage() {
         })();
     }, []);
 
-    // ── Fetch Appointments (only pending/confirmed — exclude completed) ──
-    useEffect(() => {
-        (async () => {
-            try {
-                const snap = await getDocs(query(collection(db, 'appointments'), orderBy('createdAt', 'desc')));
-                const all = snap.docs.map(d => ({ id: d.id, ...d.data() } as Appointment));
-                setAppointments(all.filter(a => a.status === 'confirmed' || a.status === 'pending'));
-            } catch (e) { console.error(e); }
-        })();
-    }, []);
+    // Fetch Appointments removed according to cost-saving dev feedback
 
     // ── Fetch Services for auto-fill ──
     useEffect(() => {
@@ -256,12 +400,17 @@ export default function RepairPage() {
     }, [searchParams, services]);
 
     // ── Stats ──
+    const isTerminal = (ticket: RepairTicket) => {
+        const workflow = getWorkflowForTicket(ticket);
+        return workflow.find(s => s.id === ticket.status)?.isTerminal ?? false;
+    };
+
     const stats = {
         total: tickets.length,
-        processing: tickets.filter(t => !TERMINAL_STATUSES.includes(t.status) && t.status !== endGameTrigger).length,
-        completed: tickets.filter(t => TERMINAL_STATUSES.includes(t.status) || t.status === endGameTrigger).length,
+        processing: tickets.filter(t => !isTerminal(t)).length,
+        completed: tickets.filter(t => isTerminal(t)).length,
         revenue: tickets
-            .filter(t => t.status === 'da_tra_may')
+            .filter(t => isTerminal(t) && t.ticketType !== 'warranty')
             .reduce((sum, t) => sum + (t.payment?.amount || 0), 0),
     };
 
@@ -275,40 +424,84 @@ export default function RepairPage() {
             t.deviceInfo?.model?.toLowerCase().includes(s);
         const matchStatus = statusFilter === 'all' || t.status === statusFilter;
         const matchTech = techFilter === 'all' || t.staff?.assignedTechnician === techFilter;
-        return matchSearch && matchStatus && matchTech;
+        const matchType = ticketTypeFilter === 'all' || (ticketTypeFilter === 'warranty' ? t.ticketType === 'warranty' : t.ticketType !== 'warranty');
+        return matchSearch && matchStatus && matchTech && matchType;
     });
+
+    const { paginatedData: paginatedTickets, currentPage, totalPages, pageSize, totalFiltered, setPage, setPageSize, resetPage } = useClientPagination(filtered, 20);
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    useEffect(() => { resetPage(); }, [searchTerm, statusFilter, techFilter, ticketTypeFilter]);
 
     // ── Quick status transition ──
     const handleQuickStatus = async (ticket: RepairTicket, nextStatus: string) => {
+        const workflow = getWorkflowForTicket(ticket);
+        const currentCfg = workflow.find(s => s.id === ticket.status);
         // Block terminal states
-        if (TERMINAL_STATUSES.includes(ticket.status)) {
-            alert('Phiếu đã đóng, không thể thay đổi trạng thái!');
+        if (currentCfg?.isTerminal) {
+            toastError('Phiếu đã đóng, không thể thay đổi trạng thái!');
             return;
         }
 
-        // ── Payment warning for done ──
-        if (nextStatus === endGameTrigger && ticket.payment?.status === 'unpaid') {
-            const ok = window.confirm(
-                'Đơn này chưa thanh toán. Bạn có muốn chuyển trạng thái thanh toán thành "Thanh toán sau" (Khách nợ) không?\n\n• OK = Chuyển trạng thái + đánh dấu thanh toán sau\n• Cancel = Hủy thao tác (giữ nguyên để thu tiền trước)'
-            );
-            if (!ok) return;
-            try {
-                await updateDoc(doc(db, 'repairs', ticket.id), {
-                    status: nextStatus,
-                    'payment.status': 'pay_later',
-                    'timing.completedAt': serverTimestamp(),
-                    updatedAt: serverTimestamp(),
-                    'staff.assignedTechnician': user?.uid || '',
-                    'staff.assignedTechnicianName': user?.displayName || 'Admin',
-                });
-            } catch (e) {
-                console.error(e);
-                alert('Lỗi cập nhật trạng thái!');
+        // Align with technician flow: require tech notes after inspection before moving forward.
+        if (ticket.status === 'dang_kiem_tra' && nextStatus !== 'dang_kiem_tra') {
+            if (!ticket.issue?.notes || ticket.issue.notes.trim().length === 0) {
+                toastError('Vui lòng nhập ghi chú kỹ thuật (mục "Ghi chú kỹ thuật") trước khi chuyển trạng thái tiếp theo.');
+                return;
             }
-            return;
         }
 
+        // Align with technician flow: warn (but allow) transitions without parts selection.
+        if (currentCfg?.allowedFeatures?.includes('allowPartsSelection')) {
+            const partsCount = (ticket.parts || []).length;
+            if (partsCount === 0) {
+                toastWarning('Chưa chọn linh kiện cho phiếu này. Nếu ca sửa không cần linh kiện, bạn vẫn có thể tiếp tục chuyển trạng thái.');
+            }
+        }
+
+        // ── Checklist requirement check (Feature 1) ──
+        if (currentCfg?.allowedFeatures?.includes('requireChecklist')) {
+            if (!isChecklistComplete(ticket.deviceInfo?.checklist as Record<string, unknown> | undefined)) {
+                toastError('Trạng thái hiện tại yêu cầu hoàn thành Checklist (8 mục) trước khi chuyển tiếp. Vui lòng mở phiếu để điền checklist.');
+                return;
+            }
+        }
+
+        // ── Payment requirement check (Intercept before normal transition) ──
+        if (currentCfg?.allowedFeatures?.includes('requirePaymentGate')) {
+            setHandoverAdditionalFees(ticket.payment?.additionalFees?.toString() || '');
+            setHandoverDiscountAmount(ticket.payment?.discountAmount?.toString() || '');
+            if (nextStatus === 'refund') {
+                setHandoverModal({ ticket, action: 'refund', targetStatus: nextStatus });
+                return;
+            } else if (nextStatus === 'out') {
+                setHandoverModal({ ticket, action: 'out', targetStatus: nextStatus });
+                return;
+            } else {
+                setHandoverModal({ ticket, action: 'done', targetStatus: nextStatus });
+                return;
+            }
+        }
+
+        // ── Check requirePartsReady ──
+        if (currentCfg?.allowedFeatures?.includes('requirePartsReady')) {
+            if (!areAllPartsReady(ticket)) {
+                const pendingCount = (ticket.parts || []).filter(
+                    p => p.status === 'requested' || p.status === 'ordered'
+                ).length;
+                toastError(
+                    `Còn ${pendingCount} linh kiện chưa về kho. Vui lòng chờ hàng về và nhập kho trước khi chuyển sang bước tiếp theo.`
+                );
+                return;
+            }
+        }
+
+        const nextCfg = workflow.find(s => s.id === nextStatus);
+        
         try {
+            // Create consolidated import receipt if there are requested parts (avoid duplicates).
+            await ensureConsolidatedImportReceiptForTicket(ticket, user);
+
             // Build statusTimeline entry
             const now = Date.now();
             const oldTimeline: StatusTimelineEntry[] = ticket.statusTimeline || [];
@@ -327,25 +520,49 @@ export default function RepairPage() {
                 'staff.assignedTechnician': user?.uid || '',
                 'staff.assignedTechnicianName': user?.displayName || 'Admin',
             };
-            if (nextStatus === endGameTrigger) {
+            if (nextCfg?.isTerminal) {
                 update['timing.completedAt'] = serverTimestamp();
             }
             await updateDoc(doc(db, 'repairs', ticket.id), update);
+
+            // ── Dynamic Commission Calculation ──
+            const enableTechCommission = nextCfg?.allowedFeatures?.includes('enableTechnicianCommission');
+            const enableSellerCommission = nextCfg?.allowedFeatures?.includes('enableSellerCommission');
+            
+            if (enableTechCommission || enableSellerCommission) {
+                const commissionTicket = { ...ticket, ...update, status: nextStatus as RepairStatus } as RepairTicket;
+                if (enableTechCommission && commissionTicket.staff?.assignedTechnician) {
+                    calculateAndSaveCommissions(
+                        { uid: commissionTicket.staff.assignedTechnician, displayName: commissionTicket.staff.assignedTechnicianName || 'N/A' },
+                        'repair',
+                        commissionTicket
+                    ).catch(console.error);
+                }
+                if (enableSellerCommission && commissionTicket.staff?.createdBy) {
+                    calculateAndSaveCommissions(
+                        { uid: commissionTicket.staff.createdBy, displayName: commissionTicket.staff.createdByName || 'N/A' },
+                        'repair',
+                        commissionTicket
+                    ).catch(console.error);
+                }
+            }
         } catch (e) {
             console.error(e);
-            alert('Lỗi cập nhật trạng thái!');
+            toastError('Lỗi cập nhật trạng thái!');
         }
     };
 
     // ── Deliver / Cancel with note ──
     const handleNoteSubmit = async () => {
         if (!noteModal || !deliveryNote.trim()) {
-            alert('Vui lòng nhập ghi chú bàn giao!');
+            toastError('Vui lòng nhập ghi chú bàn giao!');
             return;
         }
         // Forward-only + terminal validation
-        if (TERMINAL_STATUSES.includes(noteModal.ticket.status)) {
-            alert('Phiếu đã đóng, không thể thay đổi!');
+        const workflow = getWorkflowForTicket(noteModal.ticket);
+        const currentCfg = workflow.find(s => s.id === noteModal.ticket.status);
+        if (currentCfg?.isTerminal) {
+            toastError('Phiếu đã đóng, không thể thay đổi!');
             return;
         }
         try {
@@ -372,22 +589,58 @@ export default function RepairPage() {
                 }
             }
             await updateDoc(doc(db, 'repairs', noteModal.ticket.id), update);
+            
+            // ── Commission: done = cộng (theo feature), hoan_phi = chỉ refund KTV (luôn chạy)
+            const targetStatusCfg = workflow.find(s => s.id === noteModal.targetStatus);
+            const commissionTicket = { ...noteModal.ticket, ...update, status: noteModal.targetStatus as RepairStatus } as RepairTicket;
+
+            if (noteModal.targetStatus === 'refund') {
+                // Hoàn phí → chỉ bù trừ hoa hồng KTV
+                if (commissionTicket.staff?.assignedTechnician) {
+                    calculateAndSaveCommissions(
+                        { uid: commissionTicket.staff.assignedTechnician, displayName: commissionTicket.staff.assignedTechnicianName || 'N/A' },
+                        'repair',
+                        commissionTicket,
+                        true // isRefund
+                    ).catch(console.error);
+                }
+            } else if (targetStatusCfg) {
+                const enableTechCommission = targetStatusCfg.allowedFeatures?.includes('enableTechnicianCommission');
+                const enableSellerCommission = targetStatusCfg.allowedFeatures?.includes('enableSellerCommission');
+                if (enableTechCommission && commissionTicket.staff?.assignedTechnician) {
+                    calculateAndSaveCommissions(
+                        { uid: commissionTicket.staff.assignedTechnician, displayName: commissionTicket.staff.assignedTechnicianName || 'N/A' },
+                        'repair',
+                        commissionTicket
+                    ).catch(console.error);
+                }
+                if (enableSellerCommission && commissionTicket.staff?.createdBy) {
+                    calculateAndSaveCommissions(
+                        { uid: commissionTicket.staff.createdBy, displayName: commissionTicket.staff.createdByName || 'N/A' },
+                        'repair',
+                        commissionTicket
+                    ).catch(console.error);
+                }
+            }
+
             setNoteModal(null);
             setDeliveryNote('');
         } catch (e) {
             console.error(e);
-            alert('Lỗi!');
+            toastError('Lỗi!');
         }
     };
 
-    // ── Handover handler (Done → 3 actions) ──
+    // ── Handover handler (Any status → terminal action) ──
     const handleHandover = async () => {
         if (!handoverModal) return;
-        const { ticket, action } = handoverModal;
+        const { ticket, action, targetStatus } = handoverModal;
 
-        // Validate: only from done status
-        if (ticket.status !== endGameTrigger) {
-            alert('Chỉ có thể bàn giao khi phiếu ở trạng thái hoàn thành sửa chữa!');
+        // Block if ticket is already in a terminal status
+        const workflow = getWorkflowForTicket(ticket);
+        const currentCfg = workflow.find(s => s.id === ticket.status);
+        if (currentCfg?.isTerminal) {
+            toastError('Phiếu đã đóng, không thể thay đổi trạng thái!');
             setHandoverModal(null);
             setPaymentConfirmed(false);
             return;
@@ -401,46 +654,296 @@ export default function RepairPage() {
                 lastEntry.durationInMinutes = Math.round((now - lastEntry.timestamp) / 60000);
             }
 
-            if (action === 'tra_may') {
-                // Trả máy thành công → paid + da_tra_may
-                const newTimeline = [...oldTimeline, { status: 'da_tra_may', timestamp: now }];
-                await updateDoc(doc(db, 'repairs', ticket.id), {
-                    status: 'da_tra_may',
+            const parsedAdditionalFees = Number(handoverAdditionalFees.replace(/[^0-9-]/g, '')) || 0;
+            const parsedDiscountAmount = Number(handoverDiscountAmount.replace(/[^0-9-]/g, '')) || 0;
+            const computedAmount = (ticket.payment?.partsCost || 0) + (ticket.payment?.laborCost || 0) + parsedAdditionalFees - parsedDiscountAmount;
+
+            const commonPaymentUpdate = {
+                'payment.additionalFees': parsedAdditionalFees,
+                'payment.discountAmount': parsedDiscountAmount,
+                'payment.amount': computedAmount,
+            };
+            const updatedPaymentForCommission = {
+                ...ticket.payment,
+                additionalFees: parsedAdditionalFees,
+                discountAmount: parsedDiscountAmount,
+                amount: computedAmount
+            };
+
+            if (action === 'done') {
+                // Trả máy thành công → paid + trạng thái targetStatus
+                const targetStatusId = targetStatus || 'done';
+                const newTimeline = [...oldTimeline, { status: targetStatusId, timestamp: now }];
+
+                // ── Warranty stamping: calculate warranty for each selected part ──
+                const patchedParts = await stampWarrantyOnParts(ticket.parts || [], now);
+
+                const handoverUpdate: Record<string, unknown> = {
+                    status: targetStatusId,
                     'payment.status': 'paid',
+                    ...commonPaymentUpdate,
                     statusTimeline: newTimeline,
                     deliveryNote: handoverNote.trim() || 'Trả máy thành công',
                     'timing.completedAt': serverTimestamp(),
                     updatedAt: serverTimestamp(),
-                });
+                };
+                if (patchedParts !== ticket.parts) {
+                    handoverUpdate.parts = patchedParts;
+                }
+                const batch = writeBatch(db);
+                batch.update(doc(db, 'repairs', ticket.id), handoverUpdate as any);
+
+                // Release held inventory
+                const partsForInventory = patchedParts || ticket.parts || [];
+                const processBatchCache = new Set<string>();
+                for (const pt of partsForInventory) {
+                    if (pt.status === 'selected' && pt.productId && !pt.productId.startsWith('custom_') && !processBatchCache.has(pt.productId)) {
+                        processBatchCache.add(pt.productId);
+                        // Sum up qty just in case there are duplicated items? Handled by grouping or we just do multiple updates.
+                        // Wait, multiple updates to same doc in one batch overrides. 
+                    }
+                }
+                // Group by product Id to update properly
+                const productDeltas = new Map<string, number>();
+                for (const pt of partsForInventory) {
+                    if (pt.status === 'selected' && pt.productId && !pt.productId.startsWith('custom_')) {
+                        const amt = Math.max(1, Number(pt.quantity) || 1);
+                        productDeltas.set(pt.productId, (productDeltas.get(pt.productId) || 0) + amt);
+                    }
+                }
+                for (const [pId, amt] of productDeltas.entries()) {
+                    batch.update(doc(db, 'products', pId), {
+                        held: increment(-amt),
+                        updatedAt: serverTimestamp()
+                    });
+                }
+                
+                await batch.commit();
+
+                // ── Commission calculation based on workflow features ──
+                const doneStatusCfg = workflow.find(s => s.id === targetStatusId);
+                const features = doneStatusCfg?.allowedFeatures || [];
+                const enableTechCommission = features.includes('enableTechnicianCommission');
+                const enableSellerCommission = features.includes('enableSellerCommission');
+
+                const commissionTicket: RepairTicket = {
+                    ...ticket,
+                    status: targetStatusId as RepairStatus,
+                    payment: { ...updatedPaymentForCommission, status: 'paid' },
+                    timing: { ...ticket.timing, completedAt: Timestamp.fromMillis(now) },
+                };
+
+                // KTV được phân công
+                if (enableTechCommission && ticket.staff?.assignedTechnician) {
+                    calculateAndSaveCommissions(
+                        { uid: ticket.staff.assignedTechnician, displayName: ticket.staff.assignedTechnicianName || 'N/A' },
+                        'repair',
+                        commissionTicket
+                    ).catch(console.error);
+                }
+
+                // Nhân viên chốt đơn (người tạo phiếu)
+                if (enableSellerCommission && ticket.staff?.createdBy) {
+                    calculateAndSaveCommissions(
+                        { uid: ticket.staff.createdBy, displayName: ticket.staff.createdByName || 'N/A' },
+                        'repair',
+                        commissionTicket
+                    ).catch(console.error);
+                }
             } else if (action === 'out') {
                 // Out → trả máy, không thu tiền (chỉ khi chưa cọc)
                 const newTimeline = [...oldTimeline, { status: 'out', timestamp: now }];
-                await updateDoc(doc(db, 'repairs', ticket.id), {
+                const batch = writeBatch(db);
+                batch.update(doc(db, 'repairs', ticket.id), {
                     status: 'out',
+                    ...commonPaymentUpdate,
                     statusTimeline: newTimeline,
                     deliveryNote: handoverNote.trim() || 'Không sửa được, trả máy',
                     'timing.completedAt': serverTimestamp(),
                     updatedAt: serverTimestamp(),
                 });
-            } else if (action === 'hoan_phi') {
+                
+                // Return held parts to stock
+                const productDeltas = new Map<string, number>();
+                for (const pt of (ticket.parts || [])) {
+                    if (pt.status === 'selected' && pt.productId && !pt.productId.startsWith('custom_')) {
+                        const amt = Math.max(1, Number(pt.quantity) || 1);
+                        productDeltas.set(pt.productId, (productDeltas.get(pt.productId) || 0) + amt);
+                    }
+                }
+                for (const [pId, amt] of productDeltas.entries()) {
+                    batch.update(doc(db, 'products', pId), {
+                        held: increment(-amt),
+                        stock: increment(amt),
+                        updatedAt: serverTimestamp()
+                    });
+                }
+                await batch.commit();
+                
+                // ── Commission calculation based on workflow features ──
+                const doneStatusCfg = workflow.find(s => s.id === 'out');
+                const features = doneStatusCfg?.allowedFeatures || [];
+                const enableTechCommission = features.includes('enableTechnicianCommission');
+                const enableSellerCommission = features.includes('enableSellerCommission');
+
+                const commissionTicket: RepairTicket = {
+                    ...ticket,
+                    status: 'out' as RepairStatus,
+                    payment: { ...updatedPaymentForCommission },
+                    timing: { ...ticket.timing, completedAt: Timestamp.fromMillis(now) },
+                };
+
+                // KTV được phân công
+                if (enableTechCommission && ticket.staff?.assignedTechnician) {
+                    calculateAndSaveCommissions(
+                        { uid: ticket.staff.assignedTechnician, displayName: ticket.staff.assignedTechnicianName || 'N/A' },
+                        'repair',
+                        commissionTicket
+                    ).catch(console.error);
+                }
+
+                // Nhân viên chốt đơn (người tạo phiếu)
+                if (enableSellerCommission && ticket.staff?.createdBy) {
+                    calculateAndSaveCommissions(
+                        { uid: ticket.staff.createdBy, displayName: ticket.staff.createdByName || 'N/A' },
+                        'repair',
+                        commissionTicket
+                    ).catch(console.error);
+                }
+            } else if (action === 'refund') {
                 // Hoàn phí → refunded + hoan_phi
-                const newTimeline = [...oldTimeline, { status: 'hoan_phi', timestamp: now }];
-                await updateDoc(doc(db, 'repairs', ticket.id), {
-                    status: 'hoan_phi',
+                const newTimeline = [...oldTimeline, { status: 'refund', timestamp: now }];
+                const batch = writeBatch(db);
+                batch.update(doc(db, 'repairs', ticket.id), {
+                    status: 'refund',
                     'payment.status': 'refunded',
+                    ...commonPaymentUpdate,
                     statusTimeline: newTimeline,
                     deliveryNote: handoverNote.trim() || 'Hoàn phí cho khách',
                     'timing.completedAt': serverTimestamp(),
                     updatedAt: serverTimestamp(),
                 });
+                
+                // Return held parts to stock
+                const productDeltas = new Map<string, number>();
+                for (const pt of (ticket.parts || [])) {
+                    if (pt.status === 'selected' && pt.productId && !pt.productId.startsWith('custom_')) {
+                        const amt = Math.max(1, Number(pt.quantity) || 1);
+                        productDeltas.set(pt.productId, (productDeltas.get(pt.productId) || 0) + amt);
+                    }
+                }
+                for (const [pId, amt] of productDeltas.entries()) {
+                    batch.update(doc(db, 'products', pId), {
+                        held: increment(-amt),
+                        stock: increment(amt),
+                        updatedAt: serverTimestamp()
+                    });
+                }
+                await batch.commit();
+                
+                // Hoàn phí → chỉ bù trừ hoa hồng cho KTV (refund), không trừ người chốt đơn
+                // Phiếu warranty không tính hoa hồng âm vì không có hoa hồng dương nào
+                if (ticket.ticketType !== 'warranty') {
+                    const commissionTicket: RepairTicket = {
+                        ...ticket,
+                        status: 'refund' as RepairStatus,
+                        payment: { ...updatedPaymentForCommission, status: 'refunded' },
+                        timing: { ...ticket.timing, completedAt: serverTimestamp() },
+                    };
+                    if (ticket.staff?.assignedTechnician) {
+                        calculateAndSaveCommissions(
+                            { uid: ticket.staff.assignedTechnician, displayName: ticket.staff.assignedTechnicianName || 'N/A' },
+                            'repair',
+                            commissionTicket,
+                            true // isRefund — luôn tạo bản ghi âm để bù trừ hoa hồng đã cộng khi done
+                        ).catch(console.error);
+                    }
+                }
             }
 
             setHandoverModal(null);
             setHandoverNote('');
             setPaymentConfirmed(false);
+            setHandoverAdditionalFees('');
+            setHandoverDiscountAmount('');
         } catch (e) {
             console.error(e);
-            alert('Lỗi xử lý bàn giao!');
+            toastError('Lỗi xử lý bàn giao!');
+        }
+    };
+
+    // ── Create Warranty Ticket ──
+    const handleCreateWarrantyTicket = async (originalTicket: RepairTicket, claimedPartIndexes: number[]) => {
+        if (claimedPartIndexes.length === 0) {
+            toastWarning('Vui lòng chọn ít nhất 1 linh kiện cần bảo hành.');
+            return;
+        }
+        setWarrantyCreating(true);
+        try {
+            // Chống tạo trùng: kiểm tra đã có phiếu warranty đang active cho cùng originalTicketId chưa
+            const existingQ = query(
+                collection(db, 'repairs'),
+                where('ticketType', '==', 'warranty'),
+                where('warrantyClaim.originalTicketId', '==', originalTicket.id)
+            );
+            const existingSnap = await getDocs(existingQ);
+            const activeWarranty = existingSnap.docs.find(d => {
+                const data = d.data();
+                const terminalIds = warrantyStatuses.filter(s => s.isTerminal).map(s => s.id);
+                return !terminalIds.includes(data.status as string);
+            });
+            if (activeWarranty) {
+                toastWarning(`Đã có phiếu bảo hành #${activeWarranty.id.slice(-6).toUpperCase()} đang xử lý cho phiếu này.`);
+                setWarrantyCreating(false);
+                return;
+            }
+
+            const warrantyTicketData = {
+                ticketType: 'warranty' as const,
+                warrantyClaim: {
+                    originalTicketId: originalTicket.id,
+                    claimedPartIndexes,
+                },
+                customer: originalTicket.customer,
+                deviceInfo: {
+                    model: originalTicket.deviceInfo?.model || '',
+                    passcode: '',
+                    imei: originalTicket.deviceInfo?.imei || '',
+                    color: originalTicket.deviceInfo?.color || '',
+                },
+                issue: { description: 'Bảo hành linh kiện', notes: '' },
+                preRepairMedia: [],
+                postRepairMedia: [],
+                payment: {
+                    status: 'unpaid' as const,
+                    partsCost: 0,
+                    laborCost: 0,
+                    amount: 0,
+                    depositAmount: 0,
+                },
+                staff: {
+                    createdBy: user?.uid || '',
+                    createdByName: user?.displayName || 'Admin',
+                    assignedTechnician: '',
+                    assignedTechnicianName: '',
+                },
+                status: warrantyStatuses[0]?.id || 'bh_tiep_nhan',
+                statusTimeline: [{ status: warrantyStatuses[0]?.id || 'bh_tiep_nhan', timestamp: Date.now() }],
+                parts: [],
+                timing: { receivedAt: serverTimestamp() },
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+            };
+
+            await addDoc(collection(db, 'repairs'), warrantyTicketData);
+            toastSuccess('Đã tạo phiếu bảo hành thành công!');
+            setWarrantyModal(null);
+            setWarrantySelectedIndexes([]);
+        } catch (err) {
+            console.error('Error creating warranty ticket:', err);
+            toastError('Không thể tạo phiếu bảo hành. Vui lòng thử lại.');
+        } finally {
+            setWarrantyCreating(false);
         }
     };
 
@@ -448,7 +951,6 @@ export default function RepairPage() {
     const handleOpenModal = (ticket?: RepairTicket) => {
         if (ticket) {
             const cl = ticket.deviceInfo?.checklist;
-            setEditingTicket(ticket);
             setFormData({
                 appointmentId: ticket.appointmentId || '',
                 customerName: ticket.customer.name,
@@ -481,44 +983,14 @@ export default function RepairPage() {
             });
             setPreMediaFiles(ticket.preRepairMedia || []);
             setPostMediaFiles(ticket.postRepairMedia || []);
+            setEditingTicket(ticket);
         } else {
             setEditingTicket(null);
-            setFormData({ ...emptyForm, technicianId: user?.uid || '' });
+            setFormData({ ...emptyForm, technicianId: '' });
             setPreMediaFiles([]);
             setPostMediaFiles([]);
         }
         setShowModal(true);
-    };
-
-    // ── Auto-fill from appointment ──
-    const handleAppointmentSelect = (appId: string) => {
-        const app = appointments.find(a => a.id === appId);
-        if (app) {
-            setFormData(prev => {
-                const updated = {
-                    ...prev,
-                    appointmentId: app.id,
-                    customerName: app.fullName,
-                    customerPhone: app.phone,
-                    selectedServiceName: '',
-                };
-
-                // Auto-select service if appointment has serviceId
-                if (app.serviceId) {
-                    const svc = services.find(s => s.id === app.serviceId);
-                    if (svc) {
-                        const price = Number(svc.price_promo || svc.price_original || svc.price) || 0;
-                        updated.deviceModel = svc.device_model || updated.deviceModel;
-                        updated.partsCost = price || updated.partsCost;
-                        updated.selectedServiceName = svc.name || app.serviceName || '';
-                    } else {
-                        updated.selectedServiceName = app.serviceName || '';
-                    }
-                }
-
-                return updated;
-            });
-        }
     };
 
     // ── Submit ──
@@ -591,7 +1063,7 @@ export default function RepairPage() {
             setShowModal(false);
         } catch (err) {
             console.error(err);
-            alert('Có lỗi xảy ra!');
+            toastError('Có lỗi xảy ra!');
         }
     };
 
@@ -603,9 +1075,14 @@ export default function RepairPage() {
 
     // ── Print ──
     const openPrint = (ticket: RepairTicket, mode: 'receipt' | 'invoice') => {
-        setPrintTicket(ticket);
         setPrintMode(mode);
-        setTimeout(() => window.print(), 400);
+        setPrintTicket(ticket);
+        // Chờ render template trước khi gọi print (một số máy render chậm)
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                setTimeout(() => window.print(), 200);
+            });
+        });
     };
 
     // ══════════════════════════════  RENDER  ═════════════════════════════════
@@ -656,25 +1133,58 @@ export default function RepairPage() {
             </div>
 
             {/* ── Filters ── */}
-            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 grid grid-cols-1 md:grid-cols-4 gap-4 print:hidden">
-                <div className="relative md:col-span-2">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-                    <input
-                        type="text"
-                        placeholder="Tìm tên, SĐT, IMEI, Model..."
-                        value={searchTerm}
-                        onChange={e => setSearchTerm(e.target.value)}
-                        className="w-full pl-10 pr-4 h-10 border rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500/20"
-                    />
+            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 grid grid-cols-1 md:grid-cols-5 gap-4 print:hidden">
+                <div className="relative md:col-span-2 flex gap-2">
+                    <div className="relative flex-1">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                        <input
+                            type="text"
+                            placeholder="Tìm tên, SĐT, IMEI, Model..."
+                            value={searchTerm}
+                            onChange={e => setSearchTerm(e.target.value)}
+                            className="w-full pl-10 pr-4 h-10 border rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500/20"
+                        />
+                    </div>
+                    {searchTerm.trim().length > 0 && filtered.length === 0 && (
+                        <button 
+                            onClick={searchInDatabase}
+                            disabled={isSearchingDB}
+                            className="px-4 py-2 bg-orange-100 text-orange-600 rounded-lg hover:bg-orange-200 transition-colors flex items-center justify-center gap-2 text-sm font-medium whitespace-nowrap"
+                        >
+                            {isSearchingDB ? <Loader2 className="animate-spin" size={16} /> : <Search size={16} />}
+                            <span className="hidden sm:inline">Tìm Server</span>
+                        </button>
+                    )}
                 </div>
-                <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
+                <select
+                    value={ticketTypeFilter}
+                    onChange={e => {
+                        setTicketTypeFilter(e.target.value as 'all' | 'repair' | 'warranty');
+                        setStatusFilter('all'); // reset status when changing type
+                    }}
+                    aria-label="Loại phiếu"
+                    title="Loại phiếu"
+                    className="h-10 px-4 border rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500/20 bg-white">
+                    <option value="all">Tất cả loại phiếu</option>
+                    <option value="repair">Phiếu sửa chữa</option>
+                    <option value="warranty">Phiếu bảo hành</option>
+                </select>
+                <select
+                    value={statusFilter}
+                    onChange={e => setStatusFilter(e.target.value)}
+                    aria-label="Lọc theo trạng thái"
+                    title="Lọc theo trạng thái"
                     className="h-10 px-4 border rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500/20 bg-white">
                     <option value="all">Tất cả trạng thái</option>
-                    {dynamicStatuses.map(s => (
+                    {(ticketTypeFilter === 'all' ? dynamicStatuses : (ticketTypeFilter === 'warranty' ? warrantyStatuses : dynamicStatuses)).map(s => (
                         <option key={s.id} value={s.id}>{s.label}</option>
                     ))}
                 </select>
-                <select value={techFilter} onChange={e => setTechFilter(e.target.value)}
+                <select
+                    value={techFilter}
+                    onChange={e => setTechFilter(e.target.value)}
+                    aria-label="Lọc theo kỹ thuật viên"
+                    title="Lọc theo kỹ thuật viên"
                     className="h-10 px-4 border rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500/20 bg-white">
                     <option value="all">Tất cả KTV</option>
                     {staffs.map(s => (
@@ -683,10 +1193,121 @@ export default function RepairPage() {
                 </select>
             </div>
 
-            {/* ── Table ── */}
+            {/* ── Table / Cards ── */}
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden print:hidden">
-                <div className="overflow-x-auto">
-                    <table className="w-full text-left">
+                {/* Mobile View */}
+                <div className="block md:hidden divide-y divide-gray-100">
+                    {filtered.length === 0 ? (
+                        <div className="px-6 py-12 text-center text-gray-400">
+                            <Wrench size={40} className="mx-auto mb-2 opacity-30" />
+                            <p>Không có phiếu sửa chữa nào.</p>
+                        </div>
+                    ) : paginatedTickets.map(ticket => {
+                        const workflow = getWorkflowForTicket(ticket);
+                        const st = workflow.find(s => s.id === ticket.status) || { id: ticket.status, label: ticket.status, color: 'bg-gray-100 text-gray-700 border-gray-200', allowedNext: [] };
+                        const StIcon = Clock; // Fallback
+                        const pay = paymentLabels[ticket.payment?.status || 'unpaid'];
+                        
+                        return (
+                            <div key={ticket.id} className={`p-4 space-y-3 bg-white hover:bg-gray-50 transition-colors ${ticket.payment?.status === 'unpaid' ? 'bg-red-50/50' : ''}`}>
+                                <div className="flex items-start justify-between">
+                                    <div className="flex-1">
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <span className="font-mono text-sm font-bold text-gray-900">#{ticket.id.slice(-6).toUpperCase()}</span>
+                                            {ticket.ticketType === 'warranty' && (
+                                                <span className="px-1.5 py-0.5 bg-purple-100 text-purple-700 text-[10px] rounded-full font-bold">BẢO HÀNH</span>
+                                            )}
+                                        </div>
+                                        <p className="text-sm font-medium text-gray-900">{ticket.customer.name}</p>
+                                        <p className="text-xs text-gray-500">{ticket.customer.phone}</p>
+                                    </div>
+                                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold flex-shrink-0 rounded-full border ${st.color}`}>
+                                        <StIcon size={12} /> {st.label}
+                                    </span>
+                                </div>
+                                <div className="grid grid-cols-2 gap-2 text-sm bg-gray-50/50 p-2.5 rounded-lg border border-gray-100">
+                                    <div className="col-span-2 flex items-center gap-1.5">
+                                        <Smartphone size={14} className="text-gray-400" />
+                                        <span className="font-medium text-sm text-gray-800">{ticket.deviceInfo?.model}</span>
+                                    </div>
+                                    <div className="col-span-2 pb-1 text-xs text-gray-600 truncate max-w-full italic">
+                                        {ticket.issue?.description}
+                                    </div>
+                                    {(() => {
+                                        const pendingParts = (ticket.parts || []).filter(p => p.status === 'requested' || p.status === 'ordered');
+                                        if (pendingParts.length > 0) {
+                                            return (
+                                                <div className="mt-1 col-span-2 inline-flex w-fit items-center gap-1 px-2 py-0.5 bg-orange-50 text-orange-600 rounded text-[10px] font-medium border border-orange-200">
+                                                    <Package size={10} />
+                                                    <span>Chờ {pendingParts.length} linh kiện</span>
+                                                </div>
+                                            );
+                                        }
+                                        return null;
+                                    })()}
+                                    <div>
+                                        <p className="text-[10px] text-gray-500 uppercase font-medium">Thanh toán</p>
+                                        <span className={`inline-flex px-1.5 py-0.5 rounded mt-0.5 text-[10px] font-semibold ${pay.color}`}>
+                                            {pay.label}
+                                        </span>
+                                    </div>
+                                    <div className="text-right">
+                                        <p className="text-[10px] text-gray-500 uppercase font-medium">KTV</p>
+                                        <p className="text-xs font-medium text-gray-700 mt-0.5 truncate">{ticket.staff?.assignedTechnicianName || '—'}</p>
+                                    </div>
+                                </div>
+                                {/* Actions Area */}
+                                <div className="pt-2 flex flex-col gap-2 border-t border-gray-100">
+                                    <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-hide">
+                                        {/* Status actions */}
+                                        {st?.isTerminal ? (
+                                            <span className="inline-flex items-center gap-1 px-3 py-1 bg-gray-100 text-gray-500 rounded-lg text-[10px] font-semibold border border-gray-200">
+                                                🔒 {st.label}
+                                            </span>
+                                        ) : (
+                                            st.allowedNext?.map((nextId: string) => {
+                                                const nextCfg = workflow.find(ds => ds.id === nextId);
+                                                if (!nextCfg) return null;
+                                                let btnClass = 'bg-orange-50 text-orange-700 border-orange-200';
+                                                let icon = <ArrowRight size={12} />;
+                                                if (nextId === 'refund') { btnClass = 'bg-red-50 text-red-600 border-red-200'; icon = <RotateCcw size={12} />; }
+                                                else if (nextId === 'out' || nextId.includes('tra_may_khong_sua')) { btnClass = 'bg-gray-50 text-gray-700 border-gray-200'; icon = <Ban size={12} />; }
+                                                else if (nextId === 'done') { btnClass = 'bg-emerald-50 text-emerald-700 border-emerald-200'; icon = <CheckCircle2 size={12} />; }
+                                                return (
+                                                    <button key={nextId} onClick={() => handleQuickStatus(ticket, nextId)}
+                                                        className={`flex whitespace-nowrap items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded border ${btnClass}`}>
+                                                        {icon} {nextCfg.label}
+                                                    </button>
+                                                );
+                                            })
+                                        )}
+                                    </div>
+                                    
+                                    <div className="flex flex-wrap gap-2">
+                                        <button onClick={() => setViewingTicket(ticket)} className="flex-1 py-2 bg-gray-50 text-gray-700 text-xs font-medium rounded-lg border border-gray-200 flex items-center justify-center gap-1 active:bg-gray-100">
+                                            <Eye size={14} /> Chi tiết
+                                        </button>
+                                        {(!(st?.isTerminal) || user?.role?.toLowerCase() === 'admin' || user?.permissions?.includes('admin_only') || user?.email?.includes('admin')) && (
+                                            <button onClick={() => handleOpenModal(ticket)} className="flex-1 py-2 bg-orange-50 text-orange-600 text-xs font-medium rounded-lg border border-orange-200 flex items-center justify-center gap-1 active:bg-orange-100">
+                                                <Wrench size={14} /> Sửa
+                                            </button>
+                                        )}
+                                        {/* Nút Kích hoạt Bảo hành */}
+                                        {ticket.status === 'done' && ticket.ticketType !== 'warranty' && (ticket.parts || []).some(p => !['rejected', 'cancelled'].includes(String(p.status || '')) && p.warrantyMonths && p.warrantyMonths > 0 && p.warrantyExpiresAt && (typeof p.warrantyExpiresAt === 'number' ? p.warrantyExpiresAt : (p.warrantyExpiresAt as { toDate?: () => Date })?.toDate?.()?.getTime() || 0) > Date.now()) && (
+                                            <button onClick={() => { setWarrantyModal(ticket); setWarrantySelectedIndexes([]); }} className="w-full py-2 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-semibold rounded-lg flex items-center justify-center gap-1 mt-1">
+                                                <AlertCircle size={14} /> Kích hoạt bảo hành
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+
+                {/* Desktop View */}
+                <div className="hidden md:block overflow-x-auto">
+                    <table className="w-full text-left min-w-[800px]">
                         <thead>
                             <tr className="bg-gray-50 border-b text-xs uppercase text-gray-500 font-semibold">
                                 <th className="px-4 py-3">Mã</th>
@@ -706,14 +1327,20 @@ export default function RepairPage() {
                                         Không có phiếu sửa chữa nào.
                                     </td>
                                 </tr>
-                            ) : filtered.map(ticket => {
-                                const st = dynamicStatuses.find(s => s.id === ticket.status) || { id: ticket.status, label: ticket.status, color: 'bg-gray-100 text-gray-700 border-gray-200', allowedNext: [] };
+                            ) : paginatedTickets.map(ticket => {
+                                const workflow = getWorkflowForTicket(ticket);
+                                const st = workflow.find(s => s.id === ticket.status) || { id: ticket.status, label: ticket.status, color: 'bg-gray-100 text-gray-700 border-gray-200', allowedNext: [] };
                                 const StIcon = Clock; // Fallback generic icon
                                 const pay = paymentLabels[ticket.payment?.status || 'unpaid'];
                                 return (
                                     <tr key={ticket.id} className={`hover:bg-gray-50/50 transition-colors ${ticket.payment?.status === 'unpaid' ? 'bg-red-50' : ''}`}>
                                         <td className="px-4 py-3 font-mono text-xs text-gray-500">
-                                            #{ticket.id.slice(-6).toUpperCase()}
+                                            <div className="flex items-center gap-1">
+                                                <span>#{ticket.id.slice(-6).toUpperCase()}</span>
+                                                {ticket.ticketType === 'warranty' && (
+                                                    <span className="px-1.5 py-0.5 bg-purple-100 text-purple-700 text-[10px] rounded-full font-bold">BH</span>
+                                                )}
+                                            </div>
                                         </td>
                                         <td className="px-4 py-3">
                                             <p className="font-medium text-gray-900 text-sm">{ticket.customer.name}</p>
@@ -725,6 +1352,18 @@ export default function RepairPage() {
                                                 <span className="font-medium text-sm text-gray-900">{ticket.deviceInfo?.model}</span>
                                             </div>
                                             <p className="text-xs text-gray-500 truncate max-w-[180px]">{ticket.issue?.description}</p>
+                                            {(() => {
+                                                const pendingParts = (ticket.parts || []).filter(p => p.status === 'requested' || p.status === 'ordered');
+                                                if (pendingParts.length > 0) {
+                                                    return (
+                                                        <div className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 bg-orange-50 text-orange-600 rounded text-[10px] font-medium border border-orange-200">
+                                                            <Package size={10} />
+                                                            <span>Chờ {pendingParts.length} linh kiện</span>
+                                                        </div>
+                                                    );
+                                                }
+                                                return null;
+                                            })()}
                                         </td>
                                         <td className="px-4 py-3">
                                             <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold border ${st.color}`}>
@@ -744,39 +1383,35 @@ export default function RepairPage() {
                                         </td>
                                         <td className="px-4 py-3 text-right">
                                             <div className="flex items-center justify-end gap-1 flex-wrap">
-                                                {/* ═══ STATUS ACTIONS (ternary: terminal / done / normal) ═══ */}
-                                                {TERMINAL_STATUSES.includes(ticket.status) ? (
+                                                {/* ═══ STATUS ACTIONS (ternary: terminal / normal) ═══ */}
+                                                {st?.isTerminal ? (
                                                     <span className="inline-flex items-center gap-1 px-3 py-1.5 bg-gray-100 text-gray-500 rounded-lg text-[11px] font-semibold border border-gray-200">
                                                         🔒 Đã đóng ({st.label})
                                                     </span>
-                                                ) : ticket.status === endGameTrigger ? (
-                                                    <div className="flex items-center gap-1 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1">
-                                                        <button onClick={() => setHandoverModal({ ticket, action: 'tra_may' })}
-                                                            className="px-2 py-1.5 text-xs font-semibold bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors">
-                                                            ✅ Trả Máy
-                                                        </button>
-                                                        <button onClick={() => setHandoverModal({ ticket, action: 'out' })}
-                                                            disabled={(ticket.payment?.depositAmount || 0) > 0 || ticket.payment?.status === 'paid'}
-                                                            className="px-2 py-1.5 text-xs font-semibold bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                                                            title={(ticket.payment?.depositAmount || 0) > 0 || ticket.payment?.status === 'paid' ? 'Khách đã cọc, chọn Hoàn Phí' : 'Trả máy — không sửa được'}>
-                                                            ⚪ Out
-                                                        </button>
-                                                        <button onClick={() => setHandoverModal({ ticket, action: 'hoan_phi' })}
-                                                            disabled={(ticket.payment?.depositAmount || 0) === 0 && ticket.payment?.status === 'unpaid'}
-                                                            className="px-2 py-1.5 text-xs font-semibold bg-red-500 text-white rounded-lg hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                                                            title={(ticket.payment?.depositAmount || 0) === 0 && ticket.payment?.status === 'unpaid' ? 'Chưa có tiền để hoàn, chọn Out' : 'Hoàn tiền cho khách'}>
-                                                            🔴 Hoàn Phí
-                                                        </button>
-                                                    </div>
                                                 ) : (
                                                     st.allowedNext?.map((nextId: string) => {
-                                                        const nextCfg = dynamicStatuses.find(ds => ds.id === nextId);
+                                                        const nextCfg = workflow.find(ds => ds.id === nextId);
                                                         if (!nextCfg) return null;
+                                                        
+                                                        // Choose icons and colors dynamically based on target ID semantics if possible, or fallback
+                                                        let btnClass = 'bg-orange-50 text-orange-700 hover:bg-orange-100 border-orange-200';
+                                                        let icon = <ArrowRight size={12} />;
+                                                        if (nextId === 'refund') {
+                                                            btnClass = 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100';
+                                                            icon = <RotateCcw size={12} />;
+                                                        } else if (nextId === 'out' || nextId.includes('tra_may_khong_sua')) {
+                                                            btnClass = 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100';
+                                                            icon = <Ban size={12} />;
+                                                        } else if (nextId === 'done') {
+                                                            btnClass = 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100';
+                                                            icon = <CheckCircle2 size={12} />;
+                                                        }
+
                                                         return (
                                                             <button key={nextId} onClick={() => handleQuickStatus(ticket, nextId)}
-                                                                className={`flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-lg transition-colors border ${nextId === 'hoan_phi' ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100' : nextId === 'out' ? 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100' : 'bg-orange-50 text-orange-700 hover:bg-orange-100 border-orange-200'}`}
+                                                                className={`flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-lg transition-colors border ${btnClass}`}
                                                                 title={`Chuyển → ${nextCfg.label}`}>
-                                                                {nextId === 'hoan_phi' ? <X size={12} /> : <ArrowRight size={12} />}
+                                                                {icon}
                                                                 {nextCfg.label}
                                                             </button>
                                                         );
@@ -794,42 +1429,139 @@ export default function RepairPage() {
                                                     className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg" title="In phiếu tiếp nhận">
                                                     <Printer size={16} />
                                                 </button>
-                                                {['done', 'da_tra_may', 'out'].includes(ticket.status) && (
+                                                {ticket.status === 'done' && (
                                                     <button onClick={() => openPrint(ticket, 'invoice')}
                                                         className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg" title="In hóa đơn">
                                                         <FileText size={16} />
                                                     </button>
                                                 )}
-                                                {/* Upload Video Bàn Giao — luôn cho phép */}
-                                                {['done', 'da_tra_may', 'out', 'hoan_phi'].includes(ticket.status) && (
+                                                {/* Nút Kích hoạt Bảo hành — chỉ hiện khi phiếu done và có linh kiện còn hạn BH */}
+                                                {ticket.status === 'done' && ticket.ticketType !== 'warranty' && (ticket.parts || []).some(p =>
+                                                    !['rejected', 'cancelled'].includes(String(p.status || '')) && p.warrantyMonths && p.warrantyMonths > 0 &&
+                                                    p.warrantyExpiresAt && (
+                                                        typeof p.warrantyExpiresAt === 'number'
+                                                            ? p.warrantyExpiresAt
+                                                            : (p.warrantyExpiresAt as { toDate?: () => Date })?.toDate?.()?.getTime() || 0
+                                                    ) > Date.now()
+                                                ) && (
+                                                    <button onClick={() => { setWarrantyModal(ticket); setWarrantySelectedIndexes([]); }}
+                                                        className="flex items-center gap-1 px-2 py-1 text-[10px] font-semibold rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition-colors"
+                                                        title="Tạo phiếu bảo hành">
+                                                        <AlertCircle size={12} /> Bảo hành
+                                                    </button>
+                                                )}
+                                                {/* Upload Video/Image hoặc Dán Link YouTube Bàn Giao */}
+                                                {['done', 'out', 'refund'].includes(ticket.status) && (
                                                     ticket.postRepairMedia?.length > 0 ? (
-                                                        <span className="text-[10px] bg-green-50 text-green-600 border border-green-200 px-2 py-1 rounded-lg font-semibold flex items-center gap-1">
-                                                            <CheckCircle2 size={10} /> Đã hoàn tất
-                                                        </span>
-                                                    ) : (
-                                                        <label className="cursor-pointer p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors" title="Upload Video Bàn Giao">
-                                                            <Camera size={16} />
-                                                            <input type="file" accept="video/*,image/*" className="hidden"
-                                                                onChange={async (e) => {
-                                                                    const file = e.target.files?.[0];
-                                                                    if (!file) return;
+                                                        <div className="flex items-center gap-1">
+                                                            <span className="text-[10px] bg-green-50 text-green-600 border border-green-200 px-2 py-1 rounded-lg font-semibold flex items-center gap-1">
+                                                                <CheckCircle2 size={10} /> {ticket.postRepairMedia.length} media
+                                                            </span>
+                                                            {/* Allow adding more */}
+                                                            <label className="cursor-pointer p-1 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors" title="Thêm Video/Ảnh">
+                                                                <Camera size={14} />
+                                                                <input
+                                                                    type="file"
+                                                                    accept="video/*,image/*"
+                                                                    className="hidden"
+                                                                    aria-label="Thêm video/ảnh bàn giao"
+                                                                    title="Thêm video/ảnh bàn giao"
+                                                                    onChange={async (e) => {
+                                                                        const file = e.target.files?.[0];
+                                                                        if (!file) return;
+                                                                        try {
+                                                                            const url = await uploadMedia(file, 'repairs/handover');
+                                                                            const existing = ticket.postRepairMedia || [];
+                                                                            await updateDoc(doc(db, 'repairs', ticket.id), {
+                                                                                postRepairMedia: [...existing, url],
+                                                                                updatedAt: serverTimestamp(),
+                                                                            });
+                                                                        } catch (err) {
+                                                                            console.error('Upload error:', err);
+                                                                            toastError('Lỗi upload: ' + (err as Error).message);
+                                                                        }
+                                                                    }} />
+                                                            </label>
+                                                            <button
+                                                                className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                                                                title="Dán link YouTube"
+                                                                onClick={async () => {
+                                                                    const link = prompt('Dán link YouTube tại đây:\n\nVD: https://youtu.be/xxxxx hoặc https://youtube.com/watch?v=xxxxx');
+                                                                    if (!link?.trim()) return;
+                                                                    if (!isYouTubeUrl(link)) {
+                                                                        toastError('Link không hợp lệ. Vui lòng dán link YouTube.');
+                                                                        return;
+                                                                    }
                                                                     try {
-                                                                        const url = await uploadMedia(file, 'repairs/handover');
                                                                         const existing = ticket.postRepairMedia || [];
                                                                         await updateDoc(doc(db, 'repairs', ticket.id), {
-                                                                            postRepairMedia: [...existing, url],
+                                                                            postRepairMedia: [...existing, link.trim()],
                                                                             updatedAt: serverTimestamp(),
                                                                         });
                                                                     } catch (err) {
-                                                                        console.error('Upload error:', err);
-                                                                        alert('Lỗi upload: ' + (err as Error).message);
+                                                                        console.error('YouTube link error:', err);
+                                                                        toastError('Lỗi: ' + (err as Error).message);
                                                                     }
-                                                                }} />
-                                                        </label>
+                                                                }}
+                                                            >
+                                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.6 3.5 12 3.5 12 3.5s-7.6 0-9.4.6A3 3 0 0 0 .5 6.2 31.5 31.5 0 0 0 0 12a31.5 31.5 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.8.6 9.4.6 9.4.6s7.6 0 9.4-.6a3 3 0 0 0 2.1-2.1c.5-1.9.5-5.8.5-5.8s0-3.9-.5-5.8zM9.5 15.6V8.4l6.3 3.6-6.3 3.6z"/></svg>
+                                                            </button>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="flex items-center gap-1">
+                                                            <label className="cursor-pointer p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors" title="Upload Video/Ảnh Bàn Giao">
+                                                                <Camera size={16} />
+                                                                <input
+                                                                    type="file"
+                                                                    accept="video/*,image/*"
+                                                                    className="hidden"
+                                                                    aria-label="Upload video/ảnh bàn giao"
+                                                                    title="Upload video/ảnh bàn giao"
+                                                                    onChange={async (e) => {
+                                                                        const file = e.target.files?.[0];
+                                                                        if (!file) return;
+                                                                        try {
+                                                                            const url = await uploadMedia(file, 'repairs/handover');
+                                                                            const existing = ticket.postRepairMedia || [];
+                                                                            await updateDoc(doc(db, 'repairs', ticket.id), {
+                                                                                postRepairMedia: [...existing, url],
+                                                                                updatedAt: serverTimestamp(),
+                                                                            });
+                                                                        } catch (err) {
+                                                                            console.error('Upload error:', err);
+                                                                            toastError('Lỗi upload: ' + (err as Error).message);
+                                                                        }
+                                                                    }} />
+                                                            </label>
+                                                            <button
+                                                                className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                                                                title="Dán link YouTube (tiết kiệm dung lượng)"
+                                                                onClick={async () => {
+                                                                    const link = prompt('🎬 Dán link YouTube tại đây:\n\nVD: https://youtu.be/xxxxx hoặc https://youtube.com/watch?v=xxxxx\n\n💡 Sử dụng YouTube tiết kiệm chi phí lưu trữ!');
+                                                                    if (!link?.trim()) return;
+                                                                    if (!isYouTubeUrl(link)) {
+                                                                        toastError('Link không hợp lệ. Vui lòng dán link YouTube.');
+                                                                        return;
+                                                                    }
+                                                                    try {
+                                                                        const existing = ticket.postRepairMedia || [];
+                                                                        await updateDoc(doc(db, 'repairs', ticket.id), {
+                                                                            postRepairMedia: [...existing, link.trim()],
+                                                                            updatedAt: serverTimestamp(),
+                                                                        });
+                                                                    } catch (err) {
+                                                                        console.error('YouTube link error:', err);
+                                                                        toastError('Lỗi: ' + (err as Error).message);
+                                                                    }
+                                                                }}
+                                                            >
+                                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.6 3.5 12 3.5 12 3.5s-7.6 0-9.4.6A3 3 0 0 0 .5 6.2 31.5 31.5 0 0 0 0 12a31.5 31.5 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.8.6 9.4.6 9.4.6s7.6 0 9.4-.6a3 3 0 0 0 2.1-2.1c.5-1.9.5-5.8.5-5.8s0-3.9-.5-5.8zM9.5 15.6V8.4l6.3 3.6-6.3 3.6z"/></svg>
+                                                            </button>
+                                                        </div>
                                                     )
                                                 )}
                                                 {/* Edit — admin luôn sửa được; staff chỉ sửa phiếu chưa đóng */}
-                                                {(!TERMINAL_STATUSES.includes(ticket.status) || user?.role?.toLowerCase() === 'admin' || user?.permissions?.includes('admin_only') || user?.email?.includes('admin')) && (
+                                                {(!(st?.isTerminal) || user?.role?.toLowerCase() === 'admin' || user?.permissions?.includes('admin_only') || user?.email?.includes('admin')) && (
                                                     <button onClick={() => handleOpenModal(ticket)}
                                                         className="p-1.5 text-gray-400 hover:text-orange-500 hover:bg-orange-50 rounded-lg" title="Sửa">
                                                         <Wrench size={16} />
@@ -843,19 +1575,44 @@ export default function RepairPage() {
                         </tbody>
                     </table>
                 </div>
+                <PaginationBar
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    pageSize={pageSize}
+                    totalFiltered={totalFiltered}
+                    totalAll={tickets.length}
+                    onPageChange={setPage}
+                    onPageSizeChange={setPageSize}
+                    entityLabel="phiếu"
+                />
+                
+                {hasMore && !searchTerm && (
+                    <div className="p-4 border-t border-gray-100 flex justify-center">
+                        <button 
+                            onClick={loadMoreData}
+                            className="px-6 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-lg transition-colors flex items-center gap-2"
+                        >
+                            Tải thêm lịch sử cũ
+                        </button>
+                    </div>
+                )}
             </div>
 
             {/* ══════════  Delivery/Cancel Note Modal  ══════════ */}
             {noteModal && (
-                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 print:hidden">
-                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4">
+                <Modal
+                    isOpen={true}
+                    onClose={() => { setNoteModal(null); setDeliveryNote(''); }}
+                    size="md"
+                >
+                    <div className="p-5 pb-8 md:p-6 space-y-4">
                         <div className="flex items-center gap-3">
-                            <div className={`w-10 h-10 rounded-full flex items-center justify-center ${noteModal.targetStatus === 'hoan_phi' ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
+                            <div className={`w-10 h-10 rounded-full flex items-center justify-center ${noteModal.targetStatus === 'refund' ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
                                 <AlertTriangle size={20} />
                             </div>
                             <div>
                                 <h3 className="font-bold text-gray-900">
-                                    {noteModal.targetStatus === 'hoan_phi' ? 'Xác nhận Hoàn phí' : 'Bàn giao máy'}
+                                    {noteModal.targetStatus === 'refund' ? 'Xác nhận Hoàn phí' : 'Bàn giao máy'}
                                 </h3>
                                 <p className="text-sm text-gray-500">#{noteModal.ticket.id.slice(-6).toUpperCase()} — {noteModal.ticket.customer.name}</p>
                             </div>
@@ -863,14 +1620,14 @@ export default function RepairPage() {
 
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">
-                                {noteModal.targetStatus === 'hoan_phi' ? 'Lý do hoàn phí *' : 'Ghi chú bàn giao *'}
+                                {noteModal.targetStatus === 'refund' ? 'Lý do hoàn phí *' : 'Ghi chú bàn giao *'}
                             </label>
                             <textarea
                                 rows={3}
                                 required
                                 value={deliveryNote}
                                 onChange={e => setDeliveryNote(e.target.value)}
-                                placeholder={noteModal.targetStatus === 'hoan_phi'
+                                placeholder={noteModal.targetStatus === 'refund'
                                     ? 'Nhập lý do hoàn phí...'
                                     : 'Tình trạng máy khi trả, đã test chức năng...'}
                                 className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20"
@@ -883,47 +1640,25 @@ export default function RepairPage() {
                                 Đóng
                             </button>
                             <button onClick={handleNoteSubmit}
-                                className={`px-4 py-2 text-sm font-semibold text-white rounded-lg ${noteModal.targetStatus === 'hoan_phi' ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600'}`}>
-                                {noteModal.targetStatus === 'hoan_phi' ? 'Xác nhận hoàn phí' : 'Xác nhận trả máy'}
+                                className={`px-4 py-2 text-sm font-semibold text-white rounded-lg ${noteModal.targetStatus === 'refund' ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600'}`}>
+                                {noteModal.targetStatus === 'refund' ? 'Xác nhận hoàn phí' : 'Xác nhận trả máy'}
                             </button>
                         </div>
                     </div>
-                </div>
+                </Modal>
             )}
 
             {/* ══════════  Create/Edit Modal  ══════════ */}
             {showModal && (
-                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 print:hidden">
-                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
-                        <div className="sticky top-0 bg-white px-6 py-4 border-b flex items-center justify-between z-10">
-                            <h3 className="font-bold text-lg text-gray-900">
-                                {editingTicket ? 'Cập nhật phiếu' : 'Tạo phiếu sửa chữa'}
-                            </h3>
-                            <button onClick={() => setShowModal(false)} className="p-2 hover:bg-gray-100 rounded-full"><X size={20} /></button>
-                        </div>
-
-                        <form onSubmit={handleSubmit} className="p-6 space-y-6">
-                            {/* ── Appointment selector (only for new tickets) ── */}
-                            {!editingTicket && (
-                                <div className="bg-blue-50 rounded-xl p-4 border border-blue-100">
-                                    <label className="flex items-center gap-2 text-sm font-semibold text-blue-800 mb-2">
-                                        <Calendar size={16} /> Tạo từ lịch hẹn (tùy chọn)
-                                    </label>
-                                    <select
-                                        value={formData.appointmentId}
-                                        onChange={e => handleAppointmentSelect(e.target.value)}
-                                        className="w-full px-4 py-2 border border-blue-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-300/30"
-                                    >
-                                        <option value="">— Nhập tay —</option>
-                                        {appointments.map(a => (
-                                            <option key={a.id} value={a.id}>
-                                                {a.fullName} — {a.phone} — {new Date(a.date).toLocaleDateString('vi-VN')}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </div>
-                            )}
-
+                <Modal
+                    isOpen={true}
+                    onClose={() => setShowModal(false)}
+                    title={editingTicket ? 'Cập nhật phiếu' : 'Tạo phiếu sửa chữa'}
+                    size="4xl"
+                    priority="high"
+                >
+                        <div className="flex-1 overflow-y-auto w-full">
+                            <form onSubmit={handleSubmit} className="p-4 md:p-6 space-y-6">
                             {/* ── Customer ── */}
                             <fieldset className="space-y-3">
                                 <legend className="flex items-center gap-2 font-semibold text-gray-900"><User size={18} className="text-orange-500" /> Khách hàng</legend>
@@ -984,6 +1719,8 @@ export default function RepairPage() {
                                                         selectedServiceName: e.target.value,
                                                     }));
                                                 }}
+                                                aria-label="Chọn nhóm dịch vụ"
+                                                title="Chọn nhóm dịch vụ"
                                                 className="w-full px-4 py-2 border border-orange-200 rounded-lg bg-white focus:ring-2 focus:ring-orange-300/30"
                                             >
                                                 <option value="">— Chọn nhóm dịch vụ —</option>
@@ -1001,12 +1738,16 @@ export default function RepairPage() {
                                     <label className="block text-sm font-medium text-gray-700 mb-1">Mô tả lỗi *</label>
                                     <textarea rows={3} required value={formData.issueDescription}
                                         onChange={e => setFormData(p => ({ ...p, issueDescription: e.target.value }))}
+                                        aria-label="Mô tả lỗi"
+                                        title="Mô tả lỗi"
                                         className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20" />
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">Ghi chú kỹ thuật</label>
                                     <textarea rows={2} value={formData.techNotes}
                                         onChange={e => setFormData(p => ({ ...p, techNotes: e.target.value }))}
+                                        aria-label="Ghi chú kỹ thuật"
+                                        title="Ghi chú kỹ thuật"
                                         className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20" />
                                 </div>
                             </fieldset>
@@ -1014,10 +1755,14 @@ export default function RepairPage() {
                             <hr className="border-gray-100" />
 
                             {/* ── Checklist kiểm tra đầu vào ── */}
-                            <fieldset className="space-y-3">
-                                <legend className="flex items-center gap-2 font-semibold text-gray-900">
-                                    <CheckCircle2 size={18} className="text-orange-500" /> Kiểm tra đầu vào
-                                </legend>
+                            {(() => {
+                                const st = dynamicStatuses.find(s => s.id === formData.status);
+                                return st?.allowedFeatures?.includes('requireChecklist');
+                            })() && (
+                                <fieldset className="space-y-3">
+                                    <legend className="flex items-center gap-2 font-semibold text-gray-900">
+                                        <CheckCircle2 size={18} className="text-orange-500" /> Kiểm tra đầu vào
+                                    </legend>
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                                     {[
                                         { key: 'checkBody', label: 'Vỏ máy' },
@@ -1032,12 +1777,20 @@ export default function RepairPage() {
                                         <div key={item.key} className="bg-gray-50 rounded-lg p-2.5 border border-gray-100">
                                             <label className="block text-xs font-semibold text-gray-600 mb-1">{item.label}</label>
                                             <select
-                                                value={(formData as Record<string, unknown>)[item.key] as string}
+                                                value={
+                                                    ['OK', 'Trầy', 'Nứt', 'Móp', 'Lỗi', 'Không có'].find(
+                                                        v => v.toLowerCase() === ((formData as Record<string, unknown>)[item.key] as string)?.toLowerCase()
+                                                    ) || ((formData as Record<string, unknown>)[item.key] as string) || 'OK'
+                                                }
                                                 onChange={e => setFormData(p => ({ ...p, [item.key]: e.target.value }))}
-                                                className={`w-full text-xs px-2 py-1.5 border rounded-md bg-white ${(formData as Record<string, unknown>)[item.key] === 'OK' ? 'border-green-300 text-green-700'
-                                                    : (formData as Record<string, unknown>)[item.key] === 'Lỗi' ? 'border-red-300 text-red-700'
-                                                        : 'border-yellow-300 text-yellow-700'
-                                                    }`}
+                                                aria-label={`Checklist: ${item.label}`}
+                                                title={`Checklist: ${item.label}`}
+                                                className={`w-full text-xs px-2 py-1.5 border rounded-md bg-white ${
+                                                    (formData as Record<string, unknown>)[item.key]?.toString().toLowerCase() === 'ok' ? 'border-green-300 text-green-700'
+                                                    : (formData as Record<string, unknown>)[item.key]?.toString().toLowerCase() === 'lỗi' ? 'border-red-300 text-red-700'
+                                                    : ((formData as Record<string, unknown>)[item.key] && (formData as Record<string, unknown>)[item.key] !== '') ? 'border-orange-300 text-orange-700'
+                                                    : 'border-gray-300 text-gray-700'
+                                                }`}
                                             >
                                                 <option value="OK">✅ OK</option>
                                                 <option value="Trầy">⚠️ Trầy</option>
@@ -1049,7 +1802,8 @@ export default function RepairPage() {
                                         </div>
                                     ))}
                                 </div>
-                            </fieldset>
+                                </fieldset>
+                            )}
 
                             <hr className="border-gray-100" />
 
@@ -1100,7 +1854,7 @@ export default function RepairPage() {
                                                 try {
                                                     const urls = await Promise.all(files.map(f => uploadImage(f, 'repairs/pre')));
                                                     setPreMediaFiles(prev => [...prev, ...urls]);
-                                                } catch (err) { console.error(err); alert('Lỗi upload!'); }
+                                                } catch (err) { console.error(err); toastError('Lỗi upload!'); }
                                                 finally { setUploadingMedia(false); }
                                             }} />
                                     </label>
@@ -1109,7 +1863,7 @@ export default function RepairPage() {
                             </fieldset>
 
                             {/* ── Media Upload: Ảnh/Video sau sửa (chỉ hiển khi Done/Out/Hoàn Phí) ── */}
-                            {['done', 'out', 'hoan_phi'].includes(formData.status) && (
+                            {['done', 'out', 'refund'].includes(formData.status) && (
                                 <>
                                     <hr className="border-gray-100" />
                                     <fieldset className="space-y-3">
@@ -1135,7 +1889,7 @@ export default function RepairPage() {
                                                         try {
                                                             const urls = await Promise.all(files.map(f => uploadImage(f, 'repairs/post')));
                                                             setPostMediaFiles(prev => [...prev, ...urls]);
-                                                        } catch (err) { console.error(err); alert('Lỗi upload!'); }
+                                                        } catch (err) { console.error(err); toastError('Lỗi upload!'); }
                                                         finally { setUploadingMedia(false); }
                                                     }} />
                                             </label>
@@ -1152,15 +1906,15 @@ export default function RepairPage() {
                                 <div className="grid md:grid-cols-4 gap-4">
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Tiền linh kiện (VNĐ)</label>
-                                        <input type="number" value={formData.partsCost || ''}
-                                            onChange={e => setFormData(p => ({ ...p, partsCost: Number(e.target.value) }))}
+                                        <input type="text" value={formData.partsCost ? Number(formData.partsCost).toLocaleString('vi-VN') : ''}
+                                            onChange={e => setFormData(p => ({ ...p, partsCost: Number(e.target.value.replace(/\D/g, '')) || '' }))}
                                             placeholder="0"
                                             className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20" />
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Tiền công thợ (VNĐ)</label>
-                                        <input type="number" value={formData.laborCost || ''}
-                                            onChange={e => setFormData(p => ({ ...p, laborCost: Number(e.target.value) }))}
+                                        <input type="text" value={formData.laborCost ? Number(formData.laborCost).toLocaleString('vi-VN') : ''}
+                                            onChange={e => setFormData(p => ({ ...p, laborCost: Number(e.target.value.replace(/\D/g, '')) || '' }))}
                                             placeholder="0"
                                             className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20" />
                                     </div>
@@ -1172,8 +1926,11 @@ export default function RepairPage() {
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Đặt cọc (VNĐ)</label>
-                                        <input type="number" value={formData.depositAmount || ''}
-                                            onChange={e => setFormData(p => ({ ...p, depositAmount: Number(e.target.value) }))}
+                                        <input type="text" value={formData.depositAmount ? Number(formData.depositAmount).toLocaleString('vi-VN') : ''}
+                                            onChange={e => {
+                                                const val = Number(e.target.value.replace(/\D/g, '')) || 0;
+                                                setFormData(p => ({ ...p, depositAmount: val || '', paymentStatus: val > 0 ? 'deposit' : 'unpaid' }));
+                                            }}
                                             placeholder="0"
                                             className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20" />
                                     </div>
@@ -1181,6 +1938,8 @@ export default function RepairPage() {
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Trạng thái TT</label>
                                         <select value={formData.paymentStatus}
                                             onChange={e => setFormData(p => ({ ...p, paymentStatus: e.target.value as PaymentStatus }))}
+                                            aria-label="Trạng thái thanh toán"
+                                            title="Trạng thái thanh toán"
                                             className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20 bg-white">
                                             <option value="unpaid">Chưa thanh toán</option>
                                             <option value="deposit">Đã đặt cọc</option>
@@ -1195,25 +1954,36 @@ export default function RepairPage() {
                                         <select value={formData.status}
                                             onChange={e => setFormData(p => ({ ...p, status: e.target.value as RepairStatus }))}
                                             disabled={!!editingTicket && !(user?.role?.toLowerCase() === 'admin' || user?.permissions?.includes('admin_only') || user?.email?.includes('admin'))}
+                                            aria-label="Trạng thái phiếu"
+                                            title="Trạng thái phiếu"
                                             className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20 bg-white disabled:bg-gray-100 disabled:opacity-70 disabled:cursor-not-allowed">
                                             {dynamicStatuses.map(s => (
                                                 <option key={s.id} value={s.id}>{s.label}</option>
                                             ))}
                                         </select>
                                     </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">Kỹ thuật viên</label>
-                                        <select value={formData.technicianId}
-                                            onChange={e => setFormData(p => ({ ...p, technicianId: e.target.value }))}
-                                            className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20 bg-white">
-                                            <option value="">— Chọn —</option>
-                                            {staffs.map(s => <option key={s.uid} value={s.uid}>{s.displayName}</option>)}
-                                        </select>
-                                    </div>
+                                    {(() => {
+                                        const st = dynamicStatuses.find(s => s.id === formData.status);
+                                        return st?.allowedFeatures?.includes('allowAssignTech');
+                                    })() && (
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Kỹ thuật viên</label>
+                                            <select value={formData.technicianId}
+                                                onChange={e => setFormData(p => ({ ...p, technicianId: e.target.value }))}
+                                                aria-label="Chọn kỹ thuật viên"
+                                                title="Chọn kỹ thuật viên"
+                                                className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20 bg-white">
+                                                <option value="">— Chọn —</option>
+                                                {staffs.map(s => <option key={s.uid} value={s.uid}>{s.displayName}</option>)}
+                                            </select>
+                                        </div>
+                                    )}
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Ngày trả dự kiến</label>
                                         <input type="date" value={formData.estimatedReturnDate}
                                             onChange={e => setFormData(p => ({ ...p, estimatedReturnDate: e.target.value }))}
+                                            aria-label="Ngày trả dự kiến"
+                                            title="Ngày trả dự kiến"
                                             className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20" />
                                     </div>
                                 </div>
@@ -1235,50 +2005,153 @@ export default function RepairPage() {
                             </div>
                         </form>
                     </div>
-                </div>
+                </Modal>
             )}
 
-            {/* ══════════  Print Template  ══════════ */}
-            {printTicket && <PrintableReceipt ticket={printTicket} receiptConfig={receiptConfig} />}
+            {/* ══════════  Print Templates  ══════════ */}
+            {printTicket && printMode === 'receipt' && (
+                <PrintableReceipt ticket={printTicket} receiptConfig={receiptConfig} />
+            )}
+            {printTicket && printMode === 'invoice' && (
+                <PrintableRepairInvoice ticket={printTicket} receiptConfig={receiptConfig} />
+            )}
 
-            {/* ═══ Handover Confirmation Modal ═══ */}
+            {/* ═══ Handover Confirmation Modal (Enhanced with full breakdown) ═══ */}
             {handoverModal && (() => {
                 const t = handoverModal.ticket;
                 const deposit = t.payment?.depositAmount || 0;
-                const total = t.payment?.amount || 0;
+                const computedPartsCost = (t.parts || [])
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    .filter((p: any) => p.status !== 'rejected')
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    .reduce((sum: number, p: any) => {
+                        const qty = Math.max(1, Number(p?.quantity) || 1);
+                        const unit = Number(p?.unitPriceAtUse ?? p?.price ?? 0) || 0;
+                        return sum + unit * qty;
+                    }, 0);
+                const partsCost = computedPartsCost > 0 ? computedPartsCost : Number(t.payment?.partsCost) || 0;
+                const laborCost = Number(t.payment?.laborCost) || 0;
+                const additionalFees = Number(handoverAdditionalFees.replace(/[^0-9-]/g, '')) || 0;
+                const discountAmount = Number(handoverDiscountAmount.replace(/[^0-9-]/g, '')) || 0;
+                const total = partsCost + laborCost + additionalFees - discountAmount;
                 const remaining = total - deposit;
                 const action = handoverModal.action;
+                const parts = t.parts || [];
 
                 const titles: Record<string, string> = {
-                    tra_may: '✅ Xác nhận Trả Máy',
-                    out: '⚪ Xác nhận Out (Không sửa được)',
-                    hoan_phi: '🔴 Xác nhận Hoàn Phí',
+                    done: '✅ Hoàn Tất Đơn — Xác nhận Thanh Toán',
+                    out: '↩️ Trả Máy — Xác nhận Hoàn/Thu phí',
+                    refund: '🔴 Hoàn Phí — Xác nhận Hoàn tiền',
                 };
                 const colors: Record<string, string> = {
-                    tra_may: 'bg-emerald-500 hover:bg-emerald-600',
+                    done: 'bg-emerald-500 hover:bg-emerald-600',
                     out: 'bg-gray-500 hover:bg-gray-600',
-                    hoan_phi: 'bg-red-500 hover:bg-red-600',
+                    refund: 'bg-red-500 hover:bg-red-600',
                 };
 
+                // For "out" action: calculate refund or charge
+                const outRefundAmount = action === 'out' && deposit > 0 ? deposit : 0;
+                const outChargeAmount = action === 'out' && additionalFees > 0 ? (additionalFees - deposit > 0 ? additionalFees - deposit - discountAmount : 0) : 0; // Simplified
+
+
                 return (
-                    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-                        <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
-                            <div className={`px-6 py-4 rounded-t-2xl text-white ${action === 'tra_may' ? 'bg-emerald-600' : action === 'hoan_phi' ? 'bg-red-600' : 'bg-gray-600'}`}>
+                    <Modal
+                        isOpen={true}
+                        onClose={() => { setHandoverModal(null); setHandoverNote(''); setPaymentConfirmed(false); setHandoverAdditionalFees(''); setHandoverDiscountAmount(''); }}
+                        size="lg"
+                        priority="high"
+                    >
+                            {/* Custom colored header */}
+                            <div className={`px-6 py-4 text-white sticky top-0 z-10 ${action === 'done' ? 'bg-emerald-600' : action === 'refund' ? 'bg-red-600' : 'bg-gray-600'}`}>
                                 <h2 className="text-lg font-bold flex items-center gap-2">
-                                    {action === 'tra_may' ? <CheckCircle2 size={20} /> : action === 'hoan_phi' ? <RotateCcw size={20} /> : <Ban size={20} />}
+                                    {action === 'done' ? <CheckCircle2 size={20} /> : action === 'refund' ? <RotateCcw size={20} /> : <Ban size={20} />}
                                     {titles[action]}
                                 </h2>
                                 <p className="text-sm opacity-80 mt-0.5">
-                                    Khách hàng: <b>{t.customer.name}</b> — Thiết bị: <b>{t.deviceInfo?.model}</b>
+                                    #{t.id.slice(-6).toUpperCase()} • <b>{t.customer.name}</b> • {t.deviceInfo?.model}
                                 </p>
                             </div>
 
                             <div className="px-6 py-5 space-y-4">
-                                {/* Payment Summary */}
-                                <div className="bg-gray-50 rounded-xl p-4 space-y-2">
-                                    <div className="flex justify-between text-sm">
-                                        <span className="text-gray-500">Tổng phí sửa chữa:</span>
-                                        <span className="font-bold">{formatPrice(total)}</span>
+                                {/* ── Service Info ── */}
+                                <div className="bg-blue-50 rounded-xl p-4 border border-blue-100">
+                                    <p className="text-xs font-bold text-blue-700 uppercase mb-2 flex items-center gap-1"><Wrench size={12} /> Thông tin dịch vụ</p>
+                                    <div className="space-y-1 text-sm">
+                                        <div className="flex justify-between">
+                                            <span className="text-gray-600">Dịch vụ:</span>
+                                            <span className="font-medium">{typeof t.issue === 'string' ? t.issue : t.issue?.description || t.deviceInfo?.model || '—'}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span className="text-gray-600">Thiết bị:</span>
+                                            <span className="font-medium">{t.deviceInfo?.model || '—'}</span>
+                                        </div>
+                                        {t.staff?.assignedTechnicianName && (
+                                            <div className="flex justify-between">
+                                                <span className="text-gray-600">KTV phụ trách:</span>
+                                                <span className="font-medium text-orange-600">{t.staff.assignedTechnicianName}</span>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* ── Parts Used ── */}
+                                {parts.length > 0 && (
+                                    <div className="bg-purple-50 rounded-xl p-4 border border-purple-100">
+                                        <p className="text-xs font-bold text-purple-700 uppercase mb-2 flex items-center gap-1"><ClipboardList size={12} /> Linh kiện đã sử dụng</p>
+                                        <div className="space-y-1.5">
+                                            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                                            {parts.filter((p: any) => p.status !== 'rejected').map((p: any, i: number) => (
+                                                <div key={i} className="flex justify-between text-sm">
+                                                    <span className="text-gray-700">
+                                                        {p.productName || p.name || p.partName || 'Linh kiện'} <span className="text-xs text-gray-400">×{p.quantity || 1}</span>
+                                                        {p.quality && <span className="text-xs ml-1 px-1 bg-blue-100 text-blue-600 rounded">{p.quality}</span>}
+                                                    </span>
+                                                    <span className="font-medium">{formatPrice((Number(p.unitPriceAtUse ?? p.price ?? 0) || 0) * (p.quantity || 1))}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* ── Financial Breakdown ── */}
+                                <div className="bg-gray-50 rounded-xl p-4 space-y-2 border border-gray-200">
+                                    <p className="text-xs font-bold text-gray-500 uppercase mb-2 flex items-center gap-1"><DollarSign size={12} /> Chi tiết thanh toán</p>
+                                    
+                                    {partsCost > 0 && (
+                                        <div className="flex justify-between text-sm">
+                                            <span className="text-gray-500">Chi phí linh kiện:</span>
+                                            <span className="font-medium">{formatPrice(partsCost)}</span>
+                                        </div>
+                                    )}
+                                    {laborCost > 0 && (
+                                        <div className="flex justify-between text-sm items-center">
+                                            <span className="text-gray-500">Tiền công sửa chữa:</span>
+                                            <span className="font-medium">{formatPrice(laborCost)}</span>
+                                        </div>
+                                    )}
+                                    <div className="flex justify-between text-sm items-center py-1">
+                                        <span className="text-gray-500">Phụ phí (nếu có):</span>
+                                        <input 
+                                            type="text" 
+                                            value={handoverAdditionalFees ? Number(handoverAdditionalFees.replace(/[^0-9-]/g, '')).toLocaleString('vi-VN') : ''}
+                                            onChange={e => setHandoverAdditionalFees(e.target.value)}
+                                            placeholder="0"
+                                            className="w-32 px-3 py-1 text-right border rounded-lg focus:ring-1 focus:ring-orange-500 text-gray-900 font-medium bg-white" 
+                                        />
+                                    </div>
+                                    <div className="flex justify-between text-sm items-center py-1">
+                                        <span className="text-gray-500">Giảm giá:</span>
+                                        <input 
+                                            type="text" 
+                                            value={handoverDiscountAmount ? Number(handoverDiscountAmount.replace(/[^0-9-]/g, '')).toLocaleString('vi-VN') : ''}
+                                            onChange={e => setHandoverDiscountAmount(e.target.value)}
+                                            placeholder="0"
+                                            className="w-32 px-3 py-1 text-right border rounded-lg focus:ring-1 focus:ring-green-500 text-green-600 font-medium bg-white" 
+                                        />
+                                    </div>
+                                    <div className="flex justify-between text-sm border-t pt-2">
+                                        <span className="text-gray-700 font-semibold">Tổng cộng:</span>
+                                        <span className="font-bold text-lg">{formatPrice(total)}</span>
                                     </div>
                                     {deposit > 0 && (
                                         <div className="flex justify-between text-sm">
@@ -1286,34 +2159,48 @@ export default function RepairPage() {
                                             <span className="font-semibold text-yellow-600">-{formatPrice(deposit)}</span>
                                         </div>
                                     )}
-                                    {action === 'tra_may' && remaining > 0 && (
-                                        <div className="flex justify-between items-center text-sm border-t pt-3 mt-2 font-bold bg-emerald-50 -mx-4 -mb-4 px-4 py-3 rounded-b-xl border-emerald-100 border">
-                                            <span className="text-gray-700">SỐ TIỀN CẦN THU THÊM:</span>
+
+                                    {/* ── Action-specific bottom section ── */}
+                                    {action === 'done' && remaining > 0 && (
+                                        <div className="flex justify-between items-center text-sm border-t border-emerald-200 pt-3 mt-2 font-bold bg-emerald-50 -mx-4 -mb-4 px-4 py-3 rounded-b-xl">
+                                            <span className="text-gray-700">💰 SỐ TIỀN KHÁCH CẦN THANH TOÁN:</span>
                                             <span className="text-red-600 text-xl">{formatPrice(remaining)}</span>
                                         </div>
                                     )}
-                                    {action === 'tra_may' && remaining <= 0 && (
-                                        <div className="flex justify-between items-center text-sm border-t pt-3 mt-2 font-bold bg-emerald-50 -mx-4 -mb-4 px-4 py-3 rounded-b-xl border-emerald-100 border">
-                                            <span className="text-gray-700">✅ Đã thu đủ:</span>
+                                    {action === 'done' && remaining <= 0 && (
+                                        <div className="flex justify-between items-center text-sm border-t border-emerald-200 pt-3 mt-2 font-bold bg-emerald-50 -mx-4 -mb-4 px-4 py-3 rounded-b-xl">
+                                            <span className="text-gray-700">✅ Đã thu đủ</span>
                                             <span className="text-emerald-600 text-xl">{formatPrice(total)}</span>
                                         </div>
                                     )}
-                                    {action === 'hoan_phi' && (
-                                        <div className="flex justify-between items-center text-sm border-t pt-3 mt-2 font-bold bg-red-50 -mx-4 -mb-4 px-4 py-3 rounded-b-xl">
-                                            <span className="text-red-700">SỐ TIỀN CẦN HOÀN TRẢ KHÁCH:</span>
-                                            <span className="text-red-600 text-xl">{formatPrice(deposit > 0 ? deposit : total)}</span>
+                                    {action === 'out' && deposit > 0 && (
+                                        <div className="flex justify-between items-center text-sm border-t border-orange-200 pt-3 mt-2 font-bold bg-orange-50 -mx-4 -mb-4 px-4 py-3 rounded-b-xl">
+                                            <span className="text-orange-700">🔄 TIỀN CỬA HÀNG HOÀN LẠI KHÁCH:</span>
+                                            <span className="text-orange-600 text-xl">{formatPrice(outRefundAmount)}</span>
                                         </div>
                                     )}
-                                    {action === 'out' && (
+                                    {action === 'out' && additionalFees > 0 && deposit === 0 && (
+                                        <div className="flex justify-between items-center text-sm border-t border-yellow-200 pt-3 mt-2 font-bold bg-yellow-50 -mx-4 -mb-4 px-4 py-3 rounded-b-xl">
+                                            <span className="text-yellow-700">⚠️ KHÁCH CẦN THANH TOÁN PHÍ PHÁT SINH:</span>
+                                            <span className="text-yellow-600 text-xl">{formatPrice(outChargeAmount)}</span>
+                                        </div>
+                                    )}
+                                    {action === 'out' && deposit === 0 && additionalFees === 0 && (
                                         <div className="text-sm text-gray-500 border-t pt-2 mt-2 italic flex items-center justify-center gap-2">
                                             <Ban size={16} />
-                                            Trả lại máy, không thu phí.
+                                            Trả lại máy, không thu/hoàn phí.
+                                        </div>
+                                    )}
+                                    {action === 'refund' && (
+                                        <div className="flex justify-between items-center text-sm border-t border-red-200 pt-3 mt-2 font-bold bg-red-50 -mx-4 -mb-4 px-4 py-3 rounded-b-xl">
+                                            <span className="text-red-700">🔴 SỐ TIỀN CẦN HOÀN TRẢ KHÁCH:</span>
+                                            <span className="text-red-600 text-xl">{formatPrice(deposit > 0 ? deposit : 0)}</span>
                                         </div>
                                     )}
                                 </div>
 
                                 {/* Financial Checkbox for tra_may */}
-                                {action === 'tra_may' && remaining > 0 && (
+                                {action === 'done' && remaining > 0 && (
                                     <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
                                         <label className="flex items-start gap-3 cursor-pointer">
                                             <div className="mt-0.5 bg-white border rounded">
@@ -1326,43 +2213,74 @@ export default function RepairPage() {
                                     </div>
                                 )}
 
+                                {/* Financial Checkbox for out with refund */}
+                                {action === 'out' && outRefundAmount > 0 && (
+                                    <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
+                                        <label className="flex items-start gap-3 cursor-pointer">
+                                            <div className="mt-0.5 bg-white border rounded">
+                                                <input type="checkbox" checked={paymentConfirmed} onChange={e => setPaymentConfirmed(e.target.checked)} className="w-5 h-5 text-orange-600 rounded border-gray-300 focus:ring-orange-500" />
+                                            </div>
+                                            <span className="text-sm font-semibold text-orange-800 leading-snug">
+                                                Tôi xác nhận đã hoàn trả <span className="text-orange-600 underline decoration-2 underline-offset-2">{formatPrice(outRefundAmount)}</span> tiền cọc cho khách hàng.
+                                            </span>
+                                        </label>
+                                    </div>
+                                )}
+
+                                {/* Financial Checkbox for hoan_phi */}
+                                {action === 'refund' && deposit > 0 && (
+                                    <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                                        <label className="flex items-start gap-3 cursor-pointer">
+                                            <div className="mt-0.5 bg-white border rounded">
+                                                <input type="checkbox" checked={paymentConfirmed} onChange={e => setPaymentConfirmed(e.target.checked)} className="w-5 h-5 text-red-600 rounded border-gray-300 focus:ring-red-500" />
+                                            </div>
+                                            <span className="text-sm font-semibold text-red-800 leading-snug">
+                                                Tôi xác nhận đã hoàn trả <span className="text-red-600 underline decoration-2 underline-offset-2">{formatPrice(deposit)}</span> cho khách hàng.
+                                            </span>
+                                        </label>
+                                    </div>
+                                )}
+
                                 {/* Note */}
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Ghi chú bàn giao</label>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                                        {action === 'refund' ? 'Lý do hoàn phí *' : action === 'out' ? 'Lý do trả máy *' : 'Ghi chú bàn giao'}
+                                    </label>
                                     <textarea value={handoverNote} onChange={e => setHandoverNote(e.target.value)}
-                                        rows={2} placeholder="VD: Máy đã sửa xong, giao cho khách lúc 15h..."
+                                        rows={2} placeholder={action === 'refund' ? 'Máy bảo hành, không tìm được linh kiện...' : action === 'out' ? 'Không sửa được, trả máy cho khách...' : 'VD: Máy đã sửa xong, giao cho khách lúc 15h...'}
                                         className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20 text-sm" />
                                 </div>
                             </div>
 
-                            <div className="flex justify-end gap-3 px-6 py-4 border-t">
-                                <button onClick={() => { setHandoverModal(null); setHandoverNote(''); setPaymentConfirmed(false); }}
+                            <div className="flex justify-end gap-3 px-6 py-4 border-t sticky bottom-0 bg-white">
+                                <button onClick={() => { setHandoverModal(null); setHandoverNote(''); setPaymentConfirmed(false); setHandoverAdditionalFees(''); setHandoverDiscountAmount(''); }}
                                     className="px-4 py-2 text-sm bg-gray-100 rounded-lg hover:bg-gray-200">Hủy</button>
 
                                 <button onClick={handleHandover}
-                                    disabled={action === 'tra_may' && remaining > 0 && !paymentConfirmed}
+                                    disabled={
+                                        (action === 'done' && remaining > 0 && !paymentConfirmed) ||
+                                        (action === 'out' && outRefundAmount > 0 && !paymentConfirmed) ||
+                                        (action === 'refund' && deposit > 0 && !paymentConfirmed) ||
+                                        ((action === 'refund' || action === 'out') && !handoverNote.trim())
+                                    }
                                     className={`px-5 py-2 text-sm font-semibold text-white rounded-lg flex items-center gap-2 ${colors[action]} disabled:opacity-50 disabled:cursor-not-allowed`}>
                                     <CheckCircle2 size={16} />
-                                    {action === 'tra_may' ? 'Xác nhận Bàn Giao' : action === 'hoan_phi' ? 'Xác nhận Hoàn phí' : 'Xác nhận Out'}
+                                    {action === 'done' ? 'Xác nhận Hoàn Tất Đơn' : action === 'refund' ? 'Xác nhận Hoàn Phí' : 'Xác nhận Trả Máy'}
                                 </button>
                             </div>
-                        </div>
-                    </div>
+                    </Modal>
                 );
             })()}
             {/* ══════════  Detail View Modal (Eye Icon)  ══════════ */}
             {viewingTicket && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 print:hidden" onClick={() => setViewingTicket(null)}>
-                    <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-                        <div className="p-5 border-b flex items-center justify-between sticky top-0 bg-white z-10">
-                            <div>
-                                <h2 className="text-lg font-bold text-gray-900">{viewingTicket.deviceInfo?.model || 'Thiết bị'}</h2>
-                                <p className="text-xs text-gray-500">#{viewingTicket.id.slice(-6).toUpperCase()} • {viewingTicket.customer?.name}</p>
-                            </div>
-                            <button onClick={() => setViewingTicket(null)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
-                        </div>
-
-                        <div className="p-5 space-y-4">
+                <Modal
+                    isOpen={true}
+                    onClose={() => setViewingTicket(null)}
+                    title={`${viewingTicket.deviceInfo?.model || 'Thiết bị'} — #${viewingTicket.id.slice(-6).toUpperCase()}`}
+                    size="lg"
+                    priority="high"
+                >
+                    <div className="p-5 space-y-4">
                             {/* Status */}
                             {(() => {
                                 const st = dynamicStatuses.find(s => s.id === viewingTicket.status) || { id: viewingTicket.status, label: viewingTicket.status, color: 'text-gray-700 bg-gray-50 border-gray-200' };
@@ -1389,6 +2307,25 @@ export default function RepairPage() {
                                 )}
                             </div>
 
+                            {/* Parts Used */}
+                            {viewingTicket.parts && viewingTicket.parts.length > 0 && (
+                                <div className="bg-purple-50 rounded-xl p-3 border border-purple-100">
+                                    <p className="text-xs font-semibold text-purple-700 mb-2 flex items-center gap-1"><ClipboardList size={12} /> Linh kiện đã sử dụng</p>
+                                    <div className="space-y-1.5">
+                                        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                                        {viewingTicket.parts.map((p: any, i: number) => (
+                                            <div key={i} className="flex justify-between text-[13px]">
+                                                <span className="text-gray-700 font-medium">
+                                                    {p.productName || p.name || p.partName || 'Linh kiện'} <span className="text-xs text-gray-400 font-normal">×{p.quantity || 1}</span>
+                                                    {p.quality && <span className="text-xs ml-1 px-1 bg-blue-100 text-blue-600 rounded font-normal">{p.quality}</span>}
+                                                </span>
+                                                <span className="font-semibold text-gray-800">{formatPrice((Number(p.unitPriceAtUse ?? p.price ?? 0) || 0) * (p.quantity || 1))}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
                             {/* Checklist */}
                             {viewingTicket.deviceInfo?.checklist && (
                                 <div>
@@ -1397,8 +2334,13 @@ export default function RepairPage() {
                                         {Object.entries(viewingTicket.deviceInfo.checklist)
                                             .filter(([k]) => !['hasPriorRepair', 'hasWaterDamage', 'hasNonGenuineParts'].includes(k))
                                             .map(([key, val]) => (
-                                                <div key={key} className="text-xs bg-gray-50 rounded-lg px-2.5 py-1.5 border">
-                                                    <span className="text-gray-500">{
+                                                <div key={key} className={`text-[11px] rounded-lg px-2.5 py-2 border font-medium flex items-center justify-between ${
+                                                    val?.toString().toLowerCase() === 'ok' ? 'bg-green-50 border-green-200 text-green-700' :
+                                                    val?.toString().toLowerCase() === 'lỗi' ? 'bg-red-50 border-red-200 text-red-600' :
+                                                    val && val !== 'N/A' && val !== '—' ? 'bg-orange-50 border-orange-200 text-orange-600' :
+                                                    'bg-gray-50 border-gray-200 text-gray-500'
+                                                }`}>
+                                                    <span className="opacity-70">{
                                                         key === 'body' ? 'Vỏ máy' :
                                                             key === 'screen' ? 'Màn hình' :
                                                                 key === 'touch' ? 'Cảm ứng' :
@@ -1408,7 +2350,7 @@ export default function RepairPage() {
                                                                                 key === 'battery' ? 'Pin' :
                                                                                     key === 'biometric' ? 'FaceID/Vân tay' : key
                                                     }:</span>
-                                                    <span className="ml-1 font-medium text-gray-800">{val as string || '—'}</span>
+                                                    <span>{val as string || '—'}</span>
                                                 </div>
                                             ))}
                                     </div>
@@ -1452,11 +2394,17 @@ export default function RepairPage() {
                             {/* Post-repair Media */}
                             {viewingTicket.postRepairMedia?.length > 0 && (
                                 <div>
-                                    <p className="text-xs font-semibold text-gray-500 mb-2 flex items-center gap-1"><Video size={12} /> Video bàn giao</p>
+                                    <p className="text-xs font-semibold text-gray-500 mb-2 flex items-center gap-1"><Video size={12} /> Video / Media bàn giao</p>
                                     <div className="grid grid-cols-2 gap-2">
                                         {viewingTicket.postRepairMedia.map((url, i) => (
                                             <div key={i} className="rounded-lg overflow-hidden bg-gray-100 border">
-                                                {url.includes('.mp4') || url.includes('video') ? (
+                                                {isYouTubeUrl(url) ? (
+                                                    <div className="aspect-video">
+                                                        <iframe src={getYouTubeEmbedUrl(url) || ''} title={`YouTube ${i + 1}`}
+                                                            className="w-full h-full" frameBorder="0"
+                                                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen />
+                                                    </div>
+                                                ) : url.includes('.mp4') || url.includes('video') ? (
                                                     <video src={url} controls className="w-full" />
                                                 ) : (
                                                     <img src={url} alt={`Post-repair ${i + 1}`} className="w-full object-cover" />
@@ -1489,10 +2437,76 @@ export default function RepairPage() {
                                     </div>
                                 </div>
                             )}
-                        </div>
                     </div>
-                </div>
+                </Modal>
             )}
+
+            {/* ═══ WARRANTY MODAL ═══ */}
+            {warrantyModal && (() => {
+                const wt = warrantyModal;
+                const activeParts = (wt.parts || [])
+                    .map((p, idx) => ({ ...p, _origIdx: idx }))
+                    .filter(p =>
+                        !['rejected', 'cancelled'].includes(String(p.status || '')) &&
+                        p.warrantyMonths && p.warrantyMonths > 0 &&
+                        p.warrantyExpiresAt && (
+                            typeof p.warrantyExpiresAt === 'number'
+                                ? p.warrantyExpiresAt
+                                : (p.warrantyExpiresAt as { toDate?: () => Date })?.toDate?.()?.getTime() || 0
+                        ) > Date.now()
+                    );
+                return (
+                    <Modal
+                        isOpen={true}
+                        onClose={() => setWarrantyModal(null)}
+                        title={`Kích hoạt Bảo hành — #${wt.id.slice(-6).toUpperCase()}`}
+                        size="lg"
+                        priority="high"
+                    >
+                            <div className="px-6 py-4 space-y-3 max-h-[60vh] overflow-y-auto">
+                                <p className="text-sm text-gray-600 font-medium">Chọn linh kiện đang bị lỗi cần bảo hành:</p>
+                                {activeParts.length === 0 ? (
+                                    <p className="text-sm text-gray-400 italic">Không có linh kiện nào còn hạn bảo hành.</p>
+                                ) : (
+                                    activeParts.map(p => {
+                                        const exTs = typeof p.warrantyExpiresAt === 'number'
+                                            ? p.warrantyExpiresAt
+                                            : (p.warrantyExpiresAt as { toDate?: () => Date })?.toDate?.()?.getTime() || 0;
+                                        const exStr = exTs ? new Date(exTs).toLocaleDateString('vi-VN') : '—';
+                                        const checked = warrantySelectedIndexes.includes(p._origIdx);
+                                        return (
+                                            <label key={p._origIdx}
+                                                className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-colors ${checked ? 'bg-emerald-50 border-emerald-300' : 'bg-gray-50 border-gray-200 hover:bg-gray-100'}`}>
+                                                <input type="checkbox" checked={checked}
+                                                    onChange={() => setWarrantySelectedIndexes(prev =>
+                                                        checked ? prev.filter(i => i !== p._origIdx) : [...prev, p._origIdx]
+                                                    )}
+                                                    className="w-4 h-4 text-emerald-600 rounded" />
+                                                <div className="flex-1">
+                                                    <p className="font-semibold text-sm text-gray-900">{p.productName}</p>
+                                                    <p className="text-xs text-gray-500">
+                                                        {p.partType || '—'} · BH {p.warrantyMonths} tháng · Hết hạn: {exStr}
+                                                    </p>
+                                                </div>
+                                            </label>
+                                        );
+                                    })
+                                )}
+                            </div>
+                            <div className="flex justify-end gap-3 px-6 py-4 border-t">
+                                <button onClick={() => setWarrantyModal(null)}
+                                    className="px-4 py-2 text-sm bg-gray-100 rounded-lg hover:bg-gray-200">Hủy</button>
+                                <button
+                                    onClick={() => handleCreateWarrantyTicket(wt, warrantySelectedIndexes)}
+                                    disabled={warrantyCreating || warrantySelectedIndexes.length === 0}
+                                    className="px-5 py-2 text-sm font-semibold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-2">
+                                    {warrantyCreating ? <Loader2 className="animate-spin" size={16} /> : <CheckCircle2 size={16} />}
+                                    Tạo Phiếu Bảo Hành ({warrantySelectedIndexes.length})
+                                </button>
+                            </div>
+                    </Modal>
+                );
+            })()}
         </div >
     );
 }

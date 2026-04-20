@@ -1,19 +1,48 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-    Star, Camera, X, Loader2, CheckCircle2, HeartHandshake
+    Star, Camera, X, Loader2, CheckCircle2, HeartHandshake,
+    MapPin, KeyRound, ShieldCheck, Navigation
 } from 'lucide-react';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
 import { uploadMedia } from '@/lib/storage';
+import { SITE_URL } from "@/lib/constants";
+
+// ── Haversine distance (meters) ──
+function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+    const R = 6_371_000;
+    const toRad = (deg: number) => (deg * Math.PI) / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+    const a =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+type VerifyStatus = 'loading' | 'disabled' | 'geoOk' | 'pinRequired' | 'pinOk';
+
+interface GeoConfig {
+    enabled: boolean;
+    lat: number;
+    lng: number;
+    radiusMeters: number;
+}
 
 export default function RatePage() {
     const seoTitle = 'Đánh giá dịch vụ | Văn Lành Service';
     const seoDescription = 'Gửi đánh giá dịch vụ tại Văn Lành Service (quét QR). Bạn có thể chọn số sao, viết nhận xét và đính kèm hình ảnh.';
-    const canonicalUrl = 'https://qlch-vanlanh.web.app/rate';
+    const canonicalUrl = `${SITE_URL}/rate`;
     const router = useRouter();
+
+    // Geofence state
+    const [verifyStatus, setVerifyStatus] = useState<VerifyStatus>('loading');
+    const [geoConfig, setGeoConfig] = useState<GeoConfig | null>(null);
+    const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
+    const [pinInput, setPinInput] = useState('');
+    const [pinError, setPinError] = useState('');
+    const [geoMessage, setGeoMessage] = useState('');
 
     // Form states
     const [name, setName] = useState('');
@@ -28,6 +57,61 @@ export default function RatePage() {
     const [success, setSuccess] = useState(false);
 
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    // ── Fetch geofence config + check GPS ──
+    const checkGeofence = useCallback(async () => {
+        try {
+            const res = await fetch('/api/reviews');
+            if (!res.ok) throw new Error('API error');
+            const cfg: GeoConfig = await res.json();
+            setGeoConfig(cfg);
+
+            if (!cfg.enabled) {
+                setVerifyStatus('disabled');
+                return;
+            }
+
+            // Try geolocation
+            if (!navigator.geolocation) {
+                setGeoMessage('Trình duyệt không hỗ trợ định vị.');
+                setVerifyStatus('pinRequired');
+                return;
+            }
+
+            navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                    const { latitude, longitude } = pos.coords;
+                    setUserCoords({ lat: latitude, lng: longitude });
+                    const distance = haversineMeters(latitude, longitude, cfg.lat, cfg.lng);
+                    if (distance <= cfg.radiusMeters) {
+                        setVerifyStatus('geoOk');
+                        setGeoMessage(`Đang ở cửa hàng (${Math.round(distance)}m)`);
+                    } else {
+                        setGeoMessage(`Bạn đang cách cửa hàng ${Math.round(distance)}m. Vui lòng nhập mã PIN.`);
+                        setVerifyStatus('pinRequired');
+                    }
+                },
+                (err) => {
+                    console.warn('Geolocation error:', err.message);
+                    if (err.code === err.PERMISSION_DENIED) {
+                        setGeoMessage('Bạn đã từ chối quyền truy cập vị trí. Vui lòng nhập mã PIN để xác minh.');
+                    } else {
+                        setGeoMessage('Không thể xác định vị trí. Vui lòng nhập mã PIN.');
+                    }
+                    setVerifyStatus('pinRequired');
+                },
+                { enableHighAccuracy: true, timeout: 10_000, maximumAge: 0 }
+            );
+        } catch (err) {
+            console.error('Geofence check failed:', err);
+            // If API fails, allow form (fail open)
+            setVerifyStatus('disabled');
+        }
+    }, []);
+
+    useEffect(() => {
+        checkGeofence();
+    }, [checkGeofence]);
 
     const formatPhonePrivate = (p: string) => {
         if (!p || p.length < 4) return p;
@@ -64,6 +148,21 @@ export default function RatePage() {
         setImageUrls(prev => prev.filter((_, i) => i !== index));
     };
 
+    const handlePinSubmit = async () => {
+        if (!pinInput.trim()) {
+            setPinError('Vui lòng nhập mã PIN.');
+            return;
+        }
+        setPinError('');
+        // We'll validate PIN server-side during review submit
+        // But do a basic length check for UX
+        if (pinInput.length < 4) {
+            setPinError('Mã PIN phải có ít nhất 4 ký tự.');
+            return;
+        }
+        setVerifyStatus('pinOk');
+    };
+
     const handleSubmitReview = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!name.trim() || !phone.trim() || phone.length < 8) {
@@ -85,18 +184,36 @@ export default function RatePage() {
                 uploadedUrls.push(url);
             }
 
-            // Save review to Firestore (general review, no referenceId)
-            await addDoc(collection(db, 'reviews'), {
-                referenceId: '', // General review
+            // Build body with geofence data
+            const reviewBody: Record<string, unknown> = {
+                referenceId: '',
                 type: 'general',
                 customerName: name.trim(),
                 phone: formatPhonePrivate(phone.trim()),
                 rating,
                 content: content.trim(),
                 images: uploadedUrls,
-                status: 'pending', // Cần admin duyệt
-                createdAt: serverTimestamp()
+            };
+
+            // Attach verification data
+            if (verifyStatus === 'geoOk' && userCoords) {
+                reviewBody.lat = userCoords.lat;
+                reviewBody.lng = userCoords.lng;
+            } else if (verifyStatus === 'pinOk') {
+                reviewBody.pin = pinInput;
+            }
+
+            // Save review via API route
+            const res = await fetch('/api/reviews', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(reviewBody),
             });
+            const data = await res.json();
+            if (!res.ok) {
+                alert(data.error || 'Có lỗi xảy ra khi gửi đánh giá. Vui lòng thử lại.');
+                return;
+            }
 
             setSuccess(true);
         } catch (error) {
@@ -107,10 +224,12 @@ export default function RatePage() {
         }
     };
 
+    const canShowForm = verifyStatus === 'disabled' || verifyStatus === 'geoOk' || verifyStatus === 'pinOk';
+
+    // ═══ Success Screen ═══
     if (success) {
         return (
             <div className="min-h-screen bg-gray-50 flex items-center justify-center py-10 px-4">
-                {/* SEO (noindex for rating form) */}
                 <title>{seoTitle}</title>
                 <meta name="description" content={seoDescription} />
                 <meta name="robots" content="noindex,follow" />
@@ -146,6 +265,79 @@ export default function RatePage() {
         );
     }
 
+    // ═══ Loading State ═══
+    if (verifyStatus === 'loading') {
+        return (
+            <div className="min-h-screen bg-gray-50 flex items-center justify-center py-10 px-4">
+                <title>{seoTitle}</title>
+                <meta name="robots" content="noindex,follow" />
+                <div className="w-full max-w-sm bg-white rounded-3xl shadow-xl overflow-hidden p-8 text-center">
+                    <div className="w-16 h-16 bg-orange-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                        <Navigation size={28} className="text-orange-500 animate-pulse" />
+                    </div>
+                    <h2 className="text-lg font-bold text-gray-900 mb-2">Đang xác minh vị trí...</h2>
+                    <p className="text-gray-500 text-sm">Vui lòng cho phép truy cập vị trí khi được hỏi.</p>
+                    <Loader2 size={24} className="animate-spin text-orange-500 mx-auto mt-4" />
+                </div>
+            </div>
+        );
+    }
+
+    // ═══ PIN Required Screen ═══
+    if (verifyStatus === 'pinRequired') {
+        return (
+            <div className="min-h-screen bg-gray-50 flex items-center justify-center py-10 px-4">
+                <title>{seoTitle}</title>
+                <meta name="robots" content="noindex,follow" />
+                <div className="w-full max-w-sm bg-white rounded-3xl shadow-xl overflow-hidden p-8 text-center animate-in fade-in slide-in-from-bottom-8 duration-500 border border-gray-100">
+                    <div className="w-16 h-16 bg-amber-50 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-inner">
+                        <KeyRound size={28} className="text-amber-600" />
+                    </div>
+                    <h2 className="text-xl font-bold text-gray-900 mb-2">Xác minh bằng mã PIN</h2>
+                    <p className="text-gray-500 text-sm mb-1">{geoMessage}</p>
+                    <p className="text-gray-400 text-xs mb-6">Hỏi nhân viên cửa hàng để nhận mã PIN.</p>
+
+                    <div className="space-y-4">
+                        <div className="relative">
+                            <input
+                                type="text"
+                                inputMode="numeric"
+                                maxLength={8}
+                                placeholder="Nhập mã PIN..."
+                                value={pinInput}
+                                onChange={(e) => {
+                                    setPinInput(e.target.value);
+                                    setPinError('');
+                                }}
+                                onKeyDown={(e) => e.key === 'Enter' && handlePinSubmit()}
+                                className="w-full h-14 px-4 text-center text-2xl font-bold tracking-[0.5em] bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 transition-all"
+                            />
+                        </div>
+                        {pinError && (
+                            <p className="text-red-500 text-xs font-medium">{pinError}</p>
+                        )}
+                        <button
+                            type="button"
+                            onClick={handlePinSubmit}
+                            className="w-full h-12 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl font-bold flex items-center justify-center gap-2 text-base hover:shadow-lg hover:shadow-orange-500/30 transition-all active:scale-95"
+                        >
+                            <ShieldCheck size={20} />
+                            Xác nhận
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => checkGeofence()}
+                            className="text-sm text-gray-500 hover:text-orange-500 font-medium transition-colors"
+                        >
+                            Thử lại định vị GPS
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    // ═══ Main Review Form ═══
     return (
         <div className="min-h-screen bg-gray-50 flex items-center justify-center py-10 px-4">
             {/* SEO (noindex for rating form) */}
@@ -168,6 +360,21 @@ export default function RatePage() {
                         <h1 className="text-2xl font-bold text-gray-900 mt-4">Đánh giá Dịch vụ</h1>
                         <p className="text-gray-500 text-sm">Văn Lành Service luôn lắng nghe ý kiến để phục vụ bạn tốt hơn.</p>
                     </div>
+
+                    {/* Verification Badge */}
+                    {canShowForm && verifyStatus !== 'disabled' && (
+                        <div className={`flex items-center justify-center gap-2 py-2 px-4 rounded-full text-xs font-semibold mx-auto w-fit ${
+                            verifyStatus === 'geoOk'
+                                ? 'bg-green-50 text-green-700 border border-green-200'
+                                : 'bg-blue-50 text-blue-700 border border-blue-200'
+                        }`}>
+                            {verifyStatus === 'geoOk' ? (
+                                <><MapPin size={14} /> {geoMessage}</>
+                            ) : (
+                                <><ShieldCheck size={14} /> Đã xác minh bằng PIN</>
+                            )}
+                        </div>
+                    )}
 
                     <form onSubmit={handleSubmitReview} className="space-y-6">
                         {/* Info Inputs */}

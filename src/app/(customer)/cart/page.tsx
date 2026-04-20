@@ -12,6 +12,7 @@ import {
     Truck
 } from 'lucide-react';
 import { useCart } from '@/lib/CartContext';
+import { SITE_URL } from "@/lib/constants";
 import { useState } from 'react';
 
 // Format price to VND
@@ -25,7 +26,7 @@ const formatPrice = (price: number) => {
 export default function CartPage() {
     const seoTitle = 'Giỏ hàng | Văn Lành Service';
     const seoDescription = 'Xem và chỉnh sửa giỏ hàng trước khi thanh toán tại Văn Lành Service.';
-    const canonicalUrl = 'https://qlch-vanlanh.web.app/cart';
+    const canonicalUrl = `${SITE_URL}/cart`;
     const { items: cartItems, removeItem, updateQuantity: updateCartQuantity } = useCart();
     const [couponCode, setCouponCode] = useState('');
 

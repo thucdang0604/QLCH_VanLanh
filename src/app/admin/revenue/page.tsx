@@ -6,12 +6,13 @@ import {
     ArrowUpRight, ArrowDownLeft, BarChart3, Wallet, ShoppingCart,
     Wrench, Package, Award, FileText, Calendar
 } from 'lucide-react';
+import Modal from '@/components/admin/Modal';
 import {
-    collection, getDocs, addDoc, serverTimestamp, query, orderBy
+    collection, getDocs, addDoc, serverTimestamp, query, orderBy, where, Timestamp
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
-import type { Expense } from '@/lib/types';
+import type { Commission, Expense, ImportReceipt, Order, RepairTicket } from '@/lib/types';
 
 // ── Expense categories ──
 const expenseCategories = [
@@ -22,14 +23,23 @@ const expenseCategories = [
     { key: 'other', label: 'Khác', icon: '📝' },
 ];
 
+// Get Firestore Timestamp for N months ago (used to limit query scope)
+function getMonthsAgoTimestamp(months: number): Timestamp {
+    const d = new Date();
+    d.setMonth(d.getMonth() - months);
+    d.setDate(1);
+    d.setHours(0, 0, 0, 0);
+    return Timestamp.fromDate(d);
+}
+
 export default function RevenuePage() {
     const { user } = useAuth();
 
     // Data
-    const [orders, setOrders] = useState<any[]>([]);
-    const [repairs, setRepairs] = useState<any[]>([]);
-    const [importReceipts, setImportReceipts] = useState<any[]>([]);
-    const [commissions, setCommissions] = useState<any[]>([]);
+    const [orders, setOrders] = useState<Order[]>([]);
+    const [repairs, setRepairs] = useState<RepairTicket[]>([]);
+    const [importReceipts, setImportReceipts] = useState<ImportReceipt[]>([]);
+    const [commissions, setCommissions] = useState<Commission[]>([]);
     const [expenses, setExpenses] = useState<(Expense & { id: string })[]>([]);
     const [loading, setLoading] = useState(true);
 
@@ -44,22 +54,24 @@ export default function RevenuePage() {
     const [expDescription, setExpDescription] = useState('');
     const [expAmount, setExpAmount] = useState(0);
     const [isProcessing, setIsProcessing] = useState(false);
+    const [showAllExpenses, setShowAllExpenses] = useState(false);
 
-    // ── Load all data ──
+    // ── Load data (limited to 3 months to reduce reads) ──
     useEffect(() => {
         const load = async () => {
             try {
+                const threeMonthsAgo = getMonthsAgoTimestamp(3);
                 const [oSnap, rSnap, iSnap, cSnap, eSnap] = await Promise.all([
-                    getDocs(query(collection(db, 'orders'), orderBy('createdAt', 'desc'))),
-                    getDocs(query(collection(db, 'repairs'), orderBy('createdAt', 'desc'))),
-                    getDocs(collection(db, 'import_receipts')),
-                    getDocs(collection(db, 'commissions')),
-                    getDocs(query(collection(db, 'expenses'), orderBy('createdAt', 'desc'))),
+                    getDocs(query(collection(db, 'orders'), where('createdAt', '>=', threeMonthsAgo), orderBy('createdAt', 'desc'))),
+                    getDocs(query(collection(db, 'repairs'), where('createdAt', '>=', threeMonthsAgo), orderBy('createdAt', 'desc'))),
+                    getDocs(query(collection(db, 'import_receipts'), where('createdAt', '>=', threeMonthsAgo), orderBy('createdAt', 'desc'))),
+                    getDocs(query(collection(db, 'commissions'), where('createdAt', '>=', threeMonthsAgo), orderBy('createdAt', 'desc'))),
+                    getDocs(query(collection(db, 'expenses'), where('createdAt', '>=', threeMonthsAgo), orderBy('createdAt', 'desc'))),
                 ]);
-                setOrders(oSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-                setRepairs(rSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-                setImportReceipts(iSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-                setCommissions(cSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+                setOrders(oSnap.docs.map(d => ({ id: d.id, ...d.data() } as Order)));
+                setRepairs(rSnap.docs.map(d => ({ id: d.id, ...d.data() } as RepairTicket)));
+                setImportReceipts(iSnap.docs.map(d => ({ id: d.id, ...d.data() } as ImportReceipt)));
+                setCommissions(cSnap.docs.map(d => ({ id: d.id, ...d.data() } as Commission)));
                 setExpenses(eSnap.docs.map(d => ({ id: d.id, ...d.data() } as Expense & { id: string })));
             } catch (err) {
                 console.error(err);
@@ -71,9 +83,10 @@ export default function RevenuePage() {
     }, []);
 
     const formatPrice = (n: number) => n.toLocaleString('vi-VN') + 'đ';
-    const toDate = (ts: any) => {
+    const toDate = (ts: unknown) => {
         if (!ts) return null;
-        return ts.toDate ? ts.toDate() : new Date(ts);
+        const maybe = ts as { toDate?: () => Date };
+        return typeof maybe?.toDate === 'function' ? maybe.toDate() : new Date(ts as string | number | Date);
     };
 
     // ── Date filter ──
@@ -109,7 +122,7 @@ export default function RevenuePage() {
         return { from, to };
     };
 
-    const inRange = (ts: any) => {
+    const inRange = (ts: unknown) => {
         const d = toDate(ts);
         if (!d) return false;
         const { from, to } = getDateRange();
@@ -124,7 +137,7 @@ export default function RevenuePage() {
             .reduce((s, o) => s + (o.total_amount || 0), 0);
 
         const repairRevenue = repairs
-            .filter(r => r.status === 'da_tra_may' && inRange(r.createdAt))
+            .filter(r => r.status === 'done' && r.ticketType !== 'warranty' && inRange(r.createdAt))
             .reduce((s, r) => s + (r.payment?.amount || 0), 0);
 
         const totalRevenue = orderRevenue + repairRevenue;
@@ -159,7 +172,8 @@ export default function RevenuePage() {
             posOrderCount: posOrders.length,
             webOrderRevenue: webOrders.reduce((s, o) => s + (o.total_amount || 0), 0),
             posOrderRevenue: posOrders.reduce((s, o) => s + (o.total_amount || 0), 0),
-            repairCount: repairs.filter(r => r.status === 'da_tra_may' && inRange(r.createdAt)).length,
+            repairCount: repairs.filter(r => r.status === 'done' && r.ticketType !== 'warranty' && inRange(r.createdAt)).length,
+            warrantyCount: repairs.filter(r => r.ticketType === 'warranty' && inRange(r.createdAt)).length,
         };
     }, [orders, repairs, importReceipts, commissions, expenses, period, customFrom, customTo]);
 
@@ -176,13 +190,13 @@ export default function RevenuePage() {
             const dayEnd = new Date(d);
             dayEnd.setHours(23, 59, 59, 999);
 
-            const isInDay = (ts: any) => {
+            const isInDay = (ts: unknown) => {
                 const t = toDate(ts);
                 return t && t >= dayStart && t <= dayEnd;
             };
 
             const rev = orders.filter(o => (o.status === 'Completed' || o.status === 'Shipping') && isInDay(o.createdAt)).reduce((s, o) => s + (o.total_amount || 0), 0)
-                + repairs.filter(r => r.status === 'da_tra_may' && isInDay(r.createdAt)).reduce((s, r) => s + (r.payment?.amount || 0), 0);
+                + repairs.filter(r => r.status === 'done' && r.ticketType !== 'warranty' && isInDay(r.createdAt)).reduce((s, r) => s + (r.payment?.amount || 0), 0);
 
             const exp = importReceipts.filter(i => i.status === 'completed' && isInDay(i.completedAt || i.createdAt)).reduce((s, i) => s + (i.totalAmount || 0), 0)
                 + commissions.filter(c => isInDay(c.createdAt)).reduce((s, c) => s + (c.amount || 0), 0)
@@ -202,7 +216,8 @@ export default function RevenuePage() {
         if (expAmount <= 0) return;
         setIsProcessing(true);
         try {
-            const data = {
+            const now = new Date();
+            const dataForDB = {
                 category: expCategory,
                 description: expDescription,
                 amount: expAmount,
@@ -211,8 +226,15 @@ export default function RevenuePage() {
                 createdByName: user?.displayName || 'Admin',
                 createdAt: serverTimestamp(),
             };
-            const ref = await addDoc(collection(db, 'expenses'), data);
-            setExpenses(prev => [{ id: ref.id, ...data, createdAt: new Date() } as any, ...prev]);
+
+            const dataForState = {
+                ...dataForDB,
+                date: now,
+                createdAt: now,
+            };
+
+            const ref = await addDoc(collection(db, 'expenses'), dataForDB);
+            setExpenses(prev => [{ id: ref.id, ...dataForState } as unknown as Expense & { id: string }, ...prev]);
             setShowExpenseModal(false);
             setExpDescription('');
             setExpAmount(0);
@@ -364,8 +386,35 @@ export default function RevenuePage() {
                         <FileText size={18} className="text-red-500" /> Phiếu chi gần đây
                     </h3>
                 </div>
-                <table className="w-full text-sm">
-                    <thead>
+                {/* Mobile Card View */}
+                <div className="block md:hidden divide-y divide-gray-100">
+                    {(showAllExpenses ? expenses : expenses.slice(0, 10)).map(e => {
+                        const cat = expenseCategories.find(c => c.key === e.category);
+                        return (
+                            <div key={e.id} className="p-4 hover:bg-gray-50 transition-colors">
+                                <div className="flex items-start justify-between">
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-sm font-medium text-gray-900">{cat?.icon} {cat?.label || e.category}</p>
+                                        <p className="text-xs text-gray-600 mt-0.5 line-clamp-1">{e.description || '—'}</p>
+                                        <div className="flex items-center gap-2 mt-1 text-xs text-gray-400">
+                                            <span>{toDate(e.createdAt)?.toLocaleDateString('vi-VN') || '—'}</span>
+                                            <span>·</span>
+                                            <span>{e.createdByName}</span>
+                                        </div>
+                                    </div>
+                                    <p className="font-bold text-red-600 text-sm ml-3 shrink-0">{formatPrice(e.amount)}</p>
+                                </div>
+                            </div>
+                        );
+                    })}
+                    {expenses.length === 0 && (
+                        <div className="text-center py-8 text-gray-400 text-sm">Chưa có phiếu chi</div>
+                    )}
+                </div>
+                {/* Desktop Table View */}
+                <div className="hidden md:block overflow-x-auto">
+                    <table className="w-full text-sm min-w-[600px]">
+                        <thead>
                         <tr className="text-gray-500 text-xs border-b bg-gray-50">
                             <th className="text-left px-5 py-3">Ngày</th>
                             <th className="text-left">Danh mục</th>
@@ -375,7 +424,7 @@ export default function RevenuePage() {
                         </tr>
                     </thead>
                     <tbody>
-                        {expenses.slice(0, 10).map(e => {
+                        {(showAllExpenses ? expenses : expenses.slice(0, 10)).map(e => {
                             const cat = expenseCategories.find(c => c.key === e.category);
                             return (
                                 <tr key={e.id} className="border-b border-gray-50 hover:bg-gray-50">
@@ -389,21 +438,28 @@ export default function RevenuePage() {
                                 </tr>
                             );
                         })}
+                        {expenses.length === 0 && (
+                            <tr>
+                                <td colSpan={5} className="text-center py-8 text-gray-400 text-sm">Chưa có phiếu chi</td>
+                            </tr>
+                        )}
                     </tbody>
                 </table>
-                {expenses.length === 0 && (
-                    <div className="text-center py-8 text-gray-400 text-sm">Chưa có phiếu chi</div>
+                </div>
+                {expenses.length > 10 && (
+                    <div className="flex justify-center py-3 border-t">
+                        <button
+                            onClick={() => setShowAllExpenses(prev => !prev)}
+                            className="text-sm text-orange-500 hover:text-orange-600 font-medium px-4 py-1.5 rounded-lg hover:bg-orange-50 transition-colors"
+                        >
+                            {showAllExpenses ? 'Thu gọn' : `Xem tất cả (${expenses.length})`}
+                        </button>
+                    </div>
                 )}
             </div>
 
             {/* ═══ Expense Modal ═══ */}
-            {showExpenseModal && (
-                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-                    <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
-                        <div className="flex items-center justify-between px-6 py-4 border-b">
-                            <h2 className="text-lg font-bold text-gray-900">Tạo phiếu chi</h2>
-                            <button onClick={() => setShowExpenseModal(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
-                        </div>
+            <Modal isOpen={showExpenseModal} onClose={() => setShowExpenseModal(false)} title="Tạo phiếu chi" size="md">
                         <div className="px-6 py-4 space-y-4">
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Danh mục</label>
@@ -436,9 +492,7 @@ export default function RevenuePage() {
                                 Lưu phiếu chi
                             </button>
                         </div>
-                    </div>
-                </div>
-            )}
+            </Modal>
         </div>
     );
 }

@@ -1,8 +1,10 @@
 'use client';
+import { SITE_URL } from "@/lib/constants";
+
 export default function GioiThieuPage() {
     const seoTitle = 'Giới thiệu | Văn Lành Service';
     const seoDescription = 'Giới thiệu Văn Lành Service – trung tâm sửa chữa điện thoại, laptop và phụ kiện công nghệ uy tín tại TP.HCM. Thông tin hệ thống, dịch vụ, hotline và địa chỉ.';
-    const canonicalUrl = 'https://qlch-vanlanh.web.app/info/gioi-thieu';
+    const canonicalUrl = `${SITE_URL}/info/gioi-thieu`;
     const articleSchema = {
         '@context': 'https://schema.org',
         '@type': 'Article',
@@ -16,8 +18,8 @@ export default function GioiThieuPage() {
         '@context': 'https://schema.org',
         '@type': 'BreadcrumbList',
         itemListElement: [
-            { '@type': 'ListItem', position: 1, name: 'Trang chủ', item: 'https://qlch-vanlanh.web.app/' },
-            { '@type': 'ListItem', position: 2, name: 'Thông tin', item: 'https://qlch-vanlanh.web.app/info/gioi-thieu' },
+            { '@type': 'ListItem', position: 1, name: 'Trang chủ', item: `${SITE_URL}/` },
+            { '@type': 'ListItem', position: 2, name: 'Thông tin', item: `${SITE_URL}/info/gioi-thieu` },
             { '@type': 'ListItem', position: 3, name: 'Giới thiệu', item: canonicalUrl },
         ],
     };

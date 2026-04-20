@@ -15,8 +15,7 @@ import {
     ToggleLeft,
     ToggleRight
 } from 'lucide-react';
-import { ref, onValue, push, set, get, serverTimestamp } from 'firebase/database';
-import { rtdb } from '@/lib/firebase';
+import { subscribeToRooms, subscribeToMessages, subscribeToRoomInfo, sendMessage, updateRoomInfo, ChatMessage } from '@/lib/realtimedb';
 
 interface ChatRoom {
     odId: string;
@@ -28,18 +27,10 @@ interface ChatRoom {
     hasUnread: boolean;
 }
 
-interface Message {
-    id: string;
-    text: string;
-    senderId: string;
-    senderType: 'user' | 'admin';
-    timestamp: number;
-}
-
 export default function AdminChatPage() {
     const [rooms, setRooms] = useState<ChatRoom[]>([]);
     const [selectedRoom, setSelectedRoom] = useState<string | null>(null);
-    const [messages, setMessages] = useState<Message[]>([]);
+    const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [inputMessage, setInputMessage] = useState('');
     const [loading, setLoading] = useState(true);
     const [sendingMessage, setSendingMessage] = useState(false);
@@ -52,28 +43,23 @@ export default function AdminChatPage() {
 
     // Load all chat rooms
     useEffect(() => {
-        const chatsRef = ref(rtdb, 'chats');
-
-        const unsubscribe = onValue(chatsRef, (snapshot) => {
-            const data = snapshot.val();
-            if (data) {
-                const roomList: ChatRoom[] = Object.entries(data)
-                    .map(([roomId, roomData]: [string, any]) => ({
+        const unsubscribe = subscribeToRooms((roomsMap) => {
+            const roomList: ChatRoom[] = Object.entries(roomsMap)
+                .map(([roomId, info]) => {
+                    return {
                         odId: roomId,
-                        displayName: roomData.info?.displayName || 'Khách',
-                        email: roomData.info?.email || null,
-                        isGuest: roomData.info?.isGuest ?? true,
-                        lastMessage: roomData.info?.lastMessage || '',
-                        lastMessageTime: roomData.info?.lastMessageTime || 0,
-                        hasUnread: roomData.info?.hasUnread || false,
-                    }))
-                    .filter(room => room.lastMessage) // Only show rooms with messages
-                    .sort((a, b) => b.lastMessageTime - a.lastMessageTime);
+                        displayName: info.displayName || 'Khách',
+                        email: info.email || null,
+                        isGuest: info.isGuest ?? true,
+                        lastMessage: info.lastMessage || '',
+                        lastMessageTime: info.lastMessageTime || 0,
+                        hasUnread: info.hasUnreadAdmin || false, // Check admin unread
+                    };
+                })
+                .filter(room => room.lastMessage) // Only show rooms with messages
+                .sort((a, b) => b.lastMessageTime - a.lastMessageTime);
 
-                setRooms(roomList);
-            } else {
-                setRooms([]);
-            }
+            setRooms(roomList);
             setLoading(false);
         });
 
@@ -87,30 +73,12 @@ export default function AdminChatPage() {
             return;
         }
 
-        const messagesRef = ref(rtdb, `chats/${selectedRoom}/messages`);
-
-        const unsubscribe = onValue(messagesRef, (snapshot) => {
-            const data = snapshot.val();
-            if (data) {
-                const messageList: Message[] = Object.entries(data)
-                    .map(([id, msg]: [string, any]) => ({
-                        id,
-                        text: msg.text,
-                        senderId: msg.senderId,
-                        senderType: msg.senderType,
-                        timestamp: msg.timestamp || 0,
-                    }))
-                    .sort((a, b) => a.timestamp - b.timestamp);
-
-                setMessages(messageList);
-            } else {
-                setMessages([]);
-            }
+        const unsubscribe = subscribeToMessages(selectedRoom, (messageList) => {
+            setMessages(messageList);
         });
 
         // Mark room as read
-        const roomInfoRef = ref(rtdb, `chats/${selectedRoom}/info/hasUnread`);
-        set(roomInfoRef, false);
+        updateRoomInfo(selectedRoom, { hasUnreadAdmin: false }).catch(() => {});
 
         return () => unsubscribe();
     }, [selectedRoom]);
@@ -118,10 +86,8 @@ export default function AdminChatPage() {
     // Listen to botActive status for selected room
     useEffect(() => {
         if (!selectedRoom) return;
-        const botActiveRef = ref(rtdb, `chats/${selectedRoom}/info/botActive`);
-        const unsub = onValue(botActiveRef, (snap) => {
-            const val = snap.val();
-            setBotActive(val !== false); // default true
+        const unsub = subscribeToRoomInfo(selectedRoom, (info) => {
+            setBotActive(info?.botActive !== false); // default true
         });
         return () => unsub();
     }, [selectedRoom]);
@@ -130,7 +96,7 @@ export default function AdminChatPage() {
         if (!selectedRoom) return;
         const newVal = !botActive;
         setBotActive(newVal);
-        await set(ref(rtdb, `chats/${selectedRoom}/info/botActive`), newVal);
+        await updateRoomInfo(selectedRoom, { botActive: newVal });
     };
 
     // Auto-scroll to bottom
@@ -139,7 +105,7 @@ export default function AdminChatPage() {
     }, [messages]);
 
     // Send message as admin
-    const sendMessage = async () => {
+    const sendAdminMessage = async () => {
         if (!inputMessage.trim() || !selectedRoom) return;
 
         const messageText = inputMessage.trim();
@@ -147,26 +113,7 @@ export default function AdminChatPage() {
         setSendingMessage(true);
 
         try {
-            const messagesRef = ref(rtdb, `chats/${selectedRoom}/messages`);
-            await push(messagesRef, {
-                text: messageText,
-                senderId: 'admin',
-                senderType: 'admin',
-                timestamp: Date.now(),
-            });
-
-            // Update room info
-            const roomInfoRef = ref(rtdb, `chats/${selectedRoom}/info`);
-            const roomSnapshot = await get(roomInfoRef);
-            const currentInfo = roomSnapshot.val() || {};
-
-            await set(roomInfoRef, {
-                ...currentInfo,
-                lastMessage: messageText,
-                lastMessageTime: Date.now(),
-                hasUnread: false,
-            });
-
+            await sendMessage(selectedRoom, messageText, 'admin', 'admin');
         } catch (error) {
             console.error('Error sending message:', error);
         } finally {
@@ -178,7 +125,7 @@ export default function AdminChatPage() {
     const handleKeyPress = (e: React.KeyboardEvent) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
-            sendMessage();
+            sendAdminMessage();
         }
     };
 
@@ -427,7 +374,7 @@ export default function AdminChatPage() {
                                     disabled={sendingMessage}
                                 />
                                 <button
-                                    onClick={sendMessage}
+                                    onClick={sendAdminMessage}
                                     disabled={!inputMessage.trim() || sendingMessage}
                                     className="w-11 h-11 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-full flex items-center justify-center hover:opacity-90 transition-opacity disabled:opacity-50"
                                 >

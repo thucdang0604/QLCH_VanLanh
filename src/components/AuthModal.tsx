@@ -45,13 +45,14 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
             await login(email, password);
             resetForm();
             onClose();
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error('Login error:', err);
-            if (err.code === 'auth/user-not-found') {
+            const code = (typeof err === 'object' && err !== null ? (err as { code?: string }).code : undefined);
+            if (code === 'auth/user-not-found') {
                 setError('Tài khoản không tồn tại');
-            } else if (err.code === 'auth/wrong-password') {
+            } else if (code === 'auth/wrong-password') {
                 setError('Mật khẩu không đúng');
-            } else if (err.code === 'auth/invalid-email') {
+            } else if (code === 'auth/invalid-email') {
                 setError('Email không hợp lệ');
             } else {
                 setError('Đăng nhập thất bại. Vui lòng thử lại.');
@@ -76,13 +77,14 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
             await signup(email, password, displayName, phone);
             resetForm();
             onClose();
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error('Signup error:', err);
-            if (err.code === 'auth/email-already-in-use') {
+            const code = (typeof err === 'object' && err !== null ? (err as { code?: string }).code : undefined);
+            if (code === 'auth/email-already-in-use') {
                 setError('Email đã được sử dụng');
-            } else if (err.code === 'auth/weak-password') {
+            } else if (code === 'auth/weak-password') {
                 setError('Mật khẩu quá yếu');
-            } else if (err.code === 'auth/invalid-email') {
+            } else if (code === 'auth/invalid-email') {
                 setError('Email không hợp lệ');
             } else {
                 setError('Đăng ký thất bại. Vui lòng thử lại.');
@@ -99,7 +101,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
         try {
             await googleSignIn();
             onClose();
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error('Google sign-in error:', err);
             setError('Đăng nhập bằng Google thất bại');
         } finally {

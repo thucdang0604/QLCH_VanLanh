@@ -2,33 +2,21 @@
 
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
-import { Plus, Search, Edit, Trash2, X, Upload, Loader2, Package } from 'lucide-react';
-import { useFirestoreCollection, updateDocument, deleteDocument, addDocumentWithId } from '@/lib/useFirestore';
-import { uploadImage, deleteImage } from '@/lib/storage';
-import { generateSlug } from '@/lib/utils';
-import { orderBy, getDoc, doc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { Plus, Search, Edit, Trash2, Package, Loader2 } from 'lucide-react';
+import { useFirestoreCollection, deleteDocument } from '@/lib/useFirestore';
+import { deleteImage } from '@/lib/storage';
+import { orderBy } from 'firebase/firestore';
+import type { FirestoreDateValue } from '@/lib/types';
+import { toastError } from '@/lib/toast';
+import { useClientPagination } from '@/lib/useClientPagination';
+import PaginationBar from '@/components/admin/PaginationBar';
+import { triggerRevalidate } from '@/lib/revalidate';
+import UniversalProductModal from '@/components/admin/UniversalProductModal';
+import { RETAIL_CATEGORIES } from '@/lib/constants';
+import type { Product } from '@/lib/types';
 
 
-// Product type
-interface Product {
-    id: string;
-    name: string;
-    price_original: number;
-    price_promo?: number;
-    category: string;
-    subCategory?: string;
-    brand: string;
-    description: string;
-    imageUrl: string;
-    images?: string[];
-    stock: number;
-    status: 'active' | 'inactive';
-    condition?: 'new' | 'like-new' | 'used';
-    isFlashSale?: boolean;
-    sold?: number;
-    createdAt?: any;
-}
+// Product is now imported from @/lib/types
 
 const CONDITIONS: { value: Product['condition'] | ''; label: string; color: string }[] = [
     { value: '', label: 'Tất cả tình trạng', color: '' },
@@ -37,10 +25,7 @@ const CONDITIONS: { value: Product['condition'] | ''; label: string; color: stri
     { value: 'used', label: 'Hàng cũ | TBH', color: 'bg-yellow-100 text-yellow-700' },
 ];
 
-const categories = ['Điện thoại', 'Laptop', 'Tablet', 'Phụ kiện', 'Smartwatch', 'Âm thanh'];
-const brands = ['Apple', 'Samsung', 'Xiaomi', 'OPPO', 'Vivo', 'Dell', 'HP', 'Lenovo', 'Asus', 'Sony'];
-const accessorySubCategories = ['Ốp lưng', 'Sạc dự phòng', 'Cáp sạc', 'Cóc sạc', 'Tai nghe', 'Khác'];
-
+const categories = [...RETAIL_CATEGORIES];
 export default function ProductsPage() {
     const { data: products, loading } = useFirestoreCollection<Product>('products', [orderBy('createdAt', 'desc')]);
     const [searchQuery, setSearchQuery] = useState('');
@@ -58,8 +43,10 @@ export default function ProductsPage() {
                 }
                 // Delete document
                 await deleteDocument('products', product.id);
+                // Trigger revalidation
+                await triggerRevalidate(['/', `/product/${product.id}`, '/flash-sale', '/search', '/sitemap.xml'], ['products']);
             } catch (error) {
-                alert('Lỗi khi xóa sản phẩm!');
+                toastError('Lỗi khi xóa sản phẩm!');
             }
         }
     };
@@ -71,6 +58,11 @@ export default function ProductsPage() {
         const matchCondition = !filterCondition || p.condition === filterCondition;
         return matchSearch && matchCategory && matchCondition;
     });
+
+    const { paginatedData: paginatedProducts, currentPage, totalPages, pageSize, totalFiltered, setPage, setPageSize, resetPage } = useClientPagination(filteredProducts, 20);
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    useEffect(() => { resetPage(); }, [searchQuery, filterCategory, filterCondition]);
 
     const formatPrice = (price: number) => {
         return new Intl.NumberFormat('vi-VN').format(price) + 'đ';
@@ -126,7 +118,7 @@ export default function ProductsPage() {
                 </select>
             </div>
 
-            {/* Products Table */}
+            {/* Products Table (Desktop) + Card List (Mobile) */}
             <div className="bg-white rounded-xl shadow-sm overflow-hidden">
                 {loading ? (
                     <div className="flex items-center justify-center py-20">
@@ -138,20 +130,23 @@ export default function ProductsPage() {
                         <p className="text-gray-500">Chưa có sản phẩm nào</p>
                     </div>
                 ) : (
-                    <table className="w-full">
-                        <thead className="bg-gray-50">
-                            <tr>
-                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Sản phẩm</th>
-                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Danh mục</th>
-                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Tình trạng</th>
-                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Giá</th>
-                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Tồn kho</th>
-                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Trạng thái</th>
-                                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Hành động</th>
-                            </tr>
-                        </thead>
+                    <>
+                    {/* Desktop Table */}
+                    <div className="hidden md:block overflow-x-auto">
+                        <table className="w-full min-w-[800px]">
+                            <thead className="bg-gray-50">
+                                <tr>
+                                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Sản phẩm</th>
+                                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Danh mục</th>
+                                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Tình trạng</th>
+                                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Giá</th>
+                                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Tồn kho</th>
+                                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Trạng thái</th>
+                                    <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Hành động</th>
+                                </tr>
+                            </thead>
                         <tbody className="divide-y divide-gray-100">
-                            {filteredProducts.map((product) => (
+                            {paginatedProducts.map((product) => (
                                 <tr key={product.id} className="hover:bg-gray-50">
                                     <td className="px-6 py-4">
                                         <div className="flex items-center gap-3">
@@ -197,8 +192,8 @@ export default function ProductsPage() {
                                         )}
                                     </td>
                                     <td className="px-6 py-4">
-                                        <span className={`text-sm font-medium ${product.stock > 10 ? 'text-green-600' : product.stock > 0 ? 'text-yellow-600' : 'text-red-600'}`}>
-                                            {product.stock}
+                                        <span className={`text-sm font-medium ${(product.stock || 0) > 10 ? 'text-green-600' : (product.stock || 0) > 0 ? 'text-yellow-600' : 'text-red-600'}`}>
+                                            {product.stock || 0}
                                         </span>
                                     </td>
                                     <td className="px-6 py-4">
@@ -226,337 +221,105 @@ export default function ProductsPage() {
                                 </tr>
                             ))}
                         </tbody>
-                    </table>
+                        </table>
+                    </div>
+
+                    {/* Mobile Card List */}
+                    <div className="md:hidden divide-y divide-gray-100">
+                        {paginatedProducts.map((product) => (
+                            <div key={product.id} className="p-4 flex gap-3">
+                                <div className="relative w-16 h-16 rounded-xl overflow-hidden bg-gray-100 shrink-0">
+                                    {product.imageUrl ? (
+                                        <Image
+                                            src={product.imageUrl}
+                                            alt={product.name}
+                                            fill
+                                            className="object-cover"
+                                        />
+                                    ) : (
+                                        <Package size={24} className="absolute inset-0 m-auto text-gray-400" />
+                                    )}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <p className="font-semibold text-gray-900 text-sm line-clamp-1">{product.name}</p>
+                                    <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                                        <span className="text-xs text-gray-500">{product.brand}</span>
+                                        <span className="text-gray-300">·</span>
+                                        <span className="text-xs text-gray-500">{product.category}</span>
+                                        {(() => {
+                                            const cond = CONDITIONS.find(c => c.value === product.condition);
+                                            return cond?.value ? (
+                                                <span className={`px-1.5 py-0.5 text-[10px] font-medium rounded-full ${cond.color}`}>
+                                                    {cond.label}
+                                                </span>
+                                            ) : null;
+                                        })()}
+                                    </div>
+                                    <div className="flex items-center justify-between mt-2">
+                                        <div>
+                                            {product.price_promo ? (
+                                                <div className="flex items-baseline gap-1.5">
+                                                    <span className="text-sm font-bold text-red-600">{formatPrice(product.price_promo)}</span>
+                                                    <span className="text-[10px] text-gray-400 line-through">{formatPrice(product.price_original)}</span>
+                                                </div>
+                                            ) : (
+                                                <span className="text-sm font-bold text-gray-900">{formatPrice(product.price_original)}</span>
+                                            )}
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span className={`text-xs font-bold ${(product.stock || 0) > 10 ? 'text-green-600' : (product.stock || 0) > 0 ? 'text-yellow-600' : 'text-red-600'}`}>
+                                                Kho: {product.stock || 0}
+                                            </span>
+                                            <span className={`px-1.5 py-0.5 text-[10px] font-medium rounded-full ${product.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+                                                {product.status === 'active' ? 'Đang bán' : 'Ẩn'}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-2 mt-2">
+                                        <button
+                                            onClick={() => { setEditingProduct(product); setIsModalOpen(true); }}
+                                            className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
+                                        >
+                                            <Edit size={14} />
+                                            Sửa
+                                        </button>
+                                        <button
+                                            onClick={() => handleDelete(product)}
+                                            className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
+                                        >
+                                            <Trash2 size={14} />
+                                            Xóa
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    <PaginationBar
+                        currentPage={currentPage}
+                        totalPages={totalPages}
+                        pageSize={pageSize}
+                        totalFiltered={totalFiltered}
+                        totalAll={products.length}
+                        onPageChange={setPage}
+                        onPageSizeChange={setPageSize}
+                        entityLabel="sản phẩm"
+                    />
+                    </>
                 )}
             </div>
 
             {/* Modal */}
-            {isModalOpen && (
-                <ProductModal
-                    product={editingProduct}
-                    onClose={() => setIsModalOpen(false)}
-                />
-            )}
+            <UniversalProductModal
+                isOpen={isModalOpen}
+                onClose={() => { setIsModalOpen(false); setEditingProduct(null); }}
+                mode="retail"
+                initialData={editingProduct}
+                onCreated={() => setIsModalOpen(false)}
+                onUpdated={() => setIsModalOpen(false)}
+            />
         </div>
     );
 }
 
-// Product Modal Component
-function ProductModal({
-    product,
-    onClose,
-}: {
-    product: Product | null;
-    onClose: () => void;
-}) {
-    const [formData, setFormData] = useState({
-        name: product?.name || '',
-        price_original: product?.price_original || '' as number | '',
-        price_promo: product?.price_promo || '' as number | '',
-        category: product?.category || categories[0],
-        brand: product?.brand || brands[0],
-        description: product?.description || '',
-        stock: product?.stock ?? '' as number | '',
-        status: product?.status || 'active',
-        condition: product?.condition || 'new' as Product['condition'],
-        isFlashSale: product?.isFlashSale || false,
-        subCategory: product?.subCategory || '',
-    });
-    const [imageFile, setImageFile] = useState<File | null>(null);
-    const [imagePreview, setImagePreview] = useState<string>(product?.imageUrl || '');
-    const [isSubmitting, setIsSubmitting] = useState(false);
-
-    const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (file) {
-            setImageFile(file);
-            setImagePreview(URL.createObjectURL(file));
-        }
-    };
-
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setIsSubmitting(true);
-
-        try {
-            let imageUrl = product?.imageUrl || '';
-
-            // Upload new image if selected
-            if (imageFile) {
-                // Delete old image if updating
-                if (product?.imageUrl) {
-                    await deleteImage(product.imageUrl);
-                }
-                // Upload new image
-                imageUrl = await uploadImage(imageFile, 'products');
-            }
-
-            // Validate: must have image
-            if (!imageUrl) {
-                alert('Vui lòng chọn ảnh sản phẩm!');
-                setIsSubmitting(false);
-                return;
-            }
-
-            const data = {
-                ...formData,
-                price_original: Number(formData.price_original) || 0,
-                price_promo: Number(formData.price_promo) || 0,
-                stock: Number(formData.stock) || 0,
-                imageUrl,
-                sold: product?.sold || 0,
-            };
-
-            if (product) {
-                // Update existing
-                await updateDocument('products', product.id, data);
-            } else {
-                // Create new with Slug
-                const baseSlug = generateSlug(data.name);
-                let finalSlug = baseSlug;
-                const checkRef = await getDoc(doc(db, 'products', baseSlug));
-                if (checkRef.exists()) {
-                    finalSlug = `${baseSlug}-${Math.floor(Math.random() * 10000)}`;
-                }
-                await addDocumentWithId('products', finalSlug, data);
-            }
-
-            onClose();
-        } catch (error) {
-            console.error('Error saving product:', error);
-            alert('Lỗi khi lưu sản phẩm!');
-        } finally {
-            setIsSubmitting(false);
-        }
-    };
-
-    return (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-                <div className="flex items-center justify-between p-6 border-b sticky top-0 bg-white">
-                    <h2 className="text-xl font-bold">{product ? 'Sửa sản phẩm' : 'Thêm sản phẩm mới'}</h2>
-                    <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg">
-                        <X size={20} />
-                    </button>
-                </div>
-
-                <form onSubmit={handleSubmit} className="p-6 space-y-4">
-                    {/* Image Upload */}
-                    <div>
-                        <label className="block text-sm font-medium mb-2">Ảnh sản phẩm *</label>
-                        <div className="border-2 border-dashed rounded-xl p-4 text-center">
-                            {imagePreview ? (
-                                <div className="relative w-32 h-32 mx-auto mb-3">
-                                    <Image
-                                        src={imagePreview}
-                                        alt="Preview"
-                                        fill
-                                        className="object-cover rounded-lg"
-                                    />
-                                </div>
-                            ) : (
-                                <div className="w-32 h-32 mx-auto mb-3 bg-gray-100 rounded-lg flex items-center justify-center">
-                                    <Upload size={32} className="text-gray-400" />
-                                </div>
-                            )}
-                            <input
-                                type="file"
-                                accept="image/*"
-                                onChange={handleImageChange}
-                                className="hidden"
-                                id="image-upload"
-                            />
-                            <label
-                                htmlFor="image-upload"
-                                className="cursor-pointer text-orange-600 hover:text-orange-700 font-medium"
-                            >
-                                {imagePreview ? 'Đổi ảnh' : 'Chọn ảnh'}
-                            </label>
-                        </div>
-                    </div>
-
-                    {/* Name */}
-                    <div>
-                        <label className="block text-sm font-medium mb-1">Tên sản phẩm *</label>
-                        <input
-                            type="text"
-                            value={formData.name}
-                            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                            required
-                            className="w-full h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
-                            placeholder="iPhone 15 Pro Max 256GB"
-                        />
-                    </div>
-
-                    {/* Price */}
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-medium mb-1">Giá gốc (VNĐ) *</label>
-                            <input
-                                type="number"
-                                value={formData.price_original}
-                                onChange={(e) => setFormData({ ...formData, price_original: e.target.value ? Number(e.target.value) : '' })}
-                                required
-                                min={0}
-                                className="w-full h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
-                                placeholder="0"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium mb-1">Giá khuyến mãi</label>
-                            <input
-                                type="number"
-                                value={formData.price_promo}
-                                onChange={(e) => setFormData({ ...formData, price_promo: e.target.value ? Number(e.target.value) : '' })}
-                                min={0}
-                                className="w-full h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
-                                placeholder="0"
-                            />
-                        </div>
-                    </div>
-
-                    {/* Category & Brand */}
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-medium mb-1">Danh mục</label>
-                            <select
-                                value={formData.category}
-                                onChange={(e) => setFormData({ ...formData, category: e.target.value, subCategory: e.target.value === 'Phụ kiện' ? formData.subCategory : '' })}
-                                className="w-full h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
-                            >
-                                {categories.map((cat) => (
-                                    <option key={cat} value={cat}>{cat}</option>
-                                ))}
-                            </select>
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium mb-1">Thương hiệu</label>
-                            <select
-                                value={formData.brand}
-                                onChange={(e) => setFormData({ ...formData, brand: e.target.value })}
-                                className="w-full h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
-                            >
-                                {brands.map((brand) => (
-                                    <option key={brand} value={brand}>{brand}</option>
-                                ))}
-                            </select>
-                        </div>
-                    </div>
-
-                    {/* Subcategory for Phụ kiện */}
-                    {formData.category === 'Phụ kiện' && (
-                        <div>
-                            <label className="block text-sm font-medium mb-1">Loại phụ kiện</label>
-                            <select
-                                value={formData.subCategory}
-                                onChange={(e) => setFormData({ ...formData, subCategory: e.target.value })}
-                                className="w-full h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
-                            >
-                                <option value="">— Chọn loại —</option>
-                                {accessorySubCategories.map((sub) => (
-                                    <option key={sub} value={sub}>{sub}</option>
-                                ))}
-                            </select>
-                        </div>
-                    )}
-
-                    {/* Condition */}
-                    <div>
-                        <label className="block text-sm font-medium mb-1">Tình trạng sản phẩm *</label>
-                        <div className="grid grid-cols-3 gap-2">
-                            {CONDITIONS.filter(c => c.value).map(c => (
-                                <label
-                                    key={c.value}
-                                    className={`flex items-center gap-2 p-3 rounded-lg border cursor-pointer transition-all ${formData.condition === c.value
-                                        ? 'border-orange-400 bg-orange-50'
-                                        : 'border-gray-200 hover:border-gray-300'
-                                        }`}
-                                >
-                                    <input
-                                        type="radio"
-                                        name="condition"
-                                        value={c.value}
-                                        checked={formData.condition === c.value}
-                                        onChange={() => setFormData({ ...formData, condition: c.value as Product['condition'] })}
-                                        className="accent-orange-500"
-                                    />
-                                    <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${c.color}`}>{c.label}</span>
-                                </label>
-                            ))}
-                        </div>
-                    </div>
-
-                    {/* Stock & Status */}
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-medium mb-1">Số lượng tồn kho</label>
-                            <input
-                                type="number"
-                                value={formData.stock}
-                                onChange={(e) => setFormData({ ...formData, stock: e.target.value ? Number(e.target.value) : '' })}
-                                min={0}
-                                className="w-full h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
-                                placeholder="0"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium mb-1">Trạng thái</label>
-                            <select
-                                value={formData.status}
-                                onChange={(e) => setFormData({ ...formData, status: e.target.value as 'active' | 'inactive' })}
-                                className="w-full h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
-                            >
-                                <option value="active">Đang bán</option>
-                                <option value="inactive">Tạm ẩn</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    {/* Flash Sale */}
-                    <div>
-                        <label className="flex items-center gap-3 cursor-pointer">
-                            <input
-                                type="checkbox"
-                                checked={formData.isFlashSale}
-                                onChange={(e) => setFormData({ ...formData, isFlashSale: e.target.checked })}
-                                className="w-5 h-5 accent-orange-500"
-                            />
-                            <span className="text-sm font-medium">Hiển thị trong Flash Sale</span>
-                        </label>
-                    </div>
-
-                    {/* Description */}
-                    <div>
-                        <label className="block text-sm font-medium mb-1">Mô tả</label>
-                        <textarea
-                            value={formData.description}
-                            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                            rows={4}
-                            className="w-full px-4 py-3 border rounded-lg focus:border-orange-500 focus:outline-none resize-none"
-                            placeholder="Mô tả chi tiết sản phẩm..."
-                        />
-                    </div>
-
-                    {/* Actions */}
-                    <div className="flex gap-3 pt-4">
-                        <button
-                            type="button"
-                            onClick={onClose}
-                            className="flex-1 py-3 border rounded-lg font-medium hover:bg-gray-50"
-                        >
-                            Hủy
-                        </button>
-                        <button
-                            type="submit"
-                            disabled={isSubmitting}
-                            className="flex-1 py-3 bg-orange-500 text-white rounded-lg font-medium hover:bg-orange-600 disabled:opacity-50 flex items-center justify-center gap-2"
-                        >
-                            {isSubmitting && <Loader2 size={18} className="animate-spin" />}
-                            {product ? 'Cập nhật' : 'Thêm sản phẩm'}
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    );
-}

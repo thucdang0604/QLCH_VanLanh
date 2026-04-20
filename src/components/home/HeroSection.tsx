@@ -1,8 +1,10 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import Image from 'next/image';
 import { ChevronLeft, ChevronRight, ChevronRight as ChevronR, Shield, Clock, Award, Wrench, Smartphone, Battery, Monitor, Laptop, Watch, Cpu } from 'lucide-react';
 import { useConfig } from '@/lib/ConfigContext';
+import type { HeroBanner, StoreBranch } from '@/lib/ConfigContext';
 import Link from 'next/link';
 
 // ===== Sidebar Menu Data (CareK Style) =====
@@ -63,11 +65,11 @@ const sidebarCategories = [
     },
     {
         icon: <Smartphone size={18} />,
-        name: 'Sửa OPPO / Xiaomi',
-        slug: 'sua-oppo',
+        name: 'Sửa Ipad ',
+        slug: 'sua-ipad',
         subItems: [
-            { group: 'OPPO', items: ['OPPO Find X7', 'OPPO Reno 12', 'OPPO A79', 'OPPO A58'] },
-            { group: 'Xiaomi', items: ['Xiaomi 14 Ultra', 'Redmi Note 13', 'Redmi 13C', 'POCO X6 Pro'] },
+            { group: 'Dòng máy', items: ['iPad Pro', 'iPad Air', 'iPad Mini', 'iPad'] },
+            { group: 'Dịch vụ', items: ['Thay màn hình iPad', 'Thay pin iPad', 'Sửa nút Digital Crown'] },
         ]
     },
     {
@@ -186,14 +188,25 @@ function SidebarItem({ item }: { item: typeof sidebarCategories[0] }) {
     );
 }
 
-export default function HeroSection() {
+interface HeroSectionProps {
+    initialBanners?: HeroBanner[];
+    storeBranches?: StoreBranch[];
+}
+
+export default function HeroSection({ initialBanners, storeBranches }: HeroSectionProps) {
     const { config, loading } = useConfig();
     const [current, setCurrent] = useState(0);
     const [imgError, setImgError] = useState<Record<string, boolean>>({});
 
-    const heroBanners = config.hero_banners || [];
+    // Ưu tiên dùng initialBanners (từ SSR), fallback về config (client-side) khi đã load xong
+    const heroBanners = (initialBanners && initialBanners.length > 0)
+        ? initialBanners
+        : (config.hero_banners || []);
     const hasBanners = heroBanners.length > 0;
     const totalSlides = hasBanners ? heroBanners.length : fallbackSlides.length;
+
+    // Lấy phone từ storeBranches SSR hoặc config client
+    const fallbackPhone = storeBranches?.[0]?.phone || config.store_branches?.[0]?.phone || '0932242026';
 
     useEffect(() => {
         const timer = setInterval(() => {
@@ -205,7 +218,8 @@ export default function HeroSection() {
     const prev = () => setCurrent((c) => (c - 1 + totalSlides) % totalSlides);
     const next = () => setCurrent((c) => (c + 1) % totalSlides);
 
-    if (loading) return <BannerSkeleton />;
+    // Chỉ hiện skeleton nếu KHÔNG có initialBanners (SSR) VÀ client config đang loading
+    if (!initialBanners?.length && loading) return <BannerSkeleton />;
 
     return (
         <section className="py-2">
@@ -234,41 +248,84 @@ export default function HeroSection() {
                         <div className="flex-1 min-w-0 relative bg-dark overflow-hidden rounded-tr-xl">
                             <div className="px-0">
                                 {hasBanners ? (
-                                    /* Image Banner Mode */
                                     <div className="relative h-[280px] sm:h-[380px]">
                                         {heroBanners.map((banner, i) => (
                                             <div key={banner.id} className={`absolute inset-0 transition-opacity duration-700 ${i === current ? 'opacity-100 z-10' : 'opacity-0 z-0'}`}>
                                                 {banner.link ? (
                                                     <a href={banner.link} className="block w-full h-full">
-                                                        <img
-                                                            src={imgError[banner.id] ? 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="800" height="400"><rect fill="%23333" width="800" height="400"/><text fill="%23999" x="50%" y="50%" text-anchor="middle" dy=".3em" font-size="20">Banner</text></svg>' : banner.imageUrl}
-                                                            alt={banner.alt || 'Banner'}
-                                                            className="w-full h-full object-cover"
-                                                            onError={() => setImgError(prev => ({ ...prev, [banner.id]: true }))}
-                                                        />
+                                                        {imgError[banner.id] ? (
+                                                            <div className="w-full h-full bg-gray-800 flex items-center justify-center text-gray-500 text-lg">Banner</div>
+                                                        ) : banner.width && banner.height ? (
+                                                                <Image
+                                                                    src={banner.imageUrl}
+                                                                    alt={banner.alt || 'Banner Văn Lành Service'}
+                                                                    width={banner.width}
+                                                                    height={banner.height}
+                                                                    priority={i === 0}
+                                                                    fetchPriority={i === 0 ? "high" : "auto"}
+                                                                    sizes="(max-width: 768px) 100vw, (max-width: 1200px) 75vw, 940px"
+                                                                    quality={80}
+                                                                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                                                    onError={() => setImgError(prev => ({ ...prev, [banner.id]: true }))}
+                                                                />
+                                                        ) : (
+                                                            <Image
+                                                                src={banner.imageUrl}
+                                                                alt={banner.alt || 'Banner Văn Lành Service'}
+                                                                fill
+                                                                priority={i === 0}
+                                                                fetchPriority={i === 0 ? "high" : "auto"}
+                                                                sizes="(max-width: 768px) 100vw, (max-width: 1200px) 75vw, 940px"
+                                                                quality={80}
+                                                                className="object-cover"
+                                                                onError={() => setImgError(prev => ({ ...prev, [banner.id]: true }))}
+                                                            />
+                                                        )}
                                                     </a>
                                                 ) : (
-                                                    <img
-                                                        src={imgError[banner.id] ? 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="800" height="400"><rect fill="%23333" width="800" height="400"/><text fill="%23999" x="50%" y="50%" text-anchor="middle" dy=".3em" font-size="20">Banner</text></svg>' : banner.imageUrl}
-                                                        alt={banner.alt || 'Banner'}
-                                                        className="w-full h-full object-cover"
-                                                        onError={() => setImgError(prev => ({ ...prev, [banner.id]: true }))}
-                                                    />
+                                                    imgError[banner.id] ? (
+                                                        <div className="w-full h-full bg-gray-800 flex items-center justify-center text-gray-500 text-lg">Banner</div>
+                                                    ) : banner.width && banner.height ? (
+                                                        <Image
+                                                            src={banner.imageUrl}
+                                                            alt={banner.alt || 'Banner Văn Lành Service'}
+                                                            width={banner.width}
+                                                            height={banner.height}
+                                                            priority={i === 0}
+                                                            fetchPriority={i === 0 ? "high" : "auto"}
+                                                            sizes="(max-width: 768px) 100vw, (max-width: 1200px) 75vw, 940px"
+                                                            quality={80}
+                                                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                                            onError={() => setImgError(prev => ({ ...prev, [banner.id]: true }))}
+                                                        />
+                                                    ) : (
+                                                        <Image
+                                                            src={banner.imageUrl}
+                                                            alt={banner.alt || 'Banner Văn Lành Service'}
+                                                            fill
+                                                            priority={i === 0}
+                                                            fetchPriority={i === 0 ? "high" : "auto"}
+                                                            sizes="(max-width: 768px) 100vw, (max-width: 1200px) 75vw, 940px"
+                                                            quality={80}
+                                                            className="object-cover"
+                                                            onError={() => setImgError(prev => ({ ...prev, [banner.id]: true }))}
+                                                        />
+                                                    )
                                                 )}
                                             </div>
                                         ))}
                                         {/* Arrows */}
                                         {heroBanners.length > 1 && (
                                             <>
-                                                <button onClick={prev} className="absolute left-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/20 hover:bg-white/30 text-white rounded-full flex items-center justify-center z-20"><ChevronLeft size={20} /></button>
-                                                <button onClick={next} className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/20 hover:bg-white/30 text-white rounded-full flex items-center justify-center z-20"><ChevronRight size={20} /></button>
+                                                <button onClick={prev} aria-label="Ảnh trước" className="absolute left-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/20 hover:bg-white/30 text-white rounded-full flex items-center justify-center z-20"><ChevronLeft size={20} /></button>
+                                                <button onClick={next} aria-label="Ảnh tiếp theo" className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/20 hover:bg-white/30 text-white rounded-full flex items-center justify-center z-20"><ChevronRight size={20} /></button>
                                             </>
                                         )}
                                         {/* Dots */}
                                         {heroBanners.length > 1 && (
                                             <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-2 z-20">
                                                 {heroBanners.map((_, i) => (
-                                                    <button key={i} onClick={() => setCurrent(i)} className={`transition-all duration-300 rounded-full ${i === current ? 'w-8 h-2 bg-copper' : 'w-2 h-2 bg-white/50 hover:bg-white/70'}`} />
+                                                    <button key={i} onClick={() => setCurrent(i)} aria-label={`Chuyển đến slide ${i + 1}`} className={`transition-all duration-300 rounded-full ${i === current ? 'w-8 h-2 bg-copper' : 'w-2 h-2 bg-white/50 hover:bg-white/70'}`} />
                                                 ))}
                                             </div>
                                         )}
@@ -288,19 +345,19 @@ export default function HeroSection() {
                                             </p>
                                             <div className="flex gap-3">
                                                 <a href="#booking-section" className="px-6 py-3 bg-copper text-white font-semibold rounded-lg hover:bg-copper-dark transition-colors">Đặt lịch ngay</a>
-                                                <a href={`tel:${config.store_branches[0]?.phone || '0932242026'}`} className="px-6 py-3 border border-gray-500 text-white font-semibold rounded-lg hover:border-copper hover:text-copper transition-colors">Gọi tư vấn</a>
+                                                <a href={`tel:${fallbackPhone}`} className="px-6 py-3 border border-gray-500 text-white font-semibold rounded-lg hover:border-copper hover:text-copper transition-colors">Gọi tư vấn</a>
                                             </div>
                                         </div>
                                         <div className="absolute right-0 top-1/2 -translate-y-1/2 w-64 h-64 sm:w-96 sm:h-96 bg-copper/5 rounded-full blur-3xl" />
-                                        <button onClick={prev} className="absolute left-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/10 hover:bg-white/20 text-white rounded-full flex items-center justify-center z-10"><ChevronLeft size={20} /></button>
-                                        <button onClick={next} className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/10 hover:bg-white/20 text-white rounded-full flex items-center justify-center z-10"><ChevronRight size={20} /></button>
+                                        <button onClick={prev} aria-label="Ảnh trước" className="absolute left-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/10 hover:bg-white/20 text-white rounded-full flex items-center justify-center z-10"><ChevronLeft size={20} /></button>
+                                        <button onClick={next} aria-label="Ảnh tiếp theo" className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/10 hover:bg-white/20 text-white rounded-full flex items-center justify-center z-10"><ChevronRight size={20} /></button>
                                     </div>
                                 )}
                                 {/* Dots for fallback */}
                                 {!hasBanners && (
                                     <div className="flex justify-center gap-2 pb-4">
                                         {fallbackSlides.map((_, i) => (
-                                            <button key={i} onClick={() => setCurrent(i)} className={`transition-all duration-300 rounded-full ${i === current ? 'w-8 h-2 bg-copper' : 'w-2 h-2 bg-gray-600 hover:bg-gray-400'}`} />
+                                            <button key={i} onClick={() => setCurrent(i)} aria-label={`Chuyển đến slide ${i + 1}`} className={`transition-all duration-300 rounded-full ${i === current ? 'w-8 h-2 bg-copper' : 'w-2 h-2 bg-gray-600 hover:bg-gray-400'}`} />
                                         ))}
                                     </div>
                                 )}

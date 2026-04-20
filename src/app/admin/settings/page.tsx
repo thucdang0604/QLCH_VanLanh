@@ -1,14 +1,16 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useConfig, DEFAULT_CONFIG, type ContactInfo } from '@/lib/ConfigContext';
-import { Save, RotateCcw, Loader2, Store, Phone, Mail, MapPin, Facebook, MessageCircle, CheckCircle2, AlertCircle } from 'lucide-react';
+import { useConfig, DEFAULT_CONFIG, type ContactInfo, type GeofenceConfig } from '@/lib/ConfigContext';
+import { Save, RotateCcw, Loader2, Store, Phone, Mail, MapPin, Facebook, MessageCircle, CheckCircle2, AlertCircle, ShieldCheck, Navigation, KeyRound } from 'lucide-react';
 
 export default function SettingsPage() {
     const { config, updateConfig, loading } = useConfig();
     const [formData, setFormData] = useState<ContactInfo>(DEFAULT_CONFIG.contact_info);
     const [shopName, setShopName] = useState('');
     const [topBarText, setTopBarText] = useState('');
+    const [forbiddenWords, setForbiddenWords] = useState('');
+    const [geofence, setGeofence] = useState<GeofenceConfig>(DEFAULT_CONFIG.geofence);
     const [saving, setSaving] = useState(false);
     const [seeding, setSeeding] = useState(false);
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
@@ -19,6 +21,12 @@ export default function SettingsPage() {
             if (config.contact_info) setFormData(config.contact_info);
             setShopName(config.siteName || 'Văn Lành Repair Center');
             setTopBarText(config.topBarText || '');
+            if (config.forbiddenWords) {
+                setForbiddenWords(config.forbiddenWords.join(', '));
+            }
+            if (config.geofence) {
+                setGeofence(config.geofence);
+            }
         }
     }, [config, loading]);
 
@@ -33,10 +41,13 @@ export default function SettingsPage() {
         setMessage(null);
 
         try {
+            const fWords = forbiddenWords.split(',').map(w => w.trim()).filter(Boolean);
             await updateConfig({
                 contact_info: formData,
                 siteName: shopName,
-                topBarText: topBarText
+                topBarText: topBarText,
+                forbiddenWords: fWords,
+                geofence: geofence,
             });
             setMessage({ type: 'success', text: 'Đã lưu cài đặt thành công!' });
         } catch (error) {
@@ -61,9 +72,9 @@ export default function SettingsPage() {
             } else {
                 throw new Error(data.error);
             }
-        } catch (error: any) {
+        } catch (error) {
             console.error('Seed error:', error);
-            setMessage({ type: 'error', text: `Lỗi: ${error.message}` });
+            setMessage({ type: 'error', text: `Lỗi: ${error instanceof Error ? error.message : 'Unknown error'}` });
         } finally {
             setSeeding(false);
         }
@@ -210,6 +221,141 @@ export default function SettingsPage() {
                     </div>
                 </div>
 
+                <div className="px-6 py-4 bg-gray-50 border-t border-b flex items-center gap-2 mt-4">
+                    <MessageCircle size={20} className="text-orange-500" />
+                    <h3 className="font-semibold text-gray-800">Quản lý bình luận</h3>
+                </div>
+                <div className="p-6">
+                    <div className="space-y-2">
+                        <label className="text-sm font-medium text-gray-700 block">
+                            Từ khóa bị cấm (Blacklist)
+                        </label>
+                        <textarea
+                            value={forbiddenWords}
+                            onChange={(e) => setForbiddenWords(e.target.value)}
+                            rows={3}
+                            className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all font-medium"
+                            placeholder="Nhập các từ khóa, cách nhau bằng dấu phẩy. Ví dụ: lừa đảo, chửi thề..."
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                            Các bình luận chứa từ khóa này sẽ tự động bị chuyển sang trạng thái <strong>Chờ duyệt</strong> (Pending) thay vì tự động hiển thị (Approved).
+                        </p>
+                    </div>
+                </div>
+
+                {/* ── Geofence Settings ── */}
+                <div className="px-6 py-4 bg-gray-50 border-t border-b flex items-center gap-2">
+                    <ShieldCheck size={20} className="text-orange-500" />
+                    <h3 className="font-semibold text-gray-800">Xác minh đánh giá (Geofence)</h3>
+                </div>
+                <div className="p-6 space-y-5">
+                    {/* Toggle */}
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <p className="text-sm font-medium text-gray-700">Bật xác minh vị trí</p>
+                            <p className="text-xs text-gray-400">Khi bật, khách quét QR phải ở gần cửa hàng hoặc nhập mã PIN mới được đánh giá.</p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setGeofence(g => ({ ...g, enabled: !g.enabled }))}
+                            className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors ${
+                                geofence.enabled ? 'bg-orange-500' : 'bg-gray-300'
+                            }`}
+                        >
+                            <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+                                geofence.enabled ? 'translate-x-6' : 'translate-x-1'
+                            }`} />
+                        </button>
+                    </div>
+
+                    {geofence.enabled && (
+                        <>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium text-gray-700 flex items-center gap-1.5">
+                                        <Navigation size={14} className="text-gray-400" />
+                                        Vĩ độ (Latitude)
+                                    </label>
+                                    <input
+                                        type="number"
+                                        step="0.0001"
+                                        value={geofence.lat}
+                                        onChange={(e) => setGeofence(g => ({ ...g, lat: parseFloat(e.target.value) || 0 }))}
+                                        className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all text-sm"
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium text-gray-700 flex items-center gap-1.5">
+                                        <Navigation size={14} className="text-gray-400" />
+                                        Kinh độ (Longitude)
+                                    </label>
+                                    <input
+                                        type="number"
+                                        step="0.0001"
+                                        value={geofence.lng}
+                                        onChange={(e) => setGeofence(g => ({ ...g, lng: parseFloat(e.target.value) || 0 }))}
+                                        className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all text-sm"
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium text-gray-700 flex items-center gap-1.5">
+                                        <MapPin size={14} className="text-gray-400" />
+                                        Bán kính (mét)
+                                    </label>
+                                    <input
+                                        type="number"
+                                        min={50}
+                                        max={5000}
+                                        value={geofence.radiusMeters}
+                                        onChange={(e) => setGeofence(g => ({ ...g, radiusMeters: parseInt(e.target.value) || 500 }))}
+                                        className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all text-sm"
+                                    />
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    if (!navigator.geolocation) {
+                                        alert('Trình duyệt không hỗ trợ định vị.');
+                                        return;
+                                    }
+                                    navigator.geolocation.getCurrentPosition(
+                                        (pos) => {
+                                            setGeofence(g => ({
+                                                ...g,
+                                                lat: Math.round(pos.coords.latitude * 10000) / 10000,
+                                                lng: Math.round(pos.coords.longitude * 10000) / 10000,
+                                            }));
+                                            setMessage({ type: 'success', text: 'Đã cập nhật toạ độ từ vị trí hiện tại!' });
+                                        },
+                                        () => alert('Không thể lấy vị trí. Vui lòng kiểm tra quyền truy cập GPS.'),
+                                        { enableHighAccuracy: true }
+                                    );
+                                }}
+                                className="flex items-center gap-2 text-sm text-orange-600 hover:text-orange-700 font-medium transition-colors"
+                            >
+                                <Navigation size={16} />
+                                Lấy vị trí hiện tại
+                            </button>
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium text-gray-700 flex items-center gap-1.5">
+                                    <KeyRound size={14} className="text-gray-400" />
+                                    Mã PIN (fallback khi GPS bị từ chối)
+                                </label>
+                                <input
+                                    type="text"
+                                    value={geofence.pin}
+                                    onChange={(e) => setGeofence(g => ({ ...g, pin: e.target.value }))}
+                                    className="w-full max-w-xs px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all font-mono text-lg tracking-widest"
+                                    placeholder="2026"
+                                    maxLength={8}
+                                />
+                                <p className="text-xs text-gray-400">Nhân viên sẽ cung cấp mã này cho khách khi khách không bật được GPS.</p>
+                            </div>
+                        </>
+                    )}
+                </div>
+
                 {/* Footer Actions */}
                 <div className="px-6 py-4 bg-gray-50 border-t flex items-center justify-end gap-3">
                     <button
@@ -218,6 +364,8 @@ export default function SettingsPage() {
                             setFormData(config.contact_info || DEFAULT_CONFIG.contact_info);
                             setShopName(config.siteName || '');
                             setTopBarText(config.topBarText || '');
+                            setForbiddenWords((config.forbiddenWords || []).join(', '));
+                            setGeofence(config.geofence || DEFAULT_CONFIG.geofence);
                         }}
                         className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-200 rounded-lg transition-colors"
                     >

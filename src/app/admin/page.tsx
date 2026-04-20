@@ -83,7 +83,7 @@ export default function AdminDashboard() {
                     if (data.status !== 'Cancelled') {
                         dailyRevenue += (data.total_amount || 0);
                         if (data.items) {
-                            data.items.forEach((item: any) => {
+                            (data.items as Array<Partial<{ quantity: number }>>).forEach((item) => {
                                 dailyProductsSold += (item.quantity || 0);
                             });
                         }
@@ -105,7 +105,7 @@ export default function AdminDashboard() {
                     const data = docSnap.data() as Partial<RepairTicket>;
                     dailyRepairsCount++;
                     // Add to revenue if ticket is completed successfully
-                    if (data.status === 'da_tra_may') {
+                    if (data.status === 'done') {
                         dailyRevenue += (data.payment?.amount || 0);
                     }
                 });
@@ -249,7 +249,7 @@ export default function AdminDashboard() {
                 </div>
                 <div>
                     <h3 className="text-orange-900 font-semibold text-sm">Real-time Analytics Enabled</h3>
-                    <p className="text-orange-700 text-xs mt-1">Dữ liệu 'Đang Online' được cập nhật theo thời gian thực mỗi khi có khách hàng truy cập website. Các chỉ số khác tự động làm mới khi tải lại trang.</p>
+                    <p className="text-orange-700 text-xs mt-1">Dữ liệu &quot;Đang Online&quot; được cập nhật theo thời gian thực mỗi khi có khách hàng truy cập website. Các chỉ số khác tự động làm mới khi tải lại trang.</p>
                 </div>
             </div>
         </div>

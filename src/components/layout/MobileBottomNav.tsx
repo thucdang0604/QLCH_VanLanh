@@ -94,6 +94,8 @@ export default function MobileBottomNav() {
 
     // Close menu on route change
     useEffect(() => {
+        // We intentionally close a local UI menu when the route changes.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setShowContactMenu(false);
     }, [pathname]);
 

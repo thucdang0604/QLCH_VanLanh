@@ -19,6 +19,24 @@
             "queryScope": "COLLECTION",
             "fields": [
                 {
+                    "fieldPath": "brand",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "status",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "createdAt",
+                    "order": "DESCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "products",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
                     "fieldPath": "isFlashSale",
                     "order": "ASCENDING"
                 },
@@ -60,6 +78,38 @@
             "collectionGroup": "articles",
             "queryScope": "COLLECTION",
             "fields": [
+                {
+                    "fieldPath": "status",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "createdAt",
+                    "order": "DESCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "article_comments",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "articleId",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "createdAt",
+                    "order": "DESCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "article_comments",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "articleId",
+                    "order": "ASCENDING"
+                },
                 {
                     "fieldPath": "status",
                     "order": "ASCENDING"

@@ -1,8 +1,10 @@
 'use client';
+import { SITE_URL } from "@/lib/constants";
+
 export default function ChinhSachBaoHanhPage() {
     const seoTitle = 'Chính sách bảo hành | Văn Lành Service';
     const seoDescription = 'Chính sách bảo hành sửa chữa tại Văn Lành Service: điều kiện bảo hành, lưu ý quan trọng và hotline hỗ trợ. Cam kết hoàn tiền 100% trong 30 ngày nếu không hài lòng.';
-    const canonicalUrl = 'https://qlch-vanlanh.web.app/info/chinh-sach-bao-hanh';
+    const canonicalUrl = `${SITE_URL}/info/chinh-sach-bao-hanh`;
     const articleSchema = {
         '@context': 'https://schema.org',
         '@type': 'Article',
@@ -16,8 +18,8 @@ export default function ChinhSachBaoHanhPage() {
         '@context': 'https://schema.org',
         '@type': 'BreadcrumbList',
         itemListElement: [
-            { '@type': 'ListItem', position: 1, name: 'Trang chủ', item: 'https://qlch-vanlanh.web.app/' },
-            { '@type': 'ListItem', position: 2, name: 'Thông tin', item: 'https://qlch-vanlanh.web.app/info/chinh-sach-bao-hanh' },
+            { '@type': 'ListItem', position: 1, name: 'Trang chủ', item: `${SITE_URL}/` },
+            { '@type': 'ListItem', position: 2, name: 'Thông tin', item: `${SITE_URL}/info/chinh-sach-bao-hanh` },
             { '@type': 'ListItem', position: 3, name: 'Chính sách bảo hành', item: canonicalUrl },
         ],
     };

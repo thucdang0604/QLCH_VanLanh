@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
-import { CalendarClock, Clock, Phone, User, CheckCircle2, X, Search, Loader2, MapPin, ArrowRight, History, XCircle } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { CalendarClock, Clock, Phone, User, CheckCircle2, X, Search, Loader2, MapPin, ArrowRight, History, XCircle, type LucideIcon } from 'lucide-react';
 import { collection, addDoc, serverTimestamp, query, where, getDocs, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useConfig } from '@/lib/ConfigContext';
+import type { FirestoreDateValue } from '@/lib/types';
 
 // Inline Toast component
 function Toast({ message, onClose }: { message: string; onClose: () => void }) {
@@ -30,10 +31,10 @@ interface Appointment {
     timeSlot: string;
     store: string;
     status: 'pending' | 'confirmed' | 'completed' | 'cancelled';
-    createdAt: any;
+    createdAt: FirestoreDateValue;
 }
 
-const statusConfig: Record<string, { color: string; label: string; icon: any }> = {
+const statusConfig: Record<string, { color: string; label: string; icon: LucideIcon }> = {
     pending: { color: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30', label: 'Chờ xác nhận', icon: Clock },
     confirmed: { color: 'bg-blue-500/20 text-blue-300 border-blue-500/30', label: 'Đã xác nhận', icon: CheckCircle2 },
     completed: { color: 'bg-green-500/20 text-green-300 border-green-500/30', label: 'Hoàn thành', icon: CheckCircle2 },
@@ -72,6 +73,13 @@ export default function BookingSection() {
 
     const [toast, setToast] = useState<string | null>(null);
 
+    // Sync default store when branches are loaded
+    useEffect(() => {
+        if (branches.length > 0 && !formData.store) {
+            setFormData(prev => ({ ...prev, store: branches[0].id }));
+        }
+    }, [branches]);
+
     // Toggle Handler
     const handleToggle = () => {
         setIsFlipping(true);
@@ -107,7 +115,13 @@ export default function BookingSection() {
     ];
 
     const resetForm = () => {
-        setFormData({ fullName: '', phone: '', date: '', timeSlot: '', store: branches[0]?.id || '' });
+        setFormData({
+            fullName: '',
+            phone: '',
+            date: '',
+            timeSlot: '',
+            store: branches[0]?.id || ''
+        });
     };
 
     const showToast = (message: string) => {
@@ -166,10 +180,26 @@ export default function BookingSection() {
                 })) as Appointment[];
 
             // Sort client-side to avoid index requirement
+            const toMillis = (v: unknown): number => {
+                if (!v) return 0;
+                if (typeof v === 'object' && v !== null) {
+                    if ('toMillis' in v && typeof (v as { toMillis?: unknown }).toMillis === 'function') {
+                        return (v as { toMillis: () => number }).toMillis();
+                    }
+                    if ('toDate' in v && typeof (v as { toDate?: unknown }).toDate === 'function') {
+                        return (v as { toDate: () => Date }).toDate().getTime();
+                    }
+                    if ('seconds' in v && typeof (v as { seconds?: unknown }).seconds === 'number') {
+                        return (v as { seconds: number }).seconds * 1000;
+                    }
+                }
+                if (v instanceof Date) return v.getTime();
+                if (typeof v === 'number') return v;
+                const d = new Date(v as never);
+                return Number.isNaN(d.getTime()) ? 0 : d.getTime();
+            };
             data.sort((a, b) => {
-                const timeA = a.createdAt?.seconds || 0;
-                const timeB = b.createdAt?.seconds || 0;
-                return timeB - timeA;
+                return toMillis(b.createdAt) - toMillis(a.createdAt);
             });
 
             setTrackResult(data);
@@ -191,7 +221,8 @@ export default function BookingSection() {
             {toast && <Toast message={toast} onClose={() => setToast(null)} />}
 
             <div className="max-w-[1200px] mx-auto px-2 md:px-4">
-                <div className="bg-dark rounded-xl shadow-lg overflow-hidden px-6 py-12 relative min-h-[600px] transition-all perspective-[1000px]">
+                <div className="rounded-xl shadow-lg overflow-hidden px-6 py-12 relative min-h-[600px] transition-all perspective-[1000px]" style={{ backgroundColor: 'var(--outer-bg, #1a1a2e)' }}>
+                    
 
                     {/* Top Right Toggle Button */}
                     <button

@@ -2,11 +2,18 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { Zap } from 'lucide-react';
-import { collection, query, where, orderBy, limit, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, orderBy, limit, getDocs, type QueryConstraint, type DocumentData } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import ServiceCard from './ServiceCard';
 
-const brandTabs = ['Tất cả', 'iPhone', 'Samsung', 'Xiaomi', 'Oppo'];
+// Tab cấu hình: label hiển thị vs giá trị brand trong DB
+const brandTabs = [
+    { label: 'Tất cả', value: 'Tất cả' },
+    { label: 'iPhone', value: 'Apple' },
+    { label: 'Samsung', value: 'Samsung' },
+    { label: 'Xiaomi', value: 'Xiaomi' },
+    { label: 'Oppo', value: 'OPPO' },
+];
 
 // Skeleton card for loading state
 function SkeletonCard() {
@@ -26,59 +33,74 @@ function SkeletonCard() {
     );
 }
 
-export default function FlashSale() {
-    const [activeBrand, setActiveBrand] = useState('Tất cả');
-    const [products, setProducts] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
-
-
-    // Fetch products from Firestore with brand filter
-    const fetchProducts = useCallback((brand: string) => {
-        setLoading(true);
-
-        const constraints: any[] = [
-            where('status', '==', 'active'),
-            orderBy('createdAt', 'desc'),
-            limit(10),
-        ];
-
-        if (brand !== 'Tất cả') {
-            constraints.push(where('brand', '==', brand));
-        }
-
-        const q = query(collection(db, 'products'), ...constraints);
-
-        const unsubscribe = onSnapshot(
-            q,
-            (snapshot) => {
-                const items = snapshot.docs
-                    .map((doc) => ({ id: doc.id, ...doc.data() }))
-                    .filter((p: any) => {
-                        // Show flash sale or discounted items
-                        if (p.isFlashSale) return true;
-                        if (p.price_promo && p.price_original) {
-                            return ((p.price_original - p.price_promo) / p.price_original) * 100 >= 10;
-                        }
-                        if (p.price_promo && p.price) {
-                            return ((p.price - p.price_promo) / p.price) * 100 >= 10;
-                        }
-                        return true; // Show all active products if no flash sale logic
-                    });
-                setProducts(items);
-                setLoading(false);
-            },
-            (err) => {
-                console.error('FlashSale fetch error:', err);
-                setLoading(false);
+export default function FlashSale({ ssrLatestProducts = [] }: { ssrLatestProducts?: any[] }) {
+    const [activeBrand, setActiveBrand] = useState<string>('Tất cả');
+    
+    // Helper function to filter flash sale items
+    const filterFlashSaleItems = useCallback((items: any[]) => {
+        return items.filter((p) => {
+            const item = p as Partial<{
+                isFlashSale: boolean;
+                price_promo: number;
+                price_original: number;
+                price: number;
+            }>;
+            if (item.isFlashSale) return true;
+            if (item.price_promo && item.price_original) {
+                return ((item.price_original - item.price_promo) / item.price_original) * 100 >= 10;
             }
-        );
-
-        return unsubscribe;
+            if (item.price_promo && item.price) {
+                return ((item.price - item.price_promo) / item.price) * 100 >= 10;
+            }
+            return true;
+        });
     }, []);
 
+    // Initialize with SSR data if available
+    const [products, setProducts] = useState<(DocumentData & { id: string })[]>(
+        ssrLatestProducts.length > 0 ? filterFlashSaleItems(ssrLatestProducts) : []
+    );
+    const [loading, setLoading] = useState(ssrLatestProducts.length === 0);
+
+    // Fetch products from Firestore with brand filter
+    const fetchProducts = useCallback(async (brand: string) => {
+        // Use SSR data for 'Tất cả' on initial load or subsequent clicks if it exists
+        if (brand === 'Tất cả' && ssrLatestProducts.length > 0) {
+            setProducts(filterFlashSaleItems(ssrLatestProducts));
+            setLoading(false);
+            return;
+        }
+
+        setLoading(true);
+        try {
+            const constraints: QueryConstraint[] = [
+                where('status', '==', 'active'),
+                orderBy('createdAt', 'desc'),
+                limit(10),
+            ];
+
+            if (brand !== 'Tất cả') {
+                constraints.push(where('brand', '==', brand));
+            }
+
+            const q = query(collection(db, 'products'), ...constraints);
+            const snapshot = await getDocs(q);
+            
+            const items = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+            setProducts(filterFlashSaleItems(items));
+        } catch (err) {
+            console.error('FlashSale fetch error:', err);
+        } finally {
+            setLoading(false);
+        }
+    }, [ssrLatestProducts, filterFlashSaleItems]);
+
     useEffect(() => {
-        const unsub = fetchProducts(activeBrand);
-        return () => { if (unsub) unsub(); };
+        let isMounted = true;
+        fetchProducts(activeBrand).then(() => {
+            if (!isMounted) return;
+        });
+        return () => { isMounted = false; };
     }, [activeBrand, fetchProducts]);
 
     const handleTabChange = (brand: string) => {
@@ -90,7 +112,7 @@ export default function FlashSale() {
     return (
         <section className="py-2">
             <div className="max-w-[1200px] mx-auto px-2 md:px-4">
-                <div className="bg-white rounded-xl shadow-lg p-4 sm:p-6">
+                <div className="rounded-xl shadow-lg p-4 sm:p-6" style={{ backgroundColor: 'var(--card-bg, white)' }}>
                     {/* Header Row */}
                     <div className="flex items-center gap-2 mb-6">
                         <Zap size={24} className="text-accent fill-accent" />
@@ -99,16 +121,17 @@ export default function FlashSale() {
 
                     {/* Brand Tabs */}
                     <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-4">
-                        {brandTabs.map((brand) => (
+                        {brandTabs.map((tab) => (
                             <button
-                                key={brand}
-                                onClick={() => handleTabChange(brand)}
-                                className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all ${activeBrand === brand
-                                    ? 'bg-dark text-white shadow-md'
-                                    : 'bg-white text-gray-600 border border-gray-200 hover:border-copper hover:text-copper'
-                                    }`}
+                                key={tab.value}
+                                onClick={() => handleTabChange(tab.value)}
+                                className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all ${
+                                    activeBrand === tab.value
+                                        ? 'bg-dark text-white shadow-md'
+                                        : 'bg-white text-gray-600 border border-gray-200 hover:border-copper hover:text-copper'
+                                }`}
                             >
-                                {brand}
+                                {tab.label}
                             </button>
                         ))}
                     </div>

@@ -1,8 +1,10 @@
 'use client';
+import { SITE_URL } from "@/lib/constants";
+
 export default function TraGopPage() {
     const seoTitle = 'Trả góp | Văn Lành Service';
     const seoDescription = 'Hướng dẫn mua hàng trả góp tại Văn Lành Service: thủ tục, giấy tờ, điều kiện trả trước và các hình thức trả góp (công ty tài chính, ngân hàng, paylater).';
-    const canonicalUrl = 'https://qlch-vanlanh.web.app/info/tra-gop';
+    const canonicalUrl = `${SITE_URL}/info/tra-gop`;
     const articleSchema = {
         '@context': 'https://schema.org',
         '@type': 'Article',
@@ -16,8 +18,8 @@ export default function TraGopPage() {
         '@context': 'https://schema.org',
         '@type': 'BreadcrumbList',
         itemListElement: [
-            { '@type': 'ListItem', position: 1, name: 'Trang chủ', item: 'https://qlch-vanlanh.web.app/' },
-            { '@type': 'ListItem', position: 2, name: 'Thông tin', item: 'https://qlch-vanlanh.web.app/info/tra-gop' },
+            { '@type': 'ListItem', position: 1, name: 'Trang chủ', item: `${SITE_URL}/` },
+            { '@type': 'ListItem', position: 2, name: 'Thông tin', item: `${SITE_URL}/info/tra-gop` },
             { '@type': 'ListItem', position: 3, name: 'Trả góp', item: canonicalUrl },
         ],
     };

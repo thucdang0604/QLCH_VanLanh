@@ -1,8 +1,10 @@
 'use client';
+import { SITE_URL } from "@/lib/constants";
+
 export default function ChinhSachBaoMatPage() {
     const seoTitle = 'Chính sách bảo mật | Văn Lành Service';
     const seoDescription = 'Chính sách bảo mật thông tin khách hàng tại Văn Lành Service: mục đích thu thập, cam kết bảo mật và quyền lợi của khách hàng. Liên hệ hotline khi cần hỗ trợ.';
-    const canonicalUrl = 'https://qlch-vanlanh.web.app/info/chinh-sach-bao-mat';
+    const canonicalUrl = `${SITE_URL}/info/chinh-sach-bao-mat`;
     const articleSchema = {
         '@context': 'https://schema.org',
         '@type': 'Article',
@@ -16,8 +18,8 @@ export default function ChinhSachBaoMatPage() {
         '@context': 'https://schema.org',
         '@type': 'BreadcrumbList',
         itemListElement: [
-            { '@type': 'ListItem', position: 1, name: 'Trang chủ', item: 'https://qlch-vanlanh.web.app/' },
-            { '@type': 'ListItem', position: 2, name: 'Thông tin', item: 'https://qlch-vanlanh.web.app/info/chinh-sach-bao-mat' },
+            { '@type': 'ListItem', position: 1, name: 'Trang chủ', item: `${SITE_URL}/` },
+            { '@type': 'ListItem', position: 2, name: 'Thông tin', item: `${SITE_URL}/info/chinh-sach-bao-mat` },
             { '@type': 'ListItem', position: 3, name: 'Chính sách bảo mật', item: canonicalUrl },
         ],
     };

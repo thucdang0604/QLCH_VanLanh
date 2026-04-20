@@ -19,6 +19,25 @@ export interface ReceiptConfig {
     notes: string[];
     footerText: string;
     complaintHotline: string;
+    /**
+     * Optional invoice configuration (used by `PrintableRepairInvoice`).
+     * Stored together in `system_config/receipt` for convenience/backward-compat.
+     */
+    invoice?: {
+        title?: string;
+        showCustomerInfo?: boolean;
+        showDeviceInfo?: boolean;
+        showImei?: boolean;
+        showIssueDescription?: boolean;
+        showPartsUsed?: boolean;
+        showCostBreakdown?: boolean;
+        showPaymentNote?: boolean;
+        showSignatures?: boolean;
+        footerText?: string;
+        complaintHotline?: string;
+        maxWidthPx?: number;
+        baseFontSizePx?: number;
+    };
 }
 
 const defaultReceiptConfig: ReceiptConfig = {

@@ -1,15 +1,18 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { DEFAULT_CONFIG } from '@/lib/ConfigContext';
+import { requireAdmin } from '@/lib/apiAuth';
 
 /**
  * POST /api/seed-config
  * Seeds the system_config/main_settings document with default values.
  * Only writes if the document does not already exist.
  */
-export async function POST() {
+export async function POST(request: NextRequest) {
     try {
+        await requireAdmin(request);
+
         const docRef = doc(db, 'system_config', 'main_settings');
         const existing = await getDoc(docRef);
 
@@ -31,17 +34,20 @@ export async function POST() {
             success: true,
             message: 'Default config seeded successfully!',
         });
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error('Seed config error:', error);
+        const message = error instanceof Error ? error.message : 'Unknown error';
         return NextResponse.json(
-            { success: false, error: error.message },
-            { status: 500 }
+            { success: false, error: message },
+            { status: message.toLowerCase().includes('forbidden') ? 403 : message.toLowerCase().includes('missing authorization') ? 401 : 500 }
         );
     }
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
     try {
+        await requireAdmin(request);
+
         const docRef = doc(db, 'system_config', 'main_settings');
         const snapshot = await getDoc(docRef);
 
@@ -49,10 +55,11 @@ export async function GET() {
             exists: snapshot.exists(),
             data: snapshot.exists() ? snapshot.data() : null,
         });
-    } catch (error: any) {
+    } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
         return NextResponse.json(
-            { success: false, error: error.message },
-            { status: 500 }
+            { success: false, error: message },
+            { status: message.toLowerCase().includes('forbidden') ? 403 : message.toLowerCase().includes('missing authorization') ? 401 : 500 }
         );
     }
 }

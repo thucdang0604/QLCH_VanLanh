@@ -1,24 +1,26 @@
 {
-    "rules": {
-        "chats": {
-            "$roomId": {
-                "info": {
-                    ".read": true,
-                    ".write": true
-                },
-                "messages": {
-                    ".read": true,
-                    ".write": true,
-                    "$messageId": {
-                        ".validate": "newData.hasChildren(['text', 'senderId', 'senderType', 'timestamp'])"
-                    }
-                }
-            },
-            ".read": true
+  "rules": {
+    "chats": {
+      "$roomId": {
+        ".read": true,
+        ".write": true,
+        "info": {
+          ".validate": "newData.hasChildren(['displayName']) || newData.hasChildren(['lastMessage']) || newData.hasChildren(['botActive']) || newData.hasChildren(['hasUnread'])"
         },
-        "online_users": {
-            ".read": true,
-            ".write": true
+        "messages": {
+          "$messageId": {
+            ".validate": "newData.hasChildren(['text', 'senderId', 'senderType', 'timestamp'])"
+          }
         }
+      },
+      ".read": "auth != null"
+    },
+    "online_users": {
+      ".read": "auth != null",
+      "$sessionId": {
+        ".write": true,
+        ".validate": "!newData.exists() || (newData.hasChild('timestamp') && newData.child('timestamp').isNumber())"
+      }
     }
+  }
 }

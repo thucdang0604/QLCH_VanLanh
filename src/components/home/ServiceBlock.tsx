@@ -64,7 +64,7 @@ const colorPalette = [
 ];
 
 export default function ServiceBlock() {
-    const [services, setServices] = useState<any[]>([]);
+    const [services, setServices] = useState<Array<Service & { color?: string; bgColor?: string }>>([]);
     const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
@@ -82,12 +82,21 @@ export default function ServiceBlock() {
                     setServices(demoServices);
                 } else {
                     const all = snapshot.docs.map((doc, index) => {
-                        const data = doc.data();
+                        const data = doc.data() as Partial<Service>;
                         const colors = colorPalette[index % colorPalette.length];
-                        return { id: doc.id, ...data, icon: data.icon || 'Wrench', ...colors };
+                        return {
+                            id: doc.id,
+                            name: data.name ?? 'Dịch vụ',
+                            description: data.description ?? '',
+                            price: data.price ?? '',
+                            imageUrl: data.imageUrl,
+                            icon: data.icon || 'Wrench',
+                            isActive: data.isActive,
+                            ...colors,
+                        };
                     });
                     // Client-side: lọc active nếu trường tồn tại
-                    const active = all.filter(s => (s as any).isActive !== false);
+                    const active = all.filter(s => s.isActive !== false);
                     setServices(active.length > 0 ? active : demoServices);
                 }
                 setIsLoading(false);
@@ -132,7 +141,7 @@ export default function ServiceBlock() {
             ) : (
                 <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
                     {services.map((service) => {
-                        const IconComponent = iconMap[service.icon] || Wrench;
+                        const IconComponent = iconMap[service.icon ?? 'Wrench'] || Wrench;
                         return (
                             <Link
                                 key={service.id}

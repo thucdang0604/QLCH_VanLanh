@@ -10,7 +10,11 @@ import {
     doc,
     updateDoc,
     where,
-    Timestamp
+    Timestamp,
+    limit,
+    startAfter,
+    getDocs,
+    DocumentSnapshot
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import {
@@ -29,6 +33,11 @@ import {
     Wrench
 } from 'lucide-react';
 import { useConfig } from '@/lib/ConfigContext';
+import type { FirestoreDateValue } from '@/lib/types';
+import type { LucideIcon } from 'lucide-react';
+import { toastError } from '@/lib/toast';
+import { useClientPagination } from '@/lib/useClientPagination';
+import PaginationBar from '@/components/admin/PaginationBar';
 
 // Appointment Interface
 interface Appointment {
@@ -41,10 +50,10 @@ interface Appointment {
     status: 'pending' | 'confirmed' | 'completed' | 'cancelled';
     serviceName?: string;
     serviceId?: string;
-    createdAt: any;
+    createdAt: FirestoreDateValue;
 }
 
-const statusConfig: Record<string, { color: string; label: string; icon: any }> = {
+const statusConfig: Record<string, { color: string; label: string; icon: LucideIcon }> = {
     pending: { color: 'bg-yellow-100 text-yellow-700 border-yellow-200', label: 'Chờ xác nhận', icon: Clock },
     confirmed: { color: 'bg-blue-100 text-blue-700 border-blue-200', label: 'Đã xác nhận', icon: CheckCircle2 },
     completed: { color: 'bg-green-100 text-green-700 border-green-200', label: 'Hoàn thành', icon: CheckCircle2 },
@@ -65,20 +74,78 @@ export default function AppointmentsPage() {
     const [statusFilter, setStatusFilter] = useState('');
     const [storeFilter, setStoreFilter] = useState('');
 
-    // Fetch appointments (Real-time)
+    const [lastDoc, setLastDoc] = useState<DocumentSnapshot | null>(null);
+    const [hasMore, setHasMore] = useState(true);
+    const [isSearchingDB, setIsSearchingDB] = useState(false);
+
+    // Fetch appointments (Real-time with limit)
     useEffect(() => {
-        const q = query(collection(db, 'appointments'), orderBy('createdAt', 'desc'));
+        const q = query(collection(db, 'appointments'), orderBy('createdAt', 'desc'), limit(50));
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const data = snapshot.docs.map((doc) => ({
                 id: doc.id,
                 ...doc.data(),
             })) as Appointment[];
             setAppointments(data);
+            setLastDoc(snapshot.docs[snapshot.docs.length - 1] || null);
+            setHasMore(snapshot.docs.length === 50);
+            setLoading(false);
+        }, (error) => {
+            console.error('Fetch errors:', error);
             setLoading(false);
         });
 
         return () => unsubscribe();
     }, []);
+
+    const loadMoreData = async () => {
+        if (!lastDoc || !hasMore) return;
+        setLoading(true);
+        const q = query(collection(db, 'appointments'), orderBy('createdAt', 'desc'), startAfter(lastDoc), limit(50));
+        const snap = await getDocs(q);
+        
+        if (!snap.empty) {
+            const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Appointment[];
+            setAppointments(prev => {
+                const existingIds = new Set(prev.map(p => p.id));
+                const newItems = data.filter(d => !existingIds.has(d.id));
+                return [...prev, ...newItems];
+            });
+            setLastDoc(snap.docs[snap.docs.length - 1]);
+            setHasMore(snap.docs.length === 50);
+        } else {
+            setHasMore(false);
+        }
+        setLoading(false);
+    };
+
+    const searchInDatabase = async () => {
+        if (!searchQuery.trim()) {
+            alert('Vui lòng nhập số điện thoại hoặc tên để tìm trên máy chủ.');
+            return;
+        }
+        setIsSearchingDB(true);
+        try {
+            // Find by phone
+            const qPhone = query(collection(db, 'appointments'), where('phone', '==', searchQuery.trim()));
+            const snap = await getDocs(qPhone);
+            
+            if (!snap.empty) {
+                const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Appointment[];
+                setAppointments(prev => {
+                    const existingIds = new Set(prev.map(p => p.id));
+                    const newItems = data.filter(d => !existingIds.has(d.id));
+                    return [...prev, ...newItems];
+                });
+            } else {
+                alert('Không tìm thấy dữ liệu trên máy chủ!');
+            }
+        } catch (e) {
+            console.error('Lỗi tìm kiếm DB', e);
+            alert('Lỗi tìm kiếm!');
+        }
+        setIsSearchingDB(false);
+    };
 
     const handleUpdateStatus = async (id: string, newStatus: string) => {
         try {
@@ -87,7 +154,7 @@ export default function AppointmentsPage() {
             });
         } catch (error) {
             console.error('Error updating status:', error);
-            alert('Có lỗi xảy ra khi cập nhật trạng thái.');
+            toastError('Có lỗi xảy ra khi cập nhật trạng thái.');
         }
     };
 
@@ -105,6 +172,11 @@ export default function AppointmentsPage() {
         const branch = config.store_branches?.find(b => b.id === storeId);
         return branch ? branch.name : storeId;
     };
+
+    const { paginatedData: paginatedAppointments, currentPage, totalPages, pageSize, totalFiltered, setPage, setPageSize, resetPage } = useClientPagination(filteredAppointments, 20);
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    useEffect(() => { resetPage(); }, [searchQuery, statusFilter, storeFilter]);
 
     if (loading) {
         return (
@@ -135,7 +207,19 @@ export default function AppointmentsPage() {
                         className="w-full h-10 pl-10 pr-4 border rounded-lg focus:border-orange-500 focus:outline-none"
                     />
                 </div>
-                <div>
+                {searchQuery.trim().length > 0 && filteredAppointments.length === 0 && (
+                    <div className="md:col-span-1">
+                        <button 
+                            onClick={searchInDatabase}
+                            disabled={isSearchingDB}
+                            className="w-full h-10 px-4 bg-orange-100 text-orange-600 rounded-lg hover:bg-orange-200 transition-colors flex justify-center items-center gap-2 font-medium"
+                        >
+                            {isSearchingDB ? <Loader2 className="animate-spin" size={18} /> : <Search size={18} />}
+                            Tìm Server
+                        </button>
+                    </div>
+                )}
+                <div className={searchQuery.trim().length > 0 && filteredAppointments.length === 0 ? "md:col-span-2 grid grid-cols-2 gap-4" : "md:col-span-2 grid grid-cols-2 gap-4"}>
                     <select
                         value={statusFilter}
                         onChange={(e) => setStatusFilter(e.target.value)}
@@ -163,8 +247,83 @@ export default function AppointmentsPage() {
 
             {/* List */}
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-                <div className="overflow-x-auto">
-                    <table className="w-full">
+                {/* Mobile Card View */}
+                <div className="block md:hidden divide-y divide-gray-100">
+                    {filteredAppointments.length === 0 ? (
+                        <div className="px-6 py-12 text-center text-gray-500">
+                            Không tìm thấy lịch hẹn nào.
+                        </div>
+                    ) : (
+                        paginatedAppointments.map((app) => {
+                            const status = statusConfig[app.status] || statusConfig.pending;
+                            return (
+                                <div key={app.id} className={`p-4 space-y-3 hover:bg-gray-50 transition-colors ${app.status === 'completed' ? 'opacity-60' : ''}`}>
+                                    <div className="flex items-start justify-between">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 font-bold shrink-0">
+                                                {app.fullName.charAt(0).toUpperCase()}
+                                            </div>
+                                            <div>
+                                                <p className="font-medium text-gray-900 text-sm">{app.fullName}</p>
+                                                <a href={`tel:${app.phone}`} className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 mt-0.5 transition-colors">
+                                                    <Phone size={12} />
+                                                    {app.phone}
+                                                </a>
+                                            </div>
+                                        </div>
+                                        <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium border ${status.color}`}>
+                                            <status.icon size={12} />
+                                            {status.label}
+                                        </span>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2 text-sm bg-gray-50/80 p-2.5 rounded-lg">
+                                        <div>
+                                            <p className="text-[10px] text-gray-400 uppercase font-medium">Lịch hẹn</p>
+                                            <p className="text-gray-900 font-medium text-xs">{new Date(app.date).toLocaleDateString('vi-VN')}</p>
+                                            <p className="text-xs text-gray-500">{timeSlotLabels[app.timeSlot] || app.timeSlot}</p>
+                                        </div>
+                                        <div>
+                                            <p className="text-[10px] text-gray-400 uppercase font-medium">Chi nhánh</p>
+                                            <p className="text-xs text-gray-700">{getStoreName(app.store)}</p>
+                                        </div>
+                                    </div>
+                                    {app.serviceName && (
+                                        <div>
+                                            <span className="inline-flex items-center gap-1 px-2 py-1 bg-orange-50 text-orange-700 rounded-lg text-xs font-medium border border-orange-100">
+                                                <Wrench size={12} />
+                                                {app.serviceName}
+                                            </span>
+                                        </div>
+                                    )}
+                                    {app.status !== 'completed' && (
+                                        <div className="flex items-center gap-2">
+                                            <select
+                                                value={app.status}
+                                                onChange={(e) => handleUpdateStatus(app.id, e.target.value)}
+                                                className="flex-1 text-sm border-gray-300 rounded-lg py-2 pl-3 pr-8 bg-white border"
+                                            >
+                                                {Object.entries(statusConfig).map(([key, value]) => (
+                                                    <option key={key} value={key}>{value.label}</option>
+                                                ))}
+                                            </select>
+                                            {app.status === 'confirmed' && (
+                                                <Link
+                                                    href={`/admin/repairs?appointmentId=${app.id}`}
+                                                    className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors whitespace-nowrap"
+                                                >
+                                                    <Wrench size={12} /> Tạo phiếu
+                                                </Link>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })
+                    )}
+                </div>
+                {/* Desktop Table View */}
+                <div className="hidden md:block overflow-x-auto">
+                    <table className="w-full min-w-[1000px]">
                         <thead className="bg-gray-50 border-b">
                             <tr>
                                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Khách hàng</th>
@@ -183,7 +342,7 @@ export default function AppointmentsPage() {
                                     </td>
                                 </tr>
                             ) : (
-                                filteredAppointments.map((app) => {
+                                paginatedAppointments.map((app) => {
                                     const status = statusConfig[app.status] || statusConfig.pending;
                                     return (
                                         <tr key={app.id} className={`hover:bg-gray-50 transition-colors ${app.status === 'completed' ? 'opacity-60' : ''}`}>
@@ -194,10 +353,10 @@ export default function AppointmentsPage() {
                                                     </div>
                                                     <div>
                                                         <p className="font-medium text-gray-900">{app.fullName}</p>
-                                                        <div className="flex items-center gap-1 text-xs text-gray-500 mt-1">
+                                                        <a href={`tel:${app.phone}`} className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 mt-1 transition-colors">
                                                             <Phone size={12} />
                                                             {app.phone}
-                                                        </div>
+                                                        </a>
                                                     </div>
                                                 </div>
                                             </td>
@@ -269,6 +428,27 @@ export default function AppointmentsPage() {
                         </tbody>
                     </table>
                 </div>
+                <PaginationBar
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    pageSize={pageSize}
+                    totalFiltered={totalFiltered}
+                    totalAll={appointments.length}
+                    onPageChange={setPage}
+                    onPageSizeChange={setPageSize}
+                    entityLabel="lịch hẹn"
+                />
+                
+                {hasMore && !searchQuery && (
+                    <div className="p-4 border-t border-gray-100 flex justify-center">
+                        <button 
+                            onClick={loadMoreData}
+                            className="px-6 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-lg transition-colors flex items-center gap-2"
+                        >
+                            Tải thêm lịch sử cũ
+                        </button>
+                    </div>
+                )}
             </div>
         </div>
     );

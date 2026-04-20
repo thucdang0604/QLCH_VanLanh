@@ -2,11 +2,10 @@
 
 import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { collection, query, where, getDocs, DocumentData } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
 import ServiceCard from '@/components/home/ServiceCard';
 import { Search, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
+import { SITE_URL } from "@/lib/constants";
 
 function SkeletonCard() {
     return (
@@ -24,12 +23,12 @@ function SkeletonCard() {
 function SearchResults() {
     const searchParams = useSearchParams();
     const searchQuery = searchParams.get('q') || '';
-    const canonicalUrl = `https://qlch-vanlanh.web.app/search${searchQuery ? `?q=${encodeURIComponent(searchQuery)}` : ''}`;
+    const canonicalUrl = `${SITE_URL}/search${searchQuery ? `?q=${encodeURIComponent(searchQuery)}` : ''}`;
     const seoTitle = searchQuery ? `Tìm kiếm: "${searchQuery}" | Văn Lành Service` : 'Tìm kiếm | Văn Lành Service';
     const seoDescription = searchQuery
         ? `Kết quả tìm kiếm cho "${searchQuery}" tại Văn Lành Service.`
         : 'Tìm kiếm sản phẩm và dịch vụ tại Văn Lành Service.';
-    const [results, setResults] = useState<(DocumentData & { id: string })[]>([]);
+    const [results, setResults] = useState<(Record<string, any> & { id: string })[]>([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
@@ -42,26 +41,16 @@ function SearchResults() {
         const fetchResults = async () => {
             setLoading(true);
             try {
-                // Fetch both products and services and filter client-side for keywords
-                const [productsSnap, servicesSnap] = await Promise.all([
-                    getDocs(query(collection(db, 'products'), where('status', '==', 'active'))),
-                    getDocs(query(collection(db, 'services'), where('isActive', '!=', false)))
-                ]);
-
-                const keyword = searchQuery.toLowerCase();
-
-                const products = productsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                const services = servicesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
-                const combined = [...products, ...services].filter((item: any) => {
-                    const name = (item.name || item.title || '').toLowerCase();
-                    const category = (item.category || '').toLowerCase();
-                    const brand = (item.brand || '').toLowerCase();
-                    const description = (item.description || '').toLowerCase();
-                    return name.includes(keyword) || category.includes(keyword) || brand.includes(keyword) || description.includes(keyword);
-                });
-
-                setResults(combined);
+                const res = await fetch(`/api/search?q=${encodeURIComponent(searchQuery.trim())}`);
+                if (!res.ok) {
+                    if (res.status === 429) {
+                        alert('Bạn đang tìm kiếm quá nhanh. Vui lòng thử lại sau.');
+                    }
+                    setResults([]);
+                    return;
+                }
+                const data = await res.json();
+                setResults(data.results || []);
             } catch (error) {
                 console.error('Search error:', error);
             } finally {
@@ -114,26 +103,21 @@ function SearchResults() {
                 ) : (
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
                         {results.map((item) => (
-                            <Link
+                            <ServiceCard
                                 key={item.id}
-                                href={`/product/${item.id}`}
-                                className="block"
-                            >
-                                <ServiceCard
-                                    id={item.id}
-                                    name={item.name || item.title || ''}
-                                    image={item.image || item.imageUrl || ''}
-                                    price={item.price}
-                                    price_original={item.price_original}
-                                    price_promo={item.price_promo}
-                                    warranty_text={item.warranty_text}
-                                    repair_time={item.repair_time}
-                                    tags={item.tags || []}
-                                    rating={item.rating}
-                                    reviewCount={item.reviewCount}
-                                    isFlashSale={item.isFlashSale}
-                                />
-                            </Link>
+                                id={item.id}
+                                name={item.name || item.title || ''}
+                                image={item.image || item.imageUrl || ''}
+                                price={item.price}
+                                price_original={item.price_original}
+                                price_promo={item.price_promo}
+                                warranty_text={item.warranty_text}
+                                repair_time={item.repair_time}
+                                tags={item.tags || []}
+                                rating={item.rating}
+                                reviewCount={item.reviewCount}
+                                isFlashSale={item.isFlashSale}
+                            />
                         ))}
                     </div>
                 )}

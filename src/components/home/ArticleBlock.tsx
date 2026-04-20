@@ -13,11 +13,22 @@ const typeConfig: Record<string, { label: string; color: string }> = {
     Tips: { label: 'Mẹo hay', color: 'bg-green-100 text-green-700' },
 };
 
-function formatDate(d: any): string {
+type ArticleDoc = {
+    id: string;
+    title?: string;
+    type?: string;
+    thumbnail?: string;
+    createdAt?: unknown;
+};
+
+function formatDate(d: unknown): string {
     if (!d) return '';
     if (d instanceof Timestamp) return d.toDate().toLocaleDateString('vi-VN');
-    if (d.seconds) return new Date(d.seconds * 1000).toLocaleDateString('vi-VN');
-    return new Date(d).toLocaleDateString('vi-VN');
+    if (typeof d === 'object' && d !== null && 'seconds' in d) {
+        const seconds = (d as { seconds?: unknown }).seconds;
+        if (typeof seconds === 'number') return new Date(seconds * 1000).toLocaleDateString('vi-VN');
+    }
+    return new Date(d as string | number | Date).toLocaleDateString('vi-VN');
 }
 
 function ArticleSkeleton() {
@@ -41,7 +52,7 @@ export default function ArticleBlock() {
         limit(4),
     ], []);
 
-    const { data: articles, loading } = useFirestoreCollection<any>('articles', constraints);
+    const { data: articles, loading } = useFirestoreCollection<ArticleDoc>('articles', constraints);
 
     // Don't render section if no articles and not loading
     if (!loading && articles.length === 0) return null;
@@ -49,7 +60,7 @@ export default function ArticleBlock() {
     return (
         <section className="py-2">
             <div className="max-w-[1200px] mx-auto px-2 md:px-4">
-                <div className="bg-white rounded-xl shadow-lg p-4 sm:p-6">
+                <div className="rounded-xl shadow-lg p-4 sm:p-6" style={{ backgroundColor: 'var(--card-bg, white)' }}>
                     {/* Header */}
                     <div className="flex items-center justify-between mb-5">
                         <h2 className="text-xl font-bold text-dark flex items-center gap-2">
@@ -71,8 +82,9 @@ export default function ArticleBlock() {
                         </div>
                     ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                            {articles.map((article: any) => {
-                                const typeInfo = typeConfig[article.type] || { label: article.type, color: 'bg-gray-100 text-gray-600' };
+                            {articles.map((article) => {
+                                const articleType = article.type || 'News';
+                                const typeInfo = typeConfig[articleType] || { label: articleType, color: 'bg-gray-100 text-gray-600' };
 
                                 return (
                                     <Link
@@ -83,10 +95,13 @@ export default function ArticleBlock() {
                                         {/* Thumbnail */}
                                         <div className="relative aspect-[16/9] bg-gray-50 overflow-hidden">
                                             {article.thumbnail ? (
-                                                <img
+                                                <Image
                                                     src={article.thumbnail}
-                                                    alt={article.title}
-                                                    className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-500"
+                                                    alt={article.title || 'Bài viết'}
+                                                    fill
+                                                    sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+                                                    quality={75}
+                                                    className="object-contain group-hover:scale-105 transition-transform duration-500"
                                                 />
                                             ) : (
                                                 <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-orange-50 to-red-50">
@@ -102,7 +117,7 @@ export default function ArticleBlock() {
                                         {/* Content */}
                                         <div className="p-3">
                                             <h3 className="text-sm font-bold text-gray-900 line-clamp-2 group-hover:text-copper transition-colors mb-2 min-h-[40px]">
-                                                {article.title}
+                                                {article.title || 'Bài viết'}
                                             </h3>
                                             <div className="flex items-center gap-1 text-[11px] text-gray-400">
                                                 <Clock size={11} />

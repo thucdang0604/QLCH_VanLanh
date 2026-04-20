@@ -11,6 +11,9 @@ import { collection, query, orderBy, onSnapshot, doc, updateDoc, deleteDoc } fro
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
 import type { Review } from '@/lib/types';
+import { toastError } from '@/lib/toast';
+import { useClientPagination } from '@/lib/useClientPagination';
+import PaginationBar from '@/components/admin/PaginationBar';
 
 export default function AdminReviewsPage() {
     const { user } = useAuth();
@@ -48,7 +51,7 @@ export default function AdminReviewsPage() {
             });
         } catch (error) {
             console.error('Error approving review:', error);
-            alert('Lỗi khi duyệt đánh giá');
+            toastError('Lỗi khi duyệt đánh giá');
         }
     };
 
@@ -68,13 +71,14 @@ export default function AdminReviewsPage() {
             }
         } catch (error) {
             console.error('Error rejecting review:', error);
-            alert('Lỗi thao tác');
+            toastError('Lỗi thao tác');
         }
     };
 
-    const formatDate = (timestamp: any) => {
+    const formatDate = (timestamp: unknown) => {
         if (!timestamp) return '';
-        const d = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+        const maybe = timestamp as { toDate?: () => Date };
+        const d = typeof maybe?.toDate === 'function' ? maybe.toDate() : new Date(timestamp as string | number | Date);
         return new Intl.DateTimeFormat('vi-VN', {
             day: '2-digit', month: '2-digit', year: 'numeric',
             hour: '2-digit', minute: '2-digit'
@@ -97,6 +101,11 @@ export default function AdminReviewsPage() {
     });
 
     const pendingCount = reviews.filter(r => r.status === 'pending').length;
+
+    const { paginatedData: paginatedReviews, currentPage, totalPages, pageSize, totalFiltered, setPage, setPageSize, resetPage } = useClientPagination(filteredReviews, 20);
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    useEffect(() => { resetPage(); }, [searchTerm, filter]);
 
     if (loading) {
         return (
@@ -163,7 +172,75 @@ export default function AdminReviewsPage() {
 
             {/* List */}
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-                <div className="overflow-x-auto">
+                {/* Mobile Card View */}
+                <div className="block md:hidden divide-y divide-gray-100">
+                    {filteredReviews.length === 0 ? (
+                        <div className="p-8 text-center text-gray-500">
+                            Không tìm thấy đánh giá nào
+                        </div>
+                    ) : (
+                        paginatedReviews.map((review) => (
+                            <div key={review.id} className="p-4 space-y-3 hover:bg-gray-50/50 transition-colors">
+                                <div className="flex items-start justify-between">
+                                    <div>
+                                        <p className="font-bold text-gray-900 text-sm">{review.customerName}</p>
+                                        <p className="text-xs font-mono text-gray-500 mt-0.5">{review.phone}</p>
+                                        <p className="text-xs text-gray-400 mt-0.5">{formatDate(review.createdAt)}</p>
+                                    </div>
+                                    <div className="text-right">
+                                        <div className="flex gap-0.5">
+                                            {[...Array(5)].map((_, i) => (
+                                                <Star key={i} size={14} className={i < review.rating ? "fill-orange-400 text-orange-400" : "fill-gray-200 text-gray-200"} />
+                                            ))}
+                                        </div>
+                                        <p className="text-xs font-semibold text-orange-600 mt-0.5">{review.rating}/5</p>
+                                    </div>
+                                </div>
+                                <div className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider bg-gray-100 text-gray-600 px-2 py-1 rounded">
+                                    {review.type === 'repair' ? 'Phiếu sửa chữa' : 'Đơn hàng'}
+                                    <span className="text-gray-400">#{review.referenceId}</span>
+                                </div>
+                                {review.content && (
+                                    <p className="text-sm text-gray-700 whitespace-pre-line line-clamp-3">{review.content}</p>
+                                )}
+                                {review.images && review.images.length > 0 && (
+                                    <div className="flex flex-wrap gap-2">
+                                        {review.images.map((img, idx) => (
+                                            <a key={idx} href={img} target="_blank" rel="noreferrer" className="block w-14 h-14 rounded-lg border border-gray-200 overflow-hidden">
+                                                <img src={img} alt="review" className="w-full h-full object-cover" loading="lazy" />
+                                            </a>
+                                        ))}
+                                    </div>
+                                )}
+                                <div className="flex items-center justify-between pt-1">
+                                    {review.status === 'approved' ? (
+                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                                            <CheckCircle2 size={12} /> Đã hiển thị
+                                        </span>
+                                    ) : (
+                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-700">
+                                            Chờ duyệt
+                                        </span>
+                                    )}
+                                    <div className="flex gap-2">
+                                        {review.status === 'pending' ? (
+                                            <>
+                                                <button onClick={() => handleApprove(review.id)} className="px-3 py-1.5 bg-green-500 text-white text-xs font-bold rounded-lg hover:bg-green-600">Duyệt</button>
+                                                <button onClick={() => handleReject(review.id, review.status)} className="px-3 py-1.5 bg-red-50 text-red-600 text-xs font-bold rounded-lg hover:bg-red-100">Xoá</button>
+                                            </>
+                                        ) : (
+                                            <button onClick={() => handleReject(review.id, review.status)} className="px-3 py-1.5 border border-gray-200 text-gray-600 text-xs font-bold rounded-lg hover:bg-gray-50 inline-flex items-center gap-1.5">
+                                                <Eye size={14} className="opacity-50" /> Ẩn
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </div>
+                {/* Desktop Table View */}
+                <div className="hidden md:block overflow-x-auto">
                     <table className="w-full text-left border-collapse min-w-[800px]">
                         <thead>
                             <tr className="bg-gray-50 border-b border-gray-100">
@@ -182,9 +259,8 @@ export default function AdminReviewsPage() {
                                     </td>
                                 </tr>
                             ) : (
-                                filteredReviews.map((review) => (
+                                paginatedReviews.map((review) => (
                                     <tr key={review.id} className="hover:bg-gray-50/50 transition-colors">
-                                        {/* Customer */}
                                         <td className="p-4 align-top">
                                             <div className="font-bold text-gray-900">{review.customerName}</div>
                                             <div className="text-sm font-mono text-gray-500 mt-1">{review.phone}</div>
@@ -194,48 +270,28 @@ export default function AdminReviewsPage() {
                                                 <span className="text-gray-400">#{review.referenceId}</span>
                                             </div>
                                         </td>
-
-                                        {/* Rating */}
                                         <td className="p-4 align-top">
                                             <div className="flex gap-0.5">
                                                 {[...Array(5)].map((_, i) => (
-                                                    <Star
-                                                        key={i}
-                                                        size={16}
-                                                        className={i < review.rating ? "fill-orange-400 text-orange-400" : "fill-gray-200 text-gray-200"}
-                                                    />
+                                                    <Star key={i} size={16} className={i < review.rating ? "fill-orange-400 text-orange-400" : "fill-gray-200 text-gray-200"} />
                                                 ))}
                                             </div>
-                                            <div className="text-xs font-semibold text-orange-600 mt-1">
-                                                {review.rating}/5 Sao
-                                            </div>
+                                            <div className="text-xs font-semibold text-orange-600 mt-1">{review.rating}/5 Sao</div>
                                         </td>
-
-                                        {/* Content */}
                                         <td className="p-4 align-top">
                                             <p className="text-sm text-gray-700 whitespace-pre-line mb-3">
                                                 {review.content || <span className="text-gray-400 italic">Không có nội dung rext</span>}
                                             </p>
-
-                                            {/* Attached Images */}
                                             {review.images && review.images.length > 0 && (
                                                 <div className="flex flex-wrap gap-2">
                                                     {review.images.map((img, idx) => (
-                                                        <a
-                                                            key={idx}
-                                                            href={img}
-                                                            target="_blank"
-                                                            rel="noreferrer"
-                                                            className="block w-14 h-14 rounded-lg border border-gray-200 overflow-hidden hover:opacity-80 transition-opacity"
-                                                        >
+                                                        <a key={idx} href={img} target="_blank" rel="noreferrer" className="block w-14 h-14 rounded-lg border border-gray-200 overflow-hidden hover:opacity-80 transition-opacity">
                                                             <img src={img} alt="review attachment" className="w-full h-full object-cover" loading="lazy" />
                                                         </a>
                                                     ))}
                                                 </div>
                                             )}
                                         </td>
-
-                                        {/* Status */}
                                         <td className="p-4 align-top">
                                             {review.status === 'approved' ? (
                                                 <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">
@@ -247,30 +303,14 @@ export default function AdminReviewsPage() {
                                                 </span>
                                             )}
                                         </td>
-
-                                        {/* Actions */}
                                         <td className="p-4 align-top text-right">
                                             {review.status === 'pending' ? (
                                                 <div className="flex flex-col gap-2 items-end">
-                                                    <button
-                                                        onClick={() => handleApprove(review.id)}
-                                                        className="px-3 py-1.5 bg-green-500 text-white text-xs font-bold rounded-lg hover:bg-green-600 transition-colors w-full sm:w-auto"
-                                                    >
-                                                        Duyệt hiển thị
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleReject(review.id, review.status)}
-                                                        className="px-3 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 text-xs font-bold rounded-lg transition-colors w-full sm:w-auto"
-                                                    >
-                                                        Xoá rác
-                                                    </button>
+                                                    <button onClick={() => handleApprove(review.id)} className="px-3 py-1.5 bg-green-500 text-white text-xs font-bold rounded-lg hover:bg-green-600 transition-colors w-full sm:w-auto">Duyệt hiển thị</button>
+                                                    <button onClick={() => handleReject(review.id, review.status)} className="px-3 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 text-xs font-bold rounded-lg transition-colors w-full sm:w-auto">Xoá rác</button>
                                                 </div>
                                             ) : (
-                                                <button
-                                                    onClick={() => handleReject(review.id, review.status)}
-                                                    className="px-3 py-1.5 border border-gray-200 text-gray-600 hover:bg-gray-50 text-xs font-bold rounded-lg transition-colors inline-flex items-center gap-1.5"
-                                                    title="Ẩn khỏi trang chủ để kiểm tra lại"
-                                                >
+                                                <button onClick={() => handleReject(review.id, review.status)} className="px-3 py-1.5 border border-gray-200 text-gray-600 hover:bg-gray-50 text-xs font-bold rounded-lg transition-colors inline-flex items-center gap-1.5" title="Ẩn khỏi trang chủ để kiểm tra lại">
                                                     <Eye size={14} className="opacity-50" /> Ẩn bình luận
                                                 </button>
                                             )}
@@ -281,12 +321,38 @@ export default function AdminReviewsPage() {
                         </tbody>
                     </table>
                 </div>
+                <PaginationBar
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    pageSize={pageSize}
+                    totalFiltered={totalFiltered}
+                    totalAll={reviews.length}
+                    onPageChange={setPage}
+                    onPageSizeChange={setPageSize}
+                    entityLabel="đánh giá"
+                />
             </div>
         </div>
     );
 }
 
 // Inline missing icon
-function Clock(props: any) {
-    return <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>;
+function Clock({ size = 24, width, height, ...props }: React.SVGProps<SVGSVGElement> & { size?: number }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width={width ?? size}
+            height={height ?? size}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            {...props}
+        >
+            <circle cx="12" cy="12" r="10" />
+            <polyline points="12 6 12 12 16 14" />
+        </svg>
+    );
 }

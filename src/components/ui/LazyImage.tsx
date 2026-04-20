@@ -7,6 +7,8 @@ import { Skeleton } from './Skeleton';
 interface LazyImageProps extends Omit<ImageProps, 'onLoad'> {
     fallback?: React.ReactNode;
     wrapperClassName?: string;
+    /** Responsive sizes hint - giúp trình duyệt chọn đúng kích thước ảnh tải về */
+    sizes?: string;
 }
 
 export function LazyImage({
@@ -48,7 +50,8 @@ export function LazyImage({
                         setIsLoading(false);
                         setHasError(true);
                     }}
-                    loading="lazy"
+                    loading={props.priority ? undefined : 'lazy'}
+                    sizes={props.sizes || '(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw'}
                     {...props}
                 />
             )}
@@ -74,6 +77,7 @@ export function ProductThumbnail({
             height={300}
             className={`object-cover ${className}`}
             wrapperClassName="aspect-square"
+            sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, (max-width: 1024px) 25vw, 20vw"
         />
     );
 }

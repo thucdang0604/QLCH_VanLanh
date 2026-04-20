@@ -1,21 +1,24 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import {
     Search, ShoppingCart, Phone, Menu, X, MapPin,
     Smartphone, Monitor, Wrench, Headphones as HeadphonesIcon,
     ClipboardList,
+    Tablet,
 } from 'lucide-react';
 import { useConfig } from '@/lib/ConfigContext';
 import { useCart } from '@/lib/CartContext';
 
-/* ── Main navigation — 4 items only ── */
+/* ── Main navigation ── */
 const mainNav = [
+    { label: 'Sửa chữa - Bảo hành', href: '/category/sua-chua', icon: Wrench },
+    { label: 'Sửa iPad', href: '/category/sua-ipad', icon: Tablet },
     { label: 'Máy mới', href: '/category/may-moi', icon: Smartphone },
     { label: 'Máy cũ giá rẻ', href: '/category/may-cu', icon: Monitor },
-    { label: 'Sửa chữa - Bảo hành', href: '/category/sua-chua', icon: Wrench },
     { label: 'Phụ kiện', href: '/category/phu-kien', icon: HeadphonesIcon },
 ];
 
@@ -23,13 +26,20 @@ export default function Header() {
     const pathname = usePathname();
     const router = useRouter();
     const { config, formatHotline } = useConfig();
-    const { items: cartItems } = useCart();
+    const { items: cartItems, setIsDrawerOpen } = useCart();
     const [searchQuery, setSearchQuery] = useState('');
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+    const [scrolled, setScrolled] = useState(false);
+
+    useEffect(() => {
+        const onScroll = () => setScrolled(window.scrollY > 60);
+        window.addEventListener('scroll', onScroll, { passive: true });
+        return () => window.removeEventListener('scroll', onScroll);
+    }, []);
 
     const mainPhone = config.contact_info?.main_phone || config.store_branches?.[0]?.phone || '0932242026';
     const storeName = config.siteName || 'Văn Lành Services';
-    const cartCount = cartItems.reduce((sum: number, item: any) => sum + (item.quantity || 1), 0);
+    const cartCount = cartItems.reduce((sum: number, item: { quantity?: number }) => sum + (item.quantity || 1), 0);
 
     const handleSearch = (e: React.FormEvent) => {
         e.preventDefault();
@@ -43,106 +53,120 @@ export default function Header() {
     const isActive = (href: string) => pathname?.startsWith(href);
 
     return (
-        <header className="sticky top-0 z-30">
-            {/* Wrapper matches content width: max-w-[1200px] */}
-            <div className="max-w-[1200px] mx-auto px-2 md:px-4">
+        <header className="sticky top-0 z-30 w-full transition-all duration-300">
+            {/* ── Main header bar — full width ── */}
+            <div 
+                className={`w-full border-b border-gray-100 transition-all duration-300 ${scrolled ? 'shadow-md' : ''}`}
+                style={{ backgroundColor: config.headerBg || '#ffffff' }}
+            >
+                <div className="max-w-[1200px] mx-auto">
+                <div className={`flex items-center gap-3 px-4 md:px-4 transition-all duration-300 ${scrolled ? 'h-14' : 'h-20'}`}>
 
-                {/* ── Main header bar (white, rounded) ── */}
-                <div className="bg-white text-gray-800 rounded-b-xl overflow-hidden shadow-md border border-gray-100">
-                    <div className="flex items-center h-20 px-4 gap-3">
-                        {/* Logo — 20% width */}
-                        <Link href="/" className="flex-shrink-0 w-[20%] max-w-[200px]">
-                            {config.logoUrl ? (
-                                <img
-                                    src={config.logoUrl}
-                                    alt={storeName}
-                                    className="h-20 w-auto object-contain"
-                                />
-                            ) : (
-                                <span className="text-lg font-bold text-copper whitespace-nowrap">
-                                    {storeName}
-                                </span>
-                            )}
-                        </Link>
+                    {/* Logo */}
+                    <Link href="/" className="flex-shrink-0">
+                        {config.logoUrl ? (
+                            <Image
+                                src={config.logoUrl}
+                                alt={storeName}
+                                width={160}
+                                height={64}
+                                quality={80}
+                                priority
+                                style={{ width: 'auto' }}
+                                className={`object-contain transition-all duration-300 ${scrolled ? 'h-9' : 'h-16'}`}
+                            />
+                        ) : (
+                            <span className={`font-bold text-copper whitespace-nowrap transition-all duration-300 ${scrolled ? 'text-base' : 'text-lg'}`}>
+                                {storeName}
+                            </span>
+                        )}
+                    </Link>
 
-                        {/* Search — desktop */}
-                        <form onSubmit={handleSearch} className="hidden md:flex flex-1 max-w-md">
-                            <div className="relative w-full">
-                                <input
-                                    type="text"
-                                    placeholder="Tìm sản phẩm, dịch vụ..."
-                                    value={searchQuery}
-                                    onChange={(e) => setSearchQuery(e.target.value)}
-                                    className="w-full h-10 pl-3 pr-9 rounded-lg text-sm text-gray-800 bg-gray-50 border border-gray-200 focus:outline-none focus:ring-2 focus:ring-copper/30 focus:border-copper transition-colors"
-                                />
-                                <button type="submit" className="absolute right-0 top-0 h-10 w-10 flex items-center justify-center text-gray-400 hover:text-copper transition-colors">
-                                    <Search size={16} />
-                                </button>
-                            </div>
-                        </form>
-
-                        {/* Right actions */}
-                        <div className="flex items-center gap-0.5 ml-auto text-xs">
-                            <a href={`tel:${mainPhone}`} className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-copper/10 text-copper font-semibold hover:bg-copper/20 transition-colors">
-                                <Phone size={13} />
-                                <span className="whitespace-nowrap">{formatHotline(mainPhone)}</span>
-                            </a>
-                            <Link href="/tracking" className="hidden lg:flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-gray-600 hover:text-copper hover:bg-gray-50 transition-colors">
-                                <ClipboardList size={15} />
-                                <span>Tra cứu</span>
-                            </Link>
-                            <Link href="/info/gioi-thieu" className="hidden lg:flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-gray-600 hover:text-copper hover:bg-gray-50 transition-colors">
-                                <MapPin size={15} />
-                                <span>Cửa hàng</span>
-                            </Link>
-                            <Link href="/cart" className="relative flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-gray-600 hover:text-copper hover:bg-gray-50 transition-colors">
-                                <ShoppingCart size={15} />
-                                <span className="hidden sm:inline">Giỏ hàng</span>
-                                {cartCount > 0 && (
-                                    <span className="absolute -top-0.5 left-4 sm:static bg-red-500 text-white text-[10px] font-bold min-w-[16px] h-[16px] rounded-full flex items-center justify-center px-0.5">
-                                        {cartCount > 9 ? '9+' : cartCount}
-                                    </span>
-                                )}
-                            </Link>
-                            <button
-                                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-                                className="md:hidden p-1.5 rounded-lg text-gray-600 hover:text-copper hover:bg-gray-50 transition-colors"
-                            >
-                                {mobileMenuOpen ? <X size={18} /> : <Menu size={18} />}
+                    {/* Search — desktop */}
+                    <form onSubmit={handleSearch} className="hidden md:flex flex-1 max-w-lg mx-4">
+                        <div className="relative w-full">
+                            <input
+                                type="text"
+                                placeholder="Tìm sản phẩm, dịch vụ..."
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                className="w-full h-10 pl-3 pr-9 rounded-lg text-sm text-gray-800 bg-gray-50 border border-gray-200 focus:outline-none focus:ring-2 focus:ring-copper/30 focus:border-copper transition-colors"
+                            />
+                            <button type="submit" aria-label="Tìm kiếm" className="absolute right-0 top-0 h-10 w-10 flex items-center justify-center text-gray-400 hover:text-copper transition-colors">
+                                <Search size={16} />
                             </button>
                         </div>
-                    </div>
+                    </form>
 
-                    {/* ── Desktop nav strip ── */}
-                    <nav className="hidden md:block border-t border-gray-100 bg-gray-50">
-                        <ul className="flex items-center h-9 w-full">
-                            {mainNav.map((item) => {
-                                const Icon = item.icon;
-                                const active = isActive(item.href);
-                                return (
-                                    <li key={item.href} className="flex-1">
-                                        <Link
-                                            href={item.href}
-                                            className={`flex items-center justify-center gap-1.5 h-9 text-[13px] font-medium transition-colors
-                                                ${active ? 'text-copper bg-copper/5 border-b-2 border-copper' : 'text-gray-600 hover:text-copper hover:bg-gray-100'}`}
-                                        >
-                                            <Icon size={14} />
-                                            {item.label}
-                                        </Link>
-                                    </li>
-                                );
-                            })}
-                        </ul>
-                    </nav>
-                </div>
+                    {/* Right actions */}
+                    <div className="flex items-center gap-0.5 ml-auto text-xs">
+                        <a href={`tel:${mainPhone}`} className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-copper/10 text-copper font-semibold hover:bg-copper/20 transition-colors">
+                            <Phone size={13} />
+                            <span className="whitespace-nowrap">{formatHotline(mainPhone)}</span>
+                        </a>
+                        <Link href="/tracking" className="hidden lg:flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-gray-600 hover:text-copper hover:bg-gray-50 transition-colors">
+                            <ClipboardList size={15} />
+                            <span>Tra cứu</span>
+                        </Link>
+                        <Link href="/info/gioi-thieu" className="hidden lg:flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-gray-600 hover:text-copper hover:bg-gray-50 transition-colors">
+                            <MapPin size={15} />
+                            <span>Cửa hàng</span>
+                        </Link>
+                        <button onClick={(e) => { e.preventDefault(); setIsDrawerOpen(true); }} className="relative flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-gray-600 hover:text-copper hover:bg-gray-50 transition-colors">
+                            <ShoppingCart size={15} />
+                            <span className="hidden sm:inline">Giỏ hàng</span>
+                            {cartCount > 0 && (
+                                <span className="absolute -top-0.5 left-4 sm:static bg-red-500 text-white text-[10px] font-bold min-w-[16px] h-[16px] rounded-full flex items-center justify-center px-0.5">
+                                    {cartCount > 9 ? '9+' : cartCount}
+                                </span>
+                            )}
+                        </button>
+                        <button
+                            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                            aria-label={mobileMenuOpen ? 'Đóng menu' : 'Mở menu'}
+                            aria-expanded={mobileMenuOpen}
+                            className="md:hidden p-1.5 rounded-lg text-gray-600 hover:text-copper hover:bg-gray-50 transition-colors"
+                        >
+                            {mobileMenuOpen ? <X size={18} /> : <Menu size={18} />}
+                        </button>
+                    </div>
+                </div>{/* .flex */}
+                </div>{/* max-w */}
             </div>
 
-            {/* ── Mobile menu (slide-down) ── */}
+            {/* ── Desktop nav strip — full width bg, centered inner ── */}
+            <nav 
+                className="hidden md:block w-full border-b border-gray-200"
+                style={{ backgroundColor: config.headerBg || '#f9fafb' }} // #f9fafb is gray-50
+            >
+                <div className="max-w-[1200px] mx-auto">
+                <ul className="flex items-center h-10 px-4">
+                    {mainNav.map((item) => {
+                        const Icon = item.icon;
+                        const active = isActive(item.href);
+                        return (
+                            <li key={item.href} className="flex-1">
+                                <Link
+                                    href={item.href}
+                                    className={`flex items-center justify-center gap-1.5 h-10 text-[13px] font-medium transition-colors
+                                        ${active ? 'text-copper bg-copper/5 border-b-2 border-copper' : 'text-gray-600 hover:text-copper hover:bg-gray-100'}`}
+                                >
+                                    <Icon size={14} />
+                                    {item.label}
+                                </Link>
+                            </li>
+                        );
+                    })}
+                </ul>
+                </div>{/* max-w */}
+            </nav>
+
+            {/* ── Mobile menu ── */}
             {mobileMenuOpen && (
                 <>
                     <div className="fixed inset-0 top-[50px] bg-black/40 z-20 md:hidden" onClick={() => setMobileMenuOpen(false)} />
-                    <div className="max-w-[1200px] mx-auto px-2 md:px-4 relative z-30 md:hidden">
-                        <div className="bg-white rounded-b-xl shadow-xl overflow-hidden animate-[slideDown_0.2s_ease]">
+                    <div className="w-full relative z-30 md:hidden">
+                        <div className="shadow-xl overflow-hidden" style={{ backgroundColor: config.headerBg || '#ffffff' }}>
                             {/* Mobile Search */}
                             <form onSubmit={handleSearch} className="p-3 border-b">
                                 <div className="relative">
@@ -153,7 +177,7 @@ export default function Header() {
                                         onChange={(e) => setSearchQuery(e.target.value)}
                                         className="w-full h-9 pl-3 pr-9 rounded-lg border border-gray-200 bg-gray-50 text-sm focus:outline-none focus:border-copper"
                                     />
-                                    <button type="submit" className="absolute right-0 top-0 h-9 w-9 flex items-center justify-center text-gray-400">
+                                    <button type="submit" aria-label="Tìm kiếm" className="absolute right-0 top-0 h-9 w-9 flex items-center justify-center text-gray-400">
                                         <Search size={15} />
                                     </button>
                                 </div>

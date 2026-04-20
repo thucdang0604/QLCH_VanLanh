@@ -17,6 +17,8 @@ export default function FloatingReviews() {
         if (isDismissed) return;
 
         let isMounted = true;
+        let initDelayTimer: NodeJS.Timeout;
+
         const fetchReviews = async () => {
             try {
                 // Fetch recent 5-star approved reviews
@@ -34,7 +36,25 @@ export default function FloatingReviews() {
                 });
 
                 // Sort by date manually if we don't have composite index for rating + createdAt
-                data.sort((a, b) => b.createdAt?.toMillis() - a.createdAt?.toMillis());
+                const toMillis = (v: unknown): number => {
+                    if (!v) return 0;
+                    if (typeof v === 'object' && v !== null) {
+                        if ('toMillis' in v && typeof (v as { toMillis?: unknown }).toMillis === 'function') {
+                            return (v as { toMillis: () => number }).toMillis();
+                        }
+                        if ('toDate' in v && typeof (v as { toDate?: unknown }).toDate === 'function') {
+                            return (v as { toDate: () => Date }).toDate().getTime();
+                        }
+                        if ('seconds' in v && typeof (v as { seconds?: unknown }).seconds === 'number') {
+                            return (v as { seconds: number }).seconds * 1000;
+                        }
+                    }
+                    if (v instanceof Date) return v.getTime();
+                    if (typeof v === 'number') return v;
+                    const d = new Date(v as never);
+                    return Number.isNaN(d.getTime()) ? 0 : d.getTime();
+                };
+                data.sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
 
                 if (isMounted && data.length > 0) {
                     setReviews(data);
@@ -42,17 +62,25 @@ export default function FloatingReviews() {
                     // Delay showing the widget so it doesn't pop up immediately on load
                     setTimeout(() => {
                         if (isMounted) setIsVisible(true);
-                    }, 5000);
+                    }, 2000);
                 }
             } catch (error) {
                 console.error('Error fetching reviews for widget:', error);
             }
         };
 
-        fetchReviews();
+        // Defer fetch to not block main thread (INP optimization)
+        const deferFn = window.requestIdleCallback || ((cb) => setTimeout(cb, 1));
+        
+        initDelayTimer = setTimeout(() => {
+            deferFn(() => {
+                if(isMounted) fetchReviews();
+            });
+        }, 5000); // Wait 5s before even trying to fetch from Firebase
 
         return () => {
             isMounted = false;
+            clearTimeout(initDelayTimer);
         };
     }, [isDismissed]);
 
@@ -113,7 +141,7 @@ export default function FloatingReviews() {
                                             </div>
                                         </div>
                                         <p className="text-xs text-gray-600 line-clamp-2 leading-snug">
-                                            "{review.content || 'Dịch vụ tuyệt vời, nhân viên nhiệt tình!'}"
+                                            &ldquo;{review.content || 'Dịch vụ tuyệt vời, nhân viên nhiệt tình!'}&rdquo;
                                         </p>
                                     </div>
                                 </div>

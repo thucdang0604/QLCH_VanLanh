@@ -5,9 +5,11 @@ import {
     Users, Plus, Shield, Check, X, Loader2, MoreVertical,
     Trash2, Edit, Save, Lock, Mail, Phone, Search
 } from 'lucide-react';
+import Modal from '@/components/admin/Modal';
 import { collection, query, where, getDocs, doc, updateDoc, setDoc, serverTimestamp, deleteDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { AppUser } from '@/lib/AuthContext';
+import { toastError, toastSuccess } from '@/lib/toast';
 
 // Permission List
 const PERMISSIONS = [
@@ -113,7 +115,7 @@ export default function StaffPage() {
                     role: formData.role,
                     permissions: formData.permissions
                 });
-                alert('Cập nhật nhân viên thành công!');
+                toastSuccess('Cập nhật nhân viên thành công!');
             } else {
                 // Create new user
                 // Note: Client-side creation has limitations. Ideally use Firebase Admin SDK via API Route.
@@ -122,7 +124,7 @@ export default function StaffPage() {
                 // BUT, to make it work seamlessly, we should probably use a secondary app instance or an API route.
                 // Given the constraints, let's just alert the limitation.
 
-                alert('Tính năng tạo tài khoản trực tiếp cần API Backend (Firebase Admin SDK). Hiện tại vui lòng yêu cầu nhân viên Đăng ký tài khoản trước, sau đó Admin vào đây cấp quyền.');
+                toastError('Tính năng tạo tài khoản trực tiếp cần API Backend (Firebase Admin SDK). Hiện tại vui lòng yêu cầu nhân viên Đăng ký tài khoản trước, sau đó Admin vào đây cấp quyền.');
 
                 // However, we CAN update permissions if we search by email.
                 // Let's implement searching for existing customer to promote to staff.
@@ -133,7 +135,7 @@ export default function StaffPage() {
             fetchStaffs();
         } catch (error) {
             console.error('Error saving staff:', error);
-            alert('Có lỗi xảy ra!');
+            toastError('Có lỗi xảy ra!');
         } finally {
             setProcessing(false);
         }
@@ -156,11 +158,11 @@ export default function StaffPage() {
                 const userDoc = snapshot.docs[0];
                 setFoundUser({ uid: userDoc.id, ...userDoc.data() } as AppUser);
             } else {
-                alert('Không tìm thấy tài khoản với email này. Vui lòng đảm bảo nhân viên đã đăng nhập bằng Google ít nhất 1 lần.');
+                toastError('Không tìm thấy tài khoản với email này. Vui lòng đảm bảo nhân viên đã đăng nhập bằng Google ít nhất 1 lần.');
             }
         } catch (error) {
             console.error('Error searching user:', error);
-            alert('Lỗi khi tìm kiếm');
+            toastError('Lỗi khi tìm kiếm');
         } finally {
             setSearching(false);
         }
@@ -178,7 +180,7 @@ export default function StaffPage() {
 
     return (
         <div className="space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900">Quản lý Nhân viên</h1>
                     <p className="text-gray-500">Phân quyền và quản lý tài khoản nhân viên</p>
@@ -192,9 +194,9 @@ export default function StaffPage() {
                 </button>
             </div>
 
-            {/* Staff List */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                <table className="w-full text-left border-collapse">
+            {/* Staff List — Desktop Table */}
+            <div className="hidden md:block bg-white rounded-xl shadow-sm border border-gray-200 overflow-x-auto">
+                <table className="w-full text-left border-collapse min-w-[800px]">
                     <thead>
                         <tr className="bg-gray-50 border-b border-gray-100 text-xs uppercase text-gray-500 font-semibold">
                             <th className="px-6 py-4">Nhân viên</th>
@@ -273,16 +275,69 @@ export default function StaffPage() {
                 </table>
             </div>
 
-            {/* Add Staff Search Modal */}
-            {showAddModal && (
-                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-[fadeIn_0.2s_ease]">
-                        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50">
-                            <h3 className="font-bold text-lg text-gray-900">Thêm nhân viên</h3>
-                            <button onClick={() => setShowAddModal(false)} className="p-2 hover:bg-gray-200 rounded-full transition-colors">
-                                <X size={20} />
+            {/* Staff List — Mobile Cards */}
+            <div className="md:hidden space-y-3">
+                {staffs.map((staff) => (
+                    <div key={staff.uid} className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+                        <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center text-orange-600 font-bold shrink-0">
+                                    {staff.displayName?.[0] || 'U'}
+                                </div>
+                                <div className="min-w-0">
+                                    <div className="font-semibold text-gray-900">{staff.displayName}</div>
+                                    <div className="flex items-center gap-1.5 mt-0.5">
+                                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${staff.role === 'admin'
+                                            ? 'bg-purple-100 text-purple-800'
+                                            : 'bg-blue-100 text-blue-800'
+                                            }`}>
+                                            {staff.role === 'admin' ? 'Admin' : 'NV'}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => handleOpenModal(staff)}
+                                className="p-2 text-gray-400 hover:text-orange-500 hover:bg-orange-50 rounded-lg transition-colors shrink-0"
+                            >
+                                <Edit size={18} />
                             </button>
                         </div>
+                        <div className="mt-3 space-y-1 text-sm text-gray-600">
+                            <div className="flex items-center gap-2">
+                                <Mail size={13} className="text-gray-400 shrink-0" />
+                                <span className="truncate">{staff.email}</span>
+                            </div>
+                            {staff.phone && (
+                                <div className="flex items-center gap-2">
+                                    <Phone size={13} className="text-gray-400 shrink-0" />
+                                    <span>{staff.phone}</span>
+                                </div>
+                            )}
+                        </div>
+                        <div className="flex flex-wrap gap-1 mt-3 pt-3 border-t border-gray-100">
+                            {staff.role === 'admin' ? (
+                                <span className="text-xs text-gray-400 italic">Toàn quyền hệ thống</span>
+                            ) : (
+                                staff.permissions?.map(perm => {
+                                    const label = PERMISSIONS.find(p => p.id === perm)?.label || perm;
+                                    return (
+                                        <span key={perm} className="inline-flex px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-[10px] border border-gray-200">
+                                            {label}
+                                        </span>
+                                    );
+                                })
+                            )}
+                            {staff.role !== 'admin' && (!staff.permissions || staff.permissions.length === 0) && (
+                                <span className="text-xs text-gray-400 italic">Chưa cấp quyền</span>
+                            )}
+                        </div>
+                    </div>
+                ))}
+            </div>
+
+            {/* Add Staff Search Modal */}
+            <Modal isOpen={showAddModal} onClose={() => setShowAddModal(false)} title="Thêm nhân viên" size="md">
 
                         <div className="p-6 space-y-6">
                             <p className="text-sm text-gray-600">
@@ -344,25 +399,13 @@ export default function StaffPage() {
                                 </div>
                             )}
                         </div>
-                    </div>
-                </div>
-            )}
+            </Modal>
 
             {/* Edit Modal */}
-            {showModal && (
-                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden animate-[fadeIn_0.2s_ease]">
-                        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50">
-                            <h3 className="font-bold text-lg text-gray-900">
-                                {editingUser ? 'Chỉnh sửa nhân viên' : 'Thêm nhân viên mới'}
-                            </h3>
-                            <button onClick={() => setShowModal(false)} className="p-2 hover:bg-gray-200 rounded-full transition-colors">
-                                <X size={20} />
-                            </button>
-                        </div>
+            <Modal isOpen={showModal} onClose={() => setShowModal(false)} title={editingUser ? 'Chỉnh sửa nhân viên' : 'Thêm nhân viên mới'} size="2xl">
 
                         <form onSubmit={handleSubmit} className="p-6 space-y-6">
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">Họ tên</label>
                                     <input
@@ -417,7 +460,7 @@ export default function StaffPage() {
                             {formData.role === 'staff' && (
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-3">Phân quyền</label>
-                                    <div className="grid grid-cols-2 gap-3">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                         {PERMISSIONS.map((perm) => (
                                             <label
                                                 key={perm.id}
@@ -463,9 +506,7 @@ export default function StaffPage() {
                                 </button>
                             </div>
                         </form>
-                    </div>
-                </div>
-            )}
+            </Modal>
         </div>
     );
 }

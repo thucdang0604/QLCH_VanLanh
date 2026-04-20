@@ -5,6 +5,8 @@ import { Package, Search, Loader2, ArrowUpDown, TrendingDown, TrendingUp } from 
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Product } from '@/lib/types';
+import { useClientPagination } from '@/lib/useClientPagination';
+import PaginationBar from '@/components/admin/PaginationBar';
 
 const formatPrice = (n: number) => n.toLocaleString('vi-VN') + 'đ';
 
@@ -54,6 +56,11 @@ export default function StockPage() {
         else { setSortBy(col); setSortDir('asc'); }
     };
 
+    const { paginatedData: paginatedFiltered, currentPage, totalPages, pageSize, totalFiltered: totalFilteredCount, setPage, setPageSize, resetPage } = useClientPagination(filtered, 20);
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    useEffect(() => { resetPage(); }, [searchQuery]);
+
     if (loading) return (
         <div className="flex items-center justify-center h-[60vh]">
             <Loader2 className="animate-spin text-orange-500" size={40} />
@@ -99,8 +106,9 @@ export default function StockPage() {
 
             {/* Table */}
             <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-                <div className="overflow-x-auto">
-                    <table className="w-full">
+                {/* Desktop Table */}
+                <div className="hidden md:block overflow-x-auto">
+                    <table className="w-full min-w-[800px]">
                         <thead className="bg-gray-50">
                             <tr>
                                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Mã SP</th>
@@ -124,7 +132,7 @@ export default function StockPage() {
                         <tbody className="divide-y divide-gray-100">
                             {filtered.length === 0 ? (
                                 <tr><td colSpan={7} className="text-center py-12 text-gray-400">Không có sản phẩm nào</td></tr>
-                            ) : filtered.map(p => {
+                            ) : paginatedFiltered.map(p => {
                                 const stock = p.stock || 0;
                                 const costPrice = p.costPrice || 0;
                                 const stockValue = stock * costPrice;
@@ -152,6 +160,73 @@ export default function StockPage() {
                         </tbody>
                     </table>
                 </div>
+
+                {/* Mobile Card List */}
+                <div className="md:hidden">
+                    {/* Mobile sort controls */}
+                    <div className="flex items-center gap-2 p-3 bg-gray-50 border-b overflow-x-auto">
+                        <span className="text-xs text-gray-500 shrink-0">Sắp xếp:</span>
+                        {[
+                            { key: 'name' as const, label: 'Tên' },
+                            { key: 'stock' as const, label: 'Tồn kho' },
+                            { key: 'costPrice' as const, label: 'Giá vốn' },
+                        ].map(s => (
+                            <button
+                                key={s.key}
+                                onClick={() => toggleSort(s.key)}
+                                className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-colors shrink-0 ${sortBy === s.key ? 'bg-orange-100 text-orange-700' : 'bg-white text-gray-600 border'}`}
+                            >
+                                {s.label}
+                                {sortBy === s.key && <ArrowUpDown size={10} />}
+                            </button>
+                        ))}
+                    </div>
+                    <div className="divide-y divide-gray-100">
+                        {filtered.length === 0 ? (
+                            <div className="text-center py-12 text-gray-400">Không có sản phẩm nào</div>
+                        ) : paginatedFiltered.map(p => {
+                            const stock = p.stock || 0;
+                            const costPrice = p.costPrice || 0;
+                            const stockValue = stock * costPrice;
+                            return (
+                                <div key={p.id} className={`p-4 ${stock <= 0 ? 'bg-red-50/30' : stock <= 3 ? 'bg-amber-50/30' : ''}`}>
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0 flex-1">
+                                            <p className="font-semibold text-gray-900 text-sm line-clamp-1">{p.name}</p>
+                                            <div className="flex items-center gap-1.5 mt-0.5">
+                                                <span className="text-[10px] text-gray-400">{p.brand}</span>
+                                                <span className="text-gray-300">·</span>
+                                                <span className="text-[10px] text-gray-400">{p.category}</span>
+                                                <span className="text-gray-300">·</span>
+                                                <span className="font-mono text-[10px] text-gray-400">#{p.id.slice(-6).toUpperCase()}</span>
+                                            </div>
+                                        </div>
+                                        <span className={`inline-flex items-center gap-1 font-bold text-sm shrink-0 ${stock <= 0 ? 'text-red-600' : stock <= 3 ? 'text-amber-600' : 'text-green-600'}`}>
+                                            {stock <= 0 ? <TrendingDown size={12} /> : stock <= 3 ? <TrendingDown size={12} /> : <TrendingUp size={12} />}
+                                            {stock}
+                                        </span>
+                                    </div>
+                                    <div className="flex items-center justify-between mt-2 text-xs">
+                                        <span className="text-gray-500">Vốn: <span className="font-medium text-gray-700">{costPrice > 0 ? formatPrice(costPrice) : '—'}</span></span>
+                                        <span className="text-gray-500">Bán: <span className="font-medium text-gray-900">{formatPrice(p.price_promo || p.price_original)}</span></span>
+                                        <span className="text-gray-500">Giá trị: <span className="font-bold text-orange-600">{stockValue > 0 ? formatPrice(stockValue) : '—'}</span></span>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+
+                <PaginationBar
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    pageSize={pageSize}
+                    totalFiltered={totalFilteredCount}
+                    totalAll={products.length}
+                    onPageChange={setPage}
+                    onPageSizeChange={setPageSize}
+                    entityLabel="sản phẩm"
+                />
             </div>
         </div>
     );

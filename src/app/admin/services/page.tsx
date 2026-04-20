@@ -1,13 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Image from 'next/image';
 import {
     Plus,
     Search,
     Edit,
     Trash2,
-    X,
     Upload,
     Loader2,
     Wrench
@@ -15,6 +14,13 @@ import {
 import { useFirestoreCollection, addDocument, updateDocument, deleteDocument } from '@/lib/useFirestore';
 import { uploadImage, deleteImage } from '@/lib/storage';
 import { orderBy } from 'firebase/firestore';
+import type { FirestoreDateValue } from '@/lib/types';
+import { toastError } from '@/lib/toast';
+import { useClientPagination } from '@/lib/useClientPagination';
+import PaginationBar from '@/components/admin/PaginationBar';
+import { triggerRevalidate } from '@/lib/revalidate';
+import Modal from '@/components/admin/Modal';
+import MediaManager from '@/components/admin/MediaManager';
 
 interface Service {
     id: string;
@@ -26,7 +32,7 @@ interface Service {
     icon?: string;
     category: string;
     isActive: boolean;
-    createdAt?: any;
+    createdAt?: FirestoreDateValue;
 }
 
 const serviceCategories = ['Sửa chữa', 'Thay thế', 'Bảo hành', 'Nâng cấp', 'Khác'];
@@ -44,8 +50,9 @@ export default function ServicesPage() {
                     await deleteImage(service.imageUrl);
                 }
                 await deleteDocument('services', service.id);
+                await triggerRevalidate(['/', `/service/${service.id}`, '/category/sua-chua', '/sitemap.xml'], ['services']);
             } catch (error) {
-                alert('Lỗi khi xóa dịch vụ!');
+                toastError('Lỗi khi xóa dịch vụ!');
             }
         }
     };
@@ -53,6 +60,11 @@ export default function ServicesPage() {
     const filteredServices = services.filter((s) =>
         s.name.toLowerCase().includes(searchQuery.toLowerCase())
     );
+
+    const { paginatedData: paginatedServices, currentPage, totalPages, pageSize, totalFiltered, setPage, setPageSize, resetPage } = useClientPagination(filteredServices, 20);
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    useEffect(() => { resetPage(); }, [searchQuery]);
 
     return (
         <div className="space-y-6">
@@ -94,8 +106,9 @@ export default function ServicesPage() {
                     <p className="text-gray-500">Chưa có dịch vụ nào</p>
                 </div>
             ) : (
+                <>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {filteredServices.map((service) => (
+                    {paginatedServices.map((service) => (
                         <div key={service.id} className="bg-white rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow">
                             <div className="flex items-start justify-between mb-4">
                                 <div className="w-14 h-14 bg-orange-100 rounded-xl flex items-center justify-center">
@@ -138,24 +151,36 @@ export default function ServicesPage() {
                         </div>
                     ))}
                 </div>
+                <PaginationBar
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    pageSize={pageSize}
+                    totalFiltered={totalFiltered}
+                    totalAll={services.length}
+                    onPageChange={setPage}
+                    onPageSizeChange={setPageSize}
+                    entityLabel="dịch vụ"
+                />
+                </>
             )}
 
             {/* Modal */}
-            {isModalOpen && (
-                <ServiceModal
-                    service={editingService}
-                    onClose={() => setIsModalOpen(false)}
-                />
-            )}
+            <ServiceModal
+                isOpen={isModalOpen}
+                service={editingService}
+                onClose={() => setIsModalOpen(false)}
+            />
         </div>
     );
 }
 
 // Service Modal
 function ServiceModal({
+    isOpen,
     service,
     onClose,
 }: {
+    isOpen: boolean;
     service: Service | null;
     onClose: () => void;
 }) {
@@ -168,14 +193,17 @@ function ServiceModal({
         isActive: service?.isActive ?? true,
     });
     const [imageFile, setImageFile] = useState<File | null>(null);
+    const [selectedImageUrl, setSelectedImageUrl] = useState<string>(service?.imageUrl || '');
     const [imagePreview, setImagePreview] = useState<string>(service?.imageUrl || '');
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [isMediaManagerOpen, setIsMediaManagerOpen] = useState(false);
 
     const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (file) {
             setImageFile(file);
             setImagePreview(URL.createObjectURL(file));
+            setSelectedImageUrl('');
         }
     };
 
@@ -184,7 +212,8 @@ function ServiceModal({
         setIsSubmitting(true);
 
         try {
-            let imageUrl = service?.imageUrl || '';
+            // Có thể không có ảnh, nên chấp nhận cả: ảnh cũ, ảnh thư viện, hoặc không ảnh
+            let imageUrl = selectedImageUrl || service?.imageUrl || '';
 
             if (imageFile) {
                 if (service?.imageUrl) {
@@ -200,28 +229,23 @@ function ServiceModal({
 
             if (service) {
                 await updateDocument('services', service.id, data);
+                await triggerRevalidate(['/', `/service/${service.id}`, '/category/sua-chua', '/sitemap.xml'], ['services']);
             } else {
                 await addDocument('services', data);
+                await triggerRevalidate(['/', '/category/sua-chua', '/sitemap.xml'], ['services']);
             }
 
             onClose();
         } catch (error) {
             console.error('Error saving service:', error);
-            alert('Lỗi khi lưu dịch vụ!');
+            toastError('Lỗi khi lưu dịch vụ!');
         } finally {
             setIsSubmitting(false);
         }
     };
 
     return (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-                <div className="flex items-center justify-between p-6 border-b">
-                    <h2 className="text-xl font-bold">{service ? 'Sửa dịch vụ' : 'Thêm dịch vụ'}</h2>
-                    <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg">
-                        <X size={20} />
-                    </button>
-                </div>
+        <Modal isOpen={isOpen} onClose={onClose} title={service ? 'Sửa dịch vụ' : 'Thêm dịch vụ'} size="lg">
 
                 <form onSubmit={handleSubmit} className="p-6 space-y-4">
                     {/* Image */}
@@ -238,11 +262,32 @@ function ServiceModal({
                                 </div>
                             )}
                             <input type="file" accept="image/*" onChange={handleImageChange} className="hidden" id="service-image" />
-                            <label htmlFor="service-image" className="cursor-pointer text-orange-600 hover:text-orange-700 font-medium text-sm">
-                                {imagePreview ? 'Đổi ảnh' : 'Chọn ảnh'}
-                            </label>
+                            <div className="flex items-center justify-center gap-4 mt-2">
+                                <label htmlFor="service-image" className="cursor-pointer text-orange-600 hover:text-orange-700 font-medium text-sm">
+                                    {imagePreview ? 'Đổi ảnh (upload mới)' : 'Upload ảnh mới'}
+                                </label>
+                                <button
+                                    type="button"
+                                    onClick={() => setIsMediaManagerOpen(true)}
+                                    className="text-xs text-gray-600 hover:text-orange-600 underline"
+                                >
+                                    Chọn từ thư viện
+                                </button>
+                            </div>
                         </div>
                     </div>
+
+                    {/* MediaManager — shared component */}
+                    <MediaManager
+                        isOpen={isMediaManagerOpen}
+                        onClose={() => setIsMediaManagerOpen(false)}
+                        onSelect={(url) => {
+                            setSelectedImageUrl(url);
+                            setImagePreview(url);
+                            setImageFile(null);
+                        }}
+                        title="Chọn ảnh dịch vụ"
+                    />
 
                     {/* Name */}
                     <div>
@@ -369,7 +414,6 @@ function ServiceModal({
                         </button>
                     </div>
                 </form>
-            </div>
-        </div>
+        </Modal>
     );
 }

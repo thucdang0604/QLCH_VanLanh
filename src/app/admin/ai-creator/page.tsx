@@ -34,136 +34,44 @@ export default function AICreatorPage() {
         setIsLoading(true);
         setResult('');
 
-        // Simulate AI generation (replace with actual Gemini API call)
-        setTimeout(() => {
-            let generatedContent = '';
+        try {
+            const response = await fetch('/api/admin/ai', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'generate-content',
+                    payload: {
+                        contentType: contentType.id,
+                        prompt: prompt,
+                    }
+                }),
+            });
 
-            switch (contentType.id) {
-                case 'product':
-                    generatedContent = `# ${prompt}
-
-## Mô tả sản phẩm
-
-**${prompt}** - Siêu phẩm công nghệ đỉnh cao!
-
-### Điểm nổi bật:
-- 🚀 Hiệu năng vượt trội với chip thế hệ mới
-- 📸 Camera chuyên nghiệp, chụp đẹp mọi khoảnh khắc
-- 🔋 Pin khủng, dùng cả ngày không lo hết
-- 💎 Thiết kế cao cấp, sang trọng
-
-### Thông số kỹ thuật:
-- Màn hình: 6.7 inch Super Retina XDR
-- Chip: A17 Pro 6 nhân
-- RAM: 8GB
-- Bộ nhớ: 256GB / 512GB / 1TB
-- Camera: 48MP + 12MP + 12MP
-
-### Khuyến mãi đặc biệt:
-- ✅ Giảm ngay 5.000.000đ
-- ✅ Trả góp 0% lãi suất
-- ✅ Bảo hành 24 tháng chính hãng
-- ✅ Freeship toàn quốc
-
-👉 **Đặt hàng ngay!** Hotline: 1800 2097`;
-                    break;
-                case 'promo':
-                    generatedContent = `🔥🔥🔥 **${prompt.toUpperCase()}** 🔥🔥🔥
-
-⏰ Thời gian: Chỉ trong 24H!
-
-🎁 **DEAL HOT HỌN BAO GIỜ:**
-
-📱 iPhone 15 Pro Max - Giảm 5.000.000đ
-💻 MacBook Air M3 - Giảm 3.000.000đ
-🎧 AirPods Pro 2 - Giảm 1.500.000đ
-⌚ Apple Watch Ultra - Giảm 2.000.000đ
-
-✨ **ƯU ĐÃI THÊM:**
-- Trả góp 0% lãi suất
-- Freeship toàn quốc
-- Tặng kèm phụ kiện trị giá 500K
-
-⚡ Số lượng có hạn - Nhanh tay kẻo lỡ!
-
-📞 Hotline: 1800 2097
-🌐 Website: vanlanh.vn
-📍 Địa chỉ: 123 Nguyễn Văn Linh, Đà Nẵng
-
-#FlashSale #GiamGiaSoc #VanLanh #iPhone15`;
-                    break;
-                case 'article':
-                    generatedContent = `# ${prompt}
-
-## Giới thiệu
-
-Hôm nay, Văn Lành xin gửi đến các bạn bài đánh giá chi tiết về sản phẩm đang được quan tâm nhất hiện nay...
-
-## Thiết kế & Hoàn thiện
-
-Sản phẩm được thiết kế với phong cách hiện đại, tối giản nhưng không kém phần sang trọng. Khung viền được làm từ chất liệu cao cấp, mang lại cảm giác cầm nắm chắc chắn và đẳng cấp.
-
-## Hiệu năng
-
-Với chip xử lý thế hệ mới, sản phẩm mang đến hiệu năng vượt trội:
-- Điểm Antutu: 1.500.000+
-- Xử lý đa nhiệm mượt mà
-- Gaming không giật lag
-
-## Camera
-
-Hệ thống camera được nâng cấp toàn diện:
-- Camera chính 48MP với sensor lớn
-- Quay video 4K 60fps
-- Chống rung quang học OIS
-
-## Pin & Sạc
-
-Pin 4500mAh cho thời gian sử dụng cả ngày. Hỗ trợ sạc nhanh 45W.
-
-## Kết luận
-
-⭐⭐⭐⭐⭐ **Đánh giá: 9/10**
-
-Đây là một sản phẩm hoàn hảo cho những ai đang tìm kiếm một thiết bị cao cấp với đầy đủ tính năng.
-
-👉 **Mua ngay tại Văn Lành với giá ưu đãi nhất!**`;
-                    break;
-                case 'seo':
-                    generatedContent = `## SEO Meta Tags cho: ${prompt}
-
-### Title (60 ký tự):
-"${prompt} Chính Hãng | Giá Tốt Nhất - Văn Lành"
-
-### Meta Description (155 ký tự):
-"Mua ${prompt} chính hãng tại Văn Lành với giá ưu đãi, bảo hành 24 tháng, trả góp 0%, freeship toàn quốc. Hotline: 1800 2097"
-
-### Keywords:
-${prompt.toLowerCase()}, mua ${prompt.toLowerCase()}, ${prompt.toLowerCase()} giá rẻ, ${prompt.toLowerCase()} chính hãng, ${prompt.toLowerCase()} trả góp
-
-### Open Graph:
-- og:title: "${prompt} | Văn Lành - Điện Thoại & Laptop"
-- og:description: "Mua ${prompt} chính hãng..."
-- og:type: product
-
-### Schema Markup:
-\`\`\`json
-{
-  "@type": "Product",
-  "name": "${prompt}",
-  "brand": "Apple",
-  "offers": {
-    "@type": "Offer",
-    "priceCurrency": "VND"
-  }
-}
-\`\`\``;
-                    break;
+            if (!response.ok) {
+                const errData = await response.json();
+                throw new Error(errData.error || 'Request failed');
             }
 
-            setResult(generatedContent);
+            if (!response.body) throw new Error('No response body');
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let accumulatedContent = '';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                const textChunk = decoder.decode(value, { stream: true });
+                accumulatedContent += textChunk;
+                setResult(accumulatedContent);
+            }
+        } catch (error: any) {
+            console.error('Generation error:', error);
+            setResult(`Đã xảy ra lỗi: ${error.message}`);
+        } finally {
             setIsLoading(false);
-        }, 2000);
+        }
     };
 
     const copyToClipboard = () => {

@@ -1,8 +1,10 @@
 'use client';
+import { SITE_URL } from "@/lib/constants";
+
 export default function ChinhSachMuaHangPage() {
     const seoTitle = 'Chính sách mua hàng & giao nhận | Văn Lành Service';
     const seoDescription = 'Chính sách mua hàng từ xa, khu vực giao hàng toàn quốc, giá cả và hỗ trợ đặt hàng tại Văn Lành Service. Hotline: 0932.242.026.';
-    const canonicalUrl = 'https://qlch-vanlanh.web.app/info/chinh-sach-mua-hang';
+    const canonicalUrl = `${SITE_URL}/info/chinh-sach-mua-hang`;
     const articleSchema = {
         '@context': 'https://schema.org',
         '@type': 'Article',
@@ -16,8 +18,8 @@ export default function ChinhSachMuaHangPage() {
         '@context': 'https://schema.org',
         '@type': 'BreadcrumbList',
         itemListElement: [
-            { '@type': 'ListItem', position: 1, name: 'Trang chủ', item: 'https://qlch-vanlanh.web.app/' },
-            { '@type': 'ListItem', position: 2, name: 'Thông tin', item: 'https://qlch-vanlanh.web.app/info/chinh-sach-mua-hang' },
+            { '@type': 'ListItem', position: 1, name: 'Trang chủ', item: `${SITE_URL}/` },
+            { '@type': 'ListItem', position: 2, name: 'Thông tin', item: `${SITE_URL}/info/chinh-sach-mua-hang` },
             { '@type': 'ListItem', position: 3, name: 'Chính sách mua hàng', item: canonicalUrl },
         ],
     };

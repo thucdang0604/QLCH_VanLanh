@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import type { Content } from '@google/generative-ai';
 
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY || '');
 
@@ -49,7 +50,7 @@ const SYSTEM_PROMPT = `Bạn là AI tư vấn viên của Văn Lành Service —
 6. Không bịa đặt thông tin kỹ thuật không chắc chắn`;
 
 // Chat function for customer support
-export async function chatWithGemini(message: string, context?: string, history?: any[]) {
+export async function chatWithGemini(message: string, context?: string, history?: Content[]) {
     // Tinh chỉnh behavior của AI
     const enhancedPrompt = context
         ? `${SYSTEM_PROMPT}\n\n[HƯỚNG DẪN BỔ SUNG YÊU CẦU CHO TIN NHẮN NÀY]: ${context}`
@@ -59,11 +60,11 @@ export async function chatWithGemini(message: string, context?: string, history?
         // Validate and sanitize chat history for Gemini strict rules
         // Rule 1: Must start with 'user'
         // Rule 2: Must alternate user -> model -> user -> model
-        let formattedHistory = [];
+        const formattedHistory: Content[] = [];
         if (history && Array.isArray(history)) {
             // First, strip out the last message if it's the exact same as the current prompt
             // (Frontend sometimes appends it before sending)
-            let rawHistory = [...history];
+            const rawHistory = [...history];
             if (rawHistory.length > 0 &&
                 rawHistory[rawHistory.length - 1].role === 'user' &&
                 rawHistory[rawHistory.length - 1].parts[0].text === message) {
@@ -76,7 +77,7 @@ export async function chatWithGemini(message: string, context?: string, history?
                 if (msg.role === expectedRole) {
                     formattedHistory.push({
                         role: msg.role,
-                        parts: msg.parts || [{ text: msg.text || '' }] // Ensure parts structure
+                        parts: msg.parts?.length ? msg.parts : [{ text: '' }] // Ensure parts structure
                     });
                     expectedRole = expectedRole === 'user' ? 'model' : 'user';
                 }

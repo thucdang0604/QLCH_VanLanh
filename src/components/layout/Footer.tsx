@@ -23,7 +23,7 @@ const services = [
 const aboutLinks = [
     { name: 'Giới thiệu', href: '/info/gioi-thieu' },
     { name: 'Bài Viết Nổi Bật', href: '/tin-tuc' },
-    { name: 'Tuyển dụng', href: '/tuyen-dung' },
+    { name: 'Đào tạo học viên', href: '/dao-tao-hoc-vien' },
     { name: 'Liên hệ', href: '/lien-he' },
 ];
 

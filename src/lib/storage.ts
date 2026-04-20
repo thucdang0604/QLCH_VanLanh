@@ -1,5 +1,6 @@
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
-import { storage } from './firebase';
+import { ref, uploadBytes, getDownloadURL, deleteObject, listAll, getMetadata } from 'firebase/storage';
+import { collection, getDocs, orderBy, query, deleteDoc, doc, limit as firestoreLimit, startAfter, type QueryDocumentSnapshot, type DocumentData } from 'firebase/firestore';
+import { storage, db } from './firebase';
 
 const MAX_VIDEO_SIZE_MB = 50;
 const MAX_VIDEO_SIZE_BYTES = MAX_VIDEO_SIZE_MB * 1024 * 1024;
@@ -95,4 +96,89 @@ export async function deleteImage(fileUrl: string): Promise<void> {
         console.error('Error deleting file:', error);
         // Don't throw - file might not exist
     }
+}
+
+/**
+ * Liệt kê ảnh trong một thư mục Storage
+ * @param path - thư mục con trong `images/` (vd: 'products', 'services')
+ */
+export async function listImagesInFolder(path: string): Promise<{ name: string; url: string }[]> {
+    try {
+        const folderRef = ref(storage, `images/${path}`);
+        const res = await listAll(folderRef);
+        const items = await Promise.all(
+            res.items.map(async (itemRef) => {
+                const url = await getDownloadURL(itemRef);
+                return {
+                    name: itemRef.name,
+                    url,
+                };
+            })
+        );
+        // Sắp xếp mới nhất lên đầu (dựa trên tên có timestamp)
+        return items.sort((a, b) => (a.name < b.name ? 1 : -1));
+    } catch (error) {
+        console.error('Error listing images:', error);
+        return [];
+    }
+}
+
+
+
+/**
+ * Quét và xoá các media entries trong Firestore mà file gốc đã bị xoá trên Storage.
+ * Trả về số lượng entries đã dọn dẹp.
+ */
+export async function cleanBrokenMedia(
+    onProgress?: (checked: number, total: number, broken: number) => void
+): Promise<{ cleaned: number; total: number }> {
+    const BATCH_SIZE = 50;
+    let cleaned = 0;
+    let checked = 0;
+    let lastDoc: QueryDocumentSnapshot<DocumentData> | undefined;
+    let hasMore = true;
+
+    while (hasMore) {
+        let q = query(
+            collection(db, 'media_library'),
+            orderBy('createdAt', 'desc'),
+            firestoreLimit(BATCH_SIZE)
+        );
+        if (lastDoc) {
+            q = query(
+                collection(db, 'media_library'),
+                orderBy('createdAt', 'desc'),
+                startAfter(lastDoc),
+                firestoreLimit(BATCH_SIZE)
+            );
+        }
+
+        const snap = await getDocs(q);
+        if (snap.docs.length < BATCH_SIZE) hasMore = false;
+        if (snap.docs.length === 0) break;
+
+        lastDoc = snap.docs[snap.docs.length - 1];
+
+        for (const docSnap of snap.docs) {
+            const data = docSnap.data();
+            checked++;
+            try {
+                // Kiểm tra file còn tồn tại trên Storage không
+                const storageRef = ref(storage, data.path);
+                await getMetadata(storageRef);
+                // File còn tồn tại → OK
+            } catch {
+                // File đã bị xoá trên Storage → Xoá entry Firestore
+                try {
+                    await deleteDoc(doc(db, 'media_library', docSnap.id));
+                    cleaned++;
+                } catch (delErr) {
+                    console.error('Error deleting broken entry:', delErr);
+                }
+            }
+            onProgress?.(checked, 0, cleaned);
+        }
+    }
+
+    return { cleaned, total: checked };
 }

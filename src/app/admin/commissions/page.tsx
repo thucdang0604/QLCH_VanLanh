@@ -5,19 +5,23 @@ import {
     Award, Plus, Search, Percent, Trash2, X, Save, Loader2,
     CheckCircle2, Clock, User, DollarSign, TrendingUp, FileText
 } from 'lucide-react';
+import Modal from '@/components/admin/Modal';
 import {
     collection, getDocs, addDoc, updateDoc, deleteDoc,
     doc, serverTimestamp, query, orderBy, where
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
-import type { CommissionRule, Commission } from '@/lib/types';
+import type { CommissionRule, Commission, FirestoreWriteTimestamp } from '@/lib/types';
+import { toastError } from '@/lib/toast';
+import { useClientPagination } from '@/lib/useClientPagination';
+import PaginationBar from '@/components/admin/PaginationBar';
 
 export default function CommissionsPage() {
     const { user } = useAuth();
     const [rules, setRules] = useState<(CommissionRule & { id: string })[]>([]);
     const [commissions, setCommissions] = useState<(Commission & { id: string })[]>([]);
-    const [staffList, setStaffList] = useState<any[]>([]);
+    const [staffList, setStaffList] = useState<Array<{ uid: string; displayName?: string; role?: string }>>([]);
     const [loading, setLoading] = useState(true);
     const isAdmin = user?.role === 'admin';
     const [activeTab, setActiveTab] = useState<'rules' | 'history'>(isAdmin ? 'rules' : 'history');
@@ -32,6 +36,7 @@ export default function CommissionsPage() {
     const [ruleHierarchy, setRuleHierarchy] = useState<1 | 2 | 3>(1);
     const [ruleTargetType, setRuleTargetType] = useState<'general' | 'category' | 'specific'>('general');
     const [ruleTargetValue, setRuleTargetValue] = useState('');
+    const [ruleApplyAfterDiscount, setRuleApplyAfterDiscount] = useState(false);
 
     // Manual commission modal
     const [showManualModal, setShowManualModal] = useState(false);
@@ -55,7 +60,7 @@ export default function CommissionsPage() {
                 ]);
                 setRules(rulesSnap.docs.map(d => ({ id: d.id, ...d.data() } as CommissionRule & { id: string })));
                 setCommissions(commSnap.docs.map(d => ({ id: d.id, ...d.data() } as Commission & { id: string })));
-                setStaffList(staffSnap.docs.map(d => ({ uid: d.id, ...d.data() })));
+                setStaffList(staffSnap.docs.map(d => ({ uid: d.id, ...(d.data() as Partial<{ displayName: string; role: string }>) })));
             } catch (err) {
                 console.error(err);
             } finally {
@@ -66,9 +71,10 @@ export default function CommissionsPage() {
     }, []);
 
     const formatPrice = (n: number) => n.toLocaleString('vi-VN') + 'đ';
-    const formatDate = (ts: any) => {
+    const formatDate = (ts: unknown) => {
         if (!ts) return '—';
-        const d = ts.toDate ? ts.toDate() : new Date(ts);
+        const maybe = ts as { toDate?: () => Date };
+        const d = typeof maybe?.toDate === 'function' ? maybe.toDate() : new Date(ts as string | number | Date);
         return d.toLocaleDateString('vi-VN');
     };
 
@@ -76,7 +82,12 @@ export default function CommissionsPage() {
         // Staff: only show their own commissions
         if (!isAdmin && user?.uid && c.staffId !== user.uid) return false;
         if (!c.createdAt) return true;
-        const d = c.createdAt.toDate ? c.createdAt.toDate() : new Date(c.createdAt);
+        const d = (typeof c.createdAt === 'object'
+            && c.createdAt !== null
+            && 'toDate' in c.createdAt
+            && typeof (c.createdAt as { toDate?: unknown }).toDate === 'function')
+            ? (c.createdAt as { toDate: () => Date }).toDate()
+            : new Date(c.createdAt as never);
         return d.toISOString().slice(0, 7) === filterMonth;
     });
 
@@ -103,6 +114,7 @@ export default function CommissionsPage() {
                 hierarchyLevel: ruleHierarchy,
                 targetType: ruleTargetType,
                 targetValue: ruleTargetType !== 'general' ? ruleTargetValue : '',
+                applyAfterDiscount: ruleApplyAfterDiscount,
                 updatedAt: serverTimestamp(),
             };
             if (editingRule) {
@@ -110,12 +122,12 @@ export default function CommissionsPage() {
                 setRules(prev => prev.map(r => r.id === editingRule.id ? { ...r, ...data } : r));
             } else {
                 const ref = await addDoc(collection(db, 'commission_rules'), { ...data, createdAt: serverTimestamp() });
-                setRules(prev => [{ id: ref.id, ...data, createdAt: new Date() } as any, ...prev]);
+                setRules(prev => [{ id: ref.id, ...data, createdAt: serverTimestamp() as FirestoreWriteTimestamp } as CommissionRule & { id: string }, ...prev]);
             }
             setShowRuleModal(false);
         } catch (err) {
             console.error(err);
-            alert('Lỗi!');
+            toastError('Lỗi!');
         } finally {
             setIsProcessing(false);
         }
@@ -139,6 +151,7 @@ export default function CommissionsPage() {
             setRuleHierarchy(rule.hierarchyLevel || 1);
             setRuleTargetType(rule.targetType || 'general');
             setRuleTargetValue(rule.targetValue || '');
+            setRuleApplyAfterDiscount(rule.applyAfterDiscount || false);
         } else {
             setEditingRule(null);
             setRuleName('');
@@ -148,6 +161,7 @@ export default function CommissionsPage() {
             setRuleHierarchy(1);
             setRuleTargetType('general');
             setRuleTargetValue('');
+            setRuleApplyAfterDiscount(false);
         }
         setShowRuleModal(true);
     };
@@ -169,7 +183,7 @@ export default function CommissionsPage() {
                 createdAt: serverTimestamp(),
             };
             const ref = await addDoc(collection(db, 'commissions'), data);
-            setCommissions(prev => [{ id: ref.id, ...data, createdAt: new Date() } as any, ...prev]);
+            setCommissions(prev => [{ id: ref.id, ...data, createdAt: serverTimestamp() as FirestoreWriteTimestamp } as Commission & { id: string }, ...prev]);
             setShowManualModal(false);
             setManualStaffId('');
             setManualAmount(0);
@@ -183,6 +197,11 @@ export default function CommissionsPage() {
     };
 
     const typeLabel = { repair: 'Sửa chữa', order: 'Đơn hàng', all: 'Tất cả' };
+
+    const { paginatedData: paginatedCommissions, currentPage: commPage, totalPages: commTotalPages, pageSize: commPageSize, totalFiltered: commTotalFiltered, setPage: commSetPage, setPageSize: commSetPageSize, resetPage: commResetPage } = useClientPagination(filteredCommissions, 20);
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    useEffect(() => { commResetPage(); }, [filterMonth, activeTab]);
 
     if (loading) return (
         <div className="flex items-center justify-center h-[60vh]">
@@ -323,6 +342,30 @@ export default function CommissionsPage() {
 
                     {/* Commission list */}
                     <div className="bg-white rounded-xl border overflow-hidden">
+                        {/* Mobile Card View */}
+                        <div className="block md:hidden divide-y divide-gray-100">
+                            {paginatedCommissions.map(c => (
+                                <div key={c.id} className="p-4 hover:bg-gray-50 transition-colors">
+                                    <div className="flex items-start justify-between">
+                                        <div className="flex-1 min-w-0">
+                                            <p className="font-medium text-gray-900 text-sm">{c.staffName}</p>
+                                            <div className="flex items-center gap-2 mt-1">
+                                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${c.sourceType === 'repair' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>
+                                                    {c.sourceType === 'repair' ? 'Sửa chữa' : 'Đơn hàng'}
+                                                </span>
+                                                <span className="text-xs text-gray-400">{formatDate(c.createdAt)}</span>
+                                            </div>
+                                        </div>
+                                        <div className="text-right ml-3 shrink-0">
+                                            <p className="font-bold text-orange-600 text-sm">{formatPrice(c.amount)}</p>
+                                            <p className="text-[10px] text-gray-400 mt-0.5">Gốc: {formatPrice(c.baseAmount)}</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                        {/* Desktop Table View */}
+                        <div className="hidden md:block">
                         <table className="w-full text-sm">
                             <thead>
                                 <tr className="text-gray-500 text-xs border-b bg-gray-50">
@@ -334,7 +377,7 @@ export default function CommissionsPage() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {filteredCommissions.map(c => (
+                                {paginatedCommissions.map(c => (
                                     <tr key={c.id} className="border-b border-gray-50 hover:bg-gray-50">
                                         <td className="px-4 py-3 text-xs text-gray-500">{formatDate(c.createdAt)}</td>
                                         <td className="font-medium">{c.staffName}</td>
@@ -349,21 +392,26 @@ export default function CommissionsPage() {
                                 ))}
                             </tbody>
                         </table>
+                        </div>
                         {filteredCommissions.length === 0 && (
                             <div className="text-center py-12 text-gray-400 text-sm">Chưa có hoa hồng trong tháng này</div>
                         )}
                     </div>
+                    <PaginationBar
+                        currentPage={commPage}
+                        totalPages={commTotalPages}
+                        pageSize={commPageSize}
+                        totalFiltered={commTotalFiltered}
+                        totalAll={commissions.length}
+                        onPageChange={commSetPage}
+                        onPageSizeChange={commSetPageSize}
+                        entityLabel="hoa hồng"
+                    />
                 </div>
             )}
 
             {/* ═══ Rule Modal ═══ */}
-            {showRuleModal && (
-                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-                    <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
-                        <div className="flex items-center justify-between px-6 py-4 border-b">
-                            <h2 className="text-lg font-bold">{editingRule ? 'Sửa quy tắc' : 'Thêm quy tắc mới'}</h2>
-                            <button onClick={() => setShowRuleModal(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
-                        </div>
+            <Modal isOpen={showRuleModal} onClose={() => setShowRuleModal(false)} title={editingRule ? 'Sửa quy tắc' : 'Thêm quy tắc mới'} size="md">
                         <div className="px-6 py-4 space-y-4">
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Tên quy tắc</label>
@@ -374,7 +422,12 @@ export default function CommissionsPage() {
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">Loại</label>
-                                    <select value={ruleType} onChange={e => setRuleType(e.target.value as any)}
+                                    <select
+                                        value={ruleType}
+                                        onChange={(e) => {
+                                            const v = e.target.value;
+                                            if (v === 'all' || v === 'repair' || v === 'order') setRuleType(v);
+                                        }}
                                         className="w-full px-4 py-2 border rounded-lg bg-white">
                                         <option value="all">Tất cả</option>
                                         <option value="repair">Sửa chữa</option>
@@ -437,11 +490,19 @@ export default function CommissionsPage() {
                                 </p>
                             </div>
 
-                            <label className="flex items-center gap-2 cursor-pointer">
-                                <input type="checkbox" checked={ruleActive} onChange={e => setRuleActive(e.target.checked)}
-                                    className="w-4 h-4 rounded border-gray-300 text-orange-500 focus:ring-orange-500" />
-                                <span className="text-sm font-medium text-gray-700">Đang hoạt động</span>
-                            </label>
+                            <div className="flex flex-col gap-2">
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <input type="checkbox" checked={ruleActive} onChange={e => setRuleActive(e.target.checked)}
+                                        className="w-4 h-4 rounded border-gray-300 text-orange-500 focus:ring-orange-500" />
+                                    <span className="text-sm font-medium text-gray-700">Đang hoạt động</span>
+                                </label>
+                                
+                                <label className="flex items-center gap-2 cursor-pointer bg-orange-50 p-2 rounded border border-orange-100">
+                                    <input type="checkbox" checked={ruleApplyAfterDiscount} onChange={e => setRuleApplyAfterDiscount(e.target.checked)}
+                                        className="w-4 h-4 rounded border-gray-300 text-orange-500 focus:ring-orange-500" />
+                                    <span className="text-[11px] font-medium text-orange-800">Trừ khuyến mãi phụ kiện trước khi tính HH (Dành cho máy ghép phụ kiện)</span>
+                                </label>
+                            </div>
                         </div>
                         <div className="flex justify-end gap-3 px-6 py-4 border-t">
                             <button onClick={() => setShowRuleModal(false)}
@@ -451,18 +512,10 @@ export default function CommissionsPage() {
                                 <Save size={16} /> Lưu
                             </button>
                         </div>
-                    </div>
-                </div>
-            )}
+            </Modal>
 
             {/* ═══ Manual Commission Modal ═══ */}
-            {showManualModal && (
-                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-                    <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
-                        <div className="flex items-center justify-between px-6 py-4 border-b">
-                            <h2 className="text-lg font-bold">Thêm hoa hồng thủ công</h2>
-                            <button onClick={() => setShowManualModal(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
-                        </div>
+            <Modal isOpen={showManualModal} onClose={() => setShowManualModal(false)} title="Thêm hoa hồng thủ công" size="md">
                         <div className="px-6 py-4 space-y-4">
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Nhân viên</label>
@@ -487,7 +540,12 @@ export default function CommissionsPage() {
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">Loại</label>
-                                    <select value={manualSourceType} onChange={e => setManualSourceType(e.target.value as any)}
+                                    <select
+                                        value={manualSourceType}
+                                        onChange={(e) => {
+                                            const v = e.target.value;
+                                            if (v === 'repair' || v === 'order') setManualSourceType(v);
+                                        }}
                                         className="w-full px-4 py-2 border rounded-lg bg-white">
                                         <option value="repair">Sửa chữa</option>
                                         <option value="order">Đơn hàng</option>
@@ -508,9 +566,7 @@ export default function CommissionsPage() {
                                 <Save size={16} /> Lưu
                             </button>
                         </div>
-                    </div>
-                </div>
-            )}
+            </Modal>
         </div>
     );
 }

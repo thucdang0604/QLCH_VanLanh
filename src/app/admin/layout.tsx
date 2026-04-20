@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, ReactNode, useEffect } from 'react';
+import { useState, ReactNode, useEffect, useMemo } from 'react';
+import { ConfigProvider } from '@/lib/ConfigContext';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
@@ -30,6 +31,9 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
 import NotificationBell from '@/components/admin/NotificationBell';
+import { Toaster } from 'sonner';
+import { toastError } from '@/lib/toast';
+import { useAdminBadges } from '@/lib/useAdminBadges';
 
 // Menu Groups with Permissions
 const menuGroups = [
@@ -124,26 +128,42 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                 router.push('/admin/login');
             } else if (user.role !== 'admin' && user.role !== 'staff') {
                 // Logged in but not admin/staff -> redirect to home with message and logout
-                alert('Bạn không có quyền truy cập trang quản trị!');
+                toastError('Bạn không có quyền truy cập trang quản trị!');
                 logout().then(() => router.push('/admin/login'));
             }
         }
     }, [user, loading, router, pathname]);
 
+    // ── Badge counts from single hook (no duplicate listeners) ──
+    // Must be called before any early returns to satisfy React Hooks rules
+    const { badges, activities } = useAdminBadges(user?.uid, user?.role);
+
+    // Map menu href → badge count
+    const badgeMap = useMemo<Record<string, number>>(() => ({
+        '/admin/orders': badges.orders,
+        '/admin/appointments': badges.appointments,
+        '/admin/repairs': badges.repairs,
+        '/admin/technician': badges.technician,
+        '/admin/chat': badges.chats,
+        '/admin/reviews': badges.reviews,
+    }), [badges]);
+
     // ✅ Login page always renders directly — no auth guard, no spinner
     if (pathname === '/admin/login') {
-        return <>{children}</>;
+        return <ConfigProvider>{children}</ConfigProvider>;
     }
 
     // For all other admin pages: block rendering until auth is confirmed
     if (loading || !user || (user.role !== 'admin' && user.role !== 'staff')) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-gray-100">
-                <div className="flex flex-col items-center gap-4">
-                    <Loader2 className="animate-spin text-orange-500" size={40} />
-                    <p className="text-gray-500">Đang kiểm tra quyền truy cập...</p>
+            <ConfigProvider>
+                <div className="min-h-screen flex items-center justify-center bg-gray-100">
+                    <div className="flex flex-col items-center gap-4">
+                        <Loader2 className="animate-spin text-orange-500" size={40} />
+                        <p className="text-gray-500">Đang kiểm tra quyền truy cập...</p>
+                    </div>
                 </div>
-            </div>
+            </ConfigProvider>
         );
     }
 
@@ -176,6 +196,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
 
     if (isStaffBlocked) {
         return (
+            <ConfigProvider>
             <div className="flex min-h-screen bg-gray-100">
                 {/* Keep sidebar visible so they can navigate to allowed routes */}
                 {/* Sidebar omitted for simplicity — render access denied in main area */}
@@ -195,11 +216,14 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                     </div>
                 </div>
             </div>
+            </ConfigProvider>
         );
     }
 
     return (
+        <ConfigProvider>
         <div className="flex min-h-screen bg-gray-100">
+            <Toaster position="top-right" richColors closeButton />
             {/* Overlay for mobile */}
             {isSidebarOpen && (
                 <div
@@ -225,6 +249,8 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                         <button
                             onClick={() => setIsSidebarOpen(false)}
                             className="lg:hidden text-gray-400 hover:text-gray-600"
+                            aria-label="Đóng menu"
+                            title="Đóng menu"
                         >
                             <X size={20} />
                         </button>
@@ -256,6 +282,11 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                                                     }`}
                                             />
                                             <span className="text-sm">{item.label}</span>
+                                            {(badgeMap[item.href] ?? 0) > 0 && (
+                                                <span className="ml-auto min-w-[20px] h-5 px-1.5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center animate-pulse">
+                                                    {badgeMap[item.href] > 99 ? '99+' : badgeMap[item.href]}
+                                                </span>
+                                            )}
                                         </Link>
                                     );
                                 })}
@@ -297,6 +328,8 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                         <button
                             onClick={() => setIsSidebarOpen(true)}
                             className="lg:hidden p-2 -ml-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+                            aria-label="Mở menu"
+                            title="Mở menu"
                         >
                             <Menu size={24} />
                         </button>
@@ -314,7 +347,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
 
                     <div className="flex items-center gap-3">
                         {/* Notifications */}
-                        <NotificationBell />
+                        <NotificationBell badges={badges} activities={activities} />
 
                         {/* User */}
                         <div className="flex items-center gap-3 pl-3 border-l text-right">
@@ -338,5 +371,6 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                 </main>
             </div>
         </div>
+        </ConfigProvider>
     );
 }

@@ -1,80 +1,82 @@
-'use client';
+import { getAdminDb, isAdminAvailable } from "@/lib/firebaseAdmin";
+import { ServerConfigProvider } from "@/lib/ConfigContext";
+import { DEFAULT_CONFIG, type SiteConfig } from "@/lib/config-defaults";
+import CustomerLayoutShell from "./layout.shell";
 
-import Header from "@/components/layout/Header";
-import Footer from "@/components/layout/Footer";
-import MobileBottomNav from "@/components/layout/MobileBottomNav";
-import ChatWidget from "@/components/ChatWidget";
-import FloatingReviews from "@/components/home/FloatingReviews";
-import { CartProvider } from "@/lib/CartContext";
-import { useConfig } from "@/lib/ConfigContext";
-import { usePresence } from "@/lib/usePresence";
+/**
+ * Customer Layout — Server Component
+ * 
+ * Fetch config 1 lần qua Admin SDK (server-side), truyền xuống client shell.
+ * KHÔNG dùng onSnapshot → KHÔNG tạo WebSocket connection cho khách hàng.
+ * Config chỉ cập nhật khi admin bấm Lưu → trigger revalidate.
+ */
 
-export default function CustomerLayout({
+async function getServerConfig(): Promise<SiteConfig> {
+    if (!isAdminAvailable()) {
+        return DEFAULT_CONFIG;
+    }
+
+    try {
+        const db = getAdminDb();
+        const snapshot = await db.collection('system_config').doc('main_settings').get();
+
+        if (!snapshot.exists) {
+            return DEFAULT_CONFIG;
+        }
+
+        // Parse data — convert to plain JS (no Firestore Timestamps)
+        const data = JSON.parse(JSON.stringify(snapshot.data()));
+
+        const storedSections = Array.isArray(data.homeSections) ? data.homeSections : [];
+        let homeSections = DEFAULT_CONFIG.homeSections;
+        if (storedSections.length > 0) {
+            const storedIds = new Set(storedSections.map((s: { id: string }) => s.id));
+            const missing = DEFAULT_CONFIG.homeSections.filter(d => !storedIds.has(d.id));
+            if (missing.length === 0) {
+                homeSections = storedSections;
+            } else {
+                const maxOrder = Math.max(...storedSections.map((s: { order: number }) => s.order), 0);
+                homeSections = [...storedSections, ...missing.map((m, i) => ({ ...m, order: maxOrder + 1 + i }))];
+            }
+        }
+
+        const merged: SiteConfig = {
+            ...DEFAULT_CONFIG,
+            primaryColor: data.primaryColor || DEFAULT_CONFIG.primaryColor,
+            primaryColorDark: data.primaryColorDark || DEFAULT_CONFIG.primaryColorDark,
+            primaryColorLight: data.primaryColorLight || DEFAULT_CONFIG.primaryColorLight,
+            contact_info: { ...DEFAULT_CONFIG.contact_info, ...(data.contact_info) },
+            siteName: data.siteName || DEFAULT_CONFIG.siteName,
+            logoUrl: data.logoUrl || DEFAULT_CONFIG.logoUrl,
+            headerBg: data.headerBg !== undefined ? data.headerBg : DEFAULT_CONFIG.headerBg,
+            topBarText: data.topBarText ?? DEFAULT_CONFIG.topBarText,
+            topBarEnabled: data.topBarEnabled ?? DEFAULT_CONFIG.topBarEnabled,
+            hero_banners: data.hero_banners || DEFAULT_CONFIG.hero_banners,
+            background_config: { ...DEFAULT_CONFIG.background_config, ...(data.background_config) },
+            store_branches: data.store_branches || DEFAULT_CONFIG.store_branches,
+            homeSections,
+            forbiddenWords: data.forbiddenWords || DEFAULT_CONFIG.forbiddenWords,
+        };
+
+        return merged;
+    } catch (error) {
+        console.error('[Customer Layout] Failed to fetch config:', error);
+        return DEFAULT_CONFIG;
+    }
+}
+
+export default async function CustomerLayout({
     children,
 }: Readonly<{
     children: React.ReactNode;
 }>) {
-    const { config } = useConfig();
-    const bg = config.background_config;
-
-    // Track online presence and visitors
-    usePresence();
-
-    // Build background styles for the outer wrapper
-    const wrapperStyle: React.CSSProperties = {};
-    if (bg.is_active) {
-        if (bg.type === 'image' && bg.value) {
-            wrapperStyle.backgroundImage = `url(${bg.value})`;
-            wrapperStyle.backgroundAttachment = 'fixed';
-            wrapperStyle.backgroundSize = 'cover';
-            wrapperStyle.backgroundPosition = 'center';
-            wrapperStyle.backgroundRepeat = 'no-repeat';
-        } else if (bg.type === 'color' && bg.value) {
-            wrapperStyle.backgroundColor = bg.value;
-        }
-    }
-
-    // LocalBusiness Schema for SEO
-    const localBusinessSchema = {
-        '@context': 'https://schema.org',
-        '@type': 'LocalBusiness',
-        name: config.siteName || 'Văn Lành Service',
-        description: 'Trung tâm sửa chữa điện thoại, laptop & thiết bị công nghệ uy tín tại TP.HCM. CÔNG TY TNHH VIỄN THÔNG VĂN LÀNH SERVICE. Linh kiện chính hãng, sửa chữa nhanh chóng.',
-        url: 'https://vanlanhservice.com.vn',
-        telephone: config.contact_info?.main_phone || '0932242026',
-        email: config.contact_info?.email || 'vanlanh.vn@gmail.com',
-        address: (config.store_branches || []).map(branch => ({
-            '@type': 'PostalAddress',
-            streetAddress: branch.address,
-            addressLocality: 'Hồ Chí Minh',
-            addressCountry: 'VN',
-        })),
-        openingHours: 'Mo-Su 07:30-21:00',
-        priceRange: '$$',
-        image: 'https://vanlanhservice.com.vn/logo.png',
-        sameAs: [
-            config.contact_info?.facebook_link || '',
-            config.contact_info?.zalo_link || '',
-        ].filter(Boolean),
-    };
+    const config = await getServerConfig();
 
     return (
-        <CartProvider>
-            <div className="min-h-screen w-full" style={wrapperStyle}>
-                {/* SEO: LocalBusiness Schema */}
-                <script
-                    type="application/ld+json"
-                    dangerouslySetInnerHTML={{ __html: JSON.stringify(localBusinessSchema) }}
-                />
-                <Header />
-                <main className="min-h-screen">
-                    {children}
-                </main>
-                <Footer />
-                <MobileBottomNav />
-                <ChatWidget />
-                <FloatingReviews />
-            </div>
-        </CartProvider>
+        <ServerConfigProvider initialConfig={config}>
+            <CustomerLayoutShell>
+                {children}
+            </CustomerLayoutShell>
+        </ServerConfigProvider>
     );
 }

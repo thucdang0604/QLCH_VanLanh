@@ -7,6 +7,7 @@ import {
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import MediaManager from '@/components/admin/MediaManager';
+import { toastError, toastSuccess } from '@/lib/toast';
 
 // ── Receipt Config Interface ──
 export interface ReceiptConfig {
@@ -19,6 +20,21 @@ export interface ReceiptConfig {
     notes: string[];
     footerText: string;
     complaintHotline: string;
+    invoice?: {
+        title?: string;
+        showCustomerInfo?: boolean;
+        showDeviceInfo?: boolean;
+        showImei?: boolean;
+        showIssueDescription?: boolean;
+        showPartsUsed?: boolean;
+        showCostBreakdown?: boolean;
+        showPaymentNote?: boolean;
+        showSignatures?: boolean;
+        footerText?: string;
+        complaintHotline?: string;
+        maxWidthPx?: number;
+        baseFontSizePx?: number;
+    };
 }
 
 const defaultConfig: ReceiptConfig = {
@@ -36,6 +52,21 @@ const defaultConfig: ReceiptConfig = {
     ],
     footerText: 'Quý khách vui lòng kiểm tra và ký tên xác nhận thông tin.',
     complaintHotline: '0932.24.20.26',
+    invoice: {
+        title: 'HÓA ĐƠN DỊCH VỤ SỬA CHỮA',
+        showCustomerInfo: true,
+        showDeviceInfo: true,
+        showImei: false,
+        showIssueDescription: true,
+        showPartsUsed: true,
+        showCostBreakdown: true,
+        showPaymentNote: true,
+        showSignatures: true,
+        footerText: 'Cảm ơn Quý khách đã sử dụng dịch vụ của Văn Lành Service.',
+        complaintHotline: '0932.24.20.26',
+        maxWidthPx: 620,
+        baseFontSizePx: 11,
+    },
 };
 
 export default function ReceiptSettingsPage() {
@@ -43,6 +74,7 @@ export default function ReceiptSettingsPage() {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [showMediaManager, setShowMediaManager] = useState(false);
+    const [previewTab, setPreviewTab] = useState<'receipt' | 'invoice'>('receipt');
 
     // ── Load config ──
     useEffect(() => {
@@ -69,10 +101,10 @@ export default function ReceiptSettingsPage() {
                 ...config,
                 updatedAt: serverTimestamp(),
             }, { merge: true });
-            alert('Đã lưu cấu hình biên nhận!');
+            toastSuccess('Đã lưu cấu hình biên nhận!');
         } catch (err) {
             console.error(err);
-            alert('Lỗi khi lưu!');
+            toastError('Lỗi khi lưu!');
         } finally {
             setSaving(false);
         }
@@ -248,6 +280,117 @@ export default function ReceiptSettingsPage() {
                                 className="w-full px-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-orange-500/20 focus:outline-none" />
                         </div>
                     </fieldset>
+
+                    {/* Invoice settings */}
+                    <fieldset className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+                        <legend className="text-sm font-bold text-gray-900 px-2">🧾 Mẫu Hóa Đơn (khi hoàn tất sửa chữa)</legend>
+
+                        <div>
+                            <label className="block text-xs font-semibold text-gray-600 mb-1">Tiêu đề hóa đơn</label>
+                            <input
+                                type="text"
+                                value={config.invoice?.title || ''}
+                                onChange={(e) =>
+                                    setConfig((prev) => ({
+                                        ...prev,
+                                        invoice: { ...(prev.invoice || {}), title: e.target.value },
+                                    }))
+                                }
+                                className="w-full px-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-orange-500/20 focus:outline-none font-black text-center uppercase tracking-wider"
+                            />
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            {(
+                                [
+                                    ['showCustomerInfo', 'Hiện thông tin khách hàng'],
+                                    ['showDeviceInfo', 'Hiện thông tin thiết bị'],
+                                    ['showImei', 'Hiện IMEI (không khuyến nghị)'],
+                                    ['showIssueDescription', 'Hiện nội dung sửa chữa'],
+                                    ['showPartsUsed', 'Hiện linh kiện đã sử dụng'],
+                                    ['showCostBreakdown', 'Hiện bảng chi phí'],
+                                    ['showPaymentNote', 'Hiện ghi chú thanh toán'],
+                                    ['showSignatures', 'Hiện khung chữ ký'],
+                                ] as const
+                            ).map(([key, label]) => (
+                                <label key={key} className="flex items-center gap-2 text-sm text-gray-700">
+                                    <input
+                                        type="checkbox"
+                                        checked={Boolean(config.invoice?.[key])}
+                                        onChange={(e) =>
+                                            setConfig((prev) => ({
+                                                ...prev,
+                                                invoice: { ...(prev.invoice || {}), [key]: e.target.checked },
+                                            }))
+                                        }
+                                        className="h-4 w-4 rounded border-gray-300 text-orange-500 focus:ring-orange-500"
+                                    />
+                                    {label}
+                                </label>
+                            ))}
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div>
+                                <label className="block text-xs font-semibold text-gray-600 mb-1">Max width (px)</label>
+                                <input
+                                    type="number"
+                                    value={config.invoice?.maxWidthPx ?? 620}
+                                    onChange={(e) =>
+                                        setConfig((prev) => ({
+                                            ...prev,
+                                            invoice: { ...(prev.invoice || {}), maxWidthPx: Number(e.target.value) || 620 },
+                                        }))
+                                    }
+                                    className="w-full px-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-orange-500/20 focus:outline-none"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-semibold text-gray-600 mb-1">Cỡ chữ base (px)</label>
+                                <input
+                                    type="number"
+                                    value={config.invoice?.baseFontSizePx ?? 11}
+                                    onChange={(e) =>
+                                        setConfig((prev) => ({
+                                            ...prev,
+                                            invoice: { ...(prev.invoice || {}), baseFontSizePx: Number(e.target.value) || 11 },
+                                        }))
+                                    }
+                                    className="w-full px-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-orange-500/20 focus:outline-none"
+                                />
+                            </div>
+                        </div>
+
+                        <div>
+                            <label className="block text-xs font-semibold text-gray-600 mb-1">Footer hóa đơn</label>
+                            <input
+                                type="text"
+                                value={config.invoice?.footerText || ''}
+                                onChange={(e) =>
+                                    setConfig((prev) => ({
+                                        ...prev,
+                                        invoice: { ...(prev.invoice || {}), footerText: e.target.value },
+                                    }))
+                                }
+                                className="w-full px-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-orange-500/20 focus:outline-none"
+                            />
+                        </div>
+
+                        <div>
+                            <label className="block text-xs font-semibold text-gray-600 mb-1">Hotline khiếu nại (hóa đơn)</label>
+                            <input
+                                type="text"
+                                value={config.invoice?.complaintHotline || ''}
+                                onChange={(e) =>
+                                    setConfig((prev) => ({
+                                        ...prev,
+                                        invoice: { ...(prev.invoice || {}), complaintHotline: e.target.value },
+                                    }))
+                                }
+                                className="w-full px-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-orange-500/20 focus:outline-none"
+                            />
+                        </div>
+                    </fieldset>
                 </div>
 
                 {/* ════ CỘT PHẢI: LIVE PREVIEW ════ */}
@@ -256,117 +399,298 @@ export default function ReceiptSettingsPage() {
                         <div className="bg-gradient-to-r from-orange-50 to-amber-50 px-4 py-3 border-b border-orange-100 flex items-center gap-2">
                             <Printer size={16} className="text-orange-500" />
                             <span className="text-sm font-bold text-orange-800">Xem trước bản in (A5)</span>
+                            <div className="ml-auto flex items-center gap-1">
+                                <button
+                                    type="button"
+                                    onClick={() => setPreviewTab('receipt')}
+                                    className={`px-3 py-1 rounded-lg text-xs font-bold border transition-colors ${previewTab === 'receipt'
+                                        ? 'bg-white text-orange-700 border-orange-200'
+                                        : 'bg-transparent text-orange-700/70 border-transparent hover:border-orange-200 hover:bg-white/60'
+                                        }`}
+                                    title="Xem trước Biên nhận"
+                                >
+                                    Biên nhận
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setPreviewTab('invoice')}
+                                    className={`px-3 py-1 rounded-lg text-xs font-bold border transition-colors ${previewTab === 'invoice'
+                                        ? 'bg-white text-emerald-700 border-emerald-200'
+                                        : 'bg-transparent text-emerald-700/70 border-transparent hover:border-emerald-200 hover:bg-white/60'
+                                        }`}
+                                    title="Xem trước Hóa đơn"
+                                >
+                                    Hóa đơn
+                                </button>
+                            </div>
                         </div>
                         <div className="p-4 bg-gray-100">
                             <div className="bg-white shadow-md mx-auto text-black" style={{ maxWidth: '400px', padding: '16px', fontSize: '10px', lineHeight: '1.6' }}>
 
-                                {/* HEADER */}
-                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', marginBottom: '6px' }}>
-                                    {config.logoUrl ? (
-                                        // eslint-disable-next-line @next/next/no-img-element
-                                        <img src={config.logoUrl} alt="Logo" style={{ width: 50, height: 50, objectFit: 'contain', borderRadius: 6, border: '1px solid #ddd' }} />
-                                    ) : (
-                                        <div style={{ width: 50, height: 50, border: '2px solid #333', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 7, fontWeight: 900, textAlign: 'center' }}>
-                                            VĂN<br />LÀNH
+                                {previewTab === 'receipt' && (
+                                    <>
+                                        {/* HEADER */}
+                                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', marginBottom: '6px' }}>
+                                            {config.logoUrl ? (
+                                                // eslint-disable-next-line @next/next/no-img-element
+                                                <img src={config.logoUrl} alt="Logo" style={{ width: 50, height: 50, objectFit: 'contain', borderRadius: 6, border: '1px solid #ddd' }} />
+                                            ) : (
+                                                <div style={{ width: 50, height: 50, border: '2px solid #333', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 7, fontWeight: 900, textAlign: 'center' }}>
+                                                    VĂN<br />LÀNH
+                                                </div>
+                                            )}
+                                            <div style={{ flex: 1, textAlign: 'right' }}>
+                                                <p style={{ fontWeight: 900, fontSize: 9, textTransform: 'uppercase', lineHeight: 1.2 }}>
+                                                    {config.shopTitle}
+                                                </p>
+                                                <p style={{ fontWeight: 900, fontSize: 11, textTransform: 'uppercase', letterSpacing: 1 }}>
+                                                    {config.shopName}
+                                                </p>
+                                                <p style={{ fontSize: 8, color: '#666', marginTop: 2 }}>{config.address}</p>
+                                                <p style={{ fontSize: 8, color: '#666' }}>Hotline: <b>{config.hotline}</b></p>
+                                            </div>
                                         </div>
-                                    )}
-                                    <div style={{ flex: 1, textAlign: 'right' }}>
-                                        <p style={{ fontWeight: 900, fontSize: 9, textTransform: 'uppercase', lineHeight: 1.2 }}>
-                                            {config.shopTitle}
-                                        </p>
-                                        <p style={{ fontWeight: 900, fontSize: 11, textTransform: 'uppercase', letterSpacing: 1 }}>
-                                            {config.shopName}
-                                        </p>
-                                        <p style={{ fontSize: 8, color: '#666', marginTop: 2 }}>{config.address}</p>
-                                        <p style={{ fontSize: 8, color: '#666' }}>Hotline: <b>{config.hotline}</b></p>
-                                    </div>
-                                </div>
 
-                                {/* TITLE */}
-                                <h1 style={{ textAlign: 'center', fontWeight: 900, fontSize: 14, textTransform: 'uppercase', letterSpacing: 2, margin: '8px 0', borderTop: '2px solid #333', borderBottom: '2px solid #333', padding: '4px 0' }}>
-                                    {config.receiptTitle}
-                                </h1>
+                                        {/* TITLE */}
+                                        <h1 style={{ textAlign: 'center', fontWeight: 900, fontSize: 14, textTransform: 'uppercase', letterSpacing: 2, margin: '8px 0', borderTop: '2px solid #333', borderBottom: '2px solid #333', padding: '4px 0' }}>
+                                            {config.receiptTitle}
+                                        </h1>
 
-                                {/* MOCK DATA */}
-                                <div style={{ fontSize: 9, color: '#666', display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                                    <span>Mã phiếu: <b style={{ color: '#000' }}>#AB12CD</b></span>
-                                    <span>Ngày: <b style={{ color: '#000' }}>{new Date().toLocaleDateString('vi-VN')}</b></span>
-                                </div>
-
-                                <div style={{ borderBottom: '1px dotted #aaa', paddingBottom: 8, marginBottom: 8, fontSize: 9 }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                        <span>Khách hàng: <b>Nguyễn Văn A</b></span>
-                                        <span>SĐT: <b>0912 345 678</b></span>
-                                    </div>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4 }}>
-                                        <span>Thiết bị: <b>iPhone 15 Pro Max</b></span>
-                                        <span>Màu: <b>Titan Đen</b></span>
-                                        <span>IMEI: <b>3568****1234</b></span>
-                                    </div>
-                                    <div>Tình trạng: <b>Thay màn hình, ép kính</b></div>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                        <span>Chuẩn bệnh: <b>Nứt kính ngoài, LCD ok</b></span>
-                                        <span>Giá dự kiến: <b>1,500,000đ</b></span>
-                                    </div>
-                                </div>
-
-                                {/* CHECKLIST */}
-                                <div style={{ marginBottom: 8 }}>
-                                    <h3 style={{ fontWeight: 700, fontSize: 9, textTransform: 'uppercase', borderBottom: '1px solid #ccc', paddingBottom: 2, marginBottom: 4 }}>Kiểm Tra Đầu Vào</h3>
-                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 12px', fontSize: 8 }}>
-                                        <div>
-                                            <span><b>VỎ MÁY:</b> ☑Trầy ☐Bể ☐BTH</span><br />
-                                            <span><b>CẢM ỨNG:</b> ☐Liệt ☐Chập ☑OK</span><br />
-                                            <span><b>LOA/MIC:</b> ☐Lỗi ☑OK</span><br />
-                                            <span><b>PIN:</b> ☐Phồng ☐K nhận sạc ☑OK</span>
+                                        {/* MOCK DATA */}
+                                        <div style={{ fontSize: 9, color: '#666', display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                                            <span>Mã phiếu: <b style={{ color: '#000' }}>#AB12CD</b></span>
+                                            <span>Ngày: <b style={{ color: '#000' }}>{new Date().toLocaleDateString('vi-VN')}</b></span>
                                         </div>
-                                        <div>
-                                            <span><b>MÀN HÌNH:</b> ☐Ám ☐Sọc ☑OK</span><br />
-                                            <span><b>CAMERA:</b> ☐Mờ ☐Lỗi ☑OK</span><br />
-                                            <span><b>KẾT NỐI:</b> ☐Wi-Fi ☐BT ☑OK</span><br />
-                                            <span><b>FACE/VÂN TAY:</b> ☐Không nhận ☑OK</span>
+
+                                        <div style={{ borderBottom: '1px dotted #aaa', paddingBottom: 8, marginBottom: 8, fontSize: 9 }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                                <span>Khách hàng: <b>Nguyễn Văn A</b></span>
+                                                <span>SĐT: <b>0912 345 678</b></span>
+                                            </div>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4 }}>
+                                                <span>Thiết bị: <b>iPhone 15 Pro Max</b></span>
+                                                <span>Màu: <b>Titan Đen</b></span>
+                                                <span>IMEI: <b>3568****1234</b></span>
+                                            </div>
+                                            <div>Tình trạng: <b>Thay màn hình, ép kính</b></div>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                                <span>Chuẩn bệnh: <b>Nứt kính ngoài, LCD ok</b></span>
+                                                <span>Giá dự kiến: <b>1,500,000đ</b></span>
+                                            </div>
                                         </div>
-                                    </div>
-                                    <div style={{ display: 'flex', gap: '8px', fontSize: 8, marginTop: 4, flexWrap: 'wrap' }}>
-                                        <span style={{ fontWeight: 700 }}>LỊCH SỬ MÁY:</span>
-                                        <span>☑ Đã từng sửa</span>
-                                        <span>☐ Từng vào nước</span>
-                                        <span>☑ L.kiện lỗi/lô</span>
-                                    </div>
-                                    <div style={{ fontSize: 8, marginTop: 4, borderTop: '1px dotted #ccc', paddingTop: 4 }}>Ghi chú khác: ..............................................</div>
-                                </div>
 
-                                {/* NOTES */}
-                                <div style={{ border: '1px solid #bbb', borderRadius: 4, padding: 6, marginBottom: 8, background: '#fafafa' }}>
-                                    <h3 style={{ fontWeight: 700, fontSize: 8, textTransform: 'uppercase', marginBottom: 3 }}>Lưu ý:</h3>
-                                    <ol style={{ fontSize: 7, color: '#555', margin: 0, paddingLeft: 12, lineHeight: 1.4 }}>
-                                        {config.notes.map((note, i) => (
-                                            <li key={i}>{note || '...'}</li>
-                                        ))}
-                                    </ol>
-                                </div>
+                                        {/* CHECKLIST */}
+                                        <div style={{ marginBottom: 8 }}>
+                                            <h3 style={{ fontWeight: 700, fontSize: 9, textTransform: 'uppercase', borderBottom: '1px solid #ccc', paddingBottom: 2, marginBottom: 4 }}>Kiểm Tra Đầu Vào</h3>
+                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 12px', fontSize: 8 }}>
+                                                <div>
+                                                    <span><b>VỎ MÁY:</b> ☑Trầy ☐Bể ☐BTH</span><br />
+                                                    <span><b>CẢM ỨNG:</b> ☐Liệt ☐Chập ☑OK</span><br />
+                                                    <span><b>LOA/MIC:</b> ☐Lỗi ☑OK</span><br />
+                                                    <span><b>PIN:</b> ☐Phồng ☐K nhận sạc ☑OK</span>
+                                                </div>
+                                                <div>
+                                                    <span><b>MÀN HÌNH:</b> ☐Ám ☐Sọc ☑OK</span><br />
+                                                    <span><b>CAMERA:</b> ☐Mờ ☐Lỗi ☑OK</span><br />
+                                                    <span><b>KẾT NỐI:</b> ☐Wi-Fi ☐BT ☑OK</span><br />
+                                                    <span><b>FACE/VÂN TAY:</b> ☐Không nhận ☑OK</span>
+                                                </div>
+                                            </div>
+                                            <div style={{ display: 'flex', gap: '8px', fontSize: 8, marginTop: 4, flexWrap: 'wrap' }}>
+                                                <span style={{ fontWeight: 700 }}>LỊCH SỬ MÁY:</span>
+                                                <span>☑ Đã từng sửa</span>
+                                                <span>☐ Từng vào nước</span>
+                                                <span>☑ L.kiện lỗi/lô</span>
+                                            </div>
+                                            <div style={{ fontSize: 8, marginTop: 4, borderTop: '1px dotted #ccc', paddingTop: 4 }}>Ghi chú khác: ..............................................</div>
+                                        </div>
 
-                                {/* SIGNATURES */}
-                                <div style={{ textAlign: 'center', fontSize: 8, color: '#888', marginBottom: 6 }}>
-                                    Ngày {new Date().getDate()} tháng {new Date().getMonth() + 1} năm {new Date().getFullYear()}
-                                </div>
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
-                                    <div style={{ textAlign: 'center', fontSize: 8 }}>
-                                        <p style={{ fontWeight: 700, marginBottom: 35 }}>Khách hàng</p>
-                                        <p style={{ color: '#999', fontStyle: 'italic', fontSize: 7 }}>(Ký và ghi rõ họ tên)</p>
-                                        <p style={{ fontWeight: 600, marginTop: 4 }}>Nguyễn Văn A</p>
-                                    </div>
-                                    <div style={{ textAlign: 'center', fontSize: 8 }}>
-                                        <p style={{ fontWeight: 700, marginBottom: 35 }}>Tiếp nhận</p>
-                                        <p style={{ color: '#999', fontStyle: 'italic', fontSize: 7 }}>(Ký và ghi rõ họ tên)</p>
-                                        <p style={{ fontWeight: 600, marginTop: 4 }}>Admin</p>
-                                    </div>
-                                </div>
+                                        {/* NOTES */}
+                                        <div style={{ border: '1px solid #bbb', borderRadius: 4, padding: 6, marginBottom: 8, background: '#fafafa' }}>
+                                            <h3 style={{ fontWeight: 700, fontSize: 8, textTransform: 'uppercase', marginBottom: 3 }}>Lưu ý:</h3>
+                                            <ol style={{ fontSize: 7, color: '#555', margin: 0, paddingLeft: 12, lineHeight: 1.4 }}>
+                                                {config.notes.map((note, i) => (
+                                                    <li key={i}>{note || '...'}</li>
+                                                ))}
+                                            </ol>
+                                        </div>
 
-                                {/* FOOTER */}
-                                <div style={{ textAlign: 'center', fontSize: 6, color: '#aaa', marginTop: 10, borderTop: '1px solid #eee', paddingTop: 4 }}>
-                                    {config.footerText} Tiếp nhận khiếu nại: <b>{config.complaintHotline}</b>
-                                </div>
+                                        {/* SIGNATURES */}
+                                        <div style={{ textAlign: 'center', fontSize: 8, color: '#888', marginBottom: 6 }}>
+                                            Ngày {new Date().getDate()} tháng {new Date().getMonth() + 1} năm {new Date().getFullYear()}
+                                        </div>
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
+                                            <div style={{ textAlign: 'center', fontSize: 8 }}>
+                                                <p style={{ fontWeight: 700, marginBottom: 35 }}>Khách hàng</p>
+                                                <p style={{ color: '#999', fontStyle: 'italic', fontSize: 7 }}>(Ký và ghi rõ họ tên)</p>
+                                                <p style={{ fontWeight: 600, marginTop: 4 }}>Nguyễn Văn A</p>
+                                            </div>
+                                            <div style={{ textAlign: 'center', fontSize: 8 }}>
+                                                <p style={{ fontWeight: 700, marginBottom: 35 }}>Tiếp nhận</p>
+                                                <p style={{ color: '#999', fontStyle: 'italic', fontSize: 7 }}>(Ký và ghi rõ họ tên)</p>
+                                                <p style={{ fontWeight: 600, marginTop: 4 }}>Admin</p>
+                                            </div>
+                                        </div>
+
+                                        {/* FOOTER */}
+                                        <div style={{ textAlign: 'center', fontSize: 6, color: '#aaa', marginTop: 10, borderTop: '1px solid #eee', paddingTop: 4 }}>
+                                            {config.footerText} Tiếp nhận khiếu nại: <b>{config.complaintHotline}</b>
+                                        </div>
+                                    </>
+                                )}
+
+                                {previewTab === 'invoice' && (() => {
+                                    const inv = config.invoice || {};
+                                    const showCustomerInfo = inv.showCustomerInfo ?? true;
+                                    const showDeviceInfo = inv.showDeviceInfo ?? true;
+                                    const showImei = inv.showImei ?? false;
+                                    const showIssueDescription = inv.showIssueDescription ?? true;
+                                    const showPartsUsed = inv.showPartsUsed ?? true;
+                                    const showCostBreakdown = inv.showCostBreakdown ?? true;
+                                    const showPaymentNote = inv.showPaymentNote ?? true;
+                                    const showSignatures = inv.showSignatures ?? true;
+
+                                    const partsCost = 950000;
+                                    const laborCost = 450000;
+                                    const additionalFees = 100000;
+                                    const deposit = 200000;
+                                    const total = partsCost + laborCost + additionalFees;
+                                    const customerPay = Math.max(total - deposit, 0);
+
+                                    return (
+                                        <>
+                                            {/* HEADER */}
+                                            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', marginBottom: '6px' }}>
+                                                {config.logoUrl ? (
+                                                    // eslint-disable-next-line @next/next/no-img-element
+                                                    <img src={config.logoUrl} alt="Logo" style={{ width: 50, height: 50, objectFit: 'contain', borderRadius: 6, border: '1px solid #ddd' }} />
+                                                ) : (
+                                                    <div style={{ width: 50, height: 50, border: '2px solid #333', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 7, fontWeight: 900, textAlign: 'center' }}>
+                                                        VĂN<br />LÀNH
+                                                    </div>
+                                                )}
+                                                <div style={{ flex: 1, textAlign: 'right' }}>
+                                                    <p style={{ fontWeight: 900, fontSize: 9, textTransform: 'uppercase', lineHeight: 1.2 }}>
+                                                        {config.shopTitle}
+                                                    </p>
+                                                    <p style={{ fontWeight: 900, fontSize: 11, textTransform: 'uppercase', letterSpacing: 1 }}>
+                                                        {config.shopName}
+                                                    </p>
+                                                    <p style={{ fontSize: 8, color: '#666', marginTop: 2 }}>{config.address}</p>
+                                                    <p style={{ fontSize: 8, color: '#666' }}>Hotline: <b>{config.hotline}</b></p>
+                                                </div>
+                                            </div>
+
+                                            {/* TITLE */}
+                                            <h1 style={{ textAlign: 'center', fontWeight: 900, fontSize: 14, textTransform: 'uppercase', letterSpacing: 2, margin: '8px 0', borderTop: '2px solid #333', borderBottom: '2px solid #333', padding: '4px 0' }}>
+                                                {inv.title || 'HÓA ĐƠN DỊCH VỤ SỬA CHỮA'}
+                                            </h1>
+
+                                            {/* META */}
+                                            <div style={{ fontSize: 9, color: '#666', display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                                                <span>Mã phiếu: <b style={{ color: '#000' }}>#AB12CD</b></span>
+                                                <span>Ngày in: <b style={{ color: '#000' }}>{new Date().toLocaleDateString('vi-VN')}</b></span>
+                                            </div>
+
+                                            {(showCustomerInfo || showDeviceInfo || showIssueDescription) && (
+                                                <div style={{ border: '1px solid #ddd', borderRadius: 6, padding: 8, marginBottom: 8, fontSize: 9 }}>
+                                                    {showCustomerInfo && (
+                                                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                                                            <span>Khách hàng: <b>Nguyễn Văn A</b></span>
+                                                            <span>SĐT: <b>0912 345 678</b></span>
+                                                        </div>
+                                                    )}
+                                                    {showDeviceInfo && (
+                                                        <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+                                                            <span>Thiết bị: <b>iPhone 15 Pro Max</b></span>
+                                                            <span>Màu: <b>Titan Đen</b></span>
+                                                            {showImei && <span>IMEI: <b>3568 1234 5678 1234</b></span>}
+                                                        </div>
+                                                    )}
+                                                    {showIssueDescription && (
+                                                        <div style={{ marginTop: 4 }}>
+                                                            Nội dung sửa chữa: <b>Thay màn hình + vệ sinh máy</b>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+
+                                            {showPartsUsed && (
+                                                <div style={{ border: '1px solid #ddd', borderRadius: 6, padding: 8, marginBottom: 8, fontSize: 9 }}>
+                                                    <div style={{ fontWeight: 800, textTransform: 'uppercase', fontSize: 8, marginBottom: 4 }}>Linh kiện đã sử dụng</div>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                                        <span><b>Màn hình iPhone</b> <span style={{ color: '#999' }}>×1</span></span>
+                                                        <span><b>950,000đ</b></span>
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {showCostBreakdown && (
+                                                <div style={{ border: '1px solid #ddd', borderRadius: 6, overflow: 'hidden', marginBottom: 8, fontSize: 9 }}>
+                                                    <div style={{ background: '#f5f5f5', padding: '6px 8px', fontWeight: 800, display: 'flex' }}>
+                                                        <span style={{ width: 28 }}>STT</span>
+                                                        <span style={{ flex: 1 }}>Hạng mục</span>
+                                                        <span style={{ width: 90, textAlign: 'right' }}>Thành tiền</span>
+                                                    </div>
+                                                    <div style={{ padding: '6px 8px', display: 'flex', borderTop: '1px solid #eee' }}>
+                                                        <span style={{ width: 28 }}>1</span>
+                                                        <span style={{ flex: 1 }}>Linh kiện / vật tư</span>
+                                                        <span style={{ width: 90, textAlign: 'right' }}><b>{partsCost.toLocaleString('vi-VN')}đ</b></span>
+                                                    </div>
+                                                    <div style={{ padding: '6px 8px', display: 'flex', borderTop: '1px solid #eee' }}>
+                                                        <span style={{ width: 28 }}>2</span>
+                                                        <span style={{ flex: 1 }}>Tiền công</span>
+                                                        <span style={{ width: 90, textAlign: 'right' }}><b>{laborCost.toLocaleString('vi-VN')}đ</b></span>
+                                                    </div>
+                                                    <div style={{ padding: '6px 8px', display: 'flex', borderTop: '1px solid #eee' }}>
+                                                        <span style={{ width: 28 }}>3</span>
+                                                        <span style={{ flex: 1 }}>Phát sinh</span>
+                                                        <span style={{ width: 90, textAlign: 'right' }}><b>{additionalFees.toLocaleString('vi-VN')}đ</b></span>
+                                                    </div>
+                                                    <div style={{ padding: '6px 8px', display: 'flex', borderTop: '1px solid #ddd', fontWeight: 900 }}>
+                                                        <span style={{ flex: 1, textAlign: 'right' }}>TỔNG CỘNG:</span>
+                                                        <span style={{ width: 90, textAlign: 'right' }}>{total.toLocaleString('vi-VN')}đ</span>
+                                                    </div>
+                                                    {deposit > 0 && (
+                                                        <div style={{ padding: '6px 8px', display: 'flex', borderTop: '1px solid #eee', color: '#a16207', fontWeight: 800 }}>
+                                                            <span style={{ flex: 1, textAlign: 'right' }}>Đã đặt cọc:</span>
+                                                            <span style={{ width: 90, textAlign: 'right' }}>-{deposit.toLocaleString('vi-VN')}đ</span>
+                                                        </div>
+                                                    )}
+                                                    <div style={{ padding: '6px 8px', display: 'flex', borderTop: '1px solid #eee', fontWeight: 900 }}>
+                                                        <span style={{ flex: 1, textAlign: 'right' }}>KHÁCH THANH TOÁN:</span>
+                                                        <span style={{ width: 90, textAlign: 'right', color: '#dc2626' }}>{customerPay.toLocaleString('vi-VN')}đ</span>
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {showPaymentNote && (
+                                                <div style={{ fontSize: 8, color: '#555', marginBottom: 8 }}>
+                                                    Ghi chú thanh toán: Khách thanh toán chuyển khoản.
+                                                </div>
+                                            )}
+
+                                            {showSignatures && (
+                                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginTop: 10 }}>
+                                                    <div style={{ textAlign: 'center', fontSize: 8 }}>
+                                                        <div style={{ fontWeight: 800, marginBottom: 28 }}>KHÁCH HÀNG</div>
+                                                        <div style={{ color: '#999', fontStyle: 'italic', fontSize: 7 }}>(Ký và ghi rõ họ tên)</div>
+                                                        <div style={{ fontWeight: 700, marginTop: 4 }}>Nguyễn Văn A</div>
+                                                    </div>
+                                                    <div style={{ textAlign: 'center', fontSize: 8 }}>
+                                                        <div style={{ fontWeight: 800, marginBottom: 28 }}>THU NGÂN / KẾ TOÁN</div>
+                                                        <div style={{ color: '#999', fontStyle: 'italic', fontSize: 7 }}>(Ký và ghi rõ họ tên)</div>
+                                                        <div style={{ fontWeight: 700, marginTop: 4 }}>KTV</div>
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            <div style={{ textAlign: 'center', fontSize: 6, color: '#aaa', marginTop: 10, borderTop: '1px solid #eee', paddingTop: 4 }}>
+                                                {inv.footerText || 'Cảm ơn Quý khách đã sử dụng dịch vụ.'} Khiếu nại/Bảo hành xin liên hệ: <b>{inv.complaintHotline || config.complaintHotline}</b>
+                                            </div>
+                                        </>
+                                    );
+                                })()}
                             </div>
                         </div>
                     </div>

@@ -10,6 +10,11 @@ export interface User {
     createdAt: Date;
 }
 
+// Firestore timestamp types
+export type FirestoreTimestamp = import('firebase/firestore').Timestamp;
+export type FirestoreWriteTimestamp = import('firebase/firestore').FieldValue;
+export type FirestoreDateValue = FirestoreTimestamp | FirestoreWriteTimestamp;
+
 // Product types
 export interface ProductSpecs {
     screen?: string;
@@ -25,16 +30,28 @@ export interface Product {
     id: string;
     name: string;
     brand: string;
-    category: 'Phone' | 'Laptop' | 'Tablet' | 'Audio' | 'Watch' | 'Accessory' | 'Linh kiện';
+    category: typeof import('./constants').RETAIL_CATEGORIES[number] | string;
+    subCategory?: string;
     price_original: number;
     price_promo: number;
     costPrice?: number; // Giá vốn bình quân
+    oldCostPrice?: number;
+    supplier?: string; // Nguồn cung cấp
     specs: ProductSpecs;
     images: string[];
-    status: 'active' | 'hidden';
+    imageUrl?: string;
+    imageWidth?: number;
+    imageHeight?: number;
+    status: 'active' | 'hidden' | 'inactive';
+    condition?: 'new' | 'like-new' | 'used';
+    isFlashSale?: boolean;
+    sold?: number;
+    quality?: string;
+    partType?: string;
     description?: string;
     videoEmbedUrl?: string;
     stock?: number;
+    held?: number;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -71,12 +88,16 @@ export interface CustomerInfo {
 
 export interface Order {
     id: string;
-    customer_info: CustomerInfo;
+    customer_info?: CustomerInfo;
+    customer?: { name: string; phone: string; email?: string; address?: string; note?: string; };
     items: OrderItem[];
+    subtotal_amount?: number;
+    discount_amount?: number;
     total_amount: number;
     status: 'Pending' | 'Confirmed' | 'Shipping' | 'Completed' | 'Cancelled';
     is_vat_exported: boolean;
-    payment_method?: 'COD' | 'Bank' | 'Momo' | 'Card';
+    payment_method?: 'COD' | 'Bank' | 'Momo' | 'Card' | 'Installment';
+    deposit_amount?: number;
     source?: 'web' | 'pos';
     createdBy?: string;
     createdByName?: string;
@@ -98,6 +119,22 @@ export interface Article {
     createdAt: Date;
 }
 
+// ── Article Comments / Ratings ──
+export interface ArticleComment {
+    id: string;
+    articleId: string;
+    rating: number; // 1-5
+    name: string;
+    phone?: string;
+    content: string;
+    status: 'pending' | 'approved';
+    reply?: {
+        content: string;
+        createdAt: FirestoreDateValue;
+    };
+    createdAt: FirestoreDateValue;
+}
+
 // Chat types (Realtime DB)
 export interface ChatMessage {
     id: string;
@@ -113,10 +150,8 @@ export interface ChatSession {
     userName?: string;
     status: 'active' | 'closed';
     lastMessage?: string;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    createdAt: any;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    updatedAt: any;
+    createdAt: FirestoreDateValue;
+    updatedAt: FirestoreDateValue;
 }
 
 // Repair Ticket types
@@ -129,6 +164,7 @@ export interface WorkflowNode {
     label: string;
     color: string;
     allowedNext: string[];
+    allowedFeatures?: string[];
     isTerminal?: boolean;
 }
 
@@ -186,23 +222,43 @@ export interface RepairTicket {
     parts?: {
         productId?: string;
         productName: string;
+        name?: string;
+        partName?: string;
         quality: string;
         quantity: number;
-        status: 'selected' | 'requested';
+        partType?: string;  // Loại linh kiện: Màn hình, Pin, Camera, Mainboard…
+        // Legacy unit price (backward-compat)
+        price?: number;
+        // Snapshot pricing at time of use (when status becomes 'selected')
+        unitCostAtUse?: number;
+        unitPriceAtUse?: number;
+        pricedAt?: FirestoreDateValue;
+        costSource?: 'product.costPrice' | 'product.price_original' | 'import_receipt.importPrice';
+        // Optional estimate pricing for requested/in_stock lines (not yet used)
+        estimatedUnitCost?: number;
+        estimatedUnitPrice?: number;
+        // Warranty (stamped when ticket status → done)
+        warrantyMonths?: number;
+        warrantyExpiresAt?: FirestoreDateValue;
+        // [WARRANTY] Đánh dấu linh kiện này được bảo hành miễn phí
+        // unitPriceAtUse vẫn giữ giá gốc để audit — KHÔNG ép về 0
+        isWarrantyCovered?: boolean;
+        // [WARRANTY] Index của part bị lỗi trên phiếu gốc mà linh kiện này thay thế
+        replacesPartIndex?: number;
+        status: 'selected' | 'requested' | 'approved' | 'in_stock' | 'unavailable' | 'ordered';
     }[];
     timing: {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        receivedAt: any;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        estimatedReturnAt?: any;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        completedAt?: any;
+        receivedAt: FirestoreDateValue;
+        estimatedReturnAt?: FirestoreDateValue;
+        completedAt?: FirestoreDateValue;
     };
     payment: {
         status: PaymentStatus;
         partsCost: number;    // Tiền linh kiện
         laborCost: number;    // Tiền công thợ
-        amount: number;       // Auto = partsCost + laborCost
+        additionalFees?: number; // Chi phí phát sinh
+        discountAmount?: number; // Giảm giá
+        amount: number;       // Auto = partsCost + laborCost + additionalFees - discountAmount
         depositAmount: number;
     };
     staff: {
@@ -213,10 +269,22 @@ export interface RepairTicket {
     };
     status: RepairStatus;
     deliveryNote?: string;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    createdAt: any;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    updatedAt: any;
+    // [WARRANTY] Phân loại phiếu — undefined = 'repair' (backward-compatible)
+    // → 'repair' hoặc undefined: dùng repairStatuses
+    // → 'warranty': dùng warrantyStatuses
+    ticketType?: 'repair' | 'warranty';
+    // [WARRANTY] Chỉ tồn tại khi ticketType = 'warranty'
+    warrantyClaim?: {
+        originalTicketId: string;
+        claimedPartIndexes: number[];
+        refundedParts?: {
+            originalPartIndex: number;
+            productName: string;
+            refundAmount: number;
+        }[];
+    };
+    createdAt: FirestoreDateValue;
+    updatedAt: FirestoreDateValue;
 }
 
 // ── Import Receipt (Phiếu nhập hàng) ──
@@ -225,6 +293,7 @@ export interface ImportReceiptItem {
     productName: string;
     quantity: number;
     importPrice: number; // Giá nhập đợt này
+    oldCostPrice?: number; // Giá vốn cũ để tính dự báo
     quality?: string;    // Phân loại: Zin, Loại 1, Loại 2, Bóc máy
 }
 
@@ -239,7 +308,7 @@ export interface Review {
     content: string;
     images: string[];
     status: 'pending' | 'approved';
-    createdAt: any;
+    createdAt: FirestoreDateValue;
 }
 
 export interface ImportReceipt {
@@ -248,13 +317,11 @@ export interface ImportReceipt {
     items: ImportReceiptItem[];
     totalAmount: number;
     note?: string;
-    status: 'draft' | 'completed';
+    status: 'draft' | 'ordered' | 'completed';
     createdBy: string;
     createdByName: string;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    createdAt: any;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    completedAt?: any;
+    createdAt: FirestoreDateValue;
+    completedAt?: FirestoreDateValue;
 }
 
 // ── Commission (Hoa hồng) ──
@@ -268,7 +335,8 @@ export interface CommissionRule {
     targetType: 'general' | 'category' | 'specific'; // Loại target
     targetValue?: string; // Tên danh mục hoặc productId
     isActive: boolean;
-    createdAt: any;
+    applyAfterDiscount?: boolean; // Nếu true: tính hoa hồng sau khi trừ đi các phụ kiện khuyến mãi
+    createdAt: FirestoreDateValue;
 }
 
 export interface Commission {
@@ -280,18 +348,22 @@ export interface Commission {
     sourceId: string;    // repair/order ID
     amount: number;      // Tiền hoa hồng
     baseAmount: number;  // Tiền gốc (doanh thu)
-    createdAt: any;
+    createdAt: FirestoreDateValue;
 }
 
-// ── Expense (Phiếu chi) ──
+// ── Warranty Configuration (Cấu hình bảo hành) ──
+export interface WarrantyRule {
+    partType: string;        // Loại linh kiện: "Màn hình", "Pin", "Camera"…
+    warrantyMonths: number;  // Số tháng bảo hành
+}
+
 export interface Expense {
     id: string;
     category: 'rent' | 'utilities' | 'supplies' | 'salary' | 'other';
     description: string;
     amount: number;
-    date: any;
+    date: FirestoreDateValue;
     createdBy: string;
     createdByName: string;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    createdAt: any;
+    createdAt: FirestoreDateValue;
 }

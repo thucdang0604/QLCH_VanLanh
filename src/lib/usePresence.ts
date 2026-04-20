@@ -38,11 +38,11 @@ export function usePresence() {
                 const date = String(now.getDate()).padStart(2, '0');
                 const todayStr = `${year}-${month}-${date}`;
 
-                const lastVisitDate = sessionStorage.getItem('last_visit_date');
+                const lastVisitDate = localStorage.getItem('vl_last_visit');
 
                 if (lastVisitDate !== todayStr) {
-                    // Mark as visited today in this session
-                    sessionStorage.setItem('last_visit_date', todayStr);
+                    // Mark as visited today in this browser (cross-tab dedup)
+                    localStorage.setItem('vl_last_visit', todayStr);
 
                     // Increment in Firestore
                     await setDoc(doc(db, 'analytics', todayStr), {

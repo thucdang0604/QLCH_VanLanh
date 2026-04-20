@@ -55,7 +55,8 @@ export default function AdminAppearancePage() {
     const [saving, setSaving] = useState(false);
     const [toast, setToast] = useState<string | null>(null);
     const [mediaOpen, setMediaOpen] = useState(false);
-    const [mediaTarget, setMediaTarget] = useState<'banner' | 'background' | 'logo' | null>(null);
+    const [mediaTarget, setMediaTarget] = useState<string | null>(null);
+
     const [editBranch, setEditBranch] = useState<StoreBranch | null>(null);
     const [branchForm, setBranchForm] = useState({ name: '', address: '', phone: '', mapLink: '' });
 
@@ -71,19 +72,31 @@ export default function AdminAppearancePage() {
     };
 
     // ---- Media Manager handlers ----
-    const openMediaFor = (target: 'banner' | 'background' | 'logo') => {
+    const openMediaFor = (target: string) => {
         setMediaTarget(target);
         setMediaOpen(true);
     };
 
-    const handleMediaSelect = (url: string) => {
+    const handleMediaSelect = (url: string, width?: number, height?: number) => {
         if (mediaTarget === 'banner') {
-            const newBanner: HeroBanner = { id: `b_${Date.now()}`, imageUrl: url, alt: '', link: '' };
+            const newBanner: HeroBanner = { id: `b_${Date.now()}`, imageUrl: url, width, height, alt: '', link: '' };
             setLocal({ ...local, hero_banners: [...local.hero_banners, newBanner] });
         } else if (mediaTarget === 'background') {
             setLocal({ ...local, background_config: { ...local.background_config, type: 'image', value: url } });
         } else if (mediaTarget === 'logo') {
             setLocal({ ...local, logoUrl: url });
+        } else if (mediaTarget?.startsWith('section_bg_')) {
+            const sectionId = mediaTarget.slice('section_bg_'.length);
+            const u = local.homeSections.map(s =>
+                s.id === sectionId ? { ...s, sectionBg: { ...(s.sectionBg || { type: 'image' as const }), type: 'image' as const, imageUrl: url } } : s
+            );
+            setLocal({ ...local, homeSections: u });
+        } else if (mediaTarget?.startsWith('section_frame_')) {
+            const sectionId = mediaTarget.slice('section_frame_'.length);
+            const u = local.homeSections.map(s =>
+                s.id === sectionId ? { ...s, sectionBg: { ...(s.sectionBg || { type: 'image' as const }), frameUrl: url } } : s
+            );
+            setLocal({ ...local, homeSections: u });
         }
         setMediaTarget(null);
     };
@@ -204,9 +217,9 @@ export default function AdminAppearancePage() {
                 <SaveBtn onClick={() => save({ topBarText: local.topBarText, topBarEnabled: local.topBarEnabled }, 'Đã lưu thông báo!')} saving={saving} label="Lưu thông báo" />
             </SectionCard>
 
-            {/* 2b. Logo Cửa Hàng */}
-            <SectionCard title="Logo Cửa Hàng" icon={<ImageIcon size={20} />}>
-                <p className="text-sm text-gray-500 mb-4">Logo hiển thị trên Header. Nếu không có sẽ dùng tên cửa hàng dạng text.</p>
+            {/* 2b. Logo & Header */}
+            <SectionCard title="Logo & Nền Header" icon={<ImageIcon size={20} />}>
+                <p className="text-sm text-gray-500 mb-4">Logo hiển thị và màu nền chính của thanh tiêu đề.</p>
                 <div className="space-y-4">
                     {local.logoUrl ? (
                         <div className="flex items-center gap-4 p-4 border rounded-lg bg-gray-50">
@@ -229,7 +242,22 @@ export default function AdminAppearancePage() {
                         <ImageIcon size={16} /> Chọn ảnh từ thư viện
                     </button>
                 </div>
-                <SaveBtn onClick={() => save({ logoUrl: local.logoUrl }, 'Đã lưu logo!')} saving={saving} label="Lưu logo" />
+                <div className="mt-4 pt-4 border-t flex items-center gap-3 p-3 bg-white rounded-lg border border-gray-200">
+                    <div className="flex-1">
+                        <p className="text-sm font-medium text-gray-700">Màu nền Header</p>
+                        <p className="text-xs text-gray-400">Thay vì màu trắng mặc định</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <input type="color" value={local.headerBg || '#ffffff'} onChange={e => setLocal({ ...local, headerBg: e.target.value })}
+                            className="w-10 h-10 rounded-lg cursor-pointer border-2 border-gray-200 flex-shrink-0" />
+                        <input type="text" value={local.headerBg || '#ffffff'} onChange={e => setLocal({ ...local, headerBg: e.target.value })}
+                            className="w-24 px-2 py-1.5 border rounded-lg text-sm font-mono" />
+                        {local.headerBg && local.headerBg !== '#ffffff' && (
+                            <button onClick={() => setLocal({ ...local, headerBg: '#ffffff' })} className="text-xs text-gray-400 hover:text-gray-600 px-1.5">Reset</button>
+                        )}
+                    </div>
+                </div>
+                <SaveBtn onClick={() => save({ logoUrl: local.logoUrl, headerBg: local.headerBg }, 'Đã lưu logo và nền header!')} saving={saving} label="Lưu thay đổi" />
             </SectionCard>
 
             {/* 3. Hero Banners */}
@@ -341,25 +369,156 @@ export default function AdminAppearancePage() {
                 <SaveBtn onClick={() => save({ store_branches: local.store_branches }, 'Đã lưu chi nhánh!')} saving={saving} label="Lưu chi nhánh" />
             </SectionCard>
 
-            {/* 6. Homepage Section Layout */}
-            <SectionCard title="Sắp xếp trang chủ" icon={<LayoutDashboard size={20} />}>
-                <p className="text-sm text-gray-500 mb-4">Dùng mũi tên để sắp xếp thứ tự. Tắt/bật các khối hiển thị.</p>
-                <div className="space-y-2">
-                    {[...local.homeSections].sort((a, b) => a.order - b.order).map((section, index) => (
-                        <div key={section.id} className={`flex items-center gap-3 px-4 py-3 rounded-lg border transition-colors ${section.visible ? 'bg-white border-gray-200' : 'bg-gray-50 border-gray-100 opacity-60'}`}>
-                            <GripVertical size={18} className="text-gray-300" />
-                            <span className={`flex-1 text-sm font-medium ${section.visible ? 'text-gray-800' : 'text-gray-400'}`}>{section.label}</span>
-                            <div className="flex items-center gap-1">
-                                <button onClick={() => moveSection(index, 'up')} disabled={index === 0} className="p-1.5 rounded hover:bg-gray-100 disabled:opacity-30 text-gray-500"><ArrowUp size={16} /></button>
-                                <button onClick={() => moveSection(index, 'down')} disabled={index === local.homeSections.length - 1} className="p-1.5 rounded hover:bg-gray-100 disabled:opacity-30 text-gray-500"><ArrowDown size={16} /></button>
-                                <button onClick={() => { const u = local.homeSections.map(s => s.id === section.id ? { ...s, visible: !s.visible } : s); setLocal({ ...local, homeSections: u }); }} className={`p-1.5 rounded hover:bg-gray-100 ${section.visible ? 'text-green-500' : 'text-gray-400'}`}>
-                                    {section.visible ? <Eye size={16} /> : <EyeOff size={16} />}
-                                </button>
+        {/* 6. Homepage Section Layout */}
+            <SectionCard title="Sắp xếp & Giao diện trang chủ" icon={<LayoutDashboard size={20} />}>
+                <p className="text-sm text-gray-500 mb-4">Sắp xếp thứ tự, bật/tắt và tuỳ chỉnh nền cho từng khối.</p>
+                <div className="space-y-3">
+                    {[...local.homeSections].sort((a, b) => a.order - b.order).map((section, index) => {
+                        const bg = section.sectionBg || { type: 'none' as const };
+                        const updateBg = (partial: Partial<typeof bg>) => {
+                            const u = local.homeSections.map(s =>
+                                s.id === section.id ? { ...s, sectionBg: { ...bg, ...partial } } : s
+                            );
+                            setLocal({ ...local, homeSections: u });
+                        };
+                        return (
+                            <div key={section.id} className={`rounded-xl border overflow-hidden transition-all ${section.visible ? 'border-gray-200' : 'border-gray-100 opacity-60'}`}>
+                                {/* Section header row */}
+                                <div className={`flex items-center gap-3 px-4 py-3 ${section.visible ? 'bg-white' : 'bg-gray-50'}`}>
+                                    <GripVertical size={18} className="text-gray-300 flex-shrink-0" />
+                                    <span className={`flex-1 text-sm font-medium ${section.visible ? 'text-gray-800' : 'text-gray-400'}`}>{section.label}</span>
+                                    {/* Background type badge */}
+                                    {bg.type !== 'none' && (
+                                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-orange-100 text-orange-600 font-medium">
+                                            {bg.type === 'color' ? '🎨 nền màu' : '🖼️ nền ảnh'}
+                                            {bg.frameUrl ? ' + khung' : ''}
+                                        </span>
+                                    )}
+                                    <div className="flex items-center gap-1">
+                                        <button onClick={() => moveSection(index, 'up')} disabled={index === 0} className="p-1.5 rounded hover:bg-gray-100 disabled:opacity-30 text-gray-500"><ArrowUp size={16} /></button>
+                                        <button onClick={() => moveSection(index, 'down')} disabled={index === local.homeSections.length - 1} className="p-1.5 rounded hover:bg-gray-100 disabled:opacity-30 text-gray-500"><ArrowDown size={16} /></button>
+                                        <button onClick={() => { const u = local.homeSections.map(s => s.id === section.id ? { ...s, visible: !s.visible } : s); setLocal({ ...local, homeSections: u }); }}
+                                            className={`p-1.5 rounded hover:bg-gray-100 ${section.visible ? 'text-green-500' : 'text-gray-400'}`}>
+                                            {section.visible ? <Eye size={16} /> : <EyeOff size={16} />}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Background editor (always expanded) */}
+                                <div className="px-4 pb-4 pt-2 bg-gray-50/60 border-t border-gray-100 space-y-3">
+                                    <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Nền khối</p>
+
+                                    {/* Type selector */}
+                                    <div className="flex gap-2 flex-wrap">
+                                        {(['none', 'color', 'image'] as const).map(t => (
+                                            <button key={t} onClick={() => updateBg({ type: t })}
+                                                className={`px-3 py-1.5 rounded-lg text-xs border font-medium transition-all ${bg.type === t ? 'border-orange-500 bg-orange-50 text-orange-600' : 'border-gray-200 text-gray-500 hover:border-gray-300'}`}>
+                                                {t === 'none' ? '⬜ Không nền' : t === 'color' ? '🎨 Màu nền' : '🖼️ Ảnh nền'}
+                                            </button>
+                                        ))}
+                                    </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                        {/* Outer background color */}
+                                        <div className="flex items-center justify-between p-3 bg-white rounded-lg border border-gray-200">
+                                            <div>
+                                                <p className="text-[11px] font-medium text-gray-600">Màu nền khối ngoài</p>
+                                                <p className="text-[10px] text-gray-400">(Tùy khối, VD: Đặt Lịch)</p>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <input type="color" value={bg.outerBg || '#1a1a2e'} onChange={e => updateBg({ outerBg: e.target.value })}
+                                                    className="w-7 h-7 rounded cursor-pointer border border-gray-200 flex-shrink-0" />
+                                                {bg.outerBg && (
+                                                    <button onClick={() => updateBg({ outerBg: undefined })} className="text-[10px] text-gray-400 hover:text-gray-600">Reset</button>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {/* Card inner background color */}
+                                        <div className="flex items-center justify-between p-3 bg-white rounded-lg border border-gray-200">
+                                            <div>
+                                                <p className="text-[11px] font-medium text-gray-600">Màu nền thẻ trong</p>
+                                                <p className="text-[10px] text-gray-400">(Nền trắng của nội dung)</p>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <input type="color" value={bg.cardBg || '#ffffff'} onChange={e => updateBg({ cardBg: e.target.value })}
+                                                    className="w-7 h-7 rounded cursor-pointer border border-gray-200 flex-shrink-0" />
+                                                {bg.cardBg && bg.cardBg !== '#ffffff' && (
+                                                    <button onClick={() => updateBg({ cardBg: '#ffffff' })} className="text-[10px] text-gray-400 hover:text-gray-600">Reset</button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Color picker */}
+                                    {bg.type === 'color' && (
+                                        <div className="flex items-center gap-3">
+                                            <input type="color" value={bg.color || '#ffffff'} onChange={e => updateBg({ color: e.target.value })}
+                                                className="w-10 h-10 rounded-lg cursor-pointer border-2 border-gray-200 flex-shrink-0" />
+                                            <input type="text" value={bg.color || '#ffffff'} onChange={e => updateBg({ color: e.target.value })}
+                                                className="w-28 px-3 py-1.5 border rounded-lg text-sm font-mono" />
+                                            <div className="w-10 h-10 rounded-lg border" style={{ backgroundColor: bg.color || '#ffffff' }} />
+                                        </div>
+                                    )}
+
+                                    {/* Image picker */}
+                                    {bg.type === 'image' && (
+                                        <div className="space-y-2">
+                                            <button onClick={() => { setMediaTarget(`section_bg_${section.id}` as 'banner'); setMediaOpen(true); }}
+                                                className="flex items-center gap-2 px-3 py-2 border-2 border-dashed border-gray-300 rounded-lg hover:border-orange-400 hover:bg-orange-50 text-gray-600 text-sm w-full justify-center transition-colors">
+                                                <ImageIcon size={14} /> {bg.imageUrl ? 'Đổi ảnh nền' : 'Chọn ảnh nền từ thư viện'}
+                                            </button>
+                                            {bg.imageUrl && (
+                                                <div className="relative">
+                                                    <img src={bg.imageUrl} alt="bg preview" className="w-full h-24 object-cover rounded-lg" />
+                                                    <button onClick={() => updateBg({ imageUrl: '' })}
+                                                        className="absolute top-1 right-1 bg-red-500 text-white w-6 h-6 rounded-full flex items-center justify-center hover:bg-red-600">
+                                                        <X size={12} />
+                                                    </button>
+                                                </div>
+                                            )}
+                                            <div className="flex items-center gap-3">
+                                                <label className="text-xs text-gray-500">Độ mờ</label>
+                                                <input type="range" min={10} max={100} step={5} value={bg.opacity ?? 100} onChange={e => updateBg({ opacity: Number(e.target.value) })}
+                                                    className="flex-1 accent-orange-500" />
+                                                <span className="text-xs font-mono w-8 text-center">{bg.opacity ?? 100}%</span>
+                                            </div>
+                                            <div className="flex gap-2">
+                                                {(['cover', 'contain', 'repeat'] as const).map(s => (
+                                                    <button key={s} onClick={() => updateBg({ size: s })}
+                                                        className={`px-2.5 py-1 text-xs rounded border ${(bg.size ?? 'cover') === s ? 'border-orange-500 bg-orange-50 text-orange-600' : 'border-gray-200 text-gray-500'}`}>
+                                                        {s === 'cover' ? 'Phủ đầy' : s === 'contain' ? 'Vừa khung' : 'Lặp lại'}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Frame overlay (available for color & image) */}
+                                    {bg.type !== 'none' && (
+                                        <div className="border-t pt-3 space-y-2">
+                                            <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Khung viền trang trí (tuỳ chọn)</p>
+                                            <button onClick={() => { setMediaTarget(`section_frame_${section.id}` as 'banner'); setMediaOpen(true); }}
+                                                className="flex items-center gap-2 px-3 py-2 border-2 border-dashed border-purple-200 rounded-lg hover:border-purple-400 hover:bg-purple-50 text-gray-600 text-sm w-full justify-center transition-colors">
+                                                <ImageIcon size={14} /> {bg.frameUrl ? 'Đổi ảnh khung' : 'Chọn ảnh khung từ thư viện'}
+                                            </button>
+                                            {bg.frameUrl && (
+                                                <div className="relative">
+                                                    <img src={bg.frameUrl} alt="frame preview" className="w-full h-20 object-fill rounded-lg border" />
+                                                    <button onClick={() => updateBg({ frameUrl: '' })}
+                                                        className="absolute top-1 right-1 bg-red-500 text-white w-6 h-6 rounded-full flex items-center justify-center hover:bg-red-600">
+                                                        <X size={12} />
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
                             </div>
-                        </div>
-                    ))}
+                        );
+                    })}
                 </div>
-                <SaveBtn onClick={() => save({ homeSections: local.homeSections }, 'Đã lưu bố cục!')} saving={saving} label="Lưu bố cục" />
+                <SaveBtn onClick={() => save({ homeSections: local.homeSections }, 'Đã lưu bố cục!')} saving={saving} label="Lưu bố cục & nền" />
             </SectionCard>
         </div>
     );

@@ -2,18 +2,9 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { MessageCircle, X, Send, Bot, User, Minimize2, Maximize2, ArrowRight, Sparkles } from 'lucide-react';
-import { ref, push, onValue, serverTimestamp, set, get } from 'firebase/database';
-import { rtdb } from '@/lib/firebase';
+import { subscribeToMessages, subscribeToRoomInfo, sendMessage, updateRoomInfo, handleAIAutoReply, ChatMessage } from '@/lib/realtimedb';
 import { useAuth } from '@/lib/AuthContext';
 import { useConfig } from '@/lib/ConfigContext';
-
-interface Message {
-    id: string;
-    text: string;
-    senderId: string;
-    senderType: 'user' | 'admin';
-    timestamp: number;
-}
 
 // Generate or get guest ID
 const getGuestId = (): string => {
@@ -30,7 +21,7 @@ const getGuestId = (): string => {
 export default function ChatWidget() {
     const [isOpen, setIsOpen] = useState(false);
     const [isMinimized, setIsMinimized] = useState(false);
-    const [messages, setMessages] = useState<Message[]>([]);
+    const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [inputMessage, setInputMessage] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [isAiTyping, setIsAiTyping] = useState(false);
@@ -75,20 +66,16 @@ export default function ChatWidget() {
     useEffect(() => {
         if (!roomId || !isRegistered) return;
 
-        const messagesRef = ref(rtdb, `chats/${roomId}/messages`);
+        let isMounted = true;
+        let unsubscribe: (() => void) | undefined;
 
-        const unsubscribe = onValue(messagesRef, (snapshot) => {
-            const data = snapshot.val();
-            if (data) {
-                const messageList: Message[] = Object.entries(data).map(([id, msg]: [string, any]) => ({
-                    id,
-                    text: msg.text,
-                    senderId: msg.senderId,
-                    senderType: msg.senderType,
-                    timestamp: msg.timestamp || 0,
-                })).sort((a, b) => a.timestamp - b.timestamp);
+        // Defer listener to not block main thread
+        const deferFn = window.requestIdleCallback || ((cb) => setTimeout(cb, 100));
 
-                // Detect if last message is from staff (admin) and cancel pending AI timeout
+        deferFn(() => {
+            if (!isMounted) return;
+            unsubscribe = subscribeToMessages(roomId, (messageList) => {
+                // Detect if last message is from staff (admin)
                 const lastMsg = messageList[messageList.length - 1];
                 if (lastMsg && lastMsg.senderType === 'admin' && lastMsg.senderId !== 'bot') {
                     // Staff replied — cancel pending AI and set botActive=false
@@ -98,7 +85,7 @@ export default function ChatWidget() {
                     }
                     setBotActive(false);
                     // Update Firebase
-                    set(ref(rtdb, `chats/${roomId}/info/botActive`), false).catch(() => { });
+                    updateRoomInfo(roomId, { botActive: false }).catch(() => { });
                 }
 
                 setMessages(messageList);
@@ -110,22 +97,20 @@ export default function ChatWidget() {
                     const unread = adminMessages.filter(m => m.timestamp > lastReadTime).length;
                     setUnreadCount(unread);
                 }
-            } else {
-                setMessages([]);
-            }
+            });
         });
 
-        return () => unsubscribe();
+        return () => {
+            isMounted = false;
+            if (unsubscribe) unsubscribe();
+        };
     }, [roomId, isOpen, isRegistered]);
 
     // Read botActive status from Firebase
     useEffect(() => {
         if (!roomId) return;
-        const botActiveRef = ref(rtdb, `chats/${roomId}/info/botActive`);
-        const unsub = onValue(botActiveRef, (snap) => {
-            const val = snap.val();
-            // Default to true if not set
-            setBotActive(val !== false);
+        const unsub = subscribeToRoomInfo(roomId, (info) => {
+            setBotActive(info?.botActive !== false);
         });
         return () => unsub();
     }, [roomId]);
@@ -142,7 +127,7 @@ export default function ChatWidget() {
     // Auto-scroll to bottom
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages, isRegistered]); // Added isRegistered to scroll after registration
+    }, [messages, isRegistered]);
 
     // Mark as read when opening chat
     useEffect(() => {
@@ -155,8 +140,6 @@ export default function ChatWidget() {
     // Update room metadata (for admin to see user info)
     const updateRoomMetadata = useCallback(async () => {
         if (!roomId) return;
-
-        const roomRef = ref(rtdb, `chats/${roomId}/info`);
 
         let displayName = 'Khách';
         let phone = '';
@@ -173,14 +156,18 @@ export default function ChatWidget() {
             }
         }
 
-        await set(roomRef, {
-            odId: roomId,
-            displayName,
-            phone,
-            email: user?.email || null,
-            isGuest: !user,
-            lastActivity: serverTimestamp(),
-        });
+        try {
+            await updateRoomInfo(roomId, {
+                odId: roomId,
+                displayName,
+                phone,
+                email: user?.email || null,
+                isGuest: !user,
+                lastActivity: Date.now(),
+            });
+        } catch (error) {
+            console.error('Error updating room metadata:', error);
+        }
     }, [roomId, user]);
 
     const handleRegister = async (e: React.FormEvent) => {
@@ -192,19 +179,22 @@ export default function ChatWidget() {
 
         // Update metadata immediately
         if (roomId) {
-            const roomRef = ref(rtdb, `chats/${roomId}/info`);
-            await set(roomRef, {
-                odId: roomId,
-                displayName: regForm.name,
-                phone: regForm.phone,
-                isGuest: true,
-                lastActivity: serverTimestamp(),
-                startedAt: serverTimestamp()
-            });
+            try {
+                await updateRoomInfo(roomId, {
+                    odId: roomId,
+                    displayName: regForm.name,
+                    phone: regForm.phone,
+                    isGuest: true,
+                    lastActivity: Date.now(),
+                    startedAt: Date.now()
+                });
+            } catch (error) {
+                console.error('Error registering chat room:', error);
+            }
         }
     };
 
-    const sendMessage = async () => {
+    const sendUserMessage = async () => {
         if (!inputMessage.trim() || !roomId || isLoading) return;
 
         const messageText = inputMessage.trim();
@@ -215,27 +205,8 @@ export default function ChatWidget() {
             // Update room metadata
             await updateRoomMetadata();
 
-            // Send user message
-            const messagesRef = ref(rtdb, `chats/${roomId}/messages`);
-            await push(messagesRef, {
-                text: messageText,
-                senderId: roomId,
-                senderType: 'user',
-                timestamp: Date.now(),
-            });
-
-            // Update last message for room list
-            const roomRef = ref(rtdb, `chats/${roomId}/info`);
-            const snapshot = await get(roomRef);
-            const currentInfo = snapshot.val() || {};
-
-            await set(roomRef, {
-                ...currentInfo,
-                odId: roomId,
-                lastMessage: messageText,
-                lastMessageTime: Date.now(),
-                hasUnread: true,
-            });
+            // Send user message via realtimedb.ts
+            await sendMessage(roomId, messageText, roomId, 'user');
 
             // ── User message sent successfully — unlock input immediately ──
             setIsLoading(false);
@@ -249,56 +220,11 @@ export default function ChatWidget() {
 
             // Show AI typing indicator after a short delay
             aiTimeoutRef.current = setTimeout(async () => {
-                // Re-check botActive before calling AI
-                try {
-                    const botActiveSnap = await get(ref(rtdb, `chats/${roomId}/info/botActive`));
-                    if (botActiveSnap.val() === false) return;
-                } catch { /* proceed if can't read */ }
+                if (!botActive) return;
 
                 setIsAiTyping(true);
                 try {
-                    const rawHistory = messages.slice(-5).map((m: any) => ({
-                        role: m.senderType === 'user' ? 'user' : 'model',
-                        parts: [{ text: m.text }]
-                    }));
-
-                    const recentHistory: any[] = [];
-                    let expectedRole = 'user';
-                    for (const msg of rawHistory) {
-                        if (msg.role === expectedRole) {
-                            recentHistory.push(msg);
-                            expectedRole = expectedRole === 'user' ? 'model' : 'user';
-                        }
-                    }
-                    if (expectedRole === 'model') {
-                        recentHistory.pop();
-                    }
-                    recentHistory.push({ role: 'user', parts: [{ text: messageText }] });
-
-                    const aiRes = await fetch('/api/ai', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            prompt: messageText,
-                            history: recentHistory,
-                            context: 'Hãy đóng vai nhân viên hỗ trợ khách hàng của Văn Lành Service. Trả lời ngắn gọn, thân thiện.',
-                        }),
-                    });
-                    const aiData = await aiRes.json();
-                    if (aiData.success && aiData.content) {
-                        await push(messagesRef, {
-                            text: aiData.content,
-                            senderId: 'bot',
-                            senderType: 'admin',
-                            timestamp: Date.now(),
-                        });
-                        const updatedInfo = (await get(roomRef)).val() || {};
-                        await set(roomRef, {
-                            ...updatedInfo,
-                            lastMessage: '[AI] ' + aiData.content.substring(0, 50),
-                            lastMessageTime: Date.now(),
-                        });
-                    }
+                    await handleAIAutoReply(roomId, messages, messageText);
                 } catch (aiErr) {
                     console.error('AI auto-reply error:', aiErr);
                 } finally {
@@ -316,7 +242,7 @@ export default function ChatWidget() {
     const handleKeyPress = (e: React.KeyboardEvent) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
-            sendMessage();
+            sendUserMessage();
         }
     };
 
@@ -546,7 +472,7 @@ export default function ChatWidget() {
                                         disabled={isLoading}
                                     />
                                     <button
-                                        onClick={sendMessage}
+                                        onClick={sendUserMessage}
                                         disabled={!inputMessage.trim() || isLoading}
                                         className="w-10 h-10 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-full flex items-center justify-center hover:opacity-90 transition-opacity disabled:opacity-50"
                                     >

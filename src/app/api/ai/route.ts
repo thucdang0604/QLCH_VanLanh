@@ -3,12 +3,67 @@ import { chatWithGemini } from '@/lib/gemini';
 import { db } from '@/lib/firebase';
 import { collection, query, where, getDocs, limit } from 'firebase/firestore';
 
+// ── Rate Limiting (in-memory, per IP, 5 req/min) ──
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+const RATE_LIMIT_MAX = 5;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+
+function checkRateLimit(ip: string): boolean {
+    const now = Date.now();
+    const entry = rateLimitMap.get(ip);
+
+    if (!entry || now > entry.resetAt) {
+        rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+        return true;
+    }
+
+    if (entry.count >= RATE_LIMIT_MAX) {
+        return false;
+    }
+
+    entry.count++;
+    return true;
+}
+
+// Cleanup memory every 5 minutes
+setInterval(() => {
+    const now = Date.now();
+    for (const [ip, entry] of rateLimitMap) {
+        if (now > entry.resetAt) rateLimitMap.delete(ip);
+    }
+}, 5 * 60_000);
+
+type RAGProduct = {
+    name?: string;
+    price?: number;
+    stock?: number;
+    [key: string]: unknown;
+};
+
 export async function POST(request: NextRequest) {
     try {
+        // Rate limit check
+        const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+            || request.headers.get('x-real-ip')
+            || 'unknown';
+
+        if (!checkRateLimit(ip)) {
+            return NextResponse.json(
+                { error: 'Bạn đang gửi tin nhắn quá nhanh. Vui lòng thử lại sau.' },
+                { status: 429 }
+            );
+        }
+
         const { prompt, context, history } = await request.json();
 
         if (!prompt) {
             return NextResponse.json({ error: 'Missing prompt' }, { status: 400 });
+        }
+        if (typeof prompt !== 'string' || prompt.length > 800) {
+            return NextResponse.json({ error: 'Prompt too long' }, { status: 413 });
+        }
+        if (history && Array.isArray(history) && history.length > 30) {
+            return NextResponse.json({ error: 'History too long' }, { status: 413 });
         }
 
         // --- BẮT ĐẦU: RAG - Tìm kiếm database ---
@@ -22,13 +77,13 @@ export async function POST(request: NextRequest) {
                 const productsRef = collection(db, 'products');
                 // Vì Firestore không hỗ trợ full-text search tốt, ta lấy danh sách sản phẩm active
                 // và filter bằng Javascript dựa trên keywords trong tên sản phẩm
-                const q = query(productsRef, where('status', '==', 'active'));
+                const q = query(productsRef, where('status', '==', 'active'), limit(250));
                 const snapshot = await getDocs(q);
 
                 if (!snapshot.empty) {
-                    const allProducts: any[] = [];
+                    const allProducts: RAGProduct[] = [];
                     snapshot.forEach(doc => {
-                        allProducts.push(doc.data());
+                        allProducts.push(doc.data() as RAGProduct);
                     });
 
                     // Tính điểm phù hợp của từng sản phẩm dựa trên số lượng keyword xuất hiện trong tên
@@ -60,7 +115,7 @@ export async function POST(request: NextRequest) {
 
                     dbContext = '\\n\\n[DỮ LIỆU TỪ HỆ THỐNG]: Dưới đây là tham khảo một số giá sản phẩm/dịch vụ MỚI NHẤT hiện có trong cửa hàng (không đầy đủ):\\n';
                     finalProducts.forEach(data => {
-                        dbContext += `- ${data.name}: ${data.price?.toLocaleString('vi-VN')} VNĐ (Tình trạng: ${data.stock > 0 ? 'Còn hàng' : 'Hết hàng'})\\n`;
+                        dbContext += `- ${data.name}: ${data.price?.toLocaleString('vi-VN')} VNĐ (Tình trạng: ${(data.stock ?? 0) > 0 ? 'Còn hàng' : 'Hết hàng'})\\n`;
                     });
                     // Note cho AI
                     dbContext += '\\n(Lưu ý AI: ƯU TIÊN SỬ DỤNG DỮ LIỆU NÀY KHI TRẢ LỜI KHÁCH HÀNG. Nếu khách hỏi sản phẩm không có trong danh sách này, hãy nói là "Hiện tại trên hệ thống tạm thời chưa hiển thị, anh/chị vui lòng để lại số điện thoại hoặc gọi Hotline 0932 242026 để em báo giá chính xác nhất nhé!")';

@@ -6,18 +6,21 @@ import {
     Save, Loader2, ChevronDown, ChevronRight,
     ArrowDownToLine, AlertTriangle
 } from 'lucide-react';
+import Modal from '@/components/admin/Modal';
+import UniversalProductModal from '@/components/admin/UniversalProductModal';
 import {
     collection, getDocs, addDoc, updateDoc, deleteDoc,
-    doc, serverTimestamp, query, orderBy, getDoc, increment
+    doc, serverTimestamp, query, orderBy, getDoc, increment, limit
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
-import { uploadImage } from '@/lib/storage';
 import type { ImportReceipt, ImportReceiptItem, Product } from '@/lib/types';
+import { toastError, toastSuccess } from '@/lib/toast';
 
 // ── Status Config ──
 const statusConfig = {
     draft: { label: 'Nháp', color: 'bg-yellow-100 text-yellow-700', icon: Clock },
+    ordered: { label: 'Đã đặt hàng', color: 'bg-blue-100 text-blue-700', icon: Package },
     completed: { label: 'Đã nhập', color: 'bg-green-100 text-green-700', icon: CheckCircle2 },
 };
 
@@ -57,7 +60,7 @@ export default function InventoryPage() {
             try {
                 const [rSnap, pSnap] = await Promise.all([
                     getDocs(query(collection(db, 'import_receipts'), orderBy('createdAt', 'desc'))),
-                    getDocs(collection(db, 'products')),
+                    getDocs(query(collection(db, 'products'), orderBy('createdAt', 'desc'), limit(50))),
                 ]);
                 setReceipts(rSnap.docs.map(d => ({ id: d.id, ...d.data() } as ImportReceipt & { id: string })));
                 setProducts(pSnap.docs.map(d => ({ id: d.id, ...d.data() } as Product & { id: string })));
@@ -114,6 +117,7 @@ export default function InventoryPage() {
             setItems(prev => prev.map(i =>
                 (i.productId === productId && i.quality === importQuality) ? { ...i, quantity: i.quantity + importQty, importPrice } : i
             ));
+        } else {
             setItems(prev => [...prev, {
                 productId,
                 productName,
@@ -121,7 +125,7 @@ export default function InventoryPage() {
                 importPrice,
                 quality: importQuality,
                 isNewProduct: productId.startsWith('custom_'),
-                category: importType === 'component' ? 'Linh kiện' : 'Khác' 
+                category: importType === 'component' ? 'Linh kiện' : 'Khác'
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
             } as any]);
         }
@@ -155,7 +159,10 @@ export default function InventoryPage() {
 
     // ── Save receipt (draft) ──
     const handleSave = async () => {
-        if (items.length === 0) return alert('Chưa có sản phẩm nào!');
+        if (items.length === 0) {
+            toastError('Chưa có sản phẩm nào!');
+            return;
+        }
         setIsProcessing(true);
         try {
             const data = {
@@ -180,13 +187,13 @@ export default function InventoryPage() {
             setShowModal(false);
         } catch (err) {
             console.error(err);
-            alert('Lỗi khi lưu!');
+            toastError('Lỗi khi lưu!');
         } finally {
             setIsProcessing(false);
         }
     };
 
-    // ── Complete receipt: update stock + cost price ──
+    // ── Complete receipt: update stock + cost price (auto-create missing products) ──
     const handleComplete = async (receipt: ImportReceipt & { id: string }) => {
         if (receipt.status === 'completed') return;
         if (!confirm('Xác nhận hoàn thành nhập hàng? Stock và giá vốn sẽ được cập nhật.')) return;
@@ -196,8 +203,57 @@ export default function InventoryPage() {
             for (const item of receipt.items) {
                 const productRef = doc(db, 'products', item.productId);
                 const productSnap = await getDoc(productRef);
-                if (!productSnap.exists()) continue;
 
+                if (!productSnap.exists()) {
+                    // ── Auto-create product if it doesn't exist (custom_* items) ──
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    const isNewProduct = (item as any).isNewProduct || item.productId.startsWith('custom_');
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    const category = (item as any).category || 'Linh kiện';
+
+                    if (isNewProduct || item.productId.startsWith('custom_')) {
+                        // Create new product in products collection
+                        const newProductData = {
+                            name: item.productName,
+                            brand: 'Khác',
+                            category,
+                            price_original: item.importPrice,
+                            price_promo: 0,
+                            costPrice: item.importPrice,
+                            specs: {},
+                            images: [],
+                            imageUrl: '',
+                            status: 'active',
+                            description: `Tạo tự động từ phiếu nhập hàng`,
+                            stock: item.quantity,
+                            sold: 0,
+                            condition: 'new',
+                            createdAt: serverTimestamp(),
+                            updatedAt: serverTimestamp(),
+                        };
+
+                        // Use a generated ID instead of custom_ prefix
+                        const newRef = await addDoc(collection(db, 'products'), newProductData);
+
+                        // Update the item's productId in the receipt to point to the new product
+                        const updatedItems = receipt.items.map(i =>
+                            i.productId === item.productId
+                                ? { ...i, productId: newRef.id }
+                                : i
+                        );
+                        await updateDoc(doc(db, 'import_receipts', receipt.id), {
+                            items: updatedItems,
+                        });
+
+                        continue; // stock already set during creation
+                    } else {
+                        // Product ID exists but doc doesn't — skip with warning
+                        console.warn(`Product ${item.productId} (${item.productName}) not found, skipping.`);
+                        continue;
+                    }
+                }
+
+                // ── Existing product: update stock + weighted average cost ──
                 const pData = productSnap.data();
                 const oldStock = Number(pData.stock) || 0;
                 const oldCostPrice = Number(pData.costPrice) || 0;
@@ -227,10 +283,10 @@ export default function InventoryPage() {
             const pSnap = await getDocs(collection(db, 'products'));
             setProducts(pSnap.docs.map(d => ({ id: d.id, ...d.data() } as Product & { id: string })));
 
-            alert('✅ Nhập hàng thành công! Stock và giá vốn đã cập nhật.');
+            toastSuccess('Nhập hàng thành công! Stock và giá vốn đã cập nhật.');
         } catch (err) {
             console.error(err);
-            alert('Lỗi khi hoàn thành nhập hàng!');
+            toastError('Lỗi khi hoàn thành nhập hàng!');
         } finally {
             setIsProcessing(false);
         }
@@ -362,16 +418,17 @@ export default function InventoryPage() {
 
                             {isExpanded && (
                                 <div className="px-4 pb-4 border-t bg-gray-50">
-                                    <table className="w-full text-sm mt-3">
-                                        <thead>
-                                            <tr className="text-gray-500 text-xs border-b">
-                                                <th className="text-left py-2">Sản phẩm</th>
-                                                <th className="text-center">Phân loại</th>
-                                                <th className="text-center">SL</th>
-                                                <th className="text-right">Giá nhập</th>
-                                                <th className="text-right">Thành tiền</th>
-                                            </tr>
-                                        </thead>
+                                    <div className="overflow-x-auto mt-3">
+                                        <table className="w-full min-w-[600px] text-sm mt-3">
+                                            <thead>
+                                                <tr className="text-gray-500 text-xs border-b">
+                                                    <th className="text-left py-2 whitespace-nowrap">Sản phẩm</th>
+                                                    <th className="text-center whitespace-nowrap">Phân loại</th>
+                                                    <th className="text-center whitespace-nowrap">SL</th>
+                                                    <th className="text-right whitespace-nowrap">Giá nhập</th>
+                                                    <th className="text-right whitespace-nowrap">Thành tiền</th>
+                                                </tr>
+                                            </thead>
                                         <tbody>
                                             {receipt.items.map((item, i) => (
                                                 <tr key={i} className="border-b border-gray-100">
@@ -392,6 +449,7 @@ export default function InventoryPage() {
                                             </tr>
                                         </tfoot>
                                     </table>
+                                    </div>
                                     {receipt.note && <p className="text-xs text-gray-500 mt-2">📝 {receipt.note}</p>}
 
                                     <div className="flex gap-2 mt-3">
@@ -428,17 +486,9 @@ export default function InventoryPage() {
             </div>
 
             {/* ═══ Create/Edit Modal ═══ */}
-            {showModal && (
-                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-                    <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl">
-                        <div className="flex items-center justify-between px-6 py-4 border-b sticky top-0 bg-white z-10">
-                            <h2 className="text-lg font-bold text-gray-900">
-                                {editingReceipt ? 'Sửa phiếu nhập' : 'Tạo phiếu nhập mới'}
-                            </h2>
-                            <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
-                        </div>
+            <Modal isOpen={showModal} onClose={() => setShowModal(false)} title={editingReceipt ? 'Sửa phiếu nhập' : 'Tạo phiếu nhập mới'} size="2xl" priority="high">
 
-                        <div className="px-6 py-4 space-y-5">
+                        <div className="px-6 py-4 space-y-5 overflow-y-auto flex-1">
                             {/* Supplier + Note */}
                             <div className="grid md:grid-cols-2 gap-4">
                                 <div>
@@ -473,9 +523,9 @@ export default function InventoryPage() {
                                     </label>
                                 </div>
 
-                                <div className="grid grid-cols-12 gap-2">
+                                <div className="grid grid-cols-2 md:grid-cols-12 gap-2">
                                     {/* Product selection: dropdown + text input */}
-                                    <div className="col-span-4 relative">
+                                    <div className="col-span-2 md:col-span-4 relative">
                                         <input
                                             type="text"
                                             value={freeTextName || (selectedProductId ? products.find(p => p.id === selectedProductId)?.name || '' : '')}
@@ -514,8 +564,8 @@ export default function InventoryPage() {
                                             </div>
                                         )}
                                     </div>
-                                    <select value={importQuality} onChange={e => setImportQuality(e.target.value)}
-                                        className="col-span-2 px-2 py-2 border rounded-lg text-sm bg-white">
+                                    <select value={importQuality} onChange={e => setImportQuality(e.target.value)} aria-label="Phân loại chất lượng"
+                                        className="col-span-1 md:col-span-2 px-2 py-2 border rounded-lg text-sm bg-white">
                                         <option value="Zin">Zin</option>
                                         <option value="Loại 1">Loại 1</option>
                                         <option value="Loại 2">Loại 2</option>
@@ -523,12 +573,12 @@ export default function InventoryPage() {
                                     </select>
                                     <input type="number" value={importQty} onChange={e => setImportQty(Number(e.target.value))}
                                         placeholder="SL" min={1}
-                                        className="col-span-1 px-2 py-2 border rounded-lg text-sm text-center" />
+                                        className="col-span-1 md:col-span-1 px-2 py-2 border rounded-lg text-sm text-center" />
                                     <input type="number" value={importPrice || ''} onChange={e => setImportPrice(Number(e.target.value))}
                                         placeholder="Giá nhập"
-                                        className="col-span-3 px-3 py-2 border rounded-lg text-sm text-right" />
+                                        className="col-span-1 md:col-span-3 px-3 py-2 border rounded-lg text-sm text-right" />
                                     <button onClick={addItem}
-                                        className="col-span-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 text-sm font-medium flex items-center justify-center gap-1">
+                                        className="col-span-2 md:col-span-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 text-sm font-medium flex items-center justify-center gap-1 py-2 md:py-0">
                                         <Plus size={14} /> Thêm
                                     </button>
                                 </div>
@@ -554,15 +604,15 @@ export default function InventoryPage() {
 
                             {/* Items list */}
                             {items.length > 0 && (
-                                <div>
-                                    <table className="w-full text-sm">
+                                <div className="overflow-x-auto -mx-6 px-6 md:mx-0 md:px-0">
+                                    <table className="w-full min-w-[600px] text-sm">
                                         <thead>
                                             <tr className="text-gray-500 text-xs border-b">
-                                                <th className="text-left py-2">Sản phẩm</th>
-                                                <th className="text-center">Phân loại</th>
-                                                <th className="text-center">SL</th>
-                                                <th className="text-right">Giá nhập</th>
-                                                <th className="text-right">Thành tiền</th>
+                                                <th className="text-left py-2 whitespace-nowrap">Sản phẩm</th>
+                                                <th className="text-center whitespace-nowrap">Phân loại</th>
+                                                <th className="text-center whitespace-nowrap">SL</th>
+                                                <th className="text-right whitespace-nowrap">Giá nhập</th>
+                                                <th className="text-right whitespace-nowrap">Thành tiền</th>
                                                 <th></th>
                                             </tr>
                                         </thead>
@@ -573,11 +623,35 @@ export default function InventoryPage() {
                                                     <td className="text-center">
                                                         <span className="px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded text-xs">{item.quality || '—'}</span>
                                                     </td>
-                                                    <td className="text-center">{item.quantity}</td>
-                                                    <td className="text-right">{formatPrice(item.importPrice)}</td>
+                                                    <td className="text-center">
+                                                        <input
+                                                            type="number"
+                                                            min={1}
+                                                            value={item.quantity}
+                                                            aria-label="Số lượng"
+                                                            onChange={(e) => {
+                                                                const nextQty = Math.max(1, Number(e.target.value) || 1);
+                                                                setItems(prev => prev.map((x, idx) => idx === i ? { ...x, quantity: nextQty } : x));
+                                                            }}
+                                                            className="w-20 px-2 py-1 border rounded-lg text-sm text-center bg-white"
+                                                        />
+                                                    </td>
+                                                    <td className="text-right">
+                                                        <input
+                                                            type="number"
+                                                            min={0}
+                                                            value={item.importPrice}
+                                                            aria-label="Giá nhập"
+                                                            onChange={(e) => {
+                                                                const nextPrice = Math.max(0, Number(e.target.value) || 0);
+                                                                setItems(prev => prev.map((x, idx) => idx === i ? { ...x, importPrice: nextPrice } : x));
+                                                            }}
+                                                            className="w-32 px-2 py-1 border rounded-lg text-sm text-right bg-white"
+                                                        />
+                                                    </td>
                                                     <td className="text-right font-medium">{formatPrice(item.quantity * item.importPrice)}</td>
                                                     <td className="text-right">
-                                                        <button onClick={() => removeItem(item.productId)}
+                                                        <button onClick={() => removeItem(item.productId)} aria-label="Xóa dòng" title="Xóa"
                                                             className="text-red-400 hover:text-red-600 p-1"><Trash2 size={14} /></button>
                                                     </td>
                                                 </tr>
@@ -599,8 +673,8 @@ export default function InventoryPage() {
                             )}
                         </div>
 
-                        <div className="flex justify-end gap-3 px-6 py-4 border-t sticky bottom-0 bg-white">
-                            <button onClick={() => setShowModal(false)}
+                        <div className="flex justify-end gap-3 px-6 py-4 border-t bg-white shrink-0 sticky bottom-0 md:static z-10">
+                            <button onClick={() => setShowModal(false)} aria-label="Hủy" title="Hủy"
                                 className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200">Hủy</button>
                             <button onClick={handleSave} disabled={isProcessing || items.length === 0}
                                 className="px-5 py-2 text-sm font-semibold text-white bg-orange-500 rounded-lg hover:bg-orange-600 disabled:opacity-50 flex items-center gap-2">
@@ -608,282 +682,44 @@ export default function InventoryPage() {
                                 Lưu phiếu (Nháp)
                             </button>
                         </div>
-                    </div>
-                </div>
-            )}
+            </Modal>
 
-            {/* Inline Create Modal */}
-            {showInlineCreate === 'product' && (
-                <InlineProductCreateModal
-                    onClose={() => setShowInlineCreate(null)}
-                    onCreated={(newProduct) => {
-                        setProducts(prev => [...prev, newProduct]);
-                        // Auto-add to items
-                        setItems(prev => [...prev, {
-                            productId: newProduct.id,
-                            productName: newProduct.name,
-                            quantity: 1,
-                            importPrice: 0,
-                            quality: 'Zin',
-                        }]);
-                        setShowInlineCreate(null);
-                    }}
-                />
-            )}
-            {showInlineCreate === 'part' && (
-                <InlinePartCreateModal
-                    onClose={() => setShowInlineCreate(null)}
-                    onCreated={(newPart) => {
-                        setProducts(prev => [...prev, newPart]);
-                        // Auto-add to items
-                        setItems(prev => [...prev, {
-                            productId: newPart.id,
-                            productName: newPart.name,
-                            quantity: 1,
-                            importPrice: 0,
-                            quality: 'Zin',
-                        }]);
-                        setShowInlineCreate(null);
-                    }}
-                />
-            )}
+            {/* Inline Create Modal — via UniversalProductModal */}
+            <UniversalProductModal
+                isOpen={showInlineCreate === 'product'}
+                onClose={() => setShowInlineCreate(null)}
+                mode="retail"
+                submitLabel="Tạo & Thêm vào phiếu"
+                onCreated={(newProduct) => {
+                    setProducts(prev => [...prev, newProduct]);
+                    setItems(prev => [...prev, {
+                        productId: newProduct.id,
+                        productName: newProduct.name,
+                        quantity: 1,
+                        importPrice: 0,
+                        quality: 'Zin',
+                    }]);
+                    setShowInlineCreate(null);
+                }}
+            />
+            <UniversalProductModal
+                isOpen={showInlineCreate === 'part'}
+                onClose={() => setShowInlineCreate(null)}
+                mode="component"
+                submitLabel="Tạo & Thêm vào phiếu"
+                onCreated={(newPart) => {
+                    setProducts(prev => [...prev, newPart]);
+                    setItems(prev => [...prev, {
+                        productId: newPart.id,
+                        productName: newPart.name,
+                        quantity: 1,
+                        importPrice: 0,
+                        quality: 'Zin',
+                    }]);
+                    setShowInlineCreate(null);
+                }}
+            />
         </div>
     );
 }
 
-// ════════════════════════════════════════════════════
-// Inline Product Create Modal (Retail)
-// ════════════════════════════════════════════════════
-const RETAIL_CATEGORIES = ['Phone', 'Laptop', 'Tablet', 'Audio', 'Watch', 'Accessory'];
-const RETAIL_BRANDS = ['Apple', 'Samsung', 'Xiaomi', 'OPPO', 'Vivo', 'Dell', 'HP', 'Lenovo', 'Asus', 'Sony'];
-
-function InlineProductCreateModal({
-    onClose,
-    onCreated,
-}: {
-    onClose: () => void;
-    onCreated: (product: Product & { id: string }) => void;
-}) {
-    const [formData, setFormData] = useState({
-        name: '',
-        price_original: '' as number | '',
-        price_promo: '' as number | '',
-        category: RETAIL_CATEGORIES[0],
-        brand: RETAIL_BRANDS[0],
-        description: '',
-        stock: 0,
-        status: 'active' as const,
-        condition: 'new' as const,
-    });
-    const [imageFile, setImageFile] = useState<File | null>(null);
-    const [imagePreview, setImagePreview] = useState('');
-    const [isSubmitting, setIsSubmitting] = useState(false);
-
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setIsSubmitting(true);
-        try {
-            let imageUrl = '';
-            if (imageFile) {
-                imageUrl = await uploadImage(imageFile, 'products');
-            }
-            const data = {
-                ...formData,
-                price_original: Number(formData.price_original) || 0,
-                price_promo: Number(formData.price_promo) || 0,
-                imageUrl,
-                images: imageUrl ? [imageUrl] : [],
-                sold: 0,
-                specs: {},
-                createdAt: serverTimestamp(),
-                updatedAt: serverTimestamp(),
-            };
-            const ref = await addDoc(collection(db, 'products'), data);
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            onCreated({ id: ref.id, ...data } as any);
-        } catch (err) {
-            console.error(err);
-            alert('Lỗi khi tạo sản phẩm!');
-        } finally {
-            setIsSubmitting(false);
-        }
-    };
-
-    return (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4 backdrop-blur-sm">
-            <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-xl">
-                <div className="flex items-center justify-between p-5 border-b sticky top-0 bg-white z-10">
-                    <h2 className="text-lg font-bold text-gray-800">Tạo sản phẩm bán lẻ mới</h2>
-                    <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg text-gray-400"><X size={20} /></button>
-                </div>
-                <form onSubmit={handleSubmit} className="p-5 space-y-4">
-                    {/* Image */}
-                    <div className="border-2 border-dashed rounded-xl p-3 text-center">
-                        {imagePreview ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={imagePreview} alt="" className="w-20 h-20 object-cover rounded-lg mx-auto mb-2" />
-                        ) : (
-                            <Package className="mx-auto text-gray-300 mb-1" size={28} />
-                        )}
-                        <input type="file" accept="image/*" onChange={(e) => {
-                            const f = e.target.files?.[0];
-                            if (f) { setImageFile(f); setImagePreview(URL.createObjectURL(f)); }
-                        }} className="text-xs" />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium mb-1">Tên sản phẩm *</label>
-                        <input type="text" required value={formData.name}
-                            onChange={(e) => setFormData(p => ({ ...p, name: e.target.value }))}
-                            className="w-full h-10 px-3 border rounded-lg" />
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                        <div>
-                            <label className="block text-sm font-medium mb-1">Danh mục</label>
-                            <select value={formData.category} onChange={(e) => setFormData(p => ({ ...p, category: e.target.value }))}
-                                className="w-full h-10 px-3 border rounded-lg">
-                                {RETAIL_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                            </select>
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium mb-1">Hãng</label>
-                            <select value={formData.brand} onChange={(e) => setFormData(p => ({ ...p, brand: e.target.value }))}
-                                className="w-full h-10 px-3 border rounded-lg">
-                                {RETAIL_BRANDS.map(b => <option key={b} value={b}>{b}</option>)}
-                            </select>
-                        </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                        <div>
-                            <label className="block text-sm font-medium mb-1">Giá gốc *</label>
-                            <input type="number" required min={0} value={formData.price_original}
-                                onChange={(e) => setFormData(p => ({ ...p, price_original: e.target.value ? Number(e.target.value) : '' }))}
-                                className="w-full h-10 px-3 border rounded-lg" />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium mb-1">Giá bán</label>
-                            <input type="number" min={0} value={formData.price_promo}
-                                onChange={(e) => setFormData(p => ({ ...p, price_promo: e.target.value ? Number(e.target.value) : '' }))}
-                                className="w-full h-10 px-3 border rounded-lg" />
-                        </div>
-                    </div>
-                    <div className="flex gap-3 pt-3 border-t">
-                        <button type="button" onClick={onClose}
-                            className="w-1/3 py-2.5 rounded-xl font-medium bg-gray-100 text-gray-700 hover:bg-gray-200">Hủy</button>
-                        <button type="submit" disabled={isSubmitting}
-                            className="flex-1 py-2.5 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2">
-                            {isSubmitting ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
-                            Tạo & Thêm vào phiếu
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    );
-}
-
-// ════════════════════════════════════════════════════
-// Inline Part Create Modal (Linh kiện)
-// ════════════════════════════════════════════════════
-const QUALITY_OPTIONS = ['Zin', 'Loại 1', 'Loại 2', 'Bóc máy'];
-
-function InlinePartCreateModal({
-    onClose,
-    onCreated,
-}: {
-    onClose: () => void;
-    onCreated: (part: Product & { id: string }) => void;
-}) {
-    const [formData, setFormData] = useState({
-        name: '',
-        price_original: '' as number | '',
-        price_promo: '' as number | '',
-        description: '',
-        stock: 0,
-        status: 'active' as const,
-        quality: 'Zin',
-    });
-    const [isSubmitting, setIsSubmitting] = useState(false);
-
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setIsSubmitting(true);
-        try {
-            const data = {
-                ...formData,
-                category: 'Linh kiện',
-                brand: '',
-                price_original: Number(formData.price_original) || 0,
-                price_promo: Number(formData.price_promo) || 0,
-                imageUrl: '',
-                images: [],
-                sold: 0,
-                specs: {},
-                createdAt: serverTimestamp(),
-                updatedAt: serverTimestamp(),
-            };
-            const ref = await addDoc(collection(db, 'products'), data);
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            onCreated({ id: ref.id, ...data } as any);
-        } catch (err) {
-            console.error(err);
-            alert('Lỗi khi tạo linh kiện!');
-        } finally {
-            setIsSubmitting(false);
-        }
-    };
-
-    return (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4 backdrop-blur-sm">
-            <div className="bg-white rounded-2xl w-full max-w-md shadow-xl">
-                <div className="flex items-center justify-between p-5 border-b">
-                    <h2 className="text-lg font-bold text-gray-800">Tạo linh kiện mới</h2>
-                    <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg text-gray-400"><X size={20} /></button>
-                </div>
-                <form onSubmit={handleSubmit} className="p-5 space-y-4">
-                    <div>
-                        <label className="block text-sm font-medium mb-1">Tên linh kiện *</label>
-                        <input type="text" required value={formData.name}
-                            onChange={(e) => setFormData(p => ({ ...p, name: e.target.value }))}
-                            className="w-full h-10 px-3 border rounded-lg" placeholder="Màn hình iPhone 13 Pro Max" />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium mb-1">Dòng máy tương thích</label>
-                        <input type="text" value={formData.description}
-                            onChange={(e) => setFormData(p => ({ ...p, description: e.target.value }))}
-                            className="w-full h-10 px-3 border rounded-lg" placeholder="iPhone 13 Pro, iPhone 13 Pro Max" />
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                        <div>
-                            <label className="block text-sm font-medium mb-1">Chất lượng</label>
-                            <select value={formData.quality} onChange={(e) => setFormData(p => ({ ...p, quality: e.target.value }))}
-                                className="w-full h-10 px-3 border rounded-lg">
-                                {QUALITY_OPTIONS.map(q => <option key={q} value={q}>{q}</option>)}
-                            </select>
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium mb-1">Giá vốn *</label>
-                            <input type="number" required min={0} value={formData.price_original}
-                                onChange={(e) => setFormData(p => ({ ...p, price_original: e.target.value ? Number(e.target.value) : '' }))}
-                                className="w-full h-10 px-3 border rounded-lg" />
-                        </div>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium mb-1">Giá bán / Giá sửa chữa</label>
-                        <input type="number" min={0} value={formData.price_promo}
-                            onChange={(e) => setFormData(p => ({ ...p, price_promo: e.target.value ? Number(e.target.value) : '' }))}
-                            className="w-full h-10 px-3 border rounded-lg" />
-                    </div>
-                    <div className="flex gap-3 pt-3 border-t">
-                        <button type="button" onClick={onClose}
-                            className="w-1/3 py-2.5 rounded-xl font-medium bg-gray-100 text-gray-700 hover:bg-gray-200">Hủy</button>
-                        <button type="submit" disabled={isSubmitting}
-                            className="flex-1 py-2.5 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2">
-                            {isSubmitting ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
-                            Tạo & Thêm vào phiếu
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    );
-}

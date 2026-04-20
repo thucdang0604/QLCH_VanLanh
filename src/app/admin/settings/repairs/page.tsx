@@ -2,25 +2,47 @@
 
 import { useState, useEffect } from 'react';
 import {
-    Settings, Plus, Trash2, GripVertical, Save, Loader2, ArrowRight, X, Eye
+    Settings, Plus, Trash2, GripVertical, Save, Loader2, ArrowRight, X, Eye, Shield
 } from 'lucide-react';
+import Modal from '@/components/admin/Modal';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { WORKFLOW_FEATURES } from '@/lib/workflowFeatures';
 
-import type { WorkflowNode, TrackingGroup } from '@/lib/types';
+import type { WorkflowNode, TrackingGroup, WarrantyRule } from '@/lib/types';
+
+const DEFAULT_WARRANTY_RULES: WarrantyRule[] = [
+    { partType: 'Màn hình', warrantyMonths: 6 },
+    { partType: 'Pin', warrantyMonths: 12 },
+    { partType: 'Camera', warrantyMonths: 3 },
+    { partType: 'Mainboard', warrantyMonths: 6 },
+    { partType: 'Loa / Mic', warrantyMonths: 3 },
+    { partType: 'Cáp / Dây nguồn', warrantyMonths: 1 },
+    { partType: 'Vỏ / Khung', warrantyMonths: 0 },
+    { partType: 'Khác', warrantyMonths: 0 },
+];
+import { toastError, toastSuccess } from '@/lib/toast';
 
 const defaultStatuses: WorkflowNode[] = [
     { id: 'cho_tiep_nhan', label: 'Chờ Tiếp nhận', color: 'bg-yellow-100 text-yellow-800', allowedNext: ['dang_kiem_tra', 'out'] },
     { id: 'dang_kiem_tra', label: 'Đang Kiểm Tra', color: 'bg-blue-100 text-blue-800', allowedNext: ['bao_tinh_trang_va_gia', 'dang_sua_chua', 'done', 'out'] },
     { id: 'bao_tinh_trang_va_gia', label: 'Báo Tình Trạng & Giá', color: 'bg-indigo-100 text-indigo-800', allowedNext: ['doi_khach_phan_hoi', 'out'] },
-    { id: 'doi_khach_phan_hoi', label: 'Đợi Khách Phản Hồi', color: 'bg-purple-100 text-purple-800', allowedNext: ['tim_linh_kien', 'dang_sua_chua', 'hoan_phi', 'out'] },
-    { id: 'tim_linh_kien', label: 'Tìm Linh Kiện', color: 'bg-cyan-100 text-cyan-800', allowedNext: ['da_dat_linh_kien', 'hoan_phi', 'out'] },
-    { id: 'da_dat_linh_kien', label: 'Đã Đặt LK', color: 'bg-teal-100 text-teal-800', allowedNext: ['dang_sua_chua'] },
-    { id: 'dang_sua_chua', label: 'Đang Sửa Chữa', color: 'bg-orange-100 text-orange-800', allowedNext: ['done', 'hoan_phi'] },
+    { id: 'doi_khach_phan_hoi', label: 'Đợi Khách Phản Hồi', color: 'bg-purple-100 text-purple-800', allowedNext: ['tim_linh_kien', 'dang_sua_chua', 'refund', 'out'] },
+    { id: 'tim_linh_kien', label: 'Tìm Linh Kiện', color: 'bg-cyan-100 text-cyan-800', allowedNext: ['da_dat_linh_kien', 'refund', 'out'] },
+    { id: 'da_dat_linh_kien', label: 'Đã Đặt LK', color: 'bg-teal-100 text-teal-800', allowedNext: ['dang_sua_chua'], allowedFeatures: ['requirePartsReady'] },
+    { id: 'dang_sua_chua', label: 'Đang Sửa Chữa', color: 'bg-orange-100 text-orange-800', allowedNext: ['done', 'refund'] },
     { id: 'done', label: 'Hoàn Thành', color: 'bg-green-100 text-green-800', allowedNext: [] },
-    { id: 'hoan_phi', label: 'Hoàn Phí', color: 'bg-red-100 text-red-800', allowedNext: [], isTerminal: true },
-    { id: 'out', label: 'Đã Trả Máy', color: 'bg-gray-100 text-gray-800', allowedNext: [], isTerminal: true },
-    { id: 'da_tra_may', label: 'Đã Trả Máy', color: 'bg-emerald-100 text-emerald-800', allowedNext: [], isTerminal: true }
+    { id: 'out', label: 'Trả Máy', color: 'bg-gray-100 text-gray-800', allowedNext: [], isTerminal: true },
+    { id: 'refund', label: 'Hoàn Phí', color: 'bg-red-100 text-red-800', allowedNext: [], isTerminal: true }
+];
+
+const defaultWarrantyStatuses: WorkflowNode[] = [
+    { id: 'bh_tiep_nhan', label: 'Tiếp nhận BH', color: 'bg-yellow-100 text-yellow-800', allowedNext: ['bh_dang_kiem_tra'], allowedFeatures: ['allowAssignTech'], isTerminal: false },
+    { id: 'bh_dang_kiem_tra', label: 'Đang kiểm tra BH', color: 'bg-blue-100 text-blue-800', allowedNext: ['bh_dang_sua', 'bh_tu_choi'], allowedFeatures: ['requireChecklist'], isTerminal: false },
+    { id: 'bh_dang_sua', label: 'Đang sửa BH', color: 'bg-orange-100 text-orange-800', allowedNext: ['bh_hoan_tat', 'bh_refund'], allowedFeatures: ['allowPartsSelection'], isTerminal: false },
+    { id: 'bh_hoan_tat', label: 'Hoàn tất BH', color: 'bg-green-100 text-green-800', allowedNext: [], allowedFeatures: [], isTerminal: true },
+    { id: 'bh_tu_choi', label: 'Từ chối BH', color: 'bg-gray-100 text-gray-800', allowedNext: [], allowedFeatures: [], isTerminal: true },
+    { id: 'bh_refund', label: 'Hoàn phí BH', color: 'bg-red-100 text-red-800', allowedNext: [], allowedFeatures: ['enableTechnicianCommission'], isTerminal: true }
 ];
 
 const colorOptions = [
@@ -31,8 +53,16 @@ const colorOptions = [
 ];
 
 export default function RepairStatusSettingsPage() {
-    const [statuses, setStatuses] = useState<WorkflowNode[]>(defaultStatuses);
+    const [repairStatuses, setRepairStatuses] = useState<WorkflowNode[]>(defaultStatuses);
+    const [warrantyStatuses, setWarrantyStatuses] = useState<WorkflowNode[]>(defaultWarrantyStatuses);
+    const [workflowTab, setWorkflowTab] = useState<'repair' | 'warranty'>('repair');
+
+    const activeStatuses = workflowTab === 'repair' ? repairStatuses : warrantyStatuses;
+    const setActiveStatuses = workflowTab === 'repair' ? setRepairStatuses : setWarrantyStatuses;
+
     const [trackingGroups, setTrackingGroups] = useState<TrackingGroup[]>([]);
+    const [warrantyRules, setWarrantyRules] = useState<WarrantyRule[]>(DEFAULT_WARRANTY_RULES);
+    const [warrantyNote, setWarrantyNote] = useState('');
 
     // UI states
     const [loading, setLoading] = useState(true);
@@ -56,11 +86,16 @@ export default function RepairStatusSettingsPage() {
                 const snap = await getDoc(doc(db, 'system_config', 'repairs'));
                 if (snap.exists()) {
                     const d = snap.data();
-                    if (d.statuses) setStatuses(d.statuses);
+                    const rs = d.repairStatuses ?? d.statuses ?? defaultStatuses;
+                    const ws = d.warrantyStatuses ?? defaultWarrantyStatuses;
+                    setRepairStatuses(rs);
+                    setWarrantyStatuses(ws);
                     // Legacy migration: sort generic arrays to trackingGroups ensuring order
                     if (d.trackingGroups) {
                         setTrackingGroups(d.trackingGroups.sort((a: TrackingGroup, b: TrackingGroup) => a.order - b.order));
                     }
+                    if (d.warrantyRules) setWarrantyRules(d.warrantyRules);
+                    if (d.warrantyNote !== undefined) setWarrantyNote(d.warrantyNote);
                 }
             } catch (err) {
                 console.error(err);
@@ -78,16 +113,19 @@ export default function RepairStatusSettingsPage() {
             const orderedGroups = trackingGroups.map((g, i) => ({ ...g, order: i }));
 
             await setDoc(doc(db, 'system_config', 'repairs'), {
-                statuses,
+                repairStatuses,
+                warrantyStatuses,
                 trackingGroups: orderedGroups,
+                warrantyRules,
+                warrantyNote,
                 updatedAt: serverTimestamp(),
             }, { merge: true });
 
             setTrackingGroups(orderedGroups);
-            alert('Đã lưu cấu hình trạng thái & theo dõi!');
+            toastSuccess('Đã lưu cấu hình trạng thái & theo dõi!');
         } catch (err) {
             console.error(err);
-            alert('Lỗi khi lưu!');
+            toastError('Lỗi khi lưu!');
         } finally {
             setSaving(false);
         }
@@ -97,11 +135,11 @@ export default function RepairStatusSettingsPage() {
     const handleAddStatus = () => {
         if (!newId.trim() || !newLabel.trim()) return;
         const id = newId.trim().toLowerCase().replace(/\s+/g, '_');
-        if (statuses.find(s => s.id === id)) {
-            alert('ID đã tồn tại!');
+        if (activeStatuses.find(s => s.id === id)) {
+            toastError('ID đã tồn tại!');
             return;
         }
-        setStatuses(prev => [...prev, { id, label: newLabel.trim(), color: newColor, allowedNext: [], isTerminal: false }]);
+        setActiveStatuses(prev => [...prev, { id, label: newLabel.trim(), color: newColor, allowedNext: [], allowedFeatures: [], isTerminal: false }]);
         setNewId('');
         setNewLabel('');
         setNewColor(colorOptions[0]);
@@ -110,7 +148,7 @@ export default function RepairStatusSettingsPage() {
 
     const handleDeleteStatus = (id: string) => {
         if (!confirm(`Xóa trạng thái "${id}"? Lưu ý: Cần gỡ khỏi nhóm tra cứu (nếu có) trước khi lưu.`)) return;
-        setStatuses(prev => prev.filter(s => s.id !== id));
+        setActiveStatuses(prev => prev.filter(s => s.id !== id));
         // Remove from tracking groups as well
         setTrackingGroups(prev => prev.map(g => ({
             ...g,
@@ -122,18 +160,18 @@ export default function RepairStatusSettingsPage() {
     const handleDragOverStatus = (e: React.DragEvent, index: number) => {
         e.preventDefault();
         if (dragIndex === null || dragIndex === index) return;
-        const newList = [...statuses];
+        const newList = [...activeStatuses];
         const [moved] = newList.splice(dragIndex, 1);
         newList.splice(index, 0, moved);
-        setStatuses(newList);
+        setActiveStatuses(newList);
         setDragIndex(index);
     };
     const handleDragEndStatus = () => setDragIndex(null);
 
-    const updateLabel = (id: string, label: string) => setStatuses(prev => prev.map(s => s.id === id ? { ...s, label } : s));
-    const updateColor = (id: string, color: string) => setStatuses(prev => prev.map(s => s.id === id ? { ...s, color } : s));
+    const updateLabel = (id: string, label: string) => setActiveStatuses(prev => prev.map(s => s.id === id ? { ...s, label } : s));
+    const updateColor = (id: string, color: string) => setActiveStatuses(prev => prev.map(s => s.id === id ? { ...s, color } : s));
     const toggleNext = (id: string, nextId: string) => {
-        setStatuses(prev => prev.map(s => {
+        setActiveStatuses(prev => prev.map(s => {
             if (s.id !== id) return s;
             const allowed = s.allowedNext || [];
             return {
@@ -142,7 +180,17 @@ export default function RepairStatusSettingsPage() {
             };
         }));
     };
-    const toggleTerminal = (id: string) => setStatuses(prev => prev.map(s => s.id === id ? { ...s, isTerminal: !s.isTerminal } : s));
+    const toggleTerminal = (id: string) => setActiveStatuses(prev => prev.map(s => s.id === id ? { ...s, isTerminal: !s.isTerminal } : s));
+    const toggleFeature = (id: string, feature: string) => {
+        setActiveStatuses(prev => prev.map(s => {
+            if (s.id !== id) return s;
+            const feats = s.allowedFeatures || [];
+            return {
+                ...s,
+                allowedFeatures: feats.includes(feature) ? feats.filter(f => f !== feature) : [...feats, feature]
+            };
+        }));
+    };
 
     // --- Tracking Group Logic ---
     const handleAddGroup = () => {
@@ -250,23 +298,38 @@ export default function RepairStatusSettingsPage() {
                         </button>
                     </div>
 
+                    <div className="flex gap-2">
+                        <button
+                            onClick={() => setWorkflowTab('repair')}
+                            className={`px-4 py-2 font-semibold text-sm rounded-lg transition-colors ${workflowTab === 'repair' ? 'bg-orange-100 text-orange-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                        >
+                            Sửa chữa
+                        </button>
+                        <button
+                            onClick={() => setWorkflowTab('warranty')}
+                            className={`px-4 py-2 font-semibold text-sm rounded-lg transition-colors ${workflowTab === 'warranty' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                        >
+                            Bảo hành
+                        </button>
+                    </div>
+
                     {/* Flow Preview */}
                     <div className="bg-gradient-to-r from-orange-50 to-amber-50 rounded-xl border border-orange-200 p-4">
                         <p className="text-xs font-semibold text-orange-800 mb-2">Flow Hiển thị</p>
                         <div className="flex flex-wrap items-center gap-1">
-                            {statuses.map((s, i) => (
+                            {activeStatuses.map((s, i) => (
                                 <div key={s.id} className="flex items-center gap-1">
                                     <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${s.color}`}>
                                         {s.label}
                                     </span>
-                                    {i < statuses.length - 1 && <ArrowRight size={10} className="text-gray-400" />}
+                                    {i < activeStatuses.length - 1 && <ArrowRight size={10} className="text-gray-400" />}
                                 </div>
                             ))}
                         </div>
                     </div>
 
                     <div className="space-y-2">
-                        {statuses.map((status, index) => (
+                        {activeStatuses.map((status, index) => (
                             <div key={status.id}
                                 draggable
                                 onDragStart={() => handleDragStartStatus(index)}
@@ -306,6 +369,21 @@ export default function RepairStatusSettingsPage() {
                                         <span className={`font-semibold ${status.isTerminal ? 'text-red-600' : 'text-gray-500'}`}>Điểm kết thúc (Khóa phiếu)</span>
                                     </label>
 
+                                    {/* Feature Toggles */}
+                                    <div className="mt-2 space-y-1.5 p-2 bg-gray-50 border border-gray-100 rounded-lg">
+                                        <p className="text-[10px] font-bold text-gray-500 uppercase mb-1">Tính năng đi kèm</p>
+                                        {WORKFLOW_FEATURES.map(f => (
+                                            <label key={f.id} className="flex items-center gap-1.5 cursor-pointer w-fit text-[11px] text-gray-700 hover:text-gray-900 transition-colors" title={f.description}>
+                                                <input type="checkbox"
+                                                    checked={status.allowedFeatures?.includes(f.id) || false}
+                                                    onChange={() => toggleFeature(status.id, f.id)}
+                                                    className="rounded border-gray-300 text-orange-500 focus:ring-orange-500 w-3 h-3"
+                                                />
+                                                <span>{f.label}</span>
+                                            </label>
+                                        ))}
+                                    </div>
+
                                     {!status.isTerminal && (
                                         <div className="relative group mt-1">
                                             <button className="px-3 py-1.5 border rounded-lg bg-gray-50 text-gray-700 text-left flex items-center justify-between hover:bg-gray-100 transition-colors">
@@ -315,7 +393,7 @@ export default function RepairStatusSettingsPage() {
                                             <div className="absolute top-full left-0 mt-1 w-[280px] bg-white border rounded-xl p-2 shadow-xl z-[100] hidden group-hover:block max-h-[300px] overflow-y-auto">
                                                 <p className="text-[10px] text-gray-500 font-semibold mb-2 sticky top-0 bg-white z-10 pb-1 border-b">Tick chọn các đường đi tiếp theo cho [{status.label}]:</p>
                                                 <div className="flex flex-col gap-0.5">
-                                                    {statuses.filter(s => s.id !== status.id).map(s => (
+                                                    {activeStatuses.filter(s => s.id !== status.id).map(s => (
                                                         <label key={s.id} className="flex items-center gap-2 p-1.5 hover:bg-orange-50 rounded-lg cursor-pointer transition-colors">
                                                             <input type="checkbox"
                                                                 className="rounded border-gray-300 text-orange-500 focus:ring-orange-500"
@@ -398,7 +476,7 @@ export default function RepairStatusSettingsPage() {
                                 <div className="pl-11 pr-2">
                                     <p className="text-xs font-semibold text-gray-500 mb-2">Trạng thái con (Maps to):</p>
                                     <div className="flex flex-wrap gap-2">
-                                        {statuses.map(s => {
+                                        {activeStatuses.map(s => {
                                             const isChecked = group.mappedStatuses.includes(s.id);
                                             // Is it mapped to SOME OTHER group?
                                             const isMappedElsewhere = !isChecked && trackingGroups.some(g => g.mappedStatuses.includes(s.id));
@@ -431,16 +509,97 @@ export default function RepairStatusSettingsPage() {
                 </div>
             </div>
 
+            {/* ─── SECTION 3: CẤU HÌNH BẢO HÀNH ─── */}
+            <div className="space-y-4 mt-8">
+                <div className="flex items-center justify-between border-b pb-2 border-gray-200">
+                    <div>
+                        <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                            <Shield className="text-emerald-500" size={20} /> Cấu hình Bảo hành theo Loại Linh kiện
+                        </h2>
+                        <p className="text-xs text-gray-500 mt-0.5">Khi phiếu hoàn tất, mỗi linh kiện sẽ được gắn thời gian BH dựa trên loại</p>
+                    </div>
+                    <button
+                        onClick={() => setWarrantyRules(prev => [...prev, { partType: '', warrantyMonths: 0 }])}
+                        className="flex items-center gap-1 px-3 py-1.5 bg-emerald-100 text-emerald-700 rounded-lg text-sm font-semibold hover:bg-emerald-200 transition-colors">
+                        <Plus size={16} /> Thêm loại
+                    </button>
+                </div>
+
+                <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
+                    <table className="w-full text-sm">
+                        <thead className="bg-gray-50">
+                            <tr>
+                                <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase w-8">#</th>
+                                <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">Loại linh kiện</th>
+                                <th className="px-4 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase w-36">BH (tháng)</th>
+                                <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase w-16"></th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                            {warrantyRules.map((rule, idx) => (
+                                <tr key={idx} className="hover:bg-emerald-50/50 transition-colors">
+                                    <td className="px-4 py-2 text-gray-400 text-xs">{idx + 1}</td>
+                                    <td className="px-4 py-2">
+                                        <input
+                                            type="text"
+                                            value={rule.partType}
+                                            onChange={e => {
+                                                const next = [...warrantyRules];
+                                                next[idx] = { ...next[idx], partType: e.target.value };
+                                                setWarrantyRules(next);
+                                            }}
+                                            placeholder="VD: Màn hình, Pin, Camera…"
+                                            className="w-full px-3 py-1.5 border rounded-lg text-sm font-medium focus:border-emerald-500 focus:outline-none"
+                                        />
+                                    </td>
+                                    <td className="px-4 py-2">
+                                        <input
+                                            type="number"
+                                            min={0}
+                                            value={rule.warrantyMonths}
+                                            onChange={e => {
+                                                const next = [...warrantyRules];
+                                                next[idx] = { ...next[idx], warrantyMonths: Number(e.target.value) || 0 };
+                                                setWarrantyRules(next);
+                                            }}
+                                            className="w-full max-w-[100px] mx-auto block px-3 py-1.5 border rounded-lg text-sm text-center font-semibold focus:border-emerald-500 focus:outline-none"
+                                        />
+                                    </td>
+                                    <td className="px-4 py-2 text-right">
+                                        <button
+                                            onClick={() => setWarrantyRules(prev => prev.filter((_, i) => i !== idx))}
+                                            className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                                        >
+                                            <Trash2 size={15} />
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))}
+                            {warrantyRules.length === 0 && (
+                                <tr>
+                                    <td colSpan={4} className="text-center py-6 text-gray-400 text-sm">
+                                        Chưa có loại linh kiện nào. Bấm &quot;Thêm loại&quot; để bắt đầu.
+                                    </td>
+                                </tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div>
+                    <label className="text-sm font-semibold text-gray-700 mb-1 block">Ghi chú bảo hành (in trên hóa đơn)</label>
+                    <textarea
+                        value={warrantyNote}
+                        onChange={e => setWarrantyNote(e.target.value)}
+                        placeholder="VD: Bảo hành chỉ áp dụng cho lỗi kỹ thuật, không áp dụng cho hư hỏng do rơi vỡ, vào nước…"
+                        rows={3}
+                        className="w-full px-4 py-3 border rounded-xl text-sm focus:border-emerald-500 focus:outline-none resize-none"
+                    />
+                </div>
+            </div>
+
             {/* Modal Internal Status */}
-            {showAddModal && (
-                <div className="fixed inset-0 bg-black/50 flex flex-col items-center justify-center z-50 p-4" onClick={() => setShowAddModal(false)}>
-                    <div className="bg-white rounded-2xl w-full max-w-md p-6 relative" onClick={e => e.stopPropagation()}>
-                        <div className="flex items-center justify-between mb-4">
-                            <h2 className="text-lg font-bold text-gray-900">Thêm Trạng thái nội bộ</h2>
-                            <button onClick={() => setShowAddModal(false)} className="text-gray-400 hover:text-gray-600">
-                                <X size={20} />
-                            </button>
-                        </div>
+            <Modal isOpen={showAddModal} onClose={() => setShowAddModal(false)} title="Thêm Trạng thái nội bộ" size="md">
                         <div className="space-y-3 pt-2">
                             <div>
                                 <label className="text-sm text-gray-700 font-semibold mb-1 block">ID (không dấu, snake_case)</label>
@@ -471,20 +630,10 @@ export default function RepairStatusSettingsPage() {
                                 </button>
                             </div>
                         </div>
-                    </div>
-                </div>
-            )}
+            </Modal>
 
             {/* Modal Tracking Group */}
-            {showAddGroupModal && (
-                <div className="fixed inset-0 bg-black/50 flex flex-col items-center justify-center z-50 p-4" onClick={() => setShowAddGroupModal(false)}>
-                    <div className="bg-white rounded-2xl w-full max-w-sm p-6 relative" onClick={e => e.stopPropagation()}>
-                        <div className="flex items-center justify-between mb-4">
-                            <h2 className="text-lg font-bold text-gray-900 text-blue-600">Tạo Nhóm Trạng Thái</h2>
-                            <button onClick={() => setShowAddGroupModal(false)} className="text-gray-400 hover:text-gray-600">
-                                <X size={20} />
-                            </button>
-                        </div>
+            <Modal isOpen={showAddGroupModal} onClose={() => setShowAddGroupModal(false)} title="Tạo Nhóm Trạng Thái" size="sm">
                         <div className="space-y-4 pt-2">
                             <div>
                                 <label className="text-sm text-gray-700 font-semibold mb-2 block">Tên nhóm (dành cho Khách)</label>
@@ -499,9 +648,7 @@ export default function RepairStatusSettingsPage() {
                                 </button>
                             </div>
                         </div>
-                    </div>
-                </div>
-            )}
+            </Modal>
         </div>
     );
 }

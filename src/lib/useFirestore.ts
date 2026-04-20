@@ -32,6 +32,8 @@ export function useFirestoreCollection<T extends DocumentData>(
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
+        // This hook re-subscribes when its query changes; show loading state immediately.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setLoading(true);
         setError(null);
 
@@ -93,7 +95,7 @@ export function useProducts(filters?: {
  * Hook for Flash Sale products
  */
 export function useFlashSaleProducts(maxItems: number = 6) {
-    const [data, setData] = useState<DocumentData[]>([]);
+    const [data, setData] = useState<(DocumentData & { id: string })[]>([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
@@ -110,11 +112,16 @@ export function useFlashSaleProducts(maxItems: number = 6) {
                 const unsubscribe = onSnapshot(q, (snapshot) => {
                     const products = snapshot.docs
                         .map((doc) => ({ id: doc.id, ...doc.data() }))
-                        .filter((p: any) => {
+                        .filter((p) => {
+                            const item = p as Partial<{
+                                isFlashSale: boolean;
+                                price_promo: number;
+                                price_original: number;
+                            }>;
                             // Filter products with discount or isFlashSale flag
-                            if (p.isFlashSale) return true;
-                            if (p.price_promo && p.price_original) {
-                                const discount = ((p.price_original - p.price_promo) / p.price_original) * 100;
+                            if (item.isFlashSale) return true;
+                            if (item.price_promo && item.price_original) {
+                                const discount = ((item.price_original - item.price_promo) / item.price_original) * 100;
                                 return discount >= 10;
                             }
                             return false;
@@ -194,7 +201,7 @@ export function useOrders(filters?: {
  * CRUD Operations
  */
 
-export async function addDocument(collectionName: string, data: Record<string, any>) {
+export async function addDocument(collectionName: string, data: Record<string, unknown>) {
     try {
         const docRef = await addDoc(collection(db, collectionName), {
             ...data,
@@ -208,7 +215,7 @@ export async function addDocument(collectionName: string, data: Record<string, a
     }
 }
 
-export async function addDocumentWithId(collectionName: string, docId: string, data: Record<string, any>) {
+export async function addDocumentWithId(collectionName: string, docId: string, data: Record<string, unknown>) {
     try {
         const docRef = doc(db, collectionName, docId);
         await setDoc(docRef, {
@@ -223,7 +230,7 @@ export async function addDocumentWithId(collectionName: string, docId: string, d
     }
 }
 
-export async function updateDocument(collectionName: string, docId: string, data: Record<string, any>) {
+export async function updateDocument(collectionName: string, docId: string, data: Record<string, unknown>) {
     try {
         const docRef = doc(db, collectionName, docId);
         await updateDoc(docRef, {

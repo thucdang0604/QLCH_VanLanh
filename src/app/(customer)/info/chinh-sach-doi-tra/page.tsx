@@ -1,8 +1,10 @@
 'use client';
+import { SITE_URL } from "@/lib/constants";
+
 export default function ChinhSachDoiTraPage() {
     const seoTitle = 'Chính sách đổi trả | Văn Lành Service';
     const seoDescription = 'Chính sách đổi trả hàng tại Văn Lành Service: điều kiện đổi trả máy/phụ kiện, lưu ý về dữ liệu và hotline hỗ trợ. Vui lòng đọc kỹ trước khi đổi trả.';
-    const canonicalUrl = 'https://qlch-vanlanh.web.app/info/chinh-sach-doi-tra';
+    const canonicalUrl = `${SITE_URL}/info/chinh-sach-doi-tra`;
     const articleSchema = {
         '@context': 'https://schema.org',
         '@type': 'Article',
@@ -16,8 +18,8 @@ export default function ChinhSachDoiTraPage() {
         '@context': 'https://schema.org',
         '@type': 'BreadcrumbList',
         itemListElement: [
-            { '@type': 'ListItem', position: 1, name: 'Trang chủ', item: 'https://qlch-vanlanh.web.app/' },
-            { '@type': 'ListItem', position: 2, name: 'Thông tin', item: 'https://qlch-vanlanh.web.app/info/chinh-sach-doi-tra' },
+            { '@type': 'ListItem', position: 1, name: 'Trang chủ', item: `${SITE_URL}/` },
+            { '@type': 'ListItem', position: 2, name: 'Thông tin', item: `${SITE_URL}/info/chinh-sach-doi-tra` },
             { '@type': 'ListItem', position: 3, name: 'Chính sách đổi trả', item: canonicalUrl },
         ],
     };

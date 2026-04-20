@@ -14,7 +14,9 @@ service firebase.storage {
     // Allow unauthenticated users to upload reviews (up to 5MB, must be image)
     match /images/reviews/{imageId} {
       allow read: if true;
-      allow write: if request.resource.size < 5 * 1024 * 1024
+      // Prevent overwriting existing objects to reduce abuse.
+      allow write: if !exists(/b/{bucket}/o/images/reviews/$(imageId))
+                   && request.resource.size < 5 * 1024 * 1024
                    && request.resource.contentType.matches('image/.*');
     }
   }

@@ -1,13 +1,13 @@
-'use client';
-
-import { useState, useEffect, use } from 'react';
+import { Metadata } from 'next';
 import Link from 'next/link';
 import Image from 'next/image';
-import { ChevronRight, Clock, User, Tag, ArrowLeft, Eye, Loader2, FileText } from 'lucide-react';
-import { doc, getDoc, updateDoc, increment } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
-import { Timestamp } from 'firebase/firestore';
+import { ChevronRight, Clock, User, Tag, ArrowLeft, Eye, FileText } from 'lucide-react';
 import VideoEmbed from '@/components/VideoEmbed';
+import { SITE_URL } from "@/lib/constants";
+import ArticleClientParts from './ArticleClientParts';
+import { fetchArticleDetail } from '@/app/(customer)/_lib/server-queries';
+
+export const revalidate = false;
 
 function stripHtml(html: string): string {
     return (html || '')
@@ -18,15 +18,30 @@ function stripHtml(html: string): string {
         .trim();
 }
 
-function formatDate(d: any): string {
-    if (!d) return '';
-    if (d instanceof Timestamp) {
-        return d.toDate().toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    }
-    if (d.seconds) {
-        return new Date(d.seconds * 1000).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    }
-    return new Date(d).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+function sanitizeArticleHtml(html: string): string {
+    const input = html || '';
+    return input
+        // Replace &nbsp; with regular spaces to fix word-wrap / text overflow
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/\u00A0/g, ' ')
+        // Drop script/style blocks entirely
+        .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
+        .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, '')
+        // Remove inline event handlers like onclick="..."
+        .replace(/\son\w+\s*=\s*(["']).*?\1/gi, '')
+        // Neutralize javascript: URLs
+        .replace(/(href|src)\s*=\s*(["'])\s*javascript:[\s\S]*?\2/gi, '$1="#"')
+        // Basic iframe allowlist: only YouTube/Facebook embeds; strip others
+        .replace(/<iframe\b([^>]*?)\bsrc=(["'])([^"']+)\2([^>]*)\/?>/gi, (m, pre, q, src, post) => {
+            const s = String(src || '');
+            const ok = /^(https?:)?\/\/(www\.)?(youtube\.com|youtu\.be|www\.facebook\.com|web\.facebook\.com)\//i.test(s);
+            return ok ? `<iframe${pre} src="${s}"${post}></iframe>` : '';
+        });
+}
+
+function formatDate(timestampMs?: number): string {
+    if (!timestampMs) return '';
+    return new Date(timestampMs).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
 const typeConfig: Record<string, { label: string; color: string }> = {
@@ -35,45 +50,43 @@ const typeConfig: Record<string, { label: string; color: string }> = {
     Tips: { label: 'Mẹo hay', color: 'bg-green-100 text-green-700' },
 };
 
-export default function ArticleDetailPage({ params }: { params: Promise<{ slug: string }> }) {
-    const { slug } = use(params);
-    const [article, setArticle] = useState<any>(null);
-    const [loading, setLoading] = useState(true);
-    const [notFound, setNotFound] = useState(false);
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+    const slug = (await params).slug;
+    const article = await fetchArticleDetail(slug);
 
-    useEffect(() => {
-        const fetchArticle = async () => {
-            try {
-                const docRef = doc(db, 'articles', slug);
-                const snap = await getDoc(docRef);
-                if (snap.exists()) {
-                    setArticle({ id: snap.id, ...snap.data() });
-                    // Increment view count
-                    updateDoc(docRef, { views: increment(1) }).catch(() => {});
-                } else {
-                    setNotFound(true);
-                }
-            } catch (err) {
-                console.error('Error fetching article:', err);
-                setNotFound(true);
-            } finally {
-                setLoading(false);
-            }
+    if (!article) {
+        return {
+            title: 'Không tìm thấy bài viết | Văn Lành Service',
         };
-        fetchArticle();
-    }, [slug]);
-
-    if (loading) {
-        return (
-            <div className="max-w-[900px] mx-auto px-2 md:px-4 py-8">
-                <div className="flex items-center justify-center py-20">
-                    <Loader2 className="animate-spin text-orange-500" size={40} />
-                </div>
-            </div>
-        );
     }
 
-    if (notFound || !article) {
+    const title = `${article.title || 'Bài viết'} | Văn Lành Service`;
+    const descriptionSource = (article.excerpt as string) || stripHtml(article.content || '') || (article.title as string) || 'Bài viết';
+    const description = descriptionSource.slice(0, 155);
+    const ogImage = article.thumbnail || `${SITE_URL}/logo.png`;
+    const canonicalUrl = `${SITE_URL}/tin-tuc/${article.id}`;
+
+    return {
+        title,
+        description,
+        alternates: { canonical: canonicalUrl },
+        openGraph: {
+            title,
+            description,
+            url: canonicalUrl,
+            images: [{ url: ogImage }],
+            type: 'article',
+            publishedTime: (article.publishedAt || article.createdAt) ? new Date((article.publishedAt || article.createdAt) as number).toISOString() : undefined,
+            authors: article.author ? [article.author] : undefined,
+        },
+    };
+}
+
+export default async function ArticleDetailPage({ params }: { params: Promise<{ slug: string }> }) {
+    const { slug } = await params;
+    const article = await fetchArticleDetail(slug);
+
+    if (!article) {
         return (
             <div className="max-w-[900px] mx-auto px-2 md:px-4 py-8">
                 <div className="bg-white rounded-xl shadow-sm py-20 text-center">
@@ -88,23 +101,19 @@ export default function ArticleDetailPage({ params }: { params: Promise<{ slug: 
         );
     }
 
-    const typeInfo = typeConfig[article.type] || { label: article.type, color: 'bg-gray-100 text-gray-600' };
+    const typeInfo = typeConfig[article.type || ''] || { label: article.type || '', color: 'bg-gray-100 text-gray-600' };
 
-    const canonicalUrl = `https://qlch-vanlanh.web.app/tin-tuc/${article.id}`;
-    const seoTitle = `${article.title} | Văn Lành Service`;
-    const descriptionSource = (article.excerpt as string) || stripHtml(article.content || '') || (article.title as string);
+    const canonicalUrl = `${SITE_URL}/tin-tuc/${article.id}`;
+    const descriptionSource = (article.excerpt as string) || stripHtml(article.content || '') || (article.title as string) || 'Bài viết';
     const seoDescription = descriptionSource.slice(0, 155);
-    const ogImage = article.thumbnail || 'https://qlch-vanlanh.web.app/logo.png';
 
-    const published = article.publishedAt || article.createdAt;
-    const publishedIso = published instanceof Timestamp
-        ? published.toDate().toISOString()
-        : (published?.seconds ? new Date(published.seconds * 1000).toISOString() : undefined);
+    const publishedMs = article.publishedAt || article.createdAt;
+    const publishedIso = publishedMs ? new Date(publishedMs).toISOString() : undefined;
 
     const blogPostingSchema = {
         '@context': 'https://schema.org',
         '@type': 'BlogPosting',
-        headline: article.title,
+        headline: article.title || 'Bài viết',
         description: seoDescription,
         image: article.thumbnail ? [article.thumbnail] : undefined,
         datePublished: publishedIso,
@@ -115,7 +124,7 @@ export default function ArticleDetailPage({ params }: { params: Promise<{ slug: 
             name: 'Văn Lành Service',
             logo: {
                 '@type': 'ImageObject',
-                url: 'https://qlch-vanlanh.web.app/logo.png',
+                url: `${SITE_URL}/logo.png`,
             },
         },
         mainEntityOfPage: {
@@ -131,13 +140,13 @@ export default function ArticleDetailPage({ params }: { params: Promise<{ slug: 
                 '@type': 'ListItem',
                 position: 1,
                 name: 'Trang chủ',
-                item: 'https://qlch-vanlanh.web.app/',
+                item: `${SITE_URL}/`,
             },
             {
                 '@type': 'ListItem',
                 position: 2,
                 name: 'Bài viết',
-                item: 'https://qlch-vanlanh.web.app/tin-tuc',
+                item: `${SITE_URL}/tin-tuc`,
             },
             {
                 '@type': 'ListItem',
@@ -150,19 +159,6 @@ export default function ArticleDetailPage({ params }: { params: Promise<{ slug: 
 
     return (
         <div className="max-w-[900px] mx-auto px-2 md:px-4 py-4 md:py-8">
-            {/* SEO */}
-            <title>{seoTitle}</title>
-            <meta name="description" content={seoDescription} />
-            <link rel="canonical" href={canonicalUrl} />
-            <meta property="og:type" content="article" />
-            <meta property="og:title" content={seoTitle} />
-            <meta property="og:description" content={seoDescription} />
-            <meta property="og:url" content={canonicalUrl} />
-            <meta property="og:image" content={ogImage} />
-            <meta property="twitter:card" content="summary_large_image" />
-            <meta property="twitter:title" content={seoTitle} />
-            <meta property="twitter:description" content={seoDescription} />
-            <meta property="twitter:image" content={ogImage} />
             <script
                 type="application/ld+json"
                 dangerouslySetInnerHTML={{ __html: JSON.stringify(blogPostingSchema) }}
@@ -184,10 +180,10 @@ export default function ArticleDetailPage({ params }: { params: Promise<{ slug: 
             <article className="bg-white rounded-2xl shadow-sm overflow-hidden">
                 {/* Thumbnail */}
                 {article.thumbnail && (
-                    <div className="relative aspect-[21/9] w-full bg-gray-100">
+                    <div className="relative aspect-video w-full bg-gray-100">
                         <Image
                             src={article.thumbnail}
-                            alt={article.title}
+                            alt={article.title || 'Bài viết'}
                             fill
                             className="object-cover"
                             priority
@@ -206,7 +202,7 @@ export default function ArticleDetailPage({ params }: { params: Promise<{ slug: 
                                 <Clock size={14} />
                                 {formatDate(article.publishedAt || article.createdAt)}
                             </span>
-                            {article.views > 0 && (
+                            {!!article.views && article.views > 0 && (
                                 <span className="flex items-center gap-1 text-sm text-gray-400">
                                     <Eye size={14} />
                                     {article.views.toLocaleString()} lượt xem
@@ -238,16 +234,17 @@ export default function ArticleDetailPage({ params }: { params: Promise<{ slug: 
                         className="prose prose-lg max-w-none text-gray-700
                             prose-headings:text-gray-900 prose-headings:font-bold
                             prose-a:text-orange-600 prose-a:no-underline hover:prose-a:underline
-                            prose-img:rounded-xl prose-img:shadow-sm
+                            prose-img:rounded-xl prose-img:shadow-sm prose-img:max-w-full prose-img:h-auto prose-img:mx-auto
                             prose-blockquote:border-orange-500 prose-blockquote:bg-orange-50/50 prose-blockquote:rounded-r-xl
                             [&_iframe]:w-full [&_iframe]:aspect-video [&_iframe]:rounded-xl [&_iframe]:border-0
                             [&_.ql-video]:w-full [&_.ql-video]:aspect-video [&_.ql-video]:rounded-xl
+                            overflow-hidden break-words
                         "
-                        dangerouslySetInnerHTML={{ __html: article.content }}
+                        dangerouslySetInnerHTML={{ __html: sanitizeArticleHtml(String(article.content || '')) }}
                     />
 
                     {/* Tags */}
-                    {article.tags?.length > 0 && (
+                    {article.tags && article.tags.length > 0 && (
                         <div className="flex flex-wrap items-center gap-2 mt-10 pt-6 border-t border-gray-100">
                             <Tag size={16} className="text-gray-400" />
                             {article.tags.map((tag: string) => (
@@ -259,6 +256,9 @@ export default function ArticleDetailPage({ params }: { params: Promise<{ slug: 
                     )}
                 </div>
             </article>
+
+            {/* Ratings + Comments (Client Side) */}
+            <ArticleClientParts slug={slug} />
 
             {/* Back link */}
             <div className="mt-6 text-center">

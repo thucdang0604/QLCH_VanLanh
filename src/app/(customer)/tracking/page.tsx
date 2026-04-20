@@ -1,18 +1,21 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { collection, query, where, getDocs, doc, getDoc, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import Link from 'next/link';
 import {
     Search, Loader2, Calendar, Clock, MapPin, CheckCircle2, Phone,
     XCircle, User, Wrench, ShoppingCart, Package, AlertCircle,
     Smartphone, Star, PlayCircle, Image as ImageIcon, CircleDot,
-    Camera, X, HeartHandshake
+    Camera, X, HeartHandshake, Shield
 } from 'lucide-react';
 import { useConfig } from '@/lib/ConfigContext';
 import { uploadMedia } from '@/lib/storage';
-import type { RepairTicket, RepairStatus, TrackingGroup } from '@/lib/types';
+import type { RepairTicket, TrackingGroup, FirestoreDateValue, WorkflowNode } from '@/lib/types';
+import { isYouTubeUrl, getYouTubeEmbedUrl } from '@/lib/workflowFeatures';
+import type { LucideIcon } from 'lucide-react';
+import { SITE_URL } from "@/lib/constants";
 
 /* ─── Appointment ─── */
 interface Appointment {
@@ -23,10 +26,10 @@ interface Appointment {
     timeSlot: string;
     store: string;
     status: 'pending' | 'confirmed' | 'completed' | 'cancelled';
-    createdAt: any;
+    createdAt: FirestoreDateValue;
 }
 
-const appointmentStatusConfig: Record<string, { color: string; label: string; icon: any }> = {
+const appointmentStatusConfig: Record<string, { color: string; label: string; icon: LucideIcon }> = {
     pending: { color: 'bg-yellow-50 text-yellow-700 border-yellow-200', label: 'Chờ xác nhận', icon: Clock },
     confirmed: { color: 'bg-blue-50 text-blue-700 border-blue-200', label: 'Đã xác nhận', icon: CheckCircle2 },
     completed: { color: 'bg-green-50 text-green-700 border-green-200', label: 'Hoàn thành', icon: CheckCircle2 },
@@ -42,15 +45,15 @@ const timeSlotLabels: Record<string, string> = {
 const repairStatusConfig: Record<string, { label: string; color: string }> = {
     cho_tiep_nhan: { label: 'Chờ tiếp nhận', color: 'text-yellow-600' },
     dang_kiem_tra: { label: 'Đang kiểm tra', color: 'text-blue-600' },
-    da_bao_gia: { label: 'Đã báo giá', color: 'text-purple-600' },
+    da_tinh_trang_va_gia: { label: 'báo tình trạng và giá sau kiểm tra', color: 'text-purple-600' },
     doi_khach_phan_hoi: { label: 'Đợi khách phản hồi', color: 'text-amber-600' },
     tim_linh_kien: { label: 'Tìm linh kiện', color: 'text-cyan-600' },
-    da_dat_linh_kien: { label: 'Đã đặt LK', color: 'text-indigo-600' },
+    da_dat_linh_kien: { label: 'Đã đặt linh kiện', color: 'text-indigo-600' },
     dang_sua_chua: { label: 'Đang sửa chữa', color: 'text-orange-600' },
-    done: { label: 'Chờ bàn giao', color: 'text-green-600' },
-    da_tra_may: { label: 'Hoàn Thành', color: 'text-emerald-600' },
-    hoan_phi: { label: 'Hoàn phí', color: 'text-red-600' },
-    out: { label: 'Out', color: 'text-gray-600' },
+    cho_ban_giao_khach: { label: 'Chờ bàn giao khách', color: 'text-green-600' },
+    done: { label: 'Hoàn tất đơn', color: 'text-green-600' },
+    refund: { label: 'Hoàn phí', color: 'text-red-600' },
+    out: { label: 'Trả máy', color: 'text-gray-600' },
 };
 
 const paymentLabels: Record<string, string> = {
@@ -61,12 +64,13 @@ const paymentLabels: Record<string, string> = {
     refunded: 'Đã hoàn tiền',
 };
 
-const TERMINAL_STATUSES = ['da_tra_may', 'hoan_phi', 'out'];
+const TERMINAL_STATUSES = ['done', 'refund', 'out'];
 
 /* ─── Helpers ─── */
-const fmtDate = (ts: any) => {
+const fmtDate = (ts: unknown) => {
     if (!ts) return '—';
-    const d = ts.toDate ? ts.toDate() : new Date(ts);
+    const maybe = ts as { toDate?: () => Date };
+    const d = typeof maybe?.toDate === 'function' ? maybe.toDate() : new Date(ts as string | number | Date);
     return d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 const fmtPrice = (n: number) => new Intl.NumberFormat('vi-VN').format(n) + 'đ';
@@ -75,7 +79,7 @@ const fmtPrice = (n: number) => new Intl.NumberFormat('vi-VN').format(n) + 'đ';
 export default function TrackingPage() {
     const seoTitle = 'Tra cứu thông tin | Văn Lành Service';
     const seoDescription = 'Tra cứu phiếu sửa chữa, lịch hẹn và thông tin liên quan theo số điện thoại tại Văn Lành Service.';
-    const canonicalUrl = 'https://qlch-vanlanh.web.app/tracking';
+    const canonicalUrl = `${SITE_URL}/tracking`;
     const { config } = useConfig();
     const [activeTab, setActiveTab] = useState<'appointment' | 'repair' | 'order'>('repair');
     const [phone, setPhone] = useState('');
@@ -85,8 +89,15 @@ export default function TrackingPage() {
     // Data
     const [appointments, setAppointments] = useState<Appointment[]>([]);
     const [repairs, setRepairs] = useState<RepairTicket[]>([]);
+    const [orders, setOrders] = useState<any[]>([]);
     const [trackingGroups, setTrackingGroups] = useState<TrackingGroup[]>([]);
     const [reviewedTickets, setReviewedTickets] = useState<string[]>([]);
+    const [dynamicStatuses, setDynamicStatuses] = useState<WorkflowNode[]>([]);
+    const [warrantyStatuses, setWarrantyStatuses] = useState<WorkflowNode[]>([]);
+
+    const getWorkflowForTicket = (ticket: RepairTicket): WorkflowNode[] => {
+        return ticket.ticketType === 'warranty' ? warrantyStatuses : dynamicStatuses;
+    };
 
     // Review Modal States
     const [reviewModal, setReviewModal] = useState<RepairTicket | null>(null);
@@ -102,10 +113,15 @@ export default function TrackingPage() {
         const fetchSystemConfig = async () => {
             try {
                 const snap = await getDoc(doc(db, 'system_config', 'repairs'));
-                if (snap.exists() && snap.data().trackingGroups) {
-                    const groups = snap.data().trackingGroups as TrackingGroup[];
-                    groups.sort((a, b) => a.order - b.order);
-                    setTrackingGroups(groups);
+                if (snap.exists()) {
+                    const data = snap.data();
+                    if (data.trackingGroups) {
+                        const groups = data.trackingGroups as TrackingGroup[];
+                        groups.sort((a, b) => a.order - b.order);
+                        setTrackingGroups(groups);
+                    }
+                    setDynamicStatuses(data.repairStatuses ?? data.statuses ?? []);
+                    setWarrantyStatuses(data.warrantyStatuses ?? []);
                 }
             } catch (err) {
                 console.error("Config fetch error:", err);
@@ -119,10 +135,30 @@ export default function TrackingPage() {
         e.preventDefault();
         if (!phone.trim()) return;
 
+        const toMillis = (v: unknown): number => {
+            if (!v) return 0;
+            if (typeof v === 'object' && v !== null) {
+                if ('toMillis' in v && typeof (v as { toMillis?: unknown }).toMillis === 'function') {
+                    return (v as { toMillis: () => number }).toMillis();
+                }
+                if ('toDate' in v && typeof (v as { toDate?: unknown }).toDate === 'function') {
+                    return (v as { toDate: () => Date }).toDate().getTime();
+                }
+                if ('seconds' in v && typeof (v as { seconds?: unknown }).seconds === 'number') {
+                    return (v as { seconds: number }).seconds * 1000;
+                }
+            }
+            if (v instanceof Date) return v.getTime();
+            if (typeof v === 'number') return v;
+            const d = new Date(v as never);
+            return Number.isNaN(d.getTime()) ? 0 : d.getTime();
+        };
+
         setLoading(true);
         setSearched(true);
         setAppointments([]);
         setRepairs([]);
+        setOrders([]);
 
         try {
             const cleanPhone = phone.trim().replace(/\s+/g, '');
@@ -131,15 +167,22 @@ export default function TrackingPage() {
             const aq = query(collection(db, 'appointments'), where('phone', '==', cleanPhone));
             const aSnap = await getDocs(aq);
             const aData = aSnap.docs.map(d => ({ id: d.id, ...d.data() })) as Appointment[];
-            aData.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+            aData.sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
             setAppointments(aData);
 
             // Query Repairs
             const rq = query(collection(db, 'repairs'), where('customer.phone', '==', cleanPhone));
             const rSnap = await getDocs(rq);
             const rData = rSnap.docs.map(d => ({ id: d.id, ...d.data() })) as RepairTicket[];
-            rData.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+            rData.sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
             setRepairs(rData);
+
+            // Query Orders
+            const oq = query(collection(db, 'orders'), where('customer_info.phone', '==', cleanPhone));
+            const oSnap = await getDocs(oq);
+            const oData = oSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+            oData.sort((a: any, b: any) => toMillis(b.createdAt) - toMillis(a.createdAt));
+            setOrders(oData);
         } catch (error) {
             console.error('Search error:', error);
         } finally {
@@ -148,8 +191,9 @@ export default function TrackingPage() {
     };
 
     const getStoreName = (storeId: string) => {
-        const branch = config.store_branches?.find((b: any) => b.id === storeId);
-        return branch ? branch.name : storeId;
+        const branches = (config.store_branches || []) as Array<Partial<{ id: string; name: string }>>;
+        const branch = branches.find((b) => b.id === storeId);
+        return branch?.name || storeId;
     };
 
     /* ── Review Logic ── */
@@ -195,17 +239,25 @@ export default function TrackingPage() {
                 uploadedUrls.push(url);
             }
 
-            await addDoc(collection(db, 'reviews'), {
-                referenceId: reviewModal.id,
-                type: 'repair',
-                customerName: reviewModal.customer.name,
-                phone: reviewModal.customer.phone,
-                rating,
-                content: content.trim(),
-                images: uploadedUrls,
-                status: 'pending',
-                createdAt: serverTimestamp()
+            // Submit review via API route (rate limited)
+            const res = await fetch('/api/reviews', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    referenceId: reviewModal.id,
+                    type: 'repair',
+                    customerName: reviewModal.customer.name,
+                    phone: reviewModal.customer.phone,
+                    rating,
+                    content: content.trim(),
+                    images: uploadedUrls,
+                }),
             });
+            const data = await res.json();
+            if (!res.ok) {
+                alert(data.error || 'Có lỗi xảy ra khi gửi đánh giá. Vui lòng thử lại.');
+                return;
+            }
 
             setReviewedTickets(prev => [...prev, reviewModal.id]);
             setReviewModal(null);
@@ -227,9 +279,7 @@ export default function TrackingPage() {
     };
 
     /* ── Component: Vertical Timeline (Tracking Groups) ── */
-    const RepairTimeline = ({ ticket }: { ticket: RepairTicket }) => {
-        const isTerminal = TERMINAL_STATUSES.includes(ticket.status);
-
+    const RepairTimeline = ({ ticket, isTerminal, currentStatus }: { ticket: RepairTicket, isTerminal: boolean, currentStatus: WorkflowNode | undefined }) => {
         // Determinate active group
         let currentGroupIndex = -1;
 
@@ -245,25 +295,25 @@ export default function TrackingPage() {
 
                 {/* --- TERMINAL BANNER --- */}
                 {isTerminal && (
-                    <div className={`overflow-hidden rounded-2xl border-2 shadow-sm ${ticket.status === 'da_tra_may'
+                    <div className={`overflow-hidden rounded-2xl border-2 shadow-sm ${ticket.status.includes('done')
                         ? 'border-green-200 bg-green-50'
-                        : ticket.status === 'hoan_phi'
+                        : ticket.status.includes('refund') || ticket.status === 'hoan_phi'
                             ? 'border-red-200 bg-red-50'
                             : 'border-gray-200 bg-gray-50'
                         }`}>
                         <div className="p-4 md:p-5 flex flex-col items-center text-center gap-3">
-                            <div className={`w-14 h-14 rounded-full flex items-center justify-center ${ticket.status === 'da_tra_may'
+                            <div className={`w-14 h-14 rounded-full flex items-center justify-center ${ticket.status.includes('done')
                                 ? 'bg-green-100 text-green-600'
-                                : ticket.status === 'hoan_phi'
+                                : ticket.status.includes('refund') || ticket.status === 'hoan_phi'
                                     ? 'bg-red-100 text-red-600'
                                     : 'bg-gray-200 text-gray-600'
                                 }`}>
-                                {ticket.status === 'da_tra_may' ? <CheckCircle2 size={32} /> : ticket.status === 'hoan_phi' ? <XCircle size={32} /> : <Package size={32} />}
+                                {ticket.status.includes('done') ? <CheckCircle2 size={32} /> : ticket.status.includes('refund') || ticket.status === 'hoan_phi' ? <XCircle size={32} /> : <Package size={32} />}
                             </div>
                             <div>
-                                <h3 className={`font-bold text-lg ${ticket.status === 'da_tra_may'
+                                <h3 className={`font-bold text-lg ${ticket.status.includes('done')
                                     ? 'text-green-800'
-                                    : ticket.status === 'hoan_phi'
+                                    : ticket.status.includes('refund') || ticket.status === 'hoan_phi'
                                         ? 'text-red-800'
                                         : 'text-gray-800'
                                     }`}>
@@ -272,7 +322,7 @@ export default function TrackingPage() {
                                 <p className="text-sm font-medium mt-1">
                                     Trạng thái cuối:
                                     <span className="ml-1 uppercase tracking-wide opacity-90">
-                                        {repairStatusConfig[ticket.status]?.label || ticket.status}
+                                        {currentStatus?.label || repairStatusConfig[ticket.status]?.label || ticket.status}
                                     </span>
                                 </p>
                             </div>
@@ -295,7 +345,11 @@ export default function TrackingPage() {
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                     {ticket.postRepairMedia.map((url: string, i: number) => (
                                         <div key={i} className="rounded-xl overflow-hidden border border-gray-200 bg-black aspect-video relative group shadow-sm">
-                                            {url.includes('.mp4') || url.includes('video') ? (
+                                            {isYouTubeUrl(url) ? (
+                                                <iframe src={getYouTubeEmbedUrl(url) || ''} title={`YouTube ${i + 1}`}
+                                                    className="w-full h-full" frameBorder="0"
+                                                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen />
+                                            ) : url.includes('.mp4') || url.includes('video') ? (
                                                 <video controls src={url} className="w-full h-full object-contain" />
                                             ) : (
                                                 <img src={url} alt={`Bàn giao ${i + 1}`} className="w-full h-full object-contain bg-gray-50" />
@@ -315,7 +369,7 @@ export default function TrackingPage() {
                             style={{
                                 '--tw-gradient-to': 'transparent',
                                 '--tw-gradient-stops': `var(--tw-gradient-from) ${Math.max(0, currentGroupIndex / Math.max(1, trackingGroups.length - 1)) * 100}%, var(--tw-gradient-to)`
-                            } as any}
+                            } as React.CSSProperties}
                         >
                             {trackingGroups.map((group, index) => {
                                 const isCurrentGroupTerminal = trackingGroups[currentGroupIndex]?.isTerminal;
@@ -374,7 +428,11 @@ export default function TrackingPage() {
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                 {ticket.postRepairMedia.map((url: string, i: number) => (
                                     <div key={i} className="rounded-xl overflow-hidden border border-gray-200 bg-black aspect-video relative group shadow-sm">
-                                        {url.includes('.mp4') || url.includes('video') ? (
+                                        {isYouTubeUrl(url) ? (
+                                            <iframe src={getYouTubeEmbedUrl(url) || ''} title={`YouTube ${i + 1}`}
+                                                className="w-full h-full" frameBorder="0"
+                                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen />
+                                        ) : url.includes('.mp4') || url.includes('video') ? (
                                             <video controls src={url} className="w-full h-full object-contain" />
                                         ) : (
                                             <img src={url} alt={`Bàn giao ${i + 1}`} className="w-full h-full object-contain bg-gray-50" />
@@ -444,9 +502,10 @@ export default function TrackingPage() {
                                 </button>
                                 <button
                                     onClick={() => setActiveTab('order')}
-                                    className={`flex-1 py-3 text-sm font-semibold rounded-lg transition-all flex items-center justify-center ${activeTab === 'order' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                                    className={`flex-1 py-3 text-sm font-semibold rounded-lg transition-all flex items-center justify-center gap-2 ${activeTab === 'order' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
                                 >
                                     Đơn hàng
+                                    {orders.length > 0 && <span className="w-5 h-5 text-[10px] bg-orange-100 text-orange-600 rounded-full flex items-center justify-center font-bold">{orders.length}</span>}
                                 </button>
                                 <button
                                     onClick={() => setActiveTab('appointment')}
@@ -472,7 +531,9 @@ export default function TrackingPage() {
                                             </div>
                                         ) : (
                                             repairs.map((ticket) => {
-                                                const isTerminal = TERMINAL_STATUSES.includes(ticket.status);
+                                                const workflow = getWorkflowForTicket(ticket);
+                                                const st = workflow.find(s => s.id === ticket.status);
+                                                const isTerminal = st?.isTerminal ?? TERMINAL_STATUSES.includes(ticket.status);
 
                                                 return (
                                                     <div key={ticket.id} className="bg-white rounded-[2rem] shadow-xl shadow-black/5 border border-gray-100 overflow-hidden relative">
@@ -488,11 +549,18 @@ export default function TrackingPage() {
                                                                     </div>
                                                                     <div>
                                                                         <p className="font-extrabold text-xl text-gray-900 tracking-tight">{ticket.deviceInfo?.model || 'Thiết bị Điện tử'}</p>
-                                                                        <p className="text-sm font-semibold text-gray-400 uppercase tracking-widest mt-0.5">Mã PHIẾU: #{ticket.id.slice(-6)}</p>
+                                                                        <div className="flex items-center gap-2 mt-0.5">
+                                                                            <p className="text-sm font-semibold text-gray-400 uppercase tracking-widest">Mã PHIẾU: #{ticket.id.slice(-6)}</p>
+                                                                            {ticket.ticketType === 'warranty' && (
+                                                                                <span className="text-[10px] font-bold uppercase bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full border border-emerald-200">
+                                                                                    Bảo Hành
+                                                                                </span>
+                                                                            )}
+                                                                        </div>
                                                                     </div>
                                                                 </div>
                                                                 <div className="flex items-center gap-2">
-                                                                    {ticket.status === 'da_tra_may' && (
+                                                                    {ticket.status === 'done' && (
                                                                         reviewedTickets.includes(ticket.id) ? (
                                                                             <span className="text-xs font-bold text-green-600 bg-green-50 px-4 py-2 rounded-xl border border-green-200 flex items-center gap-1.5">
                                                                                 <CheckCircle2 size={14} /> Đã đánh giá
@@ -539,8 +607,90 @@ export default function TrackingPage() {
 
                                                         {/* Timeline Area */}
                                                         <div className="p-6">
-                                                            <RepairTimeline ticket={ticket} />
+                                                            <RepairTimeline ticket={ticket} isTerminal={isTerminal} currentStatus={st} />
                                                         </div>
+
+                                                        {/* ── Warranty Info (only for completed tickets with warranty parts) ── */}
+                                                        {isTerminal && (() => {
+                                                            const warrantyParts = (ticket.parts || []).filter(p =>
+                                                                p.status === 'selected' && (p as { warrantyMonths?: number }).warrantyMonths && (p as { warrantyMonths?: number }).warrantyMonths! > 0
+                                                            );
+                                                            if (warrantyParts.length === 0) return null;
+                                                            const now = Date.now();
+                                                            return (
+                                                                <div className="mx-6 mb-6 bg-emerald-50 rounded-2xl border border-emerald-200 overflow-hidden">
+                                                                    <div className="flex items-center gap-2 px-5 py-3 bg-emerald-100/60 border-b border-emerald-200">
+                                                                        <Shield size={18} className="text-emerald-600" />
+                                                                        <span className="font-bold text-emerald-800 text-sm">Điều khoản Bảo hành Linh kiện</span>
+                                                                    </div>
+                                                                    <div className="overflow-x-auto">
+                                                                        <table className="w-full text-sm">
+                                                                            <thead>
+                                                                                <tr className="text-left text-xs text-emerald-700 uppercase">
+                                                                                    <th className="px-5 py-2">Linh kiện</th>
+                                                                                    <th className="px-3 py-2">Loại</th>
+                                                                                    <th className="px-3 py-2 text-center">BH</th>
+                                                                                    <th className="px-3 py-2">Hết hạn</th>
+                                                                                    <th className="px-3 py-2 text-center">Trạng thái</th>
+                                                                                </tr>
+                                                                            </thead>
+                                                                            <tbody className="divide-y divide-emerald-100">
+                                                                                {warrantyParts.map((p, i) => {
+                                                                                    const ext = p as { warrantyMonths?: number; warrantyExpiresAt?: { toDate?: () => Date } | number; partType?: string };
+                                                                                    const expiresTs = typeof ext.warrantyExpiresAt === 'number'
+                                                                                        ? ext.warrantyExpiresAt
+                                                                                        : (ext.warrantyExpiresAt as { toDate?: () => Date })?.toDate?.()?.getTime() || 0;
+                                                                                    const isActive = expiresTs > now;
+                                                                                    const expiresDate = expiresTs ? new Date(expiresTs).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—';
+                                                                                    return (
+                                                                                        <tr key={i} className="text-gray-700">
+                                                                                            <td className="px-5 py-2.5 font-medium">{p.productName}</td>
+                                                                                            <td className="px-3 py-2.5 text-gray-500">{ext.partType || '—'}</td>
+                                                                                            <td className="px-3 py-2.5 text-center font-semibold">{ext.warrantyMonths} tháng</td>
+                                                                                            <td className="px-3 py-2.5 text-gray-600">{expiresDate}</td>
+                                                                                            <td className="px-3 py-2.5 text-center">
+                                                                                                <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                                                                                                    isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'
+                                                                                                }`}>
+                                                                                                    {isActive ? <><CheckCircle2 size={12} /> Còn BH</> : <><XCircle size={12} /> Hết BH</>}
+                                                                                                </span>
+                                                                                            </td>
+                                                                                        </tr>
+                                                                                    );
+                                                                                })}
+                                                                            </tbody>
+                                                                        </table>
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })()}
+
+                                                        {/* [WARRANTY TH3] Thông tin hoàn tiền */}
+                                                        {ticket.ticketType === 'warranty' && ticket.status.includes('refund') && (() => {
+                                                            const wc = ticket.warrantyClaim as { refundedParts?: { productName: string; refundAmount: number }[] } | undefined;
+                                                            if (!wc?.refundedParts?.length) return null;
+                                                            const totalRefund = wc.refundedParts.reduce((s, rp) => s + (rp.refundAmount || 0), 0);
+                                                            return (
+                                                                <div className="mx-6 mb-6 bg-red-50 rounded-2xl border border-red-200 overflow-hidden">
+                                                                    <div className="flex items-center gap-2 px-5 py-3 bg-red-100/60 border-b border-red-200">
+                                                                        <AlertCircle size={18} className="text-red-600" />
+                                                                        <span className="font-bold text-red-800 text-sm">Thông tin Hoàn tiền Bảo hành</span>
+                                                                    </div>
+                                                                    <div className="p-5 space-y-2">
+                                                                        {wc.refundedParts.map((rp, i) => (
+                                                                            <div key={i} className="flex justify-between text-sm">
+                                                                                <span className="text-gray-700">{rp.productName}</span>
+                                                                                <span className="font-semibold text-emerald-700">+{fmtPrice(rp.refundAmount)}</span>
+                                                                            </div>
+                                                                        ))}
+                                                                        <div className="flex justify-between pt-2 border-t border-red-200 font-bold">
+                                                                            <span className="text-gray-900">Tổng hoàn tiền</span>
+                                                                            <span className="text-emerald-700 text-lg">{fmtPrice(totalRefund)}</span>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })()}
                                                     </div>
                                                 );
                                             })
@@ -607,14 +757,88 @@ export default function TrackingPage() {
                                     </div>
                                 )}
 
-                                {/* ── ORDER TAB (placeholder) ── */}
+                                {/* ── ORDER TAB ── */}
                                 {activeTab === 'order' && (
-                                    <div className="text-center py-16 bg-white rounded-3xl border border-dashed border-gray-200">
-                                        <div className="w-20 h-20 bg-gray-50 rounded-full flex flex-col items-center justify-center mx-auto mb-4 border border-gray-100">
-                                            <ShoppingCart size={32} className="text-gray-300" />
-                                        </div>
-                                        <h3 className="text-lg font-bold text-gray-900">Tính năng đang phát triển</h3>
-                                        <p className="text-gray-500 mt-1">Hệ thống tra cứu đơn hàng sẽ sớm ra mắt.</p>
+                                    <div className="space-y-4">
+                                        {orders.length === 0 ? (
+                                            <div className="text-center py-12 bg-white rounded-3xl border border-dashed border-gray-100">
+                                                <ShoppingCart size={48} className="mx-auto text-gray-300 mb-4" />
+                                                <h3 className="text-lg font-bold text-gray-900">Không có đơn hàng</h3>
+                                                <p className="text-gray-500 mt-1">Bạn chưa có đơn đặt mua sản phẩm nào trên hệ thống.</p>
+                                            </div>
+                                        ) : (
+                                            orders.map((order) => {
+                                                const statusMap: Record<string, { color: string; label: string; icon: LucideIcon }> = {
+                                                    'Pending': { color: 'bg-yellow-50 text-yellow-700 border-yellow-200', label: 'Chờ xác nhận', icon: Clock },
+                                                    'Processing': { color: 'bg-blue-50 text-blue-700 border-blue-200', label: 'Đang xử lý', icon: Loader2 },
+                                                    'Completed': { color: 'bg-green-50 text-green-700 border-green-200', label: 'Hoàn thành', icon: CheckCircle2 },
+                                                    'Cancelled': { color: 'bg-red-50 text-red-700 border-red-200', label: 'Đã hủy', icon: XCircle },
+                                                };
+                                                const st = statusMap[order.status] || statusMap['Pending'];
+                                                
+                                                return (
+                                                    <div key={order.id} className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+                                                        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-gray-50 pb-4 mb-4">
+                                                            <div className="flex items-center gap-3">
+                                                                <div className="w-12 h-12 rounded-xl bg-orange-50 flex items-center justify-center text-orange-600">
+                                                                    <Package size={24} />
+                                                                </div>
+                                                                <div>
+                                                                    <p className="font-bold text-gray-900 text-lg">Đơn hàng #{order.id.slice(-6).toUpperCase()}</p>
+                                                                    <p className="text-sm font-medium text-gray-500 mt-0.5">{fmtDate(order.createdAt)}</p>
+                                                                </div>
+                                                            </div>
+                                                            <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold uppercase border ${st.color}`}>
+                                                                <st.icon size={14} className={order.status === 'Processing' ? "animate-spin" : ""} />
+                                                                {st.label}
+                                                            </span>
+                                                        </div>
+                                                        
+                                                        {/* Items */}
+                                                        <div className="space-y-3 mb-4">
+                                                            {order.items?.map((item: any, idx: number) => (
+                                                                <div key={idx} className="flex gap-3 items-center bg-gray-50 p-2 rounded-lg">
+                                                                    {item.image ? (
+                                                                        <img src={item.image} alt={item.productName} className="w-12 h-12 object-cover rounded-md flex-shrink-0" />
+                                                                    ) : (
+                                                                        <div className="w-12 h-12 bg-gray-200 rounded-md flex items-center justify-center flex-shrink-0"><ImageIcon size={16} className="text-gray-400" /></div>
+                                                                    )}
+                                                                    <div className="flex-1 min-w-0">
+                                                                        <p className="font-medium text-sm text-gray-900 truncate">{item.productName}</p>
+                                                                        <div className="text-xs text-gray-500 mt-0.5">
+                                                                            {item.color && <span>Màu: {item.color}</span>}
+                                                                            {item.storage && <span className="ml-2">DL: {item.storage}</span>}
+                                                                            <span className="ml-2 block sm:inline">SL: {item.quantity}</span>
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className="font-bold text-sm text-gray-900 whitespace-nowrap pl-4">
+                                                                        {fmtPrice(item.price)}
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+
+                                                        {/* Footer */}
+                                                        <div className="flex flex-wrap items-center justify-between gap-4 pt-4 border-t border-gray-100">
+                                                            <div className="text-sm">
+                                                                <span className="text-gray-500">Phí giao hàng: </span>
+                                                                <span className="font-medium text-gray-900">{fmtPrice(order.shipping_fee || 0)}</span>
+                                                            </div>
+                                                            <div className="text-base">
+                                                                <span className="text-gray-500 mr-2">Tổng thanh toán:</span>
+                                                                <span className="font-bold text-orange-600 text-lg">{fmtPrice(order.total_amount)}</span>
+                                                            </div>
+                                                        </div>
+                                                        {order.customer_info?.note && (
+                                                            <div className="mt-4 text-sm bg-yellow-50 text-yellow-800 p-3 rounded-lg border border-yellow-100 flex items-start gap-2">
+                                                                <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
+                                                                <span className="font-medium">{order.customer_info.note}</span>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })
+                                        )}
                                     </div>
                                 )}
                             </div>
