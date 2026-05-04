@@ -6,14 +6,15 @@ import { Plus, Search, Edit, Trash2, Package, Loader2 } from 'lucide-react';
 import { useFirestoreCollection, deleteDocument } from '@/lib/useFirestore';
 import { deleteImage } from '@/lib/storage';
 import { orderBy } from 'firebase/firestore';
-import type { FirestoreDateValue } from '@/lib/types';
 import { toastError } from '@/lib/toast';
 import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
 import { triggerRevalidate } from '@/lib/revalidate';
 import UniversalProductModal from '@/components/admin/UniversalProductModal';
-import { RETAIL_CATEGORIES } from '@/lib/constants';
+import CategoryTaxonomySelector from '@/components/admin/CategoryTaxonomySelector';
 import type { Product } from '@/lib/types';
+import { useConfig } from '@/lib/ConfigContext';
+import { getCategoryPath, collectAllNodeIds } from '@/lib/utils';
 
 
 // Product is now imported from @/lib/types
@@ -25,11 +26,12 @@ const CONDITIONS: { value: Product['condition'] | ''; label: string; color: stri
     { value: 'used', label: 'Hàng cũ | TBH', color: 'bg-yellow-100 text-yellow-700' },
 ];
 
-const categories = [...RETAIL_CATEGORIES];
 export default function ProductsPage() {
+    const { config } = useConfig();
     const { data: products, loading } = useFirestoreCollection<Product>('products', [orderBy('createdAt', 'desc')]);
     const [searchQuery, setSearchQuery] = useState('');
     const [filterCategory, setFilterCategory] = useState('');
+    const [filterCategoryIds, setFilterCategoryIds] = useState<string[]>([]);
     const [filterCondition, setFilterCondition] = useState('');
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -54,15 +56,36 @@ export default function ProductsPage() {
     const filteredProducts = products.filter((p) => {
         if (p.category === 'Linh kiện') return false; // Linh kiện managed separately in /admin/parts
         const matchSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase());
-        const matchCategory = !filterCategory || p.category === filterCategory;
+        
+        let matchCategory = true;
+        if (filterCategory) {
+            matchCategory = p.category === filterCategory;
+        } else if (filterCategoryIds.length > 0) {
+            const targetId = filterCategoryIds[filterCategoryIds.length - 1];
+            matchCategory = p.categoryIds?.includes(targetId) || false;
+        }
+
         const matchCondition = !filterCondition || p.condition === filterCondition;
         return matchSearch && matchCategory && matchCondition;
     });
 
+    // --- ORPHAN CATEGORY DETECTION (ID-based) ---
+    const retailTaxonomy = config?.taxonomy?.retail || [];
+    const validNodeIds = collectAllNodeIds(retailTaxonomy);
+
+    const getOrphanStatus = (product: Product): 'valid' | 'orphan' | 'unassigned' => {
+        if (!product.categoryIds || product.categoryIds.length === 0) {
+            return product.category ? 'orphan' : 'unassigned';
+        }
+        const deepestId = product.categoryIds[product.categoryIds.length - 1];
+        return validNodeIds.has(deepestId) ? 'valid' : 'orphan';
+    };
+    // ---------------------------------
+
     const { paginatedData: paginatedProducts, currentPage, totalPages, pageSize, totalFiltered, setPage, setPageSize, resetPage } = useClientPagination(filteredProducts, 20);
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    useEffect(() => { resetPage(); }, [searchQuery, filterCategory, filterCondition]);
+    useEffect(() => { resetPage(); }, [searchQuery, filterCategory, filterCategoryIds, filterCondition]);
 
     const formatPrice = (price: number) => {
         return new Intl.NumberFormat('vi-VN').format(price) + 'đ';
@@ -86,36 +109,53 @@ export default function ProductsPage() {
             </div>
 
             {/* Filters */}
-            <div className="flex flex-col md:flex-row gap-4">
-                <div className="relative flex-1 max-w-md">
-                    <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                    <input
-                        type="text"
-                        placeholder="Tìm sản phẩm..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        className="w-full h-11 pl-10 pr-4 border rounded-lg focus:border-orange-500 focus:outline-none"
+            <div className="flex flex-col gap-3">
+                <div className="flex flex-col md:flex-row gap-4">
+                    <div className="relative flex-1">
+                        <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <input
+                            type="text"
+                            placeholder="Tìm sản phẩm..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            className="w-full h-11 pl-10 pr-4 border rounded-lg focus:border-orange-500 focus:outline-none"
+                        />
+                    </div>
+                    <select
+                        value={filterCategory}
+                        onChange={(e) => {
+                            setFilterCategory(e.target.value);
+                            if (e.target.value) setFilterCategoryIds([]);
+                        }}
+                        className="h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
+                    >
+                        <option value="">Tất cả danh mục cũ</option>
+                        {[...new Set(products.map(p => p.category).filter(Boolean))].map((cat) => (
+                            <option key={cat} value={cat}>{cat}</option>
+                        ))}
+                    </select>
+                    <select
+                        value={filterCondition}
+                        onChange={(e) => setFilterCondition(e.target.value)}
+                        className="h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
+                    >
+                        {CONDITIONS.map((c) => (
+                            <option key={c.value} value={c.value}>{c.label}</option>
+                        ))}
+                    </select>
+                </div>
+                {/* Modern Taxonomy Filter */}
+                <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
+                    <p className="text-xs font-medium text-gray-500 mb-2">Lọc theo danh mục mới:</p>
+                    <CategoryTaxonomySelector
+                        type="retail"
+                        value={filterCategoryIds}
+                        onChange={(ids) => {
+                            setFilterCategoryIds(ids);
+                            if (ids.length > 0) setFilterCategory('');
+                        }}
                     />
                 </div>
-                <select
-                    value={filterCategory}
-                    onChange={(e) => setFilterCategory(e.target.value)}
-                    className="h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
-                >
-                    <option value="">Tất cả danh mục</option>
-                    {categories.map((cat) => (
-                        <option key={cat} value={cat}>{cat}</option>
-                    ))}
-                </select>
-                <select
-                    value={filterCondition}
-                    onChange={(e) => setFilterCondition(e.target.value)}
-                    className="h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
-                >
-                    {CONDITIONS.map((c) => (
-                        <option key={c.value} value={c.value}>{c.label}</option>
-                    ))}
-                </select>
             </div>
 
             {/* Products Table (Desktop) + Card List (Mobile) */}
@@ -168,7 +208,16 @@ export default function ProductsPage() {
                                             </div>
                                         </div>
                                     </td>
-                                    <td className="px-6 py-4 text-sm text-gray-600">{product.category}</td>
+                                    <td className="px-6 py-4 text-sm">
+                                        {(() => {
+                                            const status = getOrphanStatus(product);
+                                            const deepestId = product.categoryIds?.[product.categoryIds.length - 1];
+                                            const path = deepestId ? getCategoryPath(deepestId, retailTaxonomy) : null;
+                                            if (status === 'orphan') return <span className="text-xs text-red-600 bg-red-50 px-2 py-0.5 rounded">⚠ {deepestId || product.category}</span>;
+                                            if (status === 'unassigned') return <span className="text-xs text-yellow-600">Chưa gán</span>;
+                                            return <span className="text-gray-600">{path || product.category}</span>;
+                                        })()}
+                                    </td>
                                     <td className="px-6 py-4">
                                         {(() => {
                                             const cond = CONDITIONS.find(c => c.value === product.condition);
@@ -245,7 +294,13 @@ export default function ProductsPage() {
                                     <div className="flex flex-wrap items-center gap-1.5 mt-1">
                                         <span className="text-xs text-gray-500">{product.brand}</span>
                                         <span className="text-gray-300">·</span>
-                                        <span className="text-xs text-gray-500">{product.category}</span>
+                                        <span className="text-xs text-gray-500">
+                                            {(() => {
+                                                const deepestId = product.categoryIds?.[product.categoryIds.length - 1];
+                                                const path = deepestId ? getCategoryPath(deepestId, retailTaxonomy) : null;
+                                                return path || product.category;
+                                            })()}
+                                        </span>
                                         {(() => {
                                             const cond = CONDITIONS.find(c => c.value === product.condition);
                                             return cond?.value ? (

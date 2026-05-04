@@ -43,7 +43,8 @@ export default function AdminChatPage() {
 
     // Load all chat rooms
     useEffect(() => {
-        const unsubscribe = subscribeToRooms((roomsMap) => {
+        let unsubscribe: (() => void) | undefined;
+        subscribeToRooms((roomsMap) => {
             const roomList: ChatRoom[] = Object.entries(roomsMap)
                 .map(([roomId, info]) => {
                     return {
@@ -61,9 +62,9 @@ export default function AdminChatPage() {
 
             setRooms(roomList);
             setLoading(false);
-        });
+        }).then(fn => { unsubscribe = fn; });
 
-        return () => unsubscribe();
+        return () => { if (unsubscribe) unsubscribe(); };
     }, []);
 
     // Load messages for selected room
@@ -73,23 +74,25 @@ export default function AdminChatPage() {
             return;
         }
 
-        const unsubscribe = subscribeToMessages(selectedRoom, (messageList) => {
+        let unsubscribe: (() => void) | undefined;
+        subscribeToMessages(selectedRoom, (messageList) => {
             setMessages(messageList);
-        });
+        }).then(fn => { unsubscribe = fn; });
 
         // Mark room as read
         updateRoomInfo(selectedRoom, { hasUnreadAdmin: false }).catch(() => {});
 
-        return () => unsubscribe();
+        return () => { if (unsubscribe) unsubscribe(); };
     }, [selectedRoom]);
 
     // Listen to botActive status for selected room
     useEffect(() => {
         if (!selectedRoom) return;
-        const unsub = subscribeToRoomInfo(selectedRoom, (info) => {
+        let unsub: (() => void) | undefined;
+        subscribeToRoomInfo(selectedRoom, (info) => {
             setBotActive(info?.botActive !== false); // default true
-        });
-        return () => unsub();
+        }).then(fn => { unsub = fn; });
+        return () => { if (unsub) unsub(); };
     }, [selectedRoom]);
 
     const toggleBot = async () => {

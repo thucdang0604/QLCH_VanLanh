@@ -3,9 +3,9 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { FileText, Clock, ArrowRight } from 'lucide-react';
-import { useFirestoreCollection } from '@/lib/useFirestore';
-import { where, orderBy, limit, Timestamp } from 'firebase/firestore';
-import { useMemo } from 'react';
+import { collection, query, where, orderBy, limit, Timestamp, getDocs } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+import { useMemo, useState, useEffect } from 'react';
 
 const typeConfig: Record<string, { label: string; color: string }> = {
     Promo: { label: 'Khuyến mãi', color: 'bg-red-100 text-red-700' },
@@ -46,13 +46,42 @@ function ArticleSkeleton() {
 }
 
 export default function ArticleBlock() {
+    const [articles, setArticles] = useState<ArticleDoc[]>([]);
+    const [loading, setLoading] = useState(true);
+
     const constraints = useMemo(() => [
         where('status', '==', 'published'),
         orderBy('createdAt', 'desc'),
         limit(4),
     ], []);
 
-    const { data: articles, loading } = useFirestoreCollection<ArticleDoc>('articles', constraints);
+    useEffect(() => {
+        let isMounted = true;
+        const fetchArticles = async () => {
+            try {
+                const q = query(collection(db, 'articles'), ...constraints);
+                const snapshot = await getDocs(q);
+                if (!isMounted) return;
+                
+                const docs = snapshot.docs.map(doc => ({
+                    id: doc.id,
+                    ...doc.data()
+                })) as ArticleDoc[];
+                setArticles(docs);
+            } catch (error) {
+                console.error("Error fetching articles:", error);
+                if (isMounted) setArticles([]);
+            } finally {
+                if (isMounted) setLoading(false);
+            }
+        };
+
+        fetchArticles();
+
+        return () => {
+            isMounted = false;
+        };
+    }, [constraints]);
 
     // Don't render section if no articles and not loading
     if (!loading && articles.length === 0) return null;

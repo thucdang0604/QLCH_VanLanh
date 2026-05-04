@@ -49,6 +49,21 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // Categories & Brands - public read (storefront filtering), admin write
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /brands/{brandId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    // Services - public read (storefront), admin write
+    match /services/{serviceId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
     // Analytics Dashboard
     match /analytics/{dateStr} {
       allow read: if true;

@@ -5,7 +5,7 @@ import { SITE_URL } from "@/lib/constants";
 import { fetchDetailItem } from '../../_lib/server-queries';
 import ServiceDetailClient from './ServiceDetailClient';
 
-export const revalidate = false;
+export const revalidate = 30;
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
     const { id } = await params;

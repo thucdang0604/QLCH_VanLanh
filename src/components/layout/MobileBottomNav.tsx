@@ -132,6 +132,7 @@ export default function MobileBottomNav() {
                                 </div>
                                 <button
                                     onClick={() => setShowContactMenu(false)}
+                                    aria-label="Đóng menu liên hệ"
                                     className="p-1 hover:bg-gray-200 rounded-full transition-colors"
                                 >
                                     <X size={18} className="text-gray-500" />
@@ -181,7 +182,7 @@ export default function MobileBottomNav() {
                         {/* 1. Trang chủ */}
                         <Link
                             href="/"
-                            className={`flex flex-col items-center justify-center py-1 min-w-[56px] transition-colors ${isActive('/') ? 'text-copper' : 'text-gray-500'}`}
+                            className={`flex flex-col items-center justify-center py-2 min-w-[56px] transition-colors ${isActive('/') ? 'text-copper' : 'text-gray-500'}`}
                         >
                             <Home size={22} />
                             <span className={`text-[10px] mt-1 ${isActive('/') ? 'font-semibold' : ''}`}>
@@ -192,7 +193,7 @@ export default function MobileBottomNav() {
                         {/* 2. Danh mục */}
                         <Link
                             href="/category/all"
-                            className={`flex flex-col items-center justify-center py-1 min-w-[56px] transition-colors ${pathname?.startsWith('/category') ? 'text-copper' : 'text-gray-500'}`}
+                            className={`flex flex-col items-center justify-center py-2 min-w-[56px] transition-colors ${pathname?.startsWith('/category') ? 'text-copper' : 'text-gray-500'}`}
                         >
                             <LayoutGrid size={22} />
                             <span className={`text-[10px] mt-1 ${pathname?.startsWith('/category') ? 'font-semibold' : ''}`}>
@@ -203,6 +204,7 @@ export default function MobileBottomNav() {
                         {/* 3. CENTER BUTTON - Liên hệ */}
                         <button
                             onClick={() => setShowContactMenu(!showContactMenu)}
+                            aria-label={showContactMenu ? 'Đóng liên hệ' : 'Mở liên hệ'}
                             className="flex flex-col items-center justify-center -mt-5 relative"
                         >
                             <div className={`w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 ${showContactMenu
@@ -222,7 +224,7 @@ export default function MobileBottomNav() {
                         {/* 4. Tra cứu */}
                         <Link
                             href="/tracking"
-                            className={`flex flex-col items-center justify-center py-1 min-w-[56px] transition-colors ${pathname?.startsWith('/tracking') ? 'text-copper' : 'text-gray-500'}`}
+                            className={`flex flex-col items-center justify-center py-2 min-w-[56px] transition-colors ${pathname?.startsWith('/tracking') ? 'text-copper' : 'text-gray-500'}`}
                         >
                             <ClipboardList size={22} />
                             <span className={`text-[10px] mt-1 ${pathname?.startsWith('/tracking') ? 'font-semibold' : ''}`}>
@@ -234,7 +236,7 @@ export default function MobileBottomNav() {
                         {user && (user.role === 'admin' || user.role === 'staff') && (
                             <Link
                                 href="/admin"
-                                className={`flex flex-col items-center justify-center py-1 min-w-[56px] transition-colors ${pathname?.startsWith('/admin') ? 'text-copper' : 'text-gray-500'}`}
+                                className={`flex flex-col items-center justify-center py-2 min-w-[56px] transition-colors ${pathname?.startsWith('/admin') ? 'text-copper' : 'text-gray-500'}`}
                             >
                                 <User size={22} />
                                 <span className={`text-[10px] mt-1 ${pathname?.startsWith('/admin') ? 'font-semibold' : ''}`}>

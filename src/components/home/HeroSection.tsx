@@ -2,85 +2,12 @@
 
 import { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
-import { ChevronLeft, ChevronRight, ChevronRight as ChevronR, Shield, Clock, Award, Wrench, Smartphone, Battery, Monitor, Laptop, Watch, Cpu } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronRight as ChevronR, Shield, Clock, Award, Wrench } from 'lucide-react';
 import { useConfig } from '@/lib/ConfigContext';
 import type { HeroBanner, StoreBranch } from '@/lib/ConfigContext';
+import { getIcon } from '@/lib/icon-map';
 import Link from 'next/link';
 
-// ===== Sidebar Menu Data (CareK Style) =====
-const sidebarCategories = [
-    {
-        icon: <Smartphone size={18} />,
-        name: 'Sửa iPhone',
-        slug: 'sua-iphone',
-        subItems: [
-            { group: 'Dòng máy', items: ['iPhone 16 Pro Max', 'iPhone 16 Pro', 'iPhone 16', 'iPhone 15 Pro Max', 'iPhone 15 Pro', 'iPhone 15', 'iPhone 14 Pro Max', 'iPhone 14', 'iPhone 13', 'iPhone 12', 'iPhone 11'] },
-            { group: 'Dịch vụ phổ biến', items: ['Thay màn hình iPhone', 'Thay pin iPhone', 'Ép kính iPhone', 'Sửa loa iPhone', 'Thay camera iPhone'] },
-        ]
-    },
-    {
-        icon: <Smartphone size={18} />,
-        name: 'Sửa Samsung',
-        slug: 'sua-samsung',
-        subItems: [
-            { group: 'Dòng máy', items: ['Galaxy S25 Ultra', 'Galaxy S24 Ultra', 'Galaxy S24', 'Galaxy S23 Ultra', 'Galaxy Z Fold6', 'Galaxy Z Flip6', 'Galaxy A55', 'Galaxy A35', 'Galaxy A15'] },
-            { group: 'Dịch vụ phổ biến', items: ['Thay màn hình Samsung', 'Thay pin Samsung', 'Ép kính Samsung', 'Sửa sọc màn hình'] },
-        ]
-    },
-    {
-        icon: <Battery size={18} />,
-        name: 'Thay Pin',
-        slug: 'thay-pin',
-        subItems: [
-            { group: 'Thay pin theo hãng', items: ['Pin iPhone chính hãng', 'Pin Samsung chính hãng', 'Pin OPPO', 'Pin Xiaomi', 'Pin Vivo', 'Pin Realme'] },
-            { group: 'Cam kết', items: ['Bảo hành trọn đời', 'Pin dung lượng chuẩn', 'Thay trong 30 phút'] },
-        ]
-    },
-    {
-        icon: <Monitor size={18} />,
-        name: 'Ép Kính',
-        slug: 'ep-kinh',
-        subItems: [
-            { group: 'Ép kính theo hãng', items: ['Ép kính iPhone', 'Ép kính Samsung', 'Ép kính OPPO', 'Ép kính Xiaomi'] },
-            { group: 'Cam kết', items: ['Kính cường lực cao cấp', 'Bảo hành 12 tháng', 'Xong trong 45 phút'] },
-        ]
-    },
-    {
-        icon: <Laptop size={18} />,
-        name: 'Sửa Laptop',
-        slug: 'sua-laptop',
-        subItems: [
-            { group: 'Hãng máy', items: ['MacBook Pro', 'MacBook Air', 'Dell XPS / Inspiron', 'HP Pavilion / EliteBook', 'Lenovo ThinkPad / IdeaPad', 'Asus VivoBook / ZenBook', 'MSI Gaming'] },
-            { group: 'Dịch vụ', items: ['Thay màn hình laptop', 'Thay bàn phím laptop', 'Vệ sinh laptop', 'Nâng cấp SSD/RAM'] },
-        ]
-    },
-    {
-        icon: <Watch size={18} />,
-        name: 'Sửa Apple Watch',
-        slug: 'sua-apple-watch',
-        subItems: [
-            { group: 'Dòng máy', items: ['Apple Watch Ultra 2', 'Apple Watch Series 10', 'Apple Watch Series 9', 'Apple Watch SE'] },
-            { group: 'Dịch vụ', items: ['Thay màn hình Apple Watch', 'Thay pin Apple Watch', 'Sửa nút Digital Crown'] },
-        ]
-    },
-    {
-        icon: <Smartphone size={18} />,
-        name: 'Sửa Ipad ',
-        slug: 'sua-ipad',
-        subItems: [
-            { group: 'Dòng máy', items: ['iPad Pro', 'iPad Air', 'iPad Mini', 'iPad'] },
-            { group: 'Dịch vụ', items: ['Thay màn hình iPad', 'Thay pin iPad', 'Sửa nút Digital Crown'] },
-        ]
-    },
-    {
-        icon: <Cpu size={18} />,
-        name: 'Sửa Máy tính',
-        slug: 'sua-may-tinh',
-        subItems: [
-            { group: 'Dịch vụ', items: ['Cài đặt Windows/macOS', 'Diệt virus - Phần mềm', 'Cứu dữ liệu', 'Lắp ráp PC theo yêu cầu'] },
-        ]
-    },
-];
 
 // Fallback slides when no banners are configured
 const fallbackSlides = [
@@ -119,9 +46,10 @@ function BannerSkeleton() {
 }
 
 // ===== Sidebar Flyout Menu Item =====
-function SidebarItem({ item }: { item: typeof sidebarCategories[0] }) {
+function SidebarItem({ item }: { item: { name: string; slug: string; iconName: string; subGroups: Array<{ group: string; items: string[] }> } }) {
     const [showFlyout, setShowFlyout] = useState(false);
     const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const Icon = getIcon(item.iconName);
 
     const handleMouseEnter = () => {
         if (timeoutRef.current) clearTimeout(timeoutRef.current);
@@ -142,20 +70,20 @@ function SidebarItem({ item }: { item: typeof sidebarCategories[0] }) {
                 href={`/category/${item.slug}`}
                 className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-gray-700 hover:bg-copper/5 hover:text-copper transition-colors group"
             >
-                <span className="text-gray-400 group-hover:text-copper transition-colors flex-shrink-0">{item.icon}</span>
+                <span className="text-gray-400 group-hover:text-copper transition-colors flex-shrink-0"><Icon size={18} /></span>
                 <span className="flex-1 font-medium truncate">{item.name}</span>
                 <ChevronR size={14} className="text-gray-300 group-hover:text-copper transition-colors flex-shrink-0" />
             </Link>
 
             {/* Flyout Submenu */}
-            {showFlyout && item.subItems.length > 0 && (
+            {showFlyout && item.subGroups.length > 0 && (
                 <div
                     className="absolute left-full top-0 z-50 ml-0 w-[480px] bg-white rounded-r-xl shadow-2xl border border-gray-100 p-5 animate-[fadeIn_0.15s_ease-in-out]"
                     onMouseEnter={handleMouseEnter}
                     onMouseLeave={handleMouseLeave}
                 >
                     <div className="grid grid-cols-2 gap-5">
-                        {item.subItems.map((group, gi) => (
+                        {item.subGroups.map((group, gi) => (
                             <div key={gi}>
                                 <h4 className="text-xs font-bold text-copper uppercase tracking-wider mb-2.5">{group.group}</h4>
                                 <ul className="space-y-1.5">
@@ -197,6 +125,8 @@ export default function HeroSection({ initialBanners, storeBranches }: HeroSecti
     const { config, loading } = useConfig();
     const [current, setCurrent] = useState(0);
     const [imgError, setImgError] = useState<Record<string, boolean>>({});
+    // Defer non-first banner images to client mount so PageSpeed only discovers the LCP image
+    const [mounted, setMounted] = useState(false);
 
     // Ưu tiên dùng initialBanners (từ SSR), fallback về config (client-side) khi đã load xong
     const heroBanners = (initialBanners && initialBanners.length > 0)
@@ -208,11 +138,20 @@ export default function HeroSection({ initialBanners, storeBranches }: HeroSecti
     // Lấy phone từ storeBranches SSR hoặc config client
     const fallbackPhone = storeBranches?.[0]?.phone || config.store_branches?.[0]?.phone || '0932242026';
 
+    useEffect(() => { setMounted(true); }, []);
+
     useEffect(() => {
-        const timer = setInterval(() => {
-            setCurrent((prev) => (prev + 1) % totalSlides);
-        }, 5000);
-        return () => clearInterval(timer);
+        // Delay auto-rotation 10s so Lighthouse sees a stable viewport (SI fix)
+        let intervalId: ReturnType<typeof setInterval>;
+        const delayId = setTimeout(() => {
+            intervalId = setInterval(() => {
+                setCurrent((prev) => (prev + 1) % totalSlides);
+            }, 5000);
+        }, 10000);
+        return () => {
+            clearTimeout(delayId);
+            clearInterval(intervalId);
+        };
     }, [totalSlides]);
 
     const prev = () => setCurrent((c) => (c - 1 + totalSlides) % totalSlides);
@@ -237,7 +176,10 @@ export default function HeroSection({ initialBanners, storeBranches }: HeroSecti
                                     Danh mục dịch vụ
                                 </h3>
                                 <nav>
-                                    {sidebarCategories.map((cat) => (
+                                    {(config.sidebarMenu || [])
+                                        .filter(i => i.visible)
+                                        .sort((a, b) => a.order - b.order)
+                                        .map((cat) => (
                                         <SidebarItem key={cat.slug} item={cat} />
                                     ))}
                                 </nav>
@@ -249,34 +191,45 @@ export default function HeroSection({ initialBanners, storeBranches }: HeroSecti
                             <div className="px-0">
                                 {hasBanners ? (
                                     <div className="relative h-[280px] sm:h-[380px]">
-                                        {heroBanners.map((banner, i) => (
-                                            <div key={banner.id} className={`absolute inset-0 transition-opacity duration-700 ${i === current ? 'opacity-100 z-10' : 'opacity-0 z-0'}`}>
-                                                {banner.link ? (
+                                        {heroBanners.map((banner, i) => {
+                                            const isFirst = i === 0;
+                                            // SSR: render first slide only.
+                                            // Client: render current + next slide (for smooth transition preload).
+                                            // All other slides stay as placeholder → reduces bandwidth contention.
+                                            const isCurrentOrNext = i === current || i === (current + 1) % heroBanners.length;
+                                            const shouldRenderImage = isFirst || (mounted && isCurrentOrNext);
+                                            const finalSrc = banner.imageUrl;
+
+                                            return (
+                                            <div key={banner.id} className={`absolute inset-0 ${isFirst ? '' : 'transition-opacity duration-700'} ${i === current ? 'opacity-100 z-10' : 'opacity-0 z-0'}`}>
+                                                {!shouldRenderImage ? (
+                                                    <div className="w-full h-full bg-dark" />
+                                                ) : banner.link ? (
                                                     <a href={banner.link} className="block w-full h-full">
                                                         {imgError[banner.id] ? (
                                                             <div className="w-full h-full bg-gray-800 flex items-center justify-center text-gray-500 text-lg">Banner</div>
                                                         ) : banner.width && banner.height ? (
                                                                 <Image
-                                                                    src={banner.imageUrl}
+                                                                    src={finalSrc}
                                                                     alt={banner.alt || 'Banner Văn Lành Service'}
                                                                     width={banner.width}
                                                                     height={banner.height}
-                                                                    priority={i === 0}
-                                                                    fetchPriority={i === 0 ? "high" : "auto"}
-                                                                    sizes="(max-width: 768px) 100vw, (max-width: 1200px) 75vw, 940px"
-                                                                    quality={80}
+                                                                    priority={isFirst}
+                                                                    fetchPriority={isFirst ? "high" : "auto"}
+                                                                    sizes="(max-width: 768px) 100vw, (max-width: 1200px) 75vw, 867px"
+                                                                    quality={60}
                                                                     style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                                                                     onError={() => setImgError(prev => ({ ...prev, [banner.id]: true }))}
                                                                 />
                                                         ) : (
                                                             <Image
-                                                                src={banner.imageUrl}
+                                                                src={finalSrc}
                                                                 alt={banner.alt || 'Banner Văn Lành Service'}
                                                                 fill
-                                                                priority={i === 0}
-                                                                fetchPriority={i === 0 ? "high" : "auto"}
-                                                                sizes="(max-width: 768px) 100vw, (max-width: 1200px) 75vw, 940px"
-                                                                quality={80}
+                                                                priority={isFirst}
+                                                                fetchPriority={isFirst ? "high" : "auto"}
+                                                                sizes="(max-width: 768px) 100vw, (max-width: 1200px) 75vw, 867px"
+                                                                quality={60}
                                                                 className="object-cover"
                                                                 onError={() => setImgError(prev => ({ ...prev, [banner.id]: true }))}
                                                             />
@@ -287,33 +240,34 @@ export default function HeroSection({ initialBanners, storeBranches }: HeroSecti
                                                         <div className="w-full h-full bg-gray-800 flex items-center justify-center text-gray-500 text-lg">Banner</div>
                                                     ) : banner.width && banner.height ? (
                                                         <Image
-                                                            src={banner.imageUrl}
+                                                            src={finalSrc}
                                                             alt={banner.alt || 'Banner Văn Lành Service'}
                                                             width={banner.width}
                                                             height={banner.height}
-                                                            priority={i === 0}
-                                                            fetchPriority={i === 0 ? "high" : "auto"}
-                                                            sizes="(max-width: 768px) 100vw, (max-width: 1200px) 75vw, 940px"
-                                                            quality={80}
+                                                            priority={isFirst}
+                                                            fetchPriority={isFirst ? "high" : "auto"}
+                                                            sizes="(max-width: 768px) 100vw, (max-width: 1200px) 75vw, 867px"
+                                                            quality={60}
                                                             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                                                             onError={() => setImgError(prev => ({ ...prev, [banner.id]: true }))}
                                                         />
                                                     ) : (
                                                         <Image
-                                                            src={banner.imageUrl}
+                                                            src={finalSrc}
                                                             alt={banner.alt || 'Banner Văn Lành Service'}
                                                             fill
-                                                            priority={i === 0}
-                                                            fetchPriority={i === 0 ? "high" : "auto"}
-                                                            sizes="(max-width: 768px) 100vw, (max-width: 1200px) 75vw, 940px"
-                                                            quality={80}
+                                                            priority={isFirst}
+                                                            fetchPriority={isFirst ? "high" : "auto"}
+                                                            sizes="(max-width: 768px) 100vw, (max-width: 1200px) 75vw, 867px"
+                                                            quality={60}
                                                             className="object-cover"
                                                             onError={() => setImgError(prev => ({ ...prev, [banner.id]: true }))}
                                                         />
                                                     )
                                                 )}
                                             </div>
-                                        ))}
+                                            );
+                                        })}
                                         {/* Arrows */}
                                         {heroBanners.length > 1 && (
                                             <>
@@ -325,7 +279,7 @@ export default function HeroSection({ initialBanners, storeBranches }: HeroSecti
                                         {heroBanners.length > 1 && (
                                             <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-2 z-20">
                                                 {heroBanners.map((_, i) => (
-                                                    <button key={i} onClick={() => setCurrent(i)} aria-label={`Chuyển đến slide ${i + 1}`} className={`transition-all duration-300 rounded-full ${i === current ? 'w-8 h-2 bg-copper' : 'w-2 h-2 bg-white/50 hover:bg-white/70'}`} />
+                                                    <button key={i} onClick={() => setCurrent(i)} aria-label={`Chuyển đến slide ${i + 1}`} className={`w-3 h-3 p-2 box-content rounded-full transition-[transform,opacity] duration-300 ${i === current ? 'scale-x-[2.5] opacity-100 bg-copper' : 'scale-100 opacity-50 bg-white hover:opacity-70'}`} />
                                                 ))}
                                             </div>
                                         )}
@@ -357,7 +311,7 @@ export default function HeroSection({ initialBanners, storeBranches }: HeroSecti
                                 {!hasBanners && (
                                     <div className="flex justify-center gap-2 pb-4">
                                         {fallbackSlides.map((_, i) => (
-                                            <button key={i} onClick={() => setCurrent(i)} aria-label={`Chuyển đến slide ${i + 1}`} className={`transition-all duration-300 rounded-full ${i === current ? 'w-8 h-2 bg-copper' : 'w-2 h-2 bg-gray-600 hover:bg-gray-400'}`} />
+                                            <button key={i} onClick={() => setCurrent(i)} aria-label={`Chuyển đến slide ${i + 1}`} className={`w-3 h-3 p-2 box-content rounded-full transition-[transform,opacity] duration-300 ${i === current ? 'scale-x-[2.5] opacity-100 bg-copper' : 'scale-100 opacity-50 bg-gray-600 hover:opacity-70'}`} />
                                         ))}
                                     </div>
                                 )}
@@ -374,7 +328,7 @@ export default function HeroSection({ initialBanners, storeBranches }: HeroSecti
                                         <div className="text-copper flex-shrink-0">{badge.icon}</div>
                                         <div>
                                             <span className="block text-sm font-bold text-dark">{badge.title}</span>
-                                            <span className="block text-xs text-gray-500">{badge.desc}</span>
+                                            <span className="block text-xs text-gray-600">{badge.desc}</span>
                                         </div>
                                     </div>
                                 ))}

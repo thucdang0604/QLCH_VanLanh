@@ -2,8 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { collection, addDoc, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, limit } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
-import { db, storage } from '@/lib/firebase';
+import { db, getStorageInstance } from '@/lib/firebase';
 import { X, Upload, Image as ImageIcon, Film, Trash2, Loader2, Check, Search, AlertTriangle } from 'lucide-react';
 import type { FirestoreDateValue } from '@/lib/types';
 import { optimizeImage } from '@/lib/imageOptimizer';
@@ -33,7 +32,9 @@ export const MEDIA_FOLDERS = [
     { id: 'parts', name: 'Linh kiện' },
     { id: 'articles', name: 'Tin tức' },
     { id: 'reviews', name: 'Đánh giá' },
-    { id: 'pos', name: 'Bán hàng' }
+    { id: 'repairs', name: 'Sửa chữa' },
+    { id: 'banners', name: 'Banner' },
+    { id: 'frames', name: 'Khung viền' }
 ];
 
 interface MediaManagerProps {
@@ -93,6 +94,7 @@ export default function MediaManager({ isOpen, onClose, onSelect, title = 'Chọ
                 let fileToUpload = file;
                 let finalWidth = undefined;
                 let finalHeight = undefined;
+                let thumbFileToUpload: File | undefined = undefined;
 
                 if (file.type.startsWith('image/')) {
                     const validationError = validateImageFile(file);
@@ -100,19 +102,69 @@ export default function MediaManager({ isOpen, onClose, onSelect, title = 'Chọ
                         setUploadError(`"${file.name}": ${validationError}`);
                         continue;
                     }
-                    const optimized = await optimizeImage(file, 1200);
+                    
+                    // Xác định cấu hình nén dựa trên thư mục
+                    let maxWidth = 1200;
+                    let quality = 0.75;
+                    
+                    switch (uploadFolder) {
+                        case 'general': // Logo...
+                        case 'articles': // Ảnh bài viết
+                        case 'banners': // Banner
+                            maxWidth = 960;
+                            quality = 0.80; // Giữ chất lượng cao hơn một chút cho banner/bài viết
+                            break;
+                        case 'products':
+                        case 'services':
+                        case 'parts':
+                            maxWidth = 800; // Đủ nét cho trang chi tiết sản phẩm/dịch vụ
+                            quality = 0.75;
+                            break;
+                        case 'reviews':
+                        case 'repairs':
+                            maxWidth = 600; // Ảnh feedback hoặc sửa chữa không cần quá to
+                            quality = 0.70;
+                            break;
+                        case 'frames':
+                            maxWidth = 1200; // Khung viền cần chất lượng cao và nét
+                            quality = 0.80;
+                            break;
+                        default:
+                            maxWidth = 1200;
+                            quality = 0.75;
+                    }
+
+                    const optimized = await optimizeImage(file, maxWidth, 1600, quality);
                     fileToUpload = optimized.file;
                     finalWidth = optimized.width;
                     finalHeight = optimized.height;
+                    
+                    // Tạo thêm 1 bản Thumbnail siêu nhỏ (128px, 60% quality) làm phương án dự phòng
+                    if (['products', 'services', 'articles', 'parts'].includes(uploadFolder)) {
+                        const thumbOpt = await optimizeImage(file, 128, 128, 0.60);
+                        thumbFileToUpload = thumbOpt.file;
+                    }
                 }
 
+                const storage = await getStorageInstance();
+                const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
                 const storagePath = `media/${uploadFolder}/${Date.now()}_${fileToUpload.name}`;
                 const storageRef = ref(storage, storagePath);
 
                 await uploadBytes(storageRef, fileToUpload, { 
                     contentType: fileToUpload.type 
                 });
-                const url = await getDownloadURL(storageRef);
+                let url = await getDownloadURL(storageRef);
+                
+                // Upload bản Thumbnail (nếu có)
+                if (thumbFileToUpload) {
+                    const thumbPath = storagePath.replace(/\.([a-zA-Z0-9]+)$/, '_thumb.$1');
+                    const thumbRef = ref(storage, thumbPath);
+                    await uploadBytes(thumbRef, thumbFileToUpload, {
+                        contentType: thumbFileToUpload.type
+                    });
+                    url = url + '&hasThumb=true';
+                }
 
                 // Save metadata to Firestore
                 await addDoc(collection(db, 'media_library'), {
@@ -142,6 +194,8 @@ export default function MediaManager({ isOpen, onClose, onSelect, title = 'Chọ
         if (!confirm(`Xóa "${item.name}"?`)) return;
         setDeleting(item.id);
         try {
+            const storage = await getStorageInstance();
+            const { ref, deleteObject } = await import('firebase/storage');
             const storageRef = ref(storage, item.path);
             await deleteObject(storageRef).catch(() => { });
             await deleteDoc(doc(db, 'media_library', item.id));

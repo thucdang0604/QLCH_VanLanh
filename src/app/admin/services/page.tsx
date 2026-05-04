@@ -11,37 +11,65 @@ import {
     Loader2,
     Wrench
 } from 'lucide-react';
-import { useFirestoreCollection, addDocument, updateDocument, deleteDocument } from '@/lib/useFirestore';
+import { useFirestoreCollection, addDocumentWithId, updateDocument, deleteDocument } from '@/lib/useFirestore';
 import { uploadImage, deleteImage } from '@/lib/storage';
 import { orderBy } from 'firebase/firestore';
+import { generateSlug } from '@/lib/utils';
 import type { FirestoreDateValue } from '@/lib/types';
-import { toastError } from '@/lib/toast';
+import { getCategoryPath, collectAllNodeIds } from '@/lib/utils';
+import { toastError, toastSuccess, toastWarning } from '@/lib/toast';
 import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
 import { triggerRevalidate } from '@/lib/revalidate';
 import Modal from '@/components/admin/Modal';
 import MediaManager from '@/components/admin/MediaManager';
+import CategoryTaxonomySelector from '@/components/admin/CategoryTaxonomySelector';
+import { useConfig } from '@/lib/ConfigContext';
 
 interface Service {
     id: string;
     name: string;
     description: string;
-    price: string;
+    price?: string; // legacy string price (backward compat)
+    price_original: number;
+    price_promo?: number;
     device_model: string;
     imageUrl?: string;
     icon?: string;
     category: string;
+    categoryIds?: string[];
     isActive: boolean;
+    warranty_text?: string;
+    repair_time?: string;
+    seoDescription?: string;
+    tags?: string[];
     createdAt?: FirestoreDateValue;
 }
 
-const serviceCategories = ['Sửa chữa', 'Thay thế', 'Bảo hành', 'Nâng cấp', 'Khác'];
+const formatPrice = (p: number) => p > 0 ? new Intl.NumberFormat('vi-VN').format(p) + ' đ' : 'Liên hệ';
+
+/** Parse legacy string price like "Từ 200.000đ" or "100000" to number */
+function parseLegacyPrice(s?: string): number {
+    if (!s) return 0;
+    const cleaned = s.replace(/[^\d]/g, '');
+    return cleaned ? parseInt(cleaned, 10) : 0;
+}
 
 export default function ServicesPage() {
-    const { data: services, loading } = useFirestoreCollection<Service>('services', [orderBy('createdAt', 'desc')]);
+    const { config, loading: configLoading } = useConfig();
+    const { data: services, loading } = useFirestoreCollection<Service>('services');
     const [searchQuery, setSearchQuery] = useState('');
+    const [filterCategoryIds, setFilterCategoryIds] = useState<string[]>([]);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingService, setEditingService] = useState<Service | null>(null);
+
+    // Batch reassign state
+    const [showReassign, setShowReassign] = useState(false);
+    const [reassignFrom, setReassignFrom] = useState('');
+    const [reassignTo, setReassignTo] = useState('');
+    const [reassignToIds, setReassignToIds] = useState<string[]>([]);
+    const [isReassigning, setIsReassigning] = useState(false);
+    const [reassignProgress, setReassignProgress] = useState<{current: number, total: number} | null>(null);
 
     const handleDelete = async (service: Service) => {
         if (confirm(`Bạn có chắc muốn xóa dịch vụ "${service.name}"?`)) {
@@ -57,14 +85,101 @@ export default function ServicesPage() {
         }
     };
 
-    const filteredServices = services.filter((s) =>
-        s.name.toLowerCase().includes(searchQuery.toLowerCase())
-    );
+    const handleBatchReassign = async () => {
+        if (!reassignFrom || !reassignTo) return;
+        setIsReassigning(true);
+        try {
+            const targets = services.filter(s => s.category === reassignFrom);
+            setReassignProgress({ current: 0, total: targets.length });
+            
+            let successCount = 0;
+            let errorCount = 0;
+            
+            for (let i = 0; i < targets.length; i++) {
+                const s = targets[i];
+                try {
+                    await updateDocument('services', s.id, { 
+                        category: reassignTo,
+                        categoryIds: reassignToIds 
+                    });
+                    successCount++;
+                } catch (err) {
+                    console.error(`Error updating service ${s.id}:`, err);
+                    errorCount++;
+                }
+                setReassignProgress({ current: i + 1, total: targets.length });
+            }
+            
+            if (errorCount > 0) {
+                toastWarning(`Hoàn tất gán lại ${successCount}/${targets.length} dịch vụ (${errorCount} lỗi)`);
+            } else {
+                toastSuccess(`Đã gán lại thành công ${successCount} dịch vụ từ "${reassignFrom}" sang "${reassignTo}"`);
+            }
+            
+            setShowReassign(false);
+            setReassignFrom('');
+            setReassignTo('');
+            setReassignToIds([]);
+            setReassignProgress(null);
+        } catch {
+            toastError('Lỗi khi gán lại danh mục!');
+        } finally {
+            setIsReassigning(false);
+        }
+    };
+
+    const filteredServices = services.filter((s) => {
+        const matchSearch = s.name.toLowerCase().includes(searchQuery.toLowerCase());
+        let matchCategory = true;
+
+        if (filterCategoryIds.length > 0) {
+            const targetId = filterCategoryIds[filterCategoryIds.length - 1];
+            matchCategory = s.categoryIds?.includes(targetId) || false;
+        }
+
+        return matchSearch && matchCategory;
+    });
+
+    // --- ORPHAN CATEGORY DETECTION (ID-based) ---
+    const serviceTaxonomy = config?.taxonomy?.service || [];
+    const validNodeIds = collectAllNodeIds(serviceTaxonomy);
+
+    const getOrphanStatus = (service: Service): 'valid' | 'orphan' | 'unassigned' => {
+        if (!service.categoryIds || service.categoryIds.length === 0) {
+            return service.category ? 'orphan' : 'unassigned'; // legacy string only = orphan
+        }
+        const deepestId = service.categoryIds[service.categoryIds.length - 1];
+        return validNodeIds.has(deepestId) ? 'valid' : 'orphan';
+    };
+
+    const orphanServices = services.filter(s => getOrphanStatus(s) === 'orphan');
+    const missingCategoryCount = orphanServices.length;
+    const missingCategories = Array.from(new Set(
+        orphanServices.map(s => {
+            if (s.categoryIds?.length) return s.categoryIds[s.categoryIds.length - 1];
+            return s.category;
+        })
+    ));
+    // ---------------------------------
 
     const { paginatedData: paginatedServices, currentPage, totalPages, pageSize, totalFiltered, setPage, setPageSize, resetPage } = useClientPagination(filteredServices, 20);
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    useEffect(() => { resetPage(); }, [searchQuery]);
+    useEffect(() => { resetPage(); }, [searchQuery, filterCategoryIds]);
+
+    /** Get display price — prefers numeric fields, falls back to legacy string */
+    const getDisplayPrice = (s: Service) => {
+        if (s.price_original > 0) return formatPrice(s.price_original);
+        if (s.price) return s.price; // legacy string
+        return 'Liên hệ';
+    };
+
+    const getPromoPrice = (s: Service) => {
+        if (s.price_promo && s.price_promo > 0 && s.price_original > 0 && s.price_promo < s.price_original) {
+            return formatPrice(s.price_promo);
+        }
+        return null;
+    };
 
     return (
         <div className="space-y-6">
@@ -83,16 +198,54 @@ export default function ServicesPage() {
                 </button>
             </div>
 
-            {/* Search */}
-            <div className="relative max-w-md">
-                <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                <input
-                    type="text"
-                    placeholder="Tìm dịch vụ..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full h-11 pl-10 pr-4 border rounded-lg focus:border-orange-500 focus:outline-none"
-                />
+            {/* Orphan Categories Warning */}
+            {(!loading && !configLoading && missingCategories.length > 0) && (
+                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex flex-col sm:flex-row items-start justify-between gap-3">
+                    <div>
+                        <p className="font-medium flex items-center gap-2">
+                            ⚠️ Có {missingCategoryCount} dịch vụ đang bị mất danh mục!
+                        </p>
+                        <p className="text-sm mt-1 text-red-600">
+                            Các danh mục không tồn tại: {missingCategories.join(', ')}.
+                        </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                        {missingCategories.map(cat => (
+                            <button
+                                key={cat}
+                                onClick={() => { setReassignFrom(cat); setShowReassign(true); }}
+                                className="px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 text-sm font-medium rounded-md transition-colors"
+                            >
+                                Gán lại "{cat}"
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* Search + Category filter */}
+            <div className="flex flex-col gap-3">
+                <div className="flex flex-col sm:flex-row gap-3">
+                    <div className="relative flex-1">
+                        <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <input
+                            type="text"
+                            placeholder="Tìm dịch vụ..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            className="w-full h-11 pl-10 pr-4 border rounded-lg focus:border-orange-500 focus:outline-none"
+                        />
+                    </div>
+                </div>
+                {/* Modern Taxonomy Filter */}
+                <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
+                    <p className="text-xs font-medium text-gray-500 mb-2">Lọc theo danh mục:</p>
+                    <CategoryTaxonomySelector
+                        type="service"
+                        value={filterCategoryIds}
+                        onChange={setFilterCategoryIds}
+                    />
+                </div>
             </div>
 
             {/* Services Grid */}
@@ -108,8 +261,10 @@ export default function ServicesPage() {
             ) : (
                 <>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {paginatedServices.map((service) => (
-                        <div key={service.id} className="bg-white rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow">
+                    {paginatedServices.map((service) => {
+                        const promo = getPromoPrice(service);
+                        return (
+                        <div key={service.id} className={`bg-white rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow`}>
                             <div className="flex items-start justify-between mb-4">
                                 <div className="w-14 h-14 bg-orange-100 rounded-xl flex items-center justify-center">
                                     {service.imageUrl ? (
@@ -140,16 +295,38 @@ export default function ServicesPage() {
                                 </div>
                             </div>
                             <h3 className="font-semibold text-gray-900 mb-1">{service.name}</h3>
+                            {/* Auto-render category path from taxonomy tree */}
+                            {(() => {
+                                const status = getOrphanStatus(service);
+                                const deepestId = service.categoryIds?.[service.categoryIds.length - 1];
+                                const path = deepestId ? getCategoryPath(deepestId, serviceTaxonomy) : null;
+                                if (status === 'orphan') {
+                                    return <p className="text-xs text-red-600 bg-red-50 px-2 py-0.5 rounded inline-block mb-1">⚠ Lệch danh mục: {deepestId || service.category}</p>;
+                                }
+                                if (status === 'unassigned') {
+                                    return <p className="text-xs text-yellow-600 bg-yellow-50 px-2 py-0.5 rounded inline-block mb-1">Chưa gán danh mục</p>;
+                                }
+                                return path ? <p className="text-xs text-gray-400 mb-1">📂 {path}</p> : null;
+                            })()}
                             <p className="text-sm text-gray-500 line-clamp-2 mb-3">{service.description}</p>
                             <div className="flex items-center justify-between">
-                                <span className="text-orange-600 font-bold">{service.price}</span>
+                                <div>
+                                    {promo ? (
+                                        <div className="flex items-baseline gap-2">
+                                            <span className="text-orange-600 font-bold">{promo}</span>
+                                            <span className="text-gray-400 text-xs line-through">{getDisplayPrice(service)}</span>
+                                        </div>
+                                    ) : (
+                                        <span className="text-orange-600 font-bold">{getDisplayPrice(service)}</span>
+                                    )}
+                                </div>
                                 <span className={`px-2 py-1 text-xs rounded-full ${service.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
                                     }`}>
                                     {service.isActive ? 'Hoạt động' : 'Tạm dừng'}
                                 </span>
                             </div>
                         </div>
-                    ))}
+                    );})}
                 </div>
                 <PaginationBar
                     currentPage={currentPage}
@@ -169,7 +346,41 @@ export default function ServicesPage() {
                 isOpen={isModalOpen}
                 service={editingService}
                 onClose={() => setIsModalOpen(false)}
+                existingIds={services.map(s => s.id)}
             />
+
+            {/* Batch Reassign Modal */}
+            <Modal isOpen={showReassign} onClose={() => setShowReassign(false)} title="Gán lại danh mục hàng loạt" size="md">
+                <div className="p-6 space-y-4">
+                    <p className="text-sm text-gray-600">
+                        Chọn danh mục mới cho các dịch vụ đang thuộc danh mục <strong className="text-gray-900">"{reassignFrom}"</strong>.
+                    </p>
+                    <div>
+                        <label className="block text-sm font-medium mb-1">Danh mục mới *</label>
+                        <CategoryTaxonomySelector
+                            type="service"
+                            value={reassignToIds}
+                            onChange={(ids, catName) => {
+                                setReassignTo(catName || '');
+                                setReassignToIds(ids);
+                            }}
+                        />
+                    </div>
+                    <div className="flex gap-3 pt-4">
+                        <button onClick={() => setShowReassign(false)} className="flex-1 py-2.5 border rounded-lg hover:bg-gray-50 font-medium">Hủy</button>
+                        <button 
+                            onClick={handleBatchReassign} 
+                            disabled={!reassignTo || isReassigning}
+                            className="flex-1 py-2.5 bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-medium disabled:opacity-50 flex justify-center items-center gap-2"
+                        >
+                            {isReassigning && <Loader2 size={16} className="animate-spin" />}
+                            {isReassigning 
+                                ? (reassignProgress ? `Đang xử lý ${reassignProgress.current}/${reassignProgress.total}...` : 'Đang xử lý...') 
+                                : 'Xác nhận gán lại'}
+                        </button>
+                    </div>
+                </div>
+            </Modal>
         </div>
     );
 }
@@ -179,19 +390,49 @@ function ServiceModal({
     isOpen,
     service,
     onClose,
+    existingIds,
 }: {
     isOpen: boolean;
     service: Service | null;
     onClose: () => void;
+    existingIds: string[];
 }) {
     const [formData, setFormData] = useState({
-        name: service?.name || '',
-        description: service?.description || '',
-        price: service?.price || '',
-        device_model: service?.device_model || '',
-        category: service?.category || serviceCategories[0],
-        isActive: service?.isActive ?? true,
+        name: '',
+        description: '',
+        price_original: 0,
+        price_promo: 0,
+        device_model: '',
+        category: '',
+        categoryIds: [] as string[],
+        isActive: true,
+        warranty_text: '',
+        repair_time: '',
+        seoDescription: '',
+        tags: '',
     });
+
+    useEffect(() => {
+        if (isOpen) {
+            setFormData({
+                name: service?.name || '',
+                description: service?.description || '',
+                price_original: service?.price_original || parseLegacyPrice(service?.price),
+                price_promo: service?.price_promo || 0,
+                device_model: service?.device_model || '',
+                category: service?.category || '',
+                categoryIds: service?.categoryIds || [],
+                isActive: service?.isActive ?? true,
+                warranty_text: service?.warranty_text || '',
+                repair_time: service?.repair_time || '',
+                seoDescription: service?.seoDescription || '',
+                tags: service?.tags?.join(', ') || '',
+            });
+            setSelectedImageUrl(service?.imageUrl || '');
+            setImagePreview(service?.imageUrl || '');
+            setImageFile(null);
+        }
+    }, [isOpen, service]);
     const [imageFile, setImageFile] = useState<File | null>(null);
     const [selectedImageUrl, setSelectedImageUrl] = useState<string>(service?.imageUrl || '');
     const [imagePreview, setImagePreview] = useState<string>(service?.imageUrl || '');
@@ -212,7 +453,6 @@ function ServiceModal({
         setIsSubmitting(true);
 
         try {
-            // Có thể không có ảnh, nên chấp nhận cả: ảnh cũ, ảnh thư viện, hoặc không ảnh
             let imageUrl = selectedImageUrl || service?.imageUrl || '';
 
             if (imageFile) {
@@ -222,16 +462,40 @@ function ServiceModal({
                 imageUrl = await uploadImage(imageFile, 'services');
             }
 
-            const data = {
-                ...formData,
+            const tagsArray = formData.tags.split(',').map(t => t.trim()).filter(Boolean);
+
+            const data: Record<string, unknown> = {
+                name: formData.name,
+                description: formData.description,
+                price_original: formData.price_original,
+                price_promo: formData.price_promo || null,
+                device_model: formData.device_model,
+                category: formData.category,
+                categoryIds: formData.categoryIds,
+                isActive: formData.isActive,
+                warranty_text: formData.warranty_text || '',
+                repair_time: formData.repair_time || '',
+                seoDescription: formData.seoDescription || '',
+                tags: tagsArray,
                 imageUrl,
             };
+
+            // Remove legacy string price field when saving new data
+            if (service?.price) {
+                data.price = null; // clear legacy field
+            }
 
             if (service) {
                 await updateDocument('services', service.id, data);
                 await triggerRevalidate(['/', `/service/${service.id}`, '/category/sua-chua', '/sitemap.xml'], ['services']);
             } else {
-                await addDocument('services', data);
+                const docId = generateSlug(formData.name);
+                if (existingIds.includes(docId)) {
+                    toastError(`ID "${docId}" đã tồn tại! Hãy đổi tên dịch vụ.`);
+                    setIsSubmitting(false);
+                    return;
+                }
+                await addDocumentWithId('services', docId, data);
                 await triggerRevalidate(['/', '/category/sua-chua', '/sitemap.xml'], ['services']);
             }
 
@@ -348,30 +612,42 @@ function ServiceModal({
                     </div>
 
                     {/* Price */}
-                    <div>
-                        <label className="block text-sm font-medium mb-1">Giá dịch vụ *</label>
-                        <input
-                            type="text"
-                            value={formData.price}
-                            onChange={(e) => setFormData({ ...formData, price: e.target.value })}
-                            required
-                            className="w-full h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
-                            placeholder="Từ 350.000đ"
-                        />
+                    <div className="grid grid-cols-2 gap-3">
+                        <div>
+                            <label className="block text-sm font-medium mb-1">Giá dịch vụ (đ) *</label>
+                            <input
+                                type="number"
+                                min="0"
+                                step="1000"
+                                value={formData.price_original || ''}
+                                onChange={(e) => setFormData({ ...formData, price_original: parseInt(e.target.value) || 0 })}
+                                required
+                                className="w-full h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
+                                placeholder="350000"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium mb-1">Giá khuyến mãi (đ)</label>
+                            <input
+                                type="number"
+                                min="0"
+                                step="1000"
+                                value={formData.price_promo || ''}
+                                onChange={(e) => setFormData({ ...formData, price_promo: parseInt(e.target.value) || 0 })}
+                                className="w-full h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
+                                placeholder="Để trống nếu không giảm"
+                            />
+                        </div>
                     </div>
 
                     {/* Category */}
                     <div>
-                        <label className="block text-sm font-medium mb-1">Danh mục</label>
-                        <select
-                            value={formData.category}
-                            onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                            className="w-full h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
-                        >
-                            {serviceCategories.map((cat) => (
-                                <option key={cat} value={cat}>{cat}</option>
-                            ))}
-                        </select>
+                        <label className="block text-sm font-medium mb-1">Danh mục *</label>
+                        <CategoryTaxonomySelector
+                            type="service"
+                            value={formData.categoryIds}
+                            onChange={(ids, catName) => setFormData({ ...formData, categoryIds: ids, category: catName || formData.category })}
+                        />
                     </div>
 
                     {/* Description */}
@@ -384,6 +660,55 @@ function ServiceModal({
                             className="w-full px-4 py-3 border rounded-lg focus:border-orange-500 focus:outline-none resize-none"
                             placeholder="Mô tả dịch vụ..."
                         />
+                    </div>
+
+                    {/* SEO & Service Details */}
+                    <div className="border-t pt-4 mt-2">
+                        <p className="text-sm font-medium text-gray-700 mb-3">📋 Thông tin bổ sung & SEO</p>
+                        <div className="grid grid-cols-2 gap-3 mb-3">
+                            <div>
+                                <label className="block text-xs font-medium text-gray-600 mb-1">Bảo hành</label>
+                                <input
+                                    type="text"
+                                    value={formData.warranty_text}
+                                    onChange={(e) => setFormData({ ...formData, warranty_text: e.target.value })}
+                                    className="w-full h-10 px-3 text-sm border rounded-lg focus:border-orange-500 focus:outline-none"
+                                    placeholder="BH 12 tháng"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-medium text-gray-600 mb-1">Thời gian sửa</label>
+                                <input
+                                    type="text"
+                                    value={formData.repair_time}
+                                    onChange={(e) => setFormData({ ...formData, repair_time: e.target.value })}
+                                    className="w-full h-10 px-3 text-sm border rounded-lg focus:border-orange-500 focus:outline-none"
+                                    placeholder="30 phút"
+                                />
+                            </div>
+                        </div>
+                        <div className="mb-3">
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Mô tả SEO (hiển thị trên Google)</label>
+                            <textarea
+                                value={formData.seoDescription}
+                                onChange={(e) => setFormData({ ...formData, seoDescription: e.target.value })}
+                                rows={2}
+                                maxLength={160}
+                                className="w-full px-3 py-2 text-sm border rounded-lg focus:border-orange-500 focus:outline-none resize-none"
+                                placeholder="Mô tả ngắn gọn cho SEO (tối đa 160 ký tự)"
+                            />
+                            <p className="text-xs text-gray-400 mt-0.5">{formData.seoDescription.length}/160</p>
+                        </div>
+                        <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Tags (phân cách bằng dấu phẩy)</label>
+                            <input
+                                type="text"
+                                value={formData.tags}
+                                onChange={(e) => setFormData({ ...formData, tags: e.target.value })}
+                                className="w-full h-10 px-3 text-sm border rounded-lg focus:border-orange-500 focus:outline-none"
+                                placeholder="thay pin, iphone, bảo hành"
+                            />
+                        </div>
                     </div>
 
                     {/* Active */}

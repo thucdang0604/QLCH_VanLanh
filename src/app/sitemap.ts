@@ -1,14 +1,11 @@
 import { MetadataRoute } from 'next';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { SITE_URL } from '@/lib/constants';
+import { fetchDynamicCategories, fetchCategoryItems } from '@/app/(customer)/_lib/server-queries';
 
-const CATEGORY_SLUGS = [
-    'sua-iphone', 'sua-samsung', 'sua-oppo', 'sua-xiaomi', 'sua-tablet', 'sua-laptop', 'sua-may-tinh', 'thay-pin', 'ep-kinh',
-    'phone', 'dien-thoai', 'laptop', 'tablet', 'smartwatch', 'am-thanh', 'phu-kien-sp', 'accessory',
-    'may-moi', 'may-cu', 'sua-chua', 'phu-kien'
-];
+const STATIC_NAV_SLUGS = ['may-moi', 'may-cu', 'sua-chua', 'phu-kien'];
 
-export const revalidate = false;
+export const revalidate = 86400; // Cache sitemap for 24 hours
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     const db = getAdminDb();
@@ -26,8 +23,36 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
         { url: `${SITE_URL}/info/tra-gop`, lastModified: new Date(), changeFrequency: 'monthly', priority: 0.5 },
     ];
 
-    // 2. Category Pages
-    const categoryPages: MetadataRoute.Sitemap = CATEGORY_SLUGS.map(slug => ({
+    // Fetch items for dynamic pruning and subsequent product/service URL generation
+    const allServices = await fetchCategoryItems(true);
+    const allProducts = await fetchCategoryItems(false);
+
+    // 2. Category Pages (Static + Dynamic Pruned)
+    const dynamicCategories = await fetchDynamicCategories();
+    const validDynamicSlugs: string[] = [];
+    
+    for (const cat of dynamicCategories) {
+        if (!cat.keywords || !Array.isArray(cat.keywords) || cat.keywords.length === 0) {
+            validDynamicSlugs.push(cat.slug); // If no keywords, assume it's valid
+            continue;
+        }
+
+        const isRepair = cat.type === 'repair';
+        const itemsToFilter = isRepair ? allServices : allProducts;
+        
+        const hasItems = itemsToFilter.some(item => {
+            const searchStr = `${item.name || ''} ${item.device_model || ''} ${item.category || ''} ${item.description || ''} ${Array.isArray(item.tags) ? item.tags.join(' ') : ''}`.toLowerCase();
+            return cat.keywords.some((kw: string) => searchStr.includes(kw.toLowerCase()));
+        });
+
+        if (hasItems) {
+            validDynamicSlugs.push(cat.slug);
+        }
+    }
+
+    const combinedSlugs = Array.from(new Set([...STATIC_NAV_SLUGS, ...validDynamicSlugs]));
+
+    const categoryPages: MetadataRoute.Sitemap = combinedSlugs.map(slug => ({
         url: `${SITE_URL}/category/${slug}`,
         lastModified: new Date(),
         changeFrequency: 'weekly',
@@ -35,34 +60,20 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     }));
 
     // 3. Dynamic Products
-    let productPages: MetadataRoute.Sitemap = [];
-    try {
-        const prodSnap = await db.collection('products').where('status', '==', 'active').get();
-        productPages = prodSnap.docs.map(doc => ({
-            url: `${SITE_URL}/product/${doc.id}`,
-            lastModified: doc.data().updatedAt?.toDate() || doc.data().createdAt?.toDate() || new Date(),
-            changeFrequency: 'weekly',
-            priority: 0.8,
-        }));
-    } catch (e) {
-        console.error('Sitemap - Error fetching products:', e);
-    }
+    const productPages: MetadataRoute.Sitemap = allProducts.map(item => ({
+        url: `${SITE_URL}/product/${item.id}`,
+        lastModified: item.updatedAt ? new Date(item.updatedAt) : (item.createdAt ? new Date(item.createdAt) : new Date()),
+        changeFrequency: 'weekly',
+        priority: 0.8,
+    }));
 
     // 4. Dynamic Services
-    let servicePages: MetadataRoute.Sitemap = [];
-    try {
-        const serviceSnap = await db.collection('services').get();
-        servicePages = serviceSnap.docs
-            .filter(doc => doc.data().isActive !== false) // Default to active unless explicitly false
-            .map(doc => ({
-                url: `${SITE_URL}/service/${doc.id}`,
-                lastModified: doc.data().updatedAt?.toDate() || doc.data().createdAt?.toDate() || new Date(),
-                changeFrequency: 'weekly',
-                priority: 0.8,
-            }));
-    } catch (e) {
-        console.error('Sitemap - Error fetching services:', e);
-    }
+    const servicePages: MetadataRoute.Sitemap = allServices.map(item => ({
+        url: `${SITE_URL}/service/${item.id}`,
+        lastModified: item.updatedAt ? new Date(item.updatedAt) : (item.createdAt ? new Date(item.createdAt) : new Date()),
+        changeFrequency: 'weekly',
+        priority: 0.8,
+    }));
 
     // 5. Dynamic Articles/News
     let articlePages: MetadataRoute.Sitemap = [];

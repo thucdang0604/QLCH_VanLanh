@@ -11,8 +11,7 @@ import {
     deleteDoc, doc, serverTimestamp, setDoc, getDoc, where,
     addDoc
 } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage } from '@/lib/firebase';
+import { db, getStorageInstance } from '@/lib/firebase';
 import { generateSlug } from '@/lib/utils';
 import type { ArticleComment } from '@/lib/types';
 import dynamic from 'next/dynamic';
@@ -607,6 +606,8 @@ function ArticleModal({
                         const optimizeResponse = await optimizeImage(new File([blob], `ai_${Date.now()}.webp`, { type: 'image/webp' }), 1200, 800, 0.8);
                         const optimized = optimizeResponse.file;
                         const storagePath = `media/${Date.now()}_ai_img_${i}.webp`;
+                        const storage = await getStorageInstance();
+                        const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
                         const storageRef = ref(storage, storagePath);
 
                         await uploadBytes(storageRef, await optimized.arrayBuffer(), { contentType: 'image/webp' });
@@ -779,6 +780,8 @@ function ArticleModal({
             // Optimize: resize & convert to WebP
             const { file: optimized, width, height } = await optimizeImage(file, 1200, 800, 0.8);
             const storagePath = `media/${Date.now()}_${optimized.name}`;
+            const storage = await getStorageInstance();
+            const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
             const storageRef = ref(storage, storagePath);
 
             const buffer = await optimized.arrayBuffer();
@@ -917,6 +920,8 @@ function ArticleModal({
             const { file: optimized, width, height } = await optimizeImage(rawFile, 1200, 800, 0.8);
 
             const storagePath = `media/${optimized.name}`;
+            const storage = await getStorageInstance();
+            const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
             const storageRef = ref(storage, storagePath);
             await uploadBytes(storageRef, optimized, { contentType: 'image/webp' });
             const url = await getDownloadURL(storageRef);

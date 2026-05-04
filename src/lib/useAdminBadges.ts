@@ -2,8 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
-import { ref, onValue } from 'firebase/database';
-import { db, rtdb } from '@/lib/firebase';
+import { db, getRtdbInstance } from '@/lib/firebase';
 import type { FirestoreDateValue } from '@/lib/types';
 
 // ── Types ──
@@ -78,21 +77,29 @@ export function useAdminBadges(userUid?: string, userRole?: string) {
 
     // ── 3. Chats: Realtime DB — info.hasUnread ──
     useEffect(() => {
-        const chatsRef = ref(rtdb, 'chats');
-        const unsub = onValue(chatsRef, (snapshot) => {
-            const data = snapshot.val() as unknown;
-            if (!data) { setUnreadChats(0); return; }
-            let count = 0;
-            if (typeof data === 'object' && data !== null) {
-                Object.values(data as Record<string, unknown>).forEach((room) => {
-                    const info = (typeof room === 'object' && room !== null) ? (room as { info?: unknown }).info : undefined;
-                    const hasUnread = (typeof info === 'object' && info !== null) ? (info as { hasUnread?: unknown }).hasUnread : undefined;
-                    if (hasUnread) count++;
-                });
-            }
-            setUnreadChats(count);
-        }, (err) => console.error('[Badges] chats error:', err));
-        return () => unsub();
+        let unsub: (() => void) | undefined;
+
+        (async () => {
+            const rtdb = await getRtdbInstance();
+            const { ref, onValue } = await import('firebase/database');
+
+            const chatsRef = ref(rtdb, 'chats');
+            unsub = onValue(chatsRef, (snapshot) => {
+                const data = snapshot.val() as unknown;
+                if (!data) { setUnreadChats(0); return; }
+                let count = 0;
+                if (typeof data === 'object' && data !== null) {
+                    Object.values(data as Record<string, unknown>).forEach((room) => {
+                        const info = (typeof room === 'object' && room !== null) ? (room as { info?: unknown }).info : undefined;
+                        const hasUnread = (typeof info === 'object' && info !== null) ? (info as { hasUnread?: unknown }).hasUnread : undefined;
+                        if (hasUnread) count++;
+                    });
+                }
+                setUnreadChats(count);
+            }, (err) => console.error('[Badges] chats error:', err));
+        })();
+
+        return () => unsub?.();
     }, []);
 
     // ── 4. Repairs: cho_tiep_nhan + da_dat_linh_kien (for badge and KTV logic) ──

@@ -65,7 +65,7 @@ const QUALITY_OPTIONS = ['Zin', 'Loại 1', 'Loại 2', 'Bóc máy'];
 export default function PartsPage() {
     const { user } = useAuth(); // Ensure authenticated
     const { data: products, loading } = useFirestoreCollection<Product>('products', [orderBy('createdAt', 'desc')]);
-    const parts = products.filter(p => p.category === 'Linh kiện');
+    const parts = products.filter(p => p.category === 'Linh kiện' || (p.categoryIds && p.categoryIds.length > 0 && p.categoryIds[0].startsWith('linh-kien')));
 
     const [searchQuery, setSearchQuery] = useState('');
     const [isModalOpen, setIsModalOpen] = useState(false);

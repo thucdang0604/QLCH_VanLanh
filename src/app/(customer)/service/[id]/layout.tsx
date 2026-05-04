@@ -81,4 +81,4 @@ export default function ServiceLayout({
 }
 
 
-export const revalidate = false;
+export const revalidate = 30;

@@ -49,3 +49,8 @@ compile.log
 
 # Firebase & Agents
 .firebase/
+
+# AI Cache
+.ai_cache
+AI_FILE_MAP.md
+FILE_DEPENDENCIES.md

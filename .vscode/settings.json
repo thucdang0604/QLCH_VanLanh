@@ -1,3 +1,4 @@
 {
-    "workbench.externalBrowser": "edge"
+    "workbench.externalBrowser": "edge",
+    "git.autofetch": false
 }

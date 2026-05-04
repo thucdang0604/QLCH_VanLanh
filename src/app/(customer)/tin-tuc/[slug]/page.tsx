@@ -7,7 +7,7 @@ import { SITE_URL } from "@/lib/constants";
 import ArticleClientParts from './ArticleClientParts';
 import { fetchArticleDetail } from '@/app/(customer)/_lib/server-queries';
 
-export const revalidate = false;
+export const revalidate = 30;
 
 function stripHtml(html: string): string {
     return (html || '')

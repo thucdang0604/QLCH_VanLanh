@@ -3,20 +3,19 @@
 import { useState, useEffect } from 'react';
 import { Loader2, Plus, X } from 'lucide-react';
 import { ImageIcon } from 'lucide-react';
-import { getDoc, doc } from 'firebase/firestore';
+import { getDoc, doc, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { generateSlug } from '@/lib/utils';
-import { addDocumentWithId, updateDocument } from '@/lib/useFirestore';
+import { addDocumentWithId, updateDocument, useFirestoreCollection } from '@/lib/useFirestore';
 import { triggerRevalidate } from '@/lib/revalidate';
 import { toastError } from '@/lib/toast';
 import Modal from '@/components/admin/Modal';
 import MediaManager from '@/components/admin/MediaManager';
+import CategoryTaxonomySelector from '@/components/admin/CategoryTaxonomySelector';
 import type { Product } from '@/lib/types';
 
 // ── Shared Constants ──
-const RETAIL_CATEGORIES = ['Điện thoại', 'Laptop', 'Tablet', 'Phụ kiện', 'Smartwatch', 'Âm thanh'];
 const ACCESSORY_SUBCATEGORIES = ['Ốp lưng', 'Sạc dự phòng', 'Cáp sạc', 'Cóc sạc', 'Tai nghe', 'Khác'];
-const BRANDS = ['Apple', 'Samsung', 'Xiaomi', 'OPPO', 'Vivo', 'Dell', 'HP', 'Lenovo', 'Asus', 'Sony'];
 const CONDITIONS = [
     { value: 'new', label: 'Mới 100%' },
     { value: 'like-new', label: 'Cũ 99%' },
@@ -49,6 +48,7 @@ interface RetailFormData {
     price_promo: number | '';
     category: string;
     subCategory: string;
+    categoryIds: string[];
     brand: string;
     description: string;
     stock: number | '';
@@ -62,6 +62,7 @@ interface ComponentFormData {
     name: string;
     price_original: number | '';
     price_promo: number | '';
+    categoryIds: string[];
     description: string;
     stock: number | '';
     status: string;
@@ -87,9 +88,10 @@ export default function UniversalProductModal({
         name: initialData?.name || '',
         price_original: initialData?.price_original || '' as number | '',
         price_promo: initialData?.price_promo || '' as number | '',
-        category: initialData?.category || RETAIL_CATEGORIES[0],
+        category: initialData?.category || '',
         subCategory: initialData?.subCategory || '',
-        brand: initialData?.brand || BRANDS[0],
+        categoryIds: initialData?.categoryIds || [],
+        brand: initialData?.brand || '',
         description: initialData?.description || '',
         stock: initialData?.stock ?? '' as number | '',
         status: initialData?.status || 'active',
@@ -102,6 +104,7 @@ export default function UniversalProductModal({
         name: initialData?.name || '',
         price_original: initialData?.price_original || '' as number | '',
         price_promo: initialData?.price_promo || '' as number | '',
+        categoryIds: initialData?.categoryIds || [],
         description: initialData?.description || '',
         stock: initialData?.stock ?? '' as number | '',
         status: initialData?.status || 'active',
@@ -115,15 +118,23 @@ export default function UniversalProductModal({
     const [mediaOpen, setMediaOpen] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
 
+    // ── Dynamic Data ──
+    const { data: categoriesData } = useFirestoreCollection<{ name: string }>('categories', [orderBy('name', 'asc')]);
+    const { data: brandsData } = useFirestoreCollection<{ name: string }>('brands', [orderBy('name', 'asc')]);
+    
+    const categories = categoriesData.map(c => c.name);
+    const brands = brandsData.map(b => b.name);
+
     useEffect(() => {
         if (isOpen) {
             setRetailForm({
                 name: initialData?.name || '',
                 price_original: initialData?.price_original || '' as number | '',
                 price_promo: initialData?.price_promo || '' as number | '',
-                category: initialData?.category || RETAIL_CATEGORIES[0],
+                category: initialData?.category || '',
                 subCategory: initialData?.subCategory || '',
-                brand: initialData?.brand || BRANDS[0],
+                categoryIds: initialData?.categoryIds || [],
+                brand: initialData?.brand || '',
                 description: initialData?.description || '',
                 stock: initialData?.stock ?? '' as number | '',
                 status: initialData?.status || 'active',
@@ -134,6 +145,7 @@ export default function UniversalProductModal({
                 name: initialData?.name || '',
                 price_original: initialData?.price_original || '' as number | '',
                 price_promo: initialData?.price_promo || '' as number | '',
+                categoryIds: initialData?.categoryIds || [],
                 description: initialData?.description || '',
                 stock: initialData?.stock ?? '' as number | '',
                 status: initialData?.status || 'active',
@@ -183,7 +195,8 @@ export default function UniversalProductModal({
             price_original: Number(form.price_original) || 0,
             price_promo: Number(form.price_promo) || 0,
             category: form.category,
-            subCategory: form.category === 'Phụ kiện' ? form.subCategory : '',
+            subCategory: form.subCategory,
+            categoryIds: form.categoryIds,
             brand: form.brand,
             description: form.description,
             stock: Number(form.stock) || 0,
@@ -217,6 +230,7 @@ export default function UniversalProductModal({
         const data: Record<string, unknown> = {
             name: form.name,
             category: 'Linh kiện',
+            categoryIds: form.categoryIds,
             brand: '',
             price_original: Number(form.price_original) || 0,
             price_promo: Number(form.price_promo) || 0,
@@ -353,6 +367,8 @@ export default function UniversalProductModal({
                         <RetailFields
                             form={retailForm}
                             setForm={setRetailForm}
+                            categories={categories}
+                            brands={brands}
                         />
                     ) : (
                         <ComponentFields
@@ -392,9 +408,13 @@ export default function UniversalProductModal({
 function RetailFields({
     form,
     setForm,
+    categories,
+    brands,
 }: {
     form: RetailFormData;
     setForm: React.Dispatch<React.SetStateAction<RetailFormData>>;
+    categories: string[];
+    brands: string[];
 }) {
     return (
         <>
@@ -438,50 +458,40 @@ function RetailFields({
                 </div>
             </div>
 
-            {/* Category & Brand */}
-            <div className="grid grid-cols-2 gap-4">
-                <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Danh mục</label>
-                    <select
-                        value={form.category}
-                        onChange={(e) => setForm(p => ({ ...p, category: e.target.value, subCategory: e.target.value === 'Phụ kiện' ? p.subCategory : '' }))}
-                        className="w-full h-11 px-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-shadow"
-                        aria-label="Danh mục"
-                        title="Danh mục"
-                    >
-                        {RETAIL_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                </div>
+            {/* Category */}
+            <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Danh mục</label>
+                <CategoryTaxonomySelector
+                    type="retail"
+                    value={form.categoryIds}
+                    onChange={(ids, cat, subCat) => {
+                        setForm(p => ({
+                            ...p,
+                            categoryIds: ids,
+                            category: cat,
+                            subCategory: subCat
+                        }));
+                    }}
+                />
+            </div>
+
+            {/* Brand */}
+            <div className="grid grid-cols-1 gap-4 mb-4">
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1.5">Thương hiệu</label>
                     <select
                         value={form.brand}
                         onChange={(e) => setForm(p => ({ ...p, brand: e.target.value }))}
+                        required
                         className="w-full h-11 px-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-shadow"
                         aria-label="Thương hiệu"
                         title="Thương hiệu"
                     >
-                        {BRANDS.map(b => <option key={b} value={b}>{b}</option>)}
+                        <option value="">-- Chọn thương hiệu --</option>
+                        {brands.map(b => <option key={b} value={b}>{b}</option>)}
                     </select>
                 </div>
             </div>
-
-            {/* Subcategory for Phụ kiện */}
-            {form.category === 'Phụ kiện' && (
-                <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Loại phụ kiện</label>
-                    <select
-                        value={form.subCategory}
-                        onChange={(e) => setForm(p => ({ ...p, subCategory: e.target.value }))}
-                        className="w-full h-11 px-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-shadow"
-                        aria-label="Loại phụ kiện"
-                        title="Loại phụ kiện"
-                    >
-                        <option value="">— Chọn loại —</option>
-                        {ACCESSORY_SUBCATEGORIES.map(sub => <option key={sub} value={sub}>{sub}</option>)}
-                    </select>
-                </div>
-            )}
 
             {/* Condition */}
             <div>
@@ -589,6 +599,21 @@ function ComponentFields({
                     required
                     className="w-full h-11 px-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-shadow"
                     placeholder="Vd: Màn hình iPhone 13 Pro Max"
+                />
+            </div>
+
+            {/* Category Taxonomy */}
+            <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Danh mục</label>
+                <CategoryTaxonomySelector
+                    type="component"
+                    value={form.categoryIds}
+                    onChange={(ids) => {
+                        setForm(p => ({
+                            ...p,
+                            categoryIds: ids
+                        }));
+                    }}
                 />
             </div>
 

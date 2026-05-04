@@ -74,7 +74,7 @@ export default function ChatWidget() {
 
         deferFn(() => {
             if (!isMounted) return;
-            unsubscribe = subscribeToMessages(roomId, (messageList) => {
+            subscribeToMessages(roomId, (messageList) => {
                 // Detect if last message is from staff (admin)
                 const lastMsg = messageList[messageList.length - 1];
                 if (lastMsg && lastMsg.senderType === 'admin' && lastMsg.senderId !== 'bot') {
@@ -97,7 +97,7 @@ export default function ChatWidget() {
                     const unread = adminMessages.filter(m => m.timestamp > lastReadTime).length;
                     setUnreadCount(unread);
                 }
-            });
+            }).then(unsub => { unsubscribe = unsub; });
         });
 
         return () => {
@@ -109,10 +109,11 @@ export default function ChatWidget() {
     // Read botActive status from Firebase
     useEffect(() => {
         if (!roomId) return;
-        const unsub = subscribeToRoomInfo(roomId, (info) => {
+        let unsub: (() => void) | undefined;
+        subscribeToRoomInfo(roomId, (info) => {
             setBotActive(info?.botActive !== false);
-        });
-        return () => unsub();
+        }).then(fn => { unsub = fn; });
+        return () => { if (unsub) unsub(); };
     }, [roomId]);
 
     // Cleanup timeout on unmount

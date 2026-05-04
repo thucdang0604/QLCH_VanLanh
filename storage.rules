@@ -10,6 +10,11 @@ service firebase.storage {
     match /images/{allPaths=**} {
       allow read: if true;
     }
+
+    // Allow public read for all media
+    match /media/{allPaths=**} {
+      allow read: if true;
+    }
     
     // Allow unauthenticated users to upload reviews (up to 5MB, must be image)
     match /images/reviews/{imageId} {

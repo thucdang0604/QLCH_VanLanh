@@ -18,7 +18,7 @@ const brandTabs = [
 // Skeleton card for loading state
 function SkeletonCard() {
     return (
-        <div className="bg-white rounded-xl overflow-hidden border border-gray-100 animate-pulse">
+        <div className="bg-white rounded-xl overflow-hidden border border-gray-100">
             <div className="aspect-square bg-gray-200 skeleton-wave" />
             <div className="p-3 space-y-2">
                 <div className="h-4 bg-gray-200 rounded w-full skeleton-wave" />

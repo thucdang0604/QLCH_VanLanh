@@ -301,6 +301,7 @@ export default function BookingSection() {
                                         <select
                                             value={formData.date}
                                             onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                                            aria-label="Chọn ngày hẹn"
                                             className="w-full pl-12 pr-4 py-3.5 bg-dark-light border border-gray-700 rounded-xl text-white appearance-none focus:outline-none focus:border-copper transition-colors"
                                             required
                                         >
@@ -315,6 +316,7 @@ export default function BookingSection() {
                                     <select
                                         value={formData.store}
                                         onChange={(e) => setFormData({ ...formData, store: e.target.value })}
+                                        aria-label="Chọn chi nhánh"
                                         className="w-full px-4 py-3.5 bg-dark-light border border-gray-700 rounded-xl text-white appearance-none focus:outline-none focus:border-copper transition-colors"
                                     >
                                         {branches.map((branch) => (

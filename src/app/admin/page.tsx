@@ -13,8 +13,7 @@ import {
     Loader2
 } from 'lucide-react';
 import { collection, query, where, getDocs, doc, getDoc, onSnapshot } from 'firebase/firestore';
-import { ref, onValue } from 'firebase/database';
-import { db, rtdb } from '@/lib/firebase';
+import { db, getRtdbInstance } from '@/lib/firebase';
 import type { Order, RepairTicket } from '@/lib/types';
 
 interface DashboardStats {
@@ -133,19 +132,24 @@ export default function AdminDashboard() {
 
         fetchTodayData();
 
-        // 4. Listen to Realtime DB for Online Users
-        const onlineUsersRef = ref(rtdb, 'online_users');
-        const unsubscribeOnline = onValue(onlineUsersRef, (snapshot) => {
-            const data = snapshot.val();
-            const count = data ? Object.keys(data).length : 0;
-            if (isMounted) {
-                setStats(prev => ({ ...prev, onlineUsers: count }));
-            }
-        });
+        // 4. Listen to Realtime DB for Online Users (lazy loaded)
+        let unsubscribeOnline: (() => void) | undefined;
+        (async () => {
+            const rtdb = await getRtdbInstance();
+            const { ref, onValue } = await import('firebase/database');
+            const onlineUsersRef = ref(rtdb, 'online_users');
+            unsubscribeOnline = onValue(onlineUsersRef, (snapshot) => {
+                const data = snapshot.val();
+                const count = data ? Object.keys(data).length : 0;
+                if (isMounted) {
+                    setStats(prev => ({ ...prev, onlineUsers: count }));
+                }
+            });
+        })();
 
         return () => {
             isMounted = false;
-            unsubscribeOnline();
+            unsubscribeOnline?.();
         };
     }, [user]);
 

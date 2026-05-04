@@ -3,89 +3,102 @@
 Đây là bản đồ file của dự án. AI (như Cursor/Antigravity) sử dụng file này để hiểu context.
 
 ### `src/lib/firebase.ts` (lib)
-- **Exports**: variable db, variable rtdb, variable auth, variable storage, variable default
-- **Imported by**: [lib/AuthContext, lib/commissionUtils, lib/ConfigContext, lib/realtimedb, lib/storage, lib/useAdminBadges, lib/useFirestore, lib/usePresence, lib/warrantyUtils, page.client, admin/page, c/admin/MediaManager, c/admin/NotificationBell, c/admin/UniversalProductModal, c/home/BookingSection, c/home/FlashSale, c/home/FloatingReviews, c/home/ServiceBlock, tracking/page, admin/appointments/page, admin/articles/page, admin/commissions/page, admin/inventory/page, admin/login/page, admin/orders/page, admin/parts/page, admin/pos/page, admin/repairs/page, admin/revenue/page, admin/reviews/page, admin/staff/page, admin/technician/page, api/ai/route, api/appointments/route, api/checkout/route, api/products/route, api/reviews/route, api/seed-config/route, tin-tuc/[slug]/ArticleClientParts, admin/inventory/stock/page, admin/settings/receipt/page, admin/settings/repairs/page] (42 direct, 66 transitive)
+- **Exports**: function getAuthInstance, function getRtdbInstance, function getStorageInstance, variable db, variable default
+- **Imported by**: [lib/AuthContext, lib/commissionUtils, lib/ConfigContext, lib/realtimedb, lib/storage, lib/useAdminBadges, lib/useFirestore, lib/usePresence, lib/warrantyUtils, admin/page, c/admin/MediaManager, c/admin/NotificationBell, c/admin/UniversalProductModal, c/home/ArticleBlock, c/home/BookingSection, c/home/FlashSale, c/home/FloatingReviews, c/home/ServiceBlock, c/home/SuggestedSection, tracking/page, admin/appointments/page, admin/articles/page, admin/commissions/page, admin/inventory/page, admin/login/page, admin/orders/page, admin/parts/page, admin/pos/page, admin/repairs/page, admin/revenue/page, admin/reviews/page, admin/staff/page, admin/technician/page, api/ai/route, api/appointments/route, api/checkout/route, api/products/route, api/reviews/route, api/seed-admin/route, api/seed-config/route, tin-tuc/[slug]/ArticleClientParts, admin/inventory/stock/page, admin/settings/receipt/page, admin/settings/repairs/page] (44 direct, 72 transitive)
 
 ### `src/lib/types.ts` (lib)
-- **Exports**: interface User, type FirestoreTimestamp, type FirestoreWriteTimestamp, type FirestoreDateValue, interface ProductSpecs, interface Product, interface Service, interface OrderItem, interface CustomerInfo, interface Order, interface Article, interface ArticleComment, interface ChatMessage, interface ChatSession, type RepairStatus, type PaymentStatus, interface WorkflowNode, interface TrackingGroup, interface StatusTimelineEntry, interface DeviceChecklist, interface RepairTicket, interface ImportReceiptItem, interface Review, interface ImportReceipt, interface CommissionRule, interface Commission, interface WarrantyRule, interface Expense
-- **Imported by**: [lib/commissionUtils, lib/useAdminBadges, lib/warrantyUtils, lib/workflowFeatures, admin/page, c/admin/MediaManager, c/admin/PrintableReceipt, c/admin/PrintableRepairInvoice, c/admin/UniversalProductModal, c/home/BookingSection, c/home/FloatingReviews, tracking/page, admin/appointments/page, admin/articles/page, admin/commissions/page, admin/inventory/page, admin/orders/page, admin/parts/page, admin/pos/page, admin/products/page, admin/repairs/page, admin/revenue/page, admin/reviews/page, admin/services/page, admin/technician/page, tin-tuc/[slug]/ArticleClientParts, admin/inventory/stock/page, admin/settings/repairs/page] (28 direct, 37 transitive)
-
-### `src/lib/constants.ts` (lib)
-- **Exports**: variable SITE_URL, variable RETAIL_CATEGORIES, type RetailCategory
-- **Imported by**: [layout, robots, sitemap, page.client, cart/page, checkout/page, dao-tao-hoc-vien/page.client, rate/page, search/page, tin-tuc/page.client, tracking/page, admin/products/page, category/[slug]/CategoryClient, category/[slug]/layout, category/[slug]/page, info/chinh-sach-bao-hanh/page, info/chinh-sach-bao-mat/page, info/chinh-sach-doi-tra/page, info/chinh-sach-mua-hang/page, info/gioi-thieu/page, info/tra-gop/page, product/[id]/layout, product/[id]/page, service/[id]/layout, service/[id]/page, tin-tuc/[slug]/layout, tin-tuc/[slug]/page] (27 direct, 30 transitive)
+- **Exports**: interface User, type FirestoreTimestamp, type FirestoreWriteTimestamp, type FirestoreDateValue, interface Category, interface TaxonomyNode, interface Brand, interface ProductSpecs, interface Product, interface Service, interface OrderItem, interface CustomerInfo, interface Order, interface Article, interface ArticleComment, interface ChatMessage, interface ChatSession, type RepairStatus, type PaymentStatus, interface WorkflowNode, interface TrackingGroup, interface StatusTimelineEntry, interface DeviceChecklist, interface RepairTicket, interface ImportReceiptItem, interface Review, interface ImportReceipt, interface CommissionRule, interface Commission, interface WarrantyRule, interface Expense
+- **Imported by**: [lib/commissionUtils, lib/useAdminBadges, lib/warrantyUtils, lib/workflowFeatures, admin/page, c/admin/MediaManager, c/admin/PrintableReceipt, c/admin/PrintableRepairInvoice, c/admin/UniversalProductModal, c/home/BookingSection, c/home/FloatingReviews, tracking/page, admin/appointments/page, admin/articles/page, admin/commissions/page, admin/inventory/page, admin/orders/page, admin/parts/page, admin/pos/page, admin/products/page, admin/repairs/page, admin/revenue/page, admin/reviews/page, admin/services/page, admin/settings/CategoriesTab, admin/settings/NavigationTab, admin/technician/page, tin-tuc/[slug]/ArticleClientParts, admin/inventory/stock/page, admin/settings/repairs/page] (30 direct, 40 transitive)
 
 ### `src/lib/ConfigContext.tsx` (lib)
 - **Exports**: function ConfigProvider, function ServerConfigProvider, function useConfig, interface HeroBanner, interface BackgroundConfig, interface StoreBranch, interface SectionBackground, interface HomeSectionItem, interface ContactInfo, interface GeofenceConfig, interface SiteConfig, variable DEFAULT_CONFIG
-- **Imported by**: [not-found, c/ChatWidget, layout.shell, layout, page.client, admin/layout, c/home/BookingSection, c/home/HeroSection, c/layout/Footer, c/layout/Header, c/layout/MobileBottomNav, dao-tao-hoc-vien/page.client, tracking/page, admin/appearance/page, admin/appointments/page, admin/login/page, admin/orders/page, admin/pos/page, admin/repairs/page, admin/settings/page, api/seed-config/route, service/[id]/ServiceDetailClient, tin-tuc/[slug]/ArticleClientParts] (23 direct, 27 transitive)
+- **Imported by**: [not-found, c/ChatWidget, layout.shell, layout, page.client, admin/layout, c/admin/CategoryTaxonomySelector, c/home/BookingSection, c/home/CategoriesSection, c/home/HeroSection, c/layout/Footer, c/layout/Header, c/layout/MobileBottomNav, dao-tao-hoc-vien/page.client, tracking/page, admin/appearance/page, admin/appointments/page, admin/login/page, admin/orders/page, admin/pos/page, admin/products/page, admin/repairs/page, admin/services/page, admin/settings/CategoriesTab, admin/settings/NavigationTab, admin/settings/page, api/seed-config/route, service/[id]/ServiceDetailClient, tin-tuc/[slug]/ArticleClientParts] (29 direct, 36 transitive)
 - **Imports**: [lib/firebase, lib/revalidate, lib/config-defaults]
+
+### `src/lib/constants.ts` (lib)
+- **Exports**: variable SITE_URL, variable RETAIL_CATEGORIES, type RetailCategory
+- **Imported by**: [layout, robots, sitemap, page.client, cart/page, checkout/page, dao-tao-hoc-vien/page.client, rate/page, search/page, tin-tuc/page.client, tracking/page, category/[...slug]/layout, category/[...slug]/page, info/chinh-sach-bao-hanh/page, info/chinh-sach-bao-mat/page, info/chinh-sach-doi-tra/page, info/chinh-sach-mua-hang/page, info/gioi-thieu/page, info/tra-gop/page, product/[id]/layout, product/[id]/page, service/[id]/layout, service/[id]/page, tin-tuc/[slug]/layout, tin-tuc/[slug]/page] (25 direct, 28 transitive)
+
+### `src/lib/toast.ts` (lib)
+- **Exports**: function toastSuccess, function toastError, function toastWarning
+- **Imported by**: [admin/layout, c/admin/UniversalProductModal, admin/appointments/page, admin/articles/page, admin/commissions/page, admin/inventory/page, admin/parts/page, admin/pos/page, admin/products/page, admin/repairs/page, admin/reviews/page, admin/services/page, admin/settings/CategoriesTab, admin/staff/page, admin/technician/page, admin/settings/receipt/page, admin/settings/repairs/page] (17 direct, 18 transitive)
 
 ### `src/lib/AuthContext.tsx` (lib)
 - **Exports**: function AuthProvider, function useAuth, interface AppUser
 - **Imported by**: [layout, c/AuthModal, c/ChatWidget, admin/layout, admin/page, c/layout/MobileBottomNav, admin/commissions/page, admin/inventory/page, admin/login/page, admin/parts/page, admin/pos/page, admin/repairs/page, admin/revenue/page, admin/reviews/page, admin/staff/page, admin/technician/page] (16 direct, 19 transitive)
 - **Imports**: [lib/firebase]
 
-### `src/lib/toast.ts` (lib)
-- **Exports**: function toastSuccess, function toastError, function toastWarning
-- **Imported by**: [admin/layout, c/admin/UniversalProductModal, admin/appointments/page, admin/articles/page, admin/commissions/page, admin/inventory/page, admin/parts/page, admin/pos/page, admin/products/page, admin/repairs/page, admin/reviews/page, admin/services/page, admin/staff/page, admin/technician/page, admin/settings/receipt/page, admin/settings/repairs/page] (16 direct, 16 transitive)
-
 ### `src/lib/firebaseAdmin.ts` (lib)
 - **Exports**: function isAdminAvailable, function getAdminApp, function getAdminAuth, function getAdminDb
-- **Imported by**: [layout, sitemap, lib/apiAuth, layout, page, _lib/server-queries, flash-sale/page, reviews/page, api/search/route, product/[id]/layout, service/[id]/layout, tin-tuc/[slug]/layout, api/dev/seed-data/route] (13 direct, 21 transitive)
-
-### `src/lib/useClientPagination.ts` (hook)
-- **Exports**: function useClientPagination, variable PAGE_SIZE_OPTIONS, type PageSize
-- **Imported by**: [c/admin/PaginationBar, tin-tuc/page.client, admin/appointments/page, admin/articles/page, admin/commissions/page, admin/orders/page, admin/parts/page, admin/products/page, admin/repairs/page, admin/reviews/page, admin/services/page, category/[slug]/CategoryClient, admin/inventory/stock/page] (13 direct, 15 transitive)
+- **Imported by**: [layout, sitemap, lib/apiAuth, layout, page, _lib/server-queries, flash-sale/page, reviews/page, api/search/route, product/[id]/layout, service/[id]/layout, tin-tuc/[slug]/layout, api/admin/seed-taxonomy/route, api/dev/migrate-prices/route, api/dev/seed-data/route] (15 direct, 24 transitive)
 
 ### `src/components/admin/Modal.tsx` (component)
 - **Exports**: function default
-- **Imported by**: [c/admin/UniversalProductModal, admin/articles/page, admin/commissions/page, admin/inventory/page, admin/orders/page, admin/parts/page, admin/pos/page, admin/repairs/page, admin/revenue/page, admin/services/page, admin/staff/page, admin/technician/page, admin/settings/repairs/page] (13 direct, 14 transitive)
+- **Imported by**: [c/admin/UniversalProductModal, admin/articles/page, admin/commissions/page, admin/inventory/page, admin/orders/page, admin/parts/page, admin/pos/page, admin/repairs/page, admin/revenue/page, admin/services/page, admin/settings/CategoriesTab, admin/staff/page, admin/technician/page, admin/settings/repairs/page] (14 direct, 16 transitive)
+
+### `src/lib/useClientPagination.ts` (hook)
+- **Exports**: function useClientPagination, variable PAGE_SIZE_OPTIONS, type PageSize
+- **Imported by**: [c/admin/PaginationBar, tin-tuc/page.client, admin/appointments/page, admin/articles/page, admin/commissions/page, admin/orders/page, admin/parts/page, admin/products/page, admin/repairs/page, admin/reviews/page, admin/services/page, category/[...slug]/CategoryClient, admin/inventory/stock/page] (13 direct, 15 transitive)
 
 ### `src/components/admin/PaginationBar.tsx` (component)
 - **Exports**: function default
-- **Imported by**: [tin-tuc/page.client, admin/appointments/page, admin/articles/page, admin/commissions/page, admin/orders/page, admin/parts/page, admin/products/page, admin/repairs/page, admin/reviews/page, admin/services/page, category/[slug]/CategoryClient, admin/inventory/stock/page] (12 direct, 14 transitive)
+- **Imported by**: [tin-tuc/page.client, admin/appointments/page, admin/articles/page, admin/commissions/page, admin/orders/page, admin/parts/page, admin/products/page, admin/repairs/page, admin/reviews/page, admin/services/page, category/[...slug]/CategoryClient, admin/inventory/stock/page] (12 direct, 14 transitive)
 - **Imports**: [lib/useClientPagination]
+
+### `src/app/(customer)/_lib/server-queries.ts` (other)
+- **Exports**: variable revalidate, variable fetchDynamicCategories, variable fetchTaxonomyConfig, variable fetchNavConfig, variable fetchCategoryItems, variable fetchArticles, variable fetchDetailItem, variable fetchArticleDetail, variable fetchFlashSaleProducts, variable fetchServices
+- **Imported by**: [sitemap, flash-sale/page, tin-tuc/page, category/[...slug]/layout, category/[...slug]/page, product/[id]/page, service/[id]/page, tin-tuc/[slug]/page] (8 direct, 8 transitive)
+- **Imports**: [lib/firebaseAdmin]
 
 ### `src/lib/CartContext.tsx` (lib)
 - **Exports**: function CartProvider, function useCart, interface CartItem
 - **Imported by**: [not-found, c/CartDrawer, layout.shell, c/layout/Header, cart/page, checkout/page, product/[id]/ProductDetailClient] (7 direct, 9 transitive)
 
-### `src/lib/storage.ts` (lib)
-- **Exports**: function uploadMedia, function uploadImage, function uploadMultipleImages, function deleteImage, function listImagesInFolder, function cleanBrokenMedia
-- **Imported by**: [c/admin/MediaManager, rate/page, tracking/page, admin/products/page, admin/repairs/page, admin/services/page] (6 direct, 13 transitive)
-- **Imports**: [lib/firebase]
+### `src/lib/config-defaults.ts` (lib)
+- **Exports**: interface HeroBanner, interface BackgroundConfig, interface StoreBranch, interface SectionBackground, interface HomeSectionItem, interface ContactInfo, interface GeofenceConfig, interface NavItem, interface SidebarMenuItem, interface FooterServiceLink, interface HomeServiceCategory, interface SiteConfig, variable DEFAULT_CONFIG
+- **Imported by**: [lib/ConfigContext, layout, page.client, page, c/home/CategoriesSection, admin/settings/NavigationTab, api/admin/seed-taxonomy/route] (7 direct, 38 transitive)
 
-### `src/app/(customer)/_lib/server-queries.ts` (lib)
-- **Exports**: variable revalidate, variable fetchCategoryItems, variable fetchArticles, variable fetchDetailItem, variable fetchArticleDetail, variable fetchFlashSaleProducts, variable fetchServices
-- **Imported by**: [flash-sale/page, tin-tuc/page, category/[slug]/page, product/[id]/page, service/[id]/page, tin-tuc/[slug]/page] (6 direct, 6 transitive)
-- **Imports**: [lib/firebaseAdmin]
-
-### `src/lib/revalidate.ts` (lib)
-- **Exports**: function triggerRevalidate
-- **Imported by**: [lib/ConfigContext, c/admin/UniversalProductModal, admin/articles/page, admin/products/page, admin/services/page] (5 direct, 34 transitive)
-
-### `src/lib/useFirestore.ts` (hook)
-- **Exports**: function useFirestoreCollection, function useProducts, function useFlashSaleProducts, function useServices, function useArticles, function useOrders, function addDocument, function addDocumentWithId, function updateDocument, function deleteDocument, function subscribeNewsletter
-- **Imported by**: [c/admin/UniversalProductModal, c/home/ArticleBlock, admin/parts/page, admin/products/page, admin/services/page] (5 direct, 9 transitive)
-- **Imports**: [lib/firebase]
+### `src/lib/utils.ts` (lib)
+- **Exports**: function generateSlug, function getCategoryPath, function collectAllNodeIds
+- **Imported by**: [c/admin/UniversalProductModal, admin/articles/page, admin/parts/page, admin/products/page, admin/services/page, admin/settings/CategoriesTab, admin/settings/NavigationTab] (7 direct, 10 transitive)
 
 ### `src/components/admin/MediaManager.tsx` (component)
 - **Exports**: function default, interface MediaItem, variable MEDIA_FOLDERS
-- **Imported by**: [c/admin/UniversalProductModal, admin/appearance/page, admin/articles/page, admin/services/page, admin/settings/receipt/page] (5 direct, 9 transitive)
+- **Imported by**: [c/admin/UniversalProductModal, admin/appearance/page, admin/articles/page, admin/services/page, admin/settings/CategoriesTab, admin/settings/NavigationTab, admin/settings/receipt/page] (7 direct, 12 transitive)
 - **Imports**: [lib/firebase, lib/types, lib/imageOptimizer, lib/validateImage, lib/storage]
+
+### `src/lib/storage.ts` (lib)
+- **Exports**: function uploadMedia, function uploadImage, function uploadMultipleImages, function deleteImage, function listImagesInFolder, function cleanBrokenMedia
+- **Imported by**: [c/admin/MediaManager, rate/page, tracking/page, admin/products/page, admin/repairs/page, admin/services/page] (6 direct, 16 transitive)
+- **Imports**: [lib/firebase]
+
+### `src/lib/revalidate.ts` (lib)
+- **Exports**: function triggerRevalidate
+- **Imported by**: [lib/ConfigContext, c/admin/UniversalProductModal, admin/articles/page, admin/products/page, admin/services/page] (5 direct, 38 transitive)
+
+### `src/lib/useFirestore.ts` (hook)
+- **Exports**: function useFirestoreCollection, function useProducts, function useFlashSaleProducts, function useServices, function useArticles, function useOrders, function addDocument, function addDocumentWithId, function updateDocument, function deleteDocument, function subscribeNewsletter
+- **Imported by**: [c/admin/UniversalProductModal, admin/parts/page, admin/products/page, admin/services/page, admin/settings/CategoriesTab] (5 direct, 8 transitive)
+- **Imports**: [lib/firebase]
 
 ### `src/lib/workflowFeatures.ts` (lib)
 - **Exports**: function hasFeature, function getActiveFeatures, function isChecklistComplete, function isYouTubeUrl, function getYouTubeEmbedUrl, function areAllPartsReady, interface WorkflowFeature, variable WORKFLOW_FEATURES, variable CHECKLIST_KEYS, variable CHECKLIST_LABELS
 - **Imported by**: [tracking/page, admin/repairs/page, admin/technician/page, admin/settings/repairs/page] (4 direct, 4 transitive)
 - **Imports**: [lib/types]
 
+### `src/components/admin/CategoryTaxonomySelector.tsx` (component)
+- **Exports**: function default
+- **Imported by**: [c/admin/UniversalProductModal, admin/products/page, admin/repairs/page, admin/services/page] (4 direct, 7 transitive)
+- **Imports**: [lib/ConfigContext]
+
 ### `src/components/admin/UniversalProductModal.tsx` (component)
 - **Exports**: function default
 - **Imported by**: [admin/inventory/page, admin/parts/page, admin/pos/page, admin/products/page] (4 direct, 4 transitive)
-- **Imports**: [lib/firebase, lib/utils, lib/useFirestore, lib/revalidate, lib/toast, c/admin/Modal, c/admin/MediaManager, lib/types]
+- **Imports**: [lib/firebase, lib/utils, lib/useFirestore, lib/revalidate, lib/toast, c/admin/Modal, c/admin/MediaManager, c/admin/CategoryTaxonomySelector, lib/types]
 
 ### `src/components/home/ServiceCard.tsx` (component)
 - **Exports**: function default
-- **Imported by**: [page.client, c/home/FlashSale, search/page, category/[slug]/CategoryClient] (4 direct, 6 transitive)
+- **Imported by**: [c/home/FlashSale, c/home/SuggestedSection, search/page, category/[...slug]/CategoryClient] (4 direct, 7 transitive)
 
 ### `src/components/VideoEmbed.tsx` (component)
 - **Exports**: function default
@@ -96,17 +109,13 @@
 - **Imported by**: [admin/pos/page, admin/repairs/page, admin/technician/page] (3 direct, 3 transitive)
 - **Imports**: [lib/firebase, lib/types]
 
-### `src/lib/config-defaults.ts` (lib)
-- **Exports**: interface HeroBanner, interface BackgroundConfig, interface StoreBranch, interface SectionBackground, interface HomeSectionItem, interface ContactInfo, interface GeofenceConfig, interface SiteConfig, variable DEFAULT_CONFIG
-- **Imported by**: [lib/ConfigContext, layout, page] (3 direct, 28 transitive)
-
-### `src/lib/utils.ts` (lib)
-- **Exports**: function generateSlug
-- **Imported by**: [c/admin/UniversalProductModal, admin/articles/page, admin/parts/page] (3 direct, 6 transitive)
+### `src/lib/icon-map.ts` (lib)
+- **Exports**: function getIcon, variable ICON_MAP, variable ICON_NAMES
+- **Imported by**: [c/home/HeroSection, c/layout/Header, admin/settings/NavigationTab] (3 direct, 9 transitive)
 
 ### `src/components/ui/Skeleton.tsx` (component)
 - **Exports**: function Skeleton, function ProductCardSkeleton, function BannerSkeleton, function ServiceCardSkeleton, function BrandLogoSkeleton, function ArticleCardSkeleton, function TableRowSkeleton, function ChatMessageSkeleton
-- **Imported by**: [c/home/ServiceBlock, c/ui/LazyImage, category/[slug]/CategoryClient] (3 direct, 4 transitive)
+- **Imported by**: [c/home/ServiceBlock, c/ui/LazyImage, category/[...slug]/CategoryClient] (3 direct, 4 transitive)
 
 ### `src/lib/apiAuth.ts` (lib)
 - **Exports**: function verifyUser, function requireAdmin, type VerifiedUser
@@ -115,7 +124,7 @@
 
 ### `src/lib/imageOptimizer.ts` (lib)
 - **Exports**: function optimizeImage
-- **Imported by**: [c/admin/MediaManager, admin/articles/page] (2 direct, 10 transitive)
+- **Imported by**: [c/admin/MediaManager, admin/articles/page] (2 direct, 13 transitive)
 
 ### `src/lib/realtimedb.ts` (lib)
 - **Exports**: function subscribeToRooms, function subscribeToRoomInfo, function subscribeToMessages, function sendMessage, function updateRoomInfo, function handleAIAutoReply, interface ChatRoomInfo, interface ChatMessage, interface GeminiHistoryItem
@@ -145,7 +154,7 @@
 ### `src/components/layout/Header.tsx` (component)
 - **Exports**: function default
 - **Imported by**: [not-found, layout.shell] (2 direct, 3 transitive)
-- **Imports**: [lib/ConfigContext, lib/CartContext]
+- **Imports**: [lib/ConfigContext, lib/CartContext, lib/icon-map]
 
 ### `src/components/layout/MobileBottomNav.tsx` (component)
 - **Exports**: function default
@@ -166,6 +175,10 @@
 - **Exports**: function chatWithGemini, function generateContent, variable geminiModel
 - **Imported by**: [api/ai/route] (1 direct, 1 transitive)
 
+### `src/lib/imageLoader.ts` (lib)
+- **Exports**: function default
+- **Imported by**: [layout.shell] (1 direct, 2 transitive)
+
 ### `src/lib/ollama.ts` (lib)
 - **Exports**: function generateContentStream, function generateContent
 - **Imported by**: [api/admin/ai/route] (1 direct, 1 transitive)
@@ -177,20 +190,20 @@
 
 ### `src/lib/validateImage.ts` (lib)
 - **Exports**: function validateImageFile, variable MAX_FILE_SIZE, variable ALLOWED_TYPES
-- **Imported by**: [c/admin/MediaManager] (1 direct, 10 transitive)
+- **Imported by**: [c/admin/MediaManager] (1 direct, 13 transitive)
 
 ### `src/app/(customer)/layout.shell.tsx` (other)
 - **Exports**: function default
 - **Imported by**: [layout] (1 direct, 1 transitive)
-- **Imports**: [c/layout/Header, c/layout/Footer, c/layout/MobileBottomNav, lib/CartContext, lib/ConfigContext, lib/usePresence, c/CartDrawer, c/ChatWidget, c/home/FloatingReviews]
+- **Imports**: [c/layout/Header, lib/CartContext, lib/ConfigContext, lib/usePresence, lib/imageLoader, c/layout/MobileBottomNav, c/layout/Footer, c/CartDrawer, c/ChatWidget, c/home/FloatingReviews]
 
 ### `src/app/(customer)/page.client.tsx` (other)
 - **Exports**: function default
 - **Imported by**: [page] (1 direct, 1 transitive)
-- **Imports**: [lib/firebase, lib/ConfigContext, c/home/HeroSection, c/home/ServiceCard, lib/constants, page, c/home/FlashSale, c/home/BookingSection, c/home/ArticleBlock]
+- **Imports**: [lib/ConfigContext, c/home/HeroSection, lib/constants, page, lib/config-defaults, c/home/FlashSale, c/home/BookingSection, c/home/ArticleBlock, c/home/SuggestedSection, c/home/CategoriesSection]
 
 ### `src/app/(customer)/page.tsx` (page)
-- **Exports**: function default, variable revalidate, interface SSRHomeConfig
+- **Exports**: function default, variable dynamic, interface SSRHomeConfig
 - **Imported by**: [page.client] (1 direct, 1 transitive)
 - **Imports**: [page.client, lib/firebaseAdmin, lib/config-defaults]
 
@@ -207,12 +220,17 @@
 ### `src/components/home/ArticleBlock.tsx` (component)
 - **Exports**: function default
 - **Imported by**: [page.client] (1 direct, 2 transitive)
-- **Imports**: [lib/useFirestore]
+- **Imports**: [lib/firebase]
 
 ### `src/components/home/BookingSection.tsx` (component)
 - **Exports**: function default
 - **Imported by**: [page.client] (1 direct, 2 transitive)
 - **Imports**: [lib/firebase, lib/ConfigContext, lib/types]
+
+### `src/components/home/CategoriesSection.tsx` (component)
+- **Exports**: function default
+- **Imported by**: [page.client] (1 direct, 2 transitive)
+- **Imports**: [lib/ConfigContext, lib/config-defaults]
 
 ### `src/components/home/FlashSale.tsx` (component)
 - **Exports**: function default
@@ -227,7 +245,12 @@
 ### `src/components/home/HeroSection.tsx` (component)
 - **Exports**: function default
 - **Imported by**: [page.client] (1 direct, 2 transitive)
-- **Imports**: [lib/ConfigContext]
+- **Imports**: [lib/ConfigContext, lib/icon-map]
+
+### `src/components/home/SuggestedSection.tsx` (component)
+- **Exports**: function default
+- **Imported by**: [page.client] (1 direct, 2 transitive)
+- **Imports**: [lib/firebase, c/home/ServiceCard]
 
 ### `src/app/(customer)/dao-tao-hoc-vien/page.client.tsx` (other)
 - **Exports**: function default
@@ -238,7 +261,7 @@
 - **Exports**: function default
 - **Imported by**: [flash-sale/page] (1 direct, 1 transitive)
 
-### `src/app/(customer)/reviews/ReviewsClient.tsx` (view)
+### `src/app/(customer)/reviews/ReviewsClient.tsx` (other)
 - **Exports**: function default
 - **Imported by**: [reviews/page] (1 direct, 1 transitive)
 
@@ -247,10 +270,20 @@
 - **Imported by**: [tin-tuc/page] (1 direct, 1 transitive)
 - **Imports**: [lib/useClientPagination, c/admin/PaginationBar, lib/constants]
 
-### `src/app/(customer)/category/[slug]/CategoryClient.tsx` (other)
+### `src/app/admin/settings/CategoriesTab.tsx` (other)
 - **Exports**: function default
-- **Imported by**: [category/[slug]/page] (1 direct, 1 transitive)
-- **Imports**: [c/ui/Skeleton, c/home/ServiceCard, lib/useClientPagination, c/admin/PaginationBar, lib/constants]
+- **Imported by**: [admin/settings/page] (1 direct, 1 transitive)
+- **Imports**: [lib/useFirestore, lib/types, lib/ConfigContext, c/admin/Modal, c/admin/MediaManager, lib/utils, lib/toast]
+
+### `src/app/admin/settings/NavigationTab.tsx` (other)
+- **Exports**: function default
+- **Imported by**: [admin/settings/page] (1 direct, 1 transitive)
+- **Imports**: [lib/ConfigContext, lib/config-defaults, lib/types, lib/icon-map, lib/utils, c/admin/MediaManager]
+
+### `src/app/(customer)/category/[...slug]/CategoryClient.tsx` (other)
+- **Exports**: function default
+- **Imported by**: [category/[...slug]/page] (1 direct, 1 transitive)
+- **Imports**: [c/ui/Skeleton, c/home/ServiceCard, lib/useClientPagination, c/admin/PaginationBar]
 
 ### `src/app/(customer)/product/[id]/ProductDetailClient.tsx` (other)
 - **Exports**: function default
@@ -290,17 +323,14 @@
 
 ### `src/app/sitemap.ts` (other)
 - **Exports**: function default, variable revalidate
-- **Imports**: [lib/firebaseAdmin, lib/constants]
+- **Imports**: [lib/firebaseAdmin, lib/constants, _lib/server-queries]
 
 ### `src/components/AuthModal.tsx` (component)
 - **Exports**: function default
 - **Imports**: [lib/AuthContext]
 
-### `src/lib/imageLoader.ts` (lib)
-- **Exports**: function default
-
 ### `src/app/(customer)/layout.tsx` (layout)
-- **Exports**: function default
+- **Exports**: function default, variable revalidate
 - **Imports**: [lib/firebaseAdmin, lib/ConfigContext, lib/config-defaults, layout.shell]
 
 ### `src/app/admin/layout.tsx` (layout)
@@ -406,11 +436,11 @@
 
 ### `src/app/admin/products/page.tsx` (page)
 - **Exports**: function default
-- **Imports**: [lib/useFirestore, lib/storage, lib/types, lib/toast, lib/useClientPagination, c/admin/PaginationBar, lib/revalidate, c/admin/UniversalProductModal, lib/constants]
+- **Imports**: [lib/useFirestore, lib/storage, lib/toast, lib/useClientPagination, c/admin/PaginationBar, lib/revalidate, c/admin/UniversalProductModal, c/admin/CategoryTaxonomySelector, lib/types, lib/ConfigContext, lib/utils]
 
 ### `src/app/admin/repairs/page.tsx` (page)
 - **Exports**: function default
-- **Imports**: [lib/firebase, lib/AuthContext, lib/ConfigContext, lib/types, lib/commissionUtils, lib/storage, lib/workflowFeatures, c/admin/PrintableReceipt, c/admin/PrintableRepairInvoice, lib/toast, lib/warrantyUtils, lib/useClientPagination, c/admin/PaginationBar, c/admin/Modal]
+- **Imports**: [lib/firebase, lib/AuthContext, lib/ConfigContext, lib/types, lib/commissionUtils, lib/storage, lib/workflowFeatures, c/admin/PrintableReceipt, c/admin/PrintableRepairInvoice, lib/toast, lib/warrantyUtils, lib/useClientPagination, c/admin/PaginationBar, c/admin/Modal, c/admin/CategoryTaxonomySelector]
 
 ### `src/app/admin/revenue/page.tsx` (page)
 - **Exports**: function default
@@ -422,11 +452,11 @@
 
 ### `src/app/admin/services/page.tsx` (page)
 - **Exports**: function default
-- **Imports**: [lib/useFirestore, lib/storage, lib/types, lib/toast, lib/useClientPagination, c/admin/PaginationBar, lib/revalidate, c/admin/Modal, c/admin/MediaManager]
+- **Imports**: [lib/useFirestore, lib/storage, lib/utils, lib/types, lib/toast, lib/useClientPagination, c/admin/PaginationBar, lib/revalidate, c/admin/Modal, c/admin/MediaManager, c/admin/CategoryTaxonomySelector, lib/ConfigContext]
 
 ### `src/app/admin/settings/page.tsx` (page)
 - **Exports**: function default
-- **Imports**: [lib/ConfigContext]
+- **Imports**: [lib/ConfigContext, admin/settings/CategoriesTab, admin/settings/NavigationTab]
 
 ### `src/app/admin/staff/page.tsx` (page)
 - **Exports**: function default
@@ -452,7 +482,10 @@
 - **Exports**: function GET
 - **Imports**: [lib/firebase]
 
-### `src/app/api/reviews/route.ts` (view)
+### `src/app/api/revalidate/route.ts` (api)
+- **Exports**: function POST, function GET
+
+### `src/app/api/reviews/route.ts` (api)
 - **Exports**: function GET, function POST
 - **Imports**: [lib/firebase]
 
@@ -460,17 +493,21 @@
 - **Exports**: function GET
 - **Imports**: [lib/firebaseAdmin]
 
+### `src/app/api/seed-admin/route.ts` (api)
+- **Exports**: function POST, function GET
+- **Imports**: [lib/firebase]
+
 ### `src/app/api/seed-config/route.ts` (api)
 - **Exports**: function POST, function GET
 - **Imports**: [lib/firebase, lib/ConfigContext, lib/apiAuth]
 
-### `src/app/(customer)/category/[slug]/layout.tsx` (layout)
+### `src/app/(customer)/category/[...slug]/layout.tsx` (layout)
 - **Exports**: function generateMetadata, function default, variable revalidate
-- **Imports**: [lib/constants]
+- **Imports**: [lib/constants, _lib/server-queries]
 
-### `src/app/(customer)/category/[slug]/page.tsx` (page)
+### `src/app/(customer)/category/[...slug]/page.tsx` (page)
 - **Exports**: function generateMetadata, function default
-- **Imports**: [_lib/server-queries, category/[slug]/CategoryClient, lib/constants]
+- **Imports**: [_lib/server-queries, category/[...slug]/CategoryClient, lib/constants]
 
 ### `src/app/(customer)/info/chinh-sach-bao-hanh/page.tsx` (page)
 - **Exports**: function default
@@ -535,6 +572,14 @@
 ### `src/app/api/admin/ai/route.ts` (api)
 - **Exports**: function POST
 - **Imports**: [lib/ollama, lib/apiAuth]
+
+### `src/app/api/admin/seed-taxonomy/route.ts` (api)
+- **Exports**: function GET
+- **Imports**: [lib/firebaseAdmin, lib/config-defaults]
+
+### `src/app/api/dev/migrate-prices/route.ts` (api)
+- **Exports**: function GET, function POST
+- **Imports**: [lib/firebaseAdmin]
 
 ### `src/app/api/dev/seed-data/route.ts` (api)
 - **Exports**: function GET

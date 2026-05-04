@@ -1,38 +1,18 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { ref, onValue, onDisconnect, set, serverTimestamp as rtdbServerTimestamp } from 'firebase/database';
 import { doc, setDoc, increment } from 'firebase/firestore';
-import { rtdb, db } from './firebase';
+import { db, getRtdbInstance } from './firebase';
 
 export function usePresence() {
 
     useEffect(() => {
         if (typeof window === 'undefined') return;
 
-        // 1. Online Presence (Realtime Database)
-        const sessionId = Math.random().toString(36).substring(2, 15);
-        const userStatusDatabaseRef = ref(rtdb, `/online_users/${sessionId}`);
-        const connectedRef = ref(rtdb, '.info/connected');
-
-        const unsubscribeConnected = onValue(connectedRef, (snap) => {
-            if (snap.val() === true) {
-                // When connected, set up onDisconnect to remove the node
-                onDisconnect(userStatusDatabaseRef).remove().then(() => {
-                    // Then set the user as online
-                    set(userStatusDatabaseRef, {
-                        timestamp: rtdbServerTimestamp()
-                    });
-                });
-            }
-        });
-
-        // 2. Daily Visitors (Firestore)
+        // ── 1. Daily Visitors (Firestore) — runs immediately, lightweight ──
         const trackVisitor = async () => {
             try {
-                // Determine current local date YYYY-MM-DD
                 const now = new Date();
-                // To avoid timezone issues, format manually in local timezone
                 const year = now.getFullYear();
                 const month = String(now.getMonth() + 1).padStart(2, '0');
                 const date = String(now.getDate()).padStart(2, '0');
@@ -41,10 +21,8 @@ export function usePresence() {
                 const lastVisitDate = localStorage.getItem('vl_last_visit');
 
                 if (lastVisitDate !== todayStr) {
-                    // Mark as visited today in this browser (cross-tab dedup)
                     localStorage.setItem('vl_last_visit', todayStr);
 
-                    // Increment in Firestore
                     await setDoc(doc(db, 'analytics', todayStr), {
                         visitors: increment(1)
                     }, { merge: true });
@@ -56,11 +34,45 @@ export function usePresence() {
 
         trackVisitor();
 
+        // ── 2. Online Presence (Realtime Database) — Tạm tắt để tối ưu hiệu suất ──
+        // Việc theo dõi online_users bằng RTDB gây ra số lượng lớn kết nối (.lp / WebSockets)
+        // làm nghẽn luồng chính và tốn chi phí kết nối đồng thời.
+        /*
+        let cleanupRtdb: (() => void) | undefined;
+
+        const presenceTimer = setTimeout(async () => {
+            try {
+                const rtdb = await getRtdbInstance();
+                const { ref, onValue, onDisconnect, set, serverTimestamp: rtdbServerTimestamp } = await import('firebase/database');
+
+                const sessionId = Math.random().toString(36).substring(2, 15);
+                const userStatusDatabaseRef = ref(rtdb, `/online_users/${sessionId}`);
+                const connectedRef = ref(rtdb, '.info/connected');
+
+                const unsubscribeConnected = onValue(connectedRef, (snap) => {
+                    if (snap.val() === true) {
+                        onDisconnect(userStatusDatabaseRef).remove().then(() => {
+                            set(userStatusDatabaseRef, {
+                                timestamp: rtdbServerTimestamp()
+                            });
+                        });
+                    }
+                });
+
+                cleanupRtdb = () => {
+                    unsubscribeConnected();
+                    set(userStatusDatabaseRef, null).catch(console.error);
+                };
+            } catch (err) {
+                console.error('Presence setup error:', err);
+            }
+        }, 3000);
+        */
+
         // Cleanup function
         return () => {
-            unsubscribeConnected();
-            // Remove node immediately if component unmounts
-            set(userStatusDatabaseRef, null).catch(console.error);
+            // clearTimeout(presenceTimer);
+            // cleanupRtdb?.();
         };
     }, []);
 }

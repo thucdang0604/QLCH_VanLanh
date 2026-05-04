@@ -3,6 +3,8 @@ import { ServerConfigProvider } from "@/lib/ConfigContext";
 import { DEFAULT_CONFIG, type SiteConfig } from "@/lib/config-defaults";
 import CustomerLayoutShell from "./layout.shell";
 
+export const revalidate = 30;
+
 /**
  * Customer Layout — Server Component
  * 
@@ -18,14 +20,22 @@ async function getServerConfig(): Promise<SiteConfig> {
 
     try {
         const db = getAdminDb();
-        const snapshot = await db.collection('system_config').doc('main_settings').get();
+        const docNames = ['main_settings', 'layout_settings', 'navigation_settings', 'taxonomy_settings'];
+        const refs = docNames.map(name => db.collection('system_config').doc(name));
+        const snapshots = await db.getAll(...refs);
 
-        if (!snapshot.exists) {
+        let data: any = {};
+        snapshots.forEach(snap => {
+            if (snap.exists) {
+                // Parse data — convert to plain JS (no Firestore Timestamps)
+                const snapData = JSON.parse(JSON.stringify(snap.data()));
+                data = { ...data, ...snapData };
+            }
+        });
+
+        if (Object.keys(data).length === 0) {
             return DEFAULT_CONFIG;
         }
-
-        // Parse data — convert to plain JS (no Firestore Timestamps)
-        const data = JSON.parse(JSON.stringify(snapshot.data()));
 
         const storedSections = Array.isArray(data.homeSections) ? data.homeSections : [];
         let homeSections = DEFAULT_CONFIG.homeSections;
@@ -56,6 +66,12 @@ async function getServerConfig(): Promise<SiteConfig> {
             store_branches: data.store_branches || DEFAULT_CONFIG.store_branches,
             homeSections,
             forbiddenWords: data.forbiddenWords || DEFAULT_CONFIG.forbiddenWords,
+            geofence: { ...DEFAULT_CONFIG.geofence, ...(data.geofence) },
+            headerNav: data.headerNav || DEFAULT_CONFIG.headerNav,
+            sidebarMenu: data.sidebarMenu || DEFAULT_CONFIG.sidebarMenu,
+            footerServices: data.footerServices || DEFAULT_CONFIG.footerServices,
+            homeServiceCategories: data.homeServiceCategories || DEFAULT_CONFIG.homeServiceCategories,
+            taxonomy: data.taxonomy || DEFAULT_CONFIG.taxonomy,
         };
 
         return merged;

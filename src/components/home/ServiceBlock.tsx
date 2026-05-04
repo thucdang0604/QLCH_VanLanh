@@ -14,7 +14,7 @@ import {
     LucideIcon
 } from 'lucide-react';
 import { ServiceCardSkeleton } from '../ui/Skeleton';
-import { collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
+import { collection, query, orderBy, limit, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 interface Service {
@@ -64,8 +64,8 @@ const colorPalette = [
 ];
 
 export default function ServiceBlock() {
-    const [services, setServices] = useState<Array<Service & { color?: string; bgColor?: string }>>([]);
-    const [isLoading, setIsLoading] = useState(true);
+    const [services, setServices] = useState<Array<Service & { color?: string; bgColor?: string }>>(demoServices);
+    const [isLoading, setIsLoading] = useState(false);
 
     useEffect(() => {
         // Query mới nhất - hiển thị dịch vụ mới nhất lên đầu (limit 12)
@@ -75,9 +75,9 @@ export default function ServiceBlock() {
             limit(12)
         );
 
-        const unsubscribe = onSnapshot(
-            q,
-            (snapshot) => {
+        const fetchServices = async () => {
+            try {
+                const snapshot = await getDocs(q);
                 if (snapshot.empty) {
                     setServices(demoServices);
                 } else {
@@ -99,16 +99,15 @@ export default function ServiceBlock() {
                     const active = all.filter(s => s.isActive !== false);
                     setServices(active.length > 0 ? active : demoServices);
                 }
-                setIsLoading(false);
-            },
-            (error) => {
+            } catch (error) {
                 console.error('Services fetch error:', error);
                 setServices(demoServices);
+            } finally {
                 setIsLoading(false);
             }
-        );
+        };
 
-        return () => unsubscribe();
+        fetchServices();
     }, []);
 
     return (
@@ -119,7 +118,7 @@ export default function ServiceBlock() {
                     <h2 className="text-2xl font-bold text-gray-800">
                         Dịch Vụ Văn Lành
                     </h2>
-                    <p className="text-gray-500 mt-1">
+                    <p className="text-gray-600 mt-1">
                         Sửa chữa uy tín - Bảo hành dài hạn
                     </p>
                 </div>
@@ -160,7 +159,7 @@ export default function ServiceBlock() {
                                     <h3 className="font-semibold text-gray-800 text-sm mb-1 group-hover:text-orange-600 transition-colors">
                                         {service.name}
                                     </h3>
-                                    <p className="text-xs text-gray-500 line-clamp-2 mb-2">
+                                    <p className="text-xs text-gray-600 line-clamp-2 mb-2">
                                         {service.description}
                                     </p>
                                     <p className="text-xs font-bold text-orange-600">

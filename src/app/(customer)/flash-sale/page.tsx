@@ -3,7 +3,7 @@ import { isAdminAvailable } from '@/lib/firebaseAdmin';
 import FlashSaleClient from './page.client';
 import type { Metadata } from 'next';
 
-export const revalidate = false;
+export const revalidate = 30;
 
 export const metadata: Metadata = {
     title: 'Flash Sale - Giảm giá sốc | Văn Lành Service',

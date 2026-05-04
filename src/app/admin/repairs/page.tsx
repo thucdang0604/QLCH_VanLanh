@@ -17,7 +17,7 @@ import {
     doc, serverTimestamp, orderBy, deleteDoc, onSnapshot, Timestamp, getDoc, setDoc,
     limit, startAfter, DocumentSnapshot, writeBatch, increment
 } from 'firebase/firestore';
-import { db, storage } from '@/lib/firebase';
+import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
 import { useConfig } from '@/lib/ConfigContext';
 import type { RepairTicket, RepairStatus, PaymentStatus, DeviceChecklist, StatusTimelineEntry, WorkflowNode } from '@/lib/types';
@@ -32,6 +32,7 @@ import { stampWarrantyOnParts } from '@/lib/warrantyUtils';
 import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
 import Modal from '@/components/admin/Modal';
+import CategoryTaxonomySelector from '@/components/admin/CategoryTaxonomySelector';
 
 
 // Removal of hardcoded TERMINAL_STATUSES since we use Workflow settings now.
@@ -213,6 +214,7 @@ export default function RepairPage() {
         status: 'cho_tiep_nhan' as RepairStatus,
         estimatedReturnDate: '',
         selectedServiceName: '',
+        selectedCategoryPath: [] as string[],
     };
     const [formData, setFormData] = useState(emptyForm);
 
@@ -979,7 +981,8 @@ export default function RepairPage() {
                 technicianId: ticket.staff?.assignedTechnician || '',
                 status: ticket.status,
                 estimatedReturnDate: '',
-                selectedServiceName: '',
+                selectedServiceName: ticket.serviceName || '',
+                selectedCategoryPath: ticket.categoryPath || [],
             });
             setPreMediaFiles(ticket.preRepairMedia || []);
             setPostMediaFiles(ticket.postRepairMedia || []);
@@ -1000,6 +1003,8 @@ export default function RepairPage() {
 
         const ticketData: Record<string, unknown> = {
             appointmentId: formData.appointmentId || null,
+            categoryPath: formData.selectedCategoryPath,
+            serviceName: formData.selectedServiceName,
             customer: { name: formData.customerName, phone: formData.customerPhone },
             deviceInfo: {
                 model: formData.deviceModel,
@@ -1689,49 +1694,35 @@ export default function RepairPage() {
 
                                 {/* Service selector with auto-fill */}
                                 <div className="bg-orange-50 rounded-lg p-3 border border-orange-100">
-                                    {formData.selectedServiceName ? (
-                                        /* Service pre-selected from appointment booking */
-                                        <>
-                                            <label className="block text-sm font-medium text-orange-800 mb-1">Dịch vụ đã chọn từ lịch hẹn</label>
-                                            <div className="flex items-center justify-between bg-white px-4 py-2.5 rounded-lg border border-orange-200">
-                                                <span className="inline-flex items-center gap-2 font-medium text-gray-900">
-                                                    <Wrench size={16} className="text-orange-500" />
-                                                    {formData.selectedServiceName}
-                                                </span>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setFormData(p => ({ ...p, selectedServiceName: '' }))}
-                                                    className="text-xs text-gray-400 hover:text-gray-600 underline"
-                                                >
-                                                    Đổi dịch vụ
-                                                </button>
-                                            </div>
-                                        </>
-                                    ) : (
-                                        /* No service pre-selected — let admin choose */
-                                        <>
-                                            <label className="block text-sm font-medium text-orange-800 mb-1">Chọn nhóm dịch vụ (Category)</label>
-                                            <select
-                                                value={formData.selectedServiceName}
-                                                onChange={e => {
-                                                    setFormData(p => ({
-                                                        ...p,
-                                                        selectedServiceName: e.target.value,
-                                                    }));
-                                                }}
-                                                aria-label="Chọn nhóm dịch vụ"
-                                                title="Chọn nhóm dịch vụ"
-                                                className="w-full px-4 py-2 border border-orange-200 rounded-lg bg-white focus:ring-2 focus:ring-orange-300/30"
+                                    <label className="block text-sm font-medium text-orange-800 mb-2">Chọn nhóm dịch vụ (Category)</label>
+                                    
+                                    {/* Display legacy or auto-filled service if not yet classified in the new taxonomy */}
+                                    {formData.selectedServiceName && formData.selectedCategoryPath.length === 0 && (
+                                        <div className="flex items-center justify-between bg-orange-100/50 px-3 py-2 rounded-lg border border-orange-200 mb-3 text-sm">
+                                            <span className="text-orange-800">
+                                                Dịch vụ hiện tại: <strong className="font-semibold">{formData.selectedServiceName}</strong> (Chưa phân loại)
+                                            </span>
+                                            <button
+                                                type="button"
+                                                onClick={() => setFormData(p => ({ ...p, selectedServiceName: '' }))}
+                                                className="text-xs text-orange-600 hover:text-orange-800 underline font-medium"
                                             >
-                                                <option value="">— Chọn nhóm dịch vụ —</option>
-                                                {Array.from(new Set(services.filter(s => s.isActive !== false && s.category).map(s => s.category as string))).map(cat => (
-                                                    <option key={cat} value={cat}>
-                                                        {cat}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                        </>
+                                                Xóa
+                                            </button>
+                                        </div>
                                     )}
+
+                                    <CategoryTaxonomySelector
+                                        type="service"
+                                        value={formData.selectedCategoryPath}
+                                        onChange={(ids, catName, subCatName) => {
+                                            setFormData(p => ({
+                                                ...p,
+                                                selectedCategoryPath: ids,
+                                                selectedServiceName: subCatName || catName || '',
+                                            }));
+                                        }}
+                                    />
                                 </div>
 
                                 <div>

@@ -30,7 +30,7 @@
 | **Xem sản phẩm** (SSR) | ~3 | 0 | Product detail + related products |
 | **Xem bài viết** (SSR) | ~2 | 0 | Article + related |
 | **Đọc bài viết** (client) | ~5 | 1 | Comments + view increment |
-| **Tìm kiếm** | ~50-200 | 0 | ⚠️ getDocs toàn bộ products + services |
+| **Tìm kiếm** | 0 (ISR) | 0 | ✅ API route `/api/search` — Admin SDK + cache 60s + rate limit 10/min |
 | **Tracking đơn/sửa chữa** | ~5 | 0 | getDoc + getDocs |
 | **Đặt lịch** | 0 | 1 | addDoc appointments |
 | **Checkout** | 0 | 1 | API route → addDoc orders |
@@ -91,28 +91,25 @@
 
 ## ⚠️ Kịch bản cực đoan — Tấn công tăng chi phí
 
-### 🔴 Điểm yếu #1: Trang tìm kiếm (`/search`)
+### ✅ Điểm yếu #1: Trang tìm kiếm (`/search`) — ĐÃ KHẮC PHỤC
 
-**Vấn đề**: Mỗi lần search = `getDocs(products)` + `getDocs(services)` → fetch **TOÀN BỘ** collection
-- 100 sản phẩm + 20 dịch vụ = **120 reads/lần search**
-- Bot spam 1000 lần/ngày = **120,000 reads** → **vượt free tier**
+**Vấn đề cũ**: Mỗi lần search = `getDocs(products)` + `getDocs(services)` → fetch **TOÀN BỘ** collection
 
-**Giải pháp**:
-1. ✅ Chuyển sang SSR search (giống trang chủ) — dùng Admin SDK, không tính client reads
-2. ✅ Thêm rate limit cho search (debounce 500ms đã có, nhưng cần server-side limit)
-3. ✅ Cache results bằng ISR hoặc React Query
+**Đã triển khai** (`src/app/api/search/route.ts`):
+1. ✅ API route server-side — dùng Admin SDK (`getAdminDb()`), không tính client reads
+2. ✅ Rate limit server-side: 10 req/min/IP
+3. ✅ In-memory cache 60s — chỉ fetch Firestore 1 lần/60s cho tất cả requests
+4. ✅ Client-side: `src/app/(customer)/search/page.tsx` gọi `/api/search?q=...`
 
 ---
 
-### 🔴 Điểm yếu #2: Trang đánh giá khách (`/reviews`)
+### ✅ Điểm yếu #2: Trang đánh giá khách (`/reviews`) — ĐÃ KHẮC PHỤC
 
-**Vấn đề**: `getDocs(reviews, status=='approved')` — public, không cần auth
-- Mỗi load = đọc toàn bộ approved reviews
-- Bot spam refresh = nhiều reads
+**Vấn đề cũ**: `getDocs(reviews, status=='approved')` — public, không cần auth
 
-**Giải pháp**:
-1. ✅ Chuyển sang SSR + ISR (revalidate 60s)
-2. ✅ Thêm pagination (limit 20)
+**Đã triển khai** (`src/app/(customer)/reviews/page.tsx`):
+1. ✅ SSR + ISR `revalidate = 120` — chỉ fetch mỗi 2 phút
+2. ✅ Admin SDK server-side fetch — không tính client reads
 
 ---
 
@@ -128,28 +125,25 @@
 
 ---
 
-### 🟡 Điểm yếu #4: Checkout & Appointments (Public writes)
+### ✅ Điểm yếu #4: Checkout & Appointments (Public writes) — ĐÃ KHẮC PHỤC
 
-**Vấn đề**: Bất kỳ ai đều có thể tạo đơn hàng/lịch hẹn
-- Checkout: **đã có** rate limit 3 req/min/IP + honeypot ✅
-- Appointments: **chưa có** rate limit ❌
+**Vấn đề cũ**: Bất kỳ ai đều có thể tạo đơn hàng/lịch hẹn không giới hạn
 
-**Giải pháp**:
-1. ✅ Checkout đã bảo vệ (API route + rate limit)
-2. ❌ **Appointments cần thêm**: chuyển sang API route + rate limit (hiện tại dùng client-side `addDoc` trực tiếp)
-3. ❌ **Reviews cần thêm**: cùng vấn đề — client `addDoc` trực tiếp
+**Đã triển khai**:
+1. ✅ Checkout: API route + rate limit 3/min/IP + honeypot (`src/app/api/checkout/route.ts`)
+2. ✅ Appointments: API route + rate limit 3/min/IP + honeypot + validation (`src/app/api/appointments/route.ts`)
+3. ✅ Reviews: API route + rate limit 3/IP/ngày + geofence validation (`src/app/api/reviews/route.ts`)
 
 ---
 
-### 🟡 Điểm yếu #5: Admin trang Doanh thu (`/admin/revenue`)
+### ✅ Điểm yếu #5: Admin trang Doanh thu (`/admin/revenue`) — ĐÃ KHẮC PHỤC
 
-**Vấn đề**: Load **5 collection đồng thời** (orders, repairs, receipts, commissions, expenses) — tất cả không có filter
-- 100 orders + 50 repairs + 30 receipts + 20 commissions + 15 expenses = **215 reads/load**
-- Admin refresh 50 lần = 10,750 reads
+**Vấn đề cũ**: Load **5 collection đồng thời** không filter → 215+ reads/load
 
-**Giải pháp**:
-1. ✅ Thêm date range filter (chỉ load tháng hiện tại)
-2. ✅ Cache client-side (React Query / SWR)
+**Đã triển khai** (`src/app/admin/revenue/page.tsx`):
+1. ✅ `getMonthsAgoTimestamp(3)` — chỉ load 3 tháng gần nhất bằng `where('createdAt', '>=', threeMonthsAgo)`
+2. ✅ UI filter: Hôm nay / Tuần này / Tháng này / Tùy chọn (date picker)
+3. ✅ Client-side filter (`useMemo`) từ data đã load — không gọi Firestore thêm khi đổi filter
 
 ---
 
@@ -158,13 +152,13 @@
 | # | Biện pháp | Ưu tiên | Trạng thái | Chi phí tiết kiệm |
 |---|---|---|---|---|
 | 1 | Rate limit checkout API | Cao | ✅ Đã có | ~90% spam writes |
-| 2 | SSR search thay client getDocs | Cao | ❌ Chưa làm | ~120 reads/lần search |
-| 3 | Rate limit appointments (API route) | Cao | ❌ Chưa làm | Chặn spam writes |
-| 4 | Pagination reviews customer page | TB | ❌ Chưa làm | ~80% reads |
-| 5 | Date filter trang revenue | TB | ❌ Chưa làm | ~70% reads |
-| 6 | localStorage thay sessionStorage presence | Thấp | ❌ Chưa làm | ~50% writes |
-| 7 | Firebase App Check | Cao | ❌ Chưa làm | Chặn bot hoàn toàn |
-| 8 | Budget alerts trên Firebase Console | Cao | ❌ Chưa làm | Cảnh báo sớm |
+| 2 | SSR search (API route + Admin SDK + cache 60s) | Cao | ✅ Đã có | ~99% reads |
+| 3 | Rate limit appointments (API route + honeypot) | Cao | ✅ Đã có | Chặn spam writes |
+| 4 | SSR reviews (ISR revalidate=120) | TB | ✅ Đã có | ~95% reads |
+| 5 | Date filter trang revenue (3 tháng + UI picker) | TB | ✅ Đã có | ~70% reads |
+| 6 | localStorage thay sessionStorage presence | Thấp | ✅ Đã có | ~50% writes |
+| 7 | Firebase App Check | Cao | ❌ Chưa bật | Chặn bot hoàn toàn |
+| 8 | Budget alerts trên Firebase Console | Cao | ❌ Chưa bật | Cảnh báo sớm |
 
 > [!IMPORTANT]
 > **Biện pháp #7 (App Check)** là giải pháp toàn diện nhất — Google xác thực request đến từ app thật, không phải bot. Miễn phí, nhưng cần cấu hình reCAPTCHA v3.
@@ -191,5 +185,6 @@
 
 ✅ **500 khách + 10 admin = ~50% free tier** → hoàn toàn miễn phí  
 ✅ **Badge sidebar mới chỉ thêm ~13 reads/refresh** → ảnh hưởng không đáng kể  
-⚠️ **Rủi ro lớn nhất**: trang `/search` và public writes không rate limit  
-🛡 **Khuyến nghị**: Bật Budget Alert ngay + cân nhắc App Check khi traffic tăng
+✅ **Search, Appointments, Reviews, Revenue** đã bảo vệ bằng API route + rate limit + server-side SDK + date filter  
+⚠️ **Rủi ro còn lại**: Presence analytics (localStorage optimization) — ưu tiên thấp  
+🛡 **Khuyến nghị**: Bật Budget Alert + App Check khi traffic tăng

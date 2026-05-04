@@ -84,4 +84,4 @@ export default function ArticleLayout({
 }
 
 
-export const revalidate = false;
+export const revalidate = 30;

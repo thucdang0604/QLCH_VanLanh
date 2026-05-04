@@ -15,6 +15,38 @@ export type FirestoreTimestamp = import('firebase/firestore').Timestamp;
 export type FirestoreWriteTimestamp = import('firebase/firestore').FieldValue;
 export type FirestoreDateValue = FirestoreTimestamp | FirestoreWriteTimestamp;
 
+// Category and Brand types (Dynamic)
+export interface Category {
+    id: string;
+    name: string;
+    slug: string;
+    type: 'retail' | 'service' | 'component';
+    keywords: string[];
+    icon?: string;
+    displayCount?: string;
+    subCategories?: string[]; // Used mainly for 'retail' to hold things like "Ốp lưng", "Cáp sạc"
+    createdAt?: FirestoreDateValue;
+    updatedAt?: FirestoreDateValue;
+}
+
+export interface TaxonomyNode {
+    id: string; // The full path/slug, e.g., "dien-thoai/iphone/iphone-16"
+    name: string; // Display name, e.g., "iPhone 16"
+    slug: string; // Local slug, e.g., "iphone-16"
+    icon?: string;
+    seoKeywords?: string;
+    seoDescription?: string;
+    children?: TaxonomyNode[];
+}
+
+export interface Brand {
+    id: string;
+    name: string;
+    logoUrl?: string;
+    createdAt?: FirestoreDateValue;
+    updatedAt?: FirestoreDateValue;
+}
+
 // Product types
 export interface ProductSpecs {
     screen?: string;
@@ -31,6 +63,7 @@ export interface Product {
     name: string;
     brand: string;
     category: typeof import('./constants').RETAIL_CATEGORIES[number] | string;
+    categoryIds?: string[]; // E.g., ['dien-thoai', 'dien-thoai/iphone', 'dien-thoai/iphone/16']
     subCategory?: string;
     price_original: number;
     price_promo: number;
@@ -60,13 +93,22 @@ export interface Product {
 export interface Service {
     id: string;
     name: string;
-    price: number;
-    costPrice?: number; // Giá vốn linh kiện
+    price_original: number;
+    price_promo?: number;
     device_model: string;
     category: string;
+    categoryIds?: string[]; // E.g., ['sua-chua', 'sua-chua/iphone']
     description?: string;
+    seoDescription?: string;
+    warranty_text?: string;
+    repair_time?: string;
+    slug?: string;
+    tags?: string[];
     videoEmbedUrl?: string;
-    estimatedTime?: string;
+    imageUrl?: string;
+    isActive?: boolean;
+    createdAt?: FirestoreDateValue;
+    updatedAt?: FirestoreDateValue;
 }
 
 // Order types
@@ -200,6 +242,8 @@ export interface DeviceChecklist {
 export interface RepairTicket {
     id: string;
     appointmentId?: string;
+    categoryPath?: string[];
+    serviceName?: string;
     customer: {
         name: string;
         phone: string;

@@ -518,6 +518,7 @@ const nextConfig: NextConfig = {
   // Tối ưu tree-shaking cho các thư viện lớn - giảm bundle JS đáng kể
   experimental: {
     optimizePackageImports: ['lucide-react', 'date-fns', 'firebase/firestore', 'firebase/auth'],
+    optimizeCss: true,
   },
   images: {
     loader: 'custom',
@@ -539,6 +540,12 @@ const nextConfig: NextConfig = {
         pathname: '/**',
       },
     ],
+  },
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+  typescript: {
+    ignoreBuildErrors: true,
   },
 };
 

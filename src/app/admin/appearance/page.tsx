@@ -66,7 +66,12 @@ export default function AdminAppearancePage() {
 
     const save = async (partial: Partial<SiteConfig>, msg: string) => {
         setSaving(true);
-        try { await updateConfig(partial); showToast(msg); }
+        try { 
+            // Strip undefined values to prevent Firebase "Unsupported field value: undefined" errors
+            const cleanPartial = JSON.parse(JSON.stringify(partial));
+            await updateConfig(cleanPartial); 
+            showToast(msg); 
+        }
         catch (e) { console.error(e); }
         setSaving(false);
     };
@@ -328,6 +333,23 @@ export default function AdminAppearancePage() {
                     )}
                 </div>
                 <SaveBtn onClick={() => save({ background_config: local.background_config }, 'Đã lưu background!')} saving={saving} label="Lưu background" />
+            </SectionCard>
+
+            {/* 4.5. Image Optimization */}
+            <SectionCard title="Tối ưu ảnh & Proxy (Kill-Switch)" icon={<ImageIcon size={20} />}>
+                <div className="space-y-4 p-4 border rounded-lg bg-gray-50">
+                    <div className="flex items-start gap-3">
+                        <label className="relative inline-flex items-center cursor-pointer mt-1">
+                            <input type="checkbox" checked={local.disableImageProxy ?? false} onChange={(e) => setLocal({ ...local, disableImageProxy: e.target.checked })} className="sr-only peer" />
+                            <div className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-500" />
+                        </label>
+                        <div>
+                            <span className="text-sm font-medium text-gray-800">Tắt máy chủ nén ảnh bên ngoài (Kill-Switch)</span>
+                            <p className="text-xs text-gray-500 mt-1">Nếu bật (nút gạt màu đỏ), hệ thống sẽ tải ảnh trực tiếp từ Firebase (tắt wsrv.nl). Dùng chức năng này khi máy chủ proxy bị chậm hoặc lỗi.</p>
+                        </div>
+                    </div>
+                </div>
+                <SaveBtn onClick={() => save({ disableImageProxy: local.disableImageProxy ?? false }, 'Đã cập nhật trạng thái Kill-Switch!')} saving={saving} label="Lưu thiết lập" />
             </SectionCard>
 
             {/* 5. Store Branches */}

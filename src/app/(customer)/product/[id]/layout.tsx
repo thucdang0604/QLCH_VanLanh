@@ -96,4 +96,4 @@ export default function ProductLayout({
 }
 
 
-export const revalidate = false;
+export const revalidate = 30;

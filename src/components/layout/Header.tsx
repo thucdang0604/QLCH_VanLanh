@@ -6,21 +6,12 @@ import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import {
     Search, ShoppingCart, Phone, Menu, X, MapPin,
-    Smartphone, Monitor, Wrench, Headphones as HeadphonesIcon,
     ClipboardList,
-    Tablet,
 } from 'lucide-react';
 import { useConfig } from '@/lib/ConfigContext';
 import { useCart } from '@/lib/CartContext';
+import { getIcon } from '@/lib/icon-map';
 
-/* ── Main navigation ── */
-const mainNav = [
-    { label: 'Sửa chữa - Bảo hành', href: '/category/sua-chua', icon: Wrench },
-    { label: 'Sửa iPad', href: '/category/sua-ipad', icon: Tablet },
-    { label: 'Máy mới', href: '/category/may-moi', icon: Smartphone },
-    { label: 'Máy cũ giá rẻ', href: '/category/may-cu', icon: Monitor },
-    { label: 'Phụ kiện', href: '/category/phu-kien', icon: HeadphonesIcon },
-];
 
 export default function Header() {
     const pathname = usePathname();
@@ -30,6 +21,13 @@ export default function Header() {
     const [searchQuery, setSearchQuery] = useState('');
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [scrolled, setScrolled] = useState(false);
+
+    /* ── Dynamic nav from config ── */
+    const mainNav = (config.headerNav || [])
+        .filter(i => i.visible)
+        .sort((a, b) => a.order - b.order)
+        .map(i => ({ id: i.id, label: i.label, href: `/category/${i.slug}`, icon: getIcon(i.iconName) }));
+
 
     useEffect(() => {
         const onScroll = () => setScrolled(window.scrollY > 60);
@@ -112,7 +110,7 @@ export default function Header() {
                             <MapPin size={15} />
                             <span>Cửa hàng</span>
                         </Link>
-                        <button onClick={(e) => { e.preventDefault(); setIsDrawerOpen(true); }} className="relative flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-gray-600 hover:text-copper hover:bg-gray-50 transition-colors">
+                        <button onClick={(e) => { e.preventDefault(); setIsDrawerOpen(true); }} aria-label="Giỏ hàng" className="relative flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-gray-600 hover:text-copper hover:bg-gray-50 transition-colors">
                             <ShoppingCart size={15} />
                             <span className="hidden sm:inline">Giỏ hàng</span>
                             {cartCount > 0 && (
@@ -145,7 +143,7 @@ export default function Header() {
                         const Icon = item.icon;
                         const active = isActive(item.href);
                         return (
-                            <li key={item.href} className="flex-1">
+                            <li key={item.id} className="flex-1">
                                 <Link
                                     href={item.href}
                                     className={`flex items-center justify-center gap-1.5 h-10 text-[13px] font-medium transition-colors
@@ -187,7 +185,7 @@ export default function Header() {
                                     const Icon = item.icon;
                                     const active = isActive(item.href);
                                     return (
-                                        <li key={item.href}>
+                                        <li key={item.id}>
                                             <Link
                                                 href={item.href}
                                                 onClick={() => setMobileMenuOpen(false)}

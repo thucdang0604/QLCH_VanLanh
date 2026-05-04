@@ -283,6 +283,7 @@ export default function ServiceDetailClient({ service }: { service: any }) {
                             <select
                                 value={formData.date}
                                 onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                                aria-label="Chọn ngày hẹn"
                                 className="w-full pl-10 pr-4 py-3 bg-dark-light border border-gray-700 rounded-xl text-white text-sm appearance-none focus:outline-none focus:border-copper transition-colors"
                                 required
                             >
@@ -325,6 +326,7 @@ export default function ServiceDetailClient({ service }: { service: any }) {
                             <select
                                 value={formData.store}
                                 onChange={(e) => setFormData({ ...formData, store: e.target.value })}
+                                aria-label="Chọn chi nhánh"
                                 className="w-full pl-10 pr-4 py-3 bg-dark-light border border-gray-700 rounded-xl text-white text-sm appearance-none focus:outline-none focus:border-copper transition-colors"
                             >
                                 {branches.map((branch: { id: string; name: string; address?: string }) => (
