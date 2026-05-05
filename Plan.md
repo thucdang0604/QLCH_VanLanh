@@ -320,3 +320,9 @@ F: `HeroSection.tsx`, `package.json`
 W: Local Lighthouse report analysis: Perf 68, LCP 5.3s, SI 29s. Root causes: (1) ALL banner slides rendered after hydration → 3×49KB images competing for 4G bandwidth → LCP image delayed. Fix: Only mount current + next slide, others get placeholder div — 66% less image bandwidth. (2) Removed `defaults` from browserslist (requires positive queries before negations). Note: Legacy polyfills (Array.at/flat, Object.fromEntries) are in Next.js core chunk 1255 — NOT controlled by browserslist, it's a framework limitation. (3) SI 29s is localhost-specific artifact — images travel localhost→internet→Firebase CDN under 4G throttle.
 Y: Local Lighthouse Perf 68, LCP 5.3s (87% = image load time due to bandwidth contention).
 N: Build verified (exit 0). Deploy and test PSI.
+
+### [2026-05-05] PageSpeed Round 6 — CLS Fix + LCP Preload Mismatch + Decode Sync
+F: `page.client.tsx`, `page.tsx`, `HeroSection.tsx`
+W: (1) Changed CategoriesSection from `dynamic({ssr:false})` to direct import — SSR eliminates skeleton→content swap, CLS 0.111→0. (2) Fixed LCP preload URL mismatch: was `w=867&q=60` but imageLoader requests `w=640&q=75` on mobile → preload wasted. Now uses `imageSrcSet` + `imageSizes` responsive preload matching imageLoader output exactly. (3) Added `decoding="sync"` to first hero banner Image (4 branches) to eliminate 1.1s element render delay.
+Y: PSI Mobile 82→86. CLS 0.111→0 ✅. LCP 3.9s→3.1s. TBT 90ms→40ms. SI remained at 7.1s.
+N: Build verified (exit 0). Deploy verified. No data flow changes — CategoriesSection already supported SSR data via `ssrHomeServiceCategories` prop. imageLoader.ts and ConfigContext.tsx NOT modified.

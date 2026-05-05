@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { MessageCircle, X, Send, Bot, User, Minimize2, Maximize2, ArrowRight, Sparkles } from 'lucide-react';
-import { subscribeToMessages, subscribeToRoomInfo, sendMessage, updateRoomInfo, handleAIAutoReply, ChatMessage } from '@/lib/realtimedb';
+import type { ChatMessage } from '@/lib/realtimedb';
 import { useAuth } from '@/lib/AuthContext';
 import { useConfig } from '@/lib/ConfigContext';
 
@@ -62,9 +62,9 @@ export default function ChatWidget() {
         }
     }, [user]);
 
-    // Listen to messages for this room
+    // Listen to messages for this room — only when chat is OPEN
     useEffect(() => {
-        if (!roomId || !isRegistered) return;
+        if (!roomId || !isRegistered || !isOpen) return;
 
         let isMounted = true;
         let unsubscribe: (() => void) | undefined;
@@ -72,8 +72,9 @@ export default function ChatWidget() {
         // Defer listener to not block main thread
         const deferFn = window.requestIdleCallback || ((cb) => setTimeout(cb, 100));
 
-        deferFn(() => {
+        deferFn(async () => {
             if (!isMounted) return;
+            const { subscribeToMessages } = await import('@/lib/realtimedb');
             subscribeToMessages(roomId, (messageList) => {
                 // Detect if last message is from staff (admin)
                 const lastMsg = messageList[messageList.length - 1];
@@ -85,7 +86,9 @@ export default function ChatWidget() {
                     }
                     setBotActive(false);
                     // Update Firebase
-                    updateRoomInfo(roomId, { botActive: false }).catch(() => { });
+                    import('@/lib/realtimedb').then(({ updateRoomInfo }) =>
+                        updateRoomInfo(roomId, { botActive: false }).catch(() => { })
+                    );
                 }
 
                 setMessages(messageList);
@@ -106,15 +109,17 @@ export default function ChatWidget() {
         };
     }, [roomId, isOpen, isRegistered]);
 
-    // Read botActive status from Firebase
+    // Read botActive status from Firebase — only when chat is OPEN
     useEffect(() => {
-        if (!roomId) return;
+        if (!roomId || !isOpen) return;
         let unsub: (() => void) | undefined;
-        subscribeToRoomInfo(roomId, (info) => {
-            setBotActive(info?.botActive !== false);
-        }).then(fn => { unsub = fn; });
+        import('@/lib/realtimedb').then(({ subscribeToRoomInfo }) => {
+            subscribeToRoomInfo(roomId, (info) => {
+                setBotActive(info?.botActive !== false);
+            }).then(fn => { unsub = fn; });
+        });
         return () => { if (unsub) unsub(); };
-    }, [roomId]);
+    }, [roomId, isOpen]);
 
     // Cleanup timeout on unmount
     useEffect(() => {
@@ -158,6 +163,7 @@ export default function ChatWidget() {
         }
 
         try {
+            const { updateRoomInfo } = await import('@/lib/realtimedb');
             await updateRoomInfo(roomId, {
                 odId: roomId,
                 displayName,
@@ -181,6 +187,7 @@ export default function ChatWidget() {
         // Update metadata immediately
         if (roomId) {
             try {
+                const { updateRoomInfo } = await import('@/lib/realtimedb');
                 await updateRoomInfo(roomId, {
                     odId: roomId,
                     displayName: regForm.name,
@@ -207,6 +214,7 @@ export default function ChatWidget() {
             await updateRoomMetadata();
 
             // Send user message via realtimedb.ts
+            const { sendMessage } = await import('@/lib/realtimedb');
             await sendMessage(roomId, messageText, roomId, 'user');
 
             // ── User message sent successfully — unlock input immediately ──
@@ -225,6 +233,7 @@ export default function ChatWidget() {
 
                 setIsAiTyping(true);
                 try {
+                    const { handleAIAutoReply } = await import('@/lib/realtimedb');
                     await handleAIAutoReply(roomId, messages, messageText);
                 } catch (aiErr) {
                     console.error('AI auto-reply error:', aiErr);

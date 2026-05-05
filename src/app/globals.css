@@ -4,15 +4,15 @@
 :root {
   --background: #ffffff;
   --foreground: #111111;
-  --primary: #C8956C;
-  --primary-dark: #A97B55;
-  --primary-light: #E0B894;
+  --primary: #5A6A7A;
+  --primary-dark: #3C4C5C;
+  --primary-light: #8296AA;
   --secondary: #DC2626;
   --dark: #111111;
   --dark-light: #1a1a1a;
-  --copper: #C8956C;
-  --copper-dark: #A97B55;
-  --copper-light: #E0B894;
+  --copper: #5A6A7A;
+  --copper-dark: #3C4C5C;
+  --copper-light: #8296AA;
 }
 
 @theme inline { 

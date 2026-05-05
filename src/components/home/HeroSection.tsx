@@ -146,7 +146,7 @@ export default function HeroSection({ initialBanners, storeBranches }: HeroSecti
         const delayId = setTimeout(() => {
             intervalId = setInterval(() => {
                 setCurrent((prev) => (prev + 1) % totalSlides);
-            }, 5000);
+            }, 15000);
         }, 10000);
         return () => {
             clearTimeout(delayId);
@@ -218,7 +218,9 @@ export default function HeroSection({ initialBanners, storeBranches }: HeroSecti
                                                                     fetchPriority={isFirst ? "high" : "auto"}
                                                                     sizes="(max-width: 768px) 100vw, (max-width: 1200px) 75vw, 867px"
                                                                     quality={60}
+                                                                    unoptimized={isFirst}
                                                                     style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                                                    {...(isFirst ? { decoding: "sync" } : {})}
                                                                     onError={() => setImgError(prev => ({ ...prev, [banner.id]: true }))}
                                                                 />
                                                         ) : (
@@ -230,7 +232,9 @@ export default function HeroSection({ initialBanners, storeBranches }: HeroSecti
                                                                 fetchPriority={isFirst ? "high" : "auto"}
                                                                 sizes="(max-width: 768px) 100vw, (max-width: 1200px) 75vw, 867px"
                                                                 quality={60}
+                                                                unoptimized={isFirst}
                                                                 className="object-cover"
+                                                                {...(isFirst ? { decoding: "sync" } : {})}
                                                                 onError={() => setImgError(prev => ({ ...prev, [banner.id]: true }))}
                                                             />
                                                         )}
@@ -248,7 +252,9 @@ export default function HeroSection({ initialBanners, storeBranches }: HeroSecti
                                                             fetchPriority={isFirst ? "high" : "auto"}
                                                             sizes="(max-width: 768px) 100vw, (max-width: 1200px) 75vw, 867px"
                                                             quality={60}
+                                                            unoptimized={isFirst}
                                                             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                                            {...(isFirst ? { decoding: "sync" } : {})}
                                                             onError={() => setImgError(prev => ({ ...prev, [banner.id]: true }))}
                                                         />
                                                     ) : (
@@ -260,7 +266,9 @@ export default function HeroSection({ initialBanners, storeBranches }: HeroSecti
                                                             fetchPriority={isFirst ? "high" : "auto"}
                                                             sizes="(max-width: 768px) 100vw, (max-width: 1200px) 75vw, 867px"
                                                             quality={60}
+                                                            unoptimized={isFirst}
                                                             className="object-cover"
+                                                            {...(isFirst ? { decoding: "sync" } : {})}
                                                             onError={() => setImgError(prev => ({ ...prev, [banner.id]: true }))}
                                                         />
                                                     )

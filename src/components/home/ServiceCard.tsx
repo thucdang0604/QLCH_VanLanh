@@ -114,7 +114,7 @@ export default function ServiceCard({
                         </span>
                     )}
                     {showFlashSale && !showDeepDiscount && (
-                        <span className="inline-flex items-center gap-0.5 text-[10px] bg-red-50 text-accent font-medium px-1.5 py-0.5 rounded">
+                        <span className="inline-flex items-center gap-0.5 text-[10px] bg-red-50 text-red-700 font-medium px-1.5 py-0.5 rounded">
                             <Zap size={10} />
                             Flash Sale
                         </span>
@@ -141,7 +141,7 @@ export default function ServiceCard({
                                 {formatPrice(promoPrice)}
                             </span>
                             {originalPrice > 0 && (
-                                <span className="text-gray-400 text-xs line-through">
+                                <span className="text-gray-500 text-xs line-through">
                                     {formatPrice(originalPrice)}
                                 </span>
                             )}
@@ -172,7 +172,7 @@ export default function ServiceCard({
                             ))}
                         </div>
                         {reviewCount != null && reviewCount > 0 && (
-                            <span className="text-xs text-gray-400">({reviewCount})</span>
+                            <span className="text-xs text-gray-500">({reviewCount})</span>
                         )}
                     </div>
                 )}

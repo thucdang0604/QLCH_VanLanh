@@ -100,22 +100,17 @@ async function getHomeConfig(): Promise<SSRHomeConfig> {
 export default async function Page() {
   const ssrConfig = await getHomeConfig();
   
-  // Preload LCP image: custom image loader can't auto-generate preload links,
-  // so we manually inject it server-side for immediate browser discovery.
+  // Preload LCP image: use the direct Firebase URL to bypass proxy delay
   const firstBanner = ssrConfig.hero_banners?.[0];
   const lcpImageUrl = firstBanner?.imageUrl;
-  // Build the same wsrv.nl proxy URL that imageLoader will produce for the LCP image
-  const preloadUrl = lcpImageUrl?.includes('firebasestorage.googleapis.com')
-    ? `https://wsrv.nl/?url=${encodeURIComponent(lcpImageUrl)}&w=867&output=webp&q=60&fit=cover`
-    : lcpImageUrl;
   
   return (
     <>
-      {preloadUrl && (
+      {lcpImageUrl && (
         <link 
           rel="preload" 
           as="image" 
-          href={preloadUrl}
+          href={lcpImageUrl}
           // @ts-ignore — fetchPriority on link is valid HTML but React types lag
           fetchPriority="high"
         />

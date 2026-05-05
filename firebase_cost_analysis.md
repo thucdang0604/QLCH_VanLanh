@@ -12,7 +12,7 @@
 | **Cloud Functions** | 1.4K | 2M/tháng | 0.1% |
 | **Hosting Storage** | 17.4 MB | 10 GB total | 0.2% |
 | **Hosting Downloads** | 6.6 MB | 360 MB/ngày | 1.8% |
-| **Cloud Storage** | — | 5 GB total | — |
+| **Cloud Storage (Downloads)** | ~20 MB | 1 GB/ngày | ~2.0% |
 
 > [!NOTE]
 > **Dữ liệu hiện tại rất thấp** — tất cả dưới 6% free tier. Đây là baseline tốt để đánh giá.
@@ -25,10 +25,10 @@
 
 | Hành động | Reads | Writes | Ghi chú |
 |---|---|---|---|
-| **Trang chủ** (SSR) | ~8 | 0 | products, services, articles, reviews, config (Admin SDK — cached ISR) |
+| **Trang chủ** (SSR) | **~0** | 0 | Đã bọc `unstable_cache` (On-Demand ISR). Chỉ tốn 1 Read duy nhất toàn server mỗi khi Admin cập nhật dữ liệu. |
 | **Trang chủ** (client) | ~3 | 1 | Hiệu ứng client + analytics write (1 write/session/ngày) |
-| **Xem sản phẩm** (SSR) | ~3 | 0 | Product detail + related products |
-| **Xem bài viết** (SSR) | ~2 | 0 | Article + related |
+| **Xem sản phẩm** (SSR) | **~0** | 0 | Product detail + related products đều đã được cache mạnh. |
+| **Xem bài viết** (SSR) | **~0** | 0 | Article + related đều đã được cache. |
 | **Đọc bài viết** (client) | ~5 | 1 | Comments + view increment |
 | **Tìm kiếm** | 0 (ISR) | 0 | ✅ API route `/api/search` — Admin SDK + cache 60s + rate limit 10/min |
 | **Tracking đơn/sửa chữa** | ~5 | 0 | getDoc + getDocs |
@@ -39,14 +39,14 @@
 | **Live Chat** (RTDB) | 0 FS | 0 FS | RTDB — không tính Firestore reads |
 | **Presence** (RTDB) | 0 FS | 0 FS | RTDB online tracking |
 
-#### Khách hàng trung bình: ~20 reads + 2 writes/session
+#### Khách hàng trung bình: ~8 reads (giảm mạnh từ 20) + 2 writes/session
 
 | Metric | Tính toán | /Ngày | /Tháng |
 |---|---|---|---|
-| **Reads** | 500 khách × 20 reads | **10,000** | 300,000 |
+| **Reads** | 500 khách × 8 reads | **4,000** | 120,000 |
 | **Writes** | 500 khách × 2 writes | **1,000** | 30,000 |
 | **Free Tier Reads** | | 50,000/ngày | 1.5M/tháng |
-| **% Sử dụng Reads** | | **20%** | ✅ An toàn |
+| **% Sử dụng Reads** | | **8%** | ✅ Siêu Tiết Kiệm |
 | **% Sử dụng Writes** | | **5%** | ✅ An toàn |
 
 ### 👨‍💼 Admin — Hành trình trung bình
@@ -77,15 +77,16 @@
 
 | Metric | Khách | Admin | Tổng/Ngày | Free Tier | % |
 |---|---|---|---|---|---|
-| **Reads** | 10,000 | 15,000 | **25,000** | 50,000 | **50%** ✅ |
+| **Reads** | 4,000 | 15,000 | **19,000** | 50,000 | **38%** ✅ |
 | **Writes** | 1,000 | 600 | **1,600** | 20,000 | **8%** ✅ |
 | **Deletes** | 0 | ~20 | **20** | 20,000 | **0.1%** ✅ |
 | **RTDB Downloads** | ~5 MB | ~3 MB | **8 MB** | 360 MB | **2.2%** ✅ |
-| **Hosting** | ~50 MB | ~10 MB | **60 MB** | 360 MB | **17%** ✅ |
+| **Hosting (Tải trang)** | ~20 MB | ~10 MB | **30 MB** | 360 MB | **8.3%** ✅ |
+| **Cloud Storage (Ảnh/Media)** | ~100 MB | ~10 MB | **110 MB** | 1 GB | **11%** ✅ |
 | **Functions** | ~500 | ~100 | **600** | 66K/ngày | **0.9%** ✅ |
 
 > [!TIP]
-> **Kết luận**: Với 500 khách + 10 admin/ngày, dự án sử dụng khoảng **50% free tier Reads** — hoàn toàn miễn phí, còn headroom thoải mái.
+> **Kết luận**: Nhờ cơ chế Cache mạnh mẽ mới được cập nhật, với 500 khách + 10 admin/ngày, dự án chỉ sử dụng khoảng **38% free tier Reads** — hoàn toàn miễn phí, tối ưu hơn rất nhiều so với thiết kế ban đầu.
 
 ---
 
@@ -147,6 +148,33 @@
 
 ---
 
+---
+
+### ✅ Điểm yếu #6: Băng thông hình ảnh (LCP Hero Banner) — ĐÃ KHẮC PHỤC
+
+**Vấn đề cũ**: Việc tối ưu hóa (Image Optimization) cho các ảnh Banner siêu lớn thông qua Next.js Server hoặc Proxy `wsrv.nl` tạo ra 2 nhược điểm:
+1. Gây trễ (đẩy LCP lên cao) do quá trình nén và proxy.
+2. Tiêu tốn băng thông của Firebase Hosting (Hosting chỉ cho phép Free **360MB/ngày**).
+
+**Đã triển khai**:
+1. ✅ Dùng thuộc tính `unoptimized={isFirst}` để trình duyệt lấy thẳng file từ Firebase Storage.
+2. ✅ Trình duyệt sẽ cache file tĩnh này mạnh mẽ hơn.
+3. ✅ Dịch chuyển luồng băng thông tốn kém từ Hosting sang Cloud Storage (Cloud Storage cho phép Free tới **1GB/ngày**, rộng rãi gấp ~3 lần).
+
+---
+
+### ✅ Điểm yếu #7: Database Reads ở trang khách (Trang chủ, Sản phẩm) — ĐÃ KHẮC PHỤC
+
+**Vấn đề cũ**: Dù dùng Next.js, cấu hình cũ `revalidate = 120` (hoặc false) vẫn khiến server thỉnh thoảng (vài phút một lần) ngầm gọi Firebase để fetch lại danh sách sản phẩm, dịch vụ, cấu hình... Điều này tiêu tốn ~10-15 Reads cho mỗi chu kỳ cache. Nếu có Custom Domain bị lệch cache, số Reads có thể tăng gấp đôi.
+
+**Đã triển khai**:
+1. ✅ Bọc toàn bộ các hàm fetch Firebase (config, services, products, categories) bằng `unstable_cache` kết hợp với `tags` (như `'config'`, `'services'`).
+2. ✅ Áp dụng cơ chế **On-Demand Revalidation**: Mặc định, cache sẽ tồn tại *mãi mãi* (0 Reads cho khách).
+3. ✅ Chỉ khi Admin bấm "Lưu" hoặc "Cập nhật", hệ thống mới gọi lệnh `revalidateTag` để xóa cache và ép Next.js kéo lại data đúng **1 lần duy nhất**.
+4. ✅ Kết quả: Lượng Reads của toàn bộ Khách hàng lướt web trên SSR giảm gần như tuyệt đối về **0**.
+
+---
+
 ## 🛡 Bảng tổng hợp biện pháp bảo vệ
 
 | # | Biện pháp | Ưu tiên | Trạng thái | Chi phí tiết kiệm |
@@ -157,14 +185,16 @@
 | 4 | SSR reviews (ISR revalidate=120) | TB | ✅ Đã có | ~95% reads |
 | 5 | Date filter trang revenue (3 tháng + UI picker) | TB | ✅ Đã có | ~70% reads |
 | 6 | localStorage thay sessionStorage presence | Thấp | ✅ Đã có | ~50% writes |
-| 7 | Firebase App Check | Cao | ❌ Chưa bật | Chặn bot hoàn toàn |
-| 8 | Budget alerts trên Firebase Console | Cao | ❌ Chưa bật | Cảnh báo sớm |
+| 7 | Tải thẳng ảnh LCP từ Cloud Storage (`unoptimized`) | Cao | ✅ Đã có | Cứu băng thông Hosting |
+| 8 | On-Demand ISR (`unstable_cache`) toàn bộ SSR | Cao | ✅ Đã có | ~99% Reads từ Khách |
+| 9 | Firebase App Check | Cao | ❌ Chưa bật | Chặn bot hoàn toàn |
+| 10 | Budget alerts trên Firebase Console | Cao | ❌ Chưa bật | Cảnh báo sớm |
 
 > [!IMPORTANT]
-> **Biện pháp #7 (App Check)** là giải pháp toàn diện nhất — Google xác thực request đến từ app thật, không phải bot. Miễn phí, nhưng cần cấu hình reCAPTCHA v3.
+> **Biện pháp #9 (App Check)** là giải pháp toàn diện nhất — Google xác thực request đến từ app thật, không phải bot. Miễn phí, nhưng cần cấu hình reCAPTCHA v3.
 
 > [!WARNING]
-> **Biện pháp #8 (Budget alerts)** nên làm NGAY — vào Firebase Console → Usage & Billing → set alert ở $0 để nhận email khi bắt đầu tính phí. Không mất thời gian code.
+> **Biện pháp #10 (Budget alerts)** nên làm NGAY — vào Firebase Console → Usage & Billing → set alert ở $0 để nhận email khi bắt đầu tính phí. Không mất thời gian code.
 
 ---
 

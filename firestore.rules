@@ -67,8 +67,12 @@ service cloud.firestore {
     // Analytics Dashboard
     match /analytics/{dateStr} {
       allow read: if true;
-      allow create, update: if true; // Public can increment visitors
-      allow delete: if isAdmin(); // Only admin can delete analytics data
+      allow write: if false; // All writes must now go through secure Admin SDK API
+      
+      // Protect the subcollection as well
+      match /visits/{deviceId} {
+        allow read, write: if false;
+      }
     }
 
     // Users

@@ -16,7 +16,7 @@ const FlashSale = dynamic(() => import("@/components/home/FlashSale"), { ssr: fa
 const BookingSection = dynamic(() => import("@/components/home/BookingSection"), { ssr: false, loading: () => <div className="h-[300px] bg-white animate-pulse rounded-xl container mx-auto mt-4"></div> });
 const ArticleBlock = dynamic(() => import("@/components/home/ArticleBlock"), { ssr: false, loading: () => <div className="h-[400px] bg-white animate-pulse rounded-xl container mx-auto mt-4"></div> });
 const SuggestedSection = dynamic(() => import("@/components/home/SuggestedSection"), { ssr: false, loading: () => <div className="h-[400px] bg-white animate-pulse rounded-xl container mx-auto mt-4"></div> });
-const CategoriesSection = dynamic(() => import("@/components/home/CategoriesSection"), { ssr: false, loading: () => <div className="min-h-[200px] bg-white animate-pulse rounded-xl container mx-auto mt-4"></div> });
+import CategoriesSection from "@/components/home/CategoriesSection";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const SECTION_COMPONENTS: Record<string, React.ComponentType<any>> = {

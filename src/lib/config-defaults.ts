@@ -156,9 +156,9 @@ export interface SiteConfig {
 
 // =========== Defaults ===========
 export const DEFAULT_CONFIG: SiteConfig = {
-    primaryColor: '#C8956C',
-    primaryColorDark: '#A97B55',
-    primaryColorLight: '#E0B894',
+    primaryColor: '#5A6A7A',
+    primaryColorDark: '#3C4C5C',
+    primaryColorLight: '#8296AA',
     contact_info: {
         main_phone: '0932242026',
         email: 'vanlanh.vn@gmail.com',
