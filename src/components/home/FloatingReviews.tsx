@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Star, MessageSquareQuote, X } from 'lucide-react';
-import { collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
+import { collection, query, where, getDocs, limit } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Review } from '@/lib/types';
 
@@ -17,7 +17,6 @@ export default function FloatingReviews() {
         if (isDismissed) return;
 
         let isMounted = true;
-        let initDelayTimer: NodeJS.Timeout;
 
         const fetchReviews = async () => {
             try {
@@ -72,7 +71,7 @@ export default function FloatingReviews() {
         // Defer fetch to not block main thread (INP optimization)
         const deferFn = window.requestIdleCallback || ((cb) => setTimeout(cb, 1));
         
-        initDelayTimer = setTimeout(() => {
+        const initDelayTimer = setTimeout(() => {
             deferFn(() => {
                 if(isMounted) fetchReviews();
             });
@@ -97,7 +96,7 @@ export default function FloatingReviews() {
 
     if (!isVisible || reviews.length === 0 || isDismissed) return null;
 
-    const currentReview = reviews[currentIndex];
+
 
     return (
         <div className="fixed bottom-24 left-4 z-40 max-w-[280px] md:max-w-xs animate-in slide-in-from-left-8 fade-in duration-500">

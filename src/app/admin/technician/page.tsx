@@ -5,18 +5,18 @@
 import { useState, useEffect } from 'react';
 import {
     Wrench, Smartphone, Search, Eye, ChevronRight, Clock,
-    CheckCircle2, Loader2, Image, Video, AlertCircle, X, Package, Trash2,
-    DollarSign, Ban, RotateCcw, ClipboardList, User as UserIcon
+    CheckCircle2, Loader2, Image as ImageIcon, Video, AlertCircle, X, Package, Trash2,
+    User as UserIcon
 } from 'lucide-react';
-import { collection, query, onSnapshot, doc, updateDoc, serverTimestamp, getDocs, where, Timestamp, runTransaction, increment, getDoc, setDoc, writeBatch } from 'firebase/firestore';
+import { collection, query, onSnapshot, doc, updateDoc, serverTimestamp, getDocs, where, runTransaction, getDoc, setDoc, increment, Timestamp, orderBy, limit } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
 import { isChecklistComplete, isYouTubeUrl, getYouTubeEmbedUrl, areAllPartsReady } from '@/lib/workflowFeatures';
-import { calculateAndSaveCommissions } from '@/lib/commissionUtils';
-import type { RepairTicket, RepairStatus, Product, WorkflowNode } from '@/lib/types';
+import type { RepairTicket, Product, WorkflowNode } from '@/lib/types';
 import { toastError, toastSuccess, toastWarning } from '@/lib/toast';
+import { PART_CATEGORY, PART_CATEGORY_LABEL } from '@/lib/constants';
 import Modal from '@/components/admin/Modal';
-import { stampWarrantyOnParts } from '@/lib/warrantyUtils';
+
 
 const checklistLabels: Record<string, string> = {
     body: 'Vỏ máy', screen: 'Màn hình', touch: 'Cảm ứng', camera: 'Camera',
@@ -54,12 +54,9 @@ export default function TechnicianPage() {
         return ticket.ticketType === 'warranty' ? warrantyStatuses : dynamicStatuses;
     };
 
-    // Handover modal state
-    const [handoverModal, setHandoverModal] = useState<{ ticket: RepairTicket; action: 'done' | 'out' | 'refund', targetStatus?: string } | null>(null);
-    const [handoverNote, setHandoverNote] = useState('');
-    const [paymentConfirmed, setPaymentConfirmed] = useState(false);
+    // (Handover moved to repairs/cashier page)
 
-    // Search parts
+    // Search parts — server-side Firestore query (BUG-INV-003 fix)
     useEffect(() => {
         if (!partSearchQuery.trim()) {
             setPartSearchResults([]);
@@ -68,21 +65,38 @@ export default function TechnicianPage() {
         const timer = setTimeout(async () => {
             setIsSearchingParts(true);
             try {
-                // Fetch from products collection where status is active
-                const snap = await getDocs(query(collection(db, 'products'), where('status', '==', 'active')));
-                const all = snap.docs.map(d => ({ id: d.id, ...d.data() } as Product));
-                const lowerQ = partSearchQuery.toLowerCase();
-                // We only want parts (Linh kiện)
-                const filtered = all.filter(p =>
-                    p.category === 'Linh kiện' && (p.name.toLowerCase().includes(lowerQ) || p.id.toLowerCase().includes(lowerQ))
-                );
-                setPartSearchResults(filtered.slice(0, 10)); // max 10 results
+                // Normalize query the same way as generateSearchKeywords
+                const normalizedQ = partSearchQuery
+                    .normalize('NFD')
+                    .replace(/[\u0300-\u036f]/g, '')
+                    .replace(/đ/gi, 'd')
+                    .toLowerCase()
+                    .trim();
+
+                if (!normalizedQ) {
+                    setPartSearchResults([]);
+                    return;
+                }
+
+                // Server-side: query only parts matching the keyword
+                const snap = await getDocs(query(
+                    collection(db, 'products'),
+                    where('status', '==', 'active'),
+                    where('searchKeywords', 'array-contains', normalizedQ),
+                    limit(20)
+                ));
+
+                const results = snap.docs
+                    .map(d => ({ id: d.id, ...d.data() } as Product))
+                    .filter(p => p.category === PART_CATEGORY || p.categoryIds?.includes('component'));
+
+                setPartSearchResults(results.slice(0, 10));
             } catch (err) {
                 console.error(err);
             } finally {
                 setIsSearchingParts(false);
             }
-        }, 500);
+        }, 400);
         return () => clearTimeout(timer);
     }, [partSearchQuery]);
 
@@ -101,6 +115,7 @@ export default function TechnicianPage() {
 
                 const productData = pSnap.data() as Partial<{
                     stock: number;
+                    held: number;
                     costPrice: number;
                     price_original: number;
                     price_promo: number;
@@ -110,8 +125,10 @@ export default function TechnicianPage() {
                 }>;
 
                 const currentStock = Number(productData?.stock) || 0;
-                if (currentStock < qty) {
-                    throw new Error(`Linh kiện "${product.name}" không đủ tồn kho. Tồn hiện tại: ${currentStock}.`);
+                const currentHeld = Number(productData?.held) || 0;
+                const available = currentStock - currentHeld;
+                if (available < qty) {
+                    throw new Error(`Linh kiện "${product.name}" không đủ tồn kho. Tồn: ${currentStock}, đã giữ: ${currentHeld}, khả dụng: ${available}.`);
                 }
 
                 const unitCostAtUse = Number(productData?.costPrice ?? productData?.price_original ?? 0);
@@ -165,7 +182,8 @@ export default function TechnicianPage() {
                     }, 0);
                 const nextAmount = nextPartsCost + laborCost + additionalFees;
 
-                tx.update(productRef, { stock: increment(-qty), held: increment(qty), updatedAt: serverTimestamp() });
+                tx.update(productRef, { held: increment(qty), updatedAt: serverTimestamp() });
+
                 tx.update(ticketRef, {
                     parts: nextParts,
                     'payment.partsCost': nextPartsCost,
@@ -201,15 +219,29 @@ export default function TechnicianPage() {
                 quantity: 1,
                 status: 'requested' as const
             };
-            await updateDoc(doc(db, 'repairs', ticket.id), {
-                parts: [...currentParts, newPart]
+            const ticketRef = doc(db, 'repairs', ticket.id);
+            await runTransaction(db, async (tx) => {
+                const snap = await tx.get(ticketRef);
+                const dbVersion = snap.data()?.version || 0;
+                if (dbVersion !== (ticket.version || 0)) {
+                    throw new Error('VERSION_CONFLICT');
+                }
+                tx.update(ticketRef, {
+                    parts: [...currentParts, newPart],
+                    version: increment(1),
+                    updatedAt: serverTimestamp()
+                });
             });
-            setSelectedTicket({ ...ticket, parts: [...currentParts, newPart] });
+            setSelectedTicket({ ...ticket, parts: [...currentParts, newPart], version: (ticket.version || 0) + 1 });
             toastSuccess('Đã thêm linh kiện vào danh sách yêu cầu. Phiếu nhập sẽ được tạo khi chuyển trạng thái.');
             setPartSearchQuery('');
-        } catch (err) {
+        } catch (err: unknown) {
             console.error('Error requesting part:', err);
-            toastError('Lỗi khi tạo yêu cầu.');
+            if (err instanceof Error && err.message === 'VERSION_CONFLICT') {
+                toastError('Dữ liệu đã được cập nhật bởi người khác. Vui lòng tải lại trang.');
+            } else {
+                toastError('Lỗi khi tạo yêu cầu.');
+            }
         }
     };
 
@@ -219,23 +251,80 @@ export default function TechnicianPage() {
 
         try {
             const currentParts = ticket.parts || [];
+            const exactName = customPartName.trim();
+            
+            // Find existing proposed product with this name
+            const productsRef = collection(db, 'products');
+            const q = query(productsRef, where('name', '==', exactName), where('isProposed', '==', true));
+            const querySnapshot = await getDocs(q);
+
+            let productIdToUse = '';
+            let productNameToUse = exactName;
+
+            if (!querySnapshot.empty) {
+                const existingDoc = querySnapshot.docs[0];
+                productIdToUse = existingDoc.id;
+                productNameToUse = existingDoc.data().name;
+            } else {
+                // If no proposed product, check if admin already imported it into inventory
+                const qExist = query(productsRef, where('name', '==', exactName));
+                const existSnap = await getDocs(qExist);
+                if (!existSnap.empty) {
+                    const existingDoc = existSnap.docs[0];
+                    productIdToUse = existingDoc.id;
+                    productNameToUse = existingDoc.data().name;
+                } else {
+                    // Create new proposed product
+                    const newProdRef = doc(productsRef);
+                    await setDoc(newProdRef, {
+                        name: exactName,
+                        category: 'component',
+                        categoryIds: ['component'],
+                        price_original: 0,
+                        price_promo: 0,
+                        costPrice: 0,
+                        stock: 0,
+                        status: 'hidden',
+                        isProposed: true,
+                        createdAt: serverTimestamp(),
+                        updatedAt: serverTimestamp()
+                    });
+                    productIdToUse = newProdRef.id;
+                }
+            }
+
             const newPart = {
-                productId: `custom_${Date.now()}`,
-                productName: customPartName.trim(),
+                productId: productIdToUse,
+                productName: productNameToUse,
                 quality: selectedPartQuality,
                 partType: '',
                 quantity: 1,
                 status: 'requested' as const
             };
-            await updateDoc(doc(db, 'repairs', ticket.id), {
-                parts: [...currentParts, newPart]
+            
+            const ticketRef = doc(db, 'repairs', ticket.id);
+            await runTransaction(db, async (tx) => {
+                const snap = await tx.get(ticketRef);
+                const dbVersion = snap.data()?.version || 0;
+                if (dbVersion !== (ticket.version || 0)) {
+                    throw new Error('VERSION_CONFLICT');
+                }
+                tx.update(ticketRef, {
+                    parts: [...currentParts, newPart],
+                    version: increment(1),
+                    updatedAt: serverTimestamp()
+                });
             });
-            setSelectedTicket({ ...ticket, parts: [...currentParts, newPart] });
-            toastSuccess('Đã thêm linh kiện tùy chỉnh. Phiếu nhập sẽ được tạo khi chuyển trạng thái.');
+            setSelectedTicket({ ...ticket, parts: [...currentParts, newPart], version: (ticket.version || 0) + 1 });
+            toastSuccess('Đã thêm linh kiện đề xuất. Kế toán/Kho sẽ xem xét.');
             setCustomPartName('');
-        } catch (err) {
+        } catch (err: unknown) {
             console.error('Error adding custom part:', err);
-            toastError('Lỗi khi thêm linh kiện.');
+            if (err instanceof Error && err.message === 'VERSION_CONFLICT') {
+                toastError('Dữ liệu đã được cập nhật bởi người khác. Vui lòng tải lại trang.');
+            } else {
+                toastError('Lỗi khi thêm linh kiện.');
+            }
         }
     };
 
@@ -262,11 +351,15 @@ export default function TechnicianPage() {
                 const status = String(removedObj.status || '');
                 const productId = String(removedObj.productId || '');
                 const qty = Math.max(1, Number(removedObj.quantity) || 1);
-                if (status === 'selected' && productId && !productId.startsWith('custom_')) {
+                if (status === 'selected' && productId) {
                     const productRef = doc(db, 'products', productId);
                     const pSnap = await tx.get(productRef);
                     if (pSnap.exists()) {
-                        tx.update(productRef, { stock: increment(qty), held: increment(-qty), updatedAt: serverTimestamp() });
+                        const currentHeld = Number(pSnap.data()?.held) || 0;
+                        if (currentHeld < qty) {
+                            throw new Error(`Số lượng giữ chỗ không khớp khi xóa linh kiện (Đang giữ ${currentHeld}, cần giải phóng ${qty}).`);
+                        }
+                        tx.update(productRef, { held: increment(-qty), updatedAt: serverTimestamp() });
                     }
                 }
 
@@ -306,7 +399,7 @@ export default function TechnicianPage() {
     };
 
     useEffect(() => {
-        const unsubTickets = onSnapshot(query(collection(db, 'repairs')), (snap) => {
+        const unsubTickets = onSnapshot(query(collection(db, 'repairs'), orderBy('createdAt', 'desc'), limit(100)), (snap) => {
             const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as RepairTicket[];
             setTickets(data);
             setLoading(false);
@@ -336,13 +429,12 @@ export default function TechnicianPage() {
             const receiptRef = doc(db, 'import_receipts', receiptId);
 
             const items = requestedParts.map(p => ({
-                productId: p.productId || `custom_${Date.now()}`,
-                productName: p.productName || p.name || p.partName || 'Linh kiện',
+                productId: p.productId || '',
+                productName: p.productName || p.name || p.partName || PART_CATEGORY,
                 quantity: p.quantity || 1,
                 importPrice: 0,
                 quality: p.quality || 'Zin',
-                isNewProduct: (p.productId || '').startsWith('custom_'),
-                category: 'Linh kiện',
+                category: 'component',
             }));
 
             const existingSnap = await getDoc(receiptRef);
@@ -381,7 +473,7 @@ export default function TechnicianPage() {
         }
     };
 
-    const executeStatusChange = async (ticketId: string, newStatus: RepairStatus | string) => {
+    const executeStatusChange = async (ticketId: string, newStatus: string) => {
         try {
             const ticket = tickets.find(t => t.id === ticketId);
             if (!ticket) return;
@@ -391,6 +483,12 @@ export default function TechnicianPage() {
             // Block terminal states
             if (currentCfg?.isTerminal) {
                 toastError('Phiếu đã đóng, không thể thay đổi trạng thái!');
+                return;
+            }
+
+            // Block KTV from changing status when ticket is waiting for handover (cashier's job)
+            if (ticket.status === 'cho_ban_giao_khach') {
+                toastWarning('Phiếu đang chờ bàn giao cho khách. Vui lòng liên hệ thu ngân để xử lý.');
                 return;
             }
 
@@ -423,19 +521,8 @@ export default function TechnicianPage() {
                 }
             }
 
-            // ── Payment requirement check (Intercept before normal transition) ──
-            if (currentCfg?.allowedFeatures?.includes('requirePaymentGate')) {
-                if (newStatus === 'refund') {
-                    setHandoverModal({ ticket, action: 'refund', targetStatus: newStatus });
-                    return;
-                } else if (newStatus === 'out') {
-                    setHandoverModal({ ticket, action: 'out', targetStatus: newStatus });
-                    return;
-                } else {
-                    setHandoverModal({ ticket, action: 'done', targetStatus: newStatus });
-                    return;
-                }
-            }
+            // ── Payment gate: KTV không xử lý bàn giao, chỉ chuyển trạng thái bình thường ──
+            // (requirePaymentGate is handled by cashier in repairs/page.tsx)
 
             // ── Create consolidated import receipt if there are requested parts ──
             const requestedParts = (ticket.parts || []).filter(p => p.status === 'requested');
@@ -458,7 +545,7 @@ export default function TechnicianPage() {
         }
     };
 
-    const handleStatusChange = async (ticketId: string, newStatus: RepairStatus | string) => {
+    const handleStatusChange = async (ticketId: string, newStatus: string) => {
         const ticket = tickets.find(t => t.id === ticketId);
         if (!ticket) return;
         const workflow = getWorkflowForTicket(ticket);
@@ -487,6 +574,7 @@ export default function TechnicianPage() {
                 status: newStatus,
                 statusTimeline: timeline,
                 updatedAt: serverTimestamp(),
+                version: increment(1),
             };
 
             // Only update issue.notes if provided
@@ -494,9 +582,22 @@ export default function TechnicianPage() {
                 updates['issue.notes'] = newTechNote;
             }
 
-            await updateDoc(doc(db, 'repairs', ticket.id), updates);
-        } catch (err) {
-            console.error('Status update error:', err);
+            const ticketRef = doc(db, 'repairs', ticket.id);
+            await runTransaction(db, async (tx) => {
+                const snap = await tx.get(ticketRef);
+                const dbVersion = snap.data()?.version || 0;
+                if (dbVersion !== (ticket.version || 0)) {
+                    throw new Error('VERSION_CONFLICT');
+                }
+                tx.update(ticketRef, updates);
+            });
+        } catch (err: unknown) {
+            if (err instanceof Error && err.message === 'VERSION_CONFLICT') {
+                toastError('Phiếu đã được cập nhật bởi người khác. Vui lòng tải lại trang.');
+            } else {
+                console.error('Status update error:', err);
+                toastError('Lỗi khi cập nhật trạng thái.');
+            }
         }
     };
 
@@ -512,227 +613,11 @@ export default function TechnicianPage() {
         setTechNoteText('');
     };
 
-    // ── Handover handler (terminal action from any status) ──
-    const handleTechHandover = async () => {
-        if (!handoverModal) return;
-        const { ticket, action, targetStatus } = handoverModal;
-
-        const workflow = getWorkflowForTicket(ticket);
-        const currentCfg = workflow.find(s => s.id === ticket.status);
-        if (currentCfg?.isTerminal) {
-            toastError('Phiếu đã đóng, không thể thay đổi trạng thái!');
-            setHandoverModal(null);
-            setPaymentConfirmed(false);
-            return;
-        }
-
-        try {
-            const now = Date.now();
-            const oldTimeline = [...(ticket.statusTimeline || [])];
-            if (oldTimeline.length > 0) {
-                const lastEntry = oldTimeline[oldTimeline.length - 1];
-                lastEntry.durationInMinutes = Math.round((now - lastEntry.timestamp) / 60000);
-            }
-
-            // Create consolidated import receipt if there are requested parts
-            const requestedParts = (ticket.parts || []).filter(p => p.status === 'requested');
-            if (requestedParts.length > 0) {
-                await handleCreateConsolidatedReceipt(ticket);
-            }
-
-            if (action === 'done') {
-                const targetStatusId = targetStatus || 'done';
-                const newTimeline = [...oldTimeline, { status: targetStatusId, timestamp: now }];
-
-                // ── Warranty stamping ──
-                const patchedParts = await stampWarrantyOnParts(ticket.parts || [], now);
-
-                const techHandoverUpdate: Record<string, unknown> = {
-                    status: targetStatusId,
-                    'payment.status': 'paid',
-                    statusTimeline: newTimeline,
-                    deliveryNote: handoverNote.trim() || 'Hoàn tất đơn',
-                    'timing.completedAt': serverTimestamp(),
-                    updatedAt: serverTimestamp(),
-                };
-                if (patchedParts !== ticket.parts) {
-                    techHandoverUpdate.parts = patchedParts;
-                }
-                const batch = writeBatch(db);
-                batch.update(doc(db, 'repairs', ticket.id), techHandoverUpdate as any);
-
-                // Release held inventory
-                const partsForInventory = patchedParts || ticket.parts || [];
-                const processBatchCache = new Set<string>();
-                for (const pt of partsForInventory) {
-                    if (pt.status === 'selected' && pt.productId && !pt.productId.startsWith('custom_') && !processBatchCache.has(pt.productId)) {
-                        processBatchCache.add(pt.productId);
-                    }
-                }
-                const productDeltas = new Map<string, number>();
-                for (const pt of partsForInventory) {
-                    if (pt.status === 'selected' && pt.productId && !pt.productId.startsWith('custom_')) {
-                        const amt = Math.max(1, Number(pt.quantity) || 1);
-                        productDeltas.set(pt.productId, (productDeltas.get(pt.productId) || 0) + amt);
-                    }
-                }
-                for (const [pId, amt] of productDeltas.entries()) {
-                    batch.update(doc(db, 'products', pId), {
-                        held: increment(-amt),
-                        updatedAt: serverTimestamp()
-                    });
-                }
-                
-                await batch.commit();
-                
-                // ── Commission calculation based on workflow features ──
-                const doneStatusCfg = workflow.find(s => s.id === targetStatusId);
-                const features = doneStatusCfg?.allowedFeatures || [];
-                const enableTechCommission = features.includes('enableTechnicianCommission');
-                const enableSellerCommission = features.includes('enableSellerCommission');
-
-                const commissionTicket: RepairTicket = {
-                    ...ticket,
-                    status: targetStatusId as RepairStatus,
-                    payment: { ...ticket.payment, status: 'paid' },
-                    timing: { ...ticket.timing, completedAt: Timestamp.fromMillis(now) },
-                };
-
-                // KTV được phân công
-                if (enableTechCommission && ticket.staff?.assignedTechnician) {
-                    calculateAndSaveCommissions(
-                        { uid: ticket.staff.assignedTechnician, displayName: ticket.staff.assignedTechnicianName || 'N/A' },
-                        'repair',
-                        commissionTicket
-                    ).catch(console.error);
-                }
-
-                // Nhân viên chốt đơn (người tạo phiếu)
-                if (enableSellerCommission && ticket.staff?.createdBy) {
-                    calculateAndSaveCommissions(
-                        { uid: ticket.staff.createdBy, displayName: ticket.staff.createdByName || 'N/A' },
-                        'repair',
-                        commissionTicket
-                    ).catch(console.error);
-                }
-            } else if (action === 'out') {
-                const targetStatusId = targetStatus || 'out';
-                const newTimeline = [...oldTimeline, { status: targetStatusId, timestamp: now }];
-                const batch = writeBatch(db);
-                batch.update(doc(db, 'repairs', ticket.id), {
-                    status: targetStatusId,
-                    statusTimeline: newTimeline,
-                    deliveryNote: handoverNote.trim() || 'Không sửa được, trả máy',
-                    'timing.completedAt': serverTimestamp(),
-                    updatedAt: serverTimestamp(),
-                });
-                
-                // Return held parts to stock
-                const productDeltas = new Map<string, number>();
-                for (const pt of (ticket.parts || [])) {
-                    if (pt.status === 'selected' && pt.productId && !pt.productId.startsWith('custom_')) {
-                        const amt = Math.max(1, Number(pt.quantity) || 1);
-                        productDeltas.set(pt.productId, (productDeltas.get(pt.productId) || 0) + amt);
-                    }
-                }
-                for (const [pId, amt] of productDeltas.entries()) {
-                    batch.update(doc(db, 'products', pId), {
-                        held: increment(-amt),
-                        stock: increment(amt),
-                        updatedAt: serverTimestamp()
-                    });
-                }
-                await batch.commit();
-                
-                // ── Commission calculation based on workflow features ──
-                const doneStatusCfg = workflow.find(s => s.id === targetStatusId);
-                const features = doneStatusCfg?.allowedFeatures || [];
-                const enableTechCommission = features.includes('enableTechnicianCommission');
-                const enableSellerCommission = features.includes('enableSellerCommission');
-
-                const commissionTicket: RepairTicket = {
-                    ...ticket,
-                    status: targetStatusId as RepairStatus,
-                    timing: { ...ticket.timing, completedAt: Timestamp.fromMillis(now) },
-                };
-
-                // KTV được phân công
-                if (enableTechCommission && ticket.staff?.assignedTechnician) {
-                    calculateAndSaveCommissions(
-                        { uid: ticket.staff.assignedTechnician, displayName: ticket.staff.assignedTechnicianName || 'N/A' },
-                        'repair',
-                        commissionTicket
-                    ).catch(console.error);
-                }
-
-                // Nhân viên chốt đơn (người tạo phiếu)
-                if (enableSellerCommission && ticket.staff?.createdBy) {
-                    calculateAndSaveCommissions(
-                        { uid: ticket.staff.createdBy, displayName: ticket.staff.createdByName || 'N/A' },
-                        'repair',
-                        commissionTicket
-                    ).catch(console.error);
-                }
-            } else if (action === 'refund') {
-                const targetStatusId = targetStatus || 'refund';
-                const newTimeline = [...oldTimeline, { status: targetStatusId, timestamp: now }];
-                const batch = writeBatch(db);
-                batch.update(doc(db, 'repairs', ticket.id), {
-                    status: targetStatusId,
-                    'payment.status': 'refunded',
-                    statusTimeline: newTimeline,
-                    deliveryNote: handoverNote.trim() || 'Hoàn phí cho khách',
-                    'timing.completedAt': serverTimestamp(),
-                    updatedAt: serverTimestamp(),
-                });
-                
-                // Return held parts to stock
-                const productDeltas = new Map<string, number>();
-                for (const pt of (ticket.parts || [])) {
-                    if (pt.status === 'selected' && pt.productId && !pt.productId.startsWith('custom_')) {
-                        const amt = Math.max(1, Number(pt.quantity) || 1);
-                        productDeltas.set(pt.productId, (productDeltas.get(pt.productId) || 0) + amt);
-                    }
-                }
-                for (const [pId, amt] of productDeltas.entries()) {
-                    batch.update(doc(db, 'products', pId), {
-                        held: increment(-amt),
-                        stock: increment(amt),
-                        updatedAt: serverTimestamp()
-                    });
-                }
-                await batch.commit();
-                
-                // Hoàn phí → chỉ bù trừ hoa hồng cho KTV (refund)
-                // Phiếu warranty không tính hoa hồng âm vì không có hoa hồng dương nào
-                if (ticket.ticketType !== 'warranty') {
-                    const commissionTicket: RepairTicket = {
-                        ...ticket,
-                        status: targetStatusId as RepairStatus,
-                        payment: { ...ticket.payment, status: 'refunded' },
-                        timing: { ...ticket.timing, completedAt: Timestamp.fromMillis(now) },
-                    };
-                    if (ticket.staff?.assignedTechnician) {
-                        calculateAndSaveCommissions(
-                            { uid: ticket.staff.assignedTechnician, displayName: ticket.staff.assignedTechnicianName || 'N/A' },
-                            'repair',
-                            commissionTicket,
-                            true // isRefund
-                        ).catch(console.error);
-                    }
-                }
-            }
-
-            setHandoverModal(null);
-            setHandoverNote('');
-            setPaymentConfirmed(false);
-        } catch (e) {
-            console.error(e);
-            toastError('Lỗi xử lý bàn giao!');
-        }
-    };
+    // (handleTechHandover removed — handover is managed by cashier in repairs/page.tsx)
 
     const formatPrice = (p: number) => p > 0 ? p.toLocaleString('vi-VN') + 'đ' : '—';
+
+
 
     // ── Inline checklist update ──
     const handleChecklistUpdate = async (ticketId: string, key: string, newValue: string) => {
@@ -823,6 +708,8 @@ export default function TechnicianPage() {
                     ) : filtered.map(ticket => {
                         const workflow = getWorkflowForTicket(ticket);
                         const st = workflow.find(s => s.id === ticket.status) || { id: ticket.status, label: ticket.status, color: 'text-gray-700 bg-gray-50 border-gray-200', allowedNext: [] } as WorkflowNode;
+                        const currentCfg = workflow.find(s => s.id === ticket.status);
+                        const isReadOnly = ticket.status === 'cho_ban_giao_khach' || !!currentCfg?.isTerminal;
 
                         return (
                             <div
@@ -856,7 +743,9 @@ export default function TechnicianPage() {
                                             )}
                                             <span>• {ticket.customer?.name}</span>
                                         </div>
-                                        {ticket.issue?.description && (
+                                        {ticket.issues && ticket.issues.length > 0 ? (
+                                            <p className="text-sm text-gray-600 mt-1 line-clamp-1">{ticket.issues.map(i => i.label).join(', ')}</p>
+                                        ) : ticket.issue?.description && (
                                             <p className="text-sm text-gray-600 mt-1 line-clamp-1">{ticket.issue.description}</p>
                                         )}
 
@@ -888,7 +777,7 @@ export default function TechnicianPage() {
                                                                                     : 'bg-yellow-50 text-yellow-700 border-yellow-200'
                                                                     }`}
                                                                 >
-                                                                    {(p.productName || p.partName || 'Linh kiện')}{p.quantity ? ` ×${p.quantity}` : ''}
+                                                                    {(p.productName || p.partName || PART_CATEGORY_LABEL)}{p.quantity ? ` ×${p.quantity}` : ''}
                                                                 </span>
                                                             ))}
                                                             {remaining > 0 && (
@@ -916,6 +805,7 @@ export default function TechnicianPage() {
                                                                 value={val}
                                                                 onClick={e => e.stopPropagation()}
                                                                 onChange={e => handleChecklistUpdate(ticket.id, key, e.target.value)}
+                                                                disabled={isReadOnly}
                                                                 aria-label={`Checklist: ${checklistLabels[key]}`}
                                                                 title={`Checklist: ${checklistLabels[key]}`}
                                                                 className={`text-[20px] px-1 py-1 rounded-md border cursor-pointer transition-all appearance-none text-center font-medium ${
@@ -939,8 +829,9 @@ export default function TechnicianPage() {
                                                     const labels: Record<string, string> = { hasPriorRepair: 'Đã từng sửa', hasWaterDamage: 'Vào nước', hasNonGenuineParts: 'Kém/Lô' };
                                                     const val = !!(ticket.deviceInfo?.checklist as Record<string, boolean> | undefined)?.[key];
                                                     return (
-                                                        <button key={key} onClick={(e) => { e.stopPropagation(); handleHistoryToggle(ticket.id, key, val); }}
-                                                            className={`text-[15px] px-1.5 py-0.5 rounded-md border cursor-pointer transition-all ${val ? 'bg-orange-50 border-orange-200 text-orange-700 font-medium' : 'bg-gray-50 border-gray-200 text-gray-400'
+                                                        <button key={key} onClick={(e) => { e.stopPropagation(); if (!isReadOnly) handleHistoryToggle(ticket.id, key, val); }}
+                                                            disabled={isReadOnly}
+                                                            className={`text-[15px] px-1.5 py-0.5 rounded-md border transition-all ${isReadOnly ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'} ${val ? 'bg-orange-50 border-orange-200 text-orange-700 font-medium' : 'bg-gray-50 border-gray-200 text-gray-400'
                                                                 }`}
                                                             title={`${labels[key]}: ${val ? 'Có' : 'Không'} (Bấm để đổi)`}>
                                                             {val ? '☑' : '☐'} {labels[key]}
@@ -962,7 +853,7 @@ export default function TechnicianPage() {
                                         </button>
 
                                         {/* Dynamic Transition Button for Báo Giá */}
-                                        {st?.allowedFeatures?.includes('allowPartsSelection') ? (() => {
+                                        {!isReadOnly && st?.allowedFeatures?.includes('allowPartsSelection') ? (() => {
                                             const hasRequestedParts = ticket.parts?.length === 0 || ticket.parts?.some(p => p.status === 'requested');
                                             const targetStatusId = hasRequestedParts ? 'dang_tim_linh_kien' : 'dang_sua_chua';
                                             const targetStatus = workflow.find(ds => ds.id === targetStatusId);
@@ -978,7 +869,7 @@ export default function TechnicianPage() {
                                                     <ChevronRight size={10} />
                                                 </button>
                                             );
-                                        })() : st.allowedNext?.map((nextId: string) => {
+                                        })() : !isReadOnly && st.allowedNext?.map((nextId: string) => {
                                             const nextCfg = workflow.find(ds => ds.id === nextId);
                                             if (!nextCfg) return null;
                                             return (
@@ -1048,7 +939,9 @@ export default function TechnicianPage() {
                                                     )}
                                                 </div>
                                                 <p className="text-[11px] text-gray-600 mt-0.5 max-w-full truncate">{ticket.customer?.name}</p>
-                                                {ticket.issue?.description && (
+                                                {ticket.issues && ticket.issues.length > 0 ? (
+                                                    <p className="text-[11px] text-gray-500 mt-2 line-clamp-2 bg-gray-50 p-1.5 rounded">{ticket.issues.map(i => i.label).join(', ')}</p>
+                                                ) : ticket.issue?.description && (
                                                     <p className="text-[11px] text-gray-500 mt-2 line-clamp-2 bg-gray-50 p-1.5 rounded">{ticket.issue.description}</p>
                                                 )}
 
@@ -1135,6 +1028,17 @@ export default function TechnicianPage() {
                     size="lg"
                 >
                     <div className="p-5 space-y-4">
+                            {/* Read-Only Guard */}
+                            {(() => {
+                                const workflow = getWorkflowForTicket(selectedTicket);
+                                const currentCfg = workflow.find(s => s.id === selectedTicket.status);
+                                const isReadOnly = selectedTicket.status === 'cho_ban_giao_khach' || !!currentCfg?.isTerminal;
+                                return isReadOnly ? (
+                                    <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-800 font-medium flex items-center gap-2">
+                                        <AlertCircle size={16} /> Phiếu đã hoàn tất kỹ thuật — Chỉ xem, không thể chỉnh sửa.
+                                    </div>
+                                ) : null;
+                            })()}
                             {/* Status */}
                             {(() => {
                                 const workflow = getWorkflowForTicket(selectedTicket);
@@ -1147,7 +1051,22 @@ export default function TechnicianPage() {
                             })()}
 
                             {/* Issue */}
-                            {selectedTicket.issue?.description && (
+                            {selectedTicket.issues && selectedTicket.issues.length > 0 ? (
+                                <div className="bg-gray-50 rounded-xl p-3">
+                                    <p className="text-xs font-semibold text-gray-500 mb-1 flex items-center gap-1"><AlertCircle size={12} /> Danh sách lỗi</p>
+                                    <div className="space-y-1">
+                                        {selectedTicket.issues.map((iss, idx) => (
+                                            <div key={iss.id || idx} className="flex justify-between text-sm">
+                                                <span className="text-gray-800">{idx + 1}. {iss.label}</span>
+                                                {iss.estimatedPrice > 0 && <span className="text-gray-400 text-xs">~{iss.estimatedPrice.toLocaleString('vi-VN')}đ</span>}
+                                            </div>
+                                        ))}
+                                    </div>
+                                    {selectedTicket.issue?.notes && (
+                                        <p className="text-xs text-gray-500 mt-2 pt-2 border-t">Ghi chú: {selectedTicket.issue.notes}</p>
+                                    )}
+                                </div>
+                            ) : selectedTicket.issue?.description && (
                                 <div className="bg-gray-50 rounded-xl p-3">
                                     <p className="text-xs font-semibold text-gray-500 mb-1 flex items-center gap-1"><AlertCircle size={12} /> Lỗi / Yêu cầu</p>
                                     <p className="text-sm text-gray-800">{selectedTicket.issue.description}</p>
@@ -1200,7 +1119,7 @@ export default function TechnicianPage() {
                                 const workflow = getWorkflowForTicket(selectedTicket);
                                 const st = workflow.find(s => s.id === selectedTicket.status);
                                 return st?.allowedFeatures?.includes('allowPartsSelection');
-                            })() && (
+                            })() && !(() => { const wf = getWorkflowForTicket(selectedTicket); const cfg = wf.find(s => s.id === selectedTicket.status); return selectedTicket.status === 'cho_ban_giao_khach' || !!cfg?.isTerminal; })() && (
                                     <div className="mt-4 border-t pt-4">
                                         <p className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
                                             <Package size={16} className="text-orange-500" /> Linh kiện sử dụng
@@ -1240,6 +1159,7 @@ export default function TechnicianPage() {
                                                                             ? 'Không có hàng'
                                                                             : 'Đang yêu cầu'}
                                                             </span>
+                                                            {!(() => { const wf = getWorkflowForTicket(selectedTicket); const cfg = wf.find(s => s.id === selectedTicket.status); return selectedTicket.status === 'cho_ban_giao_khach' || !!cfg?.isTerminal; })() && (
                                                             <button
                                                                 onClick={() => handleRemovePart(selectedTicket, pIdx)}
                                                                 className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-white rounded-md transition-colors"
@@ -1247,6 +1167,7 @@ export default function TechnicianPage() {
                                                             >
                                                                 <Trash2 size={14} />
                                                             </button>
+                                                            )}
                                                         </div>
                                                     </div>
                                                 ))}
@@ -1365,7 +1286,7 @@ export default function TechnicianPage() {
                             {/* Pre-repair Media */}
                             {selectedTicket.preRepairMedia?.length > 0 && (
                                 <div>
-                                    <p className="text-xs font-semibold text-gray-500 mb-2 flex items-center gap-1"><Image size={12} /> Ảnh/Video nhận máy</p>
+                                    <p className="text-xs font-semibold text-gray-500 mb-2 flex items-center gap-1"><ImageIcon size={12} /> Ảnh/Video nhận máy</p>
                                     <div className="grid grid-cols-3 gap-2">
                                         {selectedTicket.preRepairMedia.map((url, i) => (
                                             <div key={i} className="aspect-square rounded-lg overflow-hidden bg-gray-100 border">
@@ -1431,6 +1352,9 @@ export default function TechnicianPage() {
                             {(() => {
                                 const workflow = getWorkflowForTicket(selectedTicket);
                                 const currentStatusCfg = workflow.find(s => s.id === selectedTicket.status);
+                                // Read-only guard: hide status change buttons entirely
+                                const isReadOnly = selectedTicket.status === 'cho_ban_giao_khach' || !!currentStatusCfg?.isTerminal;
+                                if (isReadOnly) return null;
                                 if (currentStatusCfg?.allowedFeatures?.includes('allowPartsSelection')) {
                                     const hasRequestedParts = selectedTicket.parts?.length === 0 || selectedTicket.parts?.some(p => p.status === 'requested');
                                     const targetStatusId = hasRequestedParts ? 'dang_tim_linh_kien' : 'dang_sua_chua';
@@ -1565,224 +1489,6 @@ export default function TechnicianPage() {
                 </Modal>
             )}
 
-            {/* ═══ Handover Confirmation Modal (Payment Gate) ═══ */}
-            {handoverModal && (() => {
-                const t = handoverModal.ticket;
-                const parts = t.parts || [];
-                const autoPartsCost = parts
-                    .filter((p) => !!p && ['selected', 'approved', 'in_stock'].includes(String(p.status)))
-                    .reduce((sum, p) => sum + (Number(p.price) || 0) * (p.quantity || 1), 0);
-
-                const deposit = t.payment?.depositAmount || 0;
-                const partsCost = Number(t.payment?.partsCost) || autoPartsCost;
-                const laborCost = Number(t.payment?.laborCost) || 0;
-                const additionalFees = Number(t.payment?.additionalFees) || 0;
-                const total = t.payment?.amount || 0;
-                const remaining = total - deposit;
-                const action = handoverModal.action;
-
-                const titles: Record<string, string> = {
-                    done: '✅ Hoàn Tất Đơn — Xác nhận Thanh Toán',
-                    out: '↩️ Trả Máy — Xác nhận Hoàn/Thu phí',
-                    refund: '🔴 Hoàn Phí — Xác nhận Hoàn tiền',
-                };
-
-                const outRefundAmount = action === 'out' && deposit > 0 ? deposit : 0;
-                const outChargeAmount = action === 'out' && additionalFees > 0 ? additionalFees : 0;
-
-                return (
-                    <Modal
-                        isOpen={true}
-                        onClose={() => { setHandoverModal(null); setHandoverNote(''); setPaymentConfirmed(false); }}
-                        size="lg"
-                        priority="high"
-                    >
-                            {/* Custom colored header */}
-                            <div className={`px-6 py-4 text-white sticky top-0 z-10 ${action === 'done' ? 'bg-emerald-600' : action === 'refund' ? 'bg-red-600' : 'bg-gray-600'}`}>
-                                <h2 className="text-lg font-bold flex items-center gap-2">
-                                    {action === 'done' ? <CheckCircle2 size={20} /> : action === 'refund' ? <RotateCcw size={20} /> : <Ban size={20} />}
-                                    {titles[action]}
-                                </h2>
-                                <p className="text-sm opacity-80 mt-0.5">
-                                    #{t.id.slice(-6).toUpperCase()} • <b>{t.customer.name}</b> • {t.deviceInfo?.model}
-                                </p>
-                            </div>
-
-                            <div className="px-6 py-5 space-y-4 flex-1 overflow-y-auto">
-                                {/* Service Info */}
-                                <div className="bg-blue-50 rounded-xl p-4 border border-blue-100">
-                                    <p className="text-xs font-bold text-blue-700 uppercase mb-2 flex items-center gap-1"><Wrench size={12} /> Thông tin dịch vụ</p>
-                                    <div className="space-y-1 text-sm">
-                                        <div className="flex justify-between">
-                                            <span className="text-gray-600">Dịch vụ:</span>
-                                            <span className="font-medium">{typeof t.issue === 'string' ? t.issue : t.issue?.description || t.deviceInfo?.model || '—'}</span>
-                                        </div>
-                                        <div className="flex justify-between">
-                                            <span className="text-gray-600">Thiết bị:</span>
-                                            <span className="font-medium">{t.deviceInfo?.model || '—'}</span>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Parts Used */}
-                                {parts.length > 0 && (
-                                    <div className="bg-purple-50 rounded-xl p-4 border border-purple-100">
-                                        <p className="text-xs font-bold text-purple-700 uppercase mb-2 flex items-center gap-1"><ClipboardList size={12} /> Linh kiện đã sử dụng</p>
-                                        <div className="space-y-1.5">
-                                            {parts
-                                                .filter((p) => p.status === 'approved' || p.status === 'in_stock' || p.status === 'selected')
-                                                .map((p, i: number) => (
-                                                <div key={i} className="flex justify-between text-sm">
-                                                    <span className="text-gray-700">
-                                                        {p.productName || p.name || p.partName} <span className="text-xs text-gray-400">×{p.quantity || 1}</span>
-                                                        {p.quality && <span className="text-xs ml-1 px-1 bg-blue-100 text-blue-600 rounded">{p.quality}</span>}
-                                                    </span>
-                                                    <span className="font-medium">{formatPrice((p.price || 0) * (p.quantity || 1))}</span>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* Financial Breakdown */}
-                                <div className="bg-gray-50 rounded-xl p-4 space-y-2 border border-gray-200">
-                                    <p className="text-xs font-bold text-gray-500 uppercase mb-2 flex items-center gap-1"><DollarSign size={12} /> Chi tiết thanh toán</p>
-
-                                    {partsCost > 0 && (
-                                        <div className="flex justify-between text-sm">
-                                            <span className="text-gray-500">Chi phí linh kiện:</span>
-                                            <span className="font-medium">{formatPrice(partsCost)}</span>
-                                        </div>
-                                    )}
-                                    {laborCost > 0 && (
-                                        <div className="flex justify-between text-sm">
-                                            <span className="text-gray-500">Tiền công sửa chữa:</span>
-                                            <span className="font-medium">{formatPrice(laborCost)}</span>
-                                        </div>
-                                    )}
-                                    {additionalFees > 0 && (
-                                        <div className="flex justify-between text-sm">
-                                            <span className="text-gray-500">Chi phí phát sinh:</span>
-                                            <span className="font-medium text-orange-600">{formatPrice(additionalFees)}</span>
-                                        </div>
-                                    )}
-                                    <div className="flex justify-between text-sm border-t pt-2">
-                                        <span className="text-gray-700 font-semibold">Tổng cộng:</span>
-                                        <span className="font-bold text-lg">{formatPrice(total)}</span>
-                                    </div>
-                                    {deposit > 0 && (
-                                        <div className="flex justify-between text-sm">
-                                            <span className="text-gray-500">Đã đặt cọc:</span>
-                                            <span className="font-semibold text-yellow-600">-{formatPrice(deposit)}</span>
-                                        </div>
-                                    )}
-
-                                    {/* Action-specific bottom */}
-                                    {action === 'done' && remaining > 0 && (
-                                        <div className="flex justify-between items-center text-sm border-t border-emerald-200 pt-3 mt-2 font-bold bg-emerald-50 -mx-4 -mb-4 px-4 py-3 rounded-b-xl">
-                                            <span className="text-gray-700">💰 SỐ TIỀN KHÁCH CẦN THANH TOÁN:</span>
-                                            <span className="text-red-600 text-xl">{formatPrice(remaining)}</span>
-                                        </div>
-                                    )}
-                                    {action === 'done' && remaining <= 0 && (
-                                        <div className="flex justify-between items-center text-sm border-t border-emerald-200 pt-3 mt-2 font-bold bg-emerald-50 -mx-4 -mb-4 px-4 py-3 rounded-b-xl">
-                                            <span className="text-gray-700">✅ Đã thu đủ</span>
-                                            <span className="text-emerald-600 text-xl">{formatPrice(total)}</span>
-                                        </div>
-                                    )}
-                                    {action === 'out' && deposit > 0 && (
-                                        <div className="flex justify-between items-center text-sm border-t border-orange-200 pt-3 mt-2 font-bold bg-orange-50 -mx-4 -mb-4 px-4 py-3 rounded-b-xl">
-                                            <span className="text-orange-700">🔄 TIỀN CỬA HÀNG HOÀN LẠI KHÁCH:</span>
-                                            <span className="text-orange-600 text-xl">{formatPrice(outRefundAmount)}</span>
-                                        </div>
-                                    )}
-                                    {action === 'out' && additionalFees > 0 && deposit === 0 && (
-                                        <div className="flex justify-between items-center text-sm border-t border-yellow-200 pt-3 mt-2 font-bold bg-yellow-50 -mx-4 -mb-4 px-4 py-3 rounded-b-xl">
-                                            <span className="text-yellow-700">⚠️ KHÁCH CẦN THANH TOÁN PHÍ PHÁT SINH:</span>
-                                            <span className="text-yellow-600 text-xl">{formatPrice(outChargeAmount)}</span>
-                                        </div>
-                                    )}
-                                    {action === 'out' && deposit === 0 && additionalFees === 0 && (
-                                        <div className="text-sm text-gray-500 border-t pt-2 mt-2 italic flex items-center justify-center gap-2">
-                                            <Ban size={16} />
-                                            Trả lại máy, không thu/hoàn phí.
-                                        </div>
-                                    )}
-                                    {action === 'refund' && (
-                                        <div className="flex justify-between items-center text-sm border-t border-red-200 pt-3 mt-2 font-bold bg-red-50 -mx-4 -mb-4 px-4 py-3 rounded-b-xl">
-                                            <span className="text-red-700">🔴 SỐ TIỀN CẦN HOÀN TRẢ KHÁCH:</span>
-                                            <span className="text-red-600 text-xl">{formatPrice(deposit > 0 ? deposit : 0)}</span>
-                                        </div>
-                                    )}
-                                </div>
-
-                                {/* Confirmation checkboxes */}
-                                {action === 'done' && remaining > 0 && (
-                                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-                                        <label className="flex items-start gap-3 cursor-pointer">
-                                            <div className="mt-0.5 bg-white border rounded">
-                                                <input type="checkbox" checked={paymentConfirmed} onChange={e => setPaymentConfirmed(e.target.checked)} className="w-5 h-5 text-emerald-600 rounded border-gray-300 focus:ring-emerald-500" />
-                                            </div>
-                                            <span className="text-sm font-semibold text-yellow-800 leading-snug">
-                                                Tôi xác nhận đã thu đủ số tiền <span className="text-red-600 underline decoration-2 underline-offset-2">{formatPrice(remaining)}</span> còn lại từ khách hàng.
-                                            </span>
-                                        </label>
-                                    </div>
-                                )}
-                                {action === 'out' && outRefundAmount > 0 && (
-                                    <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
-                                        <label className="flex items-start gap-3 cursor-pointer">
-                                            <div className="mt-0.5 bg-white border rounded">
-                                                <input type="checkbox" checked={paymentConfirmed} onChange={e => setPaymentConfirmed(e.target.checked)} className="w-5 h-5 text-orange-600 rounded border-gray-300 focus:ring-orange-500" />
-                                            </div>
-                                            <span className="text-sm font-semibold text-orange-800 leading-snug">
-                                                Tôi xác nhận đã hoàn trả <span className="text-orange-600 underline decoration-2 underline-offset-2">{formatPrice(outRefundAmount)}</span> tiền cọc cho khách hàng.
-                                            </span>
-                                        </label>
-                                    </div>
-                                )}
-                                {action === 'refund' && deposit > 0 && (
-                                    <div className="bg-red-50 border border-red-200 rounded-lg p-3">
-                                        <label className="flex items-start gap-3 cursor-pointer">
-                                            <div className="mt-0.5 bg-white border rounded">
-                                                <input type="checkbox" checked={paymentConfirmed} onChange={e => setPaymentConfirmed(e.target.checked)} className="w-5 h-5 text-red-600 rounded border-gray-300 focus:ring-red-500" />
-                                            </div>
-                                            <span className="text-sm font-semibold text-red-800 leading-snug">
-                                                Tôi xác nhận đã hoàn trả <span className="text-red-600 underline decoration-2 underline-offset-2">{formatPrice(deposit)}</span> cho khách hàng.
-                                            </span>
-                                        </label>
-                                    </div>
-                                )}
-
-                                {/* Note */}
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                                        {action === 'refund' ? 'Lý do hoàn phí *' : action === 'out' ? 'Lý do trả máy *' : 'Ghi chú bàn giao'}
-                                    </label>
-                                    <textarea value={handoverNote} onChange={e => setHandoverNote(e.target.value)}
-                                        rows={2} placeholder={action === 'refund' ? 'Máy bảo hành, không tìm được linh kiện...' : action === 'out' ? 'Không sửa được, trả máy cho khách...' : 'VD: Máy đã sửa xong, giao cho khách lúc 15h...'}
-                                        className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20 text-sm" />
-                                </div>
-                            </div>
-
-                            <div className="flex justify-end gap-3 px-6 py-4 border-t shrink-0 bg-white">
-                                <button onClick={() => { setHandoverModal(null); setHandoverNote(''); setPaymentConfirmed(false); }}
-                                    className="px-4 py-2 text-sm bg-gray-100 rounded-lg hover:bg-gray-200">Hủy</button>
-
-                                <button onClick={handleTechHandover}
-                                    disabled={
-                                        (action === 'done' && remaining > 0 && !paymentConfirmed) ||
-                                        (action === 'out' && outRefundAmount > 0 && !paymentConfirmed) ||
-                                        (action === 'refund' && deposit > 0 && !paymentConfirmed) ||
-                                        ((action === 'refund' || action === 'out') && !handoverNote.trim())
-                                    }
-                                    className={`px-5 py-2 text-sm font-semibold text-white rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${action === 'done' ? 'bg-emerald-500 hover:bg-emerald-600' : action === 'refund' ? 'bg-red-500 hover:bg-red-600' : 'bg-gray-500 hover:bg-gray-600'}`}>
-                                    {action === 'done' ? '✅ Xác nhận Trả Máy' : action === 'refund' ? '🔴 Xác nhận Hoàn Phí' : '↩️ Xác nhận Trả Máy (Out)'}
-                                </button>
-                            </div>
-                    </Modal>
-                );
-            })()}
         </div>
     );
 }

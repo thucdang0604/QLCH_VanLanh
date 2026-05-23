@@ -1,6 +1,5 @@
-import { ref, uploadBytes, getDownloadURL, deleteObject, listAll, getMetadata } from 'firebase/storage';
 import { collection, getDocs, orderBy, query, deleteDoc, doc, limit as firestoreLimit, startAfter, type QueryDocumentSnapshot, type DocumentData } from 'firebase/firestore';
-import { storage, db } from './firebase';
+import { db, getStorageInstance } from './firebase';
 
 const MAX_VIDEO_SIZE_MB = 50;
 const MAX_VIDEO_SIZE_BYTES = MAX_VIDEO_SIZE_MB * 1024 * 1024;
@@ -18,6 +17,9 @@ export async function uploadMedia(file: File, path: string = 'products'): Promis
     }
 
     try {
+        const storage = await getStorageInstance();
+        const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
+
         const timestamp = Date.now();
         const cleanName = file.name.replace(/[^a-zA-Z0-9.]/g, '_');
         const fileName = `${timestamp}_${cleanName}`;
@@ -44,6 +46,9 @@ export async function uploadMedia(file: File, path: string = 'products'): Promis
  */
 export async function uploadImage(file: File, path: string = 'products'): Promise<string> {
     try {
+        const storage = await getStorageInstance();
+        const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
+
         const timestamp = Date.now();
         const cleanName = file.name.replace(/[^a-zA-Z0-9.]/g, '_');
         const fileName = `${timestamp}_${cleanName}`;
@@ -84,6 +89,9 @@ export async function uploadMultipleImages(files: File[], path: string = 'produc
  */
 export async function deleteImage(fileUrl: string): Promise<void> {
     try {
+        const storage = await getStorageInstance();
+        const { ref, deleteObject } = await import('firebase/storage');
+
         const decodedUrl = decodeURIComponent(fileUrl);
         // Match both images/ and videos/ paths
         const pathMatch = decodedUrl.match(/(images|videos)%2F(.+?)\?/) || decodedUrl.match(/(images|videos)\/(.+?)\?/);
@@ -104,6 +112,9 @@ export async function deleteImage(fileUrl: string): Promise<void> {
  */
 export async function listImagesInFolder(path: string): Promise<{ name: string; url: string }[]> {
     try {
+        const storage = await getStorageInstance();
+        const { ref, listAll, getDownloadURL } = await import('firebase/storage');
+
         const folderRef = ref(storage, `images/${path}`);
         const res = await listAll(folderRef);
         const items = await Promise.all(
@@ -132,6 +143,9 @@ export async function listImagesInFolder(path: string): Promise<{ name: string; 
 export async function cleanBrokenMedia(
     onProgress?: (checked: number, total: number, broken: number) => void
 ): Promise<{ cleaned: number; total: number }> {
+    const storage = await getStorageInstance();
+    const { ref, getMetadata } = await import('firebase/storage');
+
     const BATCH_SIZE = 50;
     let cleaned = 0;
     let checked = 0;

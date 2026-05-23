@@ -3,6 +3,8 @@ import { ServerConfigProvider } from "@/lib/ConfigContext";
 import { DEFAULT_CONFIG, type SiteConfig } from "@/lib/config-defaults";
 import CustomerLayoutShell from "./layout.shell";
 
+export const revalidate = 30;
+
 /**
  * Customer Layout — Server Component
  * 
@@ -18,14 +20,22 @@ async function getServerConfig(): Promise<SiteConfig> {
 
     try {
         const db = getAdminDb();
-        const snapshot = await db.collection('system_config').doc('main_settings').get();
+        const docNames = ['main_settings', 'layout_settings', 'navigation_settings', 'taxonomy_settings'];
+        const refs = docNames.map(name => db.collection('system_config').doc(name));
+        const snapshots = await db.getAll(...refs);
 
-        if (!snapshot.exists) {
+        let data: Record<string, unknown> = {};
+        snapshots.forEach(snap => {
+            if (snap.exists) {
+                // Parse data — convert to plain JS (no Firestore Timestamps)
+                const snapData = JSON.parse(JSON.stringify(snap.data()));
+                data = { ...data, ...snapData };
+            }
+        });
+
+        if (Object.keys(data).length === 0) {
             return DEFAULT_CONFIG;
         }
-
-        // Parse data — convert to plain JS (no Firestore Timestamps)
-        const data = JSON.parse(JSON.stringify(snapshot.data()));
 
         const storedSections = Array.isArray(data.homeSections) ? data.homeSections : [];
         let homeSections = DEFAULT_CONFIG.homeSections;
@@ -42,20 +52,26 @@ async function getServerConfig(): Promise<SiteConfig> {
 
         const merged: SiteConfig = {
             ...DEFAULT_CONFIG,
-            primaryColor: data.primaryColor || DEFAULT_CONFIG.primaryColor,
-            primaryColorDark: data.primaryColorDark || DEFAULT_CONFIG.primaryColorDark,
-            primaryColorLight: data.primaryColorLight || DEFAULT_CONFIG.primaryColorLight,
-            contact_info: { ...DEFAULT_CONFIG.contact_info, ...(data.contact_info) },
-            siteName: data.siteName || DEFAULT_CONFIG.siteName,
-            logoUrl: data.logoUrl || DEFAULT_CONFIG.logoUrl,
-            headerBg: data.headerBg !== undefined ? data.headerBg : DEFAULT_CONFIG.headerBg,
-            topBarText: data.topBarText ?? DEFAULT_CONFIG.topBarText,
-            topBarEnabled: data.topBarEnabled ?? DEFAULT_CONFIG.topBarEnabled,
-            hero_banners: data.hero_banners || DEFAULT_CONFIG.hero_banners,
-            background_config: { ...DEFAULT_CONFIG.background_config, ...(data.background_config) },
-            store_branches: data.store_branches || DEFAULT_CONFIG.store_branches,
+            primaryColor: (data.primaryColor as string) || DEFAULT_CONFIG.primaryColor,
+            primaryColorDark: (data.primaryColorDark as string) || DEFAULT_CONFIG.primaryColorDark,
+            primaryColorLight: (data.primaryColorLight as string) || DEFAULT_CONFIG.primaryColorLight,
+            contact_info: { ...DEFAULT_CONFIG.contact_info, ...(data.contact_info as Record<string, unknown> | undefined) },
+            siteName: (data.siteName as string) || DEFAULT_CONFIG.siteName,
+            logoUrl: (data.logoUrl as string) || DEFAULT_CONFIG.logoUrl,
+            headerBg: data.headerBg !== undefined ? (data.headerBg as string) : DEFAULT_CONFIG.headerBg,
+            topBarText: (data.topBarText as string) ?? DEFAULT_CONFIG.topBarText,
+            topBarEnabled: (data.topBarEnabled as boolean) ?? DEFAULT_CONFIG.topBarEnabled,
+            hero_banners: (data.hero_banners as SiteConfig['hero_banners']) || DEFAULT_CONFIG.hero_banners,
+            background_config: { ...DEFAULT_CONFIG.background_config, ...(data.background_config as Record<string, unknown> | undefined) },
+            store_branches: (data.store_branches as SiteConfig['store_branches']) || DEFAULT_CONFIG.store_branches,
             homeSections,
-            forbiddenWords: data.forbiddenWords || DEFAULT_CONFIG.forbiddenWords,
+            forbiddenWords: (data.forbiddenWords as string[]) || DEFAULT_CONFIG.forbiddenWords,
+            geofence: { ...DEFAULT_CONFIG.geofence, ...(data.geofence as Record<string, unknown> | undefined) },
+            headerNav: (data.headerNav as SiteConfig['headerNav']) || DEFAULT_CONFIG.headerNav,
+            sidebarMenu: (data.sidebarMenu as SiteConfig['sidebarMenu']) || DEFAULT_CONFIG.sidebarMenu,
+            footerServices: (data.footerServices as SiteConfig['footerServices']) || DEFAULT_CONFIG.footerServices,
+            homeServiceCategories: (data.homeServiceCategories as SiteConfig['homeServiceCategories']) || DEFAULT_CONFIG.homeServiceCategories,
+            taxonomy: (data.taxonomy as SiteConfig['taxonomy']) || DEFAULT_CONFIG.taxonomy,
         };
 
         return merged;

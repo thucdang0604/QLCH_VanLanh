@@ -4,15 +4,15 @@
 :root {
   --background: #ffffff;
   --foreground: #111111;
-  --primary: #C8956C;
-  --primary-dark: #A97B55;
-  --primary-light: #E0B894;
+  --primary: #5A6A7A;
+  --primary-dark: #3C4C5C;
+  --primary-light: #8296AA;
   --secondary: #DC2626;
   --dark: #111111;
   --dark-light: #1a1a1a;
-  --copper: #C8956C;
-  --copper-dark: #A97B55;
-  --copper-light: #E0B894;
+  --copper: #5A6A7A;
+  --copper-dark: #3C4C5C;
+  --copper-light: #8296AA;
 }
 
 @theme inline { 
@@ -43,21 +43,25 @@ body {
   }
 }
 
-/* Skeleton shimmer animation */
-@keyframes shimmer {
-  0% {
-    background-position: -200% 0;
-  }
-
-  100% {
-    background-position: 200% 0;
-  }
+/* Skeleton shimmer animation — GPU composited via transform */
+@keyframes shimmerGPU {
+  to { transform: translateX(200%); }
 }
 
 .skeleton-wave {
-  background: linear-gradient(90deg, #e5e7eb 25%, #f3f4f6 50%, #e5e7eb 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.5s infinite;
+  background: #e5e7eb;
+  overflow: hidden;
+  position: relative;
+}
+
+.skeleton-wave::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.5) 50%, transparent 100%);
+  transform: translateX(-100%);
+  animation: shimmerGPU 1.5s infinite;
+  will-change: transform;
 }
 
 /* Hide scrollbar */
@@ -70,11 +74,7 @@ body {
   display: none;
 }
 
-/* Smooth page transitions */
-main {
-  animation: fadeIn 0.3s ease-in-out;
-}
-
+/* fadeIn keyframes — available for individual components if needed */
 @keyframes fadeIn {
   from {
     opacity: 0;

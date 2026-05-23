@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { getAuthInstance } from '@/lib/firebase';
 import {
     Sparkles,
     Wand2,
@@ -35,9 +36,15 @@ export default function AICreatorPage() {
         setResult('');
 
         try {
+            const auth = await getAuthInstance();
+            const token = await auth.currentUser?.getIdToken();
+
             const response = await fetch('/api/admin/ai', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 
+                    'Content-Type': 'application/json',
+                    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+                },
                 body: JSON.stringify({
                     action: 'generate-content',
                     payload: {
@@ -66,9 +73,9 @@ export default function AICreatorPage() {
                 accumulatedContent += textChunk;
                 setResult(accumulatedContent);
             }
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Generation error:', error);
-            setResult(`Đã xảy ra lỗi: ${error.message}`);
+            setResult(`Đã xảy ra lỗi: ${error instanceof Error ? error.message : 'Unknown error'}`);
         } finally {
             setIsLoading(false);
         }

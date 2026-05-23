@@ -1,17 +1,6 @@
-import {
-    ref,
-    push,
-    set,
-    onValue,
-    off,
-    query,
-    orderByChild,
-    limitToLast,
-    DataSnapshot,
-    update,
-    get
-} from 'firebase/database';
-import { rtdb } from './firebase';
+
+
+import { getRtdbInstance } from './firebase';
 
 export interface ChatRoomInfo {
     customerId: string;
@@ -23,7 +12,7 @@ export interface ChatRoomInfo {
     lastMessage?: string;
     lastMessageTime?: number;
     botActive?: boolean;
-    [key: string]: any;
+    [key: string]: unknown;
 }
 
 export interface ChatMessage {
@@ -39,7 +28,10 @@ export interface GeminiHistoryItem {
     parts: { text: string }[];
 }
 
-export function subscribeToRooms(callback: (rooms: Record<string, ChatRoomInfo>) => void): () => void {
+export async function subscribeToRooms(callback: (rooms: Record<string, ChatRoomInfo>) => void): Promise<() => void> {
+    const rtdb = await getRtdbInstance();
+    const { ref, onValue, off } = await import('firebase/database');
+
     const roomsRef = ref(rtdb, 'chats');
     const listener = onValue(roomsRef, (snapshot) => {
         const data = snapshot.val();
@@ -58,7 +50,10 @@ export function subscribeToRooms(callback: (rooms: Record<string, ChatRoomInfo>)
     return () => off(roomsRef, 'value', listener);
 }
 
-export function subscribeToRoomInfo(roomId: string, callback: (info: ChatRoomInfo | null) => void): () => void {
+export async function subscribeToRoomInfo(roomId: string, callback: (info: ChatRoomInfo | null) => void): Promise<() => void> {
+    const rtdb = await getRtdbInstance();
+    const { ref, onValue, off } = await import('firebase/database');
+
     const infoRef = ref(rtdb, `chats/${roomId}/info`);
     const listener = onValue(infoRef, (snapshot) => {
         callback(snapshot.val() as ChatRoomInfo | null);
@@ -66,7 +61,10 @@ export function subscribeToRoomInfo(roomId: string, callback: (info: ChatRoomInf
     return () => off(infoRef, 'value', listener);
 }
 
-export function subscribeToMessages(roomId: string, callback: (messages: ChatMessage[]) => void): () => void {
+export async function subscribeToMessages(roomId: string, callback: (messages: ChatMessage[]) => void): Promise<() => void> {
+    const rtdb = await getRtdbInstance();
+    const { ref, onValue, off, query, orderByChild, limitToLast } = await import('firebase/database');
+
     const messagesRef = ref(rtdb, `chats/${roomId}/messages`);
     const q = query(messagesRef, orderByChild('timestamp'), limitToLast(100));
     
@@ -90,6 +88,9 @@ export async function sendMessage(
     senderId: string, 
     senderType: 'user' | 'admin' | 'bot'
 ): Promise<void> {
+    const rtdb = await getRtdbInstance();
+    const { ref, push, update } = await import('firebase/database');
+
     const messagesRef = ref(rtdb, `chats/${roomId}/messages`);
     await push(messagesRef, {
         text,
@@ -114,12 +115,18 @@ export async function sendMessage(
 }
 
 export async function updateRoomInfo(roomId: string, updates: Partial<ChatRoomInfo>): Promise<void> {
+    const rtdb = await getRtdbInstance();
+    const { ref, update } = await import('firebase/database');
+
     const infoRef = ref(rtdb, `chats/${roomId}/info`);
     await update(infoRef, updates);
 }
 
 export async function handleAIAutoReply(roomId: string, messages: ChatMessage[], newText: string): Promise<void> {
     try {
+        const rtdb = await getRtdbInstance();
+        const { ref, get, push, set } = await import('firebase/database');
+
         const infoRef = ref(rtdb, `chats/${roomId}/info`);
         const botActiveSnap = await get(infoRef);
         if (botActiveSnap.exists() && botActiveSnap.val().botActive === false) {

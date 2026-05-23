@@ -17,12 +17,19 @@ export async function generateMetadata(): Promise<Metadata> {
   if (isAdminAvailable()) {
     try {
       const db = getAdminDb();
-      const snap = await db
-        .collection('system_config')
-        .doc('main_settings')
-        .get();
-      if (snap.exists) {
-        const data = snap.data();
+      const docNames = ['main_settings', 'layout_settings', 'navigation_settings', 'taxonomy_settings'];
+      const refs = docNames.map(name => db.collection('system_config').doc(name));
+      const snapshots = await db.getAll(...refs);
+      
+      let data: Record<string, unknown> = {};
+      snapshots.forEach(snap => {
+          if (snap.exists) {
+              const snapData = JSON.parse(JSON.stringify(snap.data()));
+              data = { ...data, ...snapData };
+          }
+      });
+
+      if (Object.keys(data).length > 0) {
         const siteName = data?.siteName || "Văn Lành Service";
         title = `${siteName} - Sửa chữa điện thoại, Laptop uy tín`;
       }
@@ -54,6 +61,14 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="vi" suppressHydrationWarning>
+      <head>
+        <link rel="preconnect" href="https://firestore.googleapis.com" />
+        <link rel="preconnect" href="https://identitytoolkit.googleapis.com" />
+        <link rel="preconnect" href="https://wsrv.nl" crossOrigin="anonymous" />
+        <link rel="dns-prefetch" href="https://wsrv.nl" />
+        <link rel="preconnect" href="https://firebasestorage.googleapis.com" crossOrigin="anonymous" />
+        <link rel="dns-prefetch" href="https://firebasestorage.googleapis.com" />
+      </head>
       <body className={`${inter.variable} font-sans antialiased`}>
         <AuthProvider>
           {children}

@@ -1,38 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDb, isAdminAvailable } from '@/lib/firebaseAdmin';
+import { isRateLimited } from '@/lib/rateLimit';
 
-// ── Rate Limiting (in-memory, per IP, 10 req/min) ──
-const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 const RATE_LIMIT_MAX = 10;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 
-function checkRateLimit(ip: string): boolean {
-    const now = Date.now();
-    const entry = rateLimitMap.get(ip);
-
-    if (!entry || now > entry.resetAt) {
-        rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
-        return true;
-    }
-
-    if (entry.count >= RATE_LIMIT_MAX) {
-        return false;
-    }
-
-    entry.count++;
-    return true;
-}
-
-// Cleanup memory every 5 minutes
-setInterval(() => {
-    const now = Date.now();
-    for (const [ip, entry] of rateLimitMap) {
-        if (now > entry.resetAt) rateLimitMap.delete(ip);
-    }
-}, 5 * 60_000);
-
 // ── Simple in-memory cache ──
-let cachedResults: { products: any[]; services: any[] } | null = null;
+let cachedResults: { products: Record<string, unknown>[]; services: Record<string, unknown>[] } | null = null;
 let cacheTimestamp = 0;
 const CACHE_TTL_MS = 60_000; // 60s
 
@@ -49,23 +23,37 @@ async function getCachedData() {
         db.collection('services').get(),
     ]);
 
+    type FirestoreDoc = {
+        id: string;
+        createdAt?: { toDate?: () => Date } | number;
+        updatedAt?: { toDate?: () => Date } | number;
+        isActive?: boolean;
+        name?: string;
+        title?: string;
+        category?: string;
+        brand?: string;
+        description?: string;
+        [key: string]: unknown;
+    };
+
     const products = productsSnap.docs.map(doc => {
         const data = doc.data();
-        const serialized = { ...data, id: doc.id } as Record<string, any>;
-        if (serialized.createdAt?.toDate) serialized.createdAt = serialized.createdAt.toDate().getTime();
-        if (serialized.updatedAt?.toDate) serialized.updatedAt = serialized.updatedAt.toDate().getTime();
-        return serialized;
+        const serialized = { ...data, id: doc.id } as FirestoreDoc;
+        if (typeof serialized.createdAt === 'object' && serialized.createdAt?.toDate) serialized.createdAt = serialized.createdAt.toDate().getTime();
+        if (typeof serialized.updatedAt === 'object' && serialized.updatedAt?.toDate) serialized.updatedAt = serialized.updatedAt.toDate().getTime();
+        return serialized as Record<string, unknown>;
     });
 
     const services = servicesSnap.docs
         .map(doc => {
             const data = doc.data();
-            const serialized = { ...data, id: doc.id } as Record<string, any>;
-            if (serialized.createdAt?.toDate) serialized.createdAt = serialized.createdAt.toDate().getTime();
-            if (serialized.updatedAt?.toDate) serialized.updatedAt = serialized.updatedAt.toDate().getTime();
+            const serialized = { ...data, id: doc.id } as FirestoreDoc;
+            if (typeof serialized.createdAt === 'object' && serialized.createdAt?.toDate) serialized.createdAt = serialized.createdAt.toDate().getTime();
+            if (typeof serialized.updatedAt === 'object' && serialized.updatedAt?.toDate) serialized.updatedAt = serialized.updatedAt.toDate().getTime();
             return serialized;
         })
-        .filter((s: any) => s.isActive !== false);
+        .filter((s: FirestoreDoc) => s.isActive !== false)
+        .map(s => s as Record<string, unknown>);
 
     cachedResults = { products, services };
     cacheTimestamp = now;
@@ -79,7 +67,7 @@ export async function GET(request: NextRequest) {
             || request.headers.get('x-real-ip')
             || 'unknown';
 
-        if (!checkRateLimit(ip)) {
+        if (await isRateLimited(ip, 'search', RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS)) {
             return NextResponse.json(
                 { error: 'Bạn đang tìm kiếm quá nhanh. Vui lòng thử lại sau.' },
                 { status: 429 }
@@ -103,11 +91,11 @@ export async function GET(request: NextRequest) {
         const { products, services } = await getCachedData();
         const keyword = q.toLowerCase();
 
-        const combined = [...products, ...services].filter((item: any) => {
-            const name = (item.name || item.title || '').toLowerCase();
-            const category = (item.category || '').toLowerCase();
-            const brand = (item.brand || '').toLowerCase();
-            const description = (item.description || '').toLowerCase();
+        const combined = [...products, ...services].filter((item: Record<string, unknown>) => {
+            const name = (String(item.name || item.title || '')).toLowerCase();
+            const category = (String(item.category || '')).toLowerCase();
+            const brand = (String(item.brand || '')).toLowerCase();
+            const description = (String(item.description || '')).toLowerCase();
             return name.includes(keyword) || category.includes(keyword) || brand.includes(keyword) || description.includes(keyword);
         });
 

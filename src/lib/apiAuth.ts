@@ -35,6 +35,14 @@ export async function verifyUser(req: NextRequest): Promise<VerifiedUser> {
   return { uid, role, permissions };
 }
 
+export async function requireAdminOrStaff(req: NextRequest): Promise<VerifiedUser> {
+  const user = await verifyUser(req);
+  if (user.role !== 'admin' && user.role !== 'staff') {
+    throw new Error('Forbidden: admin or staff only');
+  }
+  return user;
+}
+
 export async function requireAdmin(req: NextRequest): Promise<VerifiedUser> {
   const user = await verifyUser(req);
   if (user.role !== 'admin') {

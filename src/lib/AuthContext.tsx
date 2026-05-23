@@ -1,18 +1,10 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import {
-    User,
-    onAuthStateChanged,
-    signInWithEmailAndPassword,
-    createUserWithEmailAndPassword,
-    signOut,
-    GoogleAuthProvider,
-    signInWithPopup,
-    updateProfile
-} from 'firebase/auth';
+import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import { usePathname } from 'next/navigation';
+import type { User } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { auth, db } from './firebase';
+import { db, getAuthInstance } from './firebase';
 
 // User type with role
 export interface AppUser {
@@ -37,11 +29,26 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+    const pathname = usePathname();
     const [user, setUser] = useState<AppUser | null>(null);
     const [loading, setLoading] = useState(true);
+    const [shouldInitializeAuth, setShouldInitializeAuth] = useState(false);
+
+    // Determine if we should lazy-load Auth based on pathname or history
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            const hasLoggedIn = localStorage.getItem('has_logged_in') === 'true';
+            const isAdminRoute = pathname?.startsWith('/admin');
+            if (hasLoggedIn || isAdminRoute) {
+                setShouldInitializeAuth(true);
+            } else {
+                setLoading(false); // Fast path for anonymous customers
+            }
+        }
+    }, [pathname]);
 
     // Fetch user role and data from Firestore
-    const fetchUserData = async (firebaseUser: User): Promise<AppUser> => {
+    const fetchUserData = useCallback(async (firebaseUser: User): Promise<AppUser> => {
         const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
 
         if (userDoc.exists()) {
@@ -74,40 +81,92 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
 
         return newUser;
-    };
+    }, []);
 
-    // Listen to auth state changes
+    // Listen to auth state changes — lazily load firebase/auth only when needed
     useEffect(() => {
-        const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-            if (firebaseUser) {
-                try {
-                    const appUser = await fetchUserData(firebaseUser);
-                    setUser(appUser);
-                } catch (error) {
-                    console.error('Error fetching user data:', error);
-                    setUser(null);
-                }
-            } else {
-                setUser(null);
-            }
-            setLoading(false);
-        });
+        if (!shouldInitializeAuth) return;
 
-        return () => unsubscribe();
+        let unsubscribe: (() => void) | undefined;
+        let isMounted = true;
+
+        (async () => {
+            try {
+                const auth = await getAuthInstance();
+                const { onAuthStateChanged } = await import('firebase/auth');
+
+                if (!isMounted) return;
+
+                const localUnsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+                    if (firebaseUser) {
+                        localStorage.setItem('has_logged_in', 'true');
+                        try {
+                            const appUser = await fetchUserData(firebaseUser);
+                            if (isMounted) setUser(appUser);
+
+                            // Sync server-side session cookie for middleware RBAC
+                            if (appUser.role === 'admin' || appUser.role === 'staff') {
+                                const idToken = await firebaseUser.getIdToken();
+                                fetch('/api/auth/session', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ idToken }),
+                                }).catch(() => { /* non-blocking */ });
+                            }
+                        } catch (error) {
+                            console.error('Error fetching user data:', error);
+                            if (isMounted) setUser(null);
+                        }
+                    } else {
+                        if (isMounted) setUser(null);
+                    }
+                    if (isMounted) setLoading(false);
+                });
+
+                if (!isMounted) {
+                    localUnsubscribe();
+                } else {
+                    unsubscribe = localUnsubscribe;
+                }
+            } catch (err) {
+                console.error("Failed to initialize auth", err);
+                if (isMounted) setLoading(false);
+            }
+        })();
+
+        return () => {
+            isMounted = false;
+            if (unsubscribe) {
+                unsubscribe();
+            }
+        };
+    }, [fetchUserData, shouldInitializeAuth]);
+
+    const triggerAuthInit = useCallback(() => {
+        setShouldInitializeAuth(true);
+        if (typeof window !== 'undefined') {
+            localStorage.setItem('has_logged_in', 'true');
+        }
     }, []);
 
     // Login with email/password
-    const login = async (email: string, password: string): Promise<void> => {
+    const login = useCallback(async (email: string, password: string): Promise<void> => {
+        triggerAuthInit();
+        const auth = await getAuthInstance();
+        const { signInWithEmailAndPassword } = await import('firebase/auth');
         await signInWithEmailAndPassword(auth, email, password);
-    };
+    }, [triggerAuthInit]);
 
     // Signup with email/password
-    const signup = async (
+    const signup = useCallback(async (
         email: string,
         password: string,
         displayName: string,
         phone: string
     ): Promise<void> => {
+        triggerAuthInit();
+        const auth = await getAuthInstance();
+        const { createUserWithEmailAndPassword, updateProfile } = await import('firebase/auth');
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         const firebaseUser = userCredential.user;
 
@@ -122,19 +181,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             role: 'customer',
             createdAt: serverTimestamp(),
         });
-    };
+    }, [triggerAuthInit]);
 
     // Logout
-    const logout = async (): Promise<void> => {
+    const logout = useCallback(async (): Promise<void> => {
+        // Clear server-side session cookie before signing out
+        await fetch('/api/auth/session', { method: 'DELETE' }).catch(() => { /* non-blocking */ });
+        const auth = await getAuthInstance();
+        const { signOut } = await import('firebase/auth');
         await signOut(auth);
+        if (typeof window !== 'undefined') {
+            localStorage.removeItem('has_logged_in');
+        }
         setUser(null);
-    };
+    }, []);
 
     // Google Sign In
-    const googleSignIn = async (): Promise<void> => {
+    const googleSignIn = useCallback(async (): Promise<void> => {
+        triggerAuthInit();
+        const auth = await getAuthInstance();
+        const { GoogleAuthProvider, signInWithPopup } = await import('firebase/auth');
         const provider = new GoogleAuthProvider();
         await signInWithPopup(auth, provider);
-    };
+    }, [triggerAuthInit]);
 
     return (
         <AuthContext.Provider value={{ user, loading, login, signup, logout, googleSignIn }}>

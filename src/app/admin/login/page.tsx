@@ -2,14 +2,8 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import {
-    signInWithEmailAndPassword,
-    signOut,
-    GoogleAuthProvider,
-    signInWithPopup,
-} from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
-import { auth, db } from '@/lib/firebase';
+import { db, getAuthInstance } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
 import { Lock, Mail, Loader2, AlertCircle, ShieldCheck } from 'lucide-react';
 import { useConfig } from '@/lib/ConfigContext';
@@ -39,6 +33,8 @@ export default function AdminLoginPage() {
 
         try {
             // Step 1: Sign in with Firebase Auth
+            const auth = await getAuthInstance();
+            const { signInWithEmailAndPassword } = await import('firebase/auth');
             const cred = await signInWithEmailAndPassword(auth, email, password);
 
             // Step 2: Fetch role from Firestore
@@ -51,6 +47,7 @@ export default function AdminLoginPage() {
                 router.push('/admin');
             } else {
                 // ❌ Not authorized — sign out immediately and show error
+                const { signOut } = await import('firebase/auth');
                 await signOut(auth);
                 setError('Tài khoản này không có quyền truy cập hệ thống quản trị.');
             }
@@ -75,6 +72,8 @@ export default function AdminLoginPage() {
         setError('');
         setIsLoading(true);
         try {
+            const auth = await getAuthInstance();
+            const { GoogleAuthProvider, signInWithPopup } = await import('firebase/auth');
             const provider = new GoogleAuthProvider();
             const cred = await signInWithPopup(auth, provider);
 
@@ -98,13 +97,16 @@ export default function AdminLoginPage() {
             if (role === 'admin' || role === 'staff') {
                 router.push('/admin');
             } else {
-                await signOut(auth);
+                const { signOut: signOutFn } = await import('firebase/auth');
+                await signOutFn(auth);
                 setError('Tài khoản Google này không có quyền truy cập hệ thống quản trị. Tài khoản đã được tạo — hãy cấp quyền từ trang quản lý nhân viên.');
             }
         } catch (err: unknown) {
+            console.error('Google login error:', err);
             const code = (err as { code?: string }).code;
             if (code !== 'auth/popup-closed-by-user') {
-                setError('Đăng nhập Google thất bại. Vui lòng thử lại.');
+                const message = err instanceof Error ? err.message : 'Vui lòng thử lại.';
+                setError(`Đăng nhập Google thất bại: ${message} (${code || 'unknown'})`);
             }
         } finally {
             setIsLoading(false);

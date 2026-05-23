@@ -1,9 +1,11 @@
 'use client';
 
+/* eslint-disable @next/next/no-img-element */
 import { useState, ReactNode, useEffect, useMemo } from 'react';
 import { ConfigProvider } from '@/lib/ConfigContext';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { canStaffAccess, findFirstAccessibleRoute } from '@/lib/permissions';
 import {
     LayoutDashboard,
     Package,
@@ -19,6 +21,7 @@ import {
     X,
     Search,
     User,
+    Users,
     ShieldAlert,
     Loader2,
     Calendar,
@@ -27,7 +30,9 @@ import {
     ArrowDownToLine,
     Award,
     Warehouse,
-    Star
+    Star,
+    Building2,
+    Percent
 } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
 import NotificationBell from '@/components/admin/NotificationBell';
@@ -40,8 +45,8 @@ const menuGroups = [
     {
         groupName: 'Tổng quan',
         items: [
-            { name: 'Dashboard', href: '/admin', icon: LayoutDashboard, permission: null, roles: ['admin'] },
-            { name: 'Doanh thu', href: '/admin/revenue', icon: BarChart3, permission: 'admin_only', roles: ['admin'] },
+            { name: 'Dashboard', href: '/admin', icon: LayoutDashboard, permission: 'view_dashboard' },
+            { name: 'Doanh thu', href: '/admin/revenue', icon: BarChart3, permission: 'view_revenue' },
         ]
     },
     {
@@ -65,45 +70,36 @@ const menuGroups = [
         items: [
             { name: 'Sản phẩm bán lẻ', href: '/admin/products', icon: Package, permission: 'manage_products' },
             { name: 'Kho linh kiện', href: '/admin/parts', icon: Warehouse, permission: 'manage_products' },
-            { name: 'Tồn kho', href: '/admin/inventory/stock', icon: Warehouse, permission: 'admin_only', roles: ['admin'] },
-            { name: 'Nhập hàng', href: '/admin/inventory', icon: ArrowDownToLine, permission: 'admin_only', roles: ['admin'] },
+            { name: 'Tồn kho', href: '/admin/inventory/stock', icon: Warehouse, permission: 'manage_inventory' },
+            { name: 'Nhập hàng', href: '/admin/inventory', icon: ArrowDownToLine, permission: 'manage_inventory' },
+            { name: 'Nhà cung cấp', href: '/admin/suppliers', icon: Building2, permission: 'manage_inventory' },
         ]
     },
     {
         groupName: 'Nội dung & CSKH',
         items: [
-            { name: 'Bài viết', href: '/admin/articles', icon: FileText, permission: 'manage_articles', roles: ['admin'] },
+            { name: 'Khách hàng', href: '/admin/customers', icon: Users, permission: 'manage_orders' },
+            { name: 'Bài viết', href: '/admin/articles', icon: FileText, permission: 'manage_articles' },
             { name: 'Live Chat', href: '/admin/chat', icon: MessageSquare, permission: 'chat_support' },
-            { name: 'Đánh giá', href: '/admin/reviews', icon: Star, permission: 'admin_only', roles: ['admin'] },
-            { name: 'AI Creator', href: '/admin/ai-creator', icon: Sparkles, permission: 'admin_only', roles: ['admin'] },
+            { name: 'Đánh giá', href: '/admin/reviews', icon: Star, permission: 'manage_reviews' },
+            { name: 'AI Creator', href: '/admin/ai-creator', icon: Sparkles, permission: 'manage_ai_creator' },
         ]
     },
     {
         groupName: 'Hệ thống',
         items: [
-            { name: 'Nhân viên', href: '/admin/staff', icon: User, permission: 'admin_only' },
-            { name: 'Hoa hồng', href: '/admin/commissions', icon: Award, permission: 'admin_only', roles: ['admin'] },
-            { name: 'Giao diện', href: '/admin/appearance', icon: Palette, permission: 'admin_only', roles: ['admin'] },
-            { name: 'CĐ Sửa chữa', href: '/admin/settings/repairs', icon: Settings, permission: 'admin_only', roles: ['admin'] },
-            { name: 'Mẫu Biên Nhận', href: '/admin/settings/receipt', icon: FileText, permission: 'admin_only', roles: ['admin'] },
-            { name: 'Cài đặt', href: '/admin/settings', icon: Settings, permission: 'admin_only', roles: ['admin'] },
+            { name: 'Nhân viên', href: '/admin/staff', icon: User, permission: 'manage_staff' },
+            { name: 'Hoa hồng', href: '/admin/commissions', icon: Award, permission: 'view_commissions' },
+            { name: 'Giao diện', href: '/admin/appearance', icon: Palette, permission: 'manage_appearance' },
+            { name: 'CĐ Sửa chữa', href: '/admin/settings/repairs', icon: Settings, permission: 'manage_appearance' },
+            { name: 'CĐ Giảm giá', href: '/admin/settings/discount-rules', icon: Percent, permission: 'manage_settings' },
+            { name: 'Mẫu Biên Nhận', href: '/admin/settings/receipt', icon: FileText, permission: 'manage_appearance' },
+            { name: 'Cài đặt', href: '/admin/settings', icon: Settings, permission: 'manage_settings' },
         ]
     }
 ];
 
-// Routes that staff users are allowed to access
-const staffAllowedRoutes = [
-    '/admin/orders',
-    '/admin/repairs',
-    '/admin/chat',
-    '/admin/products',
-    '/admin/parts',
-    '/admin/services',
-    '/admin/appointments',
-    '/admin/pos',
-    '/admin/commissions',
-    '/admin/technician',
-];
+// ── Role/Permission handling is now in @/lib/permissions ──
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -117,8 +113,12 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             // Allow access to login page
             if (pathname === '/admin/login') {
                 if (user && (user.role === 'admin' || user.role === 'staff')) {
-                    // Already logged in? Redirect to dashboard
-                    router.push('/admin');
+                    // Already logged in? Redirect to dashboard or first accessible route
+                    if (user.role === 'staff') {
+                        router.push(findFirstAccessibleRoute(user.permissions));
+                    } else {
+                        router.push('/admin');
+                    }
                 }
                 return;
             }
@@ -132,11 +132,11 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                 logout().then(() => router.push('/admin/login'));
             }
         }
-    }, [user, loading, router, pathname]);
+    }, [user, loading, router, pathname, logout]);
 
     // ── Badge counts from single hook (no duplicate listeners) ──
     // Must be called before any early returns to satisfy React Hooks rules
-    const { badges, activities } = useAdminBadges(user?.uid, user?.role);
+    const { badges, activities } = useAdminBadges(user?.uid, user?.role, user?.permissions);
 
     // Map menu href → badge count
     const badgeMap = useMemo<Record<string, number>>(() => ({
@@ -178,13 +178,10 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             ...item,
             label: item.name,
         })).filter(item => {
-            // Role-based filter: if item has `roles`, user must be in that list
-            if (item.roles && !item.roles.includes(user?.role || '')) return false;
-            // Permission-based filter (legacy)
-            if (user?.role !== 'admin') {
-                if (item.permission === 'admin_only') return false;
-                if (item.permission && !user?.permissions?.includes(item.permission)) return false;
-            }
+            // Admin sees everything
+            if (user?.role === 'admin') return true;
+            // Staff: check permission
+            if (item.permission && !user?.permissions?.includes(item.permission)) return false;
             return true;
         });
 
@@ -192,7 +189,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     }).filter(group => group.items.length > 0);
 
     // ── Strict RBAC: Block staff from unauthorized routes ──
-    const isStaffBlocked = user.role === 'staff' && !staffAllowedRoutes.some(route => pathname.startsWith(route));
+    const isStaffBlocked = user.role === 'staff' && !canStaffAccess(pathname, user.permissions);
 
     if (isStaffBlocked) {
         return (
@@ -208,7 +205,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                         <h2 className="text-2xl font-bold text-gray-900 mb-2">Truy cập bị từ chối</h2>
                         <p className="text-gray-500 mb-6">Bạn không có quyền truy cập vào chức năng này.</p>
                         <button
-                            onClick={() => router.push('/admin/repairs')}
+                            onClick={() => router.push(findFirstAccessibleRoute(user?.permissions))}
                             className="px-6 py-3 bg-orange-500 text-white font-semibold rounded-xl hover:bg-orange-600 transition-colors"
                         >
                             ← Quay lại trang chính

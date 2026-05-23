@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { CalendarClock, Clock, Phone, User, CheckCircle2, X, Search, Loader2, MapPin, ArrowRight, History, XCircle, type LucideIcon } from 'lucide-react';
-import { collection, addDoc, serverTimestamp, query, where, getDocs, orderBy } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, query, where, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useConfig } from '@/lib/ConfigContext';
 import type { FirestoreDateValue } from '@/lib/types';
@@ -75,10 +75,11 @@ export default function BookingSection() {
 
     // Sync default store when branches are loaded
     useEffect(() => {
-        if (branches.length > 0 && !formData.store) {
-            setFormData(prev => ({ ...prev, store: branches[0].id }));
+        const currentBranches = config.store_branches || [];
+        if (currentBranches.length > 0 && !formData.store) {
+            setFormData(prev => ({ ...prev, store: currentBranches[0].id }));
         }
-    }, [branches]);
+    }, [config.store_branches, formData.store]);
 
     // Toggle Handler
     const handleToggle = () => {
@@ -301,6 +302,7 @@ export default function BookingSection() {
                                         <select
                                             value={formData.date}
                                             onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                                            aria-label="Chọn ngày hẹn"
                                             className="w-full pl-12 pr-4 py-3.5 bg-dark-light border border-gray-700 rounded-xl text-white appearance-none focus:outline-none focus:border-copper transition-colors"
                                             required
                                         >
@@ -315,6 +317,7 @@ export default function BookingSection() {
                                     <select
                                         value={formData.store}
                                         onChange={(e) => setFormData({ ...formData, store: e.target.value })}
+                                        aria-label="Chọn chi nhánh"
                                         className="w-full px-4 py-3.5 bg-dark-light border border-gray-700 rounded-xl text-white appearance-none focus:outline-none focus:border-copper transition-colors"
                                     >
                                         {branches.map((branch) => (

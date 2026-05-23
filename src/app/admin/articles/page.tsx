@@ -3,19 +3,19 @@
 import { useState, useEffect, useRef } from 'react';
 import {
     Plus, Search, Edit, Trash2, X, FileText,
-    Save, Loader2, Image as ImageIcon, Upload, Video, MessageCircle, Star, Wand2, ImagePlus,
-    Link as LinkIcon, ExternalLink, RefreshCw
+    Save, Loader2, Image as ImageIcon, Upload, Video, MessageCircle, Star, Wand2,
+    RefreshCw
 } from 'lucide-react';
 import {
     collection, query, orderBy, onSnapshot, updateDoc,
     deleteDoc, doc, serverTimestamp, setDoc, getDoc, where,
     addDoc
 } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage } from '@/lib/firebase';
+import { db, getStorageInstance, getAuthInstance } from '@/lib/firebase';
 import { generateSlug } from '@/lib/utils';
 import type { ArticleComment } from '@/lib/types';
 import dynamic from 'next/dynamic';
+import Image from 'next/image';
 import { toastError } from '@/lib/toast';
 import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
@@ -197,7 +197,7 @@ export default function ArticlesPage() {
                             <div key={article.id} className="p-4 space-y-3 hover:bg-gray-50 transition-colors">
                                 <div className="flex items-start gap-3">
                                     {article.thumbnail ? (
-                                        <img src={article.thumbnail} alt="" className="w-14 h-14 rounded-lg object-cover shrink-0" />
+                                        <Image src={article.thumbnail} alt="" width={56} height={56} className="w-14 h-14 rounded-lg object-cover shrink-0" />
                                     ) : (
                                         <div className="w-14 h-14 rounded-lg bg-gray-100 flex items-center justify-center shrink-0">
                                             <FileText size={22} className="text-gray-400" />
@@ -262,7 +262,7 @@ export default function ArticlesPage() {
                                             <td className="px-6 py-4">
                                                 <div className="flex items-center gap-3">
                                                     {article.thumbnail ? (
-                                                        <img src={article.thumbnail} alt="" className="w-10 h-10 rounded-lg object-cover" />
+                                                        <Image src={article.thumbnail} alt="" width={40} height={40} className="w-10 h-10 rounded-lg object-cover" />
                                                     ) : (
                                                         <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center">
                                                             <FileText size={18} className="text-gray-400" />
@@ -380,18 +380,6 @@ function ArticleModal({
     const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
     const fileRef = useRef<HTMLInputElement>(null);
 
-    // AI Image Generation states
-    const [showImageGen, setShowImageGen] = useState(false);
-    const [imagePrompt, setImagePrompt] = useState('');
-    const [generatingImage, setGeneratingImage] = useState(false);
-    const [generatedPreview, setGeneratedPreview] = useState('');
-    const [generatedBlob, setGeneratedBlob] = useState<Blob | null>(null);
-    const [uploadingGenImage, setUploadingGenImage] = useState(false);
-    const [imageModel, setImageModel] = useState('gptimage');
-    const [activeImagePlaceholder, setActiveImagePlaceholder] = useState<string | null>(null);
-    const [activeVideoPlaceholder, setActiveVideoPlaceholder] = useState<string | null>(null);
-    const [activeLinkPlaceholder, setActiveLinkPlaceholder] = useState<string | null>(null);
-    const [videoUrlInput, setVideoUrlInput] = useState('');
 
     // --- AUTO-PILOT STATES ---
     const [autoPilotTopic, setAutoPilotTopic] = useState('');
@@ -400,6 +388,19 @@ function ArticleModal({
     const [autoPilotLogs, setAutoPilotLogs] = useState<string[]>([]);
 
 
+
+    const callAiApi = async (body: Record<string, unknown>) => {
+        const auth = await getAuthInstance();
+        const token = await auth.currentUser?.getIdToken();
+        return fetch('/api/admin/ai', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+            },
+            body: JSON.stringify(body)
+        });
+    };
 
     const runAutoPilot = async () => {
         if (!autoPilotTopic.trim()) {
@@ -413,13 +414,9 @@ function ArticleModal({
         try {
             // STEP 0: CONNECTION CHECK
             setAutoPilotLogs(prev => [...prev, "Bước 0: Kiểm tra kết nối AI API..."]);
-            const connRes = await fetch('/api/admin/ai', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'check-connection',
-                    payload: { apiKey: googleApiKey }
-                })
+            const connRes = await callAiApi({
+                action: 'check-connection',
+                payload: { apiKey: googleApiKey }
             });
             const connData = await connRes.json();
             if (!connRes.ok || !connData.ok) {
@@ -429,15 +426,11 @@ function ArticleModal({
 
             // STEP 1: META GENERATION
             setAutoPilotLogs(prev => [...prev, "Bước 1: Phân tích SEO & Viết Tiêu đề, Tags, Mô tả ngắn..."]);
-            const metaRes = await fetch('/api/admin/ai', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'seo-suggest',
-                    payload: {
-                        content: autoPilotTopic
-                    }
-                })
+            const metaRes = await callAiApi({
+                action: 'seo-suggest',
+                payload: {
+                    content: autoPilotTopic
+                }
             });
             if (!metaRes.ok) throw new Error("Lỗi API seo-suggest");
             const metaReader = metaRes.body?.getReader();
@@ -470,18 +463,14 @@ function ArticleModal({
             setAutoPilotState('content');
             setAutoPilotLogs(prev => [...prev, "Bước 2: Viết nội dung chuẩn SEO EEAT..."]);
 
-            const contentRes = await fetch('/api/admin/ai', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'content-suggest',
-                    payload: {
-                        title: newTitle,
-                        excerpt: newDesc,
-                        tags: newTags,
-                        content: autoPilotTopic
-                    }
-                })
+            const contentRes = await callAiApi({
+                action: 'content-suggest',
+                payload: {
+                    title: newTitle,
+                    excerpt: newDesc,
+                    tags: newTags,
+                    content: autoPilotTopic
+                }
             });
             if (!contentRes.ok) throw new Error("Lỗi API content-suggest");
             const contentReader = contentRes.body?.getReader();
@@ -503,20 +492,16 @@ function ArticleModal({
             setAutoPilotState('refine');
             setAutoPilotLogs(prev => [...prev, "Bước 3: 🔄 Tự động kiểm tra & sửa SEO (Vòng lặp thông minh)..."]);
 
-            const refineRes = await fetch('/api/admin/ai', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'auto-refine',
-                    payload: {
-                        title: newTitle,
-                        excerpt: newDesc,
-                        tags: newTags,
-                        content: contentStr,
-                        targetScore: 85,
-                        maxRounds: 3
-                    }
-                })
+            const refineRes = await callAiApi({
+                action: 'auto-refine',
+                payload: {
+                    title: newTitle,
+                    excerpt: newDesc,
+                    tags: newTags,
+                    content: contentStr,
+                    targetScore: 85,
+                    maxRounds: 3
+                }
             });
             if (!refineRes.ok) throw new Error("Lỗi API auto-refine");
 
@@ -591,13 +576,9 @@ function ArticleModal({
                     setAutoPilotLogs(prev => [...prev, `⏳ Đang vẽ ảnh ${i + 1}/${placeholders.length}: ${ph.substring(0, 30)}...`]);
 
                     try {
-                        const imgRes = await fetch('/api/admin/ai', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                action: 'generate-image',
-                                payload: { prompt: ph, model: 'gptimage', apiKey: googleApiKey }
-                            })
+                        const imgRes = await callAiApi({
+                            action: 'generate-image',
+                            payload: { prompt: ph, model: 'gptimage', apiKey: googleApiKey }
                         });
 
                         if (!imgRes.ok) throw new Error('Cannot fetch image');
@@ -607,6 +588,8 @@ function ArticleModal({
                         const optimizeResponse = await optimizeImage(new File([blob], `ai_${Date.now()}.webp`, { type: 'image/webp' }), 1200, 800, 0.8);
                         const optimized = optimizeResponse.file;
                         const storagePath = `media/${Date.now()}_ai_img_${i}.webp`;
+                        const storage = await getStorageInstance();
+                        const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
                         const storageRef = ref(storage, storagePath);
 
                         await uploadBytes(storageRef, await optimized.arrayBuffer(), { contentType: 'image/webp' });
@@ -661,18 +644,14 @@ function ArticleModal({
         setSeoResult({ type, content: '' });
 
         try {
-            const response = await fetch('/api/admin/ai', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: type === 'check' ? 'seo-check' : type === 'suggest' ? 'seo-suggest' : 'content-suggest',
-                    payload: {
-                        title: formData.title,
-                        excerpt: formData.excerpt,
-                        tags: formData.tags,
-                        content: plainTextContent
-                    }
-                })
+            const response = await callAiApi({
+                action: type === 'check' ? 'seo-check' : type === 'suggest' ? 'seo-suggest' : 'content-suggest',
+                payload: {
+                    title: formData.title,
+                    excerpt: formData.excerpt,
+                    tags: formData.tags,
+                    content: plainTextContent
+                }
             });
 
             if (!response.ok) throw new Error('Cầu nối AI thất bại');
@@ -711,20 +690,16 @@ function ArticleModal({
         setSeoResult({ type: 'refine', content: '' });
 
         try {
-            const res = await fetch('/api/admin/ai', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'auto-refine',
-                    payload: {
-                        title: formData.title,
-                        excerpt: formData.excerpt,
-                        tags: formData.tags,
-                        content: formData.content,
-                        targetScore: 85,
-                        maxRounds: 3
-                    }
-                })
+            const res = await callAiApi({
+                action: 'auto-refine',
+                payload: {
+                    title: formData.title,
+                    excerpt: formData.excerpt,
+                    tags: formData.tags,
+                    content: formData.content,
+                    targetScore: 85,
+                    maxRounds: 3
+                }
             });
             if (!res.ok) throw new Error('Lỗi API auto-refine');
 
@@ -779,6 +754,8 @@ function ArticleModal({
             // Optimize: resize & convert to WebP
             const { file: optimized, width, height } = await optimizeImage(file, 1200, 800, 0.8);
             const storagePath = `media/${Date.now()}_${optimized.name}`;
+            const storage = await getStorageInstance();
+            const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
             const storageRef = ref(storage, storagePath);
 
             const buffer = await optimized.arrayBuffer();
@@ -808,156 +785,6 @@ function ArticleModal({
         }
     };
 
-    const getImagePlaceholders = (): { description: string; fullMatch: string }[] => {
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = formData.content;
-        const text = tempDiv.textContent || '';
-        const regex = /\[CHÈN HÌNH ẢNH[:\s]*([\s\S]*?)\]/gi;
-        const matches = [...text.matchAll(regex)];
-        return matches
-            .map(m => ({ description: m[1]?.trim() || '', fullMatch: m[0] }))
-            .filter(p => p.description);
-    };
-
-    const getVideoPlaceholders = (): { description: string; fullMatch: string }[] => {
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = formData.content;
-        const text = tempDiv.textContent || '';
-        const regex = /\[CHÈN VIDEO[:\s]*([\s\S]*?)\]/gi;
-        const matches = [...text.matchAll(regex)];
-        return matches
-            .map(m => ({ description: m[1]?.trim() || '', fullMatch: m[0] }))
-            .filter(p => p.description);
-    };
-
-    const getLinkPlaceholders = (): { description: string; fullMatch: string }[] => {
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = formData.content;
-        const text = tempDiv.textContent || '';
-        const regex = /\[GỢI Ý LIÊN KẾT[:\s]*([\s\S]*?)\]/gi;
-        const matches = [...text.matchAll(regex)];
-        return matches
-            .map(m => ({ description: m[1]?.trim() || '', fullMatch: m[0] }))
-            .filter(p => p.description);
-    };
-
-    const handleInsertVideoPlaceholder = (desc: string) => {
-        const url = prompt('Nhập đường dẫn Video YouTube:', '');
-        if (!url) return;
-
-        let embedUrl = url;
-        if (url.includes('youtube.com/watch?v=')) {
-            embedUrl = url.replace('watch?v=', 'embed/');
-        } else if (url.includes('youtu.be/')) {
-            embedUrl = url.replace('youtu.be/', 'www.youtube.com/embed/');
-        }
-
-        const videoIframe = `<div class="ql-video-container" style="margin: 20px 0;"><iframe class="ql-video" frameborder="0" allowfullscreen="true" src="${embedUrl}" style="width: 100%; aspect-ratio: 16/9; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);"></iframe></div>`;
-
-        setFormData(prev => {
-            const escaped = desc.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            const regex = new RegExp(`\\[CHÈN VIDEO[:\\s]*${escaped}\\]`, 'gi');
-            return { ...prev, content: prev.content.replace(regex, videoIframe) };
-        });
-    };
-
-    const handleInsertLinkPlaceholder = (desc: string) => {
-        const text = prompt('Nhập văn bản hiển thị cho liên kết:', desc);
-        const url = prompt('Nhập đường dẫn liên kết (VD: /tin-tuc/abc):', '#');
-        if (!text || !url) return;
-
-        const linkHtml = `<a href="${url}" style="color: #2563eb; text-decoration: underline; font-weight: 500;">${text}</a>`;
-
-        setFormData(prev => {
-            const escaped = desc.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            const regex = new RegExp(`\\[GỢI Ý LIÊN KẾT[:\\s]*${escaped}\\]`, 'gi');
-            return { ...prev, content: prev.content.replace(regex, linkHtml) };
-        });
-    };
-
-    const handleGenerateImage = async (placeholderDesc?: string) => {
-        const prompt = placeholderDesc || imagePrompt;
-        if (!prompt.trim()) return;
-        if (placeholderDesc) {
-            setImagePrompt(placeholderDesc);
-            setActiveImagePlaceholder(placeholderDesc);
-        }
-        setGeneratingImage(true);
-        setGeneratedPreview('');
-        setGeneratedBlob(null);
-        try {
-            const response = await fetch('/api/admin/ai', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'generate-image',
-                    payload: { prompt, width: 1024, height: 683, model: imageModel, articleTitle: formData.title }
-                })
-            });
-            if (!response.ok) throw new Error('Image generation failed');
-            const blob = await response.blob();
-            setGeneratedBlob(blob);
-            // Revoke previous object URL to prevent memory leak
-            if (generatedPreview) URL.revokeObjectURL(generatedPreview);
-            setGeneratedPreview(URL.createObjectURL(blob));
-        } catch (error) {
-            console.error('Image gen error:', error);
-            toastError('Lỗi tạo ảnh AI! Thử lại sau.');
-        } finally {
-            setGeneratingImage(false);
-        }
-    };
-
-    const handleInsertGenImage = async (mode: 'content' | 'thumbnail') => {
-        if (!generatedBlob) return;
-        setUploadingGenImage(true);
-        try {
-            // Convert AI-generated image blob to File, then optimize to WebP
-            const rawFile = new File([generatedBlob], `ai_${Date.now()}.jpg`, { type: 'image/jpeg' });
-            const { file: optimized, width, height } = await optimizeImage(rawFile, 1200, 800, 0.8);
-
-            const storagePath = `media/${optimized.name}`;
-            const storageRef = ref(storage, storagePath);
-            await uploadBytes(storageRef, optimized, { contentType: 'image/webp' });
-            const url = await getDownloadURL(storageRef);
-
-            // Register in Media Library
-            await addDoc(collection(db, 'media_library'), {
-                url,
-                path: storagePath,
-                name: optimized.name,
-                type: 'image/webp',
-                size: optimized.size,
-                width,
-                height,
-                createdAt: serverTimestamp(),
-            });
-
-            if (mode === 'thumbnail') {
-                setFormData(prev => ({ ...prev, thumbnail: url }));
-            } else if (activeImagePlaceholder) {
-                // Replace the specific placeholder in the HTML content
-                setFormData(prev => {
-                    const escaped = activeImagePlaceholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                    const regex = new RegExp(`\\[CHÈN HÌNH ẢNH[:\\s]*${escaped}\\]`, 'gi');
-                    const imgTag = `<img src="${url}" alt="${activeImagePlaceholder}" style="max-width:100%;border-radius:8px" />`;
-                    return { ...prev, content: prev.content.replace(regex, imgTag) };
-                });
-                setActiveImagePlaceholder(null);
-            } else {
-                const imgHtml = `<p><img src="${url}" alt="${imagePrompt}" /></p>`;
-                setFormData(prev => ({ ...prev, content: prev.content + imgHtml }));
-            }
-            setGeneratedBlob(null);
-            setGeneratedPreview('');
-            setImagePrompt('');
-        } catch (error) {
-            console.error('Upload gen image error:', error);
-            toastError('Lỗi upload ảnh!');
-        } finally {
-            setUploadingGenImage(false);
-        }
-    };
 
     const handleSave = async () => {
         if (!formData.title.trim()) {
@@ -1008,14 +835,8 @@ function ArticleModal({
         }
     };
 
-    // Derived AI Suggestions
-    const titleMatch = seoResult.content.match(/\[TITLE\]([\s\S]*?)(?:\[\/TITLE\]|$)/);
-    const descMatch = seoResult.content.match(/\[DESC\]([\s\S]*?)(?:\[\/DESC\]|$)/);
-    const tagsMatch = seoResult.content.match(/\[TAGS\]([\s\S]*?)(?:\[\/TAGS\]|$)/);
 
-    const suggestedTitle = titleMatch ? titleMatch[1].trim() : '';
-    const suggestedDesc = descMatch ? descMatch[1].trim() : '';
-    const suggestedTags = tagsMatch ? tagsMatch[1].trim() : '';
+    
 
     return (
         <Modal
@@ -1204,7 +1025,7 @@ function ArticleModal({
                         <div className="flex items-center gap-4">
                             {formData.thumbnail ? (
                                 <div className="relative w-24 h-16 rounded-lg overflow-hidden border">
-                                    <img src={formData.thumbnail} alt="" className="w-full h-full object-cover" />
+                                    <Image src={formData.thumbnail} alt="" fill className="object-cover" />
                                     <button
                                         onClick={() => setFormData({ ...formData, thumbnail: '' })}
                                         className="absolute top-0.5 right-0.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center"
@@ -1318,72 +1139,7 @@ function ArticleModal({
                             />
                         </div>
 
-                        {/* Placeholder Helpers (Video & Links) */}
-                        {(() => {
-                            const vidPhs = getVideoPlaceholders();
-                            const linkPhs = getLinkPlaceholders();
 
-                            if (vidPhs.length === 0 && linkPhs.length === 0) {
-                                return null;
-                            }
-
-                            return (
-                                <div className="mt-4 border rounded-xl p-5 bg-gradient-to-br from-slate-50 to-emerald-50 border-emerald-200 animate-in fade-in zoom-in-95 shadow-sm">
-                                    <h3 className="font-bold flex items-center gap-2 text-slate-800 text-sm mb-4">
-                                        <Wand2 size={16} className="text-emerald-500" /> Quản lý Video & Liên Kết chờ duyệt
-                                    </h3>
-                                    <div className="space-y-4">
-                                        {/* Videos */}
-                                        {vidPhs.length > 0 && (
-                                            <div>
-                                                <p className="text-xs font-semibold text-blue-700 mb-2 flex items-center gap-1">
-                                                    <Video size={12} /> Vị trí Video do AI đề xuất ({vidPhs.length}):
-                                                </p>
-                                                <div className="space-y-2">
-                                                    {vidPhs.map((ph, i) => (
-                                                        <div key={i} className="flex flex-col sm:flex-row sm:items-center gap-3 rounded-xl border border-blue-200 bg-white p-3 hover:border-blue-300 transition-all shadow-sm">
-                                                            <span className="w-7 h-7 rounded-full bg-blue-100 text-blue-700 text-[10px] font-bold flex items-center justify-center shrink-0">V</span>
-                                                            <span className="flex-1 text-xs text-blue-900 leading-relaxed font-medium">{ph.description}</span>
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => handleInsertVideoPlaceholder(ph.description)}
-                                                                className="shrink-0 px-4 py-2 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 flex items-center justify-center gap-1.5 w-full sm:w-auto"
-                                                            >
-                                                                <Video size={14} /> Chèn Nhanh
-                                                            </button>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        )}
-
-                                        {/* Links */}
-                                        {linkPhs.length > 0 && (
-                                            <div>
-                                                <p className="text-xs font-semibold text-emerald-700 mb-2 flex items-center gap-1">
-                                                    <LinkIcon size={12} /> Đề xuất Liên kết nội bộ ({linkPhs.length}):
-                                                </p>
-                                                <div className="space-y-2">
-                                                    {linkPhs.map((ph, i) => (
-                                                        <div key={i} className="flex flex-col sm:flex-row sm:items-center gap-3 rounded-xl border border-emerald-200 bg-white p-3 hover:border-emerald-300 transition-all shadow-sm">
-                                                            <span className="w-7 h-7 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-bold flex items-center justify-center shrink-0">L</span>
-                                                            <span className="flex-1 text-xs text-emerald-900 leading-relaxed font-medium">{ph.description}</span>
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => handleInsertLinkPlaceholder(ph.description)}
-                                                                className="shrink-0 px-4 py-2 bg-emerald-600 text-white rounded-lg text-xs font-bold hover:bg-emerald-700 flex items-center justify-center gap-1.5 w-full sm:w-auto"
-                                                            >
-                                                                <LinkIcon size={14} /> Chèn Link
-                                                            </button>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                            );
-                        })()}
                     </div>
 
                     {/* Actions */}

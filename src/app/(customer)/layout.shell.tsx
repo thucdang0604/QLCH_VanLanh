@@ -1,16 +1,16 @@
 'use client';
 
 import Header from "@/components/layout/Header";
-import Footer from "@/components/layout/Footer";
-import MobileBottomNav from "@/components/layout/MobileBottomNav";
 import dynamic from 'next/dynamic';
 import { CartProvider } from "@/lib/CartContext";
 import { useConfig } from "@/lib/ConfigContext";
 import { usePresence } from "@/lib/usePresence";
 import { Megaphone, X } from "lucide-react";
 import { useState } from "react";
-import type { SiteConfig } from "@/lib/ConfigContext";
-import CartDrawer from "@/components/CartDrawer";
+
+const MobileBottomNav = dynamic(() => import("@/components/layout/MobileBottomNav"), { ssr: false });
+const Footer = dynamic(() => import("@/components/layout/Footer"), { ssr: true });
+const CartDrawer = dynamic(() => import("@/components/CartDrawer"), { ssr: false });
 
 // Lazy load: ChatWidget & FloatingReviews không cần hiện ngay lúc trang mở
 // => giảm initial JS bundle đáng kể trên mobile
@@ -36,6 +36,8 @@ function TopBar() {
     );
 }
 
+import firebaseImageLoader from "@/lib/imageLoader";
+
 export default function CustomerLayoutShell({
     children,
 }: Readonly<{
@@ -51,7 +53,9 @@ export default function CustomerLayoutShell({
     const wrapperStyle: React.CSSProperties = {};
     if (bg.is_active) {
         if (bg.type === 'image' && bg.value) {
-            wrapperStyle.backgroundImage = `url(${bg.value})`;
+            // Apply proxy to background image if it's from Firebase Storage
+            const optimizedBg = firebaseImageLoader({ src: bg.value, width: 1920, quality: 75 });
+            wrapperStyle.backgroundImage = `url(${optimizedBg})`;
             wrapperStyle.backgroundAttachment = 'fixed';
             wrapperStyle.backgroundSize = 'cover';
             wrapperStyle.backgroundPosition = 'center';

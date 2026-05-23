@@ -12,14 +12,6 @@ const policies = [
     { name: 'Chính sách bảo mật', href: '/info/chinh-sach-bao-mat' },
 ];
 
-const services = [
-    { name: 'Sửa chữa Điện thoại', href: '/category/sua-iphone' },
-    { name: 'Sửa chữa Laptop', href: '/category/sua-laptop' },
-    { name: 'Thay Pin điện thoại', href: '/category/thay-pin' },
-    { name: 'Ép kính điện thoại', href: '/category/ep-kinh' },
-    { name: 'Phụ kiện chính hãng', href: '/category/phu-kien' },
-];
-
 const aboutLinks = [
     { name: 'Giới thiệu', href: '/info/gioi-thieu' },
     { name: 'Bài Viết Nổi Bật', href: '/tin-tuc' },
@@ -49,10 +41,10 @@ export default function Footer() {
                                     {branches.map((branch) => (
                                         <div key={branch.id} className="border-l-2 border-copper/30 pl-3">
                                             <span className="block text-white font-medium text-sm mb-1">{branch.name}</span>
-                                            <span className="block text-xs text-gray-400 mb-1">{branch.address}</span>
+                                            <span className="block text-xs text-gray-300 mb-1">{branch.address}</span>
                                             <a
                                                 href={`tel:${branch.phone}`}
-                                                className="text-copper text-sm font-medium hover:text-copper-light transition-colors"
+                                                className="text-copper-light text-sm font-medium hover:text-white transition-colors"
                                             >
                                                 <Phone size={12} className="inline mr-1" />
                                                 {formatHotline(branch.phone)}
@@ -61,7 +53,7 @@ export default function Footer() {
                                                 href={`${branch.mapLink}`}
                                                 target="_blank"
                                                 rel="noopener noreferrer"
-                                                className="block mt-1 text-copper text-sm font-medium hover:text-copper-light transition-colors"
+                                                className="block mt-1 text-copper-light text-sm font-medium hover:text-white transition-colors"
                                             >
                                                 <MapPin size={15} className="inline mr-1" />
                                                 Xem bản đồ
@@ -71,7 +63,7 @@ export default function Footer() {
                                     {branches.length === 0 && (
                                         <p className="text-xs text-gray-500">Chưa có thông tin chi nhánh</p>
                                     )}
-                                    <div className="flex items-center gap-2 text-xs text-gray-400 mt-3">
+                                    <div className="flex items-center gap-2 text-xs text-gray-300 mt-3">
                                         <Clock size={14} />
                                         <span>Giờ làm việc: 9h - 21h tất cả các ngày</span>
                                     </div>
@@ -87,7 +79,7 @@ export default function Footer() {
                                 <ul className="space-y-2.5">
                                     {policies.map((policy) => (
                                         <li key={policy.name}>
-                                            <Link href={policy.href} className="text-sm text-gray-400 hover:text-copper transition-colors flex items-center gap-1.5">
+                                            <Link href={policy.href} className="text-sm text-gray-300 hover:text-white transition-colors flex items-center gap-1.5">
                                                 <ChevronRight size={12} /> {policy.name}
                                             </Link>
                                         </li>
@@ -102,9 +94,12 @@ export default function Footer() {
                                     Dịch vụ sửa chữa
                                 </h3>
                                 <ul className="space-y-2.5">
-                                    {services.map((service) => (
+                                    {(config.footerServices || [])
+                                        .filter(s => s.visible)
+                                        .sort((a, b) => a.order - b.order)
+                                        .map((service) => (
                                         <li key={service.name}>
-                                            <Link href={service.href} className="text-sm text-gray-400 hover:text-copper transition-colors flex items-center gap-1.5">
+                                            <Link href={`/category/${service.slug}`} className="text-sm text-gray-300 hover:text-white transition-colors flex items-center gap-1.5">
                                                 <ChevronRight size={12} /> {service.name}
                                             </Link>
                                         </li>
@@ -118,7 +113,7 @@ export default function Footer() {
                                 <ul className="space-y-2.5 mb-6">
                                     {aboutLinks.map((link) => (
                                         <li key={link.name}>
-                                            <Link href={link.href} className="text-sm text-gray-400 hover:text-copper transition-colors flex items-center gap-1.5">
+                                            <Link href={link.href} className="text-sm text-gray-300 hover:text-white transition-colors flex items-center gap-1.5">
                                                 <ChevronRight size={12} /> {link.name}
                                             </Link>
                                         </li>
@@ -130,7 +125,7 @@ export default function Footer() {
                                     </div>
                                     <div>
                                         <span className="text-white font-bold block">VĂN LÀNH</span>
-                                        <span className="text-copper text-xs tracking-wider">SERVICE</span>
+                                        <span className="text-copper-light text-xs tracking-wider">SERVICE</span>
                                     </div>
                                 </div>
                             </div>
@@ -139,9 +134,9 @@ export default function Footer() {
 
                     {/* Bottom Bar */}
                     <div className="border-t border-gray-800">
-                        <div className="px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-gray-500">
+                        <div className="px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-gray-400">
                             <span>© 2026 Văn Lành Service. All rights reserved.</span>
-                            <span>Hotline: <a href={`tel:${mainPhone}`} className="text-copper hover:text-copper-light">{formatHotline(mainPhone)}</a></span>
+                            <span>Hotline: <a href={`tel:${mainPhone}`} className="text-copper-light hover:text-white">{formatHotline(mainPhone)}</a></span>
                         </div>
                     </div>
                 </div>{/* end bg-gray-900 rounded */}

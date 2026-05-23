@@ -3,6 +3,8 @@
 import type { RepairTicket } from '@/lib/types';
 import type { ReceiptConfig } from './PrintableReceipt';
 
+type RepairPart = NonNullable<RepairTicket['parts']>[number];
+
 const formatPrice = (p: number) => (p || 0).toLocaleString('vi-VN') + 'đ';
 
 const defaultHeaderConfig: ReceiptConfig = {
@@ -48,10 +50,8 @@ export default function PrintableRepairInvoice({ ticket, receiptConfig }: Printa
     const pay = ticket.payment || {};
     const computedPartsCost = (ticket.parts || [])
         // Only count parts that were actually used (selected) AND not warranty-covered
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .filter((p: any) => String(p?.status || '') === 'selected' && !p?.isWarrantyCovered)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .reduce((sum: number, p: any) => {
+        .filter((p: RepairPart) => String(p?.status || '') === 'selected' && !(p as { isWarrantyCovered?: boolean })?.isWarrantyCovered)
+        .reduce((sum: number, p: RepairPart) => {
             const qty = Math.max(1, Number(p?.quantity) || 1);
             const unit = Number(p?.unitPriceAtUse ?? p?.price ?? 0) || 0;
             return sum + unit * qty;
@@ -185,7 +185,9 @@ export default function PrintableRepairInvoice({ ticket, receiptConfig }: Printa
                             <div>
                                 Nội dung sửa chữa:{' '}
                                 <b>
-                                    {typeof ticket.issue === 'string' ? ticket.issue : ticket.issue?.description || '—'}
+                                    {ticket.issues && ticket.issues.length > 0
+                                        ? ticket.issues.map((iss, idx) => `${idx + 1}. ${iss.label}${iss.estimatedPrice > 0 ? ` (~${iss.estimatedPrice.toLocaleString('vi-VN')}đ)` : ''}`).join('; ')
+                                        : typeof ticket.issue === 'string' ? ticket.issue : ticket.issue?.description || '—'}
                                 </b>
                             </div>
                         )}
@@ -346,8 +348,7 @@ export default function PrintableRepairInvoice({ ticket, receiptConfig }: Printa
 
                 {/* WARRANTY SECTION — chỉ hiện khi có linh kiện có BH */}
                 {(() => {
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    const warrantyParts = (ticket.parts || []).filter((p: any) =>
+                    const warrantyParts = (ticket.parts || []).filter((p: RepairPart) =>
                         String(p?.status || '') === 'selected' && Number(p?.warrantyMonths || 0) > 0
                     );
                     if (warrantyParts.length === 0) return null;
@@ -364,11 +365,11 @@ export default function PrintableRepairInvoice({ ticket, receiptConfig }: Printa
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                                    {warrantyParts.map((p: any, i: number) => {
-                                        const expiresTs = typeof p.warrantyExpiresAt === 'number'
-                                            ? p.warrantyExpiresAt
-                                            : p.warrantyExpiresAt?.toDate?.()?.getTime() || 0;
+                                    {warrantyParts.map((p: RepairPart, i: number) => {
+                                        const wa = p.warrantyExpiresAt;
+                                        const expiresTs = typeof wa === 'number'
+                                            ? wa
+                                            : (wa && typeof wa === 'object' && 'toDate' in wa) ? (wa as { toDate: () => Date }).toDate().getTime() : 0;
                                         const expiresStr = expiresTs
                                             ? new Date(expiresTs).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' })
                                             : '—';

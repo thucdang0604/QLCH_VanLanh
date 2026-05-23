@@ -4,10 +4,11 @@ import Image from 'next/image';
 import { ChevronRight, Clock, User, Tag, ArrowLeft, Eye, FileText } from 'lucide-react';
 import VideoEmbed from '@/components/VideoEmbed';
 import { SITE_URL } from "@/lib/constants";
+import { sanitizeHtml } from '@/lib/sanitizeHtml';
 import ArticleClientParts from './ArticleClientParts';
 import { fetchArticleDetail } from '@/app/(customer)/_lib/server-queries';
 
-export const revalidate = false;
+export const revalidate = 30;
 
 function stripHtml(html: string): string {
     return (html || '')
@@ -18,26 +19,7 @@ function stripHtml(html: string): string {
         .trim();
 }
 
-function sanitizeArticleHtml(html: string): string {
-    const input = html || '';
-    return input
-        // Replace &nbsp; with regular spaces to fix word-wrap / text overflow
-        .replace(/&nbsp;/gi, ' ')
-        .replace(/\u00A0/g, ' ')
-        // Drop script/style blocks entirely
-        .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
-        .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, '')
-        // Remove inline event handlers like onclick="..."
-        .replace(/\son\w+\s*=\s*(["']).*?\1/gi, '')
-        // Neutralize javascript: URLs
-        .replace(/(href|src)\s*=\s*(["'])\s*javascript:[\s\S]*?\2/gi, '$1="#"')
-        // Basic iframe allowlist: only YouTube/Facebook embeds; strip others
-        .replace(/<iframe\b([^>]*?)\bsrc=(["'])([^"']+)\2([^>]*)\/?>/gi, (m, pre, q, src, post) => {
-            const s = String(src || '');
-            const ok = /^(https?:)?\/\/(www\.)?(youtube\.com|youtu\.be|www\.facebook\.com|web\.facebook\.com)\//i.test(s);
-            return ok ? `<iframe${pre} src="${s}"${post}></iframe>` : '';
-        });
-}
+// sanitizeArticleHtml is now imported from '@/lib/sanitizeHtml' as sanitizeHtml
 
 function formatDate(timestampMs?: number): string {
     if (!timestampMs) return '';
@@ -61,9 +43,9 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
     }
 
     const title = `${article.title || 'Bài viết'} | Văn Lành Service`;
-    const descriptionSource = (article.excerpt as string) || stripHtml(article.content || '') || (article.title as string) || 'Bài viết';
+    const descriptionSource = String(article.excerpt || stripHtml(String(article.content || '')) || article.title || 'Bài viết');
     const description = descriptionSource.slice(0, 155);
-    const ogImage = article.thumbnail || `${SITE_URL}/logo.png`;
+    const ogImage = String(article.thumbnail || `${SITE_URL}/logo.png`);
     const canonicalUrl = `${SITE_URL}/tin-tuc/${article.id}`;
 
     return {
@@ -76,8 +58,8 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
             url: canonicalUrl,
             images: [{ url: ogImage }],
             type: 'article',
-            publishedTime: (article.publishedAt || article.createdAt) ? new Date((article.publishedAt || article.createdAt) as number).toISOString() : undefined,
-            authors: article.author ? [article.author] : undefined,
+            publishedTime: (article.publishedAt || article.createdAt) ? new Date(Number(article.publishedAt || article.createdAt)).toISOString() : undefined,
+            authors: article.author ? [String(article.author)] : undefined,
         },
     };
 }
@@ -101,13 +83,13 @@ export default async function ArticleDetailPage({ params }: { params: Promise<{ 
         );
     }
 
-    const typeInfo = typeConfig[article.type || ''] || { label: article.type || '', color: 'bg-gray-100 text-gray-600' };
+    const typeInfo = typeConfig[String(article.type || '')] || { label: String(article.type || ''), color: 'bg-gray-100 text-gray-600' };
 
     const canonicalUrl = `${SITE_URL}/tin-tuc/${article.id}`;
-    const descriptionSource = (article.excerpt as string) || stripHtml(article.content || '') || (article.title as string) || 'Bài viết';
+    const descriptionSource = String(article.excerpt || stripHtml(String(article.content || '')) || article.title || 'Bài viết');
     const seoDescription = descriptionSource.slice(0, 155);
 
-    const publishedMs = article.publishedAt || article.createdAt;
+    const publishedMs = Number(article.publishedAt || article.createdAt || 0);
     const publishedIso = publishedMs ? new Date(publishedMs).toISOString() : undefined;
 
     const blogPostingSchema = {
@@ -118,7 +100,7 @@ export default async function ArticleDetailPage({ params }: { params: Promise<{ 
         image: article.thumbnail ? [article.thumbnail] : undefined,
         datePublished: publishedIso,
         dateModified: publishedIso,
-        author: article.author ? { '@type': 'Person', name: article.author } : { '@type': 'Organization', name: 'Văn Lành Service' },
+        author: article.author ? { '@type': 'Person', name: String(article.author) } : { '@type': 'Organization', name: 'Văn Lành Service' },
         publisher: {
             '@type': 'Organization',
             name: 'Văn Lành Service',
@@ -174,16 +156,16 @@ export default async function ArticleDetailPage({ params }: { params: Promise<{ 
                 <ChevronRight size={14} />
                 <Link href="/tin-tuc" className="hover:text-orange-600 transition-colors">Bài viết</Link>
                 <ChevronRight size={14} />
-                <span className="text-gray-900 font-medium line-clamp-1">{article.title}</span>
+                <span className="text-gray-900 font-medium line-clamp-1">{String(article.title ?? '')}</span>
             </nav>
 
             <article className="bg-white rounded-2xl shadow-sm overflow-hidden">
                 {/* Thumbnail */}
-                {article.thumbnail && (
+                {!!(article.thumbnail) && (
                     <div className="relative aspect-video w-full bg-gray-100">
                         <Image
-                            src={article.thumbnail}
-                            alt={article.title || 'Bài viết'}
+                            src={String(article.thumbnail)}
+                            alt={String(article.title || 'Bài viết')}
                             fill
                             className="object-cover"
                             priority
@@ -200,32 +182,32 @@ export default async function ArticleDetailPage({ params }: { params: Promise<{ 
                             </span>
                             <span className="flex items-center gap-1 text-sm text-gray-400">
                                 <Clock size={14} />
-                                {formatDate(article.publishedAt || article.createdAt)}
+                                {formatDate(Number(article.publishedAt || article.createdAt || 0))}
                             </span>
-                            {!!article.views && article.views > 0 && (
+                            {!!(article.views) && (article.views as number) > 0 && (
                                 <span className="flex items-center gap-1 text-sm text-gray-400">
                                     <Eye size={14} />
-                                    {article.views.toLocaleString()} lượt xem
+                                    {Number(article.views).toLocaleString()} lượt xem
                                 </span>
                             )}
                         </div>
 
                         <h1 className="text-2xl md:text-4xl font-bold text-gray-900 leading-tight">
-                            {article.title}
+                            {String(article.title ?? '')}
                         </h1>
 
-                        {article.author && (
+                        {!!(article.author) && (
                             <div className="flex items-center gap-2 mt-4 text-gray-500">
                                 <User size={16} />
-                                <span className="text-sm font-medium">{article.author}</span>
+                                <span className="text-sm font-medium">{String(article.author)}</span>
                             </div>
                         )}
                     </div>
 
                     {/* Featured Video */}
-                    {article.videoEmbedUrl && (
+                    {!!(article.videoEmbedUrl) && (
                         <div className="mb-8">
-                            <VideoEmbed url={article.videoEmbedUrl} />
+                            <VideoEmbed url={String(article.videoEmbedUrl)} />
                         </div>
                     )}
 
@@ -240,14 +222,14 @@ export default async function ArticleDetailPage({ params }: { params: Promise<{ 
                             [&_.ql-video]:w-full [&_.ql-video]:aspect-video [&_.ql-video]:rounded-xl
                             overflow-hidden break-words
                         "
-                        dangerouslySetInnerHTML={{ __html: sanitizeArticleHtml(String(article.content || '')) }}
+                        dangerouslySetInnerHTML={{ __html: sanitizeHtml(String(article.content || '')) }}
                     />
 
                     {/* Tags */}
-                    {article.tags && article.tags.length > 0 && (
+                    {!!(article.tags) && (article.tags as string[]).length > 0 && (
                         <div className="flex flex-wrap items-center gap-2 mt-10 pt-6 border-t border-gray-100">
                             <Tag size={16} className="text-gray-400" />
-                            {article.tags.map((tag: string) => (
+                            {(article.tags as string[]).map((tag: string) => (
                                 <span key={tag} className="text-sm bg-gray-100 text-gray-600 px-3 py-1 rounded-full font-medium hover:bg-orange-50 hover:text-orange-600 transition-colors">
                                     {tag}
                                 </span>

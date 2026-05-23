@@ -72,72 +72,191 @@ function injectBackground(bg: BackgroundConfig) {
     }
 }
 
+// =========== Local Storage Sync ===========
+function injectImageProxyState(disableImageProxy: boolean) {
+    if (typeof window === 'undefined') return;
+    if (disableImageProxy) {
+        localStorage.setItem('disableImageProxy', 'true');
+    } else {
+        localStorage.removeItem('disableImageProxy');
+    }
+}
+
+// =========== Split Config Definitions ===========
+const KEY_MAP: Record<string, string> = {
+    // taxonomy_settings
+    taxonomy: 'taxonomy_settings',
+    
+    // navigation_settings
+    headerNav: 'navigation_settings',
+    sidebarMenu: 'navigation_settings',
+    footerServices: 'navigation_settings',
+    homeServiceCategories: 'navigation_settings',
+    
+    // layout_settings
+    hero_banners: 'layout_settings',
+    homeSections: 'layout_settings',
+    store_branches: 'layout_settings',
+    background_config: 'layout_settings',
+    geofence: 'layout_settings',
+};
+
+// =========== Helper to recursively remove undefined fields for Firestore compatibility ===========
+function cleanUndefined(obj: any): any {
+    if (Array.isArray(obj)) {
+        return obj.map(cleanUndefined);
+    }
+    if (obj !== null && typeof obj === 'object') {
+        const cleaned: Record<string, any> = {};
+        for (const [key, val] of Object.entries(obj)) {
+            if (val !== undefined) {
+                cleaned[key] = cleanUndefined(val);
+            }
+        }
+        return cleaned;
+    }
+    return obj;
+}
+
+
 // =========== Provider ===========
 export function ConfigProvider({ children }: { children: ReactNode }) {
     const [config, setConfig] = useState<SiteConfig>(DEFAULT_CONFIG);
     const [loading, setLoading] = useState(true);
 
-    // Real-time listener on system_config/main_settings
+    // Real-time listener on multiple system_config documents
     useEffect(() => {
-        const docRef = doc(db, 'system_config', 'main_settings');
+        const docNames = ['main_settings', 'layout_settings', 'navigation_settings', 'taxonomy_settings'];
+        let loadedCount = 0;
 
-        const unsubscribe = onSnapshot(
-            docRef,
-            (snapshot) => {
-                if (snapshot.exists()) {
-                    const data = snapshot.data();
-                    const merged: SiteConfig = {
-                        ...DEFAULT_CONFIG, // Start with all defaults
-                        primaryColor: data.primaryColor || DEFAULT_CONFIG.primaryColor,
-                        primaryColorDark: data.primaryColorDark || DEFAULT_CONFIG.primaryColorDark,
-                        primaryColorLight: data.primaryColorLight || DEFAULT_CONFIG.primaryColorLight,
-                        contact_info: { ...DEFAULT_CONFIG.contact_info, ...(data.contact_info) },
-                        siteName: data.siteName || DEFAULT_CONFIG.siteName,
-                        logoUrl: data.logoUrl || DEFAULT_CONFIG.logoUrl,
-                        headerBg: data.headerBg !== undefined ? data.headerBg : DEFAULT_CONFIG.headerBg,
-                        topBarText: data.topBarText ?? DEFAULT_CONFIG.topBarText,
-                        topBarEnabled: data.topBarEnabled ?? DEFAULT_CONFIG.topBarEnabled,
-                        hero_banners: data.hero_banners || DEFAULT_CONFIG.hero_banners,
-                        background_config: { ...DEFAULT_CONFIG.background_config, ...(data.background_config) },
-                        store_branches: data.store_branches || DEFAULT_CONFIG.store_branches,
-                        homeSections: (() => {
-                            const stored: HomeSectionItem[] = data.homeSections || [];
-                            if (stored.length === 0) return DEFAULT_CONFIG.homeSections;
-                            // Auto-add any new sections from DEFAULT_CONFIG that are missing in Firestore
-                            const storedIds = new Set(stored.map(s => s.id));
-                            const missing = DEFAULT_CONFIG.homeSections.filter(d => !storedIds.has(d.id));
-                            if (missing.length === 0) return stored;
-                            const maxOrder = Math.max(...stored.map(s => s.order), 0);
-                            return [...stored, ...missing.map((m, i) => ({ ...m, order: maxOrder + 1 + i }))];
-                        })(),
-                        forbiddenWords: data.forbiddenWords || DEFAULT_CONFIG.forbiddenWords,
-                        geofence: { ...DEFAULT_CONFIG.geofence, ...(data.geofence) },
-                    };
-                    setConfig(merged);
-                    injectCSSVariables(merged);
-                    injectBackground(merged.background_config);
-                } else {
-                    injectCSSVariables(DEFAULT_CONFIG);
-                }
-                setLoading(false);
-            },
-            (err) => {
-                console.error('ConfigContext fetch error:', err);
-                injectCSSVariables(DEFAULT_CONFIG);
-                setLoading(false);
+        const seedDocument = async (docName: string) => {
+            let seedData: Record<string, unknown> = {};
+            if (docName === 'taxonomy_settings') {
+                seedData = { taxonomy: DEFAULT_CONFIG.taxonomy };
+            } else if (docName === 'navigation_settings') {
+                seedData = {
+                    headerNav: DEFAULT_CONFIG.headerNav,
+                    sidebarMenu: DEFAULT_CONFIG.sidebarMenu,
+                    footerServices: DEFAULT_CONFIG.footerServices,
+                    homeServiceCategories: DEFAULT_CONFIG.homeServiceCategories,
+                };
+            } else if (docName === 'layout_settings') {
+                seedData = {
+                    hero_banners: DEFAULT_CONFIG.hero_banners,
+                    homeSections: DEFAULT_CONFIG.homeSections,
+                    store_branches: DEFAULT_CONFIG.store_branches,
+                    background_config: DEFAULT_CONFIG.background_config,
+                    geofence: DEFAULT_CONFIG.geofence,
+                };
+            } else if (docName === 'main_settings') {
+                seedData = {
+                    primaryColor: DEFAULT_CONFIG.primaryColor,
+                    primaryColorDark: DEFAULT_CONFIG.primaryColorDark,
+                    primaryColorLight: DEFAULT_CONFIG.primaryColorLight,
+                    contact_info: DEFAULT_CONFIG.contact_info,
+                    siteName: DEFAULT_CONFIG.siteName,
+                    logoUrl: DEFAULT_CONFIG.logoUrl,
+                    headerBg: DEFAULT_CONFIG.headerBg,
+                    topBarText: DEFAULT_CONFIG.topBarText,
+                    topBarEnabled: DEFAULT_CONFIG.topBarEnabled,
+                    forbiddenWords: DEFAULT_CONFIG.forbiddenWords,
+                };
             }
-        );
+            try {
+                await setDoc(doc(db, 'system_config', docName), { ...seedData, updatedAt: serverTimestamp() }, { merge: true });
+            } catch (err) {
+                console.error(`Error seeding ${docName}:`, err);
+            }
+        };
 
-        return () => unsubscribe();
+        const unsubs = docNames.map(docName => {
+            return onSnapshot(
+                doc(db, 'system_config', docName),
+                (snapshot) => {
+                    if (!snapshot.exists()) {
+                        // Seed document if it doesn't exist
+                        seedDocument(docName);
+                    } else {
+                        const data = snapshot.data();
+                        setConfig(prev => {
+                            const next = { ...prev };
+                            
+                            // Merge data, but only for keys that belong to this docName
+                            for (const key of Object.keys(data)) {
+                                if (key === 'updatedAt' || key === 'createdAt') continue;
+                                
+                                const targetDoc = KEY_MAP[key] || 'main_settings';
+                                if (targetDoc === docName) {
+                                    (next as Record<string, unknown>)[key] = data[key];
+                                }
+                            }
+
+                            // Special logic for homeSections to add missing defaults
+                            if (docName === 'layout_settings' && data.homeSections) {
+                                const storedIds = new Set((data.homeSections as HomeSectionItem[]).map(s => s.id));
+                                const missing = DEFAULT_CONFIG.homeSections.filter(d => !storedIds.has(d.id));
+                                if (missing.length > 0) {
+                                    const maxOrder = Math.max(...(data.homeSections as HomeSectionItem[]).map(s => s.order), 0);
+                                    next.homeSections = [
+                                        ...data.homeSections,
+                                        ...missing.map((m, i) => ({ ...m, order: maxOrder + 1 + i }))
+                                    ];
+                                }
+                            }
+
+                            // Inject variables after merging
+                            injectCSSVariables(next);
+                            injectBackground(next.background_config);
+                            injectImageProxyState(next.disableImageProxy ?? false);
+                            return next;
+                        });
+                    }
+
+                    // Count loaded documents to remove loading state
+                    loadedCount++;
+                    if (loadedCount >= docNames.length) {
+                        setLoading(false);
+                    }
+                },
+                (err) => {
+                    console.error(`ConfigContext fetch error for ${docName}:`, err);
+                    loadedCount++;
+                    if (loadedCount >= docNames.length) {
+                        setLoading(false);
+                    }
+                }
+            );
+        });
+
+        return () => unsubs.forEach(u => u());
     }, []);
 
-    // Update config in Firestore
+    // Update config in Firestore, split into appropriate documents
     const updateConfig = async (partial: Partial<SiteConfig>) => {
-        const docRef = doc(db, 'system_config', 'main_settings');
-        await setDoc(docRef, { ...partial, updatedAt: serverTimestamp() }, { merge: true });
+        const cleanedPartial = cleanUndefined(partial);
+        const updatesByDoc: Record<string, Record<string, unknown>> = {
+            main_settings: {},
+            layout_settings: {},
+            navigation_settings: {},
+            taxonomy_settings: {}
+        };
+
+        for (const [key, value] of Object.entries(cleanedPartial)) {
+            const targetDoc = KEY_MAP[key] || 'main_settings';
+            updatesByDoc[targetDoc][key] = value;
+        }
+
+        const promises = Object.entries(updatesByDoc).map(([docName, data]) => {
+            if (Object.keys(data).length > 0) {
+                return setDoc(doc(db, 'system_config', docName), { ...data, updatedAt: serverTimestamp() }, { merge: true });
+            }
+            return Promise.resolve();
+        });
+
+        await Promise.all(promises);
         
         // Trigger global layout revalidation to apply config changes (colors, header, layout)
-        triggerRevalidate(['layout']).catch(err => console.error('Config revalidation error:', err));
+        triggerRevalidate(['layout'], ['config']).catch(err => console.error('Config revalidation error:', err));
     };
 
     // Format raw phone number for display
@@ -162,9 +281,11 @@ export function ServerConfigProvider({ children, initialConfig }: { children: Re
     useEffect(() => {
         injectCSSVariables(initialConfig);
         injectBackground(initialConfig.background_config);
+        injectImageProxyState(initialConfig.disableImageProxy ?? false);
     }, [initialConfig]);
 
     // No-op updateConfig — customer pages should never call this
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const updateConfig = async (_partial: Partial<SiteConfig>) => {
         console.warn('updateConfig called in ServerConfigProvider — this is a no-op. Use admin ConfigProvider instead.');
     };

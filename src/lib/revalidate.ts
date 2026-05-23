@@ -24,7 +24,29 @@ export async function triggerRevalidate(paths?: string[], tags?: string[]) {
         }
     }
     
-    console.log(`Revalidation successful for paths: ${paths?.join(', ')}, tags: ${tags?.join(', ')}`);
+    // Trigger cross-domain revalidation only if secret is configured
+    const revalidateSecret = process.env.REVALIDATE_SECRET;
+    if (revalidateSecret) {
+      const domains = [
+        'https://fixphone.vn',
+        'https://qlch-vanlanh.web.app'
+      ];
+
+      await Promise.allSettled(
+        domains.map(domain => 
+          fetch(`${domain}/api/revalidate`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-revalidate-secret': revalidateSecret,
+            },
+            body: JSON.stringify({ paths, tags })
+          })
+        )
+      ).catch(e => console.error('Error during cross-domain revalidation trigger:', e));
+    }
+
+    console.warn(`Revalidation successful for paths: ${paths?.join(', ')}, tags: ${tags?.join(', ')}`);
     return true;
   } catch (error) {
     console.error('Failed to trigger revalidation via Server Action:', error);

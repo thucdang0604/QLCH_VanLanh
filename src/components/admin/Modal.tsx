@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useCallback, type ReactNode } from 'react';
+import { useEffect, useCallback, useRef, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 
 /**
@@ -49,6 +49,8 @@ interface ModalProps {
     className?: string;
     /** Responsive bottom-sheet trên mobile (default: true) */
     mobileSheet?: boolean;
+    /** Form có thay đổi chưa lưu, hiện confirm khi đóng */
+    isDirty?: boolean;
 }
 
 const SIZE_MAP: Record<ModalSize, string> = {
@@ -69,16 +71,29 @@ export default function Modal({
     title,
     size = '2xl',
     priority = 'normal',
-    closeOnBackdrop = true,
+    closeOnBackdrop = false,
     printHidden = true,
     blur = false,
     className = '',
     mobileSheet = true,
+    isDirty = false,
 }: ModalProps) {
+    const handleClose = useCallback(() => {
+        if (isDirty) {
+            if (window.confirm('Bạn có thay đổi chưa lưu, bạn có chắc chắn muốn đóng?')) {
+                onClose();
+            }
+        } else {
+            onClose();
+        }
+    }, [isDirty, onClose]);
+
     // Esc key handler
     const handleKeyDown = useCallback((e: KeyboardEvent) => {
-        if (e.key === 'Escape') onClose();
-    }, [onClose]);
+        if (e.key === 'Escape') handleClose();
+    }, [handleClose]);
+
+    const backdropMouseDown = useRef(false);
 
     useEffect(() => {
         if (!isOpen) return;
@@ -102,7 +117,19 @@ export default function Modal({
     return (
         <div
             className={`fixed inset-0 bg-black/50 flex ${mobileAlign} justify-center ${zClass} p-0 md:p-4 ${blurClass} ${printClass}`}
-            onClick={closeOnBackdrop ? onClose : undefined}
+            onMouseDown={(e) => {
+                if (e.target === e.currentTarget) {
+                    backdropMouseDown.current = true;
+                } else {
+                    backdropMouseDown.current = false;
+                }
+            }}
+            onClick={(e) => {
+                if (closeOnBackdrop && e.target === e.currentTarget && backdropMouseDown.current) {
+                    handleClose();
+                }
+                backdropMouseDown.current = false;
+            }}
             role="dialog"
             aria-modal="true"
             aria-label={title}
@@ -116,7 +143,7 @@ export default function Modal({
                     <div className="flex items-center justify-between px-6 py-4 border-b shrink-0 sticky top-0 bg-white z-10">
                         <h2 className="text-lg font-bold text-gray-900 truncate pr-4">{title}</h2>
                         <button
-                            onClick={onClose}
+                            onClick={handleClose}
                             className="p-2 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-gray-600 transition-colors shrink-0"
                             aria-label="Đóng"
                         >

@@ -1,23 +1,43 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    // Default rule: block all
+    
+    // Helper function to check if the user is staff or admin
+    function isStaff() {
+      return request.auth != null && 
+        (request.auth.token.role == 'admin' || request.auth.token.role == 'staff');
+    }
+
+    // Default rule: read for authenticated users, write for staff/admin only
     match /{allPaths=**} {
-      allow read, write: if request.auth != null;
+      allow read: if request.auth != null;
+      allow write: if isStaff();
     }
     
     // Allow public read for all images
     match /images/{allPaths=**} {
       allow read: if true;
     }
+
+    // Allow public read for all media
+    match /media/{allPaths=**} {
+      allow read: if true;
+    }
     
     // Allow unauthenticated users to upload reviews (up to 5MB, must be image)
     match /images/reviews/{imageId} {
       allow read: if true;
-      // Prevent overwriting existing objects to reduce abuse.
-      allow write: if !exists(/b/{bucket}/o/images/reviews/$(imageId))
-                   && request.resource.size < 5 * 1024 * 1024
-                   && request.resource.contentType.matches('image/.*');
+      allow create: if request.resource.size < 5 * 1024 * 1024
+                    && request.resource.contentType.matches('image/.*');
+      allow update, delete: if false;
+    }
+
+    // Allow unauthenticated users to upload video reviews (up to 50MB, must be video)
+    match /videos/reviews/{videoId} {
+      allow read: if true;
+      allow create: if request.resource.size < 50 * 1024 * 1024
+                    && request.resource.contentType.matches('video/.*');
+      allow update, delete: if false;
     }
   }
 }

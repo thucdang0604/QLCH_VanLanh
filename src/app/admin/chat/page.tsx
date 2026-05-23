@@ -9,7 +9,7 @@ import {
     MessageSquare,
     Loader2,
     Users,
-    Clock,
+
     ChevronLeft,
     Bot,
     ToggleLeft,
@@ -43,17 +43,18 @@ export default function AdminChatPage() {
 
     // Load all chat rooms
     useEffect(() => {
-        const unsubscribe = subscribeToRooms((roomsMap) => {
+        let unsubscribe: (() => void) | undefined;
+        subscribeToRooms((roomsMap) => {
             const roomList: ChatRoom[] = Object.entries(roomsMap)
                 .map(([roomId, info]) => {
                     return {
                         odId: roomId,
-                        displayName: info.displayName || 'Khách',
-                        email: info.email || null,
-                        isGuest: info.isGuest ?? true,
-                        lastMessage: info.lastMessage || '',
-                        lastMessageTime: info.lastMessageTime || 0,
-                        hasUnread: info.hasUnreadAdmin || false, // Check admin unread
+                        displayName: String(info.displayName || 'Khách'),
+                        email: info.email ? String(info.email) : null,
+                        isGuest: (info.isGuest as boolean) ?? true,
+                        lastMessage: String(info.lastMessage || ''),
+                        lastMessageTime: Number(info.lastMessageTime || 0),
+                        hasUnread: !!(info.hasUnreadAdmin), // Check admin unread
                     };
                 })
                 .filter(room => room.lastMessage) // Only show rooms with messages
@@ -61,9 +62,9 @@ export default function AdminChatPage() {
 
             setRooms(roomList);
             setLoading(false);
-        });
+        }).then(fn => { unsubscribe = fn; });
 
-        return () => unsubscribe();
+        return () => { if (unsubscribe) unsubscribe(); };
     }, []);
 
     // Load messages for selected room
@@ -73,23 +74,25 @@ export default function AdminChatPage() {
             return;
         }
 
-        const unsubscribe = subscribeToMessages(selectedRoom, (messageList) => {
+        let unsubscribe: (() => void) | undefined;
+        subscribeToMessages(selectedRoom, (messageList) => {
             setMessages(messageList);
-        });
+        }).then(fn => { unsubscribe = fn; });
 
         // Mark room as read
         updateRoomInfo(selectedRoom, { hasUnreadAdmin: false }).catch(() => {});
 
-        return () => unsubscribe();
+        return () => { if (unsubscribe) unsubscribe(); };
     }, [selectedRoom]);
 
     // Listen to botActive status for selected room
     useEffect(() => {
         if (!selectedRoom) return;
-        const unsub = subscribeToRoomInfo(selectedRoom, (info) => {
+        let unsub: (() => void) | undefined;
+        subscribeToRoomInfo(selectedRoom, (info) => {
             setBotActive(info?.botActive !== false); // default true
-        });
-        return () => unsub();
+        }).then(fn => { unsub = fn; });
+        return () => { if (unsub) unsub(); };
     }, [selectedRoom]);
 
     const toggleBot = async () => {

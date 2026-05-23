@@ -6,7 +6,6 @@ import { db } from '@/lib/firebase';
 import { Timestamp } from 'firebase/firestore';
 import { Star, Loader2, Send } from 'lucide-react';
 import type { ArticleComment } from '@/lib/types';
-import { useConfig } from '@/lib/ConfigContext';
 
 function maskPhone(p?: string): string {
     if (!p) return '';
@@ -40,7 +39,7 @@ export default function ArticleClientParts({ slug }: { slug: string }) {
     const [phone, setPhone] = useState('');
     const [content, setContent] = useState('');
 
-    const { config } = useConfig();
+
 
     useEffect(() => {
         // Tăng view count
@@ -61,7 +60,7 @@ export default function ArticleClientParts({ slug }: { slug: string }) {
                 );
                 const snap = await getDocs(q);
                 if (isMounted) {
-                    setComments(snap.docs.map((d: any) => ({ id: d.id, ...(d.data() as Omit<ArticleComment, 'id'>) })));
+                    setComments(snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<ArticleComment, 'id'>) })));
                     setCommentsLoading(false);
                 }
             } catch (err) {
@@ -85,13 +84,6 @@ export default function ArticleClientParts({ slug }: { slug: string }) {
         const cleanPhone = phone.trim();
         if (!cleanName || !cleanContent) return;
 
-        // Check forbidden words
-        const textToCheck = `${cleanName} ${cleanContent}`.toLowerCase();
-        const hasForbidden = config.forbiddenWords && Array.isArray(config.forbiddenWords) 
-            ? config.forbiddenWords.some(word => textToCheck.includes(word.toLowerCase())) 
-            : false;
-        const finalStatus = hasForbidden ? 'pending' : 'approved';
-
         setSubmitLoading(true);
         try {
             await addDoc(collection(db, 'article_comments'), {
@@ -100,7 +92,7 @@ export default function ArticleClientParts({ slug }: { slug: string }) {
                 name: cleanName,
                 phone: cleanPhone,
                 content: cleanContent,
-                status: finalStatus,
+                status: 'pending',
                 createdAt: serverTimestamp(),
             });
             setSubmitDone(true);

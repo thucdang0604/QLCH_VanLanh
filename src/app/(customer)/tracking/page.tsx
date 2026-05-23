@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import Link from 'next/link';
+import Image from 'next/image';
 import {
     Search, Loader2, Calendar, Clock, MapPin, CheckCircle2, Phone,
     XCircle, User, Wrench, ShoppingCart, Package, AlertCircle,
@@ -64,6 +64,25 @@ const paymentLabels: Record<string, string> = {
     refunded: 'Đã hoàn tiền',
 };
 
+interface OrderItem {
+    productName: string;
+    image?: string;
+    color?: string;
+    storage?: string;
+    quantity: number;
+    price: number;
+}
+
+interface Order {
+    id: string;
+    status: string;
+    createdAt: FirestoreDateValue;
+    customer_info: { phone: string; name?: string; note?: string };
+    items?: OrderItem[];
+    shipping_fee?: number;
+    total_amount: number;
+}
+
 const TERMINAL_STATUSES = ['done', 'refund', 'out'];
 
 /* ─── Helpers ─── */
@@ -89,7 +108,7 @@ export default function TrackingPage() {
     // Data
     const [appointments, setAppointments] = useState<Appointment[]>([]);
     const [repairs, setRepairs] = useState<RepairTicket[]>([]);
-    const [orders, setOrders] = useState<any[]>([]);
+    const [orders, setOrders] = useState<Order[]>([]);
     const [trackingGroups, setTrackingGroups] = useState<TrackingGroup[]>([]);
     const [reviewedTickets, setReviewedTickets] = useState<string[]>([]);
     const [dynamicStatuses, setDynamicStatuses] = useState<WorkflowNode[]>([]);
@@ -161,27 +180,29 @@ export default function TrackingPage() {
         setOrders([]);
 
         try {
-            const cleanPhone = phone.trim().replace(/\s+/g, '');
+            const res = await fetch('/api/tracking', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ phone }),
+            });
 
-            // Query Appointments
-            const aq = query(collection(db, 'appointments'), where('phone', '==', cleanPhone));
-            const aSnap = await getDocs(aq);
-            const aData = aSnap.docs.map(d => ({ id: d.id, ...d.data() })) as Appointment[];
+            if (!res.ok) {
+                const errData = await res.json();
+                throw new Error(errData.error || 'Truy vấn thất bại.');
+            }
+
+            const data = await res.json();
+
+            const aData = (data.appointments || []) as Appointment[];
             aData.sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
             setAppointments(aData);
 
-            // Query Repairs
-            const rq = query(collection(db, 'repairs'), where('customer.phone', '==', cleanPhone));
-            const rSnap = await getDocs(rq);
-            const rData = rSnap.docs.map(d => ({ id: d.id, ...d.data() })) as RepairTicket[];
+            const rData = (data.repairs || []) as RepairTicket[];
             rData.sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
             setRepairs(rData);
 
-            // Query Orders
-            const oq = query(collection(db, 'orders'), where('customer_info.phone', '==', cleanPhone));
-            const oSnap = await getDocs(oq);
-            const oData = oSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
-            oData.sort((a: any, b: any) => toMillis(b.createdAt) - toMillis(a.createdAt));
+            const oData = (data.orders || []) as Order[];
+            oData.sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
             setOrders(oData);
         } catch (error) {
             console.error('Search error:', error);
@@ -352,7 +373,7 @@ export default function TrackingPage() {
                                             ) : url.includes('.mp4') || url.includes('video') ? (
                                                 <video controls src={url} className="w-full h-full object-contain" />
                                             ) : (
-                                                <img src={url} alt={`Bàn giao ${i + 1}`} className="w-full h-full object-contain bg-gray-50" />
+                                                <Image src={url} alt={`Bàn giao ${i + 1}`} width={300} height={300} className="w-full h-full object-contain bg-gray-50" />
                                             )}
                                         </div>
                                     ))}
@@ -375,7 +396,7 @@ export default function TrackingPage() {
                                 const isCurrentGroupTerminal = trackingGroups[currentGroupIndex]?.isTerminal;
                                 const isDone = isTerminal || index < currentGroupIndex || (index === currentGroupIndex && isCurrentGroupTerminal);
                                 const isCurrent = !isTerminal && index === currentGroupIndex && !isCurrentGroupTerminal;
-                                const isPending = !isTerminal && index > currentGroupIndex;
+
 
                                 return (
                                     <div key={group.id} className="relative group">
@@ -435,7 +456,7 @@ export default function TrackingPage() {
                                         ) : url.includes('.mp4') || url.includes('video') ? (
                                             <video controls src={url} className="w-full h-full object-contain" />
                                         ) : (
-                                            <img src={url} alt={`Bàn giao ${i + 1}`} className="w-full h-full object-contain bg-gray-50" />
+                                            <Image src={url} alt={`Bàn giao ${i + 1}`} width={300} height={300} className="w-full h-full object-contain bg-gray-50" />
                                         )}
                                     </div>
                                 ))}
@@ -796,10 +817,10 @@ export default function TrackingPage() {
                                                         
                                                         {/* Items */}
                                                         <div className="space-y-3 mb-4">
-                                                            {order.items?.map((item: any, idx: number) => (
+                                                            {order.items?.map((item: OrderItem, idx: number) => (
                                                                 <div key={idx} className="flex gap-3 items-center bg-gray-50 p-2 rounded-lg">
                                                                     {item.image ? (
-                                                                        <img src={item.image} alt={item.productName} className="w-12 h-12 object-cover rounded-md flex-shrink-0" />
+                                                                        <Image src={item.image} alt={item.productName} width={48} height={48} className="w-12 h-12 object-cover rounded-md flex-shrink-0" />
                                                                     ) : (
                                                                         <div className="w-12 h-12 bg-gray-200 rounded-md flex items-center justify-center flex-shrink-0"><ImageIcon size={16} className="text-gray-400" /></div>
                                                                     )}
@@ -910,7 +931,7 @@ export default function TrackingPage() {
                                 <div className="flex flex-wrap gap-2">
                                     {imageUrls.map((url, idx) => (
                                         <div key={idx} className="relative w-16 h-16 rounded-xl border border-gray-200 overflow-hidden group">
-                                            <img src={url} alt={`preview-${idx}`} className="w-full h-full object-cover" />
+                                            <Image src={url} alt={`preview-${idx}`} width={64} height={64} className="w-full h-full object-cover" />
                                             <button
                                                 type="button"
                                                 onClick={() => removeImage(idx)}

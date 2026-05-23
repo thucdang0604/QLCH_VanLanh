@@ -6,6 +6,7 @@ import {
     Star, Camera, X, Loader2, CheckCircle2, HeartHandshake,
     MapPin, KeyRound, ShieldCheck, Navigation
 } from 'lucide-react';
+import Image from 'next/image';
 import { uploadMedia } from '@/lib/storage';
 import { SITE_URL } from "@/lib/constants";
 
@@ -38,7 +39,6 @@ export default function RatePage() {
 
     // Geofence state
     const [verifyStatus, setVerifyStatus] = useState<VerifyStatus>('loading');
-    const [geoConfig, setGeoConfig] = useState<GeoConfig | null>(null);
     const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
     const [pinInput, setPinInput] = useState('');
     const [pinError, setPinError] = useState('');
@@ -64,7 +64,6 @@ export default function RatePage() {
             const res = await fetch('/api/reviews');
             if (!res.ok) throw new Error('API error');
             const cfg: GeoConfig = await res.json();
-            setGeoConfig(cfg);
 
             if (!cfg.enabled) {
                 setVerifyStatus('disabled');
@@ -452,7 +451,7 @@ export default function RatePage() {
                             <div className="flex flex-wrap gap-2">
                                 {imageUrls.map((url, idx) => (
                                     <div key={idx} className="relative w-20 h-20 rounded-xl border border-gray-200 overflow-hidden group">
-                                        <img src={url} alt={`preview-${idx}`} className="w-full h-full object-cover" />
+                                        <Image src={url} alt={`preview-${idx}`} fill className="object-cover" />
                                         <button
                                             type="button"
                                             onClick={() => removeImage(idx)}

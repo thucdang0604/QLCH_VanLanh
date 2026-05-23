@@ -49,3 +49,13 @@ compile.log
 
 # Firebase & Agents
 .firebase/
+
+# AI Cache & scratch files
+.ai_cache/
+AI_FILE_MAP.md
+FILE_DEPENDENCIES.md
+AI_fix_bug.md
+123.md
+roadmap_v2/
+buckets.json
+sub_ai_mcp_report.md

@@ -1,25 +1,43 @@
 {
   "rules": {
     "chats": {
+      ".read": "auth != null && (auth.token.role === 'admin' || auth.token.role === 'staff')",
       "$roomId": {
-        ".read": true,
-        ".write": true,
+        ".read": "auth != null && (auth.token.role === 'admin' || auth.token.role === 'staff' || auth.uid === $roomId) || $roomId.startsWith('guest_')",
+        ".write": "auth != null && (auth.token.role === 'admin' || auth.token.role === 'staff' || auth.uid === $roomId) || $roomId.startsWith('guest_')",
         "info": {
-          ".validate": "newData.hasChildren(['displayName']) || newData.hasChildren(['lastMessage']) || newData.hasChildren(['botActive']) || newData.hasChildren(['hasUnread'])"
+          ".validate": "newData.hasChildren(['displayName']) || newData.hasChildren(['lastMessage']) || newData.hasChildren(['botActive']) || newData.hasChildren(['hasUnread'])",
+          "displayName": { ".validate": "newData.isString() && newData.val().length <= 50" },
+          "lastMessage": { ".validate": "newData.isString() && newData.val().length <= 500" },
+          "botActive": { ".validate": "newData.isBoolean()" },
+          "hasUnread": { ".validate": "newData.isBoolean()" },
+          "lastTimestamp": { ".validate": "newData.isNumber()" },
+          "phone": { ".validate": "newData.isString() && newData.val().length <= 15" },
+          "$other": { ".validate": false }
         },
         "messages": {
           "$messageId": {
-            ".validate": "newData.hasChildren(['text', 'senderId', 'senderType', 'timestamp'])"
+            ".validate": "newData.hasChildren(['text', 'senderId', 'senderType', 'timestamp'])",
+            "text": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 500" },
+            "senderId": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 128" },
+            "senderType": {
+              ".validate": "newData.isString() && ( ((newData.val() === 'admin' || newData.val() === 'bot' || newData.val() === 'ai') && (auth != null && (auth.token.role === 'admin' || auth.token.role === 'staff'))) || (newData.val() === 'user' && auth != null && auth.uid === newData.parent().child('senderId').val() && auth.uid === $roomId) || (newData.val() === 'guest' && auth == null && $roomId.startsWith('guest_') && newData.parent().child('senderId').val() === $roomId) )"
+            },
+            "timestamp": { ".validate": "newData.isNumber()" },
+            "$other": { ".validate": false }
           }
-        }
-      },
-      ".read": "auth != null"
+        },
+        "$other": { ".validate": false }
+      }
     },
     "online_users": {
       ".read": "auth != null",
       "$sessionId": {
         ".write": true,
-        ".validate": "!newData.exists() || (newData.hasChild('timestamp') && newData.child('timestamp').isNumber())"
+        ".validate": "!newData.exists() || (newData.hasChild('timestamp') && newData.child('timestamp').isNumber())",
+        "timestamp": { ".validate": "newData.isNumber()" },
+        "page": { ".validate": "newData.isString() && newData.val().length <= 200" },
+        "$other": { ".validate": false }
       }
     }
   }

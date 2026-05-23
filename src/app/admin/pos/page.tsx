@@ -1,23 +1,52 @@
 'use client';
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
     Search, ShoppingCart, Plus, Minus, Trash2, User, Phone, Receipt, X,
     Package, CreditCard, Banknote, QrCode, Tag, Loader2, CheckCircle2,
-    AlertTriangle
+    AlertTriangle, Wrench
 } from 'lucide-react';
-import { collection, getDocs, serverTimestamp, doc, writeBatch, increment } from 'firebase/firestore';
+import { collection, getDocs, serverTimestamp, doc, increment, runTransaction, query, where, orderBy as fbOrderBy } from 'firebase/firestore';
+import { upsertCustomerRecord } from '@/lib/customerSync';
 import { useAuth } from '@/lib/AuthContext';
 import { useConfig } from '@/lib/ConfigContext';
 import Modal from '@/components/admin/Modal';
 import UniversalProductModal from '@/components/admin/UniversalProductModal';
+import Image from 'next/image';
 import { db } from '@/lib/firebase';
 import type { Product, Order } from '@/lib/types';
 import { calculateAndSaveCommissions } from '@/lib/commissionUtils';
 import { toastError } from '@/lib/toast';
+import { DEFAULT_CONFIG } from '@/lib/config-defaults';
+import { PART_CATEGORY, isPartCategory } from '@/lib/constants';
+import { fetchActiveDiscountRules, calculateAccessoryDiscounts } from '@/lib/discountRuleUtils';
+import CurrencyInput from '@/components/admin/CurrencyInput';
 
+
+// ── Receipt item shape (matches orderData.items) ──
+interface OrderLineItem {
+    productId: string;
+    productName: string;
+    product_id: string;
+    product_name: string;
+    quantity: number;
+    price: number;
+    costPrice: number;
+}
+
+interface LastOrderData {
+    id: string;
+    customer_info: { name: string; phone: string; email: string; city: string; district: string; ward: string; address: string };
+    items: OrderLineItem[];
+    total_amount: number;
+    discount_amount: number;
+    subtotal_amount: number;
+    deposit_amount: number;
+    payment_method: string;
+    createdByName?: string;
+    createdAt: Date;
+}
 
 // ── Cart Item ──
 interface CartItem {
@@ -59,10 +88,104 @@ export default function POSPage() {
     const [isProcessing, setIsProcessing] = useState(false);
     const [showReceipt, setShowReceipt] = useState(false);
     const [printTemplate, setPrintTemplate] = useState<'thermal' | 'a5'>('a5');
-    const [lastOrder, setLastOrder] = useState<any>(null);
+    const [lastOrder, setLastOrder] = useState<LastOrderData | null>(null);
     const [showProductModal, setShowProductModal] = useState(false);
 
+    // Repair lookup
+    interface RepairTicketInfo {
+        id: string;
+        customerName: string;
+        customerPhone: string;
+        deviceModel: string;
+        status: string;
+        parts: { productName: string; partType?: string; unitPriceAtUse?: number }[];
+    }
+    const [linkedRepair, setLinkedRepair] = useState<RepairTicketInfo | null>(null);
+    const [repairLoading, setRepairLoading] = useState(false);
+    const [autoDiscountAmount, setAutoDiscountAmount] = useState(0);
+    const [discountDetails, setDiscountDetails] = useState<{ productName: string; discountAmount: number; ruleName: string }[]>([]);
+
+    // Lookup repair by phone
+    const lookupRepairByPhone = async (phone: string) => {
+        if (!phone || phone.length < 8) {
+            setLinkedRepair(null);
+            setAutoDiscountAmount(0);
+            setDiscountDetails([]);
+            return;
+        }
+        setRepairLoading(true);
+        try {
+            const q = query(
+                collection(db, 'repairs'),
+                where('customerPhone', '==', phone.trim()),
+                fbOrderBy('createdAt', 'desc')
+            );
+            const snap = await getDocs(q);
+            if (!snap.empty) {
+                const d = snap.docs[0];
+                const data = d.data();
+                setLinkedRepair({
+                    id: d.id,
+                    customerName: data.customerName || '',
+                    customerPhone: data.customerPhone || phone,
+                    deviceModel: data.deviceModel || '',
+                    status: data.status || '',
+                    parts: (data.parts || []).map((p: Record<string, unknown>) => ({
+                        productName: String(p.productName || ''),
+                        partType: String(p.partType || ''),
+                        unitPriceAtUse: Number(p.unitPriceAtUse || 0)
+                    }))
+                });
+                // Auto-fill customer name if empty
+                if (!customerName && data.customerName) {
+                    setCustomerName(data.customerName);
+                }
+            } else {
+                setLinkedRepair(null);
+            }
+        } catch (err) {
+            console.error('Repair lookup failed:', err);
+        }
+        setRepairLoading(false);
+    };
+
+    // Auto-calculate discount when cart or linked repair changes
+    useEffect(() => {
+        if (!linkedRepair || linkedRepair.parts.length === 0 || cart.length === 0) {
+            setAutoDiscountAmount(0);
+            setDiscountDetails([]);
+            return;
+        }
+        (async () => {
+            try {
+                const rules = await fetchActiveDiscountRules();
+                if (rules.length === 0) return;
+                const results = calculateAccessoryDiscounts(
+                    linkedRepair.parts,
+                    cart.map(c => ({ productId: c.productId, productName: c.name, price: c.sellingPrice })),
+                    rules
+                );
+                const totalDisc = results.reduce((s, r) => s + r.discountAmount, 0);
+                setAutoDiscountAmount(totalDisc);
+                setDiscountDetails(results);
+            } catch { /* rules not configured yet */ }
+        })();
+    }, [linkedRepair, cart]);
+
     const searchRef = useRef<HTMLInputElement>(null);
+
+    const retailCategoryIds = DEFAULT_CONFIG.taxonomy.retail.map(n => n.id);
+
+    const filterPosProducts = useCallback((data: (Product & { id: string })[]) => {
+        return data.filter(p => {
+            if (((p.stock || 0) - (p.held || 0)) <= 0) return false;
+            if (p.status !== 'active') return false;
+            if (p.categoryIds && p.categoryIds.length > 0) {
+                return retailCategoryIds.includes(p.categoryIds[0]);
+            }
+            return !isPartCategory(p.category, p.categoryIds) && p.category !== 'Dịch vụ sửa chữa';
+        });
+    }, [retailCategoryIds]);
 
     // ── Load products ──
     useEffect(() => {
@@ -70,7 +193,7 @@ export default function POSPage() {
             try {
                 const snap = await getDocs(collection(db, 'products'));
                 const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as Product & { id: string }));
-                setProducts(data.filter(p => p.status === 'active' && p.category !== 'Linh ki\u1ec7n'));
+                setProducts(filterPosProducts(data));
             } catch (err) {
                 console.error('Failed to load products:', err);
             } finally {
@@ -78,7 +201,7 @@ export default function POSPage() {
             }
         };
         load();
-    }, []);
+    }, [filterPosProducts]);
 
     // Keyboard shortcut: F1 to focus search
     useEffect(() => {
@@ -88,6 +211,44 @@ export default function POSPage() {
         window.addEventListener('keydown', handler);
         return () => window.removeEventListener('keydown', handler);
     }, []);
+
+    // ── Barcode Scanner ──
+    const barcodeBuffer = useRef('');
+    const lastKeyTime = useRef(Date.now());
+
+    useEffect(() => {
+        const handler = (e: KeyboardEvent) => {
+            // Ignore if focus is in an input field (to prevent interference with typing)
+            if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') {
+                return;
+            }
+
+            const now = Date.now();
+            // Most scanners send keys within 10-20ms of each other.
+            // If it's been more than 50ms, assume it's a new scan.
+            if (now - lastKeyTime.current > 50) {
+                barcodeBuffer.current = '';
+            }
+            lastKeyTime.current = now;
+
+            if (e.key === 'Enter') {
+                if (barcodeBuffer.current.length >= 3) {
+                    const code = barcodeBuffer.current;
+                    barcodeBuffer.current = '';
+                    // Try finding by ID (Firestore ID) or barcode field if it exists
+                    const found = products.find(p => p.id === code || (p as unknown as { barcode?: string }).barcode === code);
+                    if (found) {
+                        addToCart(found);
+                        // Optional: play a success sound? (Maybe later)
+                    }
+                }
+            } else if (e.key.length === 1) {
+                barcodeBuffer.current += e.key;
+            }
+        };
+        window.addEventListener('keydown', handler);
+        return () => window.removeEventListener('keydown', handler);
+    }, [products]);
 
     // ── Categories ──
     const categories = ['all', ...Array.from(new Set(products.map(p => p.category)))];
@@ -102,17 +263,17 @@ export default function POSPage() {
 
     // ── Cart helpers ──
     const addToCart = (product: Product & { id: string }) => {
-        const stock = product.stock || 0;
-        if (stock <= 0) {
+        const available = (product.stock || 0) - (product.held || 0);
+        if (available <= 0) {
             toastError('Sản phẩm đã hết hàng!');
             return;
         }
         setCart(prev => {
             const existing = prev.find(c => c.productId === product.id);
             if (existing) {
-                // Prevent exceeding stock
-                if (existing.quantity >= stock) {
-                    toastError(`Tồn kho chỉ còn ${stock}. Không thể thêm.`);
+                // Prevent exceeding available stock
+                if (existing.quantity >= available) {
+                    toastError(`Khả dụng chỉ còn ${available}. Không thể thêm.`);
                     return prev;
                 }
                 return prev.map(c =>
@@ -122,7 +283,7 @@ export default function POSPage() {
             return [...prev, {
                 productId: product.id,
                 name: product.name,
-                image: (product as any).imageUrl || product.images?.[0],
+                image: (product as unknown as { imageUrl?: string }).imageUrl || product.images?.[0],
                 originalPrice: product.price_promo || product.price_original,
                 sellingPrice: product.price_promo || product.price_original,
                 costPrice: product.costPrice || 0,
@@ -138,9 +299,9 @@ export default function POSPage() {
                 const newQty = Math.max(1, c.quantity + delta);
                 // Validate against stock
                 const product = products.find(p => p.id === productId);
-                const maxStock = product?.stock || 999;
-                if (newQty > maxStock) {
-                    toastError(`Tồn kho chỉ còn ${maxStock}.`);
+                const maxAvailable = (product?.stock || 0) - (product?.held || 0);
+                if (newQty > maxAvailable) {
+                    toastError(`Khả dụng chỉ còn ${maxAvailable}.`);
                     return c;
                 }
                 return { ...c, quantity: newQty };
@@ -149,6 +310,12 @@ export default function POSPage() {
     };
 
     const updatePrice = (productId: string, newPrice: number) => {
+        const item = cart.find(c => c.productId === productId);
+        if (item && item.costPrice > 0 && newPrice < item.costPrice && newPrice > 0) {
+            if (!confirm(`⚠️ Giá bán (${newPrice.toLocaleString('vi-VN')}đ) thấp hơn giá vốn (${item.costPrice.toLocaleString('vi-VN')}đ). Bạn sẽ lỗ ${(item.costPrice - newPrice).toLocaleString('vi-VN')}đ/sp. Tiếp tục?`)) {
+                return;
+            }
+        }
         setCart(prev =>
             prev.map(c => c.productId === productId ? { ...c, sellingPrice: newPrice } : c)
         );
@@ -167,18 +334,27 @@ export default function POSPage() {
     const handleCheckout = async () => {
         if (cart.length === 0) return;
 
-        // Validate stock before checkout
-        for (const item of cart) {
-            const product = products.find(p => p.id === item.productId);
-            const currentStock = product?.stock || 0;
-            if (item.quantity > currentStock) {
-                toastError(`"${item.name}" chỉ còn ${currentStock} trong kho, nhưng bạn đang bán ${item.quantity}.`);
-                return;
-            }
-        }
-
         setIsProcessing(true);
         try {
+            // Pre-processing: gom nhóm cart theo productId chống payload manipulation
+            const groupedCart = new Map<string, { name: string; totalQty: number; costPrice: number; items: typeof cart }>();
+            for (const item of cart) {
+                const existing = groupedCart.get(item.productId);
+                if (existing) {
+                    existing.totalQty += item.quantity;
+                    existing.items.push(item);
+                } else {
+                    groupedCart.set(item.productId, {
+                        name: item.name,
+                        totalQty: item.quantity,
+                        costPrice: item.costPrice || 0,
+                        items: [item],
+                    });
+                }
+            }
+
+            const isPending = deposit > 0 && deposit < total;
+
             const orderData = {
                 customer_info: {
                     name: customerName.trim() || 'Khách lẻ',
@@ -198,7 +374,7 @@ export default function POSPage() {
                 discount_amount: discount,
                 subtotal_amount: subtotal,
                 deposit_amount: deposit,
-                status: 'Completed',
+                status: isPending ? 'Pending' : 'Completed',
                 is_vat_exported: false,
                 payment_method: paymentMethod === 'cash' ? 'COD' : paymentMethod === 'bank' ? 'Bank' : paymentMethod === 'installment' ? 'Installment' : 'Momo',
                 source: 'pos',
@@ -206,23 +382,81 @@ export default function POSPage() {
                 createdByName: user?.displayName || 'POS',
                 createdAt: serverTimestamp(),
                 updatedAt: serverTimestamp(),
+                paymentHistory: [{
+                    type: isPending ? 'deposit' : 'full',
+                    amount: isPending ? deposit : total,
+                    timestamp: Date.now(),
+                    note: isPending
+                        ? `Đặt cọc POS — ${paymentMethod === 'cash' ? 'Tiền mặt' : paymentMethod === 'bank' ? 'Chuyển khoản' : paymentMethod === 'installment' ? 'Trả góp' : 'Momo'}`
+                        : `Thanh toán POS — ${paymentMethod === 'cash' ? 'Tiền mặt' : paymentMethod === 'bank' ? 'Chuyển khoản' : paymentMethod === 'installment' ? 'Trả góp' : 'Momo'}`,
+                }],
             };
 
-            // Use writeBatch for atomic order creation + stock update (Double-Entry)
-            const batch = writeBatch(db);
+            // Use runTransaction for atomic order creation + stock update (Double-Entry)
             const orderRef = doc(collection(db, 'orders'));
-            batch.set(orderRef, orderData);
+            await runTransaction(db, async (transaction) => {
+                // Phase 1: Read all products (deduplicated by groupedCart)
+                const productDocs = new Map<string, { ref: ReturnType<typeof doc>; data: Record<string, unknown> }>();
+                for (const productId of groupedCart.keys()) {
+                    const ref = doc(db, 'products', productId);
+                    const pDoc = await transaction.get(ref);
+                    if (!pDoc.exists()) throw new Error(`Sản phẩm "${groupedCart.get(productId)!.name}" không tồn tại.`);
+                    productDocs.set(productId, { ref, data: pDoc.data() as Record<string, unknown> });
+                }
 
-            // Decrease stock and increase held for each product (atomic)
-            for (const item of cart) {
-                const productRef = doc(db, 'products', item.productId);
-                batch.update(productRef, {
-                    stock: increment(-item.quantity),
-                    held: increment(item.quantity),
+                // Phase 2: Validate tổng quantity (chống payload manipulation)
+                for (const [productId, group] of groupedCart.entries()) {
+                    const p = productDocs.get(productId)!;
+                    const available = (Number(p.data.stock) || 0) - (Number(p.data.held) || 0);
+                    if (group.totalQty > available) {
+                        throw new Error(`"${group.name}" chỉ còn ${available} sản phẩm khả dụng (đang bán ${group.totalQty}).`);
+                    }
+                }
+
+                // Đồng bộ Customer CRM (Thực hiện tất cả các READ before WRITES)
+                await upsertCustomerRecord(transaction, db, {
+                    phone: customerPhone.trim(),
+                    name: customerName.trim(),
+                    type: 'order',
+                    amount: total
                 });
-            }
 
-            await batch.commit();
+                // Write order
+                transaction.set(orderRef, orderData);
+
+                // Phase 3: Decrease stock (+ held if Pending) + Audit Trail
+                for (const [productId, group] of groupedCart.entries()) {
+                    const p = productDocs.get(productId)!;
+                    
+                    if (isPending) {
+                        // Đơn pending/cọc: chỉ tăng held, KHÔNG trừ stock
+                        transaction.update(p.ref, {
+                            held: increment(group.totalQty),
+                        });
+                        // KHÔNG ghi log vào inventory_logs
+                    } else {
+                        // Đơn Completed: chỉ trừ stock, KHÔNG chạm held
+                        transaction.update(p.ref, {
+                            stock: increment(-group.totalQty),
+                        });
+                        
+                        // Ghi log xuất kho vật lý
+                        const logRef = doc(collection(db, 'inventory_logs'));
+                        transaction.set(logRef, {
+                            productId,
+                            productName: group.name,
+                            quantity: -group.totalQty,
+                            costPriceAtLog: Number(p.data.costPrice) || group.costPrice,
+                            type: 'SALE',
+                            referenceId: orderRef.id,
+                            referenceType: 'order',
+                            createdBy: user?.uid || '',
+                            createdByName: user?.displayName || 'POS',
+                            createdAt: serverTimestamp(),
+                        });
+                    }
+                }
+            });
 
             // Generate commission (non-blocking)
             if (user) {
@@ -242,9 +476,9 @@ export default function POSPage() {
             setCustomerPhone('');
             setDiscount(0);
             setDeposit(0);
-        } catch (err) {
+        } catch (err: unknown) {
             console.error(err);
-            toastError('Lỗi khi tạo đơn hàng!');
+            toastError(err instanceof Error ? err.message : 'Lỗi khi tạo đơn hàng!');
         } finally {
             setIsProcessing(false);
         }
@@ -253,7 +487,7 @@ export default function POSPage() {
     // ── Category label map ──
     const catLabel: Record<string, string> = {
         all: 'Tất cả', Phone: 'Điện thoại', Laptop: 'Laptop', Tablet: 'Tablet',
-        Audio: 'Âm thanh', Watch: 'Đồng hồ', Accessory: 'Phụ kiện', 'Linh kiện': 'Linh kiện',
+        Audio: 'Âm thanh', Watch: 'Đồng hồ', Accessory: 'Phụ kiện', [PART_CATEGORY]: PART_CATEGORY,
     };
 
     // Reload products after adding new one
@@ -261,7 +495,7 @@ export default function POSPage() {
         try {
             const snap = await getDocs(collection(db, 'products'));
             const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as Product & { id: string }));
-            setProducts(data.filter(p => p.status === 'active'));
+            setProducts(filterPosProducts(data));
         } catch (err) {
             console.error(err);
         }
@@ -311,7 +545,7 @@ export default function POSPage() {
                                 {/* Product image in cart */}
                                 <div className="w-12 h-12 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0 flex items-center justify-center">
                                     {product?.images?.[0] ? (
-                                        <img src={product.images[0]} alt="" className="w-full h-full object-cover" />
+                                        <Image src={product.images[0]} alt="" width={48} height={48} className="w-full h-full object-cover" />
                                     ) : (
                                         <Package className="text-gray-300" size={18} />
                                     )}
@@ -348,10 +582,8 @@ export default function POSPage() {
                                 </div>
                                 <div className="flex-1 relative">
                                     <Tag size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" />
-                                    <input type="number" value={item.sellingPrice}
-                                        onChange={e => updatePrice(item.productId, Number(e.target.value))}
-                                        aria-label="Giá bán"
-                                        title="Giá bán"
+                                    <CurrencyInput value={item.sellingPrice}
+                                        onChange={v => updatePrice(item.productId, v)}
                                         className={`w-full pl-7 pr-2 py-1 text-sm border rounded-lg text-right font-semibold ${item.sellingPrice !== item.originalPrice ? 'border-orange-300 text-orange-600 bg-orange-50' : ''}`}
                                     />
                                 </div>
@@ -377,9 +609,40 @@ export default function POSPage() {
                         <Phone size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
                         <input type="text" placeholder="SĐT" value={customerPhone}
                             onChange={e => setCustomerPhone(e.target.value)}
+                            onBlur={() => lookupRepairByPhone(customerPhone)}
                             className="w-full pl-8 pr-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-orange-500/20" />
                     </div>
                 </div>
+                {/* Repair ticket link */}
+                {repairLoading && <p className="text-xs text-gray-400 animate-pulse">Đang tra cứu phiếu sửa...</p>}
+                {linkedRepair && (
+                    <div className="bg-blue-50 rounded-lg p-2.5 text-xs space-y-1 border border-blue-100">
+                        <div className="flex items-center gap-1.5 font-semibold text-blue-700">
+                            <Wrench size={13} /> Phiếu sửa #{linkedRepair.id.slice(-6)}
+                        </div>
+                        <p className="text-blue-600">Máy: {linkedRepair.deviceModel} — {linkedRepair.status}</p>
+                        {linkedRepair.parts.length > 0 && (
+                            <p className="text-blue-500">LK: {linkedRepair.parts.map(p => p.productName).join(', ')}</p>
+                        )}
+                        {discountDetails.length > 0 && (
+                            <div className="mt-1 pt-1 border-t border-blue-200">
+                                <p className="font-semibold text-green-700">🎁 Giảm PK tự động:</p>
+                                {discountDetails.map((d, i) => (
+                                    <p key={i} className="text-green-600">
+                                        {d.productName}: -{d.discountAmount.toLocaleString('vi-VN')}đ ({d.ruleName})
+                                    </p>
+                                ))}
+                                <button
+                                    type="button"
+                                    onClick={() => setDiscount(prev => prev + autoDiscountAmount)}
+                                    className="mt-1 w-full py-1.5 bg-green-600 text-white rounded-lg text-xs font-semibold hover:bg-green-700 transition-colors"
+                                >
+                                    Áp dụng giảm {autoDiscountAmount.toLocaleString('vi-VN')}đ
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                )}
                 <div className="flex gap-1.5">
                     {paymentMethods.map(m => (
                         <button key={m.key} onClick={() => setPaymentMethod(m.key)}
@@ -393,12 +656,12 @@ export default function POSPage() {
                 </div>
                 <div className="flex items-center gap-2 text-sm">
                     <span className="text-gray-500">Giảm giá:</span>
-                    <input type="number" value={discount || ''} onChange={e => setDiscount(Number(e.target.value))}
+                    <CurrencyInput value={discount || ''} onChange={v => setDiscount(v)}
                         placeholder="0" className="flex-1 px-3 py-1.5 border rounded-lg text-right text-sm" />
                 </div>
                 <div className="flex items-center gap-2 text-sm">
                     <span className="text-gray-500">Khách cọc:</span>
-                    <input type="number" value={deposit || ''} onChange={e => setDeposit(Number(e.target.value))}
+                    <CurrencyInput value={deposit || ''} onChange={v => setDeposit(v)}
                         placeholder="0" className="flex-1 px-3 py-1.5 border rounded-lg text-right text-sm" />
                 </div>
                 <div className="space-y-1 text-sm">
@@ -487,7 +750,8 @@ export default function POSPage() {
                 <div className="flex-1 overflow-y-auto">
                     <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                         {filtered.map(product => {
-                            const outOfStock = (product.stock || 0) <= 0;
+                            const available = (product.stock || 0) - (product.held || 0);
+                            const outOfStock = available <= 0;
                             return (
                                 <button
                                     key={product.id}
@@ -506,16 +770,16 @@ export default function POSPage() {
                                         </div>
                                     )}
                                     <div className="aspect-square rounded-lg bg-gray-50 mb-2 overflow-hidden flex items-center justify-center">
-                                        {((product as any).imageUrl || product.images?.[0]) ? (
-                                            <img src={(product as any).imageUrl || product.images?.[0]} alt={product.name} className={`w-full h-full object-cover ${!outOfStock ? 'group-hover:scale-105' : ''} transition-transform`} />
+                                        {((product as unknown as { imageUrl?: string }).imageUrl || product.images?.[0]) ? (
+                                            <Image src={((product as unknown as { imageUrl?: string }).imageUrl || product.images?.[0]) as string} alt={product.name} width={200} height={200} className={`w-full h-full object-cover ${!outOfStock ? 'group-hover:scale-105' : ''} transition-transform`} />
                                         ) : (
                                             <Package className="text-gray-300" size={32} />
                                         )}
                                     </div>
                                     <p className="text-xs font-semibold text-gray-800 line-clamp-2 mb-1">{product.name}</p>
                                     <p className="text-sm font-bold text-orange-600">{formatPrice(product.price_promo || product.price_original)}</p>
-                                    <p className={`text-[10px] mt-0.5 font-medium ${outOfStock ? 'text-red-500' : (product.stock || 0) <= 3 ? 'text-amber-500' : 'text-gray-400'}`}>
-                                        Tồn kho: {product.stock || 0}
+                                    <p className={`text-[10px] mt-0.5 font-medium ${outOfStock ? 'text-red-500' : available <= 3 ? 'text-amber-500' : 'text-gray-400'}`}>
+                                        Tồn kho: {product.stock || 0}{(product.held || 0) > 0 ? ` (Đang giữ: ${product.held})` : ''}
                                     </p>
                                 </button>
                             );
@@ -616,7 +880,7 @@ export default function POSPage() {
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {lastOrder.items.map((item: any, i: number) => (
+                                            {lastOrder.items.map((item: OrderLineItem, i: number) => (
                                                 <tr key={i} className="border-b border-dashed">
                                                     <td className="py-1 max-w-[100px] truncate">{item.product_name}</td>
                                                     <td className="text-center">{item.quantity}</td>
@@ -748,7 +1012,7 @@ export default function POSPage() {
                                                     </tr>
                                                 </thead>
                                                 <tbody>
-                                                    ${lastOrder.items.map((item: any, i: number) => `
+                                                    ${lastOrder.items.map((item: OrderLineItem, i: number) => `
                                                     <tr>
                                                         <td class="text-center">${i + 1}</td>
                                                         <td>${item.product_name}</td>
@@ -814,7 +1078,7 @@ export default function POSPage() {
                     <hr style={{ borderTop: '1px dashed #000' }} />
                     <table style={{ width: '100%' }}>
                         <tbody>
-                            {lastOrder.items.map((item: any, i: number) => (
+                            {lastOrder.items.map((item: OrderLineItem, i: number) => (
                                 <tr key={i}>
                                     <td>{item.product_name}</td>
                                     <td style={{ textAlign: 'center' }}>x{item.quantity}</td>

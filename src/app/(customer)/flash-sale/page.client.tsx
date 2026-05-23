@@ -6,8 +6,18 @@ import { Zap, ChevronRight, Package } from 'lucide-react';
 
 const formatPrice = (price: number) => new Intl.NumberFormat('vi-VN').format(price) + 'đ';
 
+interface FlashSaleProduct {
+    id: string;
+    name?: string;
+    imageUrl?: string;
+    image?: string;
+    price_original?: number;
+    price_promo?: number;
+    sold?: number;
+}
+
 interface FlashSaleClientProps {
-    products: any[];
+    products: FlashSaleProduct[];
 }
 
 export default function FlashSaleClient({ products }: FlashSaleClientProps) {
@@ -41,7 +51,7 @@ export default function FlashSaleClient({ products }: FlashSaleClientProps) {
                         products.map((product) => {
                             const hasDiscount = !!(product.price_promo && product.price_original && product.price_promo < product.price_original);
                             const discountPct = hasDiscount
-                                ? Math.round((1 - product.price_promo / product.price_original) * 100)
+                                ? Math.round((1 - product.price_promo! / product.price_original!) * 100)
                                 : 0;
                             const displayPrice = product.price_promo || product.price_original || 0;
                             return (
