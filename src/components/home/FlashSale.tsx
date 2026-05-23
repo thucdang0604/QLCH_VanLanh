@@ -33,11 +33,11 @@ function SkeletonCard() {
     );
 }
 
-export default function FlashSale({ ssrLatestProducts = [] }: { ssrLatestProducts?: any[] }) {
+export default function FlashSale({ ssrLatestProducts = [] }: { ssrLatestProducts?: Record<string, unknown>[] }) {
     const [activeBrand, setActiveBrand] = useState<string>('Tất cả');
     
     // Helper function to filter flash sale items
-    const filterFlashSaleItems = useCallback((items: any[]) => {
+    const filterFlashSaleItems = useCallback((items: Record<string, unknown>[]) => {
         return items.filter((p) => {
             const item = p as Partial<{
                 isFlashSale: boolean;
@@ -58,7 +58,7 @@ export default function FlashSale({ ssrLatestProducts = [] }: { ssrLatestProduct
 
     // Initialize with SSR data if available
     const [products, setProducts] = useState<(DocumentData & { id: string })[]>(
-        ssrLatestProducts.length > 0 ? filterFlashSaleItems(ssrLatestProducts) : []
+        ssrLatestProducts.length > 0 ? filterFlashSaleItems(ssrLatestProducts) as (DocumentData & { id: string })[] : []
     );
     const [loading, setLoading] = useState(ssrLatestProducts.length === 0);
 
@@ -66,7 +66,7 @@ export default function FlashSale({ ssrLatestProducts = [] }: { ssrLatestProduct
     const fetchProducts = useCallback(async (brand: string) => {
         // Use SSR data for 'Tất cả' on initial load or subsequent clicks if it exists
         if (brand === 'Tất cả' && ssrLatestProducts.length > 0) {
-            setProducts(filterFlashSaleItems(ssrLatestProducts));
+            setProducts(filterFlashSaleItems(ssrLatestProducts) as (DocumentData & { id: string })[]);
             setLoading(false);
             return;
         }
@@ -87,7 +87,7 @@ export default function FlashSale({ ssrLatestProducts = [] }: { ssrLatestProduct
             const snapshot = await getDocs(q);
             
             const items = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-            setProducts(filterFlashSaleItems(items));
+            setProducts(filterFlashSaleItems(items) as (DocumentData & { id: string })[]);
         } catch (err) {
             console.error('FlashSale fetch error:', err);
         } finally {

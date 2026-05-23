@@ -1,11 +1,12 @@
 'use client';
 
+/* eslint-disable @next/next/no-img-element */
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-    Star, CheckCircle2, XCircle, Trash2,
-    Search, Loader2, Image as ImageIcon,
-    Filter, Eye
+    Star, CheckCircle2,
+    Search, Loader2,
+    Eye
 } from 'lucide-react';
 import { collection, query, orderBy, onSnapshot, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';

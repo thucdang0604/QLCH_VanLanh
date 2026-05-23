@@ -7,7 +7,6 @@ import { useConfig } from "@/lib/ConfigContext";
 import { usePresence } from "@/lib/usePresence";
 import { Megaphone, X } from "lucide-react";
 import { useState } from "react";
-import type { SiteConfig } from "@/lib/ConfigContext";
 
 const MobileBottomNav = dynamic(() => import("@/components/layout/MobileBottomNav"), { ssr: false });
 const Footer = dynamic(() => import("@/components/layout/Footer"), { ssr: true });

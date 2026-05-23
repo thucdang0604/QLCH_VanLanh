@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
-import { Plus, Search, Edit, Trash2, Package, Loader2 } from 'lucide-react';
-import { useFirestoreCollection, deleteDocument } from '@/lib/useFirestore';
+import { Plus, Search, Edit, Trash2, Package, Loader2, FileSpreadsheet } from 'lucide-react';
+import { useFirestoreCollection, updateDocument } from '@/lib/useFirestore';
 import { deleteImage } from '@/lib/storage';
 import { orderBy } from 'firebase/firestore';
 import { toastError } from '@/lib/toast';
@@ -12,10 +12,11 @@ import PaginationBar from '@/components/admin/PaginationBar';
 import { triggerRevalidate } from '@/lib/revalidate';
 import UniversalProductModal from '@/components/admin/UniversalProductModal';
 import CategoryTaxonomySelector from '@/components/admin/CategoryTaxonomySelector';
+import ExcelImportModal from '@/components/admin/ExcelImportModal';
 import type { Product } from '@/lib/types';
 import { useConfig } from '@/lib/ConfigContext';
 import { getCategoryPath, collectAllNodeIds } from '@/lib/utils';
-
+import { PART_CATEGORY, isPartCategory } from '@/lib/constants';
 
 // Product is now imported from @/lib/types
 
@@ -35,26 +36,28 @@ export default function ProductsPage() {
     const [filterCondition, setFilterCondition] = useState('');
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+    const [showExcelImport, setShowExcelImport] = useState(false);
 
     const handleDelete = async (product: Product) => {
+        if (Number(product.stock) > 0) {
+            toastError('Không thể xóa sản phẩm đang còn tồn kho!');
+            return;
+        }
         if (confirm(`Bạn có chắc muốn xóa "${product.name}"?`)) {
             try {
-                // Delete image from storage
-                if (product.imageUrl) {
-                    await deleteImage(product.imageUrl);
-                }
-                // Delete document
-                await deleteDocument('products', product.id);
+                // Soft delete by setting status to inactive
+                await updateDocument('products', product.id, { status: 'inactive' });
                 // Trigger revalidation
                 await triggerRevalidate(['/', `/product/${product.id}`, '/flash-sale', '/search', '/sitemap.xml'], ['products']);
-            } catch (error) {
+            } catch {
                 toastError('Lỗi khi xóa sản phẩm!');
             }
         }
     };
 
     const filteredProducts = products.filter((p) => {
-        if (p.category === 'Linh kiện') return false; // Linh kiện managed separately in /admin/parts
+        if (p.status === 'inactive') return false; // Hide soft-deleted products
+        if (isPartCategory(p.category, p.categoryIds)) return false; // Linh kiện managed separately in /admin/parts
         const matchSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase());
         
         let matchCategory = true;
@@ -99,13 +102,22 @@ export default function ProductsPage() {
                     <h1 className="text-2xl font-bold text-gray-900">Quản lý sản phẩm</h1>
                     <p className="text-gray-500">{products.length} sản phẩm</p>
                 </div>
-                <button
-                    onClick={() => { setEditingProduct(null); setIsModalOpen(true); }}
-                    className="flex items-center gap-2 bg-orange-500 text-white px-4 py-2.5 rounded-lg font-medium hover:bg-orange-600 transition-colors"
-                >
-                    <Plus size={20} />
-                    Thêm sản phẩm
-                </button>
+                <div className="flex gap-2">
+                    <button
+                        onClick={() => setShowExcelImport(true)}
+                        className="flex items-center gap-2 border-2 border-green-300 text-green-700 px-4 py-2.5 rounded-lg font-medium hover:bg-green-50 transition-colors text-sm"
+                    >
+                        <FileSpreadsheet size={18} />
+                        Import Excel
+                    </button>
+                    <button
+                        onClick={() => { setEditingProduct(null); setIsModalOpen(true); }}
+                        className="flex items-center gap-2 bg-orange-500 text-white px-4 py-2.5 rounded-lg font-medium hover:bg-orange-600 transition-colors"
+                    >
+                        <Plus size={20} />
+                        Thêm sản phẩm
+                    </button>
+                </div>
             </div>
 
             {/* Filters */}
@@ -241,9 +253,15 @@ export default function ProductsPage() {
                                         )}
                                     </td>
                                     <td className="px-6 py-4">
-                                        <span className={`text-sm font-medium ${(product.stock || 0) > 10 ? 'text-green-600' : (product.stock || 0) > 0 ? 'text-yellow-600' : 'text-red-600'}`}>
-                                            {product.stock || 0}
-                                        </span>
+                                        {(() => {
+                                            const available = (product.stock || 0) - ((product as { held?: number }).held || 0);
+                                            return (
+                                                <span className={`text-sm font-medium ${available > 10 ? 'text-green-600' : available > 0 ? 'text-yellow-600' : 'text-red-600'}`}>
+                                                    {available}
+                                                    {((product as { held?: number }).held || 0) > 0 && <span className="text-xs text-gray-400 ml-1">(giữ: {(product as { held?: number }).held})</span>}
+                                                </span>
+                                            );
+                                        })()}
                                     </td>
                                     <td className="px-6 py-4">
                                         <span className={`px-3 py-1 text-xs font-medium rounded-full ${product.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'
@@ -322,9 +340,14 @@ export default function ProductsPage() {
                                             )}
                                         </div>
                                         <div className="flex items-center gap-2">
-                                            <span className={`text-xs font-bold ${(product.stock || 0) > 10 ? 'text-green-600' : (product.stock || 0) > 0 ? 'text-yellow-600' : 'text-red-600'}`}>
-                                                Kho: {product.stock || 0}
-                                            </span>
+                                            {(() => {
+                                                const available = (product.stock || 0) - ((product as { held?: number }).held || 0);
+                                                return (
+                                                    <span className={`text-xs font-bold ${available > 10 ? 'text-green-600' : available > 0 ? 'text-yellow-600' : 'text-red-600'}`}>
+                                                        Kho: {available}{((product as { held?: number }).held || 0) > 0 ? ` (giữ: ${(product as { held?: number }).held})` : ''}
+                                                    </span>
+                                                );
+                                            })()}
                                             <span className={`px-1.5 py-0.5 text-[10px] font-medium rounded-full ${product.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
                                                 {product.status === 'active' ? 'Đang bán' : 'Ẩn'}
                                             </span>
@@ -374,6 +397,8 @@ export default function ProductsPage() {
                 onCreated={() => setIsModalOpen(false)}
                 onUpdated={() => setIsModalOpen(false)}
             />
+
+            {showExcelImport && <ExcelImportModal mode="product" onClose={() => setShowExcelImport(false)} />}
         </div>
     );
 }

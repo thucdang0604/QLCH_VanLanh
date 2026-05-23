@@ -9,8 +9,7 @@ import type { WarrantyRule } from '@/lib/types';
  * Returns the patched parts array (does NOT write to Firestore).
  */
 export async function stampWarrantyOnParts(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    parts: any[],
+    parts: Record<string, unknown>[],
     completedAtMs: number
 ): Promise<typeof parts> {
     if (!parts || parts.length === 0) return parts;

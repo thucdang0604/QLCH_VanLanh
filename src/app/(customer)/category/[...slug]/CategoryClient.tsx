@@ -85,12 +85,10 @@ type CategoryItem = {
 const formatPrice = (p: number) => new Intl.NumberFormat('vi-VN').format(p) + 'đ';
 
 export default function CategoryClient({ 
-    slug, 
     initialItems,
     categoryConfig,
     navInfo 
 }: { 
-    slug: string; 
     initialItems: CategoryItem[];
     categoryConfig?: DynamicCategory;
     navInfo?: { label: string; condition?: string; isRepair?: boolean; isAccessory?: boolean };

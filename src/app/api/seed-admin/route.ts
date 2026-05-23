@@ -7,12 +7,21 @@ import { db } from '@/lib/firebase';
 // Or call directly with a known email
 
 export async function POST(request: NextRequest) {
+    if (process.env.NODE_ENV === 'production') {
+        return NextResponse.json({ error: 'Endpoint chặn chạy trên Production để bảo vệ dữ liệu.' }, { status: 403 });
+    }
     try {
         const body = await request.json();
         const { uid, email, secretKey } = body;
 
-        // Simple security check - in production, use environment variable
-        const validSecret = process.env.ADMIN_SEED_SECRET || 'vanlanh-admin-secret-2024';
+        // Security: REQUIRE env var — no hardcoded fallback
+        const validSecret = process.env.ADMIN_SEED_SECRET;
+        if (!validSecret) {
+            return NextResponse.json(
+                { success: false, error: 'Server misconfigured: missing ADMIN_SEED_SECRET' },
+                { status: 500 }
+            );
+        }
         if (secretKey !== validSecret) {
             return NextResponse.json(
                 { success: false, error: 'Invalid secret key' },
@@ -52,10 +61,10 @@ export async function POST(request: NextRequest) {
             success: true,
             message: `User ${email} is now an admin`,
         });
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error('Seed admin error:', error);
         return NextResponse.json(
-            { success: false, error: error.message },
+            { success: false, error: error instanceof Error ? error.message : 'Unknown error' },
             { status: 500 }
         );
     }
@@ -63,6 +72,9 @@ export async function POST(request: NextRequest) {
 
 // GET endpoint to check admin status
 export async function GET(request: NextRequest) {
+    if (process.env.NODE_ENV === 'production') {
+        return NextResponse.json({ error: 'Endpoint chặn chạy trên Production để bảo vệ dữ liệu.' }, { status: 403 });
+    }
     const { searchParams } = new URL(request.url);
     const uid = searchParams.get('uid');
 
@@ -92,9 +104,9 @@ export async function GET(request: NextRequest) {
             exists: true,
             role: data.role,
         });
-    } catch (error: any) {
+    } catch (error: unknown) {
         return NextResponse.json(
-            { success: false, error: error.message },
+            { success: false, error: error instanceof Error ? error.message : 'Unknown error' },
             { status: 500 }
         );
     }

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/AuthContext';
+import { findFirstAccessibleRoute } from '@/lib/permissions';
 import {
     Package,
     ShoppingCart,
@@ -12,7 +13,7 @@ import {
     DollarSign,
     Loader2
 } from 'lucide-react';
-import { collection, query, where, getDocs, doc, getDoc, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
 import { db, getRtdbInstance } from '@/lib/firebase';
 import type { Order, RepairTicket } from '@/lib/types';
 
@@ -39,10 +40,10 @@ export default function AdminDashboard() {
     });
     const [loadingStats, setLoadingStats] = useState(true);
 
-    // Staff cannot see Dashboard — redirect to repairs
+    // Staff cannot see Dashboard — redirect to their first accessible route
     useEffect(() => {
         if (!authLoading && user?.role === 'staff') {
-            router.replace('/admin/repairs');
+            router.replace(findFirstAccessibleRoute(user.permissions));
         }
     }, [user, authLoading, router]);
 
@@ -62,13 +63,15 @@ export default function AdminDashboard() {
                 const todayStr = `${year}-${month}-${dateNum}`;
                 const startOfToday = new Date(year, now.getMonth(), now.getDate(), 0, 0, 0);
                 const endOfToday = new Date(year, now.getMonth(), now.getDate(), 23, 59, 59, 999);
+                const todayStartMs = startOfToday.getTime();
+                const todayEndMs = endOfToday.getTime();
 
-                // 1. Fetch Orders
+                // 1. Fetch Orders (query by updatedAt to catch payments on older orders made today)
                 const ordersRef = collection(db, 'orders');
                 const qOrders = query(
                     ordersRef,
-                    where('createdAt', '>=', startOfToday),
-                    where('createdAt', '<=', endOfToday)
+                    where('updatedAt', '>=', startOfToday),
+                    where('updatedAt', '<=', endOfToday)
                 );
                 const ordersSnapshot = await getDocs(qOrders);
 
@@ -78,9 +81,23 @@ export default function AdminDashboard() {
 
                 ordersSnapshot.forEach((docSnap) => {
                     const data = docSnap.data() as Partial<Order>;
-                    dailyOrdersCount++;
+                    // Only count orders actually created today
+                    const cAt = (data.createdAt as { toDate?: () => Date })?.toDate?.()?.getTime?.() ?? 0;
+                    if (cAt >= todayStartMs && cAt <= todayEndMs) dailyOrdersCount++;
                     if (data.status !== 'Cancelled') {
-                        dailyRevenue += (data.total_amount || 0);
+                        // Sum revenue from paymentHistory entries that fall within today
+                        const ph = (data as { paymentHistory?: Array<{ amount: number; timestamp: number }> }).paymentHistory;
+                        if (ph && ph.length > 0) {
+                            ph.forEach(entry => {
+                                const entryTime = entry.timestamp;
+                                if (entryTime >= todayStartMs && entryTime <= todayEndMs) {
+                                    dailyRevenue += (entry.amount || 0);
+                                }
+                            });
+                        } else {
+                            // Fallback for orders without paymentHistory (legacy)
+                            dailyRevenue += (data.total_amount || 0);
+                        }
                         if (data.items) {
                             (data.items as Array<Partial<{ quantity: number }>>).forEach((item) => {
                                 dailyProductsSold += (item.quantity || 0);
@@ -89,12 +106,12 @@ export default function AdminDashboard() {
                     }
                 });
 
-                // 2. Fetch Repairs
+                // 2. Fetch Repairs (query by updatedAt to catch deposits/payments on older tickets)
                 const repairsRef = collection(db, 'repairs');
                 const qRepairs = query(
                     repairsRef,
-                    where('createdAt', '>=', startOfToday),
-                    where('createdAt', '<=', endOfToday)
+                    where('updatedAt', '>=', startOfToday),
+                    where('updatedAt', '<=', endOfToday)
                 );
                 const repairsSnapshot = await getDocs(qRepairs);
 
@@ -102,9 +119,20 @@ export default function AdminDashboard() {
 
                 repairsSnapshot.forEach((docSnap) => {
                     const data = docSnap.data() as Partial<RepairTicket>;
-                    dailyRepairsCount++;
-                    // Add to revenue if ticket is completed successfully
-                    if (data.status === 'done') {
+                    // Only count repairs actually created today
+                    const cAt = (data.createdAt as { toDate?: () => Date })?.toDate?.()?.getTime?.() ?? 0;
+                    if (cAt >= todayStartMs && cAt <= todayEndMs) dailyRepairsCount++;
+                    // Sum revenue from paymentHistory entries that fall within today
+                    const ph = (data as { paymentHistory?: Array<{ amount: number; timestamp: number }> }).paymentHistory;
+                    if (ph && ph.length > 0) {
+                        ph.forEach(entry => {
+                            const entryTime = entry.timestamp;
+                            if (entryTime >= todayStartMs && entryTime <= todayEndMs) {
+                                dailyRevenue += (entry.amount || 0);
+                            }
+                        });
+                    } else if (data.status === 'done') {
+                        // Fallback for repairs without paymentHistory (legacy)
                         dailyRevenue += (data.payment?.amount || 0);
                     }
                 });

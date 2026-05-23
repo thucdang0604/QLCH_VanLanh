@@ -97,12 +97,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
                 if (!isMounted) return;
 
-                unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+                const localUnsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
                     if (firebaseUser) {
                         localStorage.setItem('has_logged_in', 'true');
                         try {
                             const appUser = await fetchUserData(firebaseUser);
                             if (isMounted) setUser(appUser);
+
+                            // Sync server-side session cookie for middleware RBAC
+                            if (appUser.role === 'admin' || appUser.role === 'staff') {
+                                const idToken = await firebaseUser.getIdToken();
+                                fetch('/api/auth/session', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ idToken }),
+                                }).catch(() => { /* non-blocking */ });
+                            }
                         } catch (error) {
                             console.error('Error fetching user data:', error);
                             if (isMounted) setUser(null);
@@ -112,6 +122,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     }
                     if (isMounted) setLoading(false);
                 });
+
+                if (!isMounted) {
+                    localUnsubscribe();
+                } else {
+                    unsubscribe = localUnsubscribe;
+                }
             } catch (err) {
                 console.error("Failed to initialize auth", err);
                 if (isMounted) setLoading(false);
@@ -120,7 +136,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         return () => {
             isMounted = false;
-            unsubscribe?.();
+            if (unsubscribe) {
+                unsubscribe();
+            }
         };
     }, [fetchUserData, shouldInitializeAuth]);
 
@@ -163,10 +181,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             role: 'customer',
             createdAt: serverTimestamp(),
         });
-    }, []);
+    }, [triggerAuthInit]);
 
     // Logout
     const logout = useCallback(async (): Promise<void> => {
+        // Clear server-side session cookie before signing out
+        await fetch('/api/auth/session', { method: 'DELETE' }).catch(() => { /* non-blocking */ });
         const auth = await getAuthInstance();
         const { signOut } = await import('firebase/auth');
         await signOut(auth);

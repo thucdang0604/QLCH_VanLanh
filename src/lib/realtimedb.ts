@@ -1,6 +1,5 @@
-import type {
-    DataSnapshot
-} from 'firebase/database';
+
+
 import { getRtdbInstance } from './firebase';
 
 export interface ChatRoomInfo {
@@ -13,7 +12,7 @@ export interface ChatRoomInfo {
     lastMessage?: string;
     lastMessageTime?: number;
     botActive?: boolean;
-    [key: string]: any;
+    [key: string]: unknown;
 }
 
 export interface ChatMessage {

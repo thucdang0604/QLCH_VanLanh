@@ -1,4 +1,5 @@
 import { fetchFlashSaleProducts } from '@/app/(customer)/_lib/server-queries';
+import type { SerializedDoc } from '@/app/(customer)/_lib/server-queries';
 import { isAdminAvailable } from '@/lib/firebaseAdmin';
 import FlashSaleClient from './page.client';
 import type { Metadata } from 'next';
@@ -11,7 +12,7 @@ export const metadata: Metadata = {
 };
 
 export default async function FlashSalePage() {
-    let products: any[] = [];
+    let products: SerializedDoc[] = [];
 
     if (isAdminAvailable()) {
         try {

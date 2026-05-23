@@ -1,6 +1,6 @@
 import ClientPage from './page.client';
 import { isAdminAvailable, getAdminDb } from '@/lib/firebaseAdmin';
-import { DEFAULT_CONFIG, type HeroBanner, type HomeSectionItem, type StoreBranch } from '@/lib/config-defaults';
+import { DEFAULT_CONFIG, type HeroBanner, type HomeSectionItem, type StoreBranch, type HomeServiceCategory } from '@/lib/config-defaults';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,8 +13,8 @@ export interface SSRHomeConfig {
   homeSections: HomeSectionItem[];
   siteName: string;
   store_branches: StoreBranch[];
-  ssrLatestProducts?: any[]; // Cached initial products for FlashSale and Suggested
-  homeServiceCategories: any[]; 
+  ssrLatestProducts?: Record<string, unknown>[]; // Cached initial products for FlashSale and Suggested
+  homeServiceCategories: HomeServiceCategory[]; 
 }
 
 async function getHomeConfig(): Promise<SSRHomeConfig> {
@@ -68,7 +68,7 @@ async function getHomeConfig(): Promise<SSRHomeConfig> {
 
     const rawBanners = Array.isArray(data.hero_banners) ? data.hero_banners : [];
     const rawBranches = Array.isArray(data.store_branches) ? data.store_branches : DEFAULT_CONFIG.store_branches;
-    const rawHomeServiceCategories = Array.isArray(data.homeServiceCategories) ? data.homeServiceCategories : DEFAULT_CONFIG.homeServiceCategories;
+    const rawHomeServiceCategories: HomeServiceCategory[] = Array.isArray(data.homeServiceCategories) ? data.homeServiceCategories : DEFAULT_CONFIG.homeServiceCategories;
 
     const storedSections: HomeSectionItem[] = Array.isArray(data.homeSections) ? data.homeSections : [];
     let homeSections = DEFAULT_CONFIG.homeSections;
@@ -111,7 +111,6 @@ export default async function Page() {
           rel="preload" 
           as="image" 
           href={lcpImageUrl}
-          // @ts-ignore — fetchPriority on link is valid HTML but React types lag
           fetchPriority="high"
         />
       )}

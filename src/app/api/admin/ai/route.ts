@@ -1,44 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateContentStream, generateContent } from '@/lib/ollama';
-import { requireAdmin } from '@/lib/apiAuth';
+import { requireAdminOrStaff } from '@/lib/apiAuth';
+import { isRateLimited } from '@/lib/rateLimit';
 
-// ── Rate Limiting (in-memory, per IP, 5 req/min) ──
-const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 const RATE_LIMIT_MAX = 5;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 
-function checkRateLimit(ip: string): boolean {
-    const now = Date.now();
-    const entry = rateLimitMap.get(ip);
-
-    if (!entry || now > entry.resetAt) {
-        rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
-        return true;
-    }
-
-    if (entry.count >= RATE_LIMIT_MAX) {
-        return false;
-    }
-
-    entry.count++;
-    return true;
-}
-
-// Cleanup memory every 5 minutes
-setInterval(() => {
-    const now = Date.now();
-    for (const [ip, entry] of rateLimitMap) {
-        if (now > entry.resetAt) rateLimitMap.delete(ip);
-    }
-}, 5 * 60_000);
-
 export async function POST(request: NextRequest) {
     try {
-        // ── Auth: chỉ admin mới được dùng ──
+        // ── Auth: chỉ admin hoặc staff mới được dùng ──
         try {
-            await requireAdmin(request);
+            await requireAdminOrStaff(request);
         } catch {
-            return NextResponse.json({ error: 'Unauthorized: admin only' }, { status: 401 });
+            return NextResponse.json({ error: 'Unauthorized: admin or staff only' }, { status: 401 });
         }
 
         // ── Rate limit check ──
@@ -46,7 +20,7 @@ export async function POST(request: NextRequest) {
             || request.headers.get('x-real-ip')
             || 'unknown';
 
-        if (!checkRateLimit(ip)) {
+        if (await isRateLimited(ip, 'admin_ai', RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS)) {
             return NextResponse.json(
                 { error: 'Quá nhiều yêu cầu. Vui lòng thử lại sau.' },
                 { status: 429 }
@@ -115,17 +89,17 @@ export async function POST(request: NextRequest) {
                     const data = await translateRes.json();
                     if (data.response) {
                         englishPrompt = data.response.trim().replace(/^["']|["']$/g, '');
-                        console.log('AI Prompt optimized:', englishPrompt);
+                        console.warn('AI Prompt optimized:', englishPrompt);
                     }
                 }
             } catch (e) {
-                console.log('Ollama translation failed/skipped:', (e as Error).message);
+                console.warn('Ollama translation failed/skipped:', (e as Error).message);
             }
 
             const apiKey = payload.apiKey || '';
             if (apiKey && apiKey.trim() !== '') {
                 try {
-                    console.log('Using Google Gemini API (NanoBanana) for image generation');
+                    console.warn('Using Google Gemini API (NanoBanana) for image generation');
                     const body = {
                         contents: [
                             {
@@ -190,7 +164,7 @@ export async function POST(request: NextRequest) {
             // Step 2: Generate image via Pollinations.ai (stable endpoint)
             const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(englishPrompt)}?model=${pollinationsModel}&width=${width}&height=${height}&nologo=true&seed=${Date.now()}`;
             
-            console.log('Fetching image from Pollinations:', imageUrl);
+            console.warn('Fetching image from Pollinations:', imageUrl);
             
             let attempts = 0;
             const maxAttempts = 2;

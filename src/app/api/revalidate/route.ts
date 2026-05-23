@@ -3,6 +3,16 @@ import { revalidateTag, revalidatePath } from 'next/cache';
 
 export async function POST(request: NextRequest) {
     try {
+        const secret = request.headers.get('x-revalidate-secret') || request.nextUrl.searchParams.get('secret');
+        const expectedSecret = process.env.REVALIDATE_SECRET;
+        if (!expectedSecret) {
+            console.error('CRITICAL: REVALIDATE_SECRET is not configured');
+            return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
+        }
+        if (secret !== expectedSecret) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
         const body = await request.json();
         const { tag, tags, path, paths } = body;
 
@@ -29,14 +39,6 @@ export async function POST(request: NextRequest) {
     }
 }
 
-export async function GET(request: NextRequest) {
-    const tag = request.nextUrl.searchParams.get('tag');
-
-    if (!tag) {
-        return NextResponse.json({ message: 'Missing tag parameter' }, { status: 400 });
-    }
-
-    revalidateTag(tag);
-    
-    return NextResponse.json({ revalidated: true, now: Date.now(), tag }, { status: 200 });
+export async function GET() {
+    return NextResponse.json({ error: 'Method Not Allowed' }, { status: 405 });
 }

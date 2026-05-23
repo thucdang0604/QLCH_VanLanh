@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { addDoc, collection, doc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { isRateLimited } from '@/lib/rateLimit';
 
 // ── Haversine distance (meters) ──
 function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -14,15 +15,6 @@ function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number)
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// ── Rate Limiting: per-minute (in-memory) ──
-const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
-const RATE_LIMIT_MAX = 3;
-const RATE_LIMIT_WINDOW_MS = 60_000;
-
-// ── Rate Limiting: per-day (in-memory) ──
-const dailyLimitMap = new Map<string, { count: number; resetAt: number }>();
-const DAILY_LIMIT_MAX = 3; // max 3 reviews per day per IP
-
 function getNextMidnightUTC7(): number {
     const now = new Date();
     // UTC+7 offset
@@ -33,43 +25,6 @@ function getNextMidnightUTC7(): number {
     // Convert back from UTC+7 to UTC
     return tomorrow.getTime() - 7 * 60 * 60_000;
 }
-
-function checkRateLimit(ip: string): { ok: boolean; reason?: string } {
-    const now = Date.now();
-
-    // Per-minute check
-    const minuteEntry = rateLimitMap.get(ip);
-    if (!minuteEntry || now > minuteEntry.resetAt) {
-        rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
-    } else if (minuteEntry.count >= RATE_LIMIT_MAX) {
-        return { ok: false, reason: 'Bạn đang gửi quá nhiều yêu cầu. Vui lòng thử lại sau 1 phút.' };
-    } else {
-        minuteEntry.count++;
-    }
-
-    // Per-day check
-    const dayEntry = dailyLimitMap.get(ip);
-    if (!dayEntry || now > dayEntry.resetAt) {
-        dailyLimitMap.set(ip, { count: 1, resetAt: getNextMidnightUTC7() });
-    } else if (dayEntry.count >= DAILY_LIMIT_MAX) {
-        return { ok: false, reason: 'Bạn đã đạt giới hạn đánh giá trong ngày. Vui lòng quay lại ngày mai.' };
-    } else {
-        dayEntry.count++;
-    }
-
-    return { ok: true };
-}
-
-// Cleanup memory every 5 minutes
-setInterval(() => {
-    const now = Date.now();
-    for (const [ip, entry] of rateLimitMap) {
-        if (now > entry.resetAt) rateLimitMap.delete(ip);
-    }
-    for (const [ip, entry] of dailyLimitMap) {
-        if (now > entry.resetAt) dailyLimitMap.delete(ip);
-    }
-}, 5 * 60_000);
 
 // ── Fetch geofence config from Firestore ──
 interface GeofenceData {
@@ -123,10 +78,17 @@ export async function POST(request: NextRequest) {
             || request.headers.get('x-real-ip')
             || 'unknown';
 
-        const rateCheck = checkRateLimit(ip);
-        if (!rateCheck.ok) {
+        if (await isRateLimited(ip, 'reviews_minute', 3, 60_000)) {
             return NextResponse.json(
-                { error: rateCheck.reason },
+                { error: 'Bạn đang gửi quá nhiều yêu cầu. Vui lòng thử lại sau 1 phút.' },
+                { status: 429 }
+            );
+        }
+
+        const msUntilMidnight = Math.max(1000, getNextMidnightUTC7() - Date.now());
+        if (await isRateLimited(ip, 'reviews_daily', 3, msUntilMidnight)) {
+            return NextResponse.json(
+                { error: 'Bạn đã đạt giới hạn đánh giá trong ngày. Vui lòng quay lại ngày mai.' },
                 { status: 429 }
             );
         }

@@ -2,6 +2,33 @@ import { cert, getApps, initializeApp, type App } from 'firebase-admin/app';
 import { getAuth, type Auth } from 'firebase-admin/auth';
 import { getFirestore, type Firestore } from 'firebase-admin/firestore';
 
+// Auto-load environment variables from .env.local for standalone scripts
+if (typeof window === 'undefined') {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const envPath = path.resolve(process.cwd(), '.env.local');
+    if (fs.existsSync(envPath)) {
+      const envContent = fs.readFileSync(envPath, 'utf8');
+      for (const line of envContent.split('\n')) {
+        const match = line.match(/^\s*([^#=]+)\s*=\s*(.*)\s*$/);
+        if (match) {
+          const key = match[1].trim();
+          let val = match[2].trim();
+          if (!process.env[key]) {
+            if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+              val = val.substring(1, val.length - 1);
+            }
+            process.env[key] = val;
+          }
+        }
+      }
+    }
+  } catch (e) {
+    // Ignore in non-Node environments
+  }
+}
+
 function getRequiredEnv(name: string): string | undefined {
   const v = process.env[name];
   return v && v.trim().length > 0 ? v : undefined;

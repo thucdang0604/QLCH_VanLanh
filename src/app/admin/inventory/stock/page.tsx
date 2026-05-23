@@ -10,18 +10,25 @@ import PaginationBar from '@/components/admin/PaginationBar';
 
 const formatPrice = (n: number) => n.toLocaleString('vi-VN') + 'đ';
 
+const isComponent = (p: Product) => {
+    const cat = p.category?.toLowerCase() || '';
+    const firstCatId = p.categoryIds?.[0] || '';
+    return cat === 'linh kiện' || cat === 'component' || firstCatId.startsWith('linh-kien') || firstCatId === 'component';
+};
+
 export default function StockPage() {
     const [products, setProducts] = useState<(Product & { id: string })[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
     const [sortBy, setSortBy] = useState<'name' | 'stock' | 'costPrice'>('name');
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+    const [stockTab, setStockTab] = useState<'all' | 'retail' | 'component'>('all');
 
     useEffect(() => {
         const load = async () => {
             try {
                 const snap = await getDocs(collection(db, 'products'));
-                setProducts(snap.docs.map(d => ({ id: d.id, ...d.data() } as Product & { id: string })).filter(p => p.category !== 'Linh kiện'));
+                setProducts(snap.docs.map(d => ({ id: d.id, ...d.data() } as Product & { id: string })));
             } catch (err) {
                 console.error(err);
             } finally {
@@ -31,7 +38,13 @@ export default function StockPage() {
         load();
     }, []);
 
-    const filtered = products
+    const tabFiltered = products.filter(p => {
+        if (stockTab === 'component') return isComponent(p);
+        if (stockTab === 'retail') return !isComponent(p);
+        return true;
+    });
+
+    const filtered = tabFiltered
         .filter(p => {
             if (!searchQuery) return true;
             const q = searchQuery.toLowerCase();
@@ -46,10 +59,10 @@ export default function StockPage() {
             return sortDir === 'asc' ? cmp : -cmp;
         });
 
-    const totalItems = products.reduce((s, p) => s + (p.stock || 0), 0);
-    const totalValue = products.reduce((s, p) => s + (p.stock || 0) * (p.costPrice || 0), 0);
-    const lowStock = products.filter(p => (p.stock || 0) > 0 && (p.stock || 0) <= 3).length;
-    const outOfStock = products.filter(p => (p.stock || 0) <= 0).length;
+    const totalItems = tabFiltered.reduce((s, p) => s + (p.stock || 0), 0);
+    const totalValue = tabFiltered.reduce((s, p) => s + (p.stock || 0) * (p.costPrice || 0), 0);
+    const lowStock = tabFiltered.filter(p => (p.stock || 0) > 0 && (p.stock || 0) <= 3).length;
+    const outOfStock = tabFiltered.filter(p => (p.stock || 0) <= 0).length;
 
     const toggleSort = (col: typeof sortBy) => {
         if (sortBy === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -58,8 +71,7 @@ export default function StockPage() {
 
     const { paginatedData: paginatedFiltered, currentPage, totalPages, pageSize, totalFiltered: totalFilteredCount, setPage, setPageSize, resetPage } = useClientPagination(filtered, 20);
 
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    useEffect(() => { resetPage(); }, [searchQuery]);
+    useEffect(() => { resetPage(); }, [searchQuery, stockTab, resetPage]);
 
     if (loading) return (
         <div className="flex items-center justify-center h-[60vh]">
@@ -73,7 +85,23 @@ export default function StockPage() {
                 <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
                     <Package className="text-orange-500" /> Tổng Tồn Kho
                 </h1>
-                <p className="text-sm text-gray-500 mt-0.5">{products.length} mặt hàng trong hệ thống</p>
+                <p className="text-sm text-gray-500 mt-0.5">{tabFiltered.length} mặt hàng{stockTab !== 'all' ? ` (${stockTab === 'retail' ? 'bán lẻ' : 'linh kiện'})` : ''} trong hệ thống</p>
+            </div>
+
+            {/* Stock Tab Filter */}
+            <div className="flex gap-2">
+                {([['all', '📋 Tất cả'], ['retail', '📦 Bán lẻ & Phụ kiện'], ['component', '🔧 Linh kiện']] as const).map(([key, label]) => (
+                    <button key={key} onClick={() => setStockTab(key)}
+                        className={`px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
+                            stockTab === key
+                                ? key === 'component' ? 'bg-orange-50 border-orange-300 text-orange-700 shadow-sm'
+                                    : key === 'retail' ? 'bg-blue-50 border-blue-300 text-blue-700 shadow-sm'
+                                    : 'bg-gray-800 border-gray-800 text-white shadow-sm'
+                                : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                        }`}>
+                        {label}
+                    </button>
+                ))}
             </div>
 
             {/* Stats */}

@@ -27,10 +27,10 @@ function SkeletonCard() {
   );
 }
 
-export default function SuggestedSection({ ssrLatestProducts = [] }: { ssrLatestProducts?: any[] }) {
+export default function SuggestedSection({ ssrLatestProducts = [] }: { ssrLatestProducts?: Record<string, unknown>[] }) {
   const [suggestedBrand, setSuggestedBrand] = useState<string>('Tất cả');
   // Initialize with SSR data if available
-  const [suggestedProducts, setSuggestedProducts] = useState<(DocumentData & { id: string })[]>(ssrLatestProducts.slice(0, 10));
+  const [suggestedProducts, setSuggestedProducts] = useState<(DocumentData & { id: string })[]>(ssrLatestProducts.slice(0, 10) as (DocumentData & { id: string })[]);
   const [suggestedLoading, setSuggestedLoading] = useState(!ssrLatestProducts.length);
 
   useEffect(() => {
@@ -38,7 +38,7 @@ export default function SuggestedSection({ ssrLatestProducts = [] }: { ssrLatest
     const fetchSuggested = async () => {
       // If "Tất cả", rely on SSR data unless empty
       if (suggestedBrand === 'Tất cả' && ssrLatestProducts && ssrLatestProducts.length > 0) {
-        setSuggestedProducts(ssrLatestProducts.slice(0, 10));
+        setSuggestedProducts(ssrLatestProducts.slice(0, 10) as (DocumentData & { id: string })[]);
         setSuggestedLoading(false);
         return;
       }

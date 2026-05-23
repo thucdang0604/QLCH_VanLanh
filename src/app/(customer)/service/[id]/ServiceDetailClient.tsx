@@ -18,6 +18,21 @@ import Image from 'next/image';
 import { useConfig } from '@/lib/ConfigContext';
 import VideoEmbed from '@/components/VideoEmbed';
 
+interface ServiceData {
+    id: string;
+    name: string;
+    price?: number;
+    price_original?: number;
+    price_promo?: number;
+    image?: string;
+    imageUrl?: string;
+    videoEmbedUrl?: string;
+    repair_time?: string;
+    warranty_text?: string;
+    description?: string;
+    tags?: string[];
+}
+
 /* ── Inline Toast ── */
 function Toast({ message, type = 'success', onClose }: { message: string; type?: 'success' | 'error'; onClose: () => void }) {
     return (
@@ -38,7 +53,7 @@ const formatPrice = (p: number) => {
     return new Intl.NumberFormat('vi-VN').format(p) + 'đ';
 };
 
-export default function ServiceDetailClient({ service }: { service: any }) {
+export default function ServiceDetailClient({ service }: { service: ServiceData }) {
     const { config } = useConfig();
     const branches = config.store_branches || [];
 
@@ -55,10 +70,11 @@ export default function ServiceDetailClient({ service }: { service: any }) {
 
     // Update store default when branches load
     useEffect(() => {
-        if (branches.length > 0 && !formData.store) {
-            setFormData(prev => ({ ...prev, store: branches[0].id }));
+        const currentBranches = config.store_branches || [];
+        if (currentBranches.length > 0 && !formData.store) {
+            setFormData(prev => ({ ...prev, store: currentBranches[0].id }));
         }
-    }, [branches]);
+    }, [config.store_branches, formData.store]);
 
     // Date options (next 7 days)
     const getDateOptions = () => {

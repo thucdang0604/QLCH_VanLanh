@@ -1,5 +1,6 @@
 'use client';
 
+/* eslint-disable @next/next/no-img-element */
 import { Star, MessageSquareQuote, CheckCircle2, UserCircle2 } from 'lucide-react';
 
 interface ReviewData {

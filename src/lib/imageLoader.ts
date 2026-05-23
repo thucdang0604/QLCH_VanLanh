@@ -25,7 +25,7 @@ export default function firebaseImageLoader({ src, width, quality: _quality }: I
     const bypassProxyParam = src.includes('bypassProxy=true');
     
     // Clean up flags for final URL
-    let cleanSrc = src
+    const cleanSrc = src
       .replace('&hasThumb=true', '')
       .replace('?hasThumb=true', '')
       .replace('&bypassProxy=true', '')

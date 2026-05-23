@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
-    TrendingUp, TrendingDown, DollarSign, Loader2, Plus, X, Save,
-    ArrowUpRight, ArrowDownLeft, BarChart3, Wallet, ShoppingCart,
-    Wrench, Package, Award, FileText, Calendar
+    TrendingUp, Loader2, Plus, Save,
+    ArrowUpRight, ArrowDownLeft, BarChart3, Wallet,
+    FileText, Calendar
 } from 'lucide-react';
 import Modal from '@/components/admin/Modal';
+import CurrencyInput from '@/components/admin/CurrencyInput';
 import {
     collection, getDocs, addDoc, serverTimestamp, query, orderBy, where, Timestamp
 } from 'firebase/firestore';
@@ -56,11 +57,11 @@ export default function RevenuePage() {
     const [isProcessing, setIsProcessing] = useState(false);
     const [showAllExpenses, setShowAllExpenses] = useState(false);
 
-    // ── Load data (limited to 3 months to reduce reads) ──
+    // ── Load data (6 months window to capture old tickets with recent payments) ──
     useEffect(() => {
         const load = async () => {
             try {
-                const threeMonthsAgo = getMonthsAgoTimestamp(3);
+                const threeMonthsAgo = getMonthsAgoTimestamp(6);
                 const [oSnap, rSnap, iSnap, cSnap, eSnap] = await Promise.all([
                     getDocs(query(collection(db, 'orders'), where('createdAt', '>=', threeMonthsAgo), orderBy('createdAt', 'desc'))),
                     getDocs(query(collection(db, 'repairs'), where('createdAt', '>=', threeMonthsAgo), orderBy('createdAt', 'desc'))),
@@ -90,7 +91,7 @@ export default function RevenuePage() {
     };
 
     // ── Date filter ──
-    const getDateRange = () => {
+    const getDateRange = useCallback(() => {
         const now = new Date();
         let from: Date, to: Date;
 
@@ -120,25 +121,49 @@ export default function RevenuePage() {
                 to = now;
         }
         return { from, to };
-    };
+    }, [period, customFrom, customTo]);
 
-    const inRange = (ts: unknown) => {
+    const inRange = useCallback((ts: unknown) => {
         const d = toDate(ts);
         if (!d) return false;
         const { from, to } = getDateRange();
         return d >= from && d <= to;
-    };
+    }, [getDateRange]);
 
     // ── Revenue calculations ──
     const calculations = useMemo(() => {
         // REVENUE (THU)
         const orderRevenue = orders
-            .filter(o => (o.status === 'Completed' || o.status === 'Shipping') && inRange(o.createdAt))
+            .filter(o => (o.status === 'Completed' || o.status === 'Shipping') && inRange(o.completedAt || o.updatedAt || o.createdAt))
             .reduce((s, o) => s + (o.total_amount || 0), 0);
 
         const repairRevenue = repairs
-            .filter(r => r.status === 'done' && r.ticketType !== 'warranty' && inRange(r.createdAt))
-            .reduce((s, r) => s + (r.payment?.amount || 0), 0);
+            .filter(r => r.ticketType !== 'warranty')
+            .reduce((total, r) => {
+                if (r.paymentHistory && r.paymentHistory.length > 0) {
+                    const historySum = r.paymentHistory.reduce((sum, ph) => {
+                        // ph.timestamp is usually a number (ms) or a date string
+                        if (inRange(ph.timestamp || r.createdAt)) {
+                            return ph.type === 'refund' ? sum - (ph.amount || 0) : sum + (ph.amount || 0);
+                        }
+                        return sum;
+                    }, 0);
+                    return total + historySum;
+                } else {
+                    // Legacy fallback
+                    let rev = 0;
+                    if (inRange(r.createdAt)) rev += (r.payment?.depositAmount || 0);
+                    if (r.status === 'done' && inRange(r.timing?.completedAt)) {
+                        rev += ((r.payment?.amount || 0) - (r.payment?.depositAmount || 0));
+                    }
+                    return total + rev;
+                }
+            }, 0);
+
+        // Khấu trừ quà tặng khỏi doanh thu ròng (Plan §3 + §5.4b)
+        const totalGiftDiscount = repairs
+            .filter(r => r.ticketType !== 'warranty' && r.status === 'done' && inRange(r.timing?.completedAt || r.createdAt))
+            .reduce((sum, r) => sum + (r.payment?.giftDiscount || 0), 0);
 
         const totalRevenue = orderRevenue + repairRevenue;
 
@@ -157,25 +182,25 @@ export default function RevenuePage() {
 
         const totalExpenses = importCost + commissionCost + manualExpenses;
 
-        // NET PROFIT
-        const netProfit = totalRevenue - totalExpenses;
+        // NET PROFIT (trừ quà tặng)
+        const netProfit = totalRevenue - totalExpenses - totalGiftDiscount;
 
         // Orders breakdown
-        const webOrders = orders.filter(o => (o.source !== 'pos') && (o.status === 'Completed' || o.status === 'Shipping') && inRange(o.createdAt));
-        const posOrders = orders.filter(o => o.source === 'pos' && (o.status === 'Completed' || o.status === 'Shipping') && inRange(o.createdAt));
+        const webOrders = orders.filter(o => (o.source !== 'pos') && (o.status === 'Completed' || o.status === 'Shipping') && inRange(o.completedAt || o.updatedAt || o.createdAt));
+        const posOrders = orders.filter(o => o.source === 'pos' && (o.status === 'Completed' || o.status === 'Shipping') && inRange(o.completedAt || o.updatedAt || o.createdAt));
 
         return {
-            orderRevenue, repairRevenue, totalRevenue,
+            orderRevenue, repairRevenue, totalRevenue, totalGiftDiscount,
             importCost, commissionCost, manualExpenses, totalExpenses,
             netProfit,
             webOrderCount: webOrders.length,
             posOrderCount: posOrders.length,
             webOrderRevenue: webOrders.reduce((s, o) => s + (o.total_amount || 0), 0),
             posOrderRevenue: posOrders.reduce((s, o) => s + (o.total_amount || 0), 0),
-            repairCount: repairs.filter(r => r.status === 'done' && r.ticketType !== 'warranty' && inRange(r.createdAt)).length,
-            warrantyCount: repairs.filter(r => r.ticketType === 'warranty' && inRange(r.createdAt)).length,
+            repairCount: repairs.filter(r => r.status === 'done' && r.ticketType !== 'warranty' && inRange(r.timing?.completedAt || r.createdAt)).length,
+            warrantyCount: repairs.filter(r => r.ticketType === 'warranty' && inRange(r.timing?.completedAt || r.createdAt)).length,
         };
-    }, [orders, repairs, importReceipts, commissions, expenses, period, customFrom, customTo]);
+    }, [orders, repairs, importReceipts, commissions, expenses, inRange]);
 
     // ── Daily chart data ──
     const chartData = useMemo(() => {
@@ -195,8 +220,30 @@ export default function RevenuePage() {
                 return t && t >= dayStart && t <= dayEnd;
             };
 
-            const rev = orders.filter(o => (o.status === 'Completed' || o.status === 'Shipping') && isInDay(o.createdAt)).reduce((s, o) => s + (o.total_amount || 0), 0)
-                + repairs.filter(r => r.status === 'done' && r.ticketType !== 'warranty' && isInDay(r.createdAt)).reduce((s, r) => s + (r.payment?.amount || 0), 0);
+            const repairRev = repairs
+                .filter(r => r.ticketType !== 'warranty')
+                .reduce((total, r) => {
+                    if (r.paymentHistory && r.paymentHistory.length > 0) {
+                        const historySum = r.paymentHistory.reduce((sum, ph) => {
+                            if (isInDay(ph.timestamp || r.createdAt)) {
+                                return ph.type === 'refund' ? sum - (ph.amount || 0) : sum + (ph.amount || 0);
+                            }
+                            return sum;
+                        }, 0);
+                        return total + historySum;
+                    } else {
+                        // Legacy fallback
+                        let rev = 0;
+                        if (isInDay(r.createdAt)) rev += (r.payment?.depositAmount || 0);
+                        if (r.status === 'done' && isInDay(r.timing?.completedAt)) {
+                            rev += ((r.payment?.amount || 0) - (r.payment?.depositAmount || 0));
+                        }
+                        return total + rev;
+                    }
+                }, 0);
+
+            const rev = orders.filter(o => (o.status === 'Completed' || o.status === 'Shipping') && isInDay(o.completedAt || o.updatedAt || o.createdAt)).reduce((s, o) => s + (o.total_amount || 0), 0)
+                + repairRev;
 
             const exp = importReceipts.filter(i => i.status === 'completed' && isInDay(i.completedAt || i.createdAt)).reduce((s, i) => s + (i.totalAmount || 0), 0)
                 + commissions.filter(c => isInDay(c.createdAt)).reduce((s, c) => s + (c.amount || 0), 0)
@@ -206,7 +253,7 @@ export default function RevenuePage() {
             d.setDate(d.getDate() + 1);
         }
         return days;
-    }, [orders, repairs, importReceipts, commissions, expenses, period, customFrom, customTo]);
+    }, [orders, repairs, importReceipts, commissions, expenses, getDateRange]);
 
     // Chart max value for scaling
     const chartMax = Math.max(1, ...chartData.map(d => Math.max(d.revenue, d.expense)));
@@ -317,6 +364,9 @@ export default function RevenuePage() {
                         <div className="flex justify-between"><span>📦 Nhập hàng</span><span>{formatPrice(calculations.importCost)}</span></div>
                         <div className="flex justify-between"><span>🏆 Hoa hồng</span><span>{formatPrice(calculations.commissionCost)}</span></div>
                         <div className="flex justify-between"><span>📝 Chi phí khác</span><span>{formatPrice(calculations.manualExpenses)}</span></div>
+                        {calculations.totalGiftDiscount > 0 && (
+                            <div className="flex justify-between"><span>🎁 Quà tặng</span><span>{formatPrice(calculations.totalGiftDiscount)}</span></div>
+                        )}
                     </div>
                 </div>
 
@@ -478,7 +528,7 @@ export default function RevenuePage() {
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Số tiền (VNĐ)</label>
-                                <input type="number" value={expAmount || ''} onChange={e => setExpAmount(Number(e.target.value))}
+                                <CurrencyInput value={expAmount || ''} onChange={v => setExpAmount(v)}
                                     placeholder="0"
                                     className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20 text-lg font-bold" />
                             </div>

@@ -2,36 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { chatWithGemini } from '@/lib/gemini';
 import { db } from '@/lib/firebase';
 import { collection, query, where, getDocs, limit } from 'firebase/firestore';
+import { isRateLimited } from '@/lib/rateLimit';
 
-// ── Rate Limiting (in-memory, per IP, 5 req/min) ──
-const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 const RATE_LIMIT_MAX = 5;
 const RATE_LIMIT_WINDOW_MS = 60_000;
-
-function checkRateLimit(ip: string): boolean {
-    const now = Date.now();
-    const entry = rateLimitMap.get(ip);
-
-    if (!entry || now > entry.resetAt) {
-        rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
-        return true;
-    }
-
-    if (entry.count >= RATE_LIMIT_MAX) {
-        return false;
-    }
-
-    entry.count++;
-    return true;
-}
-
-// Cleanup memory every 5 minutes
-setInterval(() => {
-    const now = Date.now();
-    for (const [ip, entry] of rateLimitMap) {
-        if (now > entry.resetAt) rateLimitMap.delete(ip);
-    }
-}, 5 * 60_000);
 
 type RAGProduct = {
     name?: string;
@@ -47,7 +21,7 @@ export async function POST(request: NextRequest) {
             || request.headers.get('x-real-ip')
             || 'unknown';
 
-        if (!checkRateLimit(ip)) {
+        if (await isRateLimited(ip, 'public_ai', RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS)) {
             return NextResponse.json(
                 { error: 'Bạn đang gửi tin nhắn quá nhanh. Vui lòng thử lại sau.' },
                 { status: 429 }

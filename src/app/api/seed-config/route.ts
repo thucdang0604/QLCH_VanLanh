@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { DEFAULT_CONFIG } from '@/lib/ConfigContext';
-import { requireAdmin } from '@/lib/apiAuth';
+import { requireAdminOrStaff } from '@/lib/apiAuth';
 
 /**
  * POST /api/seed-config
@@ -11,15 +11,16 @@ import { requireAdmin } from '@/lib/apiAuth';
  */
 export async function POST(request: NextRequest) {
     try {
-        await requireAdmin(request);
+        await requireAdminOrStaff(request);
 
         const docRef = doc(db, 'system_config', 'main_settings');
+        const force = request.nextUrl.searchParams.get('force') === 'true';
         const existing = await getDoc(docRef);
 
-        if (existing.exists()) {
+        if (existing.exists() && !force) {
             return NextResponse.json({
                 success: true,
-                message: 'Config already exists, skipping seed.',
+                message: 'Config already exists, skipping seed. Use ?force=true to overwrite.',
                 data: existing.data(),
             });
         }
@@ -46,7 +47,7 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
     try {
-        await requireAdmin(request);
+        await requireAdminOrStaff(request);
 
         const docRef = doc(db, 'system_config', 'main_settings');
         const snapshot = await getDoc(docRef);

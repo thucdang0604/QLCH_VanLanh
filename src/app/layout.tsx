@@ -21,7 +21,7 @@ export async function generateMetadata(): Promise<Metadata> {
       const refs = docNames.map(name => db.collection('system_config').doc(name));
       const snapshots = await db.getAll(...refs);
       
-      let data: any = {};
+      let data: Record<string, unknown> = {};
       snapshots.forEach(snap => {
           if (snap.exists) {
               const snapData = JSON.parse(JSON.stringify(snap.data()));

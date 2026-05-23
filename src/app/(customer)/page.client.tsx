@@ -1,15 +1,14 @@
 'use client';
 
+/* eslint-disable @next/next/no-img-element */
 import { useConfig } from '@/lib/ConfigContext';
 import HeroSection from "@/components/home/HeroSection";
-import Link from "next/link";
-import Image from "next/image";
+
 import dynamic from "next/dynamic";
 import { SITE_URL } from "@/lib/constants";
 import type { SSRHomeConfig } from './page';
 import type { HeroBanner, StoreBranch } from '@/lib/ConfigContext';
 
-import { DEFAULT_CONFIG, type HomeServiceCategory } from '@/lib/config-defaults';
 
 // ===== Dynamic section components map =====
 const FlashSale = dynamic(() => import("@/components/home/FlashSale"), { ssr: false, loading: () => <div className="h-[200px] bg-white animate-pulse rounded-xl container mx-auto mt-4"></div> });
@@ -18,8 +17,7 @@ const ArticleBlock = dynamic(() => import("@/components/home/ArticleBlock"), { s
 const SuggestedSection = dynamic(() => import("@/components/home/SuggestedSection"), { ssr: false, loading: () => <div className="h-[400px] bg-white animate-pulse rounded-xl container mx-auto mt-4"></div> });
 import CategoriesSection from "@/components/home/CategoriesSection";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const SECTION_COMPONENTS: Record<string, React.ComponentType<any>> = {
+const SECTION_COMPONENTS: Record<string, React.ComponentType<Record<string, unknown>>> = {
   hero: HeroSection,
   flash_sale: FlashSale,
   booking: BookingSection,

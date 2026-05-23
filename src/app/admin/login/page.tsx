@@ -102,9 +102,11 @@ export default function AdminLoginPage() {
                 setError('Tài khoản Google này không có quyền truy cập hệ thống quản trị. Tài khoản đã được tạo — hãy cấp quyền từ trang quản lý nhân viên.');
             }
         } catch (err: unknown) {
+            console.error('Google login error:', err);
             const code = (err as { code?: string }).code;
             if (code !== 'auth/popup-closed-by-user') {
-                setError('Đăng nhập Google thất bại. Vui lòng thử lại.');
+                const message = err instanceof Error ? err.message : 'Vui lòng thử lại.';
+                setError(`Đăng nhập Google thất bại: ${message} (${code || 'unknown'})`);
             }
         } finally {
             setIsLoading(false);

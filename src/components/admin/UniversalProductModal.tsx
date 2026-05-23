@@ -2,10 +2,11 @@
 
 import { useState, useEffect } from 'react';
 import { Loader2, Plus, X } from 'lucide-react';
+import CurrencyInput from '@/components/admin/CurrencyInput';
 import { ImageIcon } from 'lucide-react';
 import { getDoc, doc, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { generateSlug } from '@/lib/utils';
+import { generateSlug, generateSearchKeywords } from '@/lib/utils';
 import { addDocumentWithId, updateDocument, useFirestoreCollection } from '@/lib/useFirestore';
 import { triggerRevalidate } from '@/lib/revalidate';
 import { toastError } from '@/lib/toast';
@@ -13,9 +14,10 @@ import Modal from '@/components/admin/Modal';
 import MediaManager from '@/components/admin/MediaManager';
 import CategoryTaxonomySelector from '@/components/admin/CategoryTaxonomySelector';
 import type { Product } from '@/lib/types';
+import { PART_CATEGORY_LABEL } from '@/lib/constants';
 
 // ── Shared Constants ──
-const ACCESSORY_SUBCATEGORIES = ['Ốp lưng', 'Sạc dự phòng', 'Cáp sạc', 'Cóc sạc', 'Tai nghe', 'Khác'];
+
 const CONDITIONS = [
     { value: 'new', label: 'Mới 100%' },
     { value: 'like-new', label: 'Cũ 99%' },
@@ -119,10 +121,10 @@ export default function UniversalProductModal({
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     // ── Dynamic Data ──
-    const { data: categoriesData } = useFirestoreCollection<{ name: string }>('categories', [orderBy('name', 'asc')]);
+    
     const { data: brandsData } = useFirestoreCollection<{ name: string }>('brands', [orderBy('name', 'asc')]);
     
-    const categories = categoriesData.map(c => c.name);
+    
     const brands = brandsData.map(b => b.name);
 
     useEffect(() => {
@@ -206,6 +208,7 @@ export default function UniversalProductModal({
             imageUrl,
             images,
             specs: initialData?.specs || {},
+            searchKeywords: generateSearchKeywords(form.name),
         };
 
         if (isEditing && initialData) {
@@ -229,7 +232,7 @@ export default function UniversalProductModal({
 
         const data: Record<string, unknown> = {
             name: form.name,
-            category: 'Linh kiện',
+            category: PART_CATEGORY_LABEL,
             categoryIds: form.categoryIds,
             brand: '',
             price_original: Number(form.price_original) || 0,
@@ -243,6 +246,7 @@ export default function UniversalProductModal({
             imageUrl,
             images,
             specs: {},
+            searchKeywords: generateSearchKeywords(form.name),
         };
 
         if (isEditing && initialData) {
@@ -367,7 +371,6 @@ export default function UniversalProductModal({
                         <RetailFields
                             form={retailForm}
                             setForm={setRetailForm}
-                            categories={categories}
                             brands={brands}
                         />
                     ) : (
@@ -408,12 +411,10 @@ export default function UniversalProductModal({
 function RetailFields({
     form,
     setForm,
-    categories,
     brands,
 }: {
     form: RetailFormData;
     setForm: React.Dispatch<React.SetStateAction<RetailFormData>>;
-    categories: string[];
     brands: string[];
 }) {
     return (
@@ -435,10 +436,9 @@ function RetailFields({
             <div className="grid grid-cols-2 gap-4">
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1.5">Giá gốc (VNĐ) *</label>
-                    <input
-                        type="number"
+                    <CurrencyInput
                         value={form.price_original}
-                        onChange={(e) => setForm(p => ({ ...p, price_original: e.target.value ? Number(e.target.value) : '' }))}
+                        onChange={(v) => setForm(p => ({ ...p, price_original: v || '' }))}
                         required
                         min={0}
                         className="w-full h-11 px-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-shadow"
@@ -447,10 +447,9 @@ function RetailFields({
                 </div>
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1.5">Giá khuyến mãi</label>
-                    <input
-                        type="number"
+                    <CurrencyInput
                         value={form.price_promo}
-                        onChange={(e) => setForm(p => ({ ...p, price_promo: e.target.value ? Number(e.target.value) : '' }))}
+                        onChange={(v) => setForm(p => ({ ...p, price_promo: v || '' }))}
                         min={0}
                         className="w-full h-11 px-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-shadow"
                         placeholder="0"
@@ -691,10 +690,9 @@ function ComponentFields({
             <div className="grid grid-cols-2 gap-4">
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1.5">Giá vốn (VNĐ) *</label>
-                    <input
-                        type="number"
+                    <CurrencyInput
                         value={form.price_original}
-                        onChange={(e) => setForm(p => ({ ...p, price_original: e.target.value ? Number(e.target.value) : '' }))}
+                        onChange={(v) => setForm(p => ({ ...p, price_original: v || '' }))}
                         required
                         min={0}
                         className="w-full h-11 px-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-shadow"
@@ -703,10 +701,9 @@ function ComponentFields({
                 </div>
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1.5">Giá Bán / Giá Sửa thay thế (VNĐ) *</label>
-                    <input
-                        type="number"
+                    <CurrencyInput
                         value={form.price_promo}
-                        onChange={(e) => setForm(p => ({ ...p, price_promo: e.target.value ? Number(e.target.value) : '' }))}
+                        onChange={(v) => setForm(p => ({ ...p, price_promo: v || '' }))}
                         required
                         min={0}
                         className="w-full h-11 px-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-shadow font-semibold text-orange-600"

@@ -6,6 +6,12 @@ import type { ChatMessage } from '@/lib/realtimedb';
 import { useAuth } from '@/lib/AuthContext';
 import { useConfig } from '@/lib/ConfigContext';
 
+// Mask phone number for localStorage persistence (SEC-004)
+const maskPhone = (phone: string): string => {
+    if (!phone || phone.length < 4) return '****';
+    return phone.slice(0, -4).replace(/./g, '*') + phone.slice(-4);
+};
+
 // Generate or get guest ID
 const getGuestId = (): string => {
     if (typeof window === 'undefined') return '';
@@ -181,10 +187,14 @@ export default function ChatWidget() {
         e.preventDefault();
         if (!regForm.name.trim() || !regForm.phone.trim()) return;
 
-        localStorage.setItem('vanlanh_customer_info', JSON.stringify(regForm));
+        // Store masked phone in localStorage (SEC-004: PII protection)
+        localStorage.setItem('vanlanh_customer_info', JSON.stringify({
+            name: regForm.name,
+            phone: maskPhone(regForm.phone)
+        }));
         setIsRegistered(true);
 
-        // Update metadata immediately
+        // Update metadata immediately (full phone sent to server for admin support)
         if (roomId) {
             try {
                 const { updateRoomInfo } = await import('@/lib/realtimedb');

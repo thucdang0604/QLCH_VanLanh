@@ -1,36 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { isRateLimited } from '@/lib/rateLimit';
 
-// ── Rate Limiting (in-memory, per IP, 3 req/min) ──
-const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 const RATE_LIMIT_MAX = 3;
 const RATE_LIMIT_WINDOW_MS = 60_000;
-
-function checkRateLimit(ip: string): boolean {
-    const now = Date.now();
-    const entry = rateLimitMap.get(ip);
-
-    if (!entry || now > entry.resetAt) {
-        rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
-        return true;
-    }
-
-    if (entry.count >= RATE_LIMIT_MAX) {
-        return false;
-    }
-
-    entry.count++;
-    return true;
-}
-
-// Cleanup memory every 5 minutes
-setInterval(() => {
-    const now = Date.now();
-    for (const [ip, entry] of rateLimitMap) {
-        if (now > entry.resetAt) rateLimitMap.delete(ip);
-    }
-}, 5 * 60_000);
 
 export async function POST(request: NextRequest) {
     try {
@@ -39,7 +13,7 @@ export async function POST(request: NextRequest) {
             || request.headers.get('x-real-ip')
             || 'unknown';
 
-        if (!checkRateLimit(ip)) {
+        if (await isRateLimited(ip, 'appointments', RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS)) {
             return NextResponse.json(
                 { error: 'Bạn đang gửi quá nhiều yêu cầu. Vui lòng thử lại sau.' },
                 { status: 429 }

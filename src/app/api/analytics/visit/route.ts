@@ -1,10 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { FieldValue } from 'firebase-admin/firestore';
-
-// In-memory rate limiting map for IPs
-// Key: IP address, Value: { count: number, resetAt: number }
-const ipRateLimit = new Map<string, { count: number; resetAt: number }>();
+import { isRateLimited } from '@/lib/rateLimit';
 
 export async function POST(req: NextRequest) {
     try {
@@ -13,19 +10,10 @@ export async function POST(req: NextRequest) {
                    req.headers.get('x-real-ip') || 
                    'unknown';
 
-        const now = Date.now();
-        
+
         // Rate Limit: Max 10 requests per minute per IP
-        if (ip !== 'unknown') {
-            const limitRecord = ipRateLimit.get(ip);
-            if (limitRecord && now < limitRecord.resetAt) {
-                if (limitRecord.count >= 10) {
-                    return NextResponse.json({ error: 'Too many requests' }, { status: 429 });
-                }
-                limitRecord.count++;
-            } else {
-                ipRateLimit.set(ip, { count: 1, resetAt: now + 60000 });
-            }
+        if (await isRateLimited(ip, 'analytics_visit', 10, 60000)) {
+            return NextResponse.json({ error: 'Too many requests' }, { status: 429 });
         }
 
         // 2. Device Identity & Visit Frequency Check via Cookies

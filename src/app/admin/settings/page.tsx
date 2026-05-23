@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useConfig, DEFAULT_CONFIG, type ContactInfo, type GeofenceConfig } from '@/lib/ConfigContext';
 import { Save, RotateCcw, Loader2, Store, Phone, Mail, MapPin, Facebook, MessageCircle, CheckCircle2, AlertCircle, ShieldCheck, Navigation, KeyRound } from 'lucide-react';
+import { getAuthInstance } from '@/lib/firebase';
 import CategoriesTab from './CategoriesTab';
 import NavigationTab from './NavigationTab';
 
@@ -67,7 +68,18 @@ export default function SettingsPage() {
         setSeeding(true);
         setMessage(null);
         try {
-            const res = await fetch('/api/seed-config', { method: 'POST' });
+            const auth = await getAuthInstance();
+            const user = auth.currentUser;
+            if (!user) {
+                setMessage({ type: 'error', text: 'Bạn chưa đăng nhập. Vui lòng đăng nhập lại.' });
+                setSeeding(false);
+                return;
+            }
+            const idToken = await user.getIdToken();
+            const res = await fetch('/api/seed-config', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${idToken}` },
+            });
             const data = await res.json();
             if (data.success) {
                 setMessage({ type: 'success', text: 'Đã khôi phục cài đặt gốc!' });

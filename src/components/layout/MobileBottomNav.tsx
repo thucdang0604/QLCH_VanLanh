@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import {
     Home, LayoutGrid, Headphones, ClipboardList, User,
@@ -62,7 +62,7 @@ const contactOptions = [
 
 export default function MobileBottomNav() {
     const pathname = usePathname();
-    const router = useRouter();
+
     const { user } = useAuth();
     const { config } = useConfig();
     const [showContactMenu, setShowContactMenu] = useState(false);
@@ -95,7 +95,6 @@ export default function MobileBottomNav() {
     // Close menu on route change
     useEffect(() => {
         // We intentionally close a local UI menu when the route changes.
-        // eslint-disable-next-line react-hooks/set-state-in-effect
         setShowContactMenu(false);
     }, [pathname]);
 

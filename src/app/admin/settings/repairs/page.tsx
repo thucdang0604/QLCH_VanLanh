@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import {
-    Settings, Plus, Trash2, GripVertical, Save, Loader2, ArrowRight, X, Eye, Shield
+    Settings, Plus, Trash2, GripVertical, Save, Loader2, ArrowRight, Eye, Shield
 } from 'lucide-react';
 import Modal from '@/components/admin/Modal';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';

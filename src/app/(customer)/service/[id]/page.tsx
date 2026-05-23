@@ -15,7 +15,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
         return { title: 'Không tìm thấy dịch vụ' };
     }
 
-    const shortDescription = data.seoDescription || data.description || `Dịch vụ ${data.name} chính hãng, sửa nhanh, bảo hành uy tín tại Văn Lành Service.`;
+    const shortDescription = String(data.seoDescription || data.description || `Dịch vụ ${data.name} chính hãng, sửa nhanh, bảo hành uy tín tại Văn Lành Service.`);
 
     return {
         title: `${data.name} | Dịch vụ sửa chữa tại Văn Lành Service`,
@@ -23,7 +23,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
         openGraph: {
             title: `${data.name} | Dịch vụ sửa chữa tại Văn Lành Service`,
             description: shortDescription,
-            images: data.image || data.imageUrl || '',
+            images: String(data.image || data.imageUrl || ''),
         }
     };
 }
@@ -49,7 +49,7 @@ export default async function ServiceDetailPage({ params }: { params: Promise<{ 
     }
 
     // SEO meta + JSON-LD
-    const shortDescription = service.seoDescription || service.description || `Dịch vụ ${service.name} chính hãng, sửa nhanh, bảo hành uy tín tại Văn Lành Service.`;
+    const shortDescription = String(service.seoDescription || service.description || `Dịch vụ ${service.name} chính hãng, sửa nhanh, bảo hành uy tín tại Văn Lành Service.`);
     const url = `${SITE_URL}/service/${service.id}`;
 
     const structuredData = {
@@ -80,10 +80,11 @@ export default async function ServiceDetailPage({ params }: { params: Promise<{ 
                     <ChevronRight size={14} />
                     <Link href="/category/sua-chua" className="hover:text-copper">Sửa chữa</Link>
                     <ChevronRight size={14} />
-                    <span className="text-gray-800 font-medium line-clamp-1">{service.name}</span>
+                    <span className="text-gray-800 font-medium line-clamp-1">{String(service.name ?? '')}</span>
                 </nav>
 
-                <ServiceDetailClient service={service} />
+                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                <ServiceDetailClient service={service as any} />
             </div>
         </div>
     );

@@ -7,22 +7,23 @@ import { useSearchParams } from 'next/navigation';
 import {
     Wrench, Plus, Search, Printer,
     CheckCircle2, Clock, Smartphone, User, FileText,
-    X, Save, Calendar,
+    Save,
     DollarSign, AlertTriangle, ArrowRight,
     ClipboardList, TrendingUp, Loader2, Eye, Upload, Image as ImageIcon, Video, Camera,
-    Ban, RotateCcw, AlertCircle, Package
+    Ban, RotateCcw, AlertCircle, Package, Trash2
 } from 'lucide-react';
 import {
     collection, query, where, getDocs, addDoc, updateDoc,
     doc, serverTimestamp, orderBy, deleteDoc, onSnapshot, Timestamp, getDoc, setDoc,
-    limit, startAfter, DocumentSnapshot, writeBatch, increment
+    limit, startAfter, DocumentSnapshot, runTransaction
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
 import { useConfig } from '@/lib/ConfigContext';
-import type { RepairTicket, RepairStatus, PaymentStatus, DeviceChecklist, StatusTimelineEntry, WorkflowNode } from '@/lib/types';
+import type { RepairTicket, RepairStatus, PaymentStatus, DeviceChecklist, StatusTimelineEntry, WorkflowNode, GiftItem, Product, RepairIssue } from '@/lib/types';
 import { calculateAndSaveCommissions } from '@/lib/commissionUtils';
-import { uploadImage, uploadMedia } from '@/lib/storage';
+import { PART_CATEGORY, PART_CATEGORY_LABEL, isPartCategory } from '@/lib/constants';
+import { uploadMedia } from '@/lib/storage';
 import { isChecklistComplete, isYouTubeUrl, getYouTubeEmbedUrl, areAllPartsReady } from '@/lib/workflowFeatures';
 import PrintableReceipt from '@/components/admin/PrintableReceipt';
 import PrintableRepairInvoice from '@/components/admin/PrintableRepairInvoice';
@@ -33,7 +34,8 @@ import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
 import Modal from '@/components/admin/Modal';
 import CategoryTaxonomySelector from '@/components/admin/CategoryTaxonomySelector';
-
+import MediaManager from '@/components/admin/MediaManager';
+import CurrencyInput from '@/components/admin/CurrencyInput';
 
 // Removal of hardcoded TERMINAL_STATUSES since we use Workflow settings now.
 
@@ -58,46 +60,47 @@ async function ensureConsolidatedImportReceiptForTicket(
 
     const items = requestedParts.map((p) => ({
         productId: p.productId || '',
-        productName: p.productName || p.partName || p.name || 'Linh kiện',
+        productName: p.productName || p.partName || p.name || PART_CATEGORY_LABEL,
         quantity: p.quantity || 1,
         importPrice: 0,
         quality: p.quality || 'Zin',
-        isNewProduct: (p.productId || '').startsWith('custom_'),
-        category: 'Linh kiện',
+        category: PART_CATEGORY,
     }));
 
-    const existingSnap = await getDoc(receiptRef);
+    await runTransaction(db, async (transaction) => {
+        const existingSnap = await transaction.get(receiptRef);
 
-    if (existingSnap.exists()) {
-        const existingData = existingSnap.data();
-        if (existingData.status !== 'draft') return; // đã ordered/completed → không sửa
+        if (existingSnap.exists()) {
+            const existingData = existingSnap.data();
+            if (existingData.status !== 'draft') return; // đã ordered/completed → không sửa
 
-        const existingItems: typeof items = existingData.items || [];
-        const existingProductIds = new Set(existingItems.map((i: { productId: string }) => i.productId));
+            const existingItems: typeof items = existingData.items || [];
+            const existingProductIds = new Set(existingItems.map((i: { productId: string }) => i.productId));
 
-        // Chỉ thêm các parts mới chưa có trong phiếu
-        const newItems = items.filter(i => !existingProductIds.has(i.productId));
-        if (newItems.length === 0) return; // không có gì mới
+            // Chỉ thêm các parts mới chưa có trong phiếu
+            const newItems = items.filter(i => !existingProductIds.has(i.productId));
+            if (newItems.length === 0) return; // không có gì mới
 
-        await updateDoc(receiptRef, {
-            items: [...existingItems, ...newItems],
-            note: `Tổng hợp linh kiện yêu cầu từ phiếu SC #${ticket.id.slice(-6).toUpperCase()} — ${ticket.customer?.name || ''} — ${ticket.deviceInfo?.model || ''}`,
-            updatedAt: serverTimestamp(),
-        });
-    } else {
-        // Tạo mới với ID cố định
-        await setDoc(receiptRef, {
-            supplier: `Yêu cầu từ KTV — Phiếu SC #${ticket.id.slice(-6).toUpperCase()}`,
-            items,
-            totalAmount: 0,
-            note: `Tổng hợp ${requestedParts.length} linh kiện yêu cầu từ phiếu SC #${ticket.id.slice(-6).toUpperCase()} — ${ticket.customer?.name || ''} — ${ticket.deviceInfo?.model || ''}`,
-            status: 'draft',
-            repairTicketId: ticket.id,
-            createdBy: actor?.uid || 'system',
-            createdByName: actor?.displayName || 'Admin',
-            createdAt: serverTimestamp(),
-        });
-    }
+            transaction.update(receiptRef, {
+                items: [...existingItems, ...newItems],
+                note: `Tổng hợp linh kiện yêu cầu từ phiếu SC #${ticket.id.slice(-6).toUpperCase()} — ${ticket.customer?.name || ''} — ${ticket.deviceInfo?.model || ''}`,
+                updatedAt: serverTimestamp(),
+            });
+        } else {
+            // Tạo mới với ID cố định
+            transaction.set(receiptRef, {
+                supplier: '', // Left blank so it doesn't get saved as a real supplier during import
+                items,
+                totalAmount: 0,
+                note: `Yêu cầu từ KTV — Phiếu SC #${ticket.id.slice(-6).toUpperCase()} — ${ticket.customer?.name || ''} — ${ticket.deviceInfo?.model || ''}`,
+                status: 'draft',
+                repairTicketId: ticket.id,
+                createdBy: actor?.uid || 'system',
+                createdByName: actor?.displayName || 'Admin',
+                createdAt: serverTimestamp(),
+            });
+        }
+    });
 }
 
 const formatPrice = (p: number) => p > 0 ? p.toLocaleString('vi-VN') + 'đ' : '—';
@@ -147,7 +150,8 @@ export default function RepairPage() {
     // Media upload states
     const [preMediaFiles, setPreMediaFiles] = useState<string[]>([]);
     const [postMediaFiles, setPostMediaFiles] = useState<string[]>([]);
-    const [uploadingMedia, setUploadingMedia] = useState(false);
+    const [showPreMediaManager, setShowPreMediaManager] = useState(false);
+    const [showPostMediaManager, setShowPostMediaManager] = useState(false);
 
     // Filters
     const [searchTerm, setSearchTerm] = useState('');
@@ -171,6 +175,10 @@ export default function RepairPage() {
     const [paymentConfirmed, setPaymentConfirmed] = useState(false);
     const [handoverAdditionalFees, setHandoverAdditionalFees] = useState<string>('');
     const [handoverDiscountAmount, setHandoverDiscountAmount] = useState<string>('');
+    // Gift product selection (replaces old handoverGiftDiscount text input)
+    const [handoverGiftItems, setHandoverGiftItems] = useState<GiftItem[]>([]);
+    const [giftProducts, setGiftProducts] = useState<Product[] | null>(null);
+    const [giftSearchTerm, setGiftSearchTerm] = useState('');
 
     // Detail Modal (Eye Icon)
     const [viewingTicket, setViewingTicket] = useState<RepairTicket | null>(null);
@@ -205,6 +213,7 @@ export default function RepairPage() {
         // Issue
         issueDescription: '',
         techNotes: '',
+        issues: [] as RepairIssue[],
         // Payment split
         partsCost: '' as string | number,
         laborCost: '' as string | number,
@@ -220,7 +229,7 @@ export default function RepairPage() {
 
     const [dynamicStatuses, setDynamicStatuses] = useState<WorkflowNode[]>([]);
     const [warrantyStatuses, setWarrantyStatuses] = useState<WorkflowNode[]>([]);
-    const [statusLoading, setStatusLoading] = useState(true);
+    const [, setStatusLoading] = useState(true);
 
     const getWorkflowForTicket = (ticket: RepairTicket): WorkflowNode[] => {
         return ticket.ticketType === 'warranty' ? warrantyStatuses : dynamicStatuses;
@@ -307,7 +316,7 @@ export default function RepairPage() {
                 if (docSnap.exists()) {
                     combined.push({ id: docSnap.id, ...docSnap.data() } as RepairTicket);
                 }
-            } catch (e) {
+            } catch {
                 // Ignore
             }
             
@@ -316,8 +325,8 @@ export default function RepairPage() {
                     const map = new Map(prev.map(p => [p.id, p]));
                     combined.forEach(c => map.set(c.id, c));
                     return Array.from(map.values()).sort((a,b) => {
-                        const tA = (a.createdAt as any)?.toMillis?.() || 0;
-                        const tB = (b.createdAt as any)?.toMillis?.() || 0;
+                        const tA = (a.createdAt as unknown as Timestamp)?.toMillis?.() || 0;
+                        const tB = (b.createdAt as unknown as Timestamp)?.toMillis?.() || 0;
                         return tB - tA;
                     });
                 });
@@ -341,6 +350,20 @@ export default function RepairPage() {
             } catch (e) { console.error(e); }
         })();
     }, []);
+
+    // ── Lazy load gift products (retail/accessories only, cached across modal opens) ──
+    useEffect(() => {
+        if (handoverModal && giftProducts === null) {
+            getDocs(query(
+                collection(db, 'products'),
+                where('status', '==', 'active'),
+                limit(200)
+            )).then(snap => {
+                const all = snap.docs.map(d => ({ id: d.id, ...d.data() } as Product));
+                setGiftProducts(all.filter(p => !isPartCategory(p.category, p.categoryIds)));
+            }).catch(console.error);
+        }
+    }, [handoverModal, giftProducts]);
 
     // Fetch Appointments removed according to cost-saving dev feedback
 
@@ -504,35 +527,44 @@ export default function RepairPage() {
             // Create consolidated import receipt if there are requested parts (avoid duplicates).
             await ensureConsolidatedImportReceiptForTicket(ticket, user);
 
-            // Build statusTimeline entry
+            // Build statusTimeline entry inside transaction (read fresh from Firestore)
             const now = Date.now();
-            const oldTimeline: StatusTimelineEntry[] = ticket.statusTimeline || [];
-            const newEntry: StatusTimelineEntry = { status: nextStatus, timestamp: now };
-            // Calculate duration of previous status
-            if (oldTimeline.length > 0) {
-                const lastEntry = oldTimeline[oldTimeline.length - 1];
-                lastEntry.durationInMinutes = Math.round((now - lastEntry.timestamp) / 60000);
-            }
-            const updatedTimeline = [...oldTimeline, newEntry];
 
-            const update: Record<string, unknown> = {
-                status: nextStatus,
-                statusTimeline: updatedTimeline,
-                updatedAt: serverTimestamp(),
-                'staff.assignedTechnician': user?.uid || '',
-                'staff.assignedTechnicianName': user?.displayName || 'Admin',
-            };
-            if (nextCfg?.isTerminal) {
-                update['timing.completedAt'] = serverTimestamp();
-            }
-            await updateDoc(doc(db, 'repairs', ticket.id), update);
+            const ticketRef = doc(db, 'repairs', ticket.id);
+            await runTransaction(db, async (tx) => {
+                const snap = await tx.get(ticketRef);
+                if (!snap.exists()) throw new Error('Phiếu sửa chữa không tồn tại.');
+
+                const freshData = snap.data();
+                const freshTimeline: StatusTimelineEntry[] = freshData.statusTimeline || [];
+
+                // Calculate duration of previous status
+                if (freshTimeline.length > 0) {
+                    const lastEntry = { ...freshTimeline[freshTimeline.length - 1] };
+                    lastEntry.durationInMinutes = Math.round((now - lastEntry.timestamp) / 60000);
+                    freshTimeline[freshTimeline.length - 1] = lastEntry;
+                }
+                const updatedTimeline = [...freshTimeline, { status: nextStatus, timestamp: now }];
+
+                const update: Record<string, unknown> = {
+                    status: nextStatus,
+                    statusTimeline: updatedTimeline,
+                    updatedAt: serverTimestamp(),
+                    'staff.assignedTechnician': user?.uid || '',
+                    'staff.assignedTechnicianName': user?.displayName || 'Admin',
+                };
+                if (nextCfg?.isTerminal) {
+                    update['timing.completedAt'] = serverTimestamp();
+                }
+                tx.update(ticketRef, update);
+            });
 
             // ── Dynamic Commission Calculation ──
             const enableTechCommission = nextCfg?.allowedFeatures?.includes('enableTechnicianCommission');
             const enableSellerCommission = nextCfg?.allowedFeatures?.includes('enableSellerCommission');
             
             if (enableTechCommission || enableSellerCommission) {
-                const commissionTicket = { ...ticket, ...update, status: nextStatus as RepairStatus } as RepairTicket;
+                const commissionTicket = { ...ticket, status: nextStatus as RepairStatus, staff: { ...ticket.staff, assignedTechnician: user?.uid || '', assignedTechnicianName: user?.displayName || 'Admin' } } as RepairTicket;
                 if (enableTechCommission && commissionTicket.staff?.assignedTechnician) {
                     calculateAndSaveCommissions(
                         { uid: commissionTicket.staff.assignedTechnician, displayName: commissionTicket.staff.assignedTechnicianName || 'N/A' },
@@ -568,33 +600,44 @@ export default function RepairPage() {
             return;
         }
         try {
-            // Build statusTimeline
-            const now = Date.now();
-            const oldTimeline: StatusTimelineEntry[] = noteModal.ticket.statusTimeline || [];
-            const newEntry: StatusTimelineEntry = { status: noteModal.targetStatus, timestamp: now };
-            if (oldTimeline.length > 0) {
-                const lastEntry = oldTimeline[oldTimeline.length - 1];
-                lastEntry.durationInMinutes = Math.round((now - lastEntry.timestamp) / 60000);
-            }
-            const updatedTimeline = [...oldTimeline, newEntry];
+            const ticketRef = doc(db, 'repairs', noteModal.ticket.id);
+            await runTransaction(db, async (tx) => {
+                const snap = await tx.get(ticketRef);
+                if (!snap.exists()) throw new Error('Phiếu sửa chữa không tồn tại.');
+                const freshData = snap.data();
 
-            const update: Record<string, unknown> = {
-                status: noteModal.targetStatus,
-                statusTimeline: updatedTimeline,
-                deliveryNote: deliveryNote.trim(),
-                updatedAt: serverTimestamp(),
-            };
-            if (noteModal.targetStatus === 'out') {
-                update['timing.completedAt'] = serverTimestamp();
-                if (noteModal.ticket.payment?.status === 'unpaid') {
-                    update['payment.status'] = 'pay_later';
+                // Re-check terminal status with fresh data
+                const freshCfg = workflow.find(s => s.id === freshData.status);
+                if (freshCfg?.isTerminal) throw new Error('Phiếu đã đóng, không thể thay đổi!');
+
+                // Build statusTimeline from fresh data
+                const now = Date.now();
+                const freshTimeline: StatusTimelineEntry[] = freshData.statusTimeline || [];
+                if (freshTimeline.length > 0) {
+                    const lastEntry = { ...freshTimeline[freshTimeline.length - 1] };
+                    lastEntry.durationInMinutes = Math.round((now - lastEntry.timestamp) / 60000);
+                    freshTimeline[freshTimeline.length - 1] = lastEntry;
                 }
-            }
-            await updateDoc(doc(db, 'repairs', noteModal.ticket.id), update);
+                const updatedTimeline = [...freshTimeline, { status: noteModal.targetStatus, timestamp: now }];
+
+                const update: Record<string, unknown> = {
+                    status: noteModal.targetStatus,
+                    statusTimeline: updatedTimeline,
+                    deliveryNote: deliveryNote.trim(),
+                    updatedAt: serverTimestamp(),
+                };
+                if (noteModal.targetStatus === 'out') {
+                    update['timing.completedAt'] = serverTimestamp();
+                    if (freshData.payment?.status === 'unpaid') {
+                        update['payment.status'] = 'pay_later';
+                    }
+                }
+                tx.update(ticketRef, update);
+            });
             
             // ── Commission: done = cộng (theo feature), hoan_phi = chỉ refund KTV (luôn chạy)
             const targetStatusCfg = workflow.find(s => s.id === noteModal.targetStatus);
-            const commissionTicket = { ...noteModal.ticket, ...update, status: noteModal.targetStatus as RepairStatus } as RepairTicket;
+            const commissionTicket = { ...noteModal.ticket, status: noteModal.targetStatus as RepairStatus, deliveryNote: deliveryNote.trim() } as RepairTicket;
 
             if (noteModal.targetStatus === 'refund') {
                 // Hoàn phí → chỉ bù trừ hoa hồng KTV
@@ -627,9 +670,10 @@ export default function RepairPage() {
 
             setNoteModal(null);
             setDeliveryNote('');
-        } catch (e) {
-            console.error(e);
-            toastError('Lỗi!');
+            toastSuccess('Cập nhật trạng thái thành công!');
+        } catch (e: unknown) {
+            console.error('Error in handleNoteSubmit:', e);
+            toastError(e instanceof Error ? e.message : 'Lỗi cập nhật trạng thái!');
         }
     };
 
@@ -656,210 +700,287 @@ export default function RepairPage() {
                 lastEntry.durationInMinutes = Math.round((now - lastEntry.timestamp) / 60000);
             }
 
+            const hasValidParts = (ticket.parts || []).filter(p => p.status !== 'rejected').length > 0;
+            const computedPartsCost = (ticket.parts || [])
+                .filter(p => p.status !== 'rejected' && !p.isWarrantyCovered)
+                .reduce((sum, p) => {
+                    const qty = Math.max(1, Number(p?.quantity) || 1);
+                    const unit = Number(p?.unitPriceAtUse ?? p?.price ?? 0) || 0;
+                    return sum + unit * qty;
+                }, 0);
+                
+            const finalPartsCost = hasValidParts ? computedPartsCost : (ticket.payment?.partsCost || 0);
+
             const parsedAdditionalFees = Number(handoverAdditionalFees.replace(/[^0-9-]/g, '')) || 0;
             const parsedDiscountAmount = Number(handoverDiscountAmount.replace(/[^0-9-]/g, '')) || 0;
-            const computedAmount = (ticket.payment?.partsCost || 0) + (ticket.payment?.laborCost || 0) + parsedAdditionalFees - parsedDiscountAmount;
+            const parsedGiftDiscount = handoverGiftItems.reduce((sum, g) => sum + g.price * g.quantity, 0);
+            const computedAmount = finalPartsCost + (ticket.payment?.laborCost || 0) + parsedAdditionalFees - parsedDiscountAmount;
+            
+            if (parsedGiftDiscount > computedAmount) {
+                alert("Giá trị quà tặng không được vượt quá tổng giá trị hoá đơn.");
+                return;
+            }
 
             const commonPaymentUpdate = {
+                'payment.partsCost': finalPartsCost,
                 'payment.additionalFees': parsedAdditionalFees,
                 'payment.discountAmount': parsedDiscountAmount,
+                'payment.giftDiscount': parsedGiftDiscount,
+                'payment.giftItems': handoverGiftItems.length > 0 ? handoverGiftItems : [],
                 'payment.amount': computedAmount,
             };
             const updatedPaymentForCommission = {
                 ...ticket.payment,
+                partsCost: finalPartsCost,
                 additionalFees: parsedAdditionalFees,
                 discountAmount: parsedDiscountAmount,
                 amount: computedAmount
             };
 
+            const targetStatusId = action === 'done' ? (targetStatus || 'done') : action;
+            let patchedParts: NonNullable<RepairTicket['parts']> = ticket.parts || [];
             if (action === 'done') {
-                // Trả máy thành công → paid + trạng thái targetStatus
-                const targetStatusId = targetStatus || 'done';
-                const newTimeline = [...oldTimeline, { status: targetStatusId, timestamp: now }];
+                patchedParts = await stampWarrantyOnParts(ticket.parts || [], now) as NonNullable<RepairTicket['parts']>;
+            }
 
-                // ── Warranty stamping: calculate warranty for each selected part ──
-                const patchedParts = await stampWarrantyOnParts(ticket.parts || [], now);
+            await runTransaction(db, async (transaction) => {
+                const ticketRef = doc(db, 'repairs', ticket.id);
+                // 1. GATHER ALL READS
+                const ticketDoc = await transaction.get(ticketRef);
+                
+                if (!ticketDoc.exists()) {
+                    throw new Error('Phiếu sửa chữa không tồn tại!');
+                }
+                const currentData = ticketDoc.data() as RepairTicket;
+                
+                // Optimistic Locking
+                if (ticket.version !== undefined && currentData.version !== undefined && currentData.version !== ticket.version) {
+                    throw new Error('Phiếu đã bị người khác thay đổi. Vui lòng tải lại trang!');
+                }
+
+                // Gather all product IDs to read ahead of time
+                const validParts = (ticket.parts || []).filter(p => p.productId && p.status === 'selected');
+                const partProductIds = validParts.map(p => p.productId) as string[];
+                
+                let giftProductIds: string[] = [];
+                if (action === 'done' || action === 'out') {
+                    giftProductIds = handoverGiftItems.map(g => g.productId).filter(Boolean);
+                }
+
+                const allProductIds = Array.from(new Set([...partProductIds, ...giftProductIds]));
+                const productDocs = new Map<string, DocumentSnapshot>();
+
+                // PERFORM ALL READS BEFORE ANY WRITES
+                for (const pid of allProductIds) {
+                    const pRef = doc(db, 'products', pid);
+                    const pDoc = await transaction.get(pRef);
+                    if (pDoc.exists()) {
+                        productDocs.set(pid, pDoc);
+                    }
+                }
+
+                // 2. AGGREGATE INVENTORY CHANGES
+                const productUpdates = new Map<string, { stockChange: number, heldChange: number }>();
+                
+                if (action === 'done') {
+                    // Aggregate parts
+                    const validPatchedParts = patchedParts.filter(p => p.productId && p.status === 'selected');
+                    for (const p of validPatchedParts) {
+                        if (p.productId) {
+                            const current = productUpdates.get(p.productId) || { stockChange: 0, heldChange: 0 };
+                            const qty = Math.max(1, Number(p.quantity) || 1);
+                            current.stockChange -= qty;
+                            current.heldChange -= qty;
+                            
+                            // Snapshot supplier for traceability
+                            const pDoc = productDocs.get(p.productId);
+                            const pData = pDoc?.data();
+                            if (pData?.supplier && !p.supplierName) {
+                                p.supplierName = pData.supplier;
+                            }
+                            productUpdates.set(p.productId, current);
+                        }
+                    }
+                    
+                    // Aggregate gifts
+                    for (const gift of handoverGiftItems) {
+                        if (gift.productId) {
+                            const current = productUpdates.get(gift.productId) || { stockChange: 0, heldChange: 0 };
+                            current.stockChange -= gift.quantity;
+                            productUpdates.set(gift.productId, current);
+                        }
+                    }
+                } else if (action === 'out' || action === 'refund') {
+                    // Release held parts
+                    for (const p of validParts) {
+                        if (p.productId) {
+                            const current = productUpdates.get(p.productId) || { stockChange: 0, heldChange: 0 };
+                            const qty = Math.max(1, Number(p.quantity) || 1);
+                            current.heldChange -= qty;
+                            productUpdates.set(p.productId, current);
+                        }
+                    }
+                }
+
+                // 3. VALIDATIONS BASED ON AGGREGATED CHANGES
+                for (const [pid, changes] of productUpdates.entries()) {
+                    const pDoc = productDocs.get(pid);
+                    if (!pDoc || !pDoc.exists()) {
+                        throw new Error(`Sản phẩm (ID: ${pid}) không tồn tại trong kho.`);
+                    }
+                    const currentStock = Number(pDoc.data()?.stock) || 0;
+                    const currentHeld = Number(pDoc.data()?.held) || 0;
+
+                    if (changes.stockChange < 0) {
+                        const neededStock = Math.abs(changes.stockChange);
+                        if (currentStock < neededStock) {
+                            throw new Error(`Sản phẩm "${pDoc.data()?.name || pid}" không đủ tồn kho vật lý (Còn ${currentStock}, cần ${neededStock}).`);
+                        }
+                    }
+                    if (changes.heldChange < 0) {
+                        const neededHeld = Math.abs(changes.heldChange);
+                        if (currentHeld < neededHeld) {
+                            throw new Error(`Sản phẩm "${pDoc.data()?.name || pid}" có số lượng giữ chỗ không khớp (Đang giữ ${currentHeld}, cần giải phóng ${neededHeld}).`);
+                        }
+                    }
+                }
+
+                // 4. PREPARE TICKET UPDATES
+                const newVersion = (currentData.version || 0) + 1;
+                const newTimeline = [...(currentData.statusTimeline || oldTimeline), { status: targetStatusId, timestamp: now }];
+                const currentPaymentHistory = [...(currentData.paymentHistory || [])];
+                const deposit = currentData.payment?.depositAmount || 0;
 
                 const handoverUpdate: Record<string, unknown> = {
                     status: targetStatusId,
-                    'payment.status': 'paid',
-                    ...commonPaymentUpdate,
                     statusTimeline: newTimeline,
-                    deliveryNote: handoverNote.trim() || 'Trả máy thành công',
-                    'timing.completedAt': serverTimestamp(),
-                    updatedAt: serverTimestamp(),
+                    version: newVersion,
+                    ...commonPaymentUpdate,
                 };
-                if (patchedParts !== ticket.parts) {
+
+                if (handoverNote.trim()) {
+                    handoverUpdate.handoverNote = handoverNote.trim();
+                }
+
+                // 5. PERFORM ALL WRITES
+                // 5.1 Update Products + Audit Trail
+                for (const [pid, changes] of productUpdates.entries()) {
+                    if (changes.stockChange === 0 && changes.heldChange === 0) continue;
+                    
+                    const pDoc = productDocs.get(pid);
+                    if (pDoc) {
+                        const currentStock = Number(pDoc.data()?.stock) || 0;
+                        const currentHeld = Number(pDoc.data()?.held) || 0;
+                        const pRef = doc(db, 'products', pid);
+                        transaction.update(pRef, {
+                            stock: currentStock + changes.stockChange,
+                            held: currentHeld + changes.heldChange
+                        });
+
+                        // Audit Trail (only log actual stock changes)
+                        if (changes.stockChange !== 0) {
+                            const logRef = doc(collection(db, 'inventory_logs'));
+                            transaction.set(logRef, {
+                                productId: pid,
+                                productName: pDoc.data()?.name || pid,
+                                quantity: changes.stockChange,
+                                costPriceAtLog: Number(pDoc.data()?.costPrice) || 0,
+                                type: action === 'done' ? 'REPAIR_HANDOVER' : action === 'out' ? 'REPAIR_OUT' : 'REPAIR_REFUND',
+                                referenceId: ticket.id,
+                                referenceType: 'repair_ticket',
+                                createdBy: user?.uid || '',
+                                createdByName: user?.displayName || '',
+                                createdAt: serverTimestamp(),
+                            });
+                        }
+                    }
+                }
+
+                // 5.2 Update Ticket
+                if (action === 'done') {
                     handoverUpdate.parts = patchedParts;
-                }
-                const batch = writeBatch(db);
-                batch.update(doc(db, 'repairs', ticket.id), handoverUpdate as any);
-
-                // Release held inventory
-                const partsForInventory = patchedParts || ticket.parts || [];
-                const processBatchCache = new Set<string>();
-                for (const pt of partsForInventory) {
-                    if (pt.status === 'selected' && pt.productId && !pt.productId.startsWith('custom_') && !processBatchCache.has(pt.productId)) {
-                        processBatchCache.add(pt.productId);
-                        // Sum up qty just in case there are duplicated items? Handled by grouping or we just do multiple updates.
-                        // Wait, multiple updates to same doc in one batch overrides. 
+                    
+                    let collectedAmount = 0;
+                    if (paymentConfirmed) {
+                        collectedAmount = computedAmount - deposit;
+                        if (collectedAmount > 0) {
+                            currentPaymentHistory.push({
+                                type: 'full',
+                                amount: collectedAmount,
+                                timestamp: now,
+                                note: 'Thu tiền khách hàng lúc giao máy'
+                            });
+                        }
+                        handoverUpdate['payment.status'] = 'paid';
+                        handoverUpdate.paymentHistory = currentPaymentHistory;
+                    }
+                    handoverUpdate.timing = { ...ticket.timing, completedAt: serverTimestamp() };
+                } else if (action === 'out') {
+                    if (paymentConfirmed) {
+                        let amountToCollect = 0;
+                        if (parsedAdditionalFees > 0) {
+                            amountToCollect = parsedAdditionalFees;
+                            currentPaymentHistory.push({
+                                type: 'additional',
+                                amount: parsedAdditionalFees,
+                                timestamp: now,
+                                note: 'Thu phụ phí máy Out'
+                            });
+                        }
+                        if (deposit > 0 && amountToCollect <= deposit) {
+                            const refundAmt = deposit - amountToCollect;
+                            if (refundAmt > 0) {
+                                currentPaymentHistory.push({
+                                    type: 'refund',
+                                    amount: refundAmt,
+                                    timestamp: now,
+                                    note: 'Hoàn tiền cọc máy Out (đã trừ phụ phí nếu có)'
+                                });
+                            }
+                            handoverUpdate['payment.status'] = 'refunded';
+                        } else if (deposit > 0 && amountToCollect > deposit) {
+                            handoverUpdate['payment.status'] = 'paid';
+                        }
+                        handoverUpdate.paymentHistory = currentPaymentHistory;
+                    }
+                } else if (action === 'refund') {
+                    if (paymentConfirmed) {
+                        const amountToRefund = (ticket.payment?.amount || 0) + deposit;
+                        if (amountToRefund > 0) {
+                            currentPaymentHistory.push({
+                                type: 'refund',
+                                amount: amountToRefund,
+                                timestamp: now,
+                                note: 'Hoàn tiền trả máy (Refund)'
+                            });
+                        }
+                        handoverUpdate['payment.status'] = 'refunded';
+                        handoverUpdate.paymentHistory = currentPaymentHistory;
                     }
                 }
-                // Group by product Id to update properly
-                const productDeltas = new Map<string, number>();
-                for (const pt of partsForInventory) {
-                    if (pt.status === 'selected' && pt.productId && !pt.productId.startsWith('custom_')) {
-                        const amt = Math.max(1, Number(pt.quantity) || 1);
-                        productDeltas.set(pt.productId, (productDeltas.get(pt.productId) || 0) + amt);
-                    }
-                }
-                for (const [pId, amt] of productDeltas.entries()) {
-                    batch.update(doc(db, 'products', pId), {
-                        held: increment(-amt),
-                        updatedAt: serverTimestamp()
-                    });
-                }
-                
-                await batch.commit();
 
-                // ── Commission calculation based on workflow features ──
-                const doneStatusCfg = workflow.find(s => s.id === targetStatusId);
-                const features = doneStatusCfg?.allowedFeatures || [];
-                const enableTechCommission = features.includes('enableTechnicianCommission');
-                const enableSellerCommission = features.includes('enableSellerCommission');
+                transaction.update(ticketRef, handoverUpdate);
+            });
 
-                const commissionTicket: RepairTicket = {
-                    ...ticket,
-                    status: targetStatusId as RepairStatus,
-                    payment: { ...updatedPaymentForCommission, status: 'paid' },
-                    timing: { ...ticket.timing, completedAt: Timestamp.fromMillis(now) },
-                };
-
-                // KTV được phân công
-                if (enableTechCommission && ticket.staff?.assignedTechnician) {
+            // Commission processing after successful transaction
+            const commissionTicket = { ...ticket, payment: updatedPaymentForCommission, status: targetStatusId };
+            
+            if (action === 'done' && paymentConfirmed) {
+                if (ticket.staff?.assignedTechnician) {
                     calculateAndSaveCommissions(
                         { uid: ticket.staff.assignedTechnician, displayName: ticket.staff.assignedTechnicianName || 'N/A' },
                         'repair',
                         commissionTicket
                     ).catch(console.error);
                 }
-
-                // Nhân viên chốt đơn (người tạo phiếu)
-                if (enableSellerCommission && ticket.staff?.createdBy) {
-                    calculateAndSaveCommissions(
-                        { uid: ticket.staff.createdBy, displayName: ticket.staff.createdByName || 'N/A' },
-                        'repair',
-                        commissionTicket
-                    ).catch(console.error);
-                }
-            } else if (action === 'out') {
-                // Out → trả máy, không thu tiền (chỉ khi chưa cọc)
-                const newTimeline = [...oldTimeline, { status: 'out', timestamp: now }];
-                const batch = writeBatch(db);
-                batch.update(doc(db, 'repairs', ticket.id), {
-                    status: 'out',
-                    ...commonPaymentUpdate,
-                    statusTimeline: newTimeline,
-                    deliveryNote: handoverNote.trim() || 'Không sửa được, trả máy',
-                    'timing.completedAt': serverTimestamp(),
-                    updatedAt: serverTimestamp(),
-                });
-                
-                // Return held parts to stock
-                const productDeltas = new Map<string, number>();
-                for (const pt of (ticket.parts || [])) {
-                    if (pt.status === 'selected' && pt.productId && !pt.productId.startsWith('custom_')) {
-                        const amt = Math.max(1, Number(pt.quantity) || 1);
-                        productDeltas.set(pt.productId, (productDeltas.get(pt.productId) || 0) + amt);
-                    }
-                }
-                for (const [pId, amt] of productDeltas.entries()) {
-                    batch.update(doc(db, 'products', pId), {
-                        held: increment(-amt),
-                        stock: increment(amt),
-                        updatedAt: serverTimestamp()
-                    });
-                }
-                await batch.commit();
-                
-                // ── Commission calculation based on workflow features ──
-                const doneStatusCfg = workflow.find(s => s.id === 'out');
-                const features = doneStatusCfg?.allowedFeatures || [];
-                const enableTechCommission = features.includes('enableTechnicianCommission');
-                const enableSellerCommission = features.includes('enableSellerCommission');
-
-                const commissionTicket: RepairTicket = {
-                    ...ticket,
-                    status: 'out' as RepairStatus,
-                    payment: { ...updatedPaymentForCommission },
-                    timing: { ...ticket.timing, completedAt: Timestamp.fromMillis(now) },
-                };
-
-                // KTV được phân công
-                if (enableTechCommission && ticket.staff?.assignedTechnician) {
+            } else if (action === 'refund' && paymentConfirmed) {
+                if (ticket.staff?.assignedTechnician) {
                     calculateAndSaveCommissions(
                         { uid: ticket.staff.assignedTechnician, displayName: ticket.staff.assignedTechnicianName || 'N/A' },
                         'repair',
-                        commissionTicket
+                        commissionTicket,
+                        true // isRefund
                     ).catch(console.error);
-                }
-
-                // Nhân viên chốt đơn (người tạo phiếu)
-                if (enableSellerCommission && ticket.staff?.createdBy) {
-                    calculateAndSaveCommissions(
-                        { uid: ticket.staff.createdBy, displayName: ticket.staff.createdByName || 'N/A' },
-                        'repair',
-                        commissionTicket
-                    ).catch(console.error);
-                }
-            } else if (action === 'refund') {
-                // Hoàn phí → refunded + hoan_phi
-                const newTimeline = [...oldTimeline, { status: 'refund', timestamp: now }];
-                const batch = writeBatch(db);
-                batch.update(doc(db, 'repairs', ticket.id), {
-                    status: 'refund',
-                    'payment.status': 'refunded',
-                    ...commonPaymentUpdate,
-                    statusTimeline: newTimeline,
-                    deliveryNote: handoverNote.trim() || 'Hoàn phí cho khách',
-                    'timing.completedAt': serverTimestamp(),
-                    updatedAt: serverTimestamp(),
-                });
-                
-                // Return held parts to stock
-                const productDeltas = new Map<string, number>();
-                for (const pt of (ticket.parts || [])) {
-                    if (pt.status === 'selected' && pt.productId && !pt.productId.startsWith('custom_')) {
-                        const amt = Math.max(1, Number(pt.quantity) || 1);
-                        productDeltas.set(pt.productId, (productDeltas.get(pt.productId) || 0) + amt);
-                    }
-                }
-                for (const [pId, amt] of productDeltas.entries()) {
-                    batch.update(doc(db, 'products', pId), {
-                        held: increment(-amt),
-                        stock: increment(amt),
-                        updatedAt: serverTimestamp()
-                    });
-                }
-                await batch.commit();
-                
-                // Hoàn phí → chỉ bù trừ hoa hồng cho KTV (refund), không trừ người chốt đơn
-                // Phiếu warranty không tính hoa hồng âm vì không có hoa hồng dương nào
-                if (ticket.ticketType !== 'warranty') {
-                    const commissionTicket: RepairTicket = {
-                        ...ticket,
-                        status: 'refund' as RepairStatus,
-                        payment: { ...updatedPaymentForCommission, status: 'refunded' },
-                        timing: { ...ticket.timing, completedAt: serverTimestamp() },
-                    };
-                    if (ticket.staff?.assignedTechnician) {
-                        calculateAndSaveCommissions(
-                            { uid: ticket.staff.assignedTechnician, displayName: ticket.staff.assignedTechnicianName || 'N/A' },
-                            'repair',
-                            commissionTicket,
-                            true // isRefund — luôn tạo bản ghi âm để bù trừ hoa hồng đã cộng khi done
-                        ).catch(console.error);
-                    }
                 }
             }
 
@@ -868,9 +989,10 @@ export default function RepairPage() {
             setPaymentConfirmed(false);
             setHandoverAdditionalFees('');
             setHandoverDiscountAmount('');
-        } catch (e) {
+            toastSuccess('Bàn giao thành công!');
+        } catch (e: unknown) {
             console.error(e);
-            toastError('Lỗi xử lý bàn giao!');
+            toastError(e instanceof Error ? e.message : 'Lỗi xử lý bàn giao!');
         }
     };
 
@@ -974,6 +1096,11 @@ export default function RepairPage() {
                 hasNonGenuineParts: cl?.hasNonGenuineParts || false,
                 issueDescription: ticket.issue?.description || '',
                 techNotes: ticket.issue?.notes || '',
+                issues: ticket.issues && ticket.issues.length > 0
+                    ? ticket.issues
+                    : ticket.issue?.description
+                        ? [{ id: crypto.randomUUID(), label: ticket.issue.description, estimatedPrice: 0, status: 'pending' as const }]
+                        : [],
                 partsCost: ticket.payment?.partsCost || ticket.payment?.amount || '',
                 laborCost: ticket.payment?.laborCost || '',
                 depositAmount: ticket.payment?.depositAmount || '',
@@ -1028,7 +1155,13 @@ export default function RepairPage() {
             preRepairMedia: preMediaFiles,
             postRepairMedia: postMediaFiles,
             statusTimeline: editingTicket?.statusTimeline || [{ status: formData.status, timestamp: Date.now() }],
-            issue: { description: formData.issueDescription, notes: formData.techNotes },
+            issue: {
+                description: formData.issues.length > 0
+                    ? formData.issues.map(i => i.label).join(' | ')
+                    : formData.issueDescription,
+                notes: formData.techNotes
+            },
+            issues: formData.issues.length > 0 ? formData.issues : undefined,
             timing: {
                 receivedAt: editingTicket?.timing?.receivedAt || serverTimestamp(),
                 estimatedReturnAt: formData.estimatedReturnDate
@@ -1052,11 +1185,38 @@ export default function RepairPage() {
             updatedAt: serverTimestamp(),
         };
 
+        // Seed paymentHistory if deposit exists at creation time
+        const depositAmt = Number(formData.depositAmount) || 0;
+        if (depositAmt > 0) {
+            ticketData.paymentHistory = [{
+                type: depositAmt >= ((Number(formData.partsCost) || 0) + (Number(formData.laborCost) || 0)) ? 'full' : 'deposit',
+                amount: depositAmt,
+                timestamp: Date.now(),
+                note: depositAmt >= ((Number(formData.partsCost) || 0) + (Number(formData.laborCost) || 0))
+                    ? 'Thanh toán trước toàn bộ khi tạo phiếu'
+                    : 'Đặt cọc khi tạo phiếu',
+            }];
+        }
+
         try {
             if (editingTicket) {
-                await updateDoc(doc(db, 'repairs', editingTicket.id), ticketData);
+                // Optimistic locking: verify version hasn't changed since form was opened
+                const ticketRef = doc(db, 'repairs', editingTicket.id);
+                await runTransaction(db, async (transaction) => {
+                    const freshDoc = await transaction.get(ticketRef);
+                    if (!freshDoc.exists()) throw new Error('Phiếu sửa chữa không còn tồn tại!');
+                    const freshVersion = freshDoc.data()?.version || 0;
+                    const editVersion = editingTicket.version || 0;
+                    if (freshVersion > editVersion) {
+                        throw new Error('Phiếu đã được cập nhật bởi người khác. Vui lòng tải lại trang.');
+                    }
+                    transaction.update(ticketRef, {
+                        ...ticketData,
+                        version: freshVersion + 1,
+                    });
+                });
             } else {
-                await addDoc(collection(db, 'repairs'), { ...ticketData, createdAt: serverTimestamp() });
+                await addDoc(collection(db, 'repairs'), { ...ticketData, version: 1, createdAt: serverTimestamp() });
                 // Auto-complete the linked appointment
                 if (formData.appointmentId) {
                     await updateDoc(doc(db, 'appointments', formData.appointmentId), {
@@ -1236,7 +1396,9 @@ export default function RepairPage() {
                                         <span className="font-medium text-sm text-gray-800">{ticket.deviceInfo?.model}</span>
                                     </div>
                                     <div className="col-span-2 pb-1 text-xs text-gray-600 truncate max-w-full italic">
-                                        {ticket.issue?.description}
+                                        {ticket.issues && ticket.issues.length > 0
+                                            ? ticket.issues.map(i => i.label).join(', ')
+                                            : ticket.issue?.description}
                                     </div>
                                     {(() => {
                                         const pendingParts = (ticket.parts || []).filter(p => p.status === 'requested' || p.status === 'ordered');
@@ -1356,7 +1518,7 @@ export default function RepairPage() {
                                                 <Smartphone size={14} className="text-gray-400" />
                                                 <span className="font-medium text-sm text-gray-900">{ticket.deviceInfo?.model}</span>
                                             </div>
-                                            <p className="text-xs text-gray-500 truncate max-w-[180px]">{ticket.issue?.description}</p>
+                                            <p className="text-xs text-gray-500 truncate max-w-[180px]">{ticket.issues && ticket.issues.length > 0 ? ticket.issues.map(i => i.label).join(', ') : ticket.issue?.description}</p>
                                             {(() => {
                                                 const pendingParts = (ticket.parts || []).filter(p => p.status === 'requested' || p.status === 'ordered');
                                                 if (pendingParts.length > 0) {
@@ -1726,13 +1888,55 @@ export default function RepairPage() {
                                 </div>
 
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Mô tả lỗi *</label>
-                                    <textarea rows={3} required value={formData.issueDescription}
-                                        onChange={e => setFormData(p => ({ ...p, issueDescription: e.target.value }))}
-                                        aria-label="Mô tả lỗi"
-                                        title="Mô tả lỗi"
-                                        className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20" />
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Danh sách lỗi / vấn đề</label>
+                                    {formData.issues.map((issue, idx) => (
+                                        <div key={issue.id} className="flex items-center gap-2 mb-2">
+                                            <span className="text-xs text-gray-400 w-5 text-center">{idx + 1}</span>
+                                            <input
+                                                type="text"
+                                                placeholder="Tên lỗi (VD: Thay màn hình)"
+                                                value={issue.label}
+                                                onChange={e => setFormData(p => ({
+                                                    ...p,
+                                                    issues: p.issues.map(i => i.id === issue.id ? { ...i, label: e.target.value } : i)
+                                                }))}
+                                                className="flex-1 px-3 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-orange-500/20"
+                                            />
+                                            <CurrencyInput
+                                                placeholder="Giá dự kiến"
+                                                value={issue.estimatedPrice || ''}
+                                                onChange={v => setFormData(p => ({
+                                                    ...p,
+                                                    issues: p.issues.map(i => i.id === issue.id ? { ...i, estimatedPrice: v } : i)
+                                                }))}
+                                                className="w-28 px-3 py-1.5 border rounded-lg text-sm text-right focus:ring-2 focus:ring-orange-500/20"
+                                            />
+                                            <button type="button" onClick={() => setFormData(p => ({ ...p, issues: p.issues.filter(i => i.id !== issue.id) }))}
+                                                className="p-1 text-red-400 hover:text-red-600" title="Xóa">
+                                                <Trash2 size={14} />
+                                            </button>
+                                        </div>
+                                    ))}
+                                    <button type="button"
+                                        onClick={() => setFormData(p => ({
+                                            ...p,
+                                            issues: [...p.issues, { id: crypto.randomUUID(), label: '', estimatedPrice: 0, status: 'pending' }]
+                                        }))}
+                                        className="flex items-center gap-1 text-sm text-orange-600 hover:text-orange-800 font-medium mt-1">
+                                        <Plus size={14} /> Thêm lỗi
+                                    </button>
                                 </div>
+                                {/* Fallback textarea nếu không dùng issues */}
+                                {formData.issues.length === 0 && (
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Mô tả lỗi *</label>
+                                        <textarea rows={3} required value={formData.issueDescription}
+                                            onChange={e => setFormData(p => ({ ...p, issueDescription: e.target.value }))}
+                                            aria-label="Mô tả lỗi"
+                                            title="Mô tả lỗi"
+                                            className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20" />
+                                    </div>
+                                )}
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">Ghi chú kỹ thuật</label>
                                     <textarea rows={2} value={formData.techNotes}
@@ -1828,28 +2032,21 @@ export default function RepairPage() {
                                 </legend>
                                 <div className="flex flex-wrap gap-2">
                                     {preMediaFiles.map((url, i) => (
-                                        <div key={i} className="relative w-20 h-20 rounded-lg overflow-hidden border">
-                                            <img src={url} alt="" className="w-full h-full object-cover" />
+                                        <div key={i} className="relative w-20 h-20 rounded-lg overflow-hidden border group">
+                                            {url.includes('.mp4') || url.includes('.webm') || url.includes('video') ? (
+                                                <video src={url} className="w-full h-full object-cover" muted playsInline />
+                                            ) : (
+                                                <img src={url} alt="" className="w-full h-full object-cover" />
+                                            )}
                                             <button type="button" onClick={() => setPreMediaFiles(prev => prev.filter((_, idx) => idx !== i))}
-                                                className="absolute top-0.5 right-0.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs">×</button>
+                                                className="absolute top-0.5 right-0.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity">×</button>
                                         </div>
                                     ))}
-                                    <label className="w-20 h-20 border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-orange-400 hover:bg-orange-50 transition-colors">
+                                    <button type="button" onClick={() => setShowPreMediaManager(true)}
+                                        className="w-20 h-20 border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center hover:border-orange-400 hover:bg-orange-50 transition-colors">
                                         <Upload size={18} className="text-gray-400" />
                                         <span className="text-[10px] text-gray-400 mt-0.5">Thêm</span>
-                                        <input type="file" accept="image/*,video/*" multiple className="hidden"
-                                            onChange={async (e) => {
-                                                const files = Array.from(e.target.files || []);
-                                                if (!files.length) return;
-                                                setUploadingMedia(true);
-                                                try {
-                                                    const urls = await Promise.all(files.map(f => uploadImage(f, 'repairs/pre')));
-                                                    setPreMediaFiles(prev => [...prev, ...urls]);
-                                                } catch (err) { console.error(err); toastError('Lỗi upload!'); }
-                                                finally { setUploadingMedia(false); }
-                                            }} />
-                                    </label>
-                                    {uploadingMedia && <Loader2 className="animate-spin text-orange-500" size={20} />}
+                                    </button>
                                 </div>
                             </fieldset>
 
@@ -1863,27 +2060,21 @@ export default function RepairPage() {
                                         </legend>
                                         <div className="flex flex-wrap gap-2">
                                             {postMediaFiles.map((url, i) => (
-                                                <div key={i} className="relative w-20 h-20 rounded-lg overflow-hidden border">
-                                                    <img src={url} alt="" className="w-full h-full object-cover" />
+                                                <div key={i} className="relative w-20 h-20 rounded-lg overflow-hidden border group">
+                                                    {url.includes('.mp4') || url.includes('.webm') || url.includes('video') ? (
+                                                        <video src={url} className="w-full h-full object-cover" muted playsInline />
+                                                    ) : (
+                                                        <img src={url} alt="" className="w-full h-full object-cover" />
+                                                    )}
                                                     <button type="button" onClick={() => setPostMediaFiles(prev => prev.filter((_, idx) => idx !== i))}
-                                                        className="absolute top-0.5 right-0.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs">×</button>
+                                                        className="absolute top-0.5 right-0.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity">×</button>
                                                 </div>
                                             ))}
-                                            <label className="w-20 h-20 border-2 border-dashed border-green-300 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-green-400 hover:bg-green-50 transition-colors">
+                                            <button type="button" onClick={() => setShowPostMediaManager(true)}
+                                                className="w-20 h-20 border-2 border-dashed border-green-300 rounded-lg flex flex-col items-center justify-center hover:border-green-400 hover:bg-green-50 transition-colors">
                                                 <Upload size={18} className="text-gray-400" />
                                                 <span className="text-[10px] text-gray-400 mt-0.5">Thêm</span>
-                                                <input type="file" accept="image/*,video/*" multiple className="hidden"
-                                                    onChange={async (e) => {
-                                                        const files = Array.from(e.target.files || []);
-                                                        if (!files.length) return;
-                                                        setUploadingMedia(true);
-                                                        try {
-                                                            const urls = await Promise.all(files.map(f => uploadImage(f, 'repairs/post')));
-                                                            setPostMediaFiles(prev => [...prev, ...urls]);
-                                                        } catch (err) { console.error(err); toastError('Lỗi upload!'); }
-                                                        finally { setUploadingMedia(false); }
-                                                    }} />
-                                            </label>
+                                            </button>
                                         </div>
                                     </fieldset>
                                 </>
@@ -1898,14 +2089,32 @@ export default function RepairPage() {
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Tiền linh kiện (VNĐ)</label>
                                         <input type="text" value={formData.partsCost ? Number(formData.partsCost).toLocaleString('vi-VN') : ''}
-                                            onChange={e => setFormData(p => ({ ...p, partsCost: Number(e.target.value.replace(/\D/g, '')) || '' }))}
+                                            onChange={e => setFormData(p => {
+                                                const newPartsCost = Number(e.target.value.replace(/\D/g, '')) || 0;
+                                                const total = newPartsCost + (Number(p.laborCost) || 0);
+                                                const dep = Number(p.depositAmount) || 0;
+                                                let autoStatus = p.paymentStatus;
+                                                if (dep > 0 && total > 0 && dep >= total) autoStatus = 'paid';
+                                                else if (dep > 0) autoStatus = 'deposit';
+                                                else autoStatus = 'unpaid';
+                                                return { ...p, partsCost: newPartsCost || '', paymentStatus: autoStatus };
+                                            })}
                                             placeholder="0"
                                             className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20" />
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Tiền công thợ (VNĐ)</label>
                                         <input type="text" value={formData.laborCost ? Number(formData.laborCost).toLocaleString('vi-VN') : ''}
-                                            onChange={e => setFormData(p => ({ ...p, laborCost: Number(e.target.value.replace(/\D/g, '')) || '' }))}
+                                            onChange={e => setFormData(p => {
+                                                const newLaborCost = Number(e.target.value.replace(/\D/g, '')) || 0;
+                                                const total = (Number(p.partsCost) || 0) + newLaborCost;
+                                                const dep = Number(p.depositAmount) || 0;
+                                                let autoStatus = p.paymentStatus;
+                                                if (dep > 0 && total > 0 && dep >= total) autoStatus = 'paid';
+                                                else if (dep > 0) autoStatus = 'deposit';
+                                                else autoStatus = 'unpaid';
+                                                return { ...p, laborCost: newLaborCost || '', paymentStatus: autoStatus };
+                                            })}
                                             placeholder="0"
                                             className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20" />
                                     </div>
@@ -1920,7 +2129,13 @@ export default function RepairPage() {
                                         <input type="text" value={formData.depositAmount ? Number(formData.depositAmount).toLocaleString('vi-VN') : ''}
                                             onChange={e => {
                                                 const val = Number(e.target.value.replace(/\D/g, '')) || 0;
-                                                setFormData(p => ({ ...p, depositAmount: val || '', paymentStatus: val > 0 ? 'deposit' : 'unpaid' }));
+                                                setFormData(p => {
+                                                    const total = (Number(p.partsCost) || 0) + (Number(p.laborCost) || 0);
+                                                    let autoStatus: PaymentStatus = 'unpaid';
+                                                    if (val > 0 && total > 0 && val >= total) autoStatus = 'paid';
+                                                    else if (val > 0) autoStatus = 'deposit';
+                                                    return { ...p, depositAmount: val || '', paymentStatus: autoStatus };
+                                                });
                                             }}
                                             placeholder="0"
                                             className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20" />
@@ -2011,23 +2226,26 @@ export default function RepairPage() {
             {handoverModal && (() => {
                 const t = handoverModal.ticket;
                 const deposit = t.payment?.depositAmount || 0;
+                const hasValidParts = (t.parts || []).filter(p => p.status !== 'rejected').length > 0;
                 const computedPartsCost = (t.parts || [])
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    .filter((p: any) => p.status !== 'rejected')
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    .reduce((sum: number, p: any) => {
+                    .filter(p => p.status !== 'rejected' && !p.isWarrantyCovered)
+                    .reduce((sum, p) => {
                         const qty = Math.max(1, Number(p?.quantity) || 1);
                         const unit = Number(p?.unitPriceAtUse ?? p?.price ?? 0) || 0;
                         return sum + unit * qty;
                     }, 0);
-                const partsCost = computedPartsCost > 0 ? computedPartsCost : Number(t.payment?.partsCost) || 0;
+                const partsCost = hasValidParts ? computedPartsCost : (Number(t.payment?.partsCost) || 0);
                 const laborCost = Number(t.payment?.laborCost) || 0;
                 const additionalFees = Number(handoverAdditionalFees.replace(/[^0-9-]/g, '')) || 0;
                 const discountAmount = Number(handoverDiscountAmount.replace(/[^0-9-]/g, '')) || 0;
+                const giftDiscount = handoverGiftItems.reduce((sum, g) => sum + g.price * g.quantity, 0);
                 const total = partsCost + laborCost + additionalFees - discountAmount;
                 const remaining = total - deposit;
                 const action = handoverModal.action;
                 const parts = t.parts || [];
+                const filteredGiftProducts = (giftProducts || []).filter(p =>
+                    p.name.toLowerCase().includes(giftSearchTerm.toLowerCase())
+                );
 
                 const titles: Record<string, string> = {
                     done: '✅ Hoàn Tất Đơn — Xác nhận Thanh Toán',
@@ -2048,7 +2266,7 @@ export default function RepairPage() {
                 return (
                     <Modal
                         isOpen={true}
-                        onClose={() => { setHandoverModal(null); setHandoverNote(''); setPaymentConfirmed(false); setHandoverAdditionalFees(''); setHandoverDiscountAmount(''); }}
+                        onClose={() => { setHandoverModal(null); setHandoverNote(''); setPaymentConfirmed(false); setHandoverAdditionalFees(''); setHandoverDiscountAmount(''); setHandoverGiftItems([]); setGiftSearchTerm(''); }}
                         size="lg"
                         priority="high"
                     >
@@ -2070,7 +2288,7 @@ export default function RepairPage() {
                                     <div className="space-y-1 text-sm">
                                         <div className="flex justify-between">
                                             <span className="text-gray-600">Dịch vụ:</span>
-                                            <span className="font-medium">{typeof t.issue === 'string' ? t.issue : t.issue?.description || t.deviceInfo?.model || '—'}</span>
+                                            <span className="font-medium">{t.issues && t.issues.length > 0 ? t.issues.map(i => i.label).join(' | ') : typeof t.issue === 'string' ? t.issue : t.issue?.description || t.deviceInfo?.model || '—'}</span>
                                         </div>
                                         <div className="flex justify-between">
                                             <span className="text-gray-600">Thiết bị:</span>
@@ -2090,11 +2308,10 @@ export default function RepairPage() {
                                     <div className="bg-purple-50 rounded-xl p-4 border border-purple-100">
                                         <p className="text-xs font-bold text-purple-700 uppercase mb-2 flex items-center gap-1"><ClipboardList size={12} /> Linh kiện đã sử dụng</p>
                                         <div className="space-y-1.5">
-                                            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                                            {parts.filter((p: any) => p.status !== 'rejected').map((p: any, i: number) => (
+                                            {parts.filter((p: NonNullable<RepairTicket['parts']>[number]) => p.status !== 'rejected').map((p: NonNullable<RepairTicket['parts']>[number], i: number) => (
                                                 <div key={i} className="flex justify-between text-sm">
                                                     <span className="text-gray-700">
-                                                        {p.productName || p.name || p.partName || 'Linh kiện'} <span className="text-xs text-gray-400">×{p.quantity || 1}</span>
+                                                        {p.productName || p.name || p.partName || PART_CATEGORY_LABEL} <span className="text-xs text-gray-400">×{p.quantity || 1}</span>
                                                         {p.quality && <span className="text-xs ml-1 px-1 bg-blue-100 text-blue-600 rounded">{p.quality}</span>}
                                                     </span>
                                                     <span className="font-medium">{formatPrice((Number(p.unitPriceAtUse ?? p.price ?? 0) || 0) * (p.quantity || 1))}</span>
@@ -2140,6 +2357,80 @@ export default function RepairPage() {
                                             className="w-32 px-3 py-1 text-right border rounded-lg focus:ring-1 focus:ring-green-500 text-green-600 font-medium bg-white" 
                                         />
                                     </div>
+                                    {/* ── Gift Product Selector ── */}
+                                    <div className="py-2">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <span className="text-gray-500 text-sm">🎁 Quà tặng (khấu trừ):</span>
+                                            {giftDiscount > 0 && <span className="text-pink-600 font-medium text-sm">-{giftDiscount.toLocaleString('vi-VN')}đ</span>}
+                                        </div>
+                                        {/* Search input */}
+                                        <div className="relative">
+                                            <input
+                                                type="text"
+                                                value={giftSearchTerm}
+                                                onChange={e => setGiftSearchTerm(e.target.value)}
+                                                placeholder="Tìm sản phẩm tặng kèm..."
+                                                className="w-full px-3 py-1.5 text-sm border rounded-lg focus:ring-1 focus:ring-pink-500 bg-white pr-8"
+                                            />
+                                            <Search size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                                            {/* Dropdown results */}
+                                            {giftSearchTerm.trim() && filteredGiftProducts.length > 0 && (
+                                                <div className="absolute z-20 left-0 right-0 top-full mt-1 bg-white border rounded-lg shadow-lg max-h-40 overflow-y-auto">
+                                                    {filteredGiftProducts.slice(0, 8).map(p => (
+                                                        <button
+                                                            key={p.id}
+                                                            type="button"
+                                                            onClick={() => {
+                                                                const existing = handoverGiftItems.find(g => g.productId === p.id);
+                                                                if (existing) {
+                                                                    setHandoverGiftItems(prev => prev.map(g => g.productId === p.id ? { ...g, quantity: g.quantity + 1 } : g));
+                                                                } else {
+                                                                    setHandoverGiftItems(prev => [...prev, {
+                                                                        productId: p.id,
+                                                                        productName: p.name,
+                                                                        price: p.price_promo || p.price_original,
+                                                                        quantity: 1
+                                                                    }]);
+                                                                }
+                                                                setGiftSearchTerm('');
+                                                            }}
+                                                            className="w-full text-left px-3 py-2 hover:bg-pink-50 text-sm flex justify-between items-center transition-colors"
+                                                        >
+                                                            <span className="truncate mr-2">{p.name}</span>
+                                                            <span className="text-pink-600 font-medium whitespace-nowrap">{(p.price_promo || p.price_original).toLocaleString('vi-VN')}đ</span>
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
+                                            {giftSearchTerm.trim() && filteredGiftProducts.length === 0 && giftProducts !== null && (
+                                                <div className="absolute z-20 left-0 right-0 top-full mt-1 bg-white border rounded-lg shadow-lg p-3 text-sm text-gray-400 text-center">
+                                                    Không tìm thấy sản phẩm
+                                                </div>
+                                            )}
+                                        </div>
+                                        {/* Selected gift items list */}
+                                        {handoverGiftItems.length > 0 && (
+                                            <div className="mt-2 space-y-1">
+                                                {handoverGiftItems.map((g, i) => (
+                                                    <div key={g.productId} className="flex items-center justify-between bg-pink-50 rounded-lg px-3 py-1.5 text-sm">
+                                                        <span className="truncate mr-2 text-gray-700">
+                                                            {g.productName} <span className="text-xs text-gray-400">×{g.quantity}</span>
+                                                        </span>
+                                                        <div className="flex items-center gap-2 shrink-0">
+                                                            <span className="text-pink-600 font-medium">{(g.price * g.quantity).toLocaleString('vi-VN')}đ</span>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setHandoverGiftItems(prev => prev.filter((_, idx) => idx !== i))}
+                                                                className="text-gray-400 hover:text-red-500 transition-colors"
+                                                            >
+                                                                <Ban size={14} />
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
                                     <div className="flex justify-between text-sm border-t pt-2">
                                         <span className="text-gray-700 font-semibold">Tổng cộng:</span>
                                         <span className="font-bold text-lg">{formatPrice(total)}</span>
@@ -2158,10 +2449,16 @@ export default function RepairPage() {
                                             <span className="text-red-600 text-xl">{formatPrice(remaining)}</span>
                                         </div>
                                     )}
-                                    {action === 'done' && remaining <= 0 && (
+                                    {action === 'done' && remaining === 0 && (
                                         <div className="flex justify-between items-center text-sm border-t border-emerald-200 pt-3 mt-2 font-bold bg-emerald-50 -mx-4 -mb-4 px-4 py-3 rounded-b-xl">
-                                            <span className="text-gray-700">✅ Đã thu đủ</span>
-                                            <span className="text-emerald-600 text-xl">{formatPrice(total)}</span>
+                                            <span className="text-gray-700">✅ Cần thu khách:</span>
+                                            <span className="text-emerald-600 text-xl">{formatPrice(0)}</span>
+                                        </div>
+                                    )}
+                                    {action === 'done' && remaining < 0 && (
+                                        <div className="flex justify-between items-center text-sm border-t border-orange-200 pt-3 mt-2 font-bold bg-orange-50 -mx-4 -mb-4 px-4 py-3 rounded-b-xl">
+                                            <span className="text-orange-700">🔄 Cọc dư — Cần hoàn khách:</span>
+                                            <span className="text-orange-600 text-xl">{formatPrice(Math.abs(remaining))}</span>
                                         </div>
                                     )}
                                     {action === 'out' && deposit > 0 && (
@@ -2284,7 +2581,19 @@ export default function RepairPage() {
 
                             {/* Issue & Tech Notes */}
                             <div className="bg-gray-50 rounded-xl p-3 space-y-2">
-                                {viewingTicket.issue?.description && (
+                                {viewingTicket.issues && viewingTicket.issues.length > 0 ? (
+                                    <div>
+                                        <p className="text-xs font-semibold text-gray-500 mb-1 flex items-center gap-1"><AlertCircle size={12} /> Danh sách lỗi</p>
+                                        <div className="space-y-1">
+                                            {viewingTicket.issues.map((iss, idx) => (
+                                                <div key={iss.id || idx} className="flex justify-between text-sm">
+                                                    <span className="text-gray-800">{idx + 1}. {iss.label}</span>
+                                                    {iss.estimatedPrice > 0 && <span className="text-gray-500 text-xs">~{iss.estimatedPrice.toLocaleString('vi-VN')}đ</span>}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ) : viewingTicket.issue?.description && (
                                     <div>
                                         <p className="text-xs font-semibold text-gray-500 mb-1 flex items-center gap-1"><AlertCircle size={12} /> Lỗi / Yêu cầu</p>
                                         <p className="text-sm text-gray-800">{viewingTicket.issue.description}</p>
@@ -2303,12 +2612,12 @@ export default function RepairPage() {
                                 <div className="bg-purple-50 rounded-xl p-3 border border-purple-100">
                                     <p className="text-xs font-semibold text-purple-700 mb-2 flex items-center gap-1"><ClipboardList size={12} /> Linh kiện đã sử dụng</p>
                                     <div className="space-y-1.5">
-                                        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                                        {viewingTicket.parts.map((p: any, i: number) => (
+                                        {viewingTicket.parts.map((p: NonNullable<RepairTicket['parts']>[number], i: number) => (
                                             <div key={i} className="flex justify-between text-[13px]">
                                                 <span className="text-gray-700 font-medium">
-                                                    {p.productName || p.name || p.partName || 'Linh kiện'} <span className="text-xs text-gray-400 font-normal">×{p.quantity || 1}</span>
+                                                    {p.productName || p.name || p.partName || PART_CATEGORY_LABEL} <span className="text-xs text-gray-400 font-normal">×{p.quantity || 1}</span>
                                                     {p.quality && <span className="text-xs ml-1 px-1 bg-blue-100 text-blue-600 rounded font-normal">{p.quality}</span>}
+                                                    {p.supplierName && <span className="text-xs ml-1 px-1 bg-gray-100 text-gray-500 rounded font-normal" title="Nhà cung cấp">🏭 {p.supplierName}</span>}
                                                 </span>
                                                 <span className="font-semibold text-gray-800">{formatPrice((Number(p.unitPriceAtUse ?? p.price ?? 0) || 0) * (p.quantity || 1))}</span>
                                             </div>
@@ -2498,6 +2807,28 @@ export default function RepairPage() {
                     </Modal>
                 );
             })()}
+            {/* ═══ PRE MEDIA MANAGER MODAL ═══ */}
+            <MediaManager
+                isOpen={showPreMediaManager}
+                onClose={() => setShowPreMediaManager(false)}
+                title="Chọn Ảnh/Video lúc nhận máy"
+                multiple={true}
+                onSelectMultiple={(urls) => {
+                    setPreMediaFiles(prev => [...prev, ...urls]);
+                }}
+            />
+
+            {/* ═══ POST MEDIA MANAGER MODAL ═══ */}
+            <MediaManager
+                isOpen={showPostMediaManager}
+                onClose={() => setShowPostMediaManager(false)}
+                title="Chọn Ảnh/Video sau sửa chữa"
+                multiple={true}
+                onSelectMultiple={(urls) => {
+                    setPostMediaFiles(prev => [...prev, ...urls]);
+                }}
+            />
+
         </div >
     );
 }

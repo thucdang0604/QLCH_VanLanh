@@ -28,7 +28,23 @@ function SearchResults() {
     const seoDescription = searchQuery
         ? `Kết quả tìm kiếm cho "${searchQuery}" tại Văn Lành Service.`
         : 'Tìm kiếm sản phẩm và dịch vụ tại Văn Lành Service.';
-    const [results, setResults] = useState<(Record<string, any> & { id: string })[]>([]);
+    interface SearchResult {
+        id: string;
+        name?: string;
+        title?: string;
+        image?: string;
+        imageUrl?: string;
+        price?: number;
+        price_original?: number;
+        price_promo?: number;
+        warranty_text?: string;
+        repair_time?: string;
+        tags?: string[];
+        rating?: number;
+        reviewCount?: number;
+        isFlashSale?: boolean;
+    }
+    const [results, setResults] = useState<SearchResult[]>([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {

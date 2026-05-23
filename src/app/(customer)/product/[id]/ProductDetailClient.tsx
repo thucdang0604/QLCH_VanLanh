@@ -14,6 +14,8 @@ import {
     Package,
     Calendar,
     Wrench,
+    Star,
+    MessageSquare,
 } from 'lucide-react';
 import VideoEmbed from '@/components/VideoEmbed';
 import { useCart } from '@/lib/CartContext';
@@ -30,7 +32,61 @@ const formatPrice = (price: number | string | undefined) => {
     }).format(numPrice).replace('₫', 'đ');
 };
 
-export default function ProductDetailClient({ data }: { data: any }) {
+interface ProductData {
+    id: string;
+    name: string;
+    _type?: string;
+    images?: string[];
+    imageUrl?: string;
+    image?: string;
+    price?: number;
+    price_original?: number;
+    price_promo?: number;
+    description?: string;
+    content?: string;
+    seoDescription?: string;
+    specs?: Record<string, string>;
+    stock?: number;
+    color?: string;
+    storage?: string;
+    category?: string;
+    slug?: string;
+    videoEmbedUrl?: string;
+    brand?: string;
+    sold?: number;
+    sku?: string;
+    rating?: number;
+    reviewCount?: number;
+}
+
+interface VariantItem {
+    id: string;
+    name: string;
+    slug: string;
+    color: string;
+    storageCapacity: string;
+    conditionLabel: string;
+    price_original: number;
+    price_promo: number;
+    images: string[];
+    imageUrl: string;
+}
+
+interface ReviewItem {
+    id: string;
+    customerName: string;
+    rating: number;
+    content: string;
+    createdAt: number;
+}
+
+interface ProductDetailClientProps {
+    data: ProductData;
+    variants?: VariantItem[];
+    reviews?: ReviewItem[];
+}
+
+export default function ProductDetailClient({ data, variants = [], reviews = [] }: ProductDetailClientProps) {
     const [activeImage, setActiveImage] = useState(0);
     const [quantity, setQuantity] = useState(1);
     const { addItem } = useCart();
@@ -165,8 +221,6 @@ export default function ProductDetailClient({ data }: { data: any }) {
                                     price: displayPrice,
                                     originalPrice: originalPrice,
                                     quantity: quantity,
-                                    // Add stock to prevent adding more than available later
-                                    // @ts-ignore - stock is allowed to be passed even if types don't strictly require it
                                     stock: data.stock || 0
                                 });
                             } else if (isService) {
@@ -206,6 +260,146 @@ export default function ProductDetailClient({ data }: { data: any }) {
                         <span className="text-[10px] sm:text-xs font-medium text-orange-700 text-center">Đổi trả 1-1</span>
                     </div>
                 </div>
+            </div>
+
+            {/* Variant Selector — full width below the 2-col grid */}
+            {variants.length > 0 && (
+                <div className="col-span-full mt-8 bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+                    <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
+                        <span className="w-1.5 h-6 bg-orange-500 rounded-full"></span>
+                        Phiên bản khác
+                    </h2>
+                    <div className="flex flex-wrap gap-3">
+                        {variants.map(v => {
+                            const vImage = v.images?.[0] || v.imageUrl || '';
+                            const vPrice = v.price_promo || v.price_original;
+                            return (
+                                <Link key={v.id} href={`/product/${v.slug || v.id}`}
+                                    className="flex items-center gap-3 px-4 py-3 border-2 border-gray-100 rounded-xl hover:border-orange-400 hover:shadow-md transition-all min-w-[200px]"
+                                >
+                                    {vImage && (
+                                        <div className="relative w-12 h-12 rounded-lg overflow-hidden bg-gray-50 flex-shrink-0">
+                                            <Image src={vImage} alt={v.name} fill className="object-contain" />
+                                        </div>
+                                    )}
+                                    <div className="text-sm">
+                                        <p className="font-semibold text-gray-800 line-clamp-1">{v.storageCapacity || v.name}</p>
+                                        {v.color && <p className="text-xs text-gray-500">{v.color}</p>}
+                                        <p className="text-red-600 font-bold mt-0.5">{formatPrice(vPrice)}</p>
+                                    </div>
+                                </Link>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
+
+            {/* Reviews Section */}
+            {data._type === 'product' && (
+                <div className="col-span-full mt-8 bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+                    <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
+                        <span className="w-1.5 h-6 bg-orange-500 rounded-full"></span>
+                        <MessageSquare size={20} className="text-orange-500" />
+                        Đánh giá & Nhận xét ({reviews.length})
+                    </h2>
+                    {reviews.length > 0 ? (
+                        <div className="space-y-4">
+                            {reviews.map(r => (
+                                <div key={r.id} className="border-b border-gray-50 pb-4 last:border-0">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-9 h-9 bg-orange-100 rounded-full flex items-center justify-center text-orange-600 font-bold text-sm">
+                                            {r.customerName.charAt(0).toUpperCase()}
+                                        </div>
+                                        <div>
+                                            <p className="font-semibold text-gray-800 text-sm">{r.customerName}</p>
+                                            <div className="flex items-center gap-0.5">
+                                                {Array.from({ length: 5 }).map((_, i) => (
+                                                    <Star key={i} size={14}
+                                                        className={i < r.rating ? 'text-yellow-400 fill-yellow-400' : 'text-gray-200'}
+                                                    />
+                                                ))}
+                                                <span className="text-xs text-gray-400 ml-2">
+                                                    {new Date(r.createdAt).toLocaleDateString('vi-VN')}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <p className="text-gray-600 text-sm mt-2 pl-12">{r.content}</p>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="text-center py-8 text-gray-400">
+                            <MessageSquare size={32} className="mx-auto mb-2 opacity-50" />
+                            <p className="text-sm">Chưa có đánh giá nào cho sản phẩm này.</p>
+                        </div>
+                    )}
+                    {/* Submit review form — client-side submission to /api/reviews */}
+                    <ReviewForm productId={data.id} productName={data.name} />
+                </div>
+            )}
+        </div>
+    );
+}
+
+/** Inline review submission form */
+function ReviewForm({ productId, productName }: { productId: string; productName: string }) {
+    const [name, setName] = useState('');
+    const [rating, setRating] = useState(5);
+    const [content, setContent] = useState('');
+    const [submitting, setSubmitting] = useState(false);
+    const [submitted, setSubmitted] = useState(false);
+
+    if (submitted) {
+        return (
+            <div className="mt-6 bg-green-50 p-4 rounded-xl text-center text-sm text-green-700">
+                Cảm ơn bạn! Đánh giá của bạn sẽ hiển thị sau khi được duyệt.
+            </div>
+        );
+    }
+
+    return (
+        <div className="mt-6 border-t pt-6">
+            <h3 className="font-semibold text-gray-800 mb-3">Viết đánh giá của bạn</h3>
+            <div className="space-y-3">
+                <input
+                    type="text" value={name} onChange={e => setName(e.target.value)}
+                    placeholder="Tên của bạn"
+                    className="w-full h-10 px-4 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-orange-500 outline-none"
+                />
+                <div className="flex items-center gap-1">
+                    {Array.from({ length: 5 }).map((_, i) => (
+                        <button key={i} type="button" onClick={() => setRating(i + 1)}>
+                            <Star size={24}
+                                className={i < rating ? 'text-yellow-400 fill-yellow-400' : 'text-gray-200 hover:text-yellow-300'}
+                            />
+                        </button>
+                    ))}
+                </div>
+                <textarea
+                    value={content} onChange={e => setContent(e.target.value)}
+                    placeholder="Chia sẻ trải nghiệm của bạn về sản phẩm..."
+                    rows={3}
+                    className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-orange-500 outline-none resize-none"
+                />
+                <button
+                    disabled={submitting || !name.trim() || !content.trim()}
+                    onClick={async () => {
+                        setSubmitting(true);
+                        try {
+                            const res = await fetch('/api/reviews', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ productId, productName, customerName: name, rating, content })
+                            });
+                            if (res.ok) setSubmitted(true);
+                        } catch { /* noop */ }
+                        setSubmitting(false);
+                    }}
+                    className="px-6 h-10 bg-orange-600 text-white font-semibold rounded-xl text-sm hover:bg-orange-700 transition-colors disabled:opacity-50"
+                >
+                    {submitting ? 'Đang gửi...' : 'Gửi đánh giá'}
+                </button>
             </div>
         </div>
     );

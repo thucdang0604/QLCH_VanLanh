@@ -25,6 +25,7 @@ const eslintConfig = [
       "firebase-debug.log",
       "firestore-debug.log",
       "next-env.d.ts",
+      "roadmap_v2/**",
     ],
   }
 ];

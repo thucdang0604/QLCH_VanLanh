@@ -50,3 +50,41 @@ export function collectAllNodeIds(trees: TaxonomyNodeLike[]): Set<string> {
     walk(trees);
     return ids;
 }
+
+/**
+ * Generate search keywords for Firestore `array-contains` server-side search.
+ * Produces lowercase, diacritic-free tokens from the product name.
+ * Each word generates prefix substrings (min 2 chars) so that typing
+ * "man" matches "Màn hình iPhone 15".
+ *
+ * Max 60 keywords to stay within Firestore 1500-field limit.
+ */
+export function generateSearchKeywords(name: string): string[] {
+    const normalized = name
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/đ/gi, 'd')
+        .toLowerCase()
+        .trim();
+
+    const words = normalized.split(/\s+/).filter(Boolean);
+    const keywords = new Set<string>();
+
+    for (const word of words) {
+        // Add full word
+        keywords.add(word);
+        // Add prefixes (min 2 chars) for typeahead
+        for (let i = 2; i < word.length; i++) {
+            keywords.add(word.slice(0, i));
+        }
+    }
+
+    // Also add multi-word prefixes for compound search
+    if (words.length > 1) {
+        keywords.add(words.join(' '));
+        keywords.add(words.slice(0, 2).join(' '));
+    }
+
+    // Cap at 60 to avoid Firestore limits
+    return Array.from(keywords).slice(0, 60);
+}

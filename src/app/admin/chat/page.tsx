@@ -9,7 +9,7 @@ import {
     MessageSquare,
     Loader2,
     Users,
-    Clock,
+
     ChevronLeft,
     Bot,
     ToggleLeft,
@@ -49,12 +49,12 @@ export default function AdminChatPage() {
                 .map(([roomId, info]) => {
                     return {
                         odId: roomId,
-                        displayName: info.displayName || 'Khách',
-                        email: info.email || null,
-                        isGuest: info.isGuest ?? true,
-                        lastMessage: info.lastMessage || '',
-                        lastMessageTime: info.lastMessageTime || 0,
-                        hasUnread: info.hasUnreadAdmin || false, // Check admin unread
+                        displayName: String(info.displayName || 'Khách'),
+                        email: info.email ? String(info.email) : null,
+                        isGuest: (info.isGuest as boolean) ?? true,
+                        lastMessage: String(info.lastMessage || ''),
+                        lastMessageTime: Number(info.lastMessageTime || 0),
+                        hasUnread: !!(info.hasUnreadAdmin), // Check admin unread
                     };
                 })
                 .filter(room => room.lastMessage) // Only show rooms with messages

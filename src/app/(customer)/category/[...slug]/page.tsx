@@ -3,6 +3,7 @@ import { fetchCategoryItems, fetchNavConfig, fetchTaxonomyConfig } from '../../_
 import CategoryClient from './CategoryClient';
 import { SITE_URL } from "@/lib/constants";
 import { notFound } from 'next/navigation';
+import type { TaxonomyNode } from '@/lib/types';
 
 /* ── Resolve nav/taxonomy info for a given slug ── */
 type ResolvedInfo = {
@@ -12,6 +13,8 @@ type ResolvedInfo = {
     isAccessory?: boolean;
     categoryConfig?: { id: string; slug: string; name: string; type: 'retail' | 'service' | 'component'; keywords: string[]; isActive: boolean };
 };
+
+type NavItem = { slug?: string; label?: string; name?: string; filterType?: string; taxonomyRef?: string };
 
 function mapFilterType(ft?: string): Partial<ResolvedInfo> {
     switch (ft) {
@@ -24,7 +27,7 @@ function mapFilterType(ft?: string): Partial<ResolvedInfo> {
 }
 
 /** Find a taxonomy node by slug. For multi-segment paths, walk the tree level by level. */
-function findTaxonomyNode(slugSegments: string[], trees: { type: string; nodes: any[] }[]): { node: any; type: string } | null {
+function findTaxonomyNode(slugSegments: string[], trees: { type: string; nodes: TaxonomyNode[] }[]): { node: TaxonomyNode; type: string } | null {
     const targetSlug = slugSegments[slugSegments.length - 1]; // deepest segment
 
     for (const tree of trees) {
@@ -46,13 +49,10 @@ function findTaxonomyNode(slugSegments: string[], trees: { type: string; nodes: 
 }
 
 async function resolveSlug(slugSegments: string[]): Promise<ResolvedInfo | null> {
-    const fullSlug = slugSegments.join('/');
-    const lastSegment = slugSegments[slugSegments.length - 1];
-
     // 1. Check nav config first — match by single-segment slug (nav items use single slugs)
     const nav = await fetchNavConfig();
     const navItem = [...nav.headerNav, ...nav.sidebarMenu, ...nav.footerServices]
-        .find((item: any) => item.slug === slugSegments[0]); // nav items only match tier 1
+        .find((item: NavItem) => item.slug === slugSegments[0]); // nav items only match tier 1
 
     // For multi-segment, skip nav-based filterType — resolve directly from taxonomy
     if (slugSegments.length === 1 && navItem) {
@@ -70,7 +70,7 @@ async function resolveSlug(slugSegments: string[]): Promise<ResolvedInfo | null>
             const found = findTaxonomyNode([navItem.taxonomyRef], trees);
             if (found) {
                 const keywords = [found.node.name, found.node.slug, ...(found.node.seoKeywords?.split(',').map((k: string) => k.trim()) || [])];
-                info.categoryConfig = { id: found.node.id, slug: found.node.slug, name: found.node.name, type: found.type as any, keywords, isActive: true };
+                info.categoryConfig = { id: found.node.id, slug: found.node.slug, name: found.node.name, type: found.type as 'retail' | 'service' | 'component', keywords, isActive: true };
                 if (!info.isRepair && found.type === 'service') info.isRepair = true;
             }
         }
@@ -99,7 +99,7 @@ async function resolveSlug(slugSegments: string[]): Promise<ResolvedInfo | null>
             label: found.node.name,
             isRepair: found.type === 'service',
             ...parentFilterType,
-            categoryConfig: { id: found.node.id, slug: found.node.slug, name: found.node.name, type: found.type as any, keywords, isActive: true },
+            categoryConfig: { id: found.node.id, slug: found.node.slug, name: found.node.name, type: found.type as 'retail' | 'service' | 'component', keywords, isActive: true },
         };
     }
 
@@ -132,7 +132,6 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 
 export default async function CategoryPage({ params }: { params: Promise<{ slug: string[] }> }) {
     const { slug } = await params;
-    const fullSlug = slug.join('/');
     const info = await resolveSlug(slug);
 
     if (!info) {
@@ -166,7 +165,6 @@ export default async function CategoryPage({ params }: { params: Promise<{ slug:
         description: seoDescription,
     };
 
-    const canonicalUrl = `${SITE_URL}/category/${fullSlug}`;
     const breadcrumbSchema = {
         '@context': 'https://schema.org',
         '@type': 'BreadcrumbList',
@@ -201,7 +199,7 @@ export default async function CategoryPage({ params }: { params: Promise<{ slug:
                 type="application/ld+json"
                 dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbSchema) }}
             />
-            <CategoryClient slug={fullSlug} initialItems={items} categoryConfig={info.categoryConfig} navInfo={navInfo} />
+            <CategoryClient initialItems={items} categoryConfig={info.categoryConfig} navInfo={navInfo} />
         </>
     );
 }

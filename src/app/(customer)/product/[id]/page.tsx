@@ -2,7 +2,8 @@ import { Metadata } from 'next';
 import Link from 'next/link';
 import { ChevronRight, Package } from 'lucide-react';
 import { SITE_URL } from "@/lib/constants";
-import { fetchDetailItem } from '../../_lib/server-queries';
+import { sanitizeHtml } from '@/lib/sanitizeHtml';
+import { fetchDetailItem, fetchProductVariants, fetchProductReviews } from '../../_lib/server-queries';
 import ProductDetailClient from './ProductDetailClient';
 
 export const revalidate = 30;
@@ -15,7 +16,8 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
         return { title: 'Không tìm thấy sản phẩm' };
     }
 
-    const shortDescription = data.seoDescription || data.description || `Mua ${data.name} chính hãng, giá tốt, bảo hành uy tín tại Văn Lành Service.`;
+    const shortDescription = String(data.seoDescription || data.description || `Mua ${data.name} chính hãng, giá tốt, bảo hành uy tín tại Văn Lành Service.`);
+    const imageUrl = ((data.images as string[])?.[0] || data.imageUrl || data.image || '') as string;
 
     return {
         title: `${data.name} | Sản phẩm tại Văn Lành Service`,
@@ -23,7 +25,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
         openGraph: {
             title: `${data.name} | Sản phẩm tại Văn Lành Service`,
             description: shortDescription,
-            images: data.images?.[0] || data.imageUrl || data.image || '',
+            images: imageUrl,
         }
     };
 }
@@ -43,6 +45,13 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
         data._type = 'product';
     }
 
+    // Fetch variants + reviews in parallel
+    const seriesId = data ? String(data.seriesId || '') : '';
+    const [variants, reviews] = await Promise.all([
+        seriesId ? fetchProductVariants(seriesId, data?.id || id) : Promise.resolve([]),
+        data?._type === 'product' ? fetchProductReviews(data?.id || id) : Promise.resolve([])
+    ]);
+
     if (!data) {
         return (
             <div className="max-w-[1200px] mx-auto px-2 md:px-4 py-2">
@@ -58,13 +67,13 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
         );
     }
 
-    const isService = data._type === 'service';
+
     const images = data.images || (data.imageUrl ? [data.imageUrl] : (data.image ? [data.image] : []));
-    const originalPrice = data.price_original || (typeof data.price === 'number' ? data.price : 0);
-    const promoPrice = data.price_promo || 0;
+    const originalPrice = Number(data.price_original || (typeof data.price === 'number' ? data.price : 0));
+    const promoPrice = Number(data.price_promo || 0);
     const displayPrice = promoPrice > 0 ? promoPrice : (originalPrice > 0 ? originalPrice : 0);
 
-    const shortDescription = data.seoDescription || data.description || `Mua ${data.name} chính hãng, giá tốt, bảo hành uy tín tại Văn Lành Service.`;
+    const shortDescription = String(data.seoDescription || data.description || `Mua ${data.name} chính hãng, giá tốt, bảo hành uy tín tại Văn Lành Service.`);
     const url = `${SITE_URL}/product/${data.id}`;
 
     const structuredData = {
@@ -80,7 +89,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
             url,
             priceCurrency: 'VND',
             price: displayPrice || undefined,
-            availability: data.stock && data.stock > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
+            availability: data.stock && (data.stock as number) > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
         },
         aggregateRating: data.rating
             ? {
@@ -103,24 +112,25 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
                 <nav className="flex items-center gap-2 text-sm text-gray-500 mb-4">
                     <Link href="/" className="hover:text-orange-600">Trang chủ</Link>
                     <ChevronRight size={14} />
-                    <Link href={`/category/${normalizeSlug(data.category ?? 'san-pham')}`} className="hover:text-orange-600">
-                        {data.category || 'Sản phẩm'}
+                    <Link href={`/category/${normalizeSlug(String(data.category ?? 'san-pham'))}`} className="hover:text-orange-600">
+                        {String(data.category || 'Sản phẩm')}
                     </Link>
                     <ChevronRight size={14} />
-                    <span className="text-gray-800 font-medium line-clamp-1">{data.name}</span>
+                    <span className="text-gray-800 font-medium line-clamp-1">{String(data.name ?? '')}</span>
                 </nav>
 
-                <ProductDetailClient data={data} />
+                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                <ProductDetailClient data={data as any} variants={variants} reviews={reviews} />
 
                 {/* Specs Table */}
-                {data.specs && Object.keys(data.specs).length > 0 && (
+                {!!(data.specs) && Object.keys(data.specs as Record<string, unknown>).length > 0 && (
                     <div className="mt-8 bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
                         <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
                             <span className="w-1.5 h-6 bg-orange-500 rounded-full"></span>
                             Thông số kỹ thuật
                         </h2>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-1">
-                            {Object.entries(data.specs).map(([key, value]: [string, any]) => (
+                            {Object.entries(data.specs as Record<string, unknown>).map(([key, value]: [string, unknown]) => (
                                 <div key={key} className="flex border-b border-gray-50 py-3.5 group hover:bg-gray-50 transition-colors px-2 rounded-lg">
                                     <span className="w-1/3 text-gray-500 text-sm font-medium uppercase tracking-tight">{key}</span>
                                     <span className="w-2/3 text-gray-800 text-sm font-semibold">{String(value ?? '')}</span>
@@ -131,7 +141,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
                 )}
 
                 {/* Detailed Description */}
-                {(data.content || data.description) && (
+                {!!(data.content || data.description) && (
                     <div className="mt-8 bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
                         <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
                             <span className="w-1.5 h-6 bg-orange-500 rounded-full"></span>
@@ -139,9 +149,9 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
                         </h2>
                         <div className="prose prose-orange max-w-none text-gray-600 leading-relaxed">
                             {data.content ? (
-                                <div dangerouslySetInnerHTML={{ __html: data.content }} />
+                                <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(String(data.content)) }} />
                             ) : (
-                                <p className="whitespace-pre-line">{data.description}</p>
+                                <p className="whitespace-pre-line">{String(data.description ?? '')}</p>
                             )}
                         </div>
                     </div>

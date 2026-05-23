@@ -1,5 +1,6 @@
 'use client';
 
+/* eslint-disable @next/next/no-img-element */
 import { useState, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { useConfig, DEFAULT_CONFIG } from '@/lib/ConfigContext';
@@ -12,6 +13,7 @@ import {
     Eye, EyeOff, GripVertical, CheckCircle2, AlertCircle,
     PanelTop, PanelLeft, PanelBottom, ChevronRight, X, FolderTree, ImageIcon,
 } from 'lucide-react';
+import { triggerRevalidate } from '@/lib/revalidate';
 
 const MediaManager = dynamic(() => import('@/components/admin/MediaManager'), { ssr: false });
 
@@ -262,7 +264,7 @@ export default function NavigationTab() {
             });
 
             // Revalidate customer pages
-            try { await fetch('/api/revalidate', { method: 'POST' }); } catch { /* non-blocking */ }
+            try { await triggerRevalidate(['layout'], ['config']); } catch { /* non-blocking */ }
 
             setMessage({ type: 'success', text: 'Đã lưu menu thành công!' });
         } catch (err) {
@@ -449,7 +451,7 @@ export default function NavigationTab() {
                             <TaxonomyBadge slug={item.slug} taxonomyRef={item.taxonomyRef} allTrees={allTaxonomyTrees} />
                             <select
                                 value={item.filterType || ''}
-                                onChange={e => updateHeaderItem(idx, { filterType: (e.target.value || undefined) as any })}
+                                onChange={e => updateHeaderItem(idx, { filterType: (e.target.value || undefined) as NavItem['filterType'] })}
                                 className="text-xs border rounded px-1.5 py-1 focus:ring-1 focus:ring-orange-300 bg-white text-gray-600 max-w-[100px]"
                                 title="Bộ lọc sản phẩm"
                             >

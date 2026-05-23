@@ -57,15 +57,33 @@ export async function calculateAndSaveCommissions(
     isRefund: boolean = false
 ) {
     try {
+        // Guard: Only calculate commissions when payment is confirmed (or for refunds)
+        if (!isRefund) {
+            // For repairs: skip if not paid
+            if (docType === 'repair') {
+                const paymentStatus = (docData as RepairTicket).payment?.status;
+                if (paymentStatus !== 'paid') {
+                    console.warn(`Skipping commission for repair ${docData.id}: payment status is "${paymentStatus}"`);
+                    return;
+                }
+            }
+            // For orders: skip if not completed (BUG-COM-005)
+            if (docType === 'order') {
+                const orderStatus = (docData as Order).status;
+                if (orderStatus !== 'Completed') {
+                    console.warn(`Skipping commission for order ${docData.id}: status is "${orderStatus}"`);
+                    return;
+                }
+            }
+        }
+
         const rules = await getActiveRules();
         if (rules.length === 0) return; // No active rules, exit
 
         const commissionsToSave: Array<Omit<Commission, 'id'>> = [];
-        let remainingDiscount = 0;
 
         if (docType === 'order') {
             const order = docData as Order;
-            remainingDiscount = safeNumber(order.discount_amount);
 
             // Fetch product categories for order items
             const productIds = order.items.map(i => i.productId).filter(Boolean);
@@ -82,6 +100,10 @@ export async function calculateAndSaveCommissions(
                 }
             }
 
+            // Pre-calculate grandTotal for pro-rata discount distribution (BUG-COM-004)
+            const totalDiscount = safeNumber(order.discount_amount);
+            const grandTotal = order.items.reduce((sum, i) => sum + safeNumber(i.price) * safeNumber(i.quantity), 0);
+
             for (const item of order.items) {
                 const product = productMap[item.productId];
                 const rule = findBestRule(rules, 'order', item.productId, product?.category);
@@ -90,16 +112,16 @@ export async function calculateAndSaveCommissions(
                     const pct = getSafePercentage(rule);
                     if (pct === null) continue;
 
-                    let baseAmount = safeNumber(item.price) * safeNumber(item.quantity);
+                    const itemTotal = safeNumber(item.price) * safeNumber(item.quantity);
+                    let baseAmount = itemTotal;
                     
-                    // Apply discount logic if rule specifies
-                    if (rule.applyAfterDiscount && remainingDiscount > 0) {
-                        const discountToApply = Math.min(baseAmount, remainingDiscount);
-                        baseAmount -= discountToApply;
-                        remainingDiscount -= discountToApply;
+                    // Pro-rata discount: phân bổ giảm giá theo tỷ lệ giá trị
+                    if (rule.applyAfterDiscount && totalDiscount > 0 && grandTotal > 0) {
+                        const itemDiscount = Math.round(totalDiscount * (itemTotal / grandTotal));
+                        baseAmount = Math.max(0, itemTotal - itemDiscount);
                     }
 
-                let commissionAmount = (baseAmount * pct) / 100;
+                let commissionAmount = Math.round((baseAmount * pct) / 100);
                 if (isRefund) commissionAmount = -commissionAmount;
                 if (commissionAmount !== 0) {
                     commissionsToSave.push({
@@ -128,8 +150,12 @@ export async function calculateAndSaveCommissions(
                 const pct = getSafePercentage(rule);
                 if (pct === null) return;
 
-                const baseAmount = safeNumber(repair.payment?.amount);
-                let commissionAmount = (baseAmount * pct) / 100;
+                const baseAmount = safeNumber(repair.payment?.amount) - safeNumber(repair.payment?.giftDiscount);
+                if (baseAmount < 0) {
+                    console.warn(`Commission: Negative baseAmount (${baseAmount}) for repair ${repair.id}. Skipping.`);
+                    return;
+                }
+                let commissionAmount = Math.round((baseAmount * pct) / 100);
                 if (isRefund) commissionAmount = -commissionAmount;
 
                 if (commissionAmount !== 0) {
@@ -154,7 +180,7 @@ export async function calculateAndSaveCommissions(
             await setDoc(doc(db, 'commissions', docId), comm);
         }
 
-        console.log(`Saved ${commissionsToSave.length} commissions for ${docType} ${docData.id}`);
+        console.warn(`Saved ${commissionsToSave.length} commissions for ${docType} ${docData.id}`);
 
     } catch (error) {
         console.error('Error calculating commissions:', error);

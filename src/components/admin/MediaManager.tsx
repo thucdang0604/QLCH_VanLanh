@@ -1,5 +1,6 @@
 'use client';
 
+/* eslint-disable @next/next/no-img-element */
 import { useState, useEffect, useRef } from 'react';
 import { collection, addDoc, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, limit } from 'firebase/firestore';
 import { db, getStorageInstance } from '@/lib/firebase';
@@ -8,6 +9,7 @@ import type { FirestoreDateValue } from '@/lib/types';
 import { optimizeImage } from '@/lib/imageOptimizer';
 import { validateImageFile } from '@/lib/validateImage';
 import { cleanBrokenMedia } from '@/lib/storage';
+import { compressVideo } from '@/lib/videoOptimizer';
 
 const MAX_VIDEO_SIZE_MB = 50;
 const MAX_VIDEO_SIZE_BYTES = MAX_VIDEO_SIZE_MB * 1024 * 1024;
@@ -40,7 +42,9 @@ export const MEDIA_FOLDERS = [
 interface MediaManagerProps {
     isOpen: boolean;
     onClose: () => void;
-    onSelect: (url: string, width?: number, height?: number) => void;
+    onSelect?: (url: string, width?: number, height?: number) => void;
+    onSelectMultiple?: (urls: string[]) => void;
+    multiple?: boolean;
     title?: string;
 }
 
@@ -48,17 +52,18 @@ function isVideoType(type: string): boolean {
     return type.includes('video');
 }
 
-export default function MediaManager({ isOpen, onClose, onSelect, title = 'Chọn media' }: MediaManagerProps) {
+export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultiple, multiple = false, title = 'Chọn media' }: MediaManagerProps) {
     const [tab, setTab] = useState<'upload' | 'library'>('library');
     const [items, setItems] = useState<MediaItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [uploading, setUploading] = useState(false);
     const [deleting, setDeleting] = useState<string | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
-    const [selected, setSelected] = useState<string | null>(null);
+    const [selected, setSelected] = useState<string[]>([]);
     const [uploadError, setUploadError] = useState<string | null>(null);
     const [cleaning, setCleaning] = useState(false);
     const [cleanProgress, setCleanProgress] = useState('');
+    const [compressProgress, setCompressProgress] = useState<{name: string, ratio: number} | null>(null);
     const [uploadFolder, setUploadFolder] = useState<string>('general');
     const [filterFolder, setFilterFolder] = useState<string>('all');
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -83,20 +88,29 @@ export default function MediaManager({ isOpen, onClose, onSelect, title = 'Chọ
 
         for (const file of Array.from(files)) {
             try {
-                // Video size validation
-                if (isVideoType(file.type)) {
-                    if (file.size > MAX_VIDEO_SIZE_BYTES) {
-                        setUploadError(`Video "${file.name}" vượt quá ${MAX_VIDEO_SIZE_MB}MB. Vui lòng chọn file nhỏ hơn.`);
-                        continue;
-                    }
-                }
-
                 let fileToUpload = file;
                 let finalWidth = undefined;
                 let finalHeight = undefined;
                 let thumbFileToUpload: File | undefined = undefined;
 
-                if (file.type.startsWith('image/')) {
+                if (isVideoType(file.type)) {
+                    if (file.size > MAX_VIDEO_SIZE_BYTES) {
+                        setUploadError(`Video "${file.name}" vượt quá ${MAX_VIDEO_SIZE_MB}MB. Vui lòng chọn file nhỏ hơn.`);
+                        continue;
+                    }
+
+                    try {
+                        fileToUpload = await compressVideo(file, (ratio) => {
+                            setCompressProgress({ name: file.name, ratio });
+                        });
+                    } catch (err) {
+                        console.error('Lỗi nén video:', err);
+                        setUploadError(`Không thể nén video "${file.name}". Vui lòng thử file khác.`);
+                        continue;
+                    } finally {
+                        setCompressProgress(null);
+                    }
+                } else if (file.type.startsWith('image/')) {
                     const validationError = validateImageFile(file);
                     if (validationError) {
                         setUploadError(`"${file.name}": ${validationError}`);
@@ -230,11 +244,15 @@ export default function MediaManager({ isOpen, onClose, onSelect, title = 'Chọ
 
     // Select and return
     const handleConfirm = () => {
-        if (selected) {
-            const selectedItem = items.find(i => i.url === selected);
-            onSelect(selected, selectedItem?.width, selectedItem?.height);
+        if (selected.length > 0) {
+            if (multiple && onSelectMultiple) {
+                onSelectMultiple(selected);
+            } else if (onSelect) {
+                const selectedItem = items.find(i => i.url === selected[0]);
+                onSelect(selected[0], selectedItem?.width, selectedItem?.height);
+            }
             onClose();
-            setSelected(null);
+            setSelected([]);
         }
     };
 
@@ -313,10 +331,16 @@ export default function MediaManager({ isOpen, onClose, onSelect, title = 'Chọ
                                 disabled={uploading}
                                 className="w-full h-48 border-2 border-dashed border-gray-300 rounded-xl hover:border-orange-400 hover:bg-orange-50 transition-colors flex flex-col items-center justify-center gap-3 text-gray-500"
                             >
-                                {uploading ? (
+                                {compressProgress ? (
+                                    <>
+                                        <Loader2 size={32} className="animate-spin text-blue-500" />
+                                        <span className="text-sm font-medium text-blue-600">Đang nén video... {Math.round(compressProgress.ratio * 100)}%</span>
+                                        <span className="text-xs text-blue-400 truncate max-w-[80%]">{compressProgress.name}</span>
+                                    </>
+                                ) : uploading ? (
                                     <>
                                         <Loader2 size={32} className="animate-spin text-orange-500" />
-                                        <span className="text-sm font-medium">Đang xử lý ảnh & upload...</span>
+                                        <span className="text-sm font-medium">Đang xử lý & upload...</span>
                                     </>
                                 ) : (
                                     <>
@@ -328,14 +352,14 @@ export default function MediaManager({ isOpen, onClose, onSelect, title = 'Chọ
                             </button>
 
                             {/* Upload warning */}
-                            <div className="flex flex-col gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                            <div className="flex flex-col gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
                                 <div className="flex items-start gap-2">
-                                    <AlertTriangle size={16} className="text-amber-500 mt-0.5 flex-shrink-0" />
-                                    <p className="text-xs text-amber-700 font-semibold">Lưu ý quan trọng về Tốc độ & Chi phí:</p>
+                                    <AlertTriangle size={16} className="text-blue-500 mt-0.5 flex-shrink-0" />
+                                    <p className="text-xs text-blue-700 font-semibold">Tự động tối ưu thông minh (Client-side):</p>
                                 </div>
-                                <ul className="text-xs text-amber-700 list-disc pl-6 space-y-1">
-                                    <li><strong>Ảnh:</strong> Tự động được hệ thống nén WebP siêu nhẹ khi tải lên. Không cần lo lắng.</li>
-                                    <li><strong>Video:</strong> KHÔNG được nén tự động để tránh treo máy. Vui lòng <u>tự nén video</u> bằng <strong>Capcut</strong> hoặc <strong>Handbrake</strong> trước khi tải lên! (Giới hạn: {MAX_VIDEO_SIZE_MB}MB). Video dung lượng cao sẽ làm web rất chậm và tốn phí băng thông.</li>
+                                <ul className="text-xs text-blue-700 list-disc pl-6 space-y-1">
+                                    <li><strong>Ảnh:</strong> Tự động nén sang WebP, giữ nguyên độ nét, giảm 70% dung lượng.</li>
+                                    <li><strong>Video:</strong> Tự động nén nhẹ trực tiếp trên thiết bị của bạn trước khi tải lên (CRF 28). Việc nén video có thể mất thêm từ 5 - 20 giây tuỳ thuộc cấu hình thiết bị. File gốc giới hạn tối đa {MAX_VIDEO_SIZE_MB}MB.</li>
                                 </ul>
                             </div>
 
@@ -411,13 +435,17 @@ export default function MediaManager({ isOpen, onClose, onSelect, title = 'Chọ
                                     {filtered.map((item) => (
                                         <div
                                             key={item.id}
-                                            className={`relative group aspect-square rounded-lg overflow-hidden cursor-pointer border-2 transition-all data-[broken=true]:cursor-not-allowed data-[broken=true]:border-red-200 data-[broken=true]:bg-gray-50 ${selected === item.url ? 'border-orange-500 ring-2 ring-orange-200' : 'border-transparent hover:border-gray-300'}`}
+                                            className={`relative group aspect-square rounded-lg overflow-hidden cursor-pointer border-2 transition-all data-[broken=true]:cursor-not-allowed data-[broken=true]:border-red-200 data-[broken=true]:bg-gray-50 ${selected.includes(item.url) ? 'border-orange-500 ring-2 ring-orange-200' : 'border-transparent hover:border-gray-300'}`}
                                             onClick={(e) => {
                                                 if (e.currentTarget.getAttribute('data-broken') === 'true') {
                                                     alert('Ảnh này đã bị xoá trên bộ nhớ gốc (Storage). Vui lòng nhấn biểu tượng 🗑️ thùng rác để dọn dẹp nó khỏi hệ thống.');
                                                     return;
                                                 }
-                                                setSelected(item.url);
+                                                if (multiple) {
+                                                    setSelected(prev => prev.includes(item.url) ? prev.filter(u => u !== item.url) : [...prev, item.url]);
+                                                } else {
+                                                    setSelected(prev => prev.includes(item.url) ? [] : [item.url]);
+                                                }
                                             }}
                                         >
                                             {/* Render video or image */}
@@ -454,7 +482,7 @@ export default function MediaManager({ isOpen, onClose, onSelect, title = 'Chọ
                                             )}
 
                                             {/* Selected check */}
-                                            {selected === item.url && (
+                                            {selected.includes(item.url) && (
                                                 <div className="absolute top-2 right-2 w-6 h-6 bg-orange-500 rounded-full flex items-center justify-center">
                                                     <Check size={14} className="text-white" />
                                                 </div>
@@ -482,15 +510,15 @@ export default function MediaManager({ isOpen, onClose, onSelect, title = 'Chọ
                 {/* Footer */}
                 <div className="flex items-center justify-between px-6 py-4 border-t bg-gray-50">
                     <span className="text-xs text-gray-400">
-                        {selected ? '1 file đã chọn' : 'Chọn từ thư viện hoặc upload mới'}
+                        {selected.length > 0 ? `${selected.length} file đã chọn` : 'Chọn từ thư viện hoặc upload mới'}
                     </span>
                     <div className="flex gap-2">
-                        <button onClick={onClose} className="px-4 py-2 text-sm border rounded-lg hover:bg-gray-100 text-gray-600">
+                        <button onClick={() => { onClose(); setSelected([]); }} className="px-4 py-2 text-sm border rounded-lg hover:bg-gray-100 text-gray-600">
                             Hủy
                         </button>
                         <button
                             onClick={handleConfirm}
-                            disabled={!selected}
+                            disabled={selected.length === 0}
                             className="px-5 py-2 text-sm bg-orange-500 text-white rounded-lg hover:bg-orange-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                         >
                             Chọn file

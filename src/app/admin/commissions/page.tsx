@@ -2,13 +2,13 @@
 
 import { useState, useEffect } from 'react';
 import {
-    Award, Plus, Search, Percent, Trash2, X, Save, Loader2,
-    CheckCircle2, Clock, User, DollarSign, TrendingUp, FileText
+    Award, Plus, Percent, Save, Loader2, FileText
 } from 'lucide-react';
 import Modal from '@/components/admin/Modal';
+import CurrencyInput from '@/components/admin/CurrencyInput';
 import {
     collection, getDocs, addDoc, updateDoc, deleteDoc,
-    doc, serverTimestamp, query, orderBy, where
+    doc, serverTimestamp, query, orderBy
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
@@ -99,7 +99,7 @@ export default function CommissionsPage() {
         return acc;
     }, {} as Record<string, { name: string; total: number; count: number }>);
 
-    const totalCommission = filteredCommissions.reduce((s, c) => s + c.amount, 0);
+    const totalCommission = Math.round(filteredCommissions.reduce((s, c) => s + c.amount, 0));
 
     // ── Save rule ──
     const handleSaveRule = async () => {
@@ -528,12 +528,12 @@ export default function CommissionsPage() {
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">Doanh thu gốc</label>
-                                    <input type="number" value={manualBaseAmount || ''} onChange={e => setManualBaseAmount(Number(e.target.value))}
+                                    <CurrencyInput value={manualBaseAmount || ''} onChange={v => setManualBaseAmount(v)}
                                         placeholder="0" className="w-full px-4 py-2 border rounded-lg" />
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">Tiền hoa hồng</label>
-                                    <input type="number" value={manualAmount || ''} onChange={e => setManualAmount(Number(e.target.value))}
+                                    <CurrencyInput value={manualAmount || ''} onChange={v => setManualAmount(v)}
                                         placeholder="0" className="w-full px-4 py-2 border rounded-lg" />
                                 </div>
                             </div>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db, getRtdbInstance } from '@/lib/firebase';
 import type { FirestoreDateValue } from '@/lib/types';
@@ -43,11 +43,18 @@ interface RepairBadgeDoc {
 /**
  * Single source of truth for all admin sidebar badge counts.
  * Consolidates all realtime listeners into ONE hook to avoid duplicate reads.
+ * Listeners are conditionally enabled based on user permissions to reduce reads.
  * 
  * @param userUid - Current user UID (for KTV badge filtering)
  * @param userRole - Current user role ('admin' | 'staff')
+ * @param userPermissions - Array of permission strings for the current user
  */
-export function useAdminBadges(userUid?: string, userRole?: string) {
+export function useAdminBadges(userUid?: string, userRole?: string, userPermissions?: string[]) {
+    // Helper: check if user has permission (admin always has all)
+    const hasPerm = useCallback((perm: string) => {
+        return userRole === 'admin' || (userPermissions?.includes(perm) ?? false);
+    }, [userRole, userPermissions]);
+
     const [pendingOrders, setPendingOrders] = useState(0);
     const [pendingAppointments, setPendingAppointments] = useState(0);
     const [unreadChats, setUnreadChats] = useState(0);
@@ -57,54 +64,68 @@ export function useAdminBadges(userUid?: string, userRole?: string) {
 
     // ── 1. Orders: status == 'Pending' ──
     useEffect(() => {
+        if (!hasPerm('manage_orders')) { setPendingOrders(0); return; }
         const q = query(collection(db, 'orders'), where('status', '==', 'Pending'));
         const unsub = onSnapshot(q,
             (snap) => setPendingOrders(snap.size),
             (err) => console.error('[Badges] orders error:', err)
         );
         return () => unsub();
-    }, []);
+    }, [hasPerm]);
 
     // ── 2. Appointments: status == 'pending' ──
     useEffect(() => {
+        if (!hasPerm('manage_orders')) { setPendingAppointments(0); return; }
         const q = query(collection(db, 'appointments'), where('status', '==', 'pending'));
         const unsub = onSnapshot(q,
             (snap) => setPendingAppointments(snap.size),
             (err) => console.error('[Badges] appointments error:', err)
         );
         return () => unsub();
-    }, []);
+    }, [hasPerm]);
 
     // ── 3. Chats: Realtime DB — info.hasUnread ──
     useEffect(() => {
+        if (!hasPerm('chat_support')) { setUnreadChats(0); return; }
         let unsub: (() => void) | undefined;
+        let isMounted = true;
 
         (async () => {
-            const rtdb = await getRtdbInstance();
-            const { ref, onValue } = await import('firebase/database');
+            try {
+                const rtdb = await getRtdbInstance();
+                const { ref, onValue } = await import('firebase/database');
 
-            const chatsRef = ref(rtdb, 'chats');
-            unsub = onValue(chatsRef, (snapshot) => {
-                const data = snapshot.val() as unknown;
-                if (!data) { setUnreadChats(0); return; }
-                let count = 0;
-                if (typeof data === 'object' && data !== null) {
-                    Object.values(data as Record<string, unknown>).forEach((room) => {
-                        const info = (typeof room === 'object' && room !== null) ? (room as { info?: unknown }).info : undefined;
-                        const hasUnread = (typeof info === 'object' && info !== null) ? (info as { hasUnread?: unknown }).hasUnread : undefined;
-                        if (hasUnread) count++;
-                    });
-                }
-                setUnreadChats(count);
-            }, (err) => console.error('[Badges] chats error:', err));
+                if (!isMounted) return;
+
+                const chatsRef = ref(rtdb, 'chats');
+                unsub = onValue(chatsRef, (snapshot) => {
+                    const data = snapshot.val() as unknown;
+                    if (!data) { setUnreadChats(0); return; }
+                    let count = 0;
+                    if (typeof data === 'object' && data !== null) {
+                        Object.values(data as Record<string, unknown>).forEach((room) => {
+                            const info = (typeof room === 'object' && room !== null) ? (room as { info?: unknown }).info : undefined;
+                            const hasUnread = (typeof info === 'object' && info !== null) ? (info as { hasUnread?: unknown }).hasUnread : undefined;
+                            if (hasUnread) count++;
+                        });
+                    }
+                    setUnreadChats(count);
+                }, (err) => console.error('[Badges] chats error:', err));
+            } catch (err) {
+                console.error('[Badges] chats setup error:', err);
+            }
         })();
 
-        return () => unsub?.();
-    }, []);
+        return () => {
+            isMounted = false;
+            if (unsub) unsub();
+        };
+    }, [hasPerm]);
 
     // ── 4. Repairs: cho_tiep_nhan + da_dat_linh_kien (for badge and KTV logic) ──
     // Query repairs with status in the 2 relevant statuses only — keeps reads minimal
     useEffect(() => {
+        if (!hasPerm('manage_repairs')) { setRepairDocs([]); return; }
         const q = query(
             collection(db, 'repairs'),
             where('status', 'in', ['cho_tiep_nhan', 'da_dat_linh_kien'])
@@ -122,7 +143,7 @@ export function useAdminBadges(userUid?: string, userRole?: string) {
             (err) => console.error('[Badges] repairs error:', err)
         );
         return () => unsub();
-    }, []);
+    }, [hasPerm]);
 
     // ── 5. Reviews: status == 'pending' (admin only) ──
     useEffect(() => {
@@ -140,6 +161,10 @@ export function useAdminBadges(userUid?: string, userRole?: string) {
 
     // ── 6. Activities (unread) — kept here to consolidate ──
     useEffect(() => {
+        if (userRole !== 'admin' && userRole !== 'staff') {
+            setActivities([]);
+            return;
+        }
         let unsub = () => { };
         try {
             const q = query(collection(db, 'activities'), where('read', '==', false));
@@ -170,7 +195,7 @@ export function useAdminBadges(userUid?: string, userRole?: string) {
             // Ignore setup errors
         }
         return () => unsub();
-    }, []);
+    }, [userRole]);
 
     // ── Computed: repairs badge (all "Chờ tiếp nhận") ──
     const repairsBadge = useMemo(() => {

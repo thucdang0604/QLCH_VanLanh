@@ -8,10 +8,11 @@ import {
     XCircle, Clock, Loader2, ShoppingBag
 } from 'lucide-react';
 import Modal from '@/components/admin/Modal';
-import { collection, query, orderBy, onSnapshot, doc, updateDoc, serverTimestamp, limit, startAfter, writeBatch, increment, getDocs, DocumentSnapshot, where } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, doc, serverTimestamp, limit, startAfter, runTransaction, increment, getDocs, DocumentSnapshot, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 import { Order } from '@/lib/types';
+import { useAuth } from '@/lib/AuthContext';
 import { useConfig } from '@/lib/ConfigContext';
 import { Receipt } from 'lucide-react';
 
@@ -33,6 +34,7 @@ const statusConfig: Record<string, { color: string; icon: React.ComponentType<{ 
 
 export default function OrdersPage() {
     const { config } = useConfig();
+    const { user } = useAuth();
     const [orders, setOrders] = useState<Order[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
@@ -119,50 +121,167 @@ export default function OrdersPage() {
         try {
             const order = orders.find(o => o.id === orderId);
             if (!order) return;
-            const oldStatus = order.status;
-            
-            const batch = writeBatch(db);
-            const orderRef = doc(db, 'orders', orderId);
 
-            batch.update(orderRef, {
-                status: newStatus,
-                updatedAt: serverTimestamp(),
+            const isActiveStatus = (s: string) => ['Pending', 'Confirmed', 'Shipping'].includes(s);
+
+            await runTransaction(db, async (transaction) => {
+                const orderRef = doc(db, 'orders', orderId);
+
+                // Read fresh order status inside transaction to prevent stale state
+                const orderSnap = await transaction.get(orderRef);
+                if (!orderSnap.exists()) throw new Error('Đơn hàng không tồn tại.');
+                const freshOrder = orderSnap.data();
+                const oldStatus = freshOrder.status;
+                if (oldStatus === newStatus) return; // Double-submit guard
+
+                // Phase 1: Read all product docs that need stock changes
+                const needsStockChange = 
+                    (isActiveStatus(oldStatus) && newStatus === 'Cancelled') ||
+                    (isActiveStatus(oldStatus) && newStatus === 'Completed') ||
+                    (oldStatus === 'Completed' && newStatus === 'Cancelled') ||
+                    (oldStatus === 'Cancelled' && isActiveStatus(newStatus));
+
+                const productDocs = new Map<string, { ref: ReturnType<typeof doc>; data: Record<string, unknown> }>();
+                if (needsStockChange && order.items) {
+                    for (const item of order.items) {
+                        if (item.productId && !productDocs.has(item.productId)) {
+                            const pRef = doc(db, 'products', item.productId);
+                            const pSnap = await transaction.get(pRef);
+                            if (pSnap.exists()) {
+                                productDocs.set(item.productId, { ref: pRef, data: pSnap.data() as Record<string, unknown> });
+                            }
+                        }
+                    }
+                }
+
+                // Gom nhóm items theo productId
+                const grouped = new Map<string, { productName: string; totalQty: number }>();
+                if (needsStockChange && order.items) {
+                    for (const item of order.items) {
+                        if (!item.productId || !productDocs.has(item.productId)) continue;
+                        const existing = grouped.get(item.productId);
+                        if (existing) {
+                            existing.totalQty += item.quantity;
+                        } else {
+                            grouped.set(item.productId, { productName: item.productName, totalQty: item.quantity });
+                        }
+                    }
+                }
+
+                // Determine log type
+                let logType: string = '';
+                if (isActiveStatus(oldStatus) && newStatus === 'Cancelled') logType = 'ORDER_CANCEL';
+                else if (isActiveStatus(oldStatus) && newStatus === 'Completed') logType = 'ORDER_COMPLETE';
+                else if (oldStatus === 'Completed' && newStatus === 'Cancelled') logType = 'ORDER_CANCEL';
+                else if (oldStatus === 'Cancelled' && isActiveStatus(newStatus)) logType = 'ORDER_REACTIVATE';
+
+                // Phase 2: Validate & Write stock changes
+                for (const [pid, group] of grouped.entries()) {
+                    const p = productDocs.get(pid)!;
+                    const currentStock = Number(p.data.stock) || 0;
+                    const currentHeld = Number(p.data.held) || 0;
+
+                    let logType = '';
+                    let stockChange = 0;
+
+                    if (isActiveStatus(oldStatus) && newStatus === 'Cancelled') {
+                        // Active → Cancelled: chỉ held -= qty, kiểm tra âm giữ chỗ
+                        if (currentHeld < group.totalQty) {
+                            throw new Error(`SP "${group.productName}" có số lượng giữ chỗ không khớp (Đang giữ ${currentHeld}, cần giải phóng ${group.totalQty}).`);
+                        }
+                        transaction.update(p.ref, { held: currentHeld - group.totalQty });
+                    } else if (isActiveStatus(oldStatus) && newStatus === 'Completed') {
+                        // Active → Completed: validate nghiêm ngặt rồi trừ cả stock lẫn held
+                        if (currentStock < group.totalQty) {
+                            throw new Error(`SP "${group.productName}" không đủ tồn kho vật lý (Có ${currentStock}, cần ${group.totalQty}).`);
+                        }
+                        if (currentHeld < group.totalQty) {
+                            throw new Error(`SP "${group.productName}" có số lượng giữ chỗ không khớp (Đang giữ ${currentHeld}, cần giải phóng ${group.totalQty}).`);
+                        }
+                        transaction.update(p.ref, {
+                            stock: currentStock - group.totalQty,
+                            held: currentHeld - group.totalQty
+                        });
+                        logType = 'ORDER_COMPLETE';
+                        stockChange = -group.totalQty;
+                    } else if (oldStatus === 'Completed' && newStatus === 'Cancelled') {
+                        // Completed → Cancelled: hoàn trả stock vật lý
+                        transaction.update(p.ref, { stock: currentStock + group.totalQty });
+                        logType = 'ORDER_CANCEL';
+                        stockChange = group.totalQty;
+                    } else if (oldStatus === 'Cancelled' && isActiveStatus(newStatus)) {
+                        // Cancelled → Active: validate khả dụng rồi giữ chỗ, KHÔNG ghi log stock
+                        const available = currentStock - currentHeld;
+                        if (available < group.totalQty) {
+                            throw new Error(`SP "${group.productName}" không đủ khả dụng để kích hoạt lại đơn (Còn ${available}, cần ${group.totalQty}).`);
+                        }
+                        transaction.update(p.ref, { held: currentHeld + group.totalQty });
+                    }
+
+                    // Chỉ ghi log inventory_logs khi thực sự thay đổi stock vật lý
+                    if (logType && stockChange !== 0) {
+                        const logRef = doc(collection(db, 'inventory_logs'));
+                        transaction.set(logRef, {
+                            productId: pid,
+                            productName: group.productName,
+                            quantity: stockChange,
+                            costPriceAtLog: Number(p.data.costPrice) || 0,
+                            type: logType,
+                            referenceId: orderId,
+                            referenceType: 'order',
+                            createdBy: user?.uid || '',
+                            createdByName: user?.displayName || '',
+                            createdAt: serverTimestamp(),
+                        });
+                    }
+                }
+
+                // Update order status and handle remaining payment for deposit orders
+                const orderUpdates: Record<string, unknown> = {
+                    status: newStatus,
+                    updatedAt: serverTimestamp(),
+                    ...(newStatus === 'Completed' ? { completedAt: serverTimestamp() } : {}),
+                };
+
+                if (newStatus === 'Completed') {
+                    const remaining = Math.max(0, (freshOrder.total_amount || 0) - (freshOrder.deposit_amount || 0));
+                    if (remaining > 0) {
+                        const history = [...(freshOrder.paymentHistory || [])];
+                        history.push({
+                            type: 'full',
+                            amount: remaining,
+                            timestamp: Date.now(),
+                            note: `Thanh toán phần còn lại khi hoàn tất đơn hàng`
+                        });
+                        orderUpdates.deposit_amount = freshOrder.total_amount;
+                        orderUpdates.paymentHistory = history;
+                    }
+                }
+
+                transaction.update(orderRef, orderUpdates);
             });
 
-            // Adjust inventory based on transition
-            if (oldStatus !== 'Cancelled' && newStatus === 'Cancelled') {
-                // Cancelled: Release held stock back to available stock
-                order.items?.forEach(item => {
-                    if (item.productId) {
-                        const pRef = doc(db, 'products', item.productId);
-                        batch.update(pRef, { stock: increment(item.quantity), held: increment(-item.quantity) });
-                    }
-                });
-            } else if (oldStatus !== 'Completed' && newStatus === 'Completed') {
-                // Completed: Just release from held stock (stock was already deducted upon Pending)
-                order.items?.forEach(item => {
-                    if (item.productId) {
-                        const pRef = doc(db, 'products', item.productId);
-                        batch.update(pRef, { held: increment(-item.quantity) });
-                    }
-                });
-            }
-
-            // Restore from Cancelled back to valid (Assuming Cancelled -> Pending/Confirmed)
-            if (oldStatus === 'Cancelled' && newStatus !== 'Cancelled') {
-                // Return to pending/confirmed: deduct stock, add to held
-                order.items?.forEach(item => {
-                    if (item.productId) {
-                        const pRef = doc(db, 'products', item.productId);
-                        batch.update(pRef, { stock: increment(-item.quantity), held: increment(item.quantity) });
-                    }
-                });
-            }
-
-            await batch.commit();
-
             if (selectedOrder?.id === orderId) {
-                setSelectedOrder(prev => prev ? { ...prev, status: newStatus as Order['status'] } : null);
+                setSelectedOrder(prev => {
+                    if (!prev) return null;
+                    const remaining = Math.max(0, (prev.total_amount || 0) - (prev.deposit_amount || 0));
+                    const updatedHistory = [...(prev.paymentHistory || [])];
+                    if (newStatus === 'Completed' && remaining > 0) {
+                        updatedHistory.push({
+                            type: 'full',
+                            amount: remaining,
+                            timestamp: Date.now(),
+                            note: `Thanh toán phần còn lại khi hoàn tất đơn hàng`
+                        });
+                        return {
+                            ...prev,
+                            status: newStatus as Order['status'],
+                            deposit_amount: prev.total_amount,
+                            paymentHistory: updatedHistory
+                        };
+                    }
+                    return { ...prev, status: newStatus as Order['status'] };
+                });
             }
         } catch (err) {
             console.error('Update status error:', err);
@@ -554,16 +673,23 @@ export default function OrdersPage() {
                                     <span className="text-red-600">{formatPrice(selectedOrder.total_amount || 0)}</span>
                                 </div>
                                 {(selectedOrder.deposit_amount || 0) > 0 && (
-                                    <div className="flex justify-between items-center pt-2 text-base font-semibold text-gray-700">
-                                        <span>Đã cọc:</span>
-                                        <span>{formatPrice(selectedOrder.deposit_amount || 0)}</span>
-                                    </div>
-                                )}
-                                {(selectedOrder.deposit_amount || 0) > 0 && (
-                                    <div className="flex justify-between items-center pt-2 text-lg font-bold text-orange-600">
-                                        <span>Còn lại:</span>
-                                        <span>{formatPrice(Math.max(0, (selectedOrder.total_amount || 0) - (selectedOrder.deposit_amount || 0)))}</span>
-                                    </div>
+                                    selectedOrder.status === 'Completed' ? (
+                                        <div className="flex justify-between items-center pt-2 text-base font-semibold text-gray-700">
+                                            <span>Đã thanh toán:</span>
+                                            <span>{formatPrice(selectedOrder.total_amount || 0)}</span>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <div className="flex justify-between items-center pt-2 text-base font-semibold text-gray-700">
+                                                <span>Đã cọc:</span>
+                                                <span>{formatPrice(selectedOrder.deposit_amount || 0)}</span>
+                                            </div>
+                                            <div className="flex justify-between items-center pt-2 text-lg font-bold text-orange-600">
+                                                <span>Còn lại:</span>
+                                                <span>{formatPrice(Math.max(0, (selectedOrder.total_amount || 0) - (selectedOrder.deposit_amount || 0)))}</span>
+                                            </div>
+                                        </>
+                                    )
                                 )}
                             </div>
 
@@ -625,15 +751,21 @@ export default function OrdersPage() {
                                                         <span>Tổng cộng:</span>
                                                         <span class="font-bold">${(selectedOrder.total_amount || 0).toLocaleString('vi-VN')}đ</span>
                                                     </div>
-                                                    ${(selectedOrder.deposit_amount || 0) > 0 ? `
-                                                    <div style="display: flex; justify-content: space-between;">
-                                                        <span>Đã cọc:</span>
-                                                        <span>${(selectedOrder.deposit_amount || 0).toLocaleString('vi-VN')}đ</span>
-                                                    </div>
-                                                    <div style="display: flex; justify-content: space-between;" class="font-bold">
-                                                        <span>CÒN LẠI:</span>
-                                                        <span>${Math.max(0, (selectedOrder.total_amount || 0) - (selectedOrder.deposit_amount || 0)).toLocaleString('vi-VN')}đ</span>
-                                                    </div>` : ''}
+                                                    ${(selectedOrder.deposit_amount || 0) > 0 ? (
+                                                        selectedOrder.status === 'Completed' ? `
+                                                        <div style="display: flex; justify-content: space-between;">
+                                                            <span>Đã thanh toán:</span>
+                                                            <span class="font-bold">${(selectedOrder.total_amount || 0).toLocaleString('vi-VN')}đ</span>
+                                                        </div>` : `
+                                                        <div style="display: flex; justify-content: space-between;">
+                                                            <span>Đã cọc:</span>
+                                                            <span>${(selectedOrder.deposit_amount || 0).toLocaleString('vi-VN')}đ</span>
+                                                        </div>
+                                                        <div style="display: flex; justify-content: space-between;" class="font-bold">
+                                                            <span>CÒN LẠI:</span>
+                                                            <span>${Math.max(0, (selectedOrder.total_amount || 0) - (selectedOrder.deposit_amount || 0)).toLocaleString('vi-VN')}đ</span>
+                                                        </div>`
+                                                    ) : ''}
                                                     <hr/>
                                                     <div class="text-center" style="margin-top: 16px;"><i>Cảm ơn quý khách!</i></div>
                                                 </body>
@@ -733,8 +865,12 @@ export default function OrdersPage() {
                                                         <div class="summary-row bold" style="font-size: 16px; margin-top: 5px; border-top: 1px dotted #ccc; padding-top: 5px;">
                                                             <span>Tổng thanh toán:</span><span>${(selectedOrder.total_amount || 0).toLocaleString('vi-VN')} đ</span>
                                                         </div>
-                                                        ${(selectedOrder.deposit_amount || 0) > 0 ? `<div class="summary-row" style="margin-top: 5px;"><span>Đã thanh toán (cọc):</span><span>${(selectedOrder.deposit_amount || 0).toLocaleString('vi-VN')} đ</span></div>
-                                                        <div class="summary-row bold" style="color: red; font-size: 16px;"><span>CÒN LẠI:</span><span>${Math.max(0, (selectedOrder.total_amount || 0) - (selectedOrder.deposit_amount || 0)).toLocaleString('vi-VN')} đ</span></div>` : ''}
+                                                        ${(selectedOrder.deposit_amount || 0) > 0 ? (
+                                                            selectedOrder.status === 'Completed' ? `
+                                                            <div class="summary-row" style="margin-top: 5px;"><span>Đã thanh toán:</span><span>${(selectedOrder.total_amount || 0).toLocaleString('vi-VN')} đ</span></div>` : `
+                                                            <div class="summary-row" style="margin-top: 5px;"><span>Đã cọc:</span><span>${(selectedOrder.deposit_amount || 0).toLocaleString('vi-VN')} đ</span></div>
+                                                            <div class="summary-row bold" style="color: red; font-size: 16px;"><span>CÒN LẠI:</span><span>${Math.max(0, (selectedOrder.total_amount || 0) - (selectedOrder.deposit_amount || 0)).toLocaleString('vi-VN')} đ</span></div>`
+                                                        ) : ''}
                                                     </div>
 
                                                     <div class="signatures">

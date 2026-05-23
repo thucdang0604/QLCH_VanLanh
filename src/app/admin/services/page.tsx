@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { useFirestoreCollection, addDocumentWithId, updateDocument, deleteDocument } from '@/lib/useFirestore';
 import { uploadImage, deleteImage } from '@/lib/storage';
-import { orderBy } from 'firebase/firestore';
+
 import { generateSlug } from '@/lib/utils';
 import type { FirestoreDateValue } from '@/lib/types';
 import { getCategoryPath, collectAllNodeIds } from '@/lib/utils';
@@ -24,6 +24,7 @@ import { triggerRevalidate } from '@/lib/revalidate';
 import Modal from '@/components/admin/Modal';
 import MediaManager from '@/components/admin/MediaManager';
 import CategoryTaxonomySelector from '@/components/admin/CategoryTaxonomySelector';
+import CurrencyInput from '@/components/admin/CurrencyInput';
 import { useConfig } from '@/lib/ConfigContext';
 
 interface Service {
@@ -79,7 +80,7 @@ export default function ServicesPage() {
                 }
                 await deleteDocument('services', service.id);
                 await triggerRevalidate(['/', `/service/${service.id}`, '/category/sua-chua', '/sitemap.xml'], ['services']);
-            } catch (error) {
+            } catch {
                 toastError('Lỗi khi xóa dịch vụ!');
             }
         }
@@ -216,7 +217,7 @@ export default function ServicesPage() {
                                 onClick={() => { setReassignFrom(cat); setShowReassign(true); }}
                                 className="px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 text-sm font-medium rounded-md transition-colors"
                             >
-                                Gán lại "{cat}"
+                                Gán lại &quot;{cat}&quot;
                             </button>
                         ))}
                     </div>
@@ -353,7 +354,7 @@ export default function ServicesPage() {
             <Modal isOpen={showReassign} onClose={() => setShowReassign(false)} title="Gán lại danh mục hàng loạt" size="md">
                 <div className="p-6 space-y-4">
                     <p className="text-sm text-gray-600">
-                        Chọn danh mục mới cho các dịch vụ đang thuộc danh mục <strong className="text-gray-900">"{reassignFrom}"</strong>.
+                        Chọn danh mục mới cho các dịch vụ đang thuộc danh mục <strong className="text-gray-900">&quot;{reassignFrom}&quot;</strong>.
                     </p>
                     <div>
                         <label className="block text-sm font-medium mb-1">Danh mục mới *</label>
@@ -615,25 +616,18 @@ function ServiceModal({
                     <div className="grid grid-cols-2 gap-3">
                         <div>
                             <label className="block text-sm font-medium mb-1">Giá dịch vụ (đ) *</label>
-                            <input
-                                type="number"
-                                min="0"
-                                step="1000"
+                            <CurrencyInput
                                 value={formData.price_original || ''}
-                                onChange={(e) => setFormData({ ...formData, price_original: parseInt(e.target.value) || 0 })}
-                                required
+                                onChange={(v) => setFormData({ ...formData, price_original: v })}
                                 className="w-full h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
-                                placeholder="350000"
+                                placeholder="350.000"
                             />
                         </div>
                         <div>
                             <label className="block text-sm font-medium mb-1">Giá khuyến mãi (đ)</label>
-                            <input
-                                type="number"
-                                min="0"
-                                step="1000"
+                            <CurrencyInput
                                 value={formData.price_promo || ''}
-                                onChange={(e) => setFormData({ ...formData, price_promo: parseInt(e.target.value) || 0 })}
+                                onChange={(v) => setFormData({ ...formData, price_promo: v })}
                                 className="w-full h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
                                 placeholder="Để trống nếu không giảm"
                             />

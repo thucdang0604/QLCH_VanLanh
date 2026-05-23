@@ -1,8 +1,11 @@
 import type { Metadata } from 'next';
 import { SITE_URL } from '@/lib/constants';
 import { fetchNavConfig, fetchTaxonomyConfig } from '../../_lib/server-queries';
+import type { TaxonomyNode } from '@/lib/types';
 
-function findTaxonomyNode(slugSegments: string[], trees: { type: string; nodes: any[] }[]): { node: any; type: string } | null {
+type NavItem = { slug?: string; label?: string; name?: string; filterType?: string; taxonomyRef?: string };
+
+function findTaxonomyNode(slugSegments: string[], trees: { type: string; nodes: TaxonomyNode[] }[]): { node: TaxonomyNode; type: string } | null {
     const targetSlug = slugSegments[slugSegments.length - 1];
     for (const tree of trees) {
         for (const node of tree.nodes) {
@@ -25,13 +28,11 @@ function findTaxonomyNode(slugSegments: string[], trees: { type: string; nodes: 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string[] }> }): Promise<Metadata> {
     const { slug } = await params;
     const fullSlug = slug.join('/');
-    const lastSegment = slug[slug.length - 1];
-
     // 1. Try nav config (only for single-segment slugs)
     const nav = await fetchNavConfig();
     const navItem = slug.length === 1
         ? [...nav.headerNav, ...nav.sidebarMenu, ...nav.footerServices]
-            .find((item: any) => item.slug === slug[0])
+            .find((item: NavItem) => item.slug === slug[0])
         : null;
 
     let pageLabel = navItem?.label || navItem?.name || '';

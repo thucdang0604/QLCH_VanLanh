@@ -101,6 +101,24 @@ const KEY_MAP: Record<string, string> = {
     geofence: 'layout_settings',
 };
 
+// =========== Helper to recursively remove undefined fields for Firestore compatibility ===========
+function cleanUndefined(obj: any): any {
+    if (Array.isArray(obj)) {
+        return obj.map(cleanUndefined);
+    }
+    if (obj !== null && typeof obj === 'object') {
+        const cleaned: Record<string, any> = {};
+        for (const [key, val] of Object.entries(obj)) {
+            if (val !== undefined) {
+                cleaned[key] = cleanUndefined(val);
+            }
+        }
+        return cleaned;
+    }
+    return obj;
+}
+
+
 // =========== Provider ===========
 export function ConfigProvider({ children }: { children: ReactNode }) {
     const [config, setConfig] = useState<SiteConfig>(DEFAULT_CONFIG);
@@ -112,7 +130,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         let loadedCount = 0;
 
         const seedDocument = async (docName: string) => {
-            let seedData: any = {};
+            let seedData: Record<string, unknown> = {};
             if (docName === 'taxonomy_settings') {
                 seedData = { taxonomy: DEFAULT_CONFIG.taxonomy };
             } else if (docName === 'navigation_settings') {
@@ -169,7 +187,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
                                 
                                 const targetDoc = KEY_MAP[key] || 'main_settings';
                                 if (targetDoc === docName) {
-                                    (next as any)[key] = data[key];
+                                    (next as Record<string, unknown>)[key] = data[key];
                                 }
                             }
 
@@ -215,14 +233,15 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
 
     // Update config in Firestore, split into appropriate documents
     const updateConfig = async (partial: Partial<SiteConfig>) => {
-        const updatesByDoc: Record<string, any> = {
+        const cleanedPartial = cleanUndefined(partial);
+        const updatesByDoc: Record<string, Record<string, unknown>> = {
             main_settings: {},
             layout_settings: {},
             navigation_settings: {},
             taxonomy_settings: {}
         };
 
-        for (const [key, value] of Object.entries(partial)) {
+        for (const [key, value] of Object.entries(cleanedPartial)) {
             const targetDoc = KEY_MAP[key] || 'main_settings';
             updatesByDoc[targetDoc][key] = value;
         }
@@ -266,6 +285,7 @@ export function ServerConfigProvider({ children, initialConfig }: { children: Re
     }, [initialConfig]);
 
     // No-op updateConfig — customer pages should never call this
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const updateConfig = async (_partial: Partial<SiteConfig>) => {
         console.warn('updateConfig called in ServerConfigProvider — this is a no-op. Use admin ConfigProvider instead.');
     };

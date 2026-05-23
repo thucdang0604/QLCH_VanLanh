@@ -1,14 +1,16 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useFirestoreCollection, addDocumentWithId, updateDocument, deleteDocument, addDocument } from '@/lib/useFirestore';
-import { Category, Brand, TaxonomyNode } from '@/lib/types';
+import { useFirestoreCollection, updateDocument, deleteDocument, addDocument } from '@/lib/useFirestore';
+import { Brand, TaxonomyNode } from '@/lib/types';
 import { useConfig } from '@/lib/ConfigContext';
 import Modal from '@/components/admin/Modal';
 import MediaManager from '@/components/admin/MediaManager';
 import { generateSlug } from '@/lib/utils';
 import { toastSuccess, toastError, toastWarning } from '@/lib/toast';
-import { Plus, Edit, Trash2, Tag, Layers, Search, Image as ImageIcon, Briefcase, Cpu, ShoppingBag, FolderTree, Sparkles, ChevronRight, ChevronDown, Package } from 'lucide-react';
+import { Plus, Edit, Trash2, Tag, Search, Image as ImageIcon, FolderTree, Sparkles, ChevronRight, ChevronDown, Package } from 'lucide-react';
+import Image from 'next/image';
+import { triggerRevalidate } from '@/lib/revalidate';
 
 export default function CategoriesTab() {
     const [activeSubTab, setActiveSubTab] = useState<'categories' | 'brands'>('categories');
@@ -85,7 +87,7 @@ function CategoriesList() {
         if (!confirm('Bạn có chắc muốn xoá danh mục này và tất cả danh mục con?')) return;
         
         const newTax = JSON.parse(JSON.stringify(taxonomy));
-        let list = newTax[filterType] as TaxonomyNode[];
+        const list = newTax[filterType] as TaxonomyNode[];
         
         if (indexPath.length === 1) {
             list.splice(indexPath[0], 1);
@@ -110,7 +112,7 @@ function CategoriesList() {
 
     const handleSaveNode = async (nodeData: Omit<TaxonomyNode, 'id'>) => {
         const newTax = JSON.parse(JSON.stringify(taxonomy));
-        let list = newTax[filterType] as TaxonomyNode[];
+        const list = newTax[filterType] as TaxonomyNode[];
         
         // Construct the full id based on parentPath
         let newId = nodeData.slug;
@@ -173,7 +175,7 @@ function CategoriesList() {
                     </div>
                     
                     {node.icon ? (
-                        <img src={node.icon} alt={node.name} className="w-8 h-8 object-contain bg-white rounded p-1 border border-gray-100" />
+                        <Image src={node.icon} alt={node.name} width={32} height={32} className="w-8 h-8 object-contain bg-white rounded p-1 border border-gray-100" />
                     ) : (
                         <div className="w-8 h-8 bg-gray-100 rounded flex items-center justify-center">
                             <FolderTree size={14} className="text-gray-400" />
@@ -225,7 +227,7 @@ function CategoriesList() {
                     <div className="flex items-center gap-2">
                         <select
                             value={filterType}
-                            onChange={(e) => setFilterType(e.target.value as any)}
+                            onChange={(e) => setFilterType(e.target.value as 'retail' | 'service' | 'component')}
                             className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 bg-gray-50/50"
                         >
                             <option value="retail">Sản phẩm bán lẻ</option>
@@ -297,7 +299,7 @@ function CategoryModal({ isOpen, onClose, initialData, onSave }: { isOpen: boole
         setSaving(true);
         try {
             await onSave(formData);
-        } catch (error) {
+        } catch {
             toastError('Lỗi khi lưu danh mục');
         } finally {
             setSaving(false);
@@ -354,7 +356,7 @@ function CategoryModal({ isOpen, onClose, initialData, onSave }: { isOpen: boole
                     <label className="text-sm font-medium text-gray-700">Icon / Hình đại diện</label>
                     <div className="flex items-center gap-4">
                         {formData.icon ? (
-                            <img src={formData.icon} alt="Icon preview" className="w-12 h-12 object-contain bg-gray-50 border rounded p-1" />
+                            <Image src={formData.icon} alt="Icon preview" width={48} height={48} className="w-12 h-12 object-contain bg-gray-50 border rounded p-1" />
                         ) : (
                             <div className="w-12 h-12 bg-gray-50 border rounded flex items-center justify-center">
                                 <ImageIcon size={20} className="text-gray-400" />
@@ -437,8 +439,8 @@ function BrandsList() {
         try {
             await deleteDocument('brands', id);
             toastSuccess('Đã xoá thương hiệu');
-            fetch('/api/revalidate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tag: 'categories' }) }).catch(console.error);
-        } catch (error) {
+            triggerRevalidate(['layout'], ['categories', 'config']).catch(console.error);
+        } catch {
             toastError('Lỗi khi xoá thương hiệu');
         }
     };
@@ -494,7 +496,7 @@ function BrandsList() {
                                 <div key={brand.id} className="border border-gray-100 rounded-xl p-4 bg-gradient-to-b from-white to-gray-50/50 hover:shadow-md hover:border-orange-200 transition-all group relative cursor-pointer" onClick={() => handleOpenModal(brand)}>
                                     <div className="aspect-square bg-white rounded-lg flex items-center justify-center p-3 mb-3 border border-gray-100">
                                         {brand.logoUrl ? (
-                                            <img src={brand.logoUrl} alt={brand.name} className="max-w-full max-h-full object-contain mix-blend-multiply" />
+                                            <Image src={brand.logoUrl} alt={brand.name} width={120} height={120} className="max-w-full max-h-full object-contain mix-blend-multiply" />
                                         ) : (
                                             <Tag size={28} className="text-gray-200" />
                                         )}
@@ -560,9 +562,9 @@ function BrandModal({ isOpen, onClose, initialData }: { isOpen: boolean, onClose
                 await addDocument('brands', payload);
                 toastSuccess('Thêm thương hiệu mới thành công');
             }
-            fetch('/api/revalidate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tag: 'categories' }) }).catch(console.error);
+            triggerRevalidate(['layout'], ['categories', 'config']).catch(console.error);
             onClose();
-        } catch (error) {
+        } catch {
             toastError('Lỗi khi lưu thương hiệu');
         } finally {
             setSaving(false);
@@ -604,7 +606,7 @@ function BrandModal({ isOpen, onClose, initialData }: { isOpen: boolean, onClose
                     <div className="flex items-center gap-4">
                         {formData.logoUrl ? (
                             <div className="w-24 h-24 bg-gray-50 border rounded flex items-center justify-center p-2 relative">
-                                <img src={formData.logoUrl} alt="Logo preview" className="max-w-full max-h-full object-contain mix-blend-multiply" />
+                                <Image src={formData.logoUrl} alt="Logo preview" width={80} height={80} className="max-w-full max-h-full object-contain mix-blend-multiply" />
                             </div>
                         ) : (
                             <div className="w-24 h-24 bg-gray-50 border border-dashed rounded flex items-center justify-center">

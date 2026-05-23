@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import {
     collection,
     query,
@@ -33,7 +33,6 @@ export function useFirestoreCollection<T extends DocumentData>(
 
     useEffect(() => {
         // This hook re-subscribes when its query changes; show loading state immediately.
-        // eslint-disable-next-line react-hooks/set-state-in-effect
         setLoading(true);
         setError(null);
 
@@ -57,6 +56,7 @@ export function useFirestoreCollection<T extends DocumentData>(
         );
 
         return () => unsubscribe();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [collectionName, JSON.stringify(constraints.map(c => c.toString()))]);
 
     return { data, loading, error };
@@ -99,45 +99,45 @@ export function useFlashSaleProducts(maxItems: number = 6) {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        const fetchFlashSale = async () => {
-            try {
-                // Query products with isFlashSale = true OR high discount
-                const q = query(
-                    collection(db, 'products'),
-                    where('status', '==', 'active'),
-                    orderBy('createdAt', 'desc'),
-                    limit(maxItems)
-                );
+        let unsubscribe: (() => void) | undefined;
 
-                const unsubscribe = onSnapshot(q, (snapshot) => {
-                    const products = snapshot.docs
-                        .map((doc) => ({ id: doc.id, ...doc.data() }))
-                        .filter((p) => {
-                            const item = p as Partial<{
-                                isFlashSale: boolean;
-                                price_promo: number;
-                                price_original: number;
-                            }>;
-                            // Filter products with discount or isFlashSale flag
-                            if (item.isFlashSale) return true;
-                            if (item.price_promo && item.price_original) {
-                                const discount = ((item.price_original - item.price_promo) / item.price_original) * 100;
-                                return discount >= 10;
-                            }
-                            return false;
-                        });
-                    setData(products);
-                    setLoading(false);
-                });
+        try {
+            // Query products with isFlashSale = true OR high discount
+            const q = query(
+                collection(db, 'products'),
+                where('status', '==', 'active'),
+                orderBy('createdAt', 'desc'),
+                limit(maxItems)
+            );
 
-                return unsubscribe;
-            } catch (error) {
-                console.error('Flash sale fetch error:', error);
+            unsubscribe = onSnapshot(q, (snapshot) => {
+                const products = snapshot.docs
+                    .map((doc) => ({ id: doc.id, ...doc.data() }))
+                    .filter((p) => {
+                        const item = p as Partial<{
+                            isFlashSale: boolean;
+                            price_promo: number;
+                            price_original: number;
+                        }>;
+                        // Filter products with discount or isFlashSale flag
+                        if (item.isFlashSale) return true;
+                        if (item.price_promo && item.price_original) {
+                            const discount = ((item.price_original - item.price_promo) / item.price_original) * 100;
+                            return discount >= 10;
+                        }
+                        return false;
+                    });
+                setData(products);
                 setLoading(false);
-            }
-        };
+            });
+        } catch (error) {
+            console.error('Flash sale fetch error:', error);
+            setLoading(false);
+        }
 
-        fetchFlashSale();
+        return () => {
+            unsubscribe?.();
+        };
     }, [maxItems]);
 
     return { data, loading };

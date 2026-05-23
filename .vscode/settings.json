@@ -1,4 +1,5 @@
 {
     "workbench.externalBrowser": "edge",
-    "git.autofetch": false
+    "git.autofetch": false,
+    "chatgpt.openOnStartup": true
 }

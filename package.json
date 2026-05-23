@@ -5,15 +5,22 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "typegen": "next typegen",
+    "typecheck": "next typegen && tsc --noEmit",
+    "verify": "npm run lint && npm run typecheck && npm run build",
     "start": "next start",
     "lint": "eslint",
     "clean": "npx rimraf .next .firebase tsconfig.tsbuildinfo",
     "graph": "node scripts/generate-graph.js",
-    "graph:serve": "node dev-tools/file-graph/serve.js"
+    "graph:serve": "node dev-tools/file-graph/serve.js",
+    "migrate:inventory": "tsx scripts/migrate-active-orders.ts"
   },
   "dependencies": {
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
     "@google/generative-ai": "^0.24.1",
     "@tailwindcss/typography": "^0.5.19",
+    "browser-image-compression": "^2.0.2",
     "critters": "^0.0.23",
     "firebase": "^12.9.0",
     "firebase-admin": "^13.7.0",
@@ -25,16 +32,20 @@
     "react-player": "^3.4.0",
     "react-quill-new": "^3.8.3",
     "sonner": "^2.0.7",
-    "swiper": "^12.1.0"
+    "swiper": "^12.1.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "^3.3.5",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "^15.5.14",
+    "puppeteer-core": "^25.0.4",
     "tailwindcss": "^4",
+    "tsx": "^4.19.2",
     "typescript": "^5"
   },
   "browserslist": [

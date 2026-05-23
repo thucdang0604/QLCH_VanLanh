@@ -20,27 +20,38 @@ service cloud.firestore {
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'staff');
     }
 
+    // Helper: Granular Permission Check
+    function hasPermission(permission) {
+      return isAuthenticated() && (
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' || (
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'staff' &&
+          'permissions' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.permissions.hasAny([permission])
+        )
+      );
+    }
+
     // Helper: Owner
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    // Products - public read, admin/staff write (staff with permission, handled in app, for rules just Admin/Staff)
+    // Products - public read, manage_products write
     match /products/{productId} {
       allow read: if true;
-      allow write: if isStaff();
+      allow write: if hasPermission('manage_products');
     }
     
     // Services - same
     match /services/{serviceId} {
       allow read: if true;
-      allow write: if isStaff();
+      allow write: if hasPermission('manage_services');
     }
     
     // Articles - same
     match /articles/{articleId} {
       allow read: if true;
-      allow write: if isStaff();
+      allow write: if hasPermission('manage_articles');
     }
     
     // System Config - public read, admin only write
@@ -58,11 +69,6 @@ service cloud.firestore {
       allow read: if true;
       allow write: if isAdmin();
     }
-    // Services - public read (storefront), admin write
-    match /services/{serviceId} {
-      allow read: if true;
-      allow write: if isAdmin();
-    }
 
     // Analytics Dashboard
     match /analytics/{dateStr} {
@@ -77,49 +83,62 @@ service cloud.firestore {
 
     // Users
     match /users/{userId} {
+      // Helper function to check if the create request has safe default role and permissions
+      function isValidUserCreate() {
+        return request.resource.data.role == 'customer'
+          && !('permissions' in request.resource.data);
+      }
+
+      // Helper function to check if only non-sensitive profile fields are modified
+      function onlySafeProfileUpdate() {
+        return request.resource.data.diff(resource.data).changedKeys()
+          .hasOnly(['displayName', 'name', 'phone', 'photoURL', 'updatedAt']);
+      }
+
       // Read: owner reads own, staff/admin reads all
       allow read: if isOwner(userId) || isStaff();
 
-      // Create: owner creates own (signup), OR admin creates for others (e.g. promoting)
-      allow create: if isOwner(userId) || isAdmin();
+      // Create: owner creates own (signup with customer role), OR admin creates/promotes
+      allow create: if (isOwner(userId) && isValidUserCreate()) || isAdmin();
 
-      // Update: owner updates own profile, OR admin updates any (for role/permission management)
-      allow update: if isOwner(userId) || isAdmin();
+      // Update: owner updates own profile (only safe fields), OR admin updates any
+      allow update: if (isOwner(userId) && onlySafeProfileUpdate()) || isAdmin();
 
-      // Delete: admin only
       allow delete: if isAdmin();
     }
     
+    // Customers
+    match /customers/{phone} {
+      allow read, write: if isStaff();
+    }
+
     // Orders
     match /orders/{orderId} {
       // Staff/Admin read all. Public cannot read orders directly.
-      allow read: if isStaff();
-      // Anyone can create an order (guest checkout & POS) — validated
-      allow create: if request.resource.data.keys().hasAll(['customer_info', 'items', 'total_amount', 'status'])
-        && request.resource.data.items is list
-        && request.resource.data.items.size() > 0
-        && request.resource.data.items.size() <= 50;
+      allow read: if hasPermission('manage_orders');
+      // Only staff/admin with manage_orders can create directly (e.g., POS); web customers must use checkout API.
+      allow create: if hasPermission('manage_orders');
       // Staff/Admin update/delete.
-      allow update, delete: if isStaff();
+      allow update, delete: if hasPermission('manage_orders');
     }
     
     // Appointments
     match /appointments/{appointmentId} {
       allow create: if true; // Public can create appointments
-      allow read: if true;   // Public for tracking
-      allow update, delete: if isStaff();
+      allow read: if hasPermission('manage_orders');
+      allow update, delete: if hasPermission('manage_orders');
     }
 
     // Repairs
     match /repairs/{repairId} {
-      allow read: if true; // Public for tracking
-      allow create, update: if isStaff();
+      allow read: if hasPermission('manage_repairs');
+      allow create, update: if hasPermission('manage_repairs');
       allow delete: if isAdmin();
     }
 
     // Activities
     match /activities/{activityId} {
-      allow read, write: if isStaff();
+      allow read, write: if hasPermission('manage_settings');
     }
 
     // Media Library
@@ -138,36 +157,105 @@ service cloud.firestore {
     
     // Inventory
     match /import_receipts/{receiptId} {
-      allow read, write: if isStaff();
+      allow read, write: if hasPermission('manage_inventory');
+    }
+    match /inventory_logs/{logId} {
+      allow read, write: if hasPermission('manage_inventory');
     }
 
     // Commissions
     match /commission_rules/{ruleId} {
-      allow read, write: if isStaff();
+      allow read, write: if hasPermission('view_commissions');
     }
     match /commissions/{commissionId} {
-      allow read, write: if isStaff();
+      allow read, write: if hasPermission('view_commissions');
     }
 
     // Expenses
     match /expenses/{expenseId} {
-      allow read, write: if isStaff();
+      allow read, write: if hasPermission('view_revenue');
     }
 
-    // Customer Reviews
+    // Suppliers
+    match /suppliers/{supplierId} {
+      allow read, write: if hasPermission('manage_inventory');
+    }
+    match /supplier_transactions/{txnId} {
+      allow read, write: if hasPermission('manage_inventory');
+    }
+
+    // Accessory Discount Rules
+    match /accessory_discount_rules/{ruleId} {
+      allow read, write: if hasPermission('manage_settings');
+    }
+
+    // Customer Reviews — public create ép pending, whitelist fields, validate types
     match /reviews/{reviewId} {
-      allow create: if true; // Public can create
-      allow read: if resource.data.status == 'approved' || request.auth != null; // Public reads approved, staff reads all
-      allow update, delete: if isStaff(); // Only staff/admin can moderate
+      allow create: if true
+        && request.resource.data.status == 'pending'
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.keys().hasAll(['customerName', 'phone', 'rating', 'content', 'status', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['referenceId', 'type', 'customerName', 'phone', 'rating', 'content', 'images', 'status', 'createdAt', 'verification'])
+        && request.resource.data.customerName is string
+        && request.resource.data.customerName.size() >= 2
+        && request.resource.data.customerName.size() <= 100
+        && request.resource.data.phone is string
+        && request.resource.data.phone.size() >= 4
+        && request.resource.data.phone.size() <= 20
+        && request.resource.data.rating is int
+        && request.resource.data.rating >= 1
+        && request.resource.data.rating <= 5
+        && request.resource.data.content is string
+        && request.resource.data.content.size() <= 2000
+        && (!('referenceId' in request.resource.data) || request.resource.data.referenceId is string)
+        && (!('type' in request.resource.data) || request.resource.data.type in ['general', 'repair'])
+        && (!('images' in request.resource.data) || (request.resource.data.images is list && request.resource.data.images.size() <= 5))
+        && (!('verification' in request.resource.data) || request.resource.data.verification in ['pin', 'geolocation']);
+      allow read: if resource.data.status == 'approved' || hasPermission('manage_reviews');
+      allow update, delete: if hasPermission('manage_reviews');
     }
 
-    // Article Comments (Bình luận + đánh giá bài viết)
-    match /article_comments/{commentId} {
-      // Bất kỳ ai (kể cả không đăng nhập) đều có thể gửi và xem bình luận
-      allow create, read: if true;
+    // Product Reviews — public create ép pending, whitelist fields
+    match /product_reviews/{reviewId} {
+      allow create: if true
+        && request.resource.data.status == 'pending'
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.keys().hasAll(['productId', 'customerName', 'rating', 'content', 'status', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['productId', 'customerName', 'phone', 'rating', 'content', 'images', 'status', 'createdAt'])
+        && request.resource.data.productId is string
+        && request.resource.data.customerName is string
+        && request.resource.data.customerName.size() >= 2
+        && request.resource.data.customerName.size() <= 100
+        && request.resource.data.rating is int
+        && request.resource.data.rating >= 1
+        && request.resource.data.rating <= 5
+        && request.resource.data.content is string
+        && request.resource.data.content.size() <= 2000
+        && (!('phone' in request.resource.data) || (request.resource.data.phone is string && request.resource.data.phone.size() <= 20))
+        && (!('images' in request.resource.data) || (request.resource.data.images is list && request.resource.data.images.size() <= 5));
+      allow read: if resource.data.status == 'approved' || hasPermission('manage_reviews');
+      allow update, delete: if hasPermission('manage_reviews');
+    }
 
-      // Chỉ staff/admin được quyền cập nhật/xoá (moderation, đổi status, ẩn spam...)
-      allow update, delete: if isStaff();
+    // Article Comments — public create ép pending, whitelist fields
+    match /article_comments/{commentId} {
+      allow create: if true
+        && request.resource.data.status == 'pending'
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.keys().hasAll(['articleId', 'rating', 'name', 'content', 'status', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['articleId', 'rating', 'name', 'phone', 'content', 'status', 'createdAt'])
+        && request.resource.data.articleId is string
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 2
+        && request.resource.data.name.size() <= 100
+        && request.resource.data.rating is int
+        && request.resource.data.rating >= 1
+        && request.resource.data.rating <= 5
+        && request.resource.data.content is string
+        && request.resource.data.content.size() <= 2000
+        && (!('phone' in request.resource.data) || (request.resource.data.phone is string && request.resource.data.phone.size() <= 20));
+      allow read: if resource.data.status == 'approved' || hasPermission('manage_articles');
+      allow update, delete: if hasPermission('manage_articles');
     }
   }
 }

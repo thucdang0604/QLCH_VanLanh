@@ -2,26 +2,17 @@
 
 import { useState, useEffect } from 'react';
 import {
-    Users, Plus, Shield, Check, X, Loader2, MoreVertical,
-    Trash2, Edit, Save, Lock, Mail, Phone, Search
+    Plus, Check, Loader2, MoreVertical,
+    Edit, Mail, Phone, Search
 } from 'lucide-react';
 import Modal from '@/components/admin/Modal';
-import { collection, query, where, getDocs, doc, updateDoc, setDoc, serverTimestamp, deleteDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { AppUser } from '@/lib/AuthContext';
 import { toastError, toastSuccess } from '@/lib/toast';
+import { PERMISSIONS_REGISTRY as PERMISSIONS } from '@/lib/permissions';
 
-// Permission List
-const PERMISSIONS = [
-    { id: 'manage_products', label: 'Quản lý Sản phẩm' },
-    { id: 'manage_orders', label: 'Quản lý Đơn hàng' },
-    { id: 'manage_repairs', label: 'Quản lý Sửa chữa' },
-    { id: 'manage_services', label: 'Quản lý Dịch vụ' },
-    { id: 'manage_articles', label: 'Quản lý Bài viết' },
-    { id: 'view_revenue', label: 'Xem Doanh thu' },
-    { id: 'chat_support', label: 'Chat & CSKH' },
-];
-
+// Using centralized PERMISSIONS from @/lib/permissions
 export default function StaffPage() {
     const [staffs, setStaffs] = useState<AppUser[]>([]);
     const [loading, setLoading] = useState(true);

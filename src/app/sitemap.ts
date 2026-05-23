@@ -31,21 +31,23 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     const dynamicCategories = await fetchDynamicCategories();
     const validDynamicSlugs: string[] = [];
     
-    for (const cat of dynamicCategories) {
+    for (const cat of dynamicCategories as Record<string, unknown>[]) {
         if (!cat.keywords || !Array.isArray(cat.keywords) || cat.keywords.length === 0) {
-            validDynamicSlugs.push(cat.slug); // If no keywords, assume it's valid
+            if (typeof cat.slug === 'string') {
+                validDynamicSlugs.push(cat.slug); // If no keywords, assume it's valid
+            }
             continue;
         }
 
         const isRepair = cat.type === 'repair';
         const itemsToFilter = isRepair ? allServices : allProducts;
         
-        const hasItems = itemsToFilter.some(item => {
+        const hasItems = itemsToFilter.some((item: Record<string, unknown>) => {
             const searchStr = `${item.name || ''} ${item.device_model || ''} ${item.category || ''} ${item.description || ''} ${Array.isArray(item.tags) ? item.tags.join(' ') : ''}`.toLowerCase();
-            return cat.keywords.some((kw: string) => searchStr.includes(kw.toLowerCase()));
+            return (cat.keywords as string[]).some((kw: string) => searchStr.includes(kw.toLowerCase()));
         });
 
-        if (hasItems) {
+        if (hasItems && typeof cat.slug === 'string') {
             validDynamicSlugs.push(cat.slug);
         }
     }
@@ -60,17 +62,17 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     }));
 
     // 3. Dynamic Products
-    const productPages: MetadataRoute.Sitemap = allProducts.map(item => ({
+    const productPages: MetadataRoute.Sitemap = allProducts.map((item: Record<string, unknown>) => ({
         url: `${SITE_URL}/product/${item.id}`,
-        lastModified: item.updatedAt ? new Date(item.updatedAt) : (item.createdAt ? new Date(item.createdAt) : new Date()),
+        lastModified: item.updatedAt ? new Date(item.updatedAt as string | number) : (item.createdAt ? new Date(item.createdAt as string | number) : new Date()),
         changeFrequency: 'weekly',
         priority: 0.8,
     }));
 
     // 4. Dynamic Services
-    const servicePages: MetadataRoute.Sitemap = allServices.map(item => ({
+    const servicePages: MetadataRoute.Sitemap = allServices.map((item: Record<string, unknown>) => ({
         url: `${SITE_URL}/service/${item.id}`,
-        lastModified: item.updatedAt ? new Date(item.updatedAt) : (item.createdAt ? new Date(item.createdAt) : new Date()),
+        lastModified: item.updatedAt ? new Date(item.updatedAt as string | number) : (item.createdAt ? new Date(item.createdAt as string | number) : new Date()),
         changeFrequency: 'weekly',
         priority: 0.8,
     }));
