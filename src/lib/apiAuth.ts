@@ -20,7 +20,7 @@ export async function verifyUser(req: NextRequest): Promise<VerifiedUser> {
     throw new Error('Missing Authorization bearer token');
   }
 
-  const decoded = await getAdminAuth().verifyIdToken(token, true);
+  const decoded = await getAdminAuth().verifyIdToken(token);
   const uid = decoded.uid;
 
   const snap = await getAdminDb().collection('users').doc(uid).get();

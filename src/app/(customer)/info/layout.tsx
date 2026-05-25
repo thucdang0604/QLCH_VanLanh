@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { ChevronRight, Home, Info, Shield, Truck, CreditCard, Lock, RotateCcw, Menu, X } from 'lucide-react';
+import { ChevronRight, Home, Info, Shield, Truck, CreditCard, Lock, RotateCcw, Menu, X, FileText, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 
 const infoPages = [
@@ -11,6 +11,8 @@ const infoPages = [
     { href: '/info/chinh-sach-mua-hang', label: 'Chính sách mua hàng & giao nhận', icon: <Truck size={16} /> },
     { href: '/info/tra-gop', label: 'Chính sách trả góp', icon: <CreditCard size={16} /> },
     { href: '/info/chinh-sach-bao-mat', label: 'Chính sách bảo mật', icon: <Lock size={16} /> },
+    { href: '/info/dieu-khoan-dich-vu', label: 'Điều khoản dịch vụ', icon: <FileText size={16} /> },
+    { href: '/info/xoa-du-lieu-nguoi-dung', label: 'Xóa dữ liệu người dùng', icon: <Trash2 size={16} /> },
     { href: '/info/chinh-sach-doi-tra', label: 'Chính sách đổi trả', icon: <RotateCcw size={16} /> },
 ];
 

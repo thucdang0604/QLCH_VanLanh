@@ -1,5 +1,5 @@
 import { MetadataRoute } from 'next';
-import { getAdminDb } from '@/lib/firebaseAdmin';
+import { getAdminDb, isAdminAvailable } from '@/lib/firebaseAdmin';
 import { SITE_URL } from '@/lib/constants';
 import { fetchDynamicCategories, fetchCategoryItems } from '@/app/(customer)/_lib/server-queries';
 
@@ -8,8 +8,6 @@ const STATIC_NAV_SLUGS = ['may-moi', 'may-cu', 'sua-chua', 'phu-kien'];
 export const revalidate = 86400; // Cache sitemap for 24 hours
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-    const db = getAdminDb();
-    
     // 1. Static Pages
     const staticPages: MetadataRoute.Sitemap = [
         { url: `${SITE_URL}/`, lastModified: new Date(), changeFrequency: 'daily', priority: 1.0 },
@@ -20,15 +18,32 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
         { url: `${SITE_URL}/info/chinh-sach-bao-mat`, lastModified: new Date(), changeFrequency: 'monthly', priority: 0.5 },
         { url: `${SITE_URL}/info/chinh-sach-doi-tra`, lastModified: new Date(), changeFrequency: 'monthly', priority: 0.5 },
         { url: `${SITE_URL}/info/chinh-sach-mua-hang`, lastModified: new Date(), changeFrequency: 'monthly', priority: 0.5 },
+        { url: `${SITE_URL}/info/dieu-khoan-dich-vu`, lastModified: new Date(), changeFrequency: 'monthly', priority: 0.5 },
+        { url: `${SITE_URL}/info/xoa-du-lieu-nguoi-dung`, lastModified: new Date(), changeFrequency: 'monthly', priority: 0.5 },
         { url: `${SITE_URL}/info/tra-gop`, lastModified: new Date(), changeFrequency: 'monthly', priority: 0.5 },
     ];
 
+    if (!isAdminAvailable()) {
+        return staticPages;
+    }
+
+    const db = getAdminDb();
+
     // Fetch items for dynamic pruning and subsequent product/service URL generation
-    const allServices = await fetchCategoryItems(true);
-    const allProducts = await fetchCategoryItems(false);
+    let allServices: Record<string, unknown>[] = [];
+    let allProducts: Record<string, unknown>[] = [];
+    let dynamicCategories: Record<string, unknown>[] = [];
+
+    try {
+        allServices = await fetchCategoryItems(true);
+        allProducts = await fetchCategoryItems(false);
+        dynamicCategories = await fetchDynamicCategories();
+    } catch (e) {
+        console.error('Sitemap - Error fetching dynamic categories/items:', e);
+        return staticPages;
+    }
 
     // 2. Category Pages (Static + Dynamic Pruned)
-    const dynamicCategories = await fetchDynamicCategories();
     const validDynamicSlugs: string[] = [];
     
     for (const cat of dynamicCategories as Record<string, unknown>[]) {

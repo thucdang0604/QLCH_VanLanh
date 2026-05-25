@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import Image from 'next/image';
 import { Plus, Search, Edit, Trash2, Package, Loader2, FileSpreadsheet } from 'lucide-react';
 import { useFirestoreCollection, updateDocument } from '@/lib/useFirestore';
-import { deleteImage } from '@/lib/storage';
+
 import { orderBy } from 'firebase/firestore';
 import { toastError } from '@/lib/toast';
 import { useClientPagination } from '@/lib/useClientPagination';
@@ -16,7 +16,7 @@ import ExcelImportModal from '@/components/admin/ExcelImportModal';
 import type { Product } from '@/lib/types';
 import { useConfig } from '@/lib/ConfigContext';
 import { getCategoryPath, collectAllNodeIds } from '@/lib/utils';
-import { PART_CATEGORY, isPartCategory } from '@/lib/constants';
+import { isPartCategory } from '@/lib/constants';
 
 // Product is now imported from @/lib/types
 

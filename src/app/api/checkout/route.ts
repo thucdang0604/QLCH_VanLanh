@@ -195,7 +195,6 @@ export async function POST(request: NextRequest) {
                 const productRef = db.collection('products').doc(productId);
                 const currentData = productDocs.get(productId)!;
                 const d = currentData.data()!;
-                const currentStock = d.stock || 0;
                 const currentHeld = d.held || 0;
                 
                 transaction.update(productRef, {

@@ -105,8 +105,10 @@ export function useAdminBadges(userUid?: string, userRole?: string, userPermissi
                     if (typeof data === 'object' && data !== null) {
                         Object.values(data as Record<string, unknown>).forEach((room) => {
                             const info = (typeof room === 'object' && room !== null) ? (room as { info?: unknown }).info : undefined;
-                            const hasUnread = (typeof info === 'object' && info !== null) ? (info as { hasUnread?: unknown }).hasUnread : undefined;
-                            if (hasUnread) count++;
+                            const unreadInfo = (typeof info === 'object' && info !== null)
+                                ? (info as { hasUnread?: unknown; hasUnreadAdmin?: unknown })
+                                : {};
+                            if (unreadInfo.hasUnread || unreadInfo.hasUnreadAdmin) count++;
                         });
                     }
                     setUnreadChats(count);

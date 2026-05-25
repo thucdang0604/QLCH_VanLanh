@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import Image from 'next/image';
 import {
     Search,
     Send,
@@ -13,18 +14,92 @@ import {
     ChevronLeft,
     Bot,
     ToggleLeft,
-    ToggleRight
+    ToggleRight,
+    Globe2,
+    MessageCircle
 } from 'lucide-react';
 import { subscribeToRooms, subscribeToMessages, subscribeToRoomInfo, sendMessage, updateRoomInfo, ChatMessage } from '@/lib/realtimedb';
+import { getAuthInstance } from '@/lib/firebase';
+import { getChatChannelLabel, isExternalChatChannel, normalizeChatChannel, type ChatChannel } from '@/lib/chatChannels';
+import { toastError } from '@/lib/toast';
 
 interface ChatRoom {
     odId: string;
     displayName: string;
     email: string | null;
     isGuest: boolean;
+    channel: ChatChannel;
+    sourceLabel: string;
+    externalUserId?: string;
+    externalPageId?: string;
+    avatarUrl?: string;
     lastMessage: string;
     lastMessageTime: number;
     hasUnread: boolean;
+}
+
+function getChannelStyle(channel: ChatChannel) {
+    if (channel === 'facebook') {
+        return {
+            label: 'Facebook',
+            badge: 'bg-blue-50 text-blue-700 border-blue-200',
+            avatar: 'bg-blue-100 text-blue-600',
+            Icon: MessageCircle,
+        };
+    }
+    if (channel === 'zalo') {
+        return {
+            label: 'Zalo',
+            badge: 'bg-sky-50 text-sky-700 border-sky-200',
+            avatar: 'bg-sky-100 text-sky-600',
+            Icon: MessageCircle,
+        };
+    }
+    return {
+        label: 'Web',
+        badge: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+        avatar: 'bg-orange-100 text-orange-600',
+        Icon: Globe2,
+    };
+}
+
+function RoomAvatar({
+    room,
+    className,
+    iconSize,
+}: {
+    room?: Pick<ChatRoom, 'avatarUrl' | 'channel'>;
+    className: string;
+    iconSize: number;
+}) {
+    const [imageFailed, setImageFailed] = useState(false);
+    const channelStyle = getChannelStyle(room?.channel || 'web');
+    const ChannelIcon = channelStyle.Icon;
+
+    useEffect(() => {
+        setImageFailed(false);
+    }, [room?.avatarUrl]);
+
+    if (room?.avatarUrl && !imageFailed) {
+        return (
+            <Image
+                src={room.avatarUrl}
+                alt=""
+                className={`${className} object-cover`}
+                width={48}
+                height={48}
+                unoptimized
+                referrerPolicy="no-referrer"
+                onError={() => setImageFailed(true)}
+            />
+        );
+    }
+
+    return (
+        <div className={`${className} flex items-center justify-center ${channelStyle.avatar}`}>
+            <ChannelIcon size={iconSize} />
+        </div>
+    );
 }
 
 export default function AdminChatPage() {
@@ -33,6 +108,7 @@ export default function AdminChatPage() {
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [inputMessage, setInputMessage] = useState('');
     const [loading, setLoading] = useState(true);
+    const [setupError, setSetupError] = useState('');
     const [sendingMessage, setSendingMessage] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [showMobileList, setShowMobileList] = useState(true);
@@ -41,20 +117,62 @@ export default function AdminChatPage() {
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
 
+    const syncAdminRealtimeRole = async (): Promise<string | null> => {
+        const auth = await getAuthInstance();
+        const user = auth.currentUser;
+        if (!user) {
+            throw new Error('Missing admin session');
+        }
+
+        const idToken = await user.getIdToken();
+        const res = await fetch('/api/auth/session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ idToken }),
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            return typeof data.error === 'string' ? `Admin session sync failed: ${data.error}` : 'Admin session sync failed';
+        }
+        if (data && data.rtdbRoleSynced === false) {
+            return typeof data.rtdbRoleSyncError === 'string' && data.rtdbRoleSyncError
+                ? `RTDB role sync failed: ${data.rtdbRoleSyncError}`
+                : 'RTDB role sync failed';
+        }
+        return null;
+    };
+
     // Load all chat rooms
     useEffect(() => {
         let unsubscribe: (() => void) | undefined;
-        subscribeToRooms((roomsMap) => {
+        let cancelled = false;
+
+        let roleSyncWarning = '';
+
+        syncAdminRealtimeRole().then((warning) => {
+            roleSyncWarning = warning || '';
+            if (roleSyncWarning) setSetupError(roleSyncWarning);
+            return subscribeToRooms((roomsMap) => {
+            if (cancelled) return;
+            setSetupError(roleSyncWarning);
             const roomList: ChatRoom[] = Object.entries(roomsMap)
                 .map(([roomId, info]) => {
+                    const channel = normalizeChatChannel(info.channel || info.source);
+                    const sourceLabel = typeof info.sourceLabel === 'string' ? info.sourceLabel : getChatChannelLabel(channel);
                     return {
                         odId: roomId,
                         displayName: String(info.displayName || 'Khách'),
                         email: info.email ? String(info.email) : null,
                         isGuest: (info.isGuest as boolean) ?? true,
+                        channel,
+                        sourceLabel,
+                        externalUserId: typeof info.externalUserId === 'string' ? info.externalUserId : undefined,
+                        externalPageId: typeof info.externalPageId === 'string' ? info.externalPageId : undefined,
+                        avatarUrl: typeof info.avatarUrl === 'string' ? info.avatarUrl : undefined,
                         lastMessage: String(info.lastMessage || ''),
                         lastMessageTime: Number(info.lastMessageTime || 0),
-                        hasUnread: !!(info.hasUnreadAdmin), // Check admin unread
+                        hasUnread: !!(info.hasUnreadAdmin || info.hasUnread), // Check admin unread
                     };
                 })
                 .filter(room => room.lastMessage) // Only show rooms with messages
@@ -62,9 +180,35 @@ export default function AdminChatPage() {
 
             setRooms(roomList);
             setLoading(false);
-        }).then(fn => { unsubscribe = fn; });
+        }, (error) => {
+            console.error('Chat rooms subscription error:', error);
+            setSetupError(
+                error.message.includes('permission')
+                    ? `${error.message}. Kiem tra admin_roles trong Realtime Database hoac cau hinh Firebase Admin credentials local.`
+                    : error.message
+            );
+            toastError('Khong tai duoc danh sach chat. Vui long dang nhap lai hoac kiem tra quyen chat.');
+            setRooms([]);
+            setLoading(false);
+        });
+        }).then(fn => {
+            if (cancelled) {
+                fn();
+                return;
+            }
+            unsubscribe = fn;
+        }).catch((error) => {
+            console.error('Chat rooms setup error:', error);
+            setSetupError(error instanceof Error ? error.message : 'Khong ket noi duoc Live Chat.');
+            toastError('Khong ket noi duoc Live Chat.');
+            setRooms([]);
+            setLoading(false);
+        });
 
-        return () => { if (unsubscribe) unsubscribe(); };
+        return () => {
+            cancelled = true;
+            if (unsubscribe) unsubscribe();
+        };
     }, []);
 
     // Load messages for selected room
@@ -80,7 +224,7 @@ export default function AdminChatPage() {
         }).then(fn => { unsubscribe = fn; });
 
         // Mark room as read
-        updateRoomInfo(selectedRoom, { hasUnreadAdmin: false }).catch(() => {});
+        updateRoomInfo(selectedRoom, { hasUnreadAdmin: false, hasUnread: false }).catch(() => {});
 
         return () => { if (unsubscribe) unsubscribe(); };
     }, [selectedRoom]);
@@ -112,13 +256,37 @@ export default function AdminChatPage() {
         if (!inputMessage.trim() || !selectedRoom) return;
 
         const messageText = inputMessage.trim();
+        const roomData = rooms.find(r => r.odId === selectedRoom);
         setInputMessage('');
         setSendingMessage(true);
 
         try {
-            await sendMessage(selectedRoom, messageText, 'admin', 'admin');
+            if (roomData && isExternalChatChannel(roomData.channel)) {
+                const auth = await getAuthInstance();
+                const token = await auth.currentUser?.getIdToken();
+                if (!token) {
+                    throw new Error('Missing admin session');
+                }
+
+                const res = await fetch('/api/admin/chat/send', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${token}`,
+                    },
+                    body: JSON.stringify({ roomId: selectedRoom, text: messageText }),
+                });
+
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    throw new Error(typeof data.error === 'string' ? data.error : 'Send failed');
+                }
+            } else {
+                await sendMessage(selectedRoom, messageText, 'admin', 'admin', 'web');
+            }
         } catch (error) {
             console.error('Error sending message:', error);
+            toastError(error instanceof Error ? error.message : 'Khong gui duoc tin nhan');
         } finally {
             setSendingMessage(false);
             inputRef.current?.focus();
@@ -159,9 +327,11 @@ export default function AdminChatPage() {
     };
 
     const selectedRoomData = rooms.find(r => r.odId === selectedRoom);
+    const selectedChannelStyle = getChannelStyle(selectedRoomData?.channel || 'web');
     const filteredRooms = rooms.filter(room =>
         room.displayName.toLowerCase().includes(searchQuery.toLowerCase()) ||
         room.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        room.sourceLabel.toLowerCase().includes(searchQuery.toLowerCase()) ||
         room.odId.toLowerCase().includes(searchQuery.toLowerCase())
     );
 
@@ -212,10 +382,12 @@ export default function AdminChatPage() {
                     ) : filteredRooms.length === 0 ? (
                         <div className="text-center py-12 text-gray-500">
                             <MessageSquare size={48} className="mx-auto text-gray-300 mb-3" />
-                            <p>Chưa có tin nhắn nào</p>
+                            <p>{setupError || 'Chưa có tin nhắn nào'}</p>
                         </div>
                     ) : (
-                        filteredRooms.map((room) => (
+                        filteredRooms.map((room) => {
+                            const channelStyle = getChannelStyle(room.channel);
+                            return (
                             <button
                                 key={room.odId}
                                 onClick={() => selectRoom(room.odId)}
@@ -224,10 +396,7 @@ export default function AdminChatPage() {
                             >
                                 {/* Avatar */}
                                 <div className="relative flex-shrink-0">
-                                    <div className={`w-12 h-12 rounded-full flex items-center justify-center ${room.isGuest ? 'bg-gray-200' : 'bg-orange-100'
-                                        }`}>
-                                        <User size={20} className={room.isGuest ? 'text-gray-500' : 'text-orange-600'} />
-                                    </div>
+                                    <RoomAvatar room={room} className="w-12 h-12 rounded-full" iconSize={20} />
                                     {room.hasUnread && (
                                         <Circle size={12} className="absolute -top-0.5 -right-0.5 text-red-500 fill-red-500" />
                                     )}
@@ -245,10 +414,11 @@ export default function AdminChatPage() {
                                         </span>
                                     </div>
                                     <div className="flex items-center gap-1">
-                                        {room.isGuest && (
-                                            <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">
-                                                Guest
-                                            </span>
+                                        <span className={`text-xs px-1.5 py-0.5 rounded border ${channelStyle.badge}`}>
+                                            {channelStyle.label}
+                                        </span>
+                                        {room.isGuest && room.channel === 'web' && (
+                                            <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">Guest</span>
                                         )}
                                         <p className={`text-sm truncate ${room.hasUnread ? 'text-gray-800 font-medium' : 'text-gray-500'
                                             }`}>
@@ -257,7 +427,8 @@ export default function AdminChatPage() {
                                     </div>
                                 </div>
                             </button>
-                        ))
+                            );
+                        })
                     )}
                 </div>
             </div>
@@ -288,10 +459,7 @@ export default function AdminChatPage() {
                                 <ChevronLeft size={20} />
                             </button>
 
-                            <div className={`w-10 h-10 rounded-full flex items-center justify-center ${selectedRoomData?.isGuest ? 'bg-gray-200' : 'bg-orange-100'
-                                }`}>
-                                <User size={18} className={selectedRoomData?.isGuest ? 'text-gray-500' : 'text-orange-600'} />
-                            </div>
+                            <RoomAvatar room={selectedRoomData} className="w-10 h-10 rounded-full" iconSize={18} />
 
                             <div className="flex-1 min-w-0">
                                 <h3 className="font-semibold text-gray-800 truncate">
@@ -302,7 +470,12 @@ export default function AdminChatPage() {
                                 </p>
                             </div>
 
+                            <span className={`text-xs px-2 py-1 rounded-full border ${selectedChannelStyle.badge}`}>
+                                {selectedChannelStyle.label}
+                            </span>
+
                             {/* Bot Toggle */}
+                            {selectedRoomData?.channel === 'web' && (
                             <button
                                 onClick={toggleBot}
                                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${botActive
@@ -315,8 +488,9 @@ export default function AdminChatPage() {
                                 {botActive ? <ToggleRight size={18} /> : <ToggleLeft size={18} />}
                                 {botActive ? 'Bot Bật' : 'Bot Tắt'}
                             </button>
+                            )}
 
-                            {selectedRoomData?.isGuest && (
+                            {selectedRoomData?.isGuest && selectedRoomData?.channel === 'web' && (
                                 <span className="text-xs bg-gray-100 text-gray-500 px-2 py-1 rounded-full">
                                     Khách vãng lai
                                 </span>
@@ -330,21 +504,30 @@ export default function AdminChatPage() {
                                     <p>Chưa có tin nhắn nào trong hội thoại này</p>
                                 </div>
                             ) : (
-                                messages.map((message) => (
+                                messages.map((message) => {
+                                    const messageChannel = normalizeChatChannel(message.channel || message.source || selectedRoomData?.channel);
+                                    const messageChannelStyle = getChannelStyle(messageChannel);
+                                    return (
                                     <div
                                         key={message.id}
                                         className={`flex ${message.senderType === 'admin' ? 'justify-end' : 'justify-start'}`}
                                     >
                                         <div className={`flex items-end gap-2 max-w-[70%] ${message.senderType === 'admin' ? 'flex-row-reverse' : ''
                                             }`}>
-                                            <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${message.senderType === 'admin'
-                                                ? 'bg-orange-100 text-orange-600'
-                                                : 'bg-gray-200 text-gray-600'
-                                                }`}>
-                                                <User size={14} />
-                                            </div>
+                                            {message.senderType === 'admin' ? (
+                                                <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 bg-orange-100 text-orange-600">
+                                                    <User size={14} />
+                                                </div>
+                                            ) : (
+                                                <RoomAvatar room={selectedRoomData} className="w-8 h-8 rounded-full flex-shrink-0" iconSize={14} />
+                                            )}
 
                                             <div>
+                                                {message.senderType !== 'admin' && (
+                                                    <span className={`text-[10px] font-medium mb-0.5 block ${messageChannel === 'facebook' ? 'text-blue-600' : messageChannel === 'zalo' ? 'text-sky-600' : 'text-emerald-600'}`}>
+                                                        {messageChannelStyle.label}
+                                                    </span>
+                                                )}
                                                 <div className={`px-4 py-2 rounded-2xl ${message.senderType === 'admin'
                                                     ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-br-sm'
                                                     : 'bg-white text-gray-800 shadow-sm rounded-bl-sm'
@@ -358,7 +541,8 @@ export default function AdminChatPage() {
                                             </div>
                                         </div>
                                     </div>
-                                ))
+                                    );
+                                })
                             )}
                             <div ref={messagesEndRef} />
                         </div>

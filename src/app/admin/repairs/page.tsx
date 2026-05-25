@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import {
     collection, query, where, getDocs, addDoc, updateDoc,
-    doc, serverTimestamp, orderBy, deleteDoc, onSnapshot, Timestamp, getDoc, setDoc,
+    doc, serverTimestamp, orderBy, deleteDoc, onSnapshot, Timestamp, getDoc,
     limit, startAfter, DocumentSnapshot, runTransaction
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';

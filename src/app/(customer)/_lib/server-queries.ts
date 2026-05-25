@@ -1,4 +1,4 @@
-import { getAdminDb } from '@/lib/firebaseAdmin';
+import { getAdminDb, isAdminAvailable } from '@/lib/firebaseAdmin';
 import { cache } from 'react';
 import { unstable_cache } from 'next/cache';
 
@@ -9,6 +9,8 @@ export const revalidate = 30;
 
 export const fetchDynamicCategories = unstable_cache(
     async () => {
+        if (!isAdminAvailable()) return [];
+
         const db = getAdminDb();
         const snapshot = await db.collection('categories').get();
         const items = snapshot.docs.map(doc => {
@@ -30,6 +32,8 @@ export const fetchDynamicCategories = unstable_cache(
 
 export const fetchTaxonomyConfig = unstable_cache(
     async () => {
+        if (!isAdminAvailable()) return { retail: [], service: [], component: [] };
+
         const db = getAdminDb();
         const snap = await db.collection('system_config').doc('taxonomy_settings').get();
         if (!snap.exists) return { retail: [], service: [], component: [] };
@@ -48,6 +52,8 @@ export const fetchTaxonomyConfig = unstable_cache(
 
 export const fetchNavConfig = unstable_cache(
     async () => {
+        if (!isAdminAvailable()) return { headerNav: [], sidebarMenu: [], footerServices: [] };
+
         const db = getAdminDb();
         const snap = await db.collection('system_config').doc('navigation_settings').get();
         if (!snap.exists) return { headerNav: [], sidebarMenu: [], footerServices: [] };
@@ -64,6 +70,8 @@ export const fetchNavConfig = unstable_cache(
 
 export const fetchCategoryItems = unstable_cache(
     async (isRepair: boolean) => {
+        if (!isAdminAvailable()) return [];
+
         const db = getAdminDb();
         const collectionName = isRepair ? 'services' : 'products';
 
@@ -104,6 +112,8 @@ export const fetchCategoryItems = unstable_cache(
 
 export const fetchArticles = unstable_cache(
     async () => {
+        if (!isAdminAvailable()) return [];
+
         const db = getAdminDb();
         const snapshot = await db.collection('articles')
             .where('status', '==', 'published')
@@ -130,6 +140,8 @@ export const fetchArticles = unstable_cache(
 );
 
 export const fetchDetailItem = cache(async (id: string, type: 'products' | 'services') => {
+    if (!isAdminAvailable()) return null;
+
     const db = getAdminDb();
     const doc = await db.collection(type).doc(id).get();
 
@@ -150,6 +162,8 @@ export const fetchDetailItem = cache(async (id: string, type: 'products' | 'serv
 });
 
 export const fetchArticleDetail = cache(async (slug: string) => {
+    if (!isAdminAvailable()) return null;
+
     const db = getAdminDb();
 
     // First try by ID (slug is often the ID in this project for articles)
@@ -185,6 +199,8 @@ export const fetchArticleDetail = cache(async (slug: string) => {
 
 export const fetchFlashSaleProducts = unstable_cache(
     async () => {
+        if (!isAdminAvailable()) return [];
+
         const db = getAdminDb();
         const snapshot = await db.collection('products')
             .where('status', '==', 'active')
@@ -219,6 +235,8 @@ export const fetchFlashSaleProducts = unstable_cache(
 
 export const fetchServices = unstable_cache(
     async () => {
+        if (!isAdminAvailable()) return [];
+
         const db = getAdminDb();
         const snapshot = await db.collection('services')
             .orderBy('createdAt', 'desc')
@@ -250,6 +268,8 @@ export const fetchServices = unstable_cache(
  */
 export const fetchProductVariants = cache(async (seriesId: string, excludeId: string) => {
     if (!seriesId) return [];
+    if (!isAdminAvailable()) return [];
+
     const db = getAdminDb();
     const snapshot = await db.collection('products')
         .where('seriesId', '==', seriesId)
@@ -280,6 +300,8 @@ export const fetchProductVariants = cache(async (seriesId: string, excludeId: st
  */
 export const fetchProductReviews = cache(async (productId: string) => {
     if (!productId) return [];
+    if (!isAdminAvailable()) return [];
+
     const db = getAdminDb();
     const snapshot = await db.collection('product_reviews')
         .where('productId', '==', productId)

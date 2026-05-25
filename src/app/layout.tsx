@@ -62,6 +62,7 @@ export default function RootLayout({
   return (
     <html lang="vi" suppressHydrationWarning>
       <head>
+        <meta name="zalo-platform-site-verification" content="NeUWSQoo8IzmZQqmegKTPdgmkMcMncinCZ8s" />
         <link rel="preconnect" href="https://firestore.googleapis.com" />
         <link rel="preconnect" href="https://identitytoolkit.googleapis.com" />
         <link rel="preconnect" href="https://wsrv.nl" crossOrigin="anonymous" />

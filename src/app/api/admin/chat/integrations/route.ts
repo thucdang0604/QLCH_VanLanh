@@ -1,0 +1,136 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { requireAdmin } from '@/lib/apiAuth';
+import {
+  getEffectiveChatIntegrationConfig,
+  saveChatIntegrationConfig,
+  toPublicChatIntegrationConfig,
+  type ChatIntegrationConfigPatch,
+} from '@/lib/chatIntegrationConfig';
+import { getAdminDb } from '@/lib/firebaseAdmin';
+
+export const runtime = 'nodejs';
+
+function cleanString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function cleanBoolean(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+export async function GET(request: NextRequest) {
+  try {
+    await requireAdmin(request);
+    const origin = request.nextUrl.origin;
+    const config = await getEffectiveChatIntegrationConfig();
+
+    return NextResponse.json({
+      success: true,
+      config: toPublicChatIntegrationConfig(config),
+      webhookUrls: {
+        facebook: `${origin}/api/integrations/facebook/webhook`,
+        zalo: `${origin}/api/integrations/zalo/webhook`,
+      },
+    });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    const lower = message.toLowerCase();
+    const status = lower.includes('missing authorization') ? 401 : lower.includes('forbidden') ? 403 : 500;
+    return NextResponse.json({ success: false, error: message }, { status });
+  }
+}
+
+export async function PUT(request: NextRequest) {
+  try {
+    await requireAdmin(request);
+    const body = await request.json();
+    const next: ChatIntegrationConfigPatch = {};
+
+    if (typeof body.facebook === 'object' && body.facebook !== null) {
+      const fb = body.facebook as Record<string, unknown>;
+      const facebook: NonNullable<ChatIntegrationConfigPatch['facebook']> = {};
+      const enabled = cleanBoolean(fb.enabled);
+      if (enabled !== undefined) facebook.enabled = enabled;
+      const pageId = cleanString(fb.pageId);
+      if (pageId !== undefined) facebook.pageId = pageId;
+      const graphVersion = cleanString(fb.graphVersion);
+      if (graphVersion !== undefined) facebook.graphVersion = graphVersion;
+      const pageAccessToken = cleanString(fb.pageAccessToken);
+      if (pageAccessToken !== undefined) facebook.pageAccessToken = pageAccessToken;
+      const appSecret = cleanString(fb.appSecret);
+      if (appSecret !== undefined) facebook.appSecret = appSecret;
+      const verifyToken = cleanString(fb.verifyToken);
+      if (verifyToken !== undefined) facebook.verifyToken = verifyToken;
+      next.facebook = facebook;
+    }
+
+    if (typeof body.zalo === 'object' && body.zalo !== null) {
+      const zalo = body.zalo as Record<string, unknown>;
+      const zaloPatch: NonNullable<ChatIntegrationConfigPatch['zalo']> = {};
+      const enabled = cleanBoolean(zalo.enabled);
+      if (enabled !== undefined) zaloPatch.enabled = enabled;
+      const oaId = cleanString(zalo.oaId);
+      if (oaId !== undefined) zaloPatch.oaId = oaId;
+      const oaAccessToken = cleanString(zalo.oaAccessToken);
+      if (oaAccessToken !== undefined) zaloPatch.oaAccessToken = oaAccessToken;
+      const webhookSecret = cleanString(zalo.webhookSecret);
+      if (webhookSecret !== undefined) zaloPatch.webhookSecret = webhookSecret;
+      next.zalo = zaloPatch;
+    }
+
+    const saved = await saveChatIntegrationConfig(next);
+    return NextResponse.json({ success: true, config: toPublicChatIntegrationConfig(saved) });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    const lower = message.toLowerCase();
+    const status = lower.includes('missing authorization') ? 401 : lower.includes('forbidden') ? 403 : 500;
+    return NextResponse.json({ success: false, error: message }, { status });
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    await requireAdmin(request);
+    const body = await request.json();
+    const channel = typeof body.channel === 'string' ? body.channel : '';
+    const config = await getEffectiveChatIntegrationConfig();
+
+    if (channel === 'facebook') {
+      const fb = config.facebook;
+      const ok = fb.enabled && !!fb.pageId && !!fb.pageAccessToken && !!fb.appSecret && !!fb.verifyToken;
+      return NextResponse.json({
+        success: true,
+        ok,
+        message: ok
+          ? 'Facebook config has required fields.'
+          : 'Facebook is missing enabled/pageId/pageAccessToken/appSecret/verifyToken.',
+      });
+    }
+
+    if (channel === 'zalo') {
+      const zalo = config.zalo;
+      const ok = zalo.enabled && !!zalo.oaAccessToken && !!zalo.webhookSecret;
+      return NextResponse.json({
+        success: true,
+        ok,
+        message: ok
+          ? 'Zalo config has required fields.'
+          : 'Zalo is missing enabled/oaAccessToken/webhookSecret.',
+      });
+    }
+
+    if (channel === 'rtdb') {
+      await getAdminDb().collection('private_config').doc('chat_integrations').get();
+      return NextResponse.json({ success: true, ok: true, message: 'Firestore config is reachable.' });
+    }
+
+    return NextResponse.json({ success: false, error: 'Invalid channel' }, { status: 400 });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    const lower = message.toLowerCase();
+    const status = lower.includes('missing authorization') ? 401 : lower.includes('forbidden') ? 403 : 500;
+    return NextResponse.json({ success: false, error: message }, { status });
+  }
+}
