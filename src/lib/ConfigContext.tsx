@@ -102,18 +102,18 @@ const KEY_MAP: Record<string, string> = {
 };
 
 // =========== Helper to recursively remove undefined fields for Firestore compatibility ===========
-function cleanUndefined(obj: any): any {
+function cleanUndefined<T>(obj: T): T {
     if (Array.isArray(obj)) {
-        return obj.map(cleanUndefined);
+        return obj.map(cleanUndefined) as T;
     }
     if (obj !== null && typeof obj === 'object') {
-        const cleaned: Record<string, any> = {};
+        const cleaned: Record<string, unknown> = {};
         for (const [key, val] of Object.entries(obj)) {
             if (val !== undefined) {
                 cleaned[key] = cleanUndefined(val);
             }
         }
-        return cleaned;
+        return cleaned as T;
     }
     return obj;
 }

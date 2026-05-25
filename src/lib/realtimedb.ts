@@ -1,14 +1,26 @@
 
 
 import { getRtdbInstance } from './firebase';
+import { getChatChannelLabel, normalizeChatChannel, type ChatChannel } from './chatChannels';
 
 export interface ChatRoomInfo {
-    customerId: string;
+    customerId?: string;
     customerName?: string;
     customerEmail?: string;
     customerPhone?: string;
+    displayName?: string;
+    avatarUrl?: string;
+    email?: string | null;
+    phone?: string;
+    isGuest?: boolean;
+    channel?: ChatChannel;
+    source?: ChatChannel;
+    sourceLabel?: string;
+    externalUserId?: string;
+    externalPageId?: string;
     hasUnreadAdmin?: boolean;
     hasUnreadUser?: boolean;
+    hasUnread?: boolean;
     lastMessage?: string;
     lastMessageTime?: number;
     botActive?: boolean;
@@ -19,8 +31,12 @@ export interface ChatMessage {
     id?: string;
     text: string;
     senderId: string;
-    senderType: 'user' | 'admin' | 'bot';
+    senderType: 'user' | 'admin' | 'bot' | 'guest' | 'ai';
     timestamp: number;
+    channel?: ChatChannel;
+    source?: ChatChannel;
+    sourceLabel?: string;
+    externalMessageId?: string | null;
 }
 
 export interface GeminiHistoryItem {
@@ -28,7 +44,10 @@ export interface GeminiHistoryItem {
     parts: { text: string }[];
 }
 
-export async function subscribeToRooms(callback: (rooms: Record<string, ChatRoomInfo>) => void): Promise<() => void> {
+export async function subscribeToRooms(
+    callback: (rooms: Record<string, ChatRoomInfo>) => void,
+    onError?: (error: Error) => void
+): Promise<() => void> {
     const rtdb = await getRtdbInstance();
     const { ref, onValue, off } = await import('firebase/database');
 
@@ -46,6 +65,8 @@ export async function subscribeToRooms(callback: (rooms: Record<string, ChatRoom
         } else {
             callback({});
         }
+    }, (error) => {
+        onError?.(error);
     });
     return () => off(roomsRef, 'value', listener);
 }
@@ -86,21 +107,30 @@ export async function sendMessage(
     roomId: string, 
     text: string, 
     senderId: string, 
-    senderType: 'user' | 'admin' | 'bot'
+    senderType: 'user' | 'admin' | 'bot' | 'guest' | 'ai',
+    channel: ChatChannel = 'web'
 ): Promise<void> {
     const rtdb = await getRtdbInstance();
     const { ref, push, update } = await import('firebase/database');
 
+    const normalizedChannel = normalizeChatChannel(channel);
+    const sourceLabel = getChatChannelLabel(normalizedChannel);
     const messagesRef = ref(rtdb, `chats/${roomId}/messages`);
     await push(messagesRef, {
         text,
         senderId,
         senderType,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        channel: normalizedChannel,
+        source: normalizedChannel,
+        sourceLabel
     });
 
     const infoRef = ref(rtdb, `chats/${roomId}/info`);
     const updates: Partial<ChatRoomInfo> = {
+        channel: normalizedChannel,
+        source: normalizedChannel,
+        sourceLabel,
         lastMessage: senderType === 'user' ? text.substring(0, 50) : `[NV] ${text.substring(0, 50)}`,
         lastMessageTime: Date.now(),
     };
@@ -169,6 +199,9 @@ export async function handleAIAutoReply(roomId: string, messages: ChatMessage[],
                 senderId: 'bot',
                 senderType: 'admin',
                 timestamp: Date.now(),
+                channel: 'web',
+                source: 'web',
+                sourceLabel: getChatChannelLabel('web'),
             });
             
             const updatedInfo = (await get(infoRef)).val() || {};

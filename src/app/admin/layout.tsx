@@ -32,7 +32,8 @@ import {
     Warehouse,
     Star,
     Building2,
-    Percent
+    Percent,
+    Cable
 } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
 import NotificationBell from '@/components/admin/NotificationBell';
@@ -93,6 +94,7 @@ const menuGroups = [
             { name: 'Giao diện', href: '/admin/appearance', icon: Palette, permission: 'manage_appearance' },
             { name: 'CĐ Sửa chữa', href: '/admin/settings/repairs', icon: Settings, permission: 'manage_appearance' },
             { name: 'CĐ Giảm giá', href: '/admin/settings/discount-rules', icon: Percent, permission: 'manage_settings' },
+            { name: 'Tích hợp Chat', href: '/admin/settings/integrations', icon: Cable, permission: 'manage_settings' },
             { name: 'Mẫu Biên Nhận', href: '/admin/settings/receipt', icon: FileText, permission: 'manage_appearance' },
             { name: 'Cài đặt', href: '/admin/settings', icon: Settings, permission: 'manage_settings' },
         ]

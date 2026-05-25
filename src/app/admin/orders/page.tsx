@@ -8,7 +8,7 @@ import {
     XCircle, Clock, Loader2, ShoppingBag
 } from 'lucide-react';
 import Modal from '@/components/admin/Modal';
-import { collection, query, orderBy, onSnapshot, doc, serverTimestamp, limit, startAfter, runTransaction, increment, getDocs, DocumentSnapshot, where } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, doc, serverTimestamp, limit, startAfter, runTransaction, getDocs, DocumentSnapshot, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 import { Order } from '@/lib/types';
@@ -167,13 +167,6 @@ export default function OrdersPage() {
                         }
                     }
                 }
-
-                // Determine log type
-                let logType: string = '';
-                if (isActiveStatus(oldStatus) && newStatus === 'Cancelled') logType = 'ORDER_CANCEL';
-                else if (isActiveStatus(oldStatus) && newStatus === 'Completed') logType = 'ORDER_COMPLETE';
-                else if (oldStatus === 'Completed' && newStatus === 'Cancelled') logType = 'ORDER_CANCEL';
-                else if (oldStatus === 'Cancelled' && isActiveStatus(newStatus)) logType = 'ORDER_REACTIVATE';
 
                 // Phase 2: Validate & Write stock changes
                 for (const [pid, group] of grouped.entries()) {

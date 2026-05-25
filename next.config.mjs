@@ -1,6 +1,5 @@
-import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
+/** @type {import('next').NextConfig} */
+const nextConfig = {
   compress: true,
   async headers() {
     return [
@@ -547,8 +546,7 @@ const nextConfig: NextConfig = {
     optimizeCss: true,
   },
   images: {
-    loader: 'custom',
-    loaderFile: './src/lib/imageLoader.ts',
+    unoptimized: true,
     remotePatterns: [
       {
         protocol: 'https',

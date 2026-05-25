@@ -328,11 +328,11 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
                     {/* Terms */}
                     <p className="mt-4 text-xs text-gray-500 text-center">
                         Bằng việc đăng ký, bạn đồng ý với{' '}
-                        <a href="/policy/terms" className="text-orange-600 hover:underline">
+                        <a href="/info/dieu-khoan-dich-vu" className="text-orange-600 hover:underline">
                             Điều khoản sử dụng
                         </a>{' '}
                         và{' '}
-                        <a href="/policy/privacy" className="text-orange-600 hover:underline">
+                        <a href="/info/chinh-sach-bao-mat" className="text-orange-600 hover:underline">
                             Chính sách bảo mật
                         </a>
                     </p>

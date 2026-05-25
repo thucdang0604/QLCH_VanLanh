@@ -1,4 +1,4 @@
-export const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://qlch-vanlanh.web.app';
+export const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://fixphone.vn';
 export const PART_CATEGORY = 'component'; // System ID for parts
 export const PART_CATEGORY_LABEL = 'Linh kiện'; // Display label for parts
 export const RETAIL_CATEGORIES = ['Phone', 'Laptop', 'Tablet', 'Audio', 'Watch', 'Accessory', PART_CATEGORY] as const;

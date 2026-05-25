@@ -62,6 +62,7 @@ export const ROUTE_PERMISSION_MAP: Record<string, PermissionId> = {
     '/admin/appearance': 'manage_appearance',
     '/admin/settings/repairs': 'manage_appearance',
     '/admin/settings/receipt': 'manage_appearance',
+    '/admin/settings/integrations': 'manage_settings',
     '/admin/settings': 'manage_settings',
 };
 

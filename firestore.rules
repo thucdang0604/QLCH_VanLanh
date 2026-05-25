@@ -60,6 +60,11 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // Private server-side configuration. Access only through Admin SDK APIs.
+    match /private_config/{docId} {
+      allow read, write: if false;
+    }
+
     // Categories & Brands - public read (storefront filtering), admin write
     match /categories/{categoryId} {
       allow read: if true;

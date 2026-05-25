@@ -19,7 +19,7 @@ import {
     Building2
 } from 'lucide-react';
 import { useFirestoreCollection, updateDocument } from '@/lib/useFirestore';
-import { PART_CATEGORY, isPartCategory } from '@/lib/constants';
+import { isPartCategory } from '@/lib/constants';
 
 import CategoryTaxonomySelector from '@/components/admin/CategoryTaxonomySelector';
 import Modal from '@/components/admin/Modal';
@@ -29,7 +29,7 @@ import type { DocumentReference, DocumentSnapshot } from 'firebase/firestore';
 import { orderBy } from 'firebase/firestore';
 import {
     collection, getDocs, updateDoc, deleteDoc,
-    doc, serverTimestamp, query, orderBy as fbOrderBy, getDoc, addDoc, onSnapshot, writeBatch, where,
+    doc, serverTimestamp, query, orderBy as fbOrderBy, addDoc, onSnapshot, where,
     runTransaction, increment
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
@@ -1474,7 +1474,6 @@ function ImportPreviewModal({
     setImportPreviewModal,
     forecastCostPrices,
     partTypeOptions,
-    suppliers,
     onConfirm
 }: ImportPreviewModalProps) {
     const { receipt, newParts } = importPreviewModal;

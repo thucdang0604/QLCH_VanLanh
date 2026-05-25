@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
 import { Search, Users, Loader2, Star, TrendingUp } from 'lucide-react';
-import { collection, query, orderBy, onSnapshot, limit, startAfter, getDocs, DocumentSnapshot, where, getDoc, doc } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, limit, startAfter, getDocs, DocumentSnapshot, getDoc, doc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 interface Customer {

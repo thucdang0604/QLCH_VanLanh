@@ -103,15 +103,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                         try {
                             const appUser = await fetchUserData(firebaseUser);
                             if (isMounted) setUser(appUser);
+                            if (isMounted) setLoading(false);
 
-                            // Sync server-side session cookie for middleware RBAC
+                            // Sync server-side session cookie for middleware RBAC.
+                            // This must not block rendering the admin UI.
                             if (appUser.role === 'admin' || appUser.role === 'staff') {
                                 const idToken = await firebaseUser.getIdToken();
+                                const controller = new AbortController();
+                                const timeout = window.setTimeout(() => controller.abort(), 5000);
                                 fetch('/api/auth/session', {
                                     method: 'POST',
                                     headers: { 'Content-Type': 'application/json' },
                                     body: JSON.stringify({ idToken }),
-                                }).catch(() => { /* non-blocking */ });
+                                    signal: controller.signal,
+                                })
+                                    .then(async (sessionRes) => {
+                                        if (!sessionRes.ok) {
+                                            console.warn('Admin session sync failed:', await sessionRes.text().catch(() => ''));
+                                        }
+                                    })
+                                    .catch((error) => console.warn('Admin session sync failed:', error))
+                                    .finally(() => window.clearTimeout(timeout));
                             }
                         } catch (error) {
                             console.error('Error fetching user data:', error);
