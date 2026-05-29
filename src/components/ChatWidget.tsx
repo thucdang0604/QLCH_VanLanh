@@ -5,24 +5,7 @@ import { MessageCircle, X, Send, Bot, User, Minimize2, Maximize2, ArrowRight, Sp
 import type { ChatMessage } from '@/lib/realtimedb';
 import { useAuth } from '@/lib/AuthContext';
 import { useConfig } from '@/lib/ConfigContext';
-
-// Mask phone number for localStorage persistence (SEC-004)
-const maskPhone = (phone: string): string => {
-    if (!phone || phone.length < 4) return '****';
-    return phone.slice(0, -4).replace(/./g, '*') + phone.slice(-4);
-};
-
-// Generate or get guest ID
-const getGuestId = (): string => {
-    if (typeof window === 'undefined') return '';
-
-    let guestId = localStorage.getItem('vanlanh_guest_id');
-    if (!guestId) {
-        guestId = `guest_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-        localStorage.setItem('vanlanh_guest_id', guestId);
-    }
-    return guestId;
-};
+import { getAuthInstance } from '@/lib/firebase';
 
 export default function ChatWidget() {
     const [isOpen, setIsOpen] = useState(false);
@@ -33,6 +16,7 @@ export default function ChatWidget() {
     const [isAiTyping, setIsAiTyping] = useState(false);
     const [roomId, setRoomId] = useState<string>('');
     const [unreadCount, setUnreadCount] = useState(0);
+    const [identityError, setIdentityError] = useState('');
 
     // Registration State
     const [isRegistered, setIsRegistered] = useState(false);
@@ -42,6 +26,7 @@ export default function ChatWidget() {
     const inputRef = useRef<HTMLInputElement>(null);
     const aiTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [botActive, setBotActive] = useState(true);
+    const [isSpeedDialOpen, setIsSpeedDialOpen] = useState(false);
 
     const { user } = useAuth();
     const { config } = useConfig();
@@ -49,23 +34,44 @@ export default function ChatWidget() {
     // Check registration status on load
     useEffect(() => {
         if (typeof window !== 'undefined') {
-            const storedInfo = localStorage.getItem('vanlanh_customer_info');
-            if (storedInfo || user) {
+            localStorage.removeItem('vanlanh_guest_id');
+            localStorage.removeItem('vanlanh_customer_info');
+            if (user) {
                 setIsRegistered(true);
-                if (storedInfo) {
-                    setRegForm(JSON.parse(storedInfo));
-                }
             }
         }
     }, [user]);
 
-    // Determine room ID based on auth state
+    // Use an authenticated anonymous Firebase identity for public chat rooms.
     useEffect(() => {
+        let cancelled = false;
         if (user?.uid) {
             setRoomId(user.uid);
-        } else {
-            setRoomId(getGuestId());
+            setIdentityError('');
+            return;
         }
+
+        setIsRegistered(false);
+        setRegForm({ name: '', phone: '' });
+        void (async () => {
+            const auth = await getAuthInstance();
+            const currentUser = auth.currentUser;
+            const { signInAnonymously } = await import('firebase/auth');
+            const firebaseUser = currentUser || (await signInAnonymously(auth)).user;
+            if (!cancelled) {
+                setRoomId(firebaseUser.uid);
+                setIdentityError('');
+            }
+        })().catch((error) => {
+            console.error('Anonymous chat identity failed:', error);
+            if (!cancelled) {
+                setIdentityError('Khong the khoi tao phien chat an toan. Vui long thu lai.');
+            }
+        });
+
+        return () => {
+            cancelled = true;
+        };
     }, [user]);
 
     // Listen to messages for this room — only when chat is OPEN
@@ -122,10 +128,17 @@ export default function ChatWidget() {
         import('@/lib/realtimedb').then(({ subscribeToRoomInfo }) => {
             subscribeToRoomInfo(roomId, (info) => {
                 setBotActive(info?.botActive !== false);
+                if (!user && typeof info?.displayName === 'string' && info.displayName.trim()) {
+                    setRegForm({
+                        name: info.displayName,
+                        phone: typeof info.phone === 'string' ? info.phone : '',
+                    });
+                    setIsRegistered(true);
+                }
             }).then(fn => { unsub = fn; });
         });
         return () => { if (unsub) unsub(); };
-    }, [roomId, isOpen]);
+    }, [roomId, isOpen, user]);
 
     // Cleanup timeout on unmount
     useEffect(() => {
@@ -153,45 +166,40 @@ export default function ChatWidget() {
     const updateRoomMetadata = useCallback(async () => {
         if (!roomId) return;
 
-        let displayName = 'Khách';
-        let phone = '';
+        const metadata: {
+            odId: string;
+            displayName?: string;
+            phone?: string;
+            email?: string | null;
+            isGuest: boolean;
+            lastActivity: number;
+        } = {
+            odId: roomId,
+            isGuest: !user,
+            lastActivity: Date.now(),
+        };
 
         if (user) {
-            displayName = user.displayName || 'Khách';
-            phone = user.phone || '';
-        } else {
-            const storedInfo = localStorage.getItem('vanlanh_customer_info');
-            if (storedInfo) {
-                const { name, phone: p } = JSON.parse(storedInfo);
-                displayName = name;
-                phone = p;
-            }
+            metadata.displayName = user.displayName || 'Khach';
+            metadata.phone = user.phone || '';
+            metadata.email = user.email || null;
+        } else if (regForm.name.trim() && regForm.phone.trim()) {
+            metadata.displayName = regForm.name.trim().slice(0, 50);
+            metadata.phone = regForm.phone.replace(/[^0-9]/g, '').slice(0, 15);
         }
 
         try {
             const { updateRoomInfo } = await import('@/lib/realtimedb');
-            await updateRoomInfo(roomId, {
-                odId: roomId,
-                displayName,
-                phone,
-                email: user?.email || null,
-                isGuest: !user,
-                lastActivity: Date.now(),
-            });
+            await updateRoomInfo(roomId, metadata);
         } catch (error) {
             console.error('Error updating room metadata:', error);
         }
-    }, [roomId, user]);
+    }, [regForm.name, regForm.phone, roomId, user]);
 
     const handleRegister = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!regForm.name.trim() || !regForm.phone.trim()) return;
 
-        // Store masked phone in localStorage (SEC-004: PII protection)
-        localStorage.setItem('vanlanh_customer_info', JSON.stringify({
-            name: regForm.name,
-            phone: maskPhone(regForm.phone)
-        }));
         setIsRegistered(true);
 
         // Update metadata immediately (full phone sent to server for admin support)
@@ -200,8 +208,8 @@ export default function ChatWidget() {
                 const { updateRoomInfo } = await import('@/lib/realtimedb');
                 await updateRoomInfo(roomId, {
                     odId: roomId,
-                    displayName: regForm.name,
-                    phone: regForm.phone,
+                    displayName: regForm.name.trim().slice(0, 50),
+                    phone: regForm.phone.replace(/[^0-9]/g, '').slice(0, 15),
                     isGuest: true,
                     lastActivity: Date.now(),
                     startedAt: Date.now()
@@ -286,49 +294,74 @@ export default function ChatWidget() {
         const fbLink = config.contact_info?.facebook_link || 'https://www.facebook.com/vanlanh.vn';
 
         return (
-            <div className="fixed bottom-6 right-6 z-50 hidden md:flex flex-col items-center gap-3">
-                {/* Zalo */}
-                <a
-                    href={zaloLink}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="group relative w-12 h-12 bg-[#0068FF] text-white rounded-full shadow-lg hover:shadow-xl hover:scale-110 transition-all duration-300 flex items-center justify-center"
-                    aria-label="Chat qua Zalo"
+            <div 
+                className="fixed bottom-6 right-6 z-50 hidden md:flex flex-col items-end gap-3"
+                onMouseLeave={() => setIsSpeedDialOpen(false)}
+            >
+                {/* Speed Dial Options */}
+                <div 
+                    className={`flex flex-col items-center gap-3 transition-all duration-300 origin-bottom ${
+                        isSpeedDialOpen ? 'scale-100 opacity-100 mb-2' : 'scale-0 opacity-0 h-0 pointer-events-none'
+                    }`}
                 >
-                    <svg viewBox="0 0 48 48" className="w-7 h-7" fill="currentColor">
-                        <path d="M12.5 7C9.46 7 7 9.46 7 12.5v23C7 38.54 9.46 41 12.5 41H24l8.15 5.44A1.5 1.5 0 0034.5 45V41h1C38.54 41 41 38.54 41 35.5v-23C41 9.46 38.54 7 35.5 7h-23zm3 10h17a1.5 1.5 0 010 3h-17a1.5 1.5 0 010-3zm0 6h13a1.5 1.5 0 010 3h-13a1.5 1.5 0 010-3zm0 6h9a1.5 1.5 0 010 3h-9a1.5 1.5 0 010-3z"/>
-                    </svg>
-                    <span className="absolute right-full mr-3 px-3 py-1.5 bg-gray-900 text-white text-xs font-semibold rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-lg">Chat Zalo</span>
-                    <span className="absolute inset-0 rounded-full bg-[#0068FF] animate-ping opacity-20" />
-                </a>
+                    {/* Zalo */}
+                    <a
+                        href={zaloLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="group relative w-12 h-12 bg-[#0068FF] text-white rounded-full shadow-lg hover:shadow-xl hover:scale-110 transition-all duration-300 flex items-center justify-center"
+                        aria-label="Chat qua Zalo"
+                    >
+                        <svg viewBox="0 0 48 48" className="w-7 h-7" fill="currentColor">
+                            <path d="M12.5 7C9.46 7 7 9.46 7 12.5v23C7 38.54 9.46 41 12.5 41H24l8.15 5.44A1.5 1.5 0 0034.5 45V41h1C38.54 41 41 38.54 41 35.5v-23C41 9.46 38.54 7 35.5 7h-23zm3 10h17a1.5 1.5 0 010 3h-17a1.5 1.5 0 010-3zm0 6h13a1.5 1.5 0 010 3h-13a1.5 1.5 0 010-3zm0 6h9a1.5 1.5 0 010 3h-9a1.5 1.5 0 010-3z"/>
+                        </svg>
+                        <span className="absolute right-full mr-3 px-3 py-1.5 bg-gray-900 text-white text-xs font-semibold rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-lg">Chat Zalo</span>
+                    </a>
 
-                {/* Messenger */}
-                <a
-                    href={fbLink}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="group relative w-12 h-12 bg-gradient-to-br from-[#00B2FF] to-[#006AFF] text-white rounded-full shadow-lg hover:shadow-xl hover:scale-110 transition-all duration-300 flex items-center justify-center"
-                    aria-label="Chat qua Messenger"
-                >
-                    <svg viewBox="0 0 24 24" className="w-6 h-6" fill="currentColor">
-                        <path d="M12 2C6.36 2 2 6.13 2 11.7c0 2.91 1.2 5.42 3.15 7.2.16.15.26.36.27.58l.05 1.82c.02.62.67 1.03 1.24.78l2.03-.9c.18-.08.38-.1.57-.06.9.23 1.86.36 2.85.36 5.64 0 10-4.13 10-9.7S17.64 2 12 2zm5.95 7.56l-2.9 4.62c-.46.74-1.45.93-2.14.42l-2.31-1.73a.58.58 0 00-.7 0l-3.12 2.37c-.42.32-.96-.18-.68-.63l2.9-4.62c.46-.74 1.45-.93 2.14-.42l2.31 1.73a.58.58 0 00.7 0l3.12-2.37c.42-.32.96.18.68.63z"/>
-                    </svg>
-                    <span className="absolute right-full mr-3 px-3 py-1.5 bg-gray-900 text-white text-xs font-semibold rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-lg">Messenger</span>
-                </a>
+                    {/* Messenger */}
+                    <a
+                        href={fbLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="group relative w-12 h-12 bg-gradient-to-br from-[#00B2FF] to-[#006AFF] text-white rounded-full shadow-lg hover:shadow-xl hover:scale-110 transition-all duration-300 flex items-center justify-center"
+                        aria-label="Chat qua Messenger"
+                    >
+                        <svg viewBox="0 0 24 24" className="w-6 h-6" fill="currentColor">
+                            <path d="M12 2C6.36 2 2 6.13 2 11.7c0 2.91 1.2 5.42 3.15 7.2.16.15.26.36.27.58l.05 1.82c.02.62.67 1.03 1.24.78l2.03-.9c.18-.08.38-.1.57-.06.9.23 1.86.36 2.85.36 5.64 0 10-4.13 10-9.7S17.64 2 12 2zm5.95 7.56l-2.9 4.62c-.46.74-1.45.93-2.14.42l-2.31-1.73a.58.58 0 00-.7 0l-3.12 2.37c-.42.32-.96-.18-.68-.63l2.9-4.62c.46-.74 1.45-.93 2.14-.42l2.31 1.73a.58.58 0 00.7 0l3.12-2.37c.42-.32.96.18.68.63z"/>
+                        </svg>
+                        <span className="absolute right-full mr-3 px-3 py-1.5 bg-gray-900 text-white text-xs font-semibold rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-lg">Messenger</span>
+                    </a>
 
-                {/* AI Chatbot */}
+                    {/* AI Chatbot */}
+                    <button
+                        onClick={toggleChat}
+                        className="group relative w-12 h-12 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-full shadow-lg hover:shadow-xl hover:scale-110 transition-all duration-300 flex items-center justify-center"
+                        aria-label="Mở chat hỗ trợ"
+                    >
+                        <Bot size={22} className="group-hover:scale-110 transition-transform" />
+                        <span className="absolute right-full mr-3 px-3 py-1.5 bg-gray-900 text-white text-xs font-semibold rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-lg">Chat AI hỗ trợ</span>
+                    </button>
+                </div>
+
+                {/* Main FAB */}
                 <button
-                    onClick={toggleChat}
-                    className="group relative w-14 h-14 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-full shadow-lg hover:shadow-xl hover:scale-110 transition-all duration-300 flex items-center justify-center"
-                    aria-label="Mở chat hỗ trợ"
+                    onClick={() => setIsSpeedDialOpen(!isSpeedDialOpen)}
+                    onMouseEnter={() => setIsSpeedDialOpen(true)}
+                    className="group relative w-14 h-14 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-full shadow-xl hover:shadow-orange-500/30 transition-all duration-300 flex items-center justify-center z-10"
+                    aria-label="Liên hệ"
                 >
-                    <MessageCircle size={24} className="group-hover:scale-110 transition-transform" />
-                    {unreadCount > 0 && (
-                        <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-600 text-white text-xs font-bold rounded-full flex items-center justify-center animate-bounce">
+                    <div className={`transition-transform duration-300 ${isSpeedDialOpen ? 'rotate-90 scale-0' : 'rotate-0 scale-100'}`}>
+                        <MessageCircle size={26} />
+                    </div>
+                    <div className={`absolute transition-transform duration-300 ${isSpeedDialOpen ? 'rotate-0 scale-100' : '-rotate-90 scale-0'}`}>
+                        <X size={26} />
+                    </div>
+                    
+                    {unreadCount > 0 && !isSpeedDialOpen && (
+                        <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-600 text-white text-xs font-bold rounded-full flex items-center justify-center animate-bounce shadow-sm">
                             {unreadCount}
                         </span>
                     )}
-                    <span className="absolute right-full mr-3 px-3 py-1.5 bg-gray-900 text-white text-xs font-semibold rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-lg">Chat AI hỗ trợ</span>
                     <span className="absolute inset-0 rounded-full bg-orange-500 animate-ping opacity-25" />
                 </button>
             </div>
@@ -378,6 +411,9 @@ export default function ChatWidget() {
                                 <p className="text-gray-500 text-sm">Vui lòng để lại thông tin để chúng tôi hỗ trợ bạn tốt nhất.</p>
                             </div>
                             <form onSubmit={handleRegister} className="space-y-4">
+                                {identityError && (
+                                    <p className="text-sm text-red-600">{identityError}</p>
+                                )}
                                 <div>
                                     <input
                                         type="text"
@@ -400,7 +436,8 @@ export default function ChatWidget() {
                                 </div>
                                 <button
                                     type="submit"
-                                    className="w-full py-3 bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold rounded-xl hover:shadow-lg hover:shadow-orange-500/30 transition-all flex items-center justify-center gap-2"
+                                    disabled={!roomId || !!identityError}
+                                    className="w-full py-3 bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold rounded-xl hover:shadow-lg hover:shadow-orange-500/30 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
                                 >
                                     Bắt đầu chat
                                     <ArrowRight size={18} />
@@ -480,6 +517,9 @@ export default function ChatWidget() {
 
                             {/* Input */}
                             <div className="p-4 border-t bg-white flex-shrink-0">
+                                {identityError && (
+                                    <p className="text-xs text-red-600 mb-2">{identityError}</p>
+                                )}
                                 <div className="flex gap-2">
                                     <input
                                         ref={inputRef}
@@ -489,11 +529,11 @@ export default function ChatWidget() {
                                         onKeyPress={handleKeyPress}
                                         placeholder="Nhập tin nhắn..."
                                         className="flex-1 px-4 py-2 border rounded-full focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
-                                        disabled={isLoading}
+                                        disabled={isLoading || !roomId || !!identityError}
                                     />
                                     <button
                                         onClick={sendUserMessage}
-                                        disabled={!inputMessage.trim() || isLoading}
+                                        disabled={!inputMessage.trim() || isLoading || !roomId || !!identityError}
                                         className="w-10 h-10 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-full flex items-center justify-center hover:opacity-90 transition-opacity disabled:opacity-50"
                                     >
                                         <Send size={18} />

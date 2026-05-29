@@ -1,0 +1,12 @@
+{
+  "id": "BUG-INV-010",
+  "trackId": "inventory",
+  "type": "bug",
+  "status": "resolved",
+  "title": "KTV lấy hàng giữ chỗ (Technician Can Take Reserved Items)",
+  "summary": "<b>Hiện tượng</b>: Trong file <code>technician/page.tsx</code>, khi KTV thêm linh kiện vào phiếu sửa chữa, hệ thống chỉ kiểm tra <code>currentStock < qty</code> thay vì <code>available < qty</code>.<br><b>Hệ lụy</b>: KTV có thể lấy nhầm linh kiện đã được giữ chỗ (held) cho các đơn hàng hoặc phiếu sửa chữa khác.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Sửa điều kiện thành <code>available = stock - held</code> trong <code>technician/page.tsx</code>.",
+  "createdAt": "17.05.2026",
+  "severity": "high",
+  "affectedFiles": [],
+  "resolvedAt": "17.05.2026"
+}

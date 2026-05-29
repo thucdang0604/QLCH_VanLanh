@@ -18,6 +18,7 @@ export interface ChatRoomInfo {
     sourceLabel?: string;
     externalUserId?: string;
     externalPageId?: string;
+    profileSyncedAt?: number;
     hasUnreadAdmin?: boolean;
     hasUnreadUser?: boolean;
     hasUnread?: boolean;
@@ -37,6 +38,13 @@ export interface ChatMessage {
     source?: ChatChannel;
     sourceLabel?: string;
     externalMessageId?: string | null;
+    attachments?: Array<{
+        type: 'image' | 'sticker' | 'audio' | 'video' | 'file' | 'unknown';
+        url?: string;
+        stickerId?: string;
+        storagePath?: string;
+        contentType?: string;
+    }>;
 }
 
 export interface GeminiHistoryItem {

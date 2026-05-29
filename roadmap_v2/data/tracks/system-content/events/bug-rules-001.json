@@ -1,0 +1,14 @@
+{
+  "id": "BUG-RULES-001",
+  "trackId": "system-content",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Missing Firestore Security Rules cho 4 collections mới (Phase 4/6/8)",
+  "summary": "<b>Hiện tượng</b>: Khi mở trang /admin/parts, console báo <code>Firestore: permission-denied</code> cho snapshot listener.<br><b>Hệ lụy</b>: Toàn bộ chức năng liên quan suppliers, supplier_transactions, product_reviews, accessory_discount_rules bị chặn trên client-side.<br><br>✅ <b>Đã vá ngày 19.05.2026</b>: Thêm 4 rule blocks vào <code>firestore.rules</code> và deploy thành công.",
+  "createdAt": "19.05.2026",
+  "severity": "high",
+  "affectedFiles": [
+    "firestore.rules"
+  ],
+  "resolvedAt": "19.05.2026"
+}

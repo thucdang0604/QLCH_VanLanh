@@ -1,0 +1,12 @@
+{
+  "id": "BUG-INV-007",
+  "trackId": "inventory",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Xóa sản phẩm gây mồ côi dữ liệu (Orphan Data)",
+  "summary": "<b>Hiện tượng</b>: Hàm <code>handleDelete</code> trong <code>parts/page.tsx</code> xóa thẳng tài liệu sản phẩm mà không kiểm tra tham chiếu.<br><b>Hệ lụy</b>: Các phiếu nhập hoặc phiếu sửa chữa cũ tham chiếu đến sản phẩm này sẽ bị lỗi không tìm thấy dữ liệu.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Chuyển sang Soft Delete (<code>status: 'inactive'</code>). Chặn xóa SP còn tồn kho (<code>stock > 0</code>). Danh sách hiển thị đã filter ẩn SP inactive.",
+  "createdAt": "17.05.2026",
+  "severity": "high",
+  "affectedFiles": [],
+  "resolvedAt": "17.05.2026"
+}

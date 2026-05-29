@@ -1,0 +1,12 @@
+{
+  "id": "BUG-REP-003",
+  "trackId": "repair",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Sản phẩm ma (Custom ID Mapping) — By-Design",
+  "summary": "<b>Hiện tượng</b>: KTV tự gõ tên linh kiện trong phiếu sửa chữa. Linh kiện không có mã, không map với kho.<br><b>Hệ lụy</b>: Không kiểm kho được. Thất thoát linh kiện không rõ lý do.",
+  "createdAt": "17.05.2026",
+  "severity": "high",
+  "affectedFiles": [],
+  "resolvedAt": "17.05.2026"
+}

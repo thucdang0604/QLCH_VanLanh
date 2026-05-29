@@ -99,6 +99,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
                 const localUnsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
                     if (firebaseUser) {
+                        if (firebaseUser.isAnonymous) {
+                            if (isMounted) {
+                                setUser(null);
+                                setLoading(false);
+                            }
+                            return;
+                        }
                         localStorage.setItem('has_logged_in', 'true');
                         try {
                             const appUser = await fetchUserData(firebaseUser);

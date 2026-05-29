@@ -1,0 +1,11 @@
+{
+  "id": "BUG-COM-003",
+  "trackId": "finance-hr",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Làm tròn số thực gây lệch tiền (Float Precision)",
+  "summary": "<b>Hiện tượng</b>: Trong <code>commissionUtils.ts</code> (dòng 113 và 147), hoa hồng được tính bằng <code>(baseAmount * pct) / 100</code> mà không làm tròn.<br><b>Hệ lụy</b>: Do tiền VNĐ không có phần thập phân, việc tính toán này tạo ra số thực (float). Khi cộng tổng trong UI (file <code>commissions/page.tsx</code> dòng 96), các phần lẻ sẽ cộng dồn gây lệch tiền so với thực tế.",
+  "createdAt": "2026-05-26T00:00:00.000Z",
+  "severity": "high",
+  "affectedFiles": []
+}

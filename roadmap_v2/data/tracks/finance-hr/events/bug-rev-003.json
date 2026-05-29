@@ -1,0 +1,11 @@
+{
+  "id": "BUG-REV-003",
+  "trackId": "finance-hr",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Sai lệch số tiền lẻ do không làm tròn số thực trong database",
+  "summary": "<b>Hiện tượng</b>: Hệ thống lưu trữ các số tiền lẻ vô lý (ví dụ: `49.998đ` thay vì `50.000đ`) trong database do không làm tròn sau các phép tính phần trăm hoặc giảm giá.<br><b>Hệ lụy</b>: Dù giao diện báo cáo doanh thu có thể dùng format để làm tròn hiển thị, nhưng dữ liệu thô bị sai lệch, dẫn đến tổng doanh thu và lợi nhuận tích lũy bị sai số (Floating-point error).",
+  "createdAt": "2026-05-26T00:00:00.000Z",
+  "severity": "high",
+  "affectedFiles": []
+}

@@ -1,0 +1,12 @@
+{
+  "id": "BUG-REP-004",
+  "trackId": "repair",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Cập nhật trạng thái nhanh không dùng Transaction",
+  "summary": "<b>Hiện tượng</b>: Trong hàm <code>handleQuickStatus</code> (dòng 547), việc cập nhật trạng thái phiếu sửa chữa được thực hiện bằng <code>updateDoc</code> thay vì <code>runTransaction</code>.<br><b>Hệ lụy</b>: Nếu có 2 nhân viên cùng thao tác trên 1 phiếu, sẽ xảy ra tình trạng ghi đè dữ liệu (Lost Update).<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Chuyển <code>handleQuickStatus</code> và các thao tác liên quan sang <code>runTransaction</code> để đảm bảo tính nguyên tử.",
+  "createdAt": "17.05.2026",
+  "severity": "high",
+  "affectedFiles": [],
+  "resolvedAt": "17.05.2026"
+}

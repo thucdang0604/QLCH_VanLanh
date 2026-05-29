@@ -31,6 +31,10 @@ service cloud.firestore {
       );
     }
 
+    function canManageCustomerData() {
+      return hasPermission('manage_customers');
+    }
+
     // Helper: Owner
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
@@ -114,17 +118,18 @@ service cloud.firestore {
     
     // Customers
     match /customers/{phone} {
-      allow read, write: if isStaff();
+      allow read: if canManageCustomerData();
+      allow create, update: if canManageCustomerData() && request.resource.data.phone == phone;
+      allow delete: if isAdmin();
     }
 
     // Orders
     match /orders/{orderId} {
-      // Staff/Admin read all. Public cannot read orders directly.
       allow read: if hasPermission('manage_orders');
-      // Only staff/admin with manage_orders can create directly (e.g., POS); web customers must use checkout API.
-      allow create: if hasPermission('manage_orders');
-      // Staff/Admin update/delete.
-      allow update, delete: if hasPermission('manage_orders');
+      allow create: if false;
+      allow update: if hasPermission('manage_orders')
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'assignedSellerId', 'assignedSellerName', 'assignedSellerAt', 'assignedBy']);
+      allow delete: if hasPermission('manage_orders');
     }
     
     // Appointments
@@ -137,7 +142,10 @@ service cloud.firestore {
     // Repairs
     match /repairs/{repairId} {
       allow read: if hasPermission('manage_repairs');
-      allow create, update: if hasPermission('manage_repairs');
+      allow create: if hasPermission('manage_repairs')
+        && !('parts' in request.resource.data);
+      allow update: if hasPermission('manage_repairs')
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['parts', 'payment', 'status', 'statusTimeline', 'partsLockedAt']);
       allow delete: if isAdmin();
     }
 
@@ -170,10 +178,20 @@ service cloud.firestore {
 
     // Commissions
     match /commission_rules/{ruleId} {
-      allow read, write: if hasPermission('view_commissions');
+      allow read: if hasPermission('view_commissions');
+      allow write: if isAdmin();
     }
     match /commissions/{commissionId} {
-      allow read, write: if hasPermission('view_commissions');
+      allow read: if hasPermission('view_commissions');
+      allow write: if isAdmin();
+    }
+    
+    // Server-only Collections
+    match /operation_requests/{docId} {
+      allow read, write: if false;
+    }
+    match /customer_ledger/{docId} {
+      allow read, write: if false;
     }
 
     // Expenses

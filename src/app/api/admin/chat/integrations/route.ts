@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/apiAuth';
+import { requirePermission } from '@/lib/apiAuth';
 import {
   getEffectiveChatIntegrationConfig,
   saveChatIntegrationConfig,
   toPublicChatIntegrationConfig,
   type ChatIntegrationConfigPatch,
+  type ChatQuickReply,
 } from '@/lib/chatIntegrationConfig';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 
@@ -20,9 +21,13 @@ function cleanBoolean(value: unknown): boolean | undefined {
   return typeof value === 'boolean' ? value : undefined;
 }
 
+function cleanQuickReplies(value: unknown): ChatQuickReply[] | undefined {
+  return Array.isArray(value) ? value as ChatQuickReply[] : undefined;
+}
+
 export async function GET(request: NextRequest) {
   try {
-    await requireAdmin(request);
+    await requirePermission(request, 'manage_settings');
     const origin = request.nextUrl.origin;
     const config = await getEffectiveChatIntegrationConfig();
 
@@ -44,7 +49,7 @@ export async function GET(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
-    await requireAdmin(request);
+    await requirePermission(request, 'manage_settings');
     const body = await request.json();
     const next: ChatIntegrationConfigPatch = {};
 
@@ -79,6 +84,8 @@ export async function PUT(request: NextRequest) {
       if (webhookSecret !== undefined) zaloPatch.webhookSecret = webhookSecret;
       next.zalo = zaloPatch;
     }
+    const quickReplies = cleanQuickReplies(body.quickReplies);
+    if (quickReplies !== undefined) next.quickReplies = quickReplies;
 
     const saved = await saveChatIntegrationConfig(next);
     return NextResponse.json({ success: true, config: toPublicChatIntegrationConfig(saved) });
@@ -92,7 +99,7 @@ export async function PUT(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    await requireAdmin(request);
+    await requirePermission(request, 'manage_settings');
     const body = await request.json();
     const channel = typeof body.channel === 'string' ? body.channel : '';
     const config = await getEffectiveChatIntegrationConfig();

@@ -1,0 +1,15 @@
+{
+  "id": "HACK-PUBLIC-REVIEWS-001",
+  "trackId": "system-content",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Public reviews/comments bypass moderation da duoc si?t Firestore rules",
+  "summary": "Public create vao reviews/product_reviews/article_comments co the gui status approved hoac field la.",
+  "createdAt": "2026-05-21",
+  "severity": "high",
+  "affectedFiles": [
+    "firestore.rules",
+    "src/app/(customer)/tin-tuc/[slug]/ArticleClientParts.tsx"
+  ],
+  "resolvedAt": "2026-05-21"
+}

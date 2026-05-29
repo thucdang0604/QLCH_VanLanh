@@ -1,0 +1,16 @@
+{
+  "id": "BUG-INVENTORY-HELD-001",
+  "trackId": "pos-orders",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Pending orders khong con tru stock va tang held dong thoi",
+  "summary": "available = stock - held bi tru hai lan khi tao don pending.",
+  "createdAt": "2026-05-21",
+  "severity": "high",
+  "affectedFiles": [
+    "src/app/api/checkout/route.ts",
+    "src/app/admin/pos/page.tsx",
+    "src/app/admin/orders/page.tsx"
+  ],
+  "resolvedAt": "2026-05-21"
+}

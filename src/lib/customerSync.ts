@@ -5,14 +5,14 @@ export interface CustomerSyncData {
     name?: string;
     address?: string;
     type: 'order' | 'repair' | 'appointment';
-    amount?: number; // amount to add to totalSpent
+    amount?: number; // kept for compatibility, but ignored in aggregation
 }
 
 /**
- * Upserts a customer record within a Firestore transaction.
- * Should be called whenever a new order, repair, or appointment is created.
+ * Ensures a customer profile exists within a Firestore transaction.
+ * DOES NOT aggregate amounts/counts. Aggregation is now handled by Server APIs upon completion.
  */
-export async function upsertCustomerRecord(
+export async function ensureCustomerProfile(
     transaction: Transaction,
     db: Firestore,
     data: CustomerSyncData
@@ -30,10 +30,10 @@ export async function upsertCustomerRecord(
             phone,
             name: data.name?.trim() || 'Khách lẻ',
             address: data.address?.trim() || '',
-            totalSpent: data.amount || 0,
-            totalOrders: data.type === 'order' ? 1 : 0,
-            totalRepairs: data.type === 'repair' ? 1 : 0,
-            totalAppointments: data.type === 'appointment' ? 1 : 0,
+            totalSpent: 0,
+            totalOrders: 0,
+            totalRepairs: 0,
+            totalAppointments: 0,
             lastVisit: serverTimestamp(),
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
@@ -54,14 +54,6 @@ export async function upsertCustomerRecord(
         if (data.address && data.address.trim() !== '' && data.address.trim() !== currentData.address) {
             updateData.address = data.address.trim();
         }
-        
-        if (data.amount && data.amount > 0) {
-            updateData.totalSpent = (currentData.totalSpent || 0) + data.amount;
-        }
-        
-        if (data.type === 'order') updateData.totalOrders = (currentData.totalOrders || 0) + 1;
-        if (data.type === 'repair') updateData.totalRepairs = (currentData.totalRepairs || 0) + 1;
-        if (data.type === 'appointment') updateData.totalAppointments = (currentData.totalAppointments || 0) + 1;
         
         transaction.update(customerRef, updateData);
     }

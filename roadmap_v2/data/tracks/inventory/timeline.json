@@ -1,0 +1,171 @@
+[
+  {
+    "id": "BUG-INV-001",
+    "trackId": "inventory",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Race Condition cộng kho phiếu nhập",
+    "summary": "<b>Hiện tượng</b>: Cộng kho khi duyệt phiếu nhập bị trùng lặp hoặc sai lệch khi click nhanh.<br><b>Hệ lụy</b>: Số lượng kho trên hệ thống nhiều hơn thực tế.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Duplicate của PAR-002/PAR-003. <code>executeFinalImport</code> đã chuyển sang <code>runTransaction</code> với <code>inventory_logs</code> đầy đủ.",
+    "createdAt": "17.05.2026",
+    "severity": "high",
+    "affectedFiles": [],
+    "resolvedAt": "17.05.2026"
+  },
+  {
+    "id": "BUG-INV-002",
+    "trackId": "inventory",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Đề xuất linh kiện bị lưu thành SP bán lẻ",
+    "summary": "<b>Hiện tượng</b>: KTV đề xuất linh kiện nhưng lại hiện ở trang bán lẻ cho khách.<br><br>✅ <b>Xác minh ngày 17.05.2026</b>: Đã được xử lý triệt để qua việc dùng <code>isPartCategory</code> filter chung và hằng số <code>PART_CATEGORY</code> trên toàn hệ thống.",
+    "createdAt": "17.05.2026",
+    "severity": "high",
+    "affectedFiles": [],
+    "resolvedAt": "17.05.2026"
+  },
+  {
+    "id": "BUG-INV-003",
+    "trackId": "inventory",
+    "type": "bug",
+    "status": "resolved",
+    "title": "KTV tải toàn bộ SP về client để tìm kiếm",
+    "summary": "<b>Hiện tượng</b>: Máy KTV bị đơ, lag khi mở trang tìm kiếm linh kiện.<br><b>Hệ lụy</b>: Tốn băng thông Firebase (đọc hàng ngàn doc mỗi lần), trải nghiệm người dùng tệ.<br><br>✅ <b>Backlog (17.05.2026)</b>: Performance optimization, không gây sai dữ liệu. Ưu tiên thấp — chỉ ảnh hưởng khi số lượng SP lớn (>500). Đã thêm filter và các giới hạn khác để tạm xử lý.",
+    "createdAt": "2026-05-26T00:00:00.000Z",
+    "severity": "high",
+    "affectedFiles": []
+  },
+  {
+    "id": "BUG-INV-004",
+    "trackId": "inventory",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Danh mục chưa đồng bộ ('Linh kiện', 'component')",
+    "summary": "<b>Hiện tượng</b>: Dữ liệu danh mục bị phân mảnh (Linh kiện, component, linh-kien).<br><b>Hệ lụy</b>: Khó thống kê, lọc sản phẩm không ra hết.<br><br>✅ <b>Xác minh ngày 17.05.2026</b>: Đã tạo <code>PART_CATEGORY</code>, <code>PART_CATEGORY_LABEL</code> và helper <code>isPartCategory</code> trong <code>src/lib/constants.ts</code>. Thay thế toàn bộ string 'Linh kiện' trên các modules: POS, Technician, Repairs, Products.",
+    "createdAt": "17.05.2026",
+    "severity": "high",
+    "affectedFiles": [],
+    "resolvedAt": "17.05.2026"
+  },
+  {
+    "id": "BUG-INV-005",
+    "trackId": "inventory",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Race Condition & Thiếu Log trong executeFinalImport",
+    "summary": "<b>Hiện tượng</b>: Khi duyệt nhập kho trong <code>parts/page.tsx</code>, hệ thống tính toán tồn kho dựa trên state cũ và không ghi log lịch sử.<br><b>Hệ lụy</b>: Gây sai lệch tồn kho khi có thao tác đồng thời và không thể truy vết thay đổi.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Duplicate của PAR-002/PAR-003. <code>executeFinalImport</code> đã dùng <code>runTransaction</code> với đọc dữ liệu tươi, giá vốn bình quân động, và <code>inventory_logs</code> đầy đủ.",
+    "createdAt": "17.05.2026",
+    "severity": "high",
+    "affectedFiles": [],
+    "resolvedAt": "17.05.2026"
+  },
+  {
+    "id": "BUG-INV-006",
+    "trackId": "inventory",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Rò rỉ Held Stock trong luồng Sửa chữa",
+    "summary": "<b>Hiện tượng</b>: Khi nhập linh kiện cho Ticket, hệ thống tăng <code>held</code>. Khi Handover, chỉ trừ <code>stock</code> mà quên trừ <code>held</code>.<br><br>✅ <b>Đã xác minh ngày 17.05.2026</b>: Duplicate của REP-007. <code>handleHandover</code> (repairs/page.tsx dòng 790-791) ĐÃ trừ CẢ <code>stock</code> lẫn <code>held</code> trong cùng transaction (<code>stockChange -= qty</code>, <code>heldChange -= qty</code>), và dùng <code>Math.max(0, ...)</code> chống âm.",
+    "createdAt": "17.05.2026",
+    "severity": "high",
+    "affectedFiles": [],
+    "resolvedAt": "17.05.2026"
+  },
+  {
+    "id": "BUG-INV-007",
+    "trackId": "inventory",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Xóa sản phẩm gây mồ côi dữ liệu (Orphan Data)",
+    "summary": "<b>Hiện tượng</b>: Hàm <code>handleDelete</code> trong <code>parts/page.tsx</code> xóa thẳng tài liệu sản phẩm mà không kiểm tra tham chiếu.<br><b>Hệ lụy</b>: Các phiếu nhập hoặc phiếu sửa chữa cũ tham chiếu đến sản phẩm này sẽ bị lỗi không tìm thấy dữ liệu.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Chuyển sang Soft Delete (<code>status: 'inactive'</code>). Chặn xóa SP còn tồn kho (<code>stock > 0</code>). Danh sách hiển thị đã filter ẩn SP inactive.",
+    "createdAt": "17.05.2026",
+    "severity": "high",
+    "affectedFiles": [],
+    "resolvedAt": "17.05.2026"
+  },
+  {
+    "id": "BUG-INV-008",
+    "trackId": "inventory",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Nguy cơ Tồn kho âm (Negative Stock)",
+    "summary": "<b>Hiện tượng</b>: Trong <code>executeFinalImport</code>, phép tính <code>stock: totalQty - ticketQty</code> không kiểm tra điều kiện tồn kho.<br><b>Hệ lụy</b>: Nếu số lượng yêu cầu lớn hơn số lượng có trong kho, tồn kho sẽ bị âm.<br><br>✅ <b>Xác nhận ngày 17.05.2026</b>: Logic negative stock guard đã có sẵn trong các luồng chính (POS, Orders, Parts). Không cần can thiệp thêm.",
+    "createdAt": "17.05.2026",
+    "severity": "high",
+    "affectedFiles": [],
+    "resolvedAt": "17.05.2026"
+  },
+  {
+    "id": "BUG-PAR-001",
+    "trackId": "inventory",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Cập nhật bất đồng bộ (Receipt & Ticket)",
+    "summary": "<b>Hiện tượng</b>: Hàm <code>handleMarkAvailability</code> cập nhật <code>import_receipts</code> và <code>repairs</code> bằng 2 lệnh <code>updateDoc</code> riêng biệt.<br><b>Hệ lụy</b>: Nếu lệnh thứ 2 lỗi, dữ liệu giữa phiếu nhập và phiếu sửa chữa sẽ bị vênh.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Chuyển toàn bộ logic sang <code>runTransaction</code> đảm bảo nguyên tử.",
+    "createdAt": "17.05.2026",
+    "severity": "high",
+    "affectedFiles": [],
+    "resolvedAt": "17.05.2026"
+  },
+  {
+    "id": "BUG-PAR-002",
+    "trackId": "inventory",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Regression: Mất an toàn Transaction và Thiếu Log khi chốt phiếu nhập",
+    "summary": "<b>Hiện tượng</b>: Hệ thống sử dụng <code>WriteBatch</code> thay vì <code>runTransaction</code> để cập nhật tồn kho.<br><b>Hệ lụy</b>: Gây Race Condition (Lost Update) và thiếu <code>inventory_logs</code> kiểm toán.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Chuyển <code>executeFinalImport</code> sang <code>runTransaction</code> với đầy đủ <code>inventory_logs</code> và giá vốn bình quân động.",
+    "createdAt": "17.05.2026",
+    "severity": "high",
+    "affectedFiles": [],
+    "resolvedAt": "17.05.2026"
+  },
+  {
+    "id": "BUG-INV-009",
+    "trackId": "inventory",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Trừ đúp tồn kho khả dụng (Systemic Double Deduction)",
+    "summary": "<b>Hiện tượng</b>: Hệ thống tính tồn kho khả dụng bằng <code>available = stock - held</code>. Tuy nhiên, trong <code>api/checkout/route.ts</code>, <code>parts/page.tsx</code> và <code>technician/page.tsx</code>, hệ thống vừa giảm <code>stock</code> vừa tăng <code>held</code>.<br><b>Hệ lụy</b>: Số lượng khả dụng bị giảm gấp đôi so với thực tế, gây hiện tượng báo hết hàng ảo.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Đã cập nhật logic trong pos, web checkout và kỹ thuật viên chỉ cộng held khi Pending, không trừ đúp.",
+    "createdAt": "17.05.2026",
+    "severity": "high",
+    "affectedFiles": [],
+    "resolvedAt": "17.05.2026"
+  },
+  {
+    "id": "BUG-INV-010",
+    "trackId": "inventory",
+    "type": "bug",
+    "status": "resolved",
+    "title": "KTV lấy hàng giữ chỗ (Technician Can Take Reserved Items)",
+    "summary": "<b>Hiện tượng</b>: Trong file <code>technician/page.tsx</code>, khi KTV thêm linh kiện vào phiếu sửa chữa, hệ thống chỉ kiểm tra <code>currentStock < qty</code> thay vì <code>available < qty</code>.<br><b>Hệ lụy</b>: KTV có thể lấy nhầm linh kiện đã được giữ chỗ (held) cho các đơn hàng hoặc phiếu sửa chữa khác.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Sửa điều kiện thành <code>available = stock - held</code> trong <code>technician/page.tsx</code>.",
+    "createdAt": "17.05.2026",
+    "severity": "high",
+    "affectedFiles": [],
+    "resolvedAt": "17.05.2026"
+  },
+  {
+    "id": "BUG-PAR-003",
+    "trackId": "inventory",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Race Condition & Stale Data trong executeFinalImport",
+    "summary": "<b>Hiện tượng</b>: Hàm <code>executeFinalImport</code> dùng dữ liệu từ hook (có thể cũ) và <code>writeBatch</code>.<br><b>Hệ lụy</b>: Race Condition và giá vốn bị tính sai.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Chuyển toàn bộ sang <code>runTransaction</code> với đọc dữ liệu tươi, tính giá vốn bình quân động, và ghi <code>inventory_logs</code>.",
+    "createdAt": "17.05.2026",
+    "severity": "high",
+    "affectedFiles": [],
+    "resolvedAt": "17.05.2026"
+  },
+  {
+    "id": "BUG-MIGRATE-INVENTORY-SCRIPT-MISSING-001",
+    "trackId": "inventory",
+    "type": "bug",
+    "status": "open",
+    "title": "package.json migrate:inventory dang tham chieu script bi thieu",
+    "summary": "Sau clean code, <code>scripts/migrate-active-orders.ts</code> khong ton tai nhung <code>package.json</code> van co script <code>migrate:inventory</code>.",
+    "createdAt": "2026-05-26T00:00:00.000Z",
+    "severity": "medium",
+    "affectedFiles": [
+      "package.json",
+      "scripts/migrate-active-orders.ts"
+    ]
+  }
+]

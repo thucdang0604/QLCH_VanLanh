@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
 import { useConfig } from '@/lib/ConfigContext';
+import TrackingModal from '@/components/TrackingModal';
 
 // Zalo SVG icon - compact inline
 function ZaloIcon({ size = 22 }: { size?: number }) {
@@ -66,6 +67,7 @@ export default function MobileBottomNav() {
     const { user } = useAuth();
     const { config } = useConfig();
     const [showContactMenu, setShowContactMenu] = useState(false);
+    const [isTrackingModalOpen, setIsTrackingModalOpen] = useState(false);
     const menuRef = useRef<HTMLDivElement>(null);
 
     // Update contact options dynamically from config
@@ -221,15 +223,15 @@ export default function MobileBottomNav() {
                         </button>
 
                         {/* 4. Tra cứu */}
-                        <Link
-                            href="/tracking"
+                        <button
+                            onClick={() => setIsTrackingModalOpen(true)}
                             className={`flex flex-col items-center justify-center py-2 min-w-[56px] transition-colors ${pathname?.startsWith('/tracking') ? 'text-copper' : 'text-gray-500'}`}
                         >
                             <ClipboardList size={22} />
                             <span className={`text-[10px] mt-1 ${pathname?.startsWith('/tracking') ? 'font-semibold' : ''}`}>
                                 Tra cứu
                             </span>
-                        </Link>
+                        </button>
 
                         {/* 5. Quản trị — chỉ hiển thị khi là admin hoặc staff */}
                         {user && (user.role === 'admin' || user.role === 'staff') && (
@@ -247,6 +249,7 @@ export default function MobileBottomNav() {
                 </nav>
             </div>
 
+            <TrackingModal isOpen={isTrackingModalOpen} onClose={() => setIsTrackingModalOpen(false)} />
         </>
     );
 }

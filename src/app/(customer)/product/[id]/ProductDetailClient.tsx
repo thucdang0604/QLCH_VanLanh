@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
 import { useState } from 'react';
@@ -184,6 +185,42 @@ export default function ProductDetailClient({ data, variants = [], reviews = [] 
                     </div>
                 </div>
 
+                {/* Variants Selector */}
+                {variants.length > 0 && (
+                    <div className="space-y-3">
+                        <p className="font-semibold text-gray-900">Tùy chọn phiên bản:</p>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                            {variants.map(v => {
+                                const vPrice = v.price_promo || v.price_original;
+                                const isActive = v.id === data.id;
+                                return (
+                                    <Link 
+                                        key={v.id} 
+                                        href={`/product/${v.slug || v.id}`}
+                                        className={`flex flex-col items-center justify-center p-2 rounded-lg border-2 transition-all text-center ${
+                                            isActive 
+                                                ? 'border-orange-500 bg-orange-50 shadow-sm relative' 
+                                                : 'border-gray-200 hover:border-orange-300 bg-white'
+                                        }`}
+                                    >
+                                        {isActive && (
+                                            <div className="absolute -top-2 -right-2 bg-orange-500 text-white rounded-full p-0.5">
+                                                <Star size={12} className="fill-white" />
+                                            </div>
+                                        )}
+                                        <span className={`text-xs sm:text-sm font-semibold line-clamp-2 ${isActive ? 'text-orange-700' : 'text-gray-800'}`}>
+                                            {v.name.replace(data.brand || '', '').trim()}
+                                        </span>
+                                        <span className={`text-xs mt-1 font-bold ${isActive ? 'text-orange-600' : 'text-red-600'}`}>
+                                            {formatPrice(vPrice)}
+                                        </span>
+                                    </Link>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
+
                 {/* Description (Short) */}
                 {data.description && (
                     <div className="text-gray-600 text-sm leading-relaxed">
@@ -262,82 +299,55 @@ export default function ProductDetailClient({ data, variants = [], reviews = [] 
                 </div>
             </div>
 
-            {/* Variant Selector — full width below the 2-col grid */}
-            {variants.length > 0 && (
-                <div className="col-span-full mt-8 bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-                    <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
-                        <span className="w-1.5 h-6 bg-orange-500 rounded-full"></span>
-                        Phiên bản khác
-                    </h2>
-                    <div className="flex flex-wrap gap-3">
-                        {variants.map(v => {
-                            const vImage = v.images?.[0] || v.imageUrl || '';
-                            const vPrice = v.price_promo || v.price_original;
-                            return (
-                                <Link key={v.id} href={`/product/${v.slug || v.id}`}
-                                    className="flex items-center gap-3 px-4 py-3 border-2 border-gray-100 rounded-xl hover:border-orange-400 hover:shadow-md transition-all min-w-[200px]"
-                                >
-                                    {vImage && (
-                                        <div className="relative w-12 h-12 rounded-lg overflow-hidden bg-gray-50 flex-shrink-0">
-                                            <Image src={vImage} alt={v.name} fill className="object-contain" />
-                                        </div>
-                                    )}
-                                    <div className="text-sm">
-                                        <p className="font-semibold text-gray-800 line-clamp-1">{v.storageCapacity || v.name}</p>
-                                        {v.color && <p className="text-xs text-gray-500">{v.color}</p>}
-                                        <p className="text-red-600 font-bold mt-0.5">{formatPrice(vPrice)}</p>
-                                    </div>
-                                </Link>
-                            );
-                        })}
-                    </div>
-                </div>
-            )}
+            {/* Reviews Section was here */}
+        </div>
+    );
+}
 
-            {/* Reviews Section */}
-            {data._type === 'product' && (
-                <div className="col-span-full mt-8 bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-                    <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
-                        <span className="w-1.5 h-6 bg-orange-500 rounded-full"></span>
-                        <MessageSquare size={20} className="text-orange-500" />
-                        Đánh giá & Nhận xét ({reviews.length})
-                    </h2>
-                    {reviews.length > 0 ? (
-                        <div className="space-y-4">
-                            {reviews.map(r => (
-                                <div key={r.id} className="border-b border-gray-50 pb-4 last:border-0">
-                                    <div className="flex items-center gap-3">
-                                        <div className="w-9 h-9 bg-orange-100 rounded-full flex items-center justify-center text-orange-600 font-bold text-sm">
-                                            {r.customerName.charAt(0).toUpperCase()}
-                                        </div>
-                                        <div>
-                                            <p className="font-semibold text-gray-800 text-sm">{r.customerName}</p>
-                                            <div className="flex items-center gap-0.5">
-                                                {Array.from({ length: 5 }).map((_, i) => (
-                                                    <Star key={i} size={14}
-                                                        className={i < r.rating ? 'text-yellow-400 fill-yellow-400' : 'text-gray-200'}
-                                                    />
-                                                ))}
-                                                <span className="text-xs text-gray-400 ml-2">
-                                                    {new Date(r.createdAt).toLocaleDateString('vi-VN')}
-                                                </span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <p className="text-gray-600 text-sm mt-2 pl-12">{r.content}</p>
+export function ProductReviews({ data, reviews = [] }: { data: any, reviews: any[] }) {
+    if (data._type !== 'product') return null;
+    
+    return (
+        <div className="mt-8 bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+            <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
+                <span className="w-1.5 h-6 bg-orange-500 rounded-full"></span>
+                <MessageSquare size={20} className="text-orange-500" />
+                Đánh giá & Nhận xét ({reviews.length})
+            </h2>
+            {reviews.length > 0 ? (
+                <div className="space-y-4">
+                    {reviews.map(r => (
+                        <div key={r.id} className="border-b border-gray-50 pb-4 last:border-0">
+                            <div className="flex items-center gap-3">
+                                <div className="w-9 h-9 bg-orange-100 rounded-full flex items-center justify-center text-orange-600 font-bold text-sm">
+                                    {r.customerName.charAt(0).toUpperCase()}
                                 </div>
-                            ))}
+                                <div>
+                                    <p className="font-semibold text-gray-800 text-sm">{r.customerName}</p>
+                                    <div className="flex items-center gap-0.5">
+                                        {Array.from({ length: 5 }).map((_, i) => (
+                                            <Star key={i} size={14}
+                                                className={i < r.rating ? 'text-yellow-400 fill-yellow-400' : 'text-gray-200'}
+                                            />
+                                        ))}
+                                        <span className="text-xs text-gray-400 ml-2">
+                                            {new Date(r.createdAt).toLocaleDateString('vi-VN')}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                            <p className="text-gray-600 text-sm mt-2 pl-12">{r.content}</p>
                         </div>
-                    ) : (
-                        <div className="text-center py-8 text-gray-400">
-                            <MessageSquare size={32} className="mx-auto mb-2 opacity-50" />
-                            <p className="text-sm">Chưa có đánh giá nào cho sản phẩm này.</p>
-                        </div>
-                    )}
-                    {/* Submit review form — client-side submission to /api/reviews */}
-                    <ReviewForm productId={data.id} productName={data.name} />
+                    ))}
+                </div>
+            ) : (
+                <div className="text-center py-8 text-gray-400">
+                    <MessageSquare size={32} className="mx-auto mb-2 opacity-50" />
+                    <p className="text-sm">Chưa có đánh giá nào cho sản phẩm này.</p>
                 </div>
             )}
+            {/* Submit review form — client-side submission to /api/reviews */}
+            <ReviewForm productId={data.id} productName={data.name} />
         </div>
     );
 }
@@ -387,7 +397,7 @@ function ReviewForm({ productId, productName }: { productId: string; productName
                     onClick={async () => {
                         setSubmitting(true);
                         try {
-                            const res = await fetch('/api/reviews', {
+                            const res = await fetch('/api/reviews/product', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ productId, productName, customerName: name, rating, content })

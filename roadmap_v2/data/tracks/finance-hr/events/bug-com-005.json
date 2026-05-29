@@ -1,0 +1,11 @@
+{
+  "id": "BUG-COM-005",
+  "trackId": "finance-hr",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Thiếu kiểm tra trạng thái thanh toán đơn hàng",
+  "summary": "<b>Hiện tượng</b>: Trong <code>commissionUtils.ts</code> (dòng 65), hệ thống chỉ kiểm tra trạng thái thanh toán cho tài liệu sửa chữa (<code>docType === 'repair'</code>). Các đơn hàng bán lẻ (Orders) được tính hoa hồng ngay lập tức bất kể trạng thái thanh toán.<br><b>Hệ lụy</b>: Nhân viên có thể tạo đơn hàng ảo, chưa thanh toán (hoặc nợ) để hệ thống ghi nhận hoa hồng, sau đó hủy đơn hoặc bùng nợ.",
+  "createdAt": "2026-05-26T00:00:00.000Z",
+  "severity": "high",
+  "affectedFiles": []
+}

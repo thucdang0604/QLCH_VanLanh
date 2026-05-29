@@ -147,6 +147,62 @@
                     "order": "DESCENDING"
                 }
             ]
+        },
+        {
+            "collectionGroup": "orders",
+            "queryScope": "COLLECTION",
+            "fields": [
+                { "fieldPath": "customer_info.phone", "order": "ASCENDING" },
+                { "fieldPath": "createdAt", "order": "DESCENDING" }
+            ]
+        },
+        {
+            "collectionGroup": "repairs",
+            "queryScope": "COLLECTION",
+            "fields": [
+                { "fieldPath": "customer.phone", "order": "ASCENDING" },
+                { "fieldPath": "createdAt", "order": "DESCENDING" }
+            ]
+        },
+        {
+            "collectionGroup": "appointments",
+            "queryScope": "COLLECTION",
+            "fields": [
+                { "fieldPath": "customerInfo.phone", "order": "ASCENDING" },
+                { "fieldPath": "createdAt", "order": "DESCENDING" }
+            ]
+        },
+        {
+            "collectionGroup": "commissions",
+            "queryScope": "COLLECTION",
+            "fields": [
+                { "fieldPath": "sourceType", "order": "ASCENDING" },
+                { "fieldPath": "sourceId", "order": "ASCENDING" }
+            ]
+        },
+        {
+            "collectionGroup": "commissions",
+            "queryScope": "COLLECTION",
+            "fields": [
+                { "fieldPath": "staffId", "order": "ASCENDING" },
+                { "fieldPath": "createdAt", "order": "DESCENDING" }
+            ]
+        },
+        {
+            "collectionGroup": "orders",
+            "queryScope": "COLLECTION",
+            "fields": [
+                { "fieldPath": "assignedSellerId", "order": "ASCENDING" },
+                { "fieldPath": "createdAt", "order": "DESCENDING" }
+            ]
+        },
+        {
+            "collectionGroup": "inventory_logs",
+            "queryScope": "COLLECTION",
+            "fields": [
+                { "fieldPath": "referenceType", "order": "ASCENDING" },
+                { "fieldPath": "referenceId", "order": "ASCENDING" }
+            ]
         }
     ],
     "fieldOverrides": []

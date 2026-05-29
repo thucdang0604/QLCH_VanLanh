@@ -1,0 +1,12 @@
+{
+  "id": "finance-hr",
+  "title": "Tài chính & Nhân sự",
+  "status": "stable",
+  "summaryPath": "finance-hr/summary.json",
+  "updatedAt": "2026-05-28T03:23:16.930Z",
+  "coreFiles": [],
+  "openEventIds": [],
+  "decisionIds": [],
+  "dependsOn": [],
+  "affectedBy": []
+}

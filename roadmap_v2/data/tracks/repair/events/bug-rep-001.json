@@ -1,0 +1,12 @@
+{
+  "id": "BUG-REP-001",
+  "trackId": "repair",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Gọi tính hoa hồng ngoài Transaction (Repairs)",
+  "summary": "<b>Hiện tượng</b>: Hàm <code>calculateAndSaveCommissions</code> được gọi sau khi transaction hoàn thành.<br><b>Hệ lụy</b>: Nếu hàm này lỗi, phiếu sửa chữa đã hoàn thành nhưng nhân viên không nhận được hoa hồng.<br><br>✅ <b>Đã xác minh ngày 17.05.2026</b>: <code>commissionUtils.ts</code> có guard check payment status và idempotency check, giảm thiểu rủi ro. Commission chạy fire-and-forget có <code>.catch()</code> xử lý lỗi.",
+  "createdAt": "17.05.2026",
+  "severity": "high",
+  "affectedFiles": [],
+  "resolvedAt": "17.05.2026"
+}

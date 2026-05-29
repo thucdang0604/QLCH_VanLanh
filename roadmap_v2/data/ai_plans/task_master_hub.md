@@ -1,0 +1,8 @@
+﻿- [x] 1. Cáº­p nháº­t `styles.css` cho giao diá»‡n full-screen Mermaid vĂ  tá»‘i Æ°u layout.
+- [x] 2. Chá»‰nh sá»­a `index.html` vĂ  `app.js` Ä‘á»ƒ tá»• chá»©c láº¡i cĂ¡c nhĂ³m Dashboard: Workflow, Bug, TĂ­nh nÄƒng má»›i, AI Plan & Task, Äá»£t Kiá»ƒm Äá»‹nh.
+- [x] 3. XĂ¢y dá»±ng cáº¥u trĂºc dá»¯ liá»‡u lÆ°u trá»¯ AI Plan & Task (chá»‘ng ghi Ä‘Ă¨) trong thÆ° má»¥c `roadmap_v2/data/ai_plans/`.
+- [x] 4. TĂ­ch há»£p chá»©c nÄƒng lÆ°u trá»¯ vĂ  Ä‘á»c cĂ¡c file markdown tá»« AI (káº¿ hoáº¡ch vĂ  task) thĂ´ng qua `manifest.json`.
+- [/] 5. Cáº­p nháº­t `workflows.json` Ä‘á»ƒ thĂªm sÆ¡ Ä‘á»“ Master Hub (Unified Workflow).
+- [x] 6. CĂ i Ä‘áº·t logic Interactive Highlight (DOM Traversal) cho Mermaid SVG trong `app.js`.
+- [x] 7. Kiá»ƒm tra hiá»ƒn thá»‹ chi tiáº¿t cho tá»«ng Ä‘á»£t kiá»ƒm Ä‘á»‹nh thay vĂ¬ hiá»‡n full ná»™i dung.
+- [x] 8. Kiá»ƒm tra vĂ  xĂ¡c nháº­n má»i chá»©c nÄƒng hoáº¡t Ä‘á»™ng Ä‘Ăºng.

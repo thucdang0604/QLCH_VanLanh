@@ -1,0 +1,12 @@
+{
+  "id": "BUG-REV-002",
+  "trackId": "finance-hr",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Khấu trừ quà tặng trong Lợi nhuận ròng (NOT A BUG)",
+  "summary": "<b>⚠️ Đây KHÔNG PHẢI BUG</b> — logic kế toán đúng.<br><br><b>Giải thích</b>:<br>• <code>repairRevenue</code> = tiền khách THỰC TRẢ (từ <code>paymentHistory</code>), chưa bao gồm giá trị quà tặng.<br>• <code>giftDiscount</code> = chi phí hàng hóa cửa hàng TẶNG THÊM (đã trừ stock tại <code>repairs/page.tsx</code> dòng 803-810).<br>• Trừ <code>giftDiscount</code> khỏi <code>netProfit</code> là ĐÚNG vì quà tặng là chi phí thực (hàng xuất kho nhưng không thu tiền).<br><br><b>Lưu ý cho dev sau</b>: <code>payment.amount</code> = partsCost + laborCost + additionalFees - discountAmount (KHÔNG trừ giftDiscount). Quà tặng là chi phí riêng, không giảm hóa đơn khách hàng.",
+  "createdAt": "17.05.2026",
+  "severity": "high",
+  "affectedFiles": [],
+  "resolvedAt": "17.05.2026"
+}

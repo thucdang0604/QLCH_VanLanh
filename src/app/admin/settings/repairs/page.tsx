@@ -31,7 +31,7 @@ const defaultStatuses: WorkflowNode[] = [
     { id: 'tim_linh_kien', label: 'Tìm Linh Kiện', color: 'bg-cyan-100 text-cyan-800', allowedNext: ['da_dat_linh_kien', 'refund', 'out'] },
     { id: 'da_dat_linh_kien', label: 'Đã Đặt LK', color: 'bg-teal-100 text-teal-800', allowedNext: ['dang_sua_chua'], allowedFeatures: ['requirePartsReady'] },
     { id: 'dang_sua_chua', label: 'Đang Sửa Chữa', color: 'bg-orange-100 text-orange-800', allowedNext: ['done', 'refund'] },
-    { id: 'done', label: 'Hoàn Thành', color: 'bg-green-100 text-green-800', allowedNext: [] },
+    { id: 'done', label: 'Hoàn Thành', color: 'bg-green-100 text-green-800', allowedNext: [], isTerminal: true },
     { id: 'out', label: 'Trả Máy', color: 'bg-gray-100 text-gray-800', allowedNext: [], isTerminal: true },
     { id: 'refund', label: 'Hoàn Phí', color: 'bg-red-100 text-red-800', allowedNext: [], isTerminal: true }
 ];

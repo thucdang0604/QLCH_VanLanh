@@ -1,16 +1,17 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { collection, query, orderBy, onSnapshot, addDoc, updateDoc, doc, deleteDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, addDoc, updateDoc, doc, deleteDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { Percent, Plus, Edit2, Trash2, ToggleLeft, ToggleRight, X, Tag } from 'lucide-react';
+import { Percent, Plus, Edit2, Trash2, ToggleLeft, ToggleRight, X, Tag, Settings, Medal, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import type { AccessoryDiscountRule } from '@/lib/types';
+import { TIER_CONFIGS, TierConfig } from '@/lib/customerTiers';
 
 const fmt = (n: number) => n.toLocaleString('vi-VN') + 'đ';
 
-// ── Rule Form Modal ──
-function RuleModal({ rule, onClose, onSave }: {
+// ── Accessory Rule Modal ──
+function AccessoryRuleModal({ rule, onClose, onSave }: {
     rule: AccessoryDiscountRule | null;
     onClose: () => void;
     onSave: (data: Partial<AccessoryDiscountRule>) => Promise<void>;
@@ -120,36 +121,76 @@ function RuleModal({ rule, onClose, onSave }: {
 
 // ── Main Page ──
 export default function DiscountRulesPage() {
+    const [activeTab, setActiveTab] = useState<'tiers' | 'accessories'>('tiers');
+
+    // Accessories State
     const [rules, setRules] = useState<(AccessoryDiscountRule & { id: string })[]>([]);
-    const [showModal, setShowModal] = useState(false);
+    const [showAccessoryModal, setShowAccessoryModal] = useState(false);
     const [editRule, setEditRule] = useState<AccessoryDiscountRule | null>(null);
 
+    // Tiers State
+    const [tiers, setTiers] = useState<TierConfig[]>(TIER_CONFIGS); // default fallback
+    const [savingTiers, setSavingTiers] = useState(false);
+
     useEffect(() => {
-        const q = query(collection(db, 'accessory_discount_rules'), orderBy('createdAt', 'desc'));
-        return onSnapshot(q, snap => {
+        // Fetch Accessory Rules
+        const qRules = query(collection(db, 'accessory_discount_rules'), orderBy('createdAt', 'desc'));
+        const unsubRules = onSnapshot(qRules, snap => {
             setRules(snap.docs.map(d => ({ id: d.id, ...d.data() } as AccessoryDiscountRule & { id: string })));
         });
+
+        // Fetch Tier Settings
+        const unsubTiers = onSnapshot(doc(db, 'system_config', 'tier_settings'), snap => {
+            if (snap.exists() && snap.data().tiers) {
+                setTiers(snap.data().tiers);
+            }
+        });
+
+        return () => { unsubRules(); unsubTiers(); };
     }, []);
 
-    const handleSave = async (data: Partial<AccessoryDiscountRule>) => {
+    // Handlers for Accessories
+    const handleSaveAccessoryRule = async (data: Partial<AccessoryDiscountRule>) => {
         if (editRule) {
             await updateDoc(doc(db, 'accessory_discount_rules', editRule.id), { ...data, updatedAt: serverTimestamp() });
-            toast.success('Đã cập nhật rule');
+            toast.success('Đã cập nhật rule phụ kiện');
         } else {
             await addDoc(collection(db, 'accessory_discount_rules'), { ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
-            toast.success('Đã thêm rule mới');
+            toast.success('Đã thêm rule phụ kiện mới');
         }
     };
 
-    const toggleActive = async (rule: AccessoryDiscountRule & { id: string }) => {
+    const toggleAccessoryActive = async (rule: AccessoryDiscountRule & { id: string }) => {
         await updateDoc(doc(db, 'accessory_discount_rules', rule.id), { isActive: !rule.isActive, updatedAt: serverTimestamp() });
         toast.success(rule.isActive ? 'Đã tắt rule' : 'Đã bật rule');
     };
 
-    const handleDelete = async (id: string) => {
+    const handleDeleteAccessoryRule = async (id: string) => {
         if (!confirm('Xóa rule này?')) return;
         await deleteDoc(doc(db, 'accessory_discount_rules', id));
         toast.success('Đã xóa rule');
+    };
+
+    // Handlers for Tiers
+    const handleTierChange = (index: number, field: keyof TierConfig, value: string | number) => {
+        const newTiers = [...tiers];
+        newTiers[index] = { ...newTiers[index], [field]: value };
+        setTiers(newTiers);
+    };
+
+    const handleSaveTiers = async () => {
+        setSavingTiers(true);
+        try {
+            await setDoc(doc(db, 'system_config', 'tier_settings'), {
+                tiers,
+                updatedAt: serverTimestamp()
+            }, { merge: true });
+            toast.success('Đã lưu cấu hình hạng thành viên');
+        } catch (error) {
+            console.error(error);
+            toast.error('Có lỗi xảy ra khi lưu hạng thành viên');
+        }
+        setSavingTiers(false);
     };
 
     return (
@@ -157,59 +198,143 @@ export default function DiscountRulesPage() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-                        <Percent className="text-orange-500" size={28} /> Cấu hình giảm giá phụ kiện
+                        <Settings className="text-orange-500" size={28} /> Cấu hình Giảm giá & Thành viên
                     </h1>
-                    <p className="text-sm text-gray-500 mt-1">Rule tự động giảm giá phụ kiện khi sửa chữa</p>
+                    <p className="text-sm text-gray-500 mt-1">Quản lý hạng khách hàng và các rule giảm giá tự động</p>
                 </div>
-                <button onClick={() => { setEditRule(null); setShowModal(true); }}
-                    className="flex items-center gap-2 bg-orange-500 text-white px-4 py-2.5 rounded-xl hover:bg-orange-600 font-medium text-sm">
-                    <Plus size={18} /> Thêm rule
+            </div>
+
+            {/* Tabs */}
+            <div className="flex border-b border-gray-200">
+                <button
+                    onClick={() => setActiveTab('tiers')}
+                    className={`pb-3 pt-1 px-4 text-sm font-medium border-b-2 flex items-center gap-2 transition-colors ${activeTab === 'tiers' ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}
+                >
+                    <Medal size={18} /> Hạng thành viên
+                </button>
+                <button
+                    onClick={() => setActiveTab('accessories')}
+                    className={`pb-3 pt-1 px-4 text-sm font-medium border-b-2 flex items-center gap-2 transition-colors ${activeTab === 'accessories' ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}
+                >
+                    <Percent size={18} /> Rule Phụ kiện & Dịch vụ
                 </button>
             </div>
 
-            {/* Rules List */}
-            <div className="space-y-3">
-                {rules.map(rule => (
-                    <div key={rule.id} className={`bg-white rounded-xl shadow-sm border p-4 ${!rule.isActive ? 'opacity-60' : ''}`}>
-                        <div className="flex items-start gap-4">
-                            <div className="w-10 h-10 bg-orange-50 rounded-lg flex items-center justify-center shrink-0">
-                                <Tag size={20} className="text-orange-500" />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                                <h3 className="font-bold text-gray-900">{rule.name}</h3>
-                                <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                                    <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg">
-                                        🔧 Khi: {rule.triggerKeywords?.join(', ') || rule.triggerServiceCategory}
-                                    </span>
-                                    <span className="bg-green-50 text-green-700 px-2 py-1 rounded-lg">
-                                        🏷️ Giảm: {rule.targetKeywords?.join(', ') || rule.targetProductCategory}
-                                    </span>
-                                    <span className="bg-orange-50 text-orange-700 px-2 py-1 rounded-lg font-bold">
-                                        {rule.discountType === 'percentage' ? `-${rule.discountValue}%` : `-${fmt(rule.discountValue)}`}
-                                        {rule.maxDiscountAmount ? ` (max ${fmt(rule.maxDiscountAmount)})` : ''}
-                                    </span>
-                                </div>
-                            </div>
-                            <div className="flex items-center gap-1 shrink-0">
-                                <button onClick={() => toggleActive(rule)} className="p-1.5 hover:bg-gray-100 rounded-lg" title={rule.isActive ? 'Tắt' : 'Bật'}>
-                                    {rule.isActive ? <ToggleRight size={20} className="text-green-500" /> : <ToggleLeft size={20} className="text-gray-400" />}
-                                </button>
-                                <button onClick={() => { setEditRule(rule); setShowModal(true); }} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400"><Edit2 size={14} /></button>
-                                <button onClick={() => handleDelete(rule.id)} className="p-1.5 hover:bg-red-50 rounded-lg text-gray-400 hover:text-red-500"><Trash2 size={14} /></button>
-                            </div>
+            {/* Tier Config Tab */}
+            {activeTab === 'tiers' && (
+                <div className="space-y-4">
+                    <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex gap-3 text-sm text-blue-800">
+                        <Users className="shrink-0 text-blue-500" size={20} />
+                        <div>
+                            <p className="font-bold mb-1">Cấu hình Hạng khách hàng (Tiers)</p>
+                            <p>Khách hàng sẽ tự động được thăng hạng dựa trên tổng chi tiêu. Mức giảm giá này áp dụng cho toàn bộ hóa đơn dịch vụ & mua sắm.</p>
                         </div>
                     </div>
-                ))}
-                {rules.length === 0 && (
-                    <div className="text-center py-16 bg-white rounded-xl">
-                        <Percent size={48} className="mx-auto text-gray-300 mb-3" />
-                        <p className="text-gray-500">Chưa có rule giảm giá nào</p>
-                        <p className="text-xs text-gray-400 mt-1">VD: Thay màn hình → Giảm 40% cường lực</p>
-                    </div>
-                )}
-            </div>
 
-            {showModal && <RuleModal rule={editRule} onClose={() => setShowModal(false)} onSave={handleSave} />}
+                    <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
+                        <table className="w-full text-left text-sm">
+                            <thead className="bg-gray-50 border-b">
+                                <tr>
+                                    <th className="px-4 py-3 font-semibold text-gray-600">Tên Hạng</th>
+                                    <th className="px-4 py-3 font-semibold text-gray-600">Mức chi tiêu tối thiểu (VNĐ)</th>
+                                    <th className="px-4 py-3 font-semibold text-gray-600">Giảm giá (%)</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100">
+                                {tiers.map((tier, idx) => (
+                                    <tr key={tier.name} className="hover:bg-gray-50 transition-colors">
+                                        <td className="px-4 py-3 font-bold text-gray-900">
+                                            {tier.name}
+                                        </td>
+                                        <td className="px-4 py-3">
+                                            <input
+                                                type="number"
+                                                value={tier.minSpent}
+                                                onChange={e => handleTierChange(idx, 'minSpent', Number(e.target.value))}
+                                                className="w-full max-w-[200px] border rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                                            />
+                                        </td>
+                                        <td className="px-4 py-3">
+                                            <div className="flex items-center gap-2">
+                                                <input
+                                                    type="number"
+                                                    value={tier.discountPercent}
+                                                    onChange={e => handleTierChange(idx, 'discountPercent', Number(e.target.value))}
+                                                    className="w-20 border rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                                                />
+                                                <span className="text-gray-500">%</span>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                        <div className="p-4 bg-gray-50 border-t flex justify-end">
+                            <button
+                                onClick={handleSaveTiers}
+                                disabled={savingTiers}
+                                className="bg-orange-500 text-white px-5 py-2 rounded-lg font-medium hover:bg-orange-600 disabled:opacity-50"
+                            >
+                                {savingTiers ? 'Đang lưu...' : 'Lưu cấu hình hạng'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Accessories Tab */}
+            {activeTab === 'accessories' && (
+                <div className="space-y-4">
+                    <div className="flex justify-end">
+                        <button onClick={() => { setEditRule(null); setShowAccessoryModal(true); }}
+                            className="flex items-center gap-2 bg-orange-500 text-white px-4 py-2 rounded-xl hover:bg-orange-600 font-medium text-sm">
+                            <Plus size={18} /> Thêm rule phụ kiện
+                        </button>
+                    </div>
+                    <div className="space-y-3">
+                        {rules.map(rule => (
+                            <div key={rule.id} className={`bg-white rounded-xl shadow-sm border p-4 ${!rule.isActive ? 'opacity-60' : ''}`}>
+                                <div className="flex items-start gap-4">
+                                    <div className="w-10 h-10 bg-orange-50 rounded-lg flex items-center justify-center shrink-0">
+                                        <Tag size={20} className="text-orange-500" />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <h3 className="font-bold text-gray-900">{rule.name}</h3>
+                                        <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                                            <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg">
+                                                🔧 Khi: {rule.triggerKeywords?.join(', ') || rule.triggerServiceCategory}
+                                            </span>
+                                            <span className="bg-green-50 text-green-700 px-2 py-1 rounded-lg">
+                                                🏷️ Giảm: {rule.targetKeywords?.join(', ') || rule.targetProductCategory}
+                                            </span>
+                                            <span className="bg-orange-50 text-orange-700 px-2 py-1 rounded-lg font-bold">
+                                                {rule.discountType === 'percentage' ? `-${rule.discountValue}%` : `-${fmt(rule.discountValue)}`}
+                                                {rule.maxDiscountAmount ? ` (max ${fmt(rule.maxDiscountAmount)})` : ''}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-1 shrink-0">
+                                        <button onClick={() => toggleAccessoryActive(rule)} className="p-1.5 hover:bg-gray-100 rounded-lg" title={rule.isActive ? 'Tắt' : 'Bật'}>
+                                            {rule.isActive ? <ToggleRight size={20} className="text-green-500" /> : <ToggleLeft size={20} className="text-gray-400" />}
+                                        </button>
+                                        <button onClick={() => { setEditRule(rule); setShowAccessoryModal(true); }} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400"><Edit2 size={14} /></button>
+                                        <button onClick={() => handleDeleteAccessoryRule(rule.id)} className="p-1.5 hover:bg-red-50 rounded-lg text-gray-400 hover:text-red-500"><Trash2 size={14} /></button>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                        {rules.length === 0 && (
+                            <div className="text-center py-16 bg-white rounded-xl">
+                                <Percent size={48} className="mx-auto text-gray-300 mb-3" />
+                                <p className="text-gray-500">Chưa có rule giảm giá nào</p>
+                                <p className="text-xs text-gray-400 mt-1">VD: Thay màn hình → Giảm 40% cường lực</p>
+                            </div>
+                        )}
+                    </div>
+
+                    {showAccessoryModal && <AccessoryRuleModal rule={editRule} onClose={() => setShowAccessoryModal(false)} onSave={handleSaveAccessoryRule} />}
+                </div>
+            )}
         </div>
     );
 }

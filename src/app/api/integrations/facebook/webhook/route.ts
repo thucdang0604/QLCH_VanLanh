@@ -1,14 +1,9 @@
 import crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
-import { upsertExternalInboundMessage } from '@/lib/chatServer';
+import { fetchFacebookUserProfile, upsertExternalInboundMessage, type ChatAttachment } from '@/lib/chatServer';
 import { getEffectiveChatIntegrationConfig } from '@/lib/chatIntegrationConfig';
 
 export const runtime = 'nodejs';
-
-interface FacebookUserProfile {
-  displayName?: string;
-  avatarUrl?: string;
-}
 
 function verifySignature(rawBody: string, signature: string | null, appSecret: string): boolean {
   if (!appSecret) return process.env.NODE_ENV !== 'production';
@@ -20,52 +15,39 @@ function verifySignature(rawBody: string, signature: string | null, appSecret: s
   return providedBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(providedBuffer, expectedBuffer);
 }
 
-function textFromFacebookMessage(message: Record<string, unknown>): string {
-  if (typeof message.text === 'string') return message.text;
-  const attachments = Array.isArray(message.attachments) ? message.attachments : [];
-  if (attachments.length > 0) return `[Facebook attachment] ${attachments.length} file`;
-  return '';
-}
+function messageContentFromFacebook(message: Record<string, unknown>) {
+  const attachments: ChatAttachment[] = (Array.isArray(message.attachments) ? message.attachments : [])
+    .slice(0, 5)
+    .map((entry) => {
+      const attachment = typeof entry === 'object' && entry !== null ? entry as Record<string, unknown> : {};
+      const payload = typeof attachment.payload === 'object' && attachment.payload !== null
+        ? attachment.payload as Record<string, unknown>
+        : {};
+      const rawType = typeof attachment.type === 'string' ? attachment.type : 'unknown';
+      const stickerId = typeof payload.sticker_id === 'number' || typeof payload.sticker_id === 'string'
+        ? String(payload.sticker_id)
+        : undefined;
+      const allowedType = rawType === 'image' || rawType === 'audio' || rawType === 'video' || rawType === 'file'
+        ? rawType
+        : 'unknown';
 
-async function getFacebookUserProfile(
-  userId: string,
-  graphVersion: string,
-  pageAccessToken: string,
-): Promise<FacebookUserProfile> {
-  if (!pageAccessToken) return {};
+      return {
+        type: stickerId ? 'sticker' : allowedType,
+        ...(typeof payload.url === 'string' ? { url: payload.url.slice(0, 2048) } : {}),
+        ...(stickerId ? { stickerId: stickerId.slice(0, 180) } : {}),
+      };
+    });
 
-  const params = new URLSearchParams({
-    fields: 'first_name,last_name,profile_pic',
-    access_token: pageAccessToken,
-  });
-  const url = `https://graph.facebook.com/${graphVersion}/${encodeURIComponent(userId)}?${params.toString()}`;
-
-  try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
-    if (!res.ok) {
-      console.warn('[FB Webhook] Profile lookup unavailable:', res.status);
-      return {};
-    }
-
-    const data = await res.json() as {
-      first_name?: unknown;
-      last_name?: unknown;
-      profile_pic?: unknown;
-    };
-    const nameParts = [data.first_name, data.last_name]
-      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-      .map(value => value.trim());
-
-    return {
-      ...(nameParts.length > 0 ? { displayName: nameParts.join(' ').slice(0, 50) } : {}),
-      ...(typeof data.profile_pic === 'string' && data.profile_pic.trim().length > 0
-        ? { avatarUrl: data.profile_pic.trim() }
-        : {}),
-    };
-  } catch (error) {
-    console.warn('[FB Webhook] Profile lookup failed:', error instanceof Error ? error.message : error);
-    return {};
+  if (typeof message.text === 'string' && message.text.trim()) {
+    return { text: message.text, attachments };
   }
+  if (attachments.some(attachment => attachment.type === 'sticker')) {
+    return { text: '[Sticker Facebook]', attachments };
+  }
+  if (attachments.length > 0) {
+    return { text: '[Tệp đính kèm Facebook]', attachments };
+  }
+  return { text: '', attachments };
 }
 
 export async function GET(request: NextRequest) {
@@ -133,9 +115,10 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        const text = textFromFacebookMessage(message);
+        const content = messageContentFromFacebook(message);
+        const text = content.text;
         console.log('[FB Webhook] Extracted text:', text ? text.slice(0, 100) : '(empty)');
-        const profile = await getFacebookUserProfile(
+        const profile = await fetchFacebookUserProfile(
           String(sender.id),
           config.graphVersion || 'v25.0',
           config.pageAccessToken,
@@ -148,9 +131,9 @@ export async function POST(request: NextRequest) {
           displayName: profile.displayName,
           avatarUrl: profile.avatarUrl,
           text,
+          attachments: content.attachments,
           timestamp: typeof eventObj.timestamp === 'number' ? eventObj.timestamp : Date.now(),
           externalMessageId: typeof message.mid === 'string' ? message.mid : undefined,
-          rawEvent: eventObj,
         });
 
         console.log('[FB Webhook] upsert result:', result);

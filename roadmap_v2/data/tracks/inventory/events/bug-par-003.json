@@ -1,0 +1,12 @@
+{
+  "id": "BUG-PAR-003",
+  "trackId": "inventory",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Race Condition & Stale Data trong executeFinalImport",
+  "summary": "<b>Hiện tượng</b>: Hàm <code>executeFinalImport</code> dùng dữ liệu từ hook (có thể cũ) và <code>writeBatch</code>.<br><b>Hệ lụy</b>: Race Condition và giá vốn bị tính sai.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Chuyển toàn bộ sang <code>runTransaction</code> với đọc dữ liệu tươi, tính giá vốn bình quân động, và ghi <code>inventory_logs</code>.",
+  "createdAt": "17.05.2026",
+  "severity": "high",
+  "affectedFiles": [],
+  "resolvedAt": "17.05.2026"
+}

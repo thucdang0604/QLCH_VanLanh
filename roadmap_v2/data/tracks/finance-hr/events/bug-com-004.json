@@ -1,0 +1,12 @@
+{
+  "id": "BUG-COM-004",
+  "trackId": "finance-hr",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Phân bổ giảm giá tùy tiện (Arbitrary Discount Distribution)",
+  "summary": "<b>Hiện tượng</b>: Trong <code>commissionUtils.ts</code> (dòng 107-111), tổng giảm giá của đơn hàng được trừ dần vào các sản phẩm theo thứ tự duyệt mảng.<br><b>Hệ lụy</b>: Kết quả hoa hồng phụ thuộc vào thứ tự ngẫu nhiên của mảng.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Refactor sang pro-rata distribution — phân bổ giảm giá theo tỷ lệ giá trị từng sản phẩm trên tổng giá trị đơn hàng.",
+  "createdAt": "17.05.2026",
+  "severity": "high",
+  "affectedFiles": [],
+  "resolvedAt": "17.05.2026"
+}

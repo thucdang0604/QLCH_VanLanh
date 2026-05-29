@@ -17,14 +17,24 @@ export interface ZaloChatConfig {
   webhookSecret: string;
 }
 
+export interface ChatQuickReply {
+  id: string;
+  title: string;
+  shortcut: string;
+  text: string;
+  enabled: boolean;
+}
+
 export interface ChatIntegrationConfig {
   facebook: FacebookChatConfig;
   zalo: ZaloChatConfig;
+  quickReplies: ChatQuickReply[];
 }
 
 export interface ChatIntegrationConfigPatch {
   facebook?: Partial<FacebookChatConfig>;
   zalo?: Partial<ZaloChatConfig>;
+  quickReplies?: ChatQuickReply[];
 }
 
 export interface PublicChatIntegrationConfig {
@@ -37,6 +47,7 @@ export interface PublicChatIntegrationConfig {
     oaAccessTokenSet: boolean;
     webhookSecretSet: boolean;
   };
+  quickReplies: ChatQuickReply[];
 }
 
 const DOC_REF = ['private_config', 'chat_integrations'] as const;
@@ -56,6 +67,7 @@ export const DEFAULT_CHAT_INTEGRATION_CONFIG: ChatIntegrationConfig = {
     oaAccessToken: '',
     webhookSecret: '',
   },
+  quickReplies: [],
 };
 
 function envConfig(): ChatIntegrationConfig {
@@ -80,6 +92,7 @@ function envConfig(): ChatIntegrationConfig {
       oaAccessToken: zaloAccessToken,
       webhookSecret: zaloWebhookSecret,
     },
+    quickReplies: [],
   };
 }
 
@@ -89,6 +102,24 @@ function asString(value: unknown): string {
 
 function asBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback;
+}
+
+function normalizeQuickReplies(value: unknown): ChatQuickReply[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 30).flatMap((item, index) => {
+    const entry = typeof item === 'object' && item !== null ? item as Record<string, unknown> : {};
+    const title = asString(entry.title).trim().slice(0, 60);
+    const text = asString(entry.text).trim().slice(0, 500);
+    const rawShortcut = asString(entry.shortcut).trim().toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24);
+    if (!title || !text || !rawShortcut) return [];
+    return [{
+      id: asString(entry.id).trim().replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 40) || `reply_${index + 1}`,
+      title,
+      shortcut: `/${rawShortcut}`,
+      text,
+      enabled: asBoolean(entry.enabled, true),
+    }];
+  });
 }
 
 function normalizeConfig(data: unknown): ChatIntegrationConfig {
@@ -111,6 +142,7 @@ function normalizeConfig(data: unknown): ChatIntegrationConfig {
       oaAccessToken: asString(zalo.oaAccessToken),
       webhookSecret: asString(zalo.webhookSecret),
     },
+    quickReplies: normalizeQuickReplies(root.quickReplies),
   };
 }
 
@@ -133,6 +165,7 @@ function mergeWithEnv(stored: ChatIntegrationConfig | null): ChatIntegrationConf
       oaAccessToken: stored.zalo.oaAccessToken || env.zalo.oaAccessToken,
       webhookSecret: stored.zalo.webhookSecret || env.zalo.webhookSecret,
     },
+    quickReplies: stored.quickReplies,
   };
 }
 
@@ -158,6 +191,7 @@ export async function saveChatIntegrationConfig(partial: ChatIntegrationConfigPa
       ...base.zalo,
       ...(partial.zalo || {}),
     },
+    quickReplies: partial.quickReplies ? normalizeQuickReplies(partial.quickReplies) : base.quickReplies,
   };
 
   await getAdminDb().collection(DOC_REF[0]).doc(DOC_REF[1]).set({
@@ -184,5 +218,6 @@ export function toPublicChatIntegrationConfig(config: ChatIntegrationConfig): Pu
       oaAccessTokenSet: !!config.zalo.oaAccessToken,
       webhookSecretSet: !!config.zalo.webhookSecret,
     },
+    quickReplies: config.quickReplies,
   };
 }

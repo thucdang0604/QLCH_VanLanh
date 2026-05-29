@@ -198,7 +198,13 @@ export default function CheckoutPage() {
                                 {cartItems.map((item) => (
                                     <div key={item.id} className="flex gap-3 p-3 bg-gray-50 rounded-xl relative group">
                                         <div className="relative w-16 h-16 md:w-20 md:h-20 rounded-lg overflow-hidden flex-shrink-0 bg-white border">
-                                            <Image src={item.image} alt={item.name} fill className="object-cover p-1" />
+                                            {item.image ? (
+                                                <Image src={item.image} alt={item.name} fill className="object-cover p-1" />
+                                            ) : (
+                                                <div className="w-full h-full flex items-center justify-center bg-gray-50">
+                                                    <ShoppingBag size={24} className="text-gray-300" />
+                                                </div>
+                                            )}
                                         </div>
                                         <div className="flex-1 min-w-0 flex flex-col justify-between">
                                             <div className="pr-8">

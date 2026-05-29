@@ -1,0 +1,83 @@
+[
+  {
+    "id": "BUG-COM-002",
+    "trackId": "finance-hr",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Trả hoa hồng trên đơn nợ (Pay Later)",
+    "summary": "<b>Hiện tượng</b>: Tính hoa hồng cho KTV ngay cả khi khách chưa trả tiền.<br><b>Hệ lụy</b>: Công ty bị âm dòng tiền nếu khách bùng nợ.<br><br>✅ <b>Đã xác minh ngày 17.05.2026</b>: <code>commissionUtils.ts</code> đã có guard check <code>payment.status === 'paid'</code> (repairs) và <code>status === 'Completed'</code> (orders).",
+    "createdAt": "17.05.2026",
+    "severity": "high",
+    "affectedFiles": [],
+    "resolvedAt": "17.05.2026"
+  },
+  {
+    "id": "BUG-COM-003",
+    "trackId": "finance-hr",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Làm tròn số thực gây lệch tiền (Float Precision)",
+    "summary": "<b>Hiện tượng</b>: Trong <code>commissionUtils.ts</code> (dòng 113 và 147), hoa hồng được tính bằng <code>(baseAmount * pct) / 100</code> mà không làm tròn.<br><b>Hệ lụy</b>: Do tiền VNĐ không có phần thập phân, việc tính toán này tạo ra số thực (float). Khi cộng tổng trong UI (file <code>commissions/page.tsx</code> dòng 96), các phần lẻ sẽ cộng dồn gây lệch tiền so với thực tế.",
+    "createdAt": "2026-05-26T00:00:00.000Z",
+    "severity": "high",
+    "affectedFiles": []
+  },
+  {
+    "id": "BUG-REV-001",
+    "trackId": "finance-hr",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Mất mát dữ liệu báo cáo do giới hạn Query 3 tháng",
+    "summary": "<b>Hiện tượng</b>: Doanh thu bị tính sai kỳ kế toán và MẤT DỮ LIỆU. Hệ thống chỉ fetch dữ liệu đơn hàng có <code>createdAt >= 3 tháng trước</code>, nhưng lại phân tích dựa trên ngày hoàn thành.<br><b>Hệ lụy</b>: Báo cáo tài chính sai lệch nghiêm trọng, thiếu hụt doanh thu thực tế.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Mở rộng query window từ 3 tháng lên 6 tháng trong <code>admin/revenue/page.tsx</code>.",
+    "createdAt": "17.05.2026",
+    "severity": "high",
+    "affectedFiles": [],
+    "resolvedAt": "17.05.2026"
+  },
+  {
+    "id": "BUG-REV-002",
+    "trackId": "finance-hr",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Khấu trừ quà tặng trong Lợi nhuận ròng (NOT A BUG)",
+    "summary": "<b>⚠️ Đây KHÔNG PHẢI BUG</b> — logic kế toán đúng.<br><br><b>Giải thích</b>:<br>• <code>repairRevenue</code> = tiền khách THỰC TRẢ (từ <code>paymentHistory</code>), chưa bao gồm giá trị quà tặng.<br>• <code>giftDiscount</code> = chi phí hàng hóa cửa hàng TẶNG THÊM (đã trừ stock tại <code>repairs/page.tsx</code> dòng 803-810).<br>• Trừ <code>giftDiscount</code> khỏi <code>netProfit</code> là ĐÚNG vì quà tặng là chi phí thực (hàng xuất kho nhưng không thu tiền).<br><br><b>Lưu ý cho dev sau</b>: <code>payment.amount</code> = partsCost + laborCost + additionalFees - discountAmount (KHÔNG trừ giftDiscount). Quà tặng là chi phí riêng, không giảm hóa đơn khách hàng.",
+    "createdAt": "17.05.2026",
+    "severity": "high",
+    "affectedFiles": [],
+    "resolvedAt": "17.05.2026"
+  },
+  {
+    "id": "BUG-REV-003",
+    "trackId": "finance-hr",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Sai lệch số tiền lẻ do không làm tròn số thực trong database",
+    "summary": "<b>Hiện tượng</b>: Hệ thống lưu trữ các số tiền lẻ vô lý (ví dụ: `49.998đ` thay vì `50.000đ`) trong database do không làm tròn sau các phép tính phần trăm hoặc giảm giá.<br><b>Hệ lụy</b>: Dù giao diện báo cáo doanh thu có thể dùng format để làm tròn hiển thị, nhưng dữ liệu thô bị sai lệch, dẫn đến tổng doanh thu và lợi nhuận tích lũy bị sai số (Floating-point error).",
+    "createdAt": "2026-05-26T00:00:00.000Z",
+    "severity": "high",
+    "affectedFiles": []
+  },
+  {
+    "id": "BUG-COM-004",
+    "trackId": "finance-hr",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Phân bổ giảm giá tùy tiện (Arbitrary Discount Distribution)",
+    "summary": "<b>Hiện tượng</b>: Trong <code>commissionUtils.ts</code> (dòng 107-111), tổng giảm giá của đơn hàng được trừ dần vào các sản phẩm theo thứ tự duyệt mảng.<br><b>Hệ lụy</b>: Kết quả hoa hồng phụ thuộc vào thứ tự ngẫu nhiên của mảng.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Refactor sang pro-rata distribution — phân bổ giảm giá theo tỷ lệ giá trị từng sản phẩm trên tổng giá trị đơn hàng.",
+    "createdAt": "17.05.2026",
+    "severity": "high",
+    "affectedFiles": [],
+    "resolvedAt": "17.05.2026"
+  },
+  {
+    "id": "BUG-COM-005",
+    "trackId": "finance-hr",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Thiếu kiểm tra trạng thái thanh toán đơn hàng",
+    "summary": "<b>Hiện tượng</b>: Trong <code>commissionUtils.ts</code> (dòng 65), hệ thống chỉ kiểm tra trạng thái thanh toán cho tài liệu sửa chữa (<code>docType === 'repair'</code>). Các đơn hàng bán lẻ (Orders) được tính hoa hồng ngay lập tức bất kể trạng thái thanh toán.<br><b>Hệ lụy</b>: Nhân viên có thể tạo đơn hàng ảo, chưa thanh toán (hoặc nợ) để hệ thống ghi nhận hoa hồng, sau đó hủy đơn hoặc bùng nợ.",
+    "createdAt": "2026-05-26T00:00:00.000Z",
+    "severity": "high",
+    "affectedFiles": []
+  }
+]

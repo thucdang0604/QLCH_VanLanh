@@ -1,0 +1,138 @@
+[
+  {
+    "id": "BUG-POS-003",
+    "trackId": "pos-orders",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Held Stock Leak (Rò rỉ tồn kho giữ chân)",
+    "summary": "<b>Hiện tượng</b>: POS tạo đơn Pending (cọc một phần) chỉ trừ <code>stock</code> mà không tăng <code>held</code>.<br><b>Hệ lụy</b>: Khi admin chuyển đơn sang Completed, orders page giảm <code>held</code> → held bị âm, gây sai lệch tồn kho.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Thêm logic conditional <code>held: increment(qty)</code> khi POS tạo đơn Pending. Đơn Completed không cần tăng held (hàng giao ngay).",
+    "createdAt": "17.05.2026",
+    "severity": "high",
+    "affectedFiles": [],
+    "resolvedAt": "17.05.2026"
+  },
+  {
+    "id": "BUG-POS-002",
+    "trackId": "pos-orders",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Race Condition POS (Tranh chấp tài nguyên)",
+    "summary": "<b>Hiện tượng</b>: 2 máy cùng bán 1 sản phẩm cuối cùng đều báo thành công. Kho bị âm.<br><b>Hệ lụy</b>: Bán khống hàng không có thực. Gây xung đột dữ liệu.<br><br>✅ <b>Đã vá ngày 12.05.2026</b>: Toàn bộ POS checkout flow đã chuyển sang <code>runTransaction</code> atomic. Validate stock availability bên trong transaction.",
+    "createdAt": "12.05.2026",
+    "severity": "high",
+    "affectedFiles": [],
+    "resolvedAt": "12.05.2026"
+  },
+  {
+    "id": "BUG-ORD-002",
+    "trackId": "pos-orders",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Hủy đơn Completed gây âm held",
+    "summary": "<b>Hiện tượng</b>: Hủy đơn hàng đã hoàn thành làm <code>held</code> bị âm.<br><b>Hệ lụy</b>: Sai lệch tồn kho khả dụng trầm trọng.<br><br>✅ <b>Đã vá ngày 12.05.2026</b>: Thêm check trạng thái đơn. Nếu đã <code>Completed</code> thì không trừ <code>held</code> nữa.",
+    "createdAt": "12.05.2026",
+    "severity": "high",
+    "affectedFiles": [],
+    "resolvedAt": "12.05.2026"
+  },
+  {
+    "id": "BUG-POS-004",
+    "trackId": "pos-orders",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Lưu trữ số thực gây lệch tiền (Float Precision)",
+    "summary": "<b>Hiện tượng</b>: Trong <code>pos/page.tsx</code> (dòng 474 và 519), giá bán và giảm giá được đọc bằng <code>Number(e.target.value)</code> và lưu trực tiếp vào database.<br><b>Hệ lụy</b>: Nếu nhân viên nhập số có phần thập phân (ví dụ 100000.5), giá trị lưu trữ sẽ là số thực. Khi cộng dồn doanh thu sẽ gây sai lệch tiền tệ VNĐ vốn không có phần thập phân.",
+    "createdAt": "2026-05-26T00:00:00.000Z",
+    "severity": "high",
+    "affectedFiles": []
+  },
+  {
+    "id": "BUG-POS-005",
+    "trackId": "pos-orders",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Cho phép nhập số âm (Negative Input)",
+    "summary": "<b>Hiện tượng</b>: Các ô nhập giảm giá và giá bán không chặn số âm.<br><b>Hệ lụy</b>: Nhập giảm giá âm làm tăng tổng tiền vô lý. Nhập giá bán âm làm tổng tiền đơn hàng bị âm, nhân viên có thể lợi dụng để rút tiền khống từ hệ thống.",
+    "createdAt": "2026-05-26T00:00:00.000Z",
+    "severity": "high",
+    "affectedFiles": []
+  },
+  {
+    "id": "BUG-POS-006",
+    "trackId": "pos-orders",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Gọi tính hoa hồng ngoài Transaction",
+    "summary": "<b>Hiện tượng</b>: Hàm <code>calculateAndSaveCommissions</code> được gọi ngoài transaction của đơn hàng (dòng 360).<br><b>Hệ lụy</b>: Nếu transaction thành công nhưng hàm tính hoa hồng lỗi, nhân viên không nhận được hoa hồng.<br><br>✅ <b>Đã xác minh ngày 17.05.2026</b>: Cùng pattern với REP-001. <code>commissionUtils.ts</code> có guard: <code>status !== 'Completed'</code> → skip, và idempotency check. Commission chạy fire-and-forget với <code>.catch(console.error)</code>. Thiết kế chấp nhận được vì commission có cơ chế tự bảo vệ.",
+    "createdAt": "17.05.2026",
+    "severity": "high",
+    "affectedFiles": [],
+    "resolvedAt": "17.05.2026"
+  },
+  {
+    "id": "BUG-POS-007",
+    "trackId": "pos-orders",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Bán dưới giá vốn (Selling below Cost)",
+    "summary": "<b>Hiện tượng</b>: Cho phép sửa giá bán thấp hơn giá vốn (costPrice) mà không có cảnh báo.<br><b>Hệ lụy</b>: Nhân viên có thể cố ý sửa giá thấp để tẩu tán tài sản cửa hàng, gây lỗ vốn.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Thêm <code>confirm()</code> cảnh báo khi giá bán thấp hơn giá vốn trong <code>pos/page.tsx</code>.",
+    "createdAt": "17.05.2026",
+    "severity": "high",
+    "affectedFiles": [],
+    "resolvedAt": "17.05.2026"
+  },
+  {
+    "id": "BUG-ORD-003",
+    "trackId": "pos-orders",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Thiếu kiểm tra cộng dồn số lượng trong Checkout API",
+    "summary": "<b>Hiện tượng</b>: API <code>checkout</code> kiểm tra tồn kho cho từng sản phẩm riêng lẻ trong mảng đầu vào, thay vì gộp tổng số lượng của các sản phẩm trùng nhau trước.<br><b>Hệ lụy</b>: Payload chứa nhiều dòng cho cùng 1 SP có thể bypass stock check và làm âm kho.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Thêm pre-aggregation step gom nhóm theo <code>productId</code> trước khi validate trong <code>api/checkout/route.ts</code>.",
+    "createdAt": "17.05.2026",
+    "severity": "high",
+    "affectedFiles": [],
+    "resolvedAt": "17.05.2026"
+  },
+  {
+    "id": "BUG-ORD-004",
+    "trackId": "pos-orders",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Race Condition & Double Submit trong updateStatus",
+    "summary": "<b>Hiện tượng</b>: Hàm <code>updateStatus</code> không đọc lại trạng thái từ Firestore bên trong transaction.<br><b>Hệ lụy</b>: Sai lệch số lượng <code>held</code> và <code>stock</code> khi trạng thái bị cập nhật chồng chéo.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Thêm <code>transaction.get(orderRef)</code> để fetch trạng thái mới nhất. Nếu <code>currentStatus === newStatus</code> thì dừng xử lý.",
+    "createdAt": "17.05.2026",
+    "severity": "high",
+    "affectedFiles": [],
+    "resolvedAt": "17.05.2026"
+  },
+  {
+    "id": "BUG-ORD-005",
+    "trackId": "pos-orders",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Lỗi vi phạm nguyên tắc Transaction ở Web Checkout",
+    "summary": "API checkout báo lỗi 500: Firestore transactions require all reads to be executed before all writes. Đơn hàng không tạo được.",
+    "createdAt": "2026-05-20",
+    "severity": "high",
+    "affectedFiles": [
+      "src/app/api/checkout/route.ts"
+    ],
+    "resolvedAt": "2026-05-20"
+  },
+  {
+    "id": "BUG-INVENTORY-HELD-001",
+    "trackId": "pos-orders",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Pending orders khong con tru stock va tang held dong thoi",
+    "summary": "available = stock - held bi tru hai lan khi tao don pending.",
+    "createdAt": "2026-05-21",
+    "severity": "high",
+    "affectedFiles": [
+      "src/app/api/checkout/route.ts",
+      "src/app/admin/pos/page.tsx",
+      "src/app/admin/orders/page.tsx"
+    ],
+    "resolvedAt": "2026-05-21"
+  }
+]

@@ -1,0 +1,9 @@
+{
+  "generatedAt": "2026-05-26T00:00:00.000Z",
+  "mode": "spa-data",
+  "preservedIndex": true,
+  "lastAction": "add-chat-security-scan-catalog-and-hardened-release-roadmap",
+  "openBugs": [
+    "BUG-MIGRATE-INVENTORY-SCRIPT-MISSING-001"
+  ]
+}

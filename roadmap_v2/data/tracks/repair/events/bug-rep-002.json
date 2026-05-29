@@ -1,0 +1,12 @@
+{
+  "id": "BUG-REP-002",
+  "trackId": "repair",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Ghi đè dữ liệu (Stale Overwrite)",
+  "summary": "<b>Hiện tượng</b>: 2 người cùng sửa 1 phiếu. Người lưu sau đè mất dữ liệu người lưu trước.<br><b>Hệ lụy</b>: Mất lịch sử sửa chữa, sai lệch thông tin khách hàng.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: <code>handleSubmit</code> (edit mode) chuyển sang <code>runTransaction</code> với Optimistic Locking. Đọc <code>version</code> mới nhất từ DB, so sánh với version lúc mở form, reject nếu đã bị sửa bởi người khác.",
+  "createdAt": "17.05.2026",
+  "severity": "high",
+  "affectedFiles": [],
+  "resolvedAt": "17.05.2026"
+}

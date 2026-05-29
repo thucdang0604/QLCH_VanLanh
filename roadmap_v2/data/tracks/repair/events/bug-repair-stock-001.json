@@ -1,0 +1,16 @@
+{
+  "id": "BUG-REPAIR-STOCK-001",
+  "trackId": "repair",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Repair parts khong con tru stock hai lan",
+  "summary": "KTV chon linh kien tru stock, handover done lai tru stock lan nua.",
+  "createdAt": "2026-05-21",
+  "severity": "high",
+  "affectedFiles": [
+    "src/app/admin/technician/page.tsx",
+    "src/app/admin/repairs/page.tsx",
+    "src/app/admin/parts/page.tsx"
+  ],
+  "resolvedAt": "2026-05-21"
+}

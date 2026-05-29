@@ -1,0 +1,12 @@
+{
+  "id": "BUG-INV-001",
+  "trackId": "inventory",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Race Condition cộng kho phiếu nhập",
+  "summary": "<b>Hiện tượng</b>: Cộng kho khi duyệt phiếu nhập bị trùng lặp hoặc sai lệch khi click nhanh.<br><b>Hệ lụy</b>: Số lượng kho trên hệ thống nhiều hơn thực tế.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Duplicate của PAR-002/PAR-003. <code>executeFinalImport</code> đã chuyển sang <code>runTransaction</code> với <code>inventory_logs</code> đầy đủ.",
+  "createdAt": "17.05.2026",
+  "severity": "high",
+  "affectedFiles": [],
+  "resolvedAt": "17.05.2026"
+}

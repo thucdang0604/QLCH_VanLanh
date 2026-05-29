@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { getAdminDb } from '@/lib/firebaseAdmin';
+import { FieldValue } from 'firebase-admin/firestore';
 import { isRateLimited } from '@/lib/rateLimit';
 
 const RATE_LIMIT_MAX = 3;
@@ -79,10 +79,11 @@ export async function POST(request: NextRequest) {
             serviceName: (serviceName || '').trim(),
             serviceId: (serviceId || '').trim(),
             status: 'pending',
-            createdAt: serverTimestamp(),
+            createdAt: FieldValue.serverTimestamp(),
         };
 
-        const docRef = await addDoc(collection(db, 'appointments'), appointment);
+        const db = getAdminDb();
+        const docRef = await db.collection('appointments').add(appointment);
 
         return NextResponse.json({
             success: true,

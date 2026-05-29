@@ -1,0 +1,12 @@
+{
+  "id": "BUG-INV-004",
+  "trackId": "inventory",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Danh mục chưa đồng bộ ('Linh kiện', 'component')",
+  "summary": "<b>Hiện tượng</b>: Dữ liệu danh mục bị phân mảnh (Linh kiện, component, linh-kien).<br><b>Hệ lụy</b>: Khó thống kê, lọc sản phẩm không ra hết.<br><br>✅ <b>Xác minh ngày 17.05.2026</b>: Đã tạo <code>PART_CATEGORY</code>, <code>PART_CATEGORY_LABEL</code> và helper <code>isPartCategory</code> trong <code>src/lib/constants.ts</code>. Thay thế toàn bộ string 'Linh kiện' trên các modules: POS, Technician, Repairs, Products.",
+  "createdAt": "17.05.2026",
+  "severity": "high",
+  "affectedFiles": [],
+  "resolvedAt": "17.05.2026"
+}

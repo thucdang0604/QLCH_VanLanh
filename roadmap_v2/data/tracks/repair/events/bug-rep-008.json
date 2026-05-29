@@ -1,0 +1,12 @@
+{
+  "id": "BUG-REP-008",
+  "trackId": "repair",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Race Condition mảng statusTimeline trong handleQuickStatus",
+  "summary": "<b>Hiện tượng</b>: Cập nhật mảng <code>statusTimeline</code> bằng cách đọc từ React state rồi ghi đè bằng <code>updateDoc</code>.<br><b>Hệ lụy</b>: Ghi đè lịch sử trạng thái nếu 2 người cùng cập nhật trạng thái gần như đồng thời.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Chuyển <code>handleQuickStatus</code> sang <code>runTransaction</code>, đọc timeline mới nhất từ Firestore trước khi append.",
+  "createdAt": "17.05.2026",
+  "severity": "high",
+  "affectedFiles": [],
+  "resolvedAt": "17.05.2026"
+}

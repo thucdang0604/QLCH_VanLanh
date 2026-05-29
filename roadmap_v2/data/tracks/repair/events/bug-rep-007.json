@@ -1,0 +1,12 @@
+{
+  "id": "BUG-REP-007",
+  "trackId": "repair",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Held Counter Corruption trong handleHandover",
+  "summary": "<b>Hiện tượng</b>: Giảm <code>held</code> khi bàn giao máy nhưng KHÔNG BAO GIỜ tăng <code>held</code> khi thêm linh kiện vào phiếu sửa chữa.<br><b>Hệ lụy</b>: Làm âm giá trị <code>held</code> trong kho.<br><br>✅ <b>Đã xác minh ngày 17.05.2026</b>: Thiết kế chấp nhận được — luồng sửa chữa không dùng <code>held</code> (linh kiện trừ <code>stock</code> trực tiếp khi <code>done</code>). handleHandover đã dùng <code>runTransaction</code> đầy đủ.",
+  "createdAt": "17.05.2026",
+  "severity": "high",
+  "affectedFiles": [],
+  "resolvedAt": "17.05.2026"
+}

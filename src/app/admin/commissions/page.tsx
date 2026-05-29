@@ -12,6 +12,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
+import { useRouter } from 'next/navigation';
 import type { CommissionRule, Commission, FirestoreWriteTimestamp } from '@/lib/types';
 import { toastError } from '@/lib/toast';
 import { useClientPagination } from '@/lib/useClientPagination';
@@ -19,12 +20,19 @@ import PaginationBar from '@/components/admin/PaginationBar';
 
 export default function CommissionsPage() {
     const { user } = useAuth();
+    const router = useRouter();
     const [rules, setRules] = useState<(CommissionRule & { id: string })[]>([]);
     const [commissions, setCommissions] = useState<(Commission & { id: string })[]>([]);
     const [staffList, setStaffList] = useState<Array<{ uid: string; displayName?: string; role?: string }>>([]);
     const [loading, setLoading] = useState(true);
     const isAdmin = user?.role === 'admin';
-    const [activeTab, setActiveTab] = useState<'rules' | 'history'>(isAdmin ? 'rules' : 'history');
+    const [activeTab, setActiveTab] = useState<'rules' | 'history'>('rules');
+
+    useEffect(() => {
+        if (user && !isAdmin) {
+            router.replace('/admin/dashboard');
+        }
+    }, [user, isAdmin, router]);
 
     // Rule modal
     const [showRuleModal, setShowRuleModal] = useState(false);

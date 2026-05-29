@@ -1,0 +1,11 @@
+{
+  "id": "BUG-SER-001",
+  "trackId": "repair",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Cho phép nhập số âm cho giá dịch vụ",
+  "summary": "<b>Hiện tượng</b>: Trong file <code>services/page.tsx</code> (dòng 623), hàm <code>parseInt</code> không chặn số âm khi người dùng nhập giá dịch vụ.<br><b>Hệ lụy</b>: Người dùng có thể vô tình hoặc cố ý nhập giá âm, gây sai lệch dữ liệu tài chính khi tính toán tổng tiền hoặc hiển thị.",
+  "createdAt": "2026-05-26T00:00:00.000Z",
+  "severity": "high",
+  "affectedFiles": []
+}

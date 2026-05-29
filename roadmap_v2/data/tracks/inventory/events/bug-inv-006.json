@@ -1,0 +1,12 @@
+{
+  "id": "BUG-INV-006",
+  "trackId": "inventory",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Rò rỉ Held Stock trong luồng Sửa chữa",
+  "summary": "<b>Hiện tượng</b>: Khi nhập linh kiện cho Ticket, hệ thống tăng <code>held</code>. Khi Handover, chỉ trừ <code>stock</code> mà quên trừ <code>held</code>.<br><br>✅ <b>Đã xác minh ngày 17.05.2026</b>: Duplicate của REP-007. <code>handleHandover</code> (repairs/page.tsx dòng 790-791) ĐÃ trừ CẢ <code>stock</code> lẫn <code>held</code> trong cùng transaction (<code>stockChange -= qty</code>, <code>heldChange -= qty</code>), và dùng <code>Math.max(0, ...)</code> chống âm.",
+  "createdAt": "17.05.2026",
+  "severity": "high",
+  "affectedFiles": [],
+  "resolvedAt": "17.05.2026"
+}

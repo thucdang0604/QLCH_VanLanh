@@ -1,0 +1,168 @@
+{
+  "schemaVersion": 3,
+  "generatedAt": "2026-05-28T03:23:16.930Z",
+  "tracks": [
+    {
+      "id": "system-content",
+      "title": "Hệ thống & Nội dung",
+      "status": "stable",
+      "summaryPath": "system-content/summary.json",
+      "updatedAt": "2026-05-28T03:23:16.930Z",
+      "coreFiles": [
+        "firestore.rules",
+        "database.rules.json",
+        "src/components/ChatWidget.tsx",
+        "src/lib/AuthContext.tsx",
+        "src/lib/chatWorkflowHandoff.ts",
+        "src/app/admin/pos/page.tsx",
+        "src/app/admin/repairs/page.tsx",
+        "src/app/(customer)/tin-tuc/[slug]/ArticleClientParts.tsx",
+        "src/app/api/admin/seed-taxonomy/route.ts",
+        "src/lib/apiAuth.ts",
+        "src/app/api/revalidate/route.ts",
+        "src/lib/revalidate.ts",
+        "src/app/admin/settings/NavigationTab.tsx",
+        "src/app/admin/settings/CategoriesTab.tsx",
+        "src/app/admin/settings/page.tsx",
+        "src/app/api/seed-config/route.ts",
+        "package.json"
+      ],
+      "openEventIds": [],
+      "decisionIds": [],
+      "dependsOn": [],
+      "affectedBy": []
+    },
+    {
+      "id": "pos-orders",
+      "title": "POS & Đơn hàng",
+      "status": "stable",
+      "summaryPath": "pos-orders/summary.json",
+      "updatedAt": "2026-05-28T03:23:16.930Z",
+      "coreFiles": [
+        "src/app/api/checkout/route.ts",
+        "src/app/admin/pos/page.tsx",
+        "src/app/admin/orders/page.tsx"
+      ],
+      "openEventIds": [],
+      "decisionIds": [],
+      "dependsOn": [],
+      "affectedBy": []
+    },
+    {
+      "id": "repair",
+      "title": "Sửa chữa",
+      "status": "stable",
+      "summaryPath": "repair/summary.json",
+      "updatedAt": "2026-05-28T03:23:16.930Z",
+      "coreFiles": [
+        "src/app/admin/technician/page.tsx",
+        "src/app/admin/repairs/page.tsx",
+        "src/app/admin/parts/page.tsx"
+      ],
+      "openEventIds": [],
+      "decisionIds": [],
+      "dependsOn": [],
+      "affectedBy": []
+    },
+    {
+      "id": "inventory",
+      "title": "Kho hàng",
+      "status": "active",
+      "summaryPath": "inventory/summary.json",
+      "updatedAt": "2026-05-28T03:23:16.930Z",
+      "coreFiles": [
+        "package.json",
+        "scripts/migrate-active-orders.ts"
+      ],
+      "openEventIds": [
+        "BUG-MIGRATE-INVENTORY-SCRIPT-MISSING-001"
+      ],
+      "decisionIds": [],
+      "dependsOn": [],
+      "affectedBy": []
+    },
+    {
+      "id": "finance-hr",
+      "title": "Tài chính & Nhân sự",
+      "status": "stable",
+      "summaryPath": "finance-hr/summary.json",
+      "updatedAt": "2026-05-28T03:23:16.930Z",
+      "coreFiles": [],
+      "openEventIds": [],
+      "decisionIds": [],
+      "dependsOn": [],
+      "affectedBy": []
+    }
+  ],
+  "fileToTracks": {
+    "firestore.rules": [
+      "system-content"
+    ],
+    "database.rules.json": [
+      "system-content"
+    ],
+    "src/components/ChatWidget.tsx": [
+      "system-content"
+    ],
+    "src/lib/AuthContext.tsx": [
+      "system-content"
+    ],
+    "src/lib/chatWorkflowHandoff.ts": [
+      "system-content"
+    ],
+    "src/app/admin/pos/page.tsx": [
+      "system-content",
+      "pos-orders"
+    ],
+    "src/app/admin/repairs/page.tsx": [
+      "system-content",
+      "repair"
+    ],
+    "src/app/(customer)/tin-tuc/[slug]/ArticleClientParts.tsx": [
+      "system-content"
+    ],
+    "src/app/api/admin/seed-taxonomy/route.ts": [
+      "system-content"
+    ],
+    "src/lib/apiAuth.ts": [
+      "system-content"
+    ],
+    "src/app/api/revalidate/route.ts": [
+      "system-content"
+    ],
+    "src/lib/revalidate.ts": [
+      "system-content"
+    ],
+    "src/app/admin/settings/NavigationTab.tsx": [
+      "system-content"
+    ],
+    "src/app/admin/settings/CategoriesTab.tsx": [
+      "system-content"
+    ],
+    "src/app/admin/settings/page.tsx": [
+      "system-content"
+    ],
+    "src/app/api/seed-config/route.ts": [
+      "system-content"
+    ],
+    "package.json": [
+      "system-content",
+      "inventory"
+    ],
+    "src/app/api/checkout/route.ts": [
+      "pos-orders"
+    ],
+    "src/app/admin/orders/page.tsx": [
+      "pos-orders"
+    ],
+    "src/app/admin/technician/page.tsx": [
+      "repair"
+    ],
+    "src/app/admin/parts/page.tsx": [
+      "repair"
+    ],
+    "scripts/migrate-active-orders.ts": [
+      "inventory"
+    ]
+  }
+}

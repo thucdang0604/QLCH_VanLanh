@@ -1,0 +1,11 @@
+{
+  "id": "BUG-POS-005",
+  "trackId": "pos-orders",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Cho phép nhập số âm (Negative Input)",
+  "summary": "<b>Hiện tượng</b>: Các ô nhập giảm giá và giá bán không chặn số âm.<br><b>Hệ lụy</b>: Nhập giảm giá âm làm tăng tổng tiền vô lý. Nhập giá bán âm làm tổng tiền đơn hàng bị âm, nhân viên có thể lợi dụng để rút tiền khống từ hệ thống.",
+  "createdAt": "2026-05-26T00:00:00.000Z",
+  "severity": "high",
+  "affectedFiles": []
+}

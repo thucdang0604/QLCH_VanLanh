@@ -1,0 +1,104 @@
+﻿src/app/admin/customers/page.tsx(468,17): error TS2322: Type 'Customer | null' is not assignable to type 'CustomerFormData | null | undefined'.
+  Type 'Customer' is not assignable to type 'CustomerFormData'.
+    Types of property 'type' are incompatible.
+      Type '"retail" | "wholesale" | undefined' is not assignable to type '"retail" | "wholesale"'.
+        Type 'undefined' is not assignable to type '"retail" | "wholesale"'.
+src/app/admin/orders/page.tsx(129,41): error TS2339: Property 'getIdToken' does not exist on type 'AppUser'.
+src/app/admin/orders/page.tsx(184,41): error TS2339: Property 'getIdToken' does not exist on type 'AppUser'.
+src/app/admin/orders/page.tsx(205,37): error TS2339: Property 'staff' does not exist on type 'Order'.
+src/app/admin/parts/page.tsx(385,41): error TS2339: Property 'getIdToken' does not exist on type 'AppUser'.
+src/app/admin/parts/page.tsx(439,41): error TS2339: Property 'getIdToken' does not exist on type 'AppUser'.
+src/app/admin/pos/page.tsx(390,41): error TS2339: Property 'getIdToken' does not exist on type 'AppUser'.
+src/app/admin/pos/page.tsx(405,26): error TS2345: Argument of type '{ createdAt: Date; idempotencyKey: string; customer_info: { name: string; phone: string; }; items: { productId: string; productName: string; quantity: number; price: number; }[]; total_amount: number; ... 4 more ...; id: any; }' is not assignable to parameter of type 'SetStateAction<LastOrderData | null>'.
+  Type '{ createdAt: Date; idempotencyKey: string; customer_info: { name: string; phone: string; }; items: { productId: string; productName: string; quantity: number; price: number; }[]; total_amount: number; ... 4 more ...; id: any; }' is not assignable to type 'LastOrderData'.
+    Types of property 'customer_info' are incompatible.
+      Type '{ name: string; phone: string; }' is missing the following properties from type '{ name: string; phone: string; email: string; city: string; district: string; ward: string; address: string; }': email, city, district, ward, address
+src/app/admin/repairs/page.tsx(471,41): error TS2339: Property 'getIdToken' does not exist on type 'AppUser'.
+src/app/admin/repairs/page.tsx(503,41): error TS2339: Property 'getIdToken' does not exist on type 'AppUser'.
+src/app/admin/repairs/page.tsx(669,45): error TS2339: Property 'getIdToken' does not exist on type 'AppUser'.
+src/app/admin/repairs/page.tsx(1400,46): error TS2552: Cannot find name 'handleNoteSubmit'. Did you mean 'handleSubmit'?
+src/app/admin/technician/page.tsx(106,41): error TS2339: Property 'getIdToken' does not exist on type 'AppUser'.
+src/app/admin/technician/page.tsx(146,41): error TS2339: Property 'getIdToken' does not exist on type 'AppUser'.
+src/app/admin/technician/page.tsx(224,41): error TS2339: Property 'getIdToken' does not exist on type 'AppUser'.
+src/app/admin/technician/page.tsx(264,41): error TS2339: Property 'getIdToken' does not exist on type 'AppUser'.
+src/app/admin/technician/page.tsx(395,41): error TS2339: Property 'getIdToken' does not exist on type 'AppUser'.
+src/app/api/inventory/import/route.ts(39,48): error TS2345: Argument of type 'Request' is not assignable to parameter of type 'NextRequest'.
+  Type 'Request' is missing the following properties from type 'NextRequest': cookies, nextUrl, page, ua
+src/app/api/inventory/import/route.ts(103,58): error TS2339: Property 'laborCost' does not exist on type '{}'.
+src/app/api/inventory/import/route.ts(104,63): error TS2339: Property 'additionalFees' does not exist on type '{}'.
+src/app/api/inventory/import/route.ts(105,63): error TS2339: Property 'discountAmount' does not exist on type '{}'.
+src/app/api/inventory/import/route.ts(283,42): error TS2339: Property 'costPriceAtUse' does not exist on type '{ partLineId?: string | undefined; productId?: string | undefined; productName: string; name?: string | undefined; partName?: string | undefined; quality: string; quantity: number; partType?: string | undefined; ... 13 more ...; status: "approved" | ... 5 more ... | "rejected"; }'.
+src/app/api/orders/assign-seller/route.ts(9,48): error TS2345: Argument of type 'Request' is not assignable to parameter of type 'NextRequest'.
+  Type 'Request' is missing the following properties from type 'NextRequest': cookies, nextUrl, page, ua
+src/app/api/orders/transition/route.ts(22,48): error TS2345: Argument of type 'Request' is not assignable to parameter of type 'NextRequest'.
+  Type 'Request' is missing the following properties from type 'NextRequest': cookies, nextUrl, page, ua
+src/app/api/orders/transition/route.ts(73,74): error TS2322: Type 'DocumentData | undefined' is not assignable to type 'FirestoreData'.
+  Type 'undefined' is not assignable to type 'FirestoreData'.
+src/app/api/pos/checkout/route.ts(10,48): error TS2345: Argument of type 'Request' is not assignable to parameter of type 'NextRequest'.
+  Type 'Request' is missing the following properties from type 'NextRequest': cookies, nextUrl, page, ua
+src/app/api/pos/checkout/route.ts(49,57): error TS2322: Type 'DocumentData | undefined' is not assignable to type 'DocumentData'.
+  Type 'undefined' is not assignable to type 'DocumentData'.
+src/app/api/pos/checkout/route.ts(159,39): error TS2339: Property 'email' does not exist on type 'VerifiedUser'.
+src/app/api/pos/checkout/route.ts(172,17): error TS18046: 'order.customer_info' is of type 'unknown'.
+src/app/api/pos/checkout/route.ts(173,31): error TS18046: 'order.customer_info' is of type 'unknown'.
+src/app/api/pos/checkout/route.ts(191,35): error TS18046: 'order.customer_info' is of type 'unknown'.
+src/app/api/pos/checkout/route.ts(216,80): error TS2322: Type 'unknown' is not assignable to type 'string'.
+src/app/api/repairs/confirm-parts/route.ts(5,49): error TS2305: Module '"@/lib/types"' has no exported member 'RepairWorkflowConfig'.
+src/app/api/repairs/confirm-parts/route.ts(42,48): error TS2345: Argument of type 'Request' is not assignable to parameter of type 'NextRequest'.
+  Type 'Request' is missing the following properties from type 'NextRequest': cookies, nextUrl, page, ua
+src/app/api/repairs/confirm-parts/route.ts(85,24): error TS2339: Property 'workflowConfigId' does not exist on type 'RepairTicket'.
+src/app/api/repairs/confirm-parts/route.ts(90,68): error TS2339: Property 'workflowConfigId' does not exist on type 'RepairTicket'.
+src/app/api/repairs/confirm-parts/route.ts(92,60): error TS7006: Parameter 'n' implicitly has an 'any' type.
+src/app/api/repairs/confirm-parts/route.ts(117,64): error TS2322: Type 'DocumentData | undefined' is not assignable to type 'ProductData'.
+  Type 'undefined' is not assignable to type 'ProductData'.
+src/app/api/repairs/confirm-parts/route.ts(136,38): error TS18048: 'pData' is possibly 'undefined'.
+src/app/api/repairs/confirm-parts/route.ts(137,37): error TS18048: 'pData' is possibly 'undefined'.
+src/app/api/repairs/confirm-parts/route.ts(140,49): error TS18048: 'pData' is possibly 'undefined'.
+src/app/api/repairs/confirm-parts/route.ts(148,34): error TS18048: 'pData' is possibly 'undefined'.
+src/app/api/repairs/confirm-parts/route.ts(151,44): error TS18048: 'pData' is possibly 'undefined'.
+src/app/api/repairs/confirm-parts/route.ts(152,21): error TS2353: Object literal may only specify known properties, and 'costPriceAtUse' does not exist in type '{ partLineId?: string | undefined; productId?: string | undefined; productName: string; name?: string | undefined; partName?: string | undefined; quality: string; quantity: number; partType?: string | undefined; ... 13 more ...; status: "approved" | ... 5 more ... | "rejected"; }'.
+src/app/api/repairs/confirm-parts/route.ts(152,44): error TS18048: 'pData' is possibly 'undefined'.
+src/app/api/repairs/confirm-parts/route.ts(167,29): error TS18048: 'pData' is possibly 'undefined'.
+src/app/api/repairs/confirm-parts/route.ts(170,28): error TS2345: Argument of type '{ partLineId: `${string}-${string}-${string}-${string}-${string}`; productId: any; productName: any; quantity: any; status: "requested"; }' is not assignable to parameter of type '{ partLineId?: string | undefined; productId?: string | undefined; productName: string; name?: string | undefined; partName?: string | undefined; quality: string; quantity: number; partType?: string | undefined; ... 13 more ...; status: "approved" | ... 5 more ... | "rejected"; }'.
+  Property 'quality' is missing in type '{ partLineId: `${string}-${string}-${string}-${string}-${string}`; productId: any; productName: any; quantity: any; status: "requested"; }' but required in type '{ partLineId?: string | undefined; productId?: string | undefined; productName: string; name?: string | undefined; partName?: string | undefined; quality: string; quantity: number; partType?: string | undefined; ... 13 more ...; status: "approved" | ... 5 more ... | "rejected"; }'.
+src/app/api/repairs/confirm-parts/route.ts(203,42): error TS18048: 'pData' is possibly 'undefined'.
+src/app/api/repairs/confirm-parts/route.ts(204,41): error TS18048: 'pData' is possibly 'undefined'.
+src/app/api/repairs/confirm-parts/route.ts(211,57): error TS18048: 'pData' is possibly 'undefined'.
+src/app/api/repairs/confirm-parts/route.ts(222,52): error TS18048: 'pData' is possibly 'undefined'.
+src/app/api/repairs/confirm-parts/route.ts(223,29): error TS2353: Object literal may only specify known properties, and 'costPriceAtUse' does not exist in type '{ partLineId?: string | undefined; productId?: string | undefined; productName: string; name?: string | undefined; partName?: string | undefined; quality: string; quantity: number; partType?: string | undefined; ... 13 more ...; status: "approved" | ... 5 more ... | "rejected"; }'.
+src/app/api/repairs/confirm-parts/route.ts(223,52): error TS18048: 'pData' is possibly 'undefined'.
+src/app/api/repairs/confirm-parts/route.ts(316,21): error TS2739: Type 'DocumentData' is missing the following properties from type 'DraftReceiptData': status, source, supplierId, totalAmount, items
+src/app/api/repairs/handover/route.ts(5,29): error TS2305: Module '"@/lib/types"' has no exported member 'RepairWorkflowConfig'.
+src/app/api/repairs/handover/route.ts(12,48): error TS2345: Argument of type 'Request' is not assignable to parameter of type 'NextRequest'.
+  Type 'Request' is missing the following properties from type 'NextRequest': cookies, nextUrl, page, ua
+src/app/api/repairs/handover/route.ts(52,24): error TS2339: Property 'workflowConfigId' does not exist on type 'RepairTicket'.
+src/app/api/repairs/handover/route.ts(57,68): error TS2339: Property 'workflowConfigId' does not exist on type 'RepairTicket'.
+src/app/api/repairs/handover/route.ts(59,59): error TS7006: Parameter 'n' implicitly has an 'any' type.
+src/app/api/repairs/handover/route.ts(116,75): error TS2322: Type 'DocumentData | undefined' is not assignable to type 'DocumentData'.
+  Type 'undefined' is not assignable to type 'DocumentData'.
+src/app/api/repairs/handover/route.ts(162,17): error TS18046: 'updateData.payment' is of type 'unknown'.
+src/app/api/repairs/handover/route.ts(163,17): error TS18046: 'updateData.payment' is of type 'unknown'.
+src/app/api/repairs/payment-edit/route.ts(5,29): error TS2305: Module '"@/lib/types"' has no exported member 'RepairWorkflowConfig'.
+src/app/api/repairs/payment-edit/route.ts(11,33): error TS2345: Argument of type 'Request' is not assignable to parameter of type 'NextRequest'.
+  Type 'Request' is missing the following properties from type 'NextRequest': cookies, nextUrl, page, ua
+src/app/api/repairs/payment-edit/route.ts(53,24): error TS2339: Property 'workflowConfigId' does not exist on type 'RepairTicket'.
+src/app/api/repairs/payment-edit/route.ts(58,68): error TS2339: Property 'workflowConfigId' does not exist on type 'RepairTicket'.
+src/app/api/repairs/payment-edit/route.ts(60,60): error TS7006: Parameter 'n' implicitly has an 'any' type.
+src/app/api/repairs/payment-edit/route.ts(81,58): error TS2339: Property 'deposit' does not exist on type '{ status: PaymentStatus; partsCost: number; laborCost: number; additionalFees?: number | undefined; discountAmount?: number | undefined; giftDiscount?: number | undefined; giftItems?: GiftItem[] | undefined; amount: number; depositAmount: number; }'.
+src/app/api/repairs/payment-edit/route.ts(82,56): error TS2339: Property 'quote' does not exist on type '{ status: PaymentStatus; partsCost: number; laborCost: number; additionalFees?: number | undefined; discountAmount?: number | undefined; giftDiscount?: number | undefined; giftItems?: GiftItem[] | undefined; amount: number; depositAmount: number; }'.
+src/app/api/repairs/payment-edit/route.ts(85,64): error TS2339: Property 'paymentMethod' does not exist on type '{ status: PaymentStatus; partsCost: number; laborCost: number; additionalFees?: number | undefined; discountAmount?: number | undefined; giftDiscount?: number | undefined; giftItems?: GiftItem[] | undefined; amount: number; depositAmount: number; }'.
+src/app/api/repairs/transition/route.ts(5,29): error TS2305: Module '"@/lib/types"' has no exported member 'RepairWorkflowConfig'.
+src/app/api/repairs/transition/route.ts(11,48): error TS2345: Argument of type 'Request' is not assignable to parameter of type 'NextRequest'.
+  Type 'Request' is missing the following properties from type 'NextRequest': cookies, nextUrl, page, ua
+src/app/api/repairs/transition/route.ts(56,24): error TS2339: Property 'workflowConfigId' does not exist on type 'RepairTicket'.
+src/app/api/repairs/transition/route.ts(61,68): error TS2339: Property 'workflowConfigId' does not exist on type 'RepairTicket'.
+src/app/api/repairs/transition/route.ts(63,60): error TS7006: Parameter 'n' implicitly has an 'any' type.
+src/app/api/repairs/transition/route.ts(64,59): error TS7006: Parameter 'n' implicitly has an 'any' type.
+src/app/api/repairs/transition/route.ts(117,43): error TS2339: Property 'checklist' does not exist on type 'RepairTicket'.
+src/app/api/repairs/transition/route.ts(118,47): error TS2339: Property 'checklist' does not exist on type 'RepairTicket'.
+src/app/api/repairs/transition/route.ts(118,65): error TS7006: Parameter 'item' implicitly has an 'any' type.
+src/app/api/repairs/transition/route.ts(133,38): error TS2339: Property 'durationInMinutes' does not exist on type 'RepairTicket'.
+src/app/api/repairs/transition/route.ts(136,44): error TS2339: Property 'at' does not exist on type 'StatusTimelineEntry'.
+src/app/api/repairs/transition/route.ts(137,48): error TS2339: Property 'at' does not exist on type 'StatusTimelineEntry'.
+src/app/api/repairs/transition/route.ts(137,70): error TS2339: Property 'at' does not exist on type 'StatusTimelineEntry'.
+src/app/api/repairs/transition/route.ts(137,103): error TS2339: Property 'at' does not exist on type 'StatusTimelineEntry'.

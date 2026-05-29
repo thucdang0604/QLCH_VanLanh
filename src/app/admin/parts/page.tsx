@@ -24,13 +24,13 @@ import { isPartCategory } from '@/lib/constants';
 import CategoryTaxonomySelector from '@/components/admin/CategoryTaxonomySelector';
 import Modal from '@/components/admin/Modal';
 import UniversalProductModal from '@/components/admin/UniversalProductModal';
-import type { Product, FirestoreDateValue, RepairTicket } from '@/lib/types';
-import type { DocumentReference, DocumentSnapshot } from 'firebase/firestore';
+import type { Product, FirestoreDateValue } from '@/lib/types';
+
 import { orderBy } from 'firebase/firestore';
 import {
     collection, getDocs, updateDoc, deleteDoc,
     doc, serverTimestamp, query, orderBy as fbOrderBy, addDoc, onSnapshot, where,
-    runTransaction, increment
+
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
@@ -382,267 +382,32 @@ export default function PartsPage() {
         
         setIsProcessing(true);
         try {
-            await runTransaction(db, async (transaction) => {
-                const estimateByProductId = new Map<string, { estimatedUnitCost: number; estimatedUnitPrice: number }>();
-                const itemUpdatesByName = new Map<string, { newProductId: string; unitCost: number; unitPrice: number }>();
-
-                // Phase 1: READ all documents inside transaction
-                // 1a. Read ticket if linked
-                let ticketData: Record<string, unknown> | null = null;
-                let ticketParts: NonNullable<RepairTicket['parts']> = [];
-                let ticketRef: DocumentReference | null = null;
-
-                if (receipt.repairTicketId) {
-                    ticketRef = doc(db, 'repairs', receipt.repairTicketId);
-                    const tSnap = await transaction.get(ticketRef);
-                    if (tSnap.exists()) {
-                        ticketData = tSnap.data();
-                        ticketParts = Array.isArray(ticketData.parts) ? [...ticketData.parts] : (Array.isArray(ticketData.selectedParts) ? [...ticketData.selectedParts] : []);
-                    }
-                }
-
-                // 1b. Read all product docs (fresh data inside transaction)
-                const productDocs = new Map<string, { ref: DocumentReference; data: Record<string, unknown> | null; exists: boolean }>();
-                for (const item of receipt.items) {
-                    if (!productDocs.has(item.productId)) {
-                        const pRef = doc(db, 'products', item.productId);
-                        const pSnap = await transaction.get(pRef);
-                        productDocs.set(item.productId, {
-                            ref: pRef,
-                            data: pSnap.exists() ? (pSnap.data() as Record<string, unknown>) : null,
-                            exists: pSnap.exists()
-                        });
-                    }
-                }
-
-                // 1c. Read all unique supplier docs from item-level supplierId (must read before any writes)
-                const supplierDocs = new Map<string, { ref: DocumentReference; snap: DocumentSnapshot }>();
-                for (const item of receipt.items) {
-                    if (item.supplierId && !supplierDocs.has(item.supplierId)) {
-                        const sRef = doc(db, 'suppliers', item.supplierId);
-                        const sSnap = await transaction.get(sRef);
-                        supplierDocs.set(item.supplierId, { ref: sRef, snap: sSnap });
-                    }
-                }
-
-                // Phase 2: COMPUTE & WRITE
-                // Track subtotal per supplier for grouped debt
-                const supplierSubtotals = new Map<string, { name: string; amount: number }>();
-
-                for (const item of receipt.items) {
-                    const currentProductId = item.productId;
-                    let pricePromo = 0;
-                    
-                    const matchTicketPart = ticketParts.find(p => p.name === item.productName || p.productName === item.productName || p.partName === item.productName);
-                    const ticketQty = matchTicketPart ? (Number(matchTicketPart.quantity) || 1) : 0;
-                    
-                    const isProposedItem = item.productId in newParts;
-                    const pDoc = productDocs.get(item.productId);
-                    const existingData = pDoc?.data;
-                    const existingExists = pDoc?.exists ?? false;
-
-                    // Accumulate supplier subtotal
-                    if (item.supplierId) {
-                        const prev = supplierSubtotals.get(item.supplierId) || { name: item.supplier || '', amount: 0 };
-                        prev.amount += item.importPrice * item.quantity;
-                        if (!prev.name && item.supplier) prev.name = item.supplier;
-                        supplierSubtotals.set(item.supplierId, prev);
-                    }
-
-                    if (isProposedItem) {
-                        // 1. Activate proposed product
-                        const info = newParts[item.productId];
-                        pricePromo = Number(info?.price_promo) || 0;
-
-                        const isRetailReceipt = receipt.receiptType === 'retail';
-                        const oldStock = existingData ? (Number(existingData.stock) || 0) : 0;
-                        const oldHeld = existingData ? (Number(existingData.held) || 0) : 0;
-                        const updateData: Record<string, unknown> = {
-                            name: item.productName,
-                            price_original: item.importPrice,
-                            costPrice: item.importPrice,
-                            price_promo: pricePromo,
-                            stock: oldStock + Number(item.quantity),
-                            held: oldHeld + ticketQty,
-                            quality: item.quality || 'Zin',
-                            supplier: item.supplier || info?.supplier || '',
-                            category: isRetailReceipt ? 'product' : 'component',
-                            categoryIds: isRetailReceipt ? (info?.categoryIds || ['san-pham']) : ['component'],
-                            status: 'active',
-                            isProposed: false,
-                            updatedAt: serverTimestamp()
-                        };
-                        if (!isRetailReceipt) {
-                            updateData.partType = info?.partType || (existingData?.partType as string) || '';
-                            updateData.description = info?.model || (existingData?.description as string) || '';
-                        }
-
-                        if (existingExists) {
-                            transaction.update(pDoc!.ref, updateData);
-                        } else {
-                            updateData.sold = 0;
-                            updateData.createdAt = serverTimestamp();
-                            transaction.set(pDoc!.ref, updateData);
-                        }
-
-                        // Audit Trail
-                        const logRef = doc(collection(db, 'inventory_logs'));
-                        transaction.set(logRef, {
-                            productId: currentProductId,
-                            productName: item.productName,
-                            quantity: Number(item.quantity),
-                            costPriceAtLog: item.importPrice,
-                            type: 'IMPORT',
-                            referenceId: receipt.id,
-                            referenceType: 'import_receipt',
-                            createdBy: user?.uid || '',
-                            createdByName: user?.displayName || 'Admin',
-                            createdAt: serverTimestamp(),
-                        });
-
-                        estimateByProductId.set(item.productId, { 
-                            estimatedUnitCost: item.importPrice, 
-                            estimatedUnitPrice: pricePromo 
-                        });
-                    } else if (existingExists && existingData) {
-                        // 2. Update existing product with weighted average (from FRESH data)
-                        const oldStock = Math.max(0, Number(existingData.stock) || 0);
-                        const oldHeld = Number(existingData.held) || 0;
-                        const oldCost = Number(existingData.costPrice) || Number(existingData.price_original) || 0;
-                        const newQty = Number(item.quantity);
-                        const newCost = Number(item.importPrice);
-                        
-                        const totalQty = oldStock + newQty;
-                        const avgCost = totalQty > 0 
-                            ? Math.round(((oldStock * oldCost) + (newQty * newCost)) / totalQty)
-                            : newCost;
-
-                        transaction.update(pDoc!.ref, {
-                            stock: totalQty,
-                            held: oldHeld + ticketQty,
-                            price_original: avgCost,
-                            costPrice: avgCost,
-                            oldCostPrice: oldCost,
-                            isProposed: false,
-                            supplier: item.supplier || (existingData.supplier as string) || '',
-                            updatedAt: serverTimestamp()
-                        });
-
-                        pricePromo = Number(existingData.price_promo || existingData.price_original || 0);
-
-                        // Audit Trail
-                        const logRef = doc(collection(db, 'inventory_logs'));
-                        transaction.set(logRef, {
-                            productId: item.productId,
-                            productName: item.productName,
-                            quantity: newQty,
-                            costPriceAtLog: newCost,
-                            type: 'IMPORT',
-                            referenceId: receipt.id,
-                            referenceType: 'import_receipt',
-                            createdBy: user?.uid || '',
-                            createdByName: user?.displayName || 'Admin',
-                            createdAt: serverTimestamp(),
-                        });
-
-                        estimateByProductId.set(item.productId, { 
-                            estimatedUnitCost: item.importPrice, 
-                            estimatedUnitPrice: pricePromo 
-                        });
-                    }
-
-                    itemUpdatesByName.set(item.productName, {
-                        newProductId: currentProductId,
-                        unitCost: item.importPrice,
-                        unitPrice: pricePromo > 0 ? pricePromo : item.importPrice
-                    });
-                }
-
-                // 3. Mark receipt completed
-                transaction.update(doc(db, 'import_receipts', receipt.id), {
-                    status: 'completed',
-                    paymentMethod,
-                    completedAt: serverTimestamp(),
-                    updatedAt: serverTimestamp()
-                });
-
-                // 3b. Create SupplierTransaction + increment supplier debt (grouped by supplierId)
-                for (const [sId, info] of supplierSubtotals) {
-                    const sDoc = supplierDocs.get(sId);
-                    if (!sDoc || !sDoc.snap.exists()) continue;
-
-                    const txnType = paymentMethod === 'debt' ? 'IMPORT' : 'IMPORT_PAID';
-
-                    // Only increment debt when paymentMethod is 'debt'
-                    if (paymentMethod === 'debt') {
-                        transaction.update(sDoc.ref, {
-                            totalDebt: increment(info.amount),
-                            updatedAt: serverTimestamp()
-                        });
-                    }
-
-                    // Always log transaction for audit trail
-                    const txnRef = doc(collection(db, 'supplier_transactions'));
-                    transaction.set(txnRef, {
-                        supplierId: sId,
-                        supplierName: info.name,
-                        type: txnType,
-                        amount: info.amount,
-                        importReceiptId: receipt.id,
-                        note: `${paymentMethod === 'debt' ? 'Ghi nợ' : 'Thanh toán ngay'} — Phiếu #${receipt.id.slice(-6)}`,
-                        createdBy: user?.uid || '',
-                        createdByName: user?.displayName || 'Admin',
-                        createdAt: serverTimestamp()
-                    });
-                }
-
-                // 4. Sync status back to repair ticket if applicable
-                if (receipt.repairTicketId && ticketData && ticketRef) {
-                    let totalPartsCost = 0;
-                    const updatedParts = ticketParts.map((p) => {
-                        const match = receipt.items.find(ri => ri.productName === p.name || ri.productName === p.productName || ri.productName === p.partName);
-                        if (match) {
-                            const updateInfo = itemUpdatesByName.get(match.productName);
-                            const qty = Number(p.quantity) || 1;
-                            const unitCostAtUse = updateInfo?.unitCost || p.unitCostAtUse || 0;
-                            const unitPriceAtUse = updateInfo?.unitPrice || p.unitPriceAtUse || p.price || 0;
-                            
-                            if (!p.isWarrantyCovered) {
-                                totalPartsCost += unitPriceAtUse * qty;
-                            }
-                            
-                            return { 
-                                ...p, 
-                                availability: 'selected', 
-                                status: 'selected',
-                                productId: updateInfo?.newProductId || p.productId,
-                                unitCostAtUse: unitCostAtUse,
-                                unitPriceAtUse: unitPriceAtUse
-                            };
-                        } else if (p.status === 'selected' && !p.isWarrantyCovered) {
-                            const qty = Number(p.quantity) || 1;
-                            totalPartsCost += (Number(p.unitPriceAtUse) || p.price || 0) * qty;
-                        }
-                        return p;
-                    });
-                    
-                    const ticketPayment = ticketData as { payment?: { laborCost?: number; additionalFees?: number; discountAmount?: number } };
-                    const newPayment = {
-                        ...(ticketPayment.payment || {}),
-                        partsCost: totalPartsCost,
-                        amount: (ticketPayment.payment?.laborCost || 0) + totalPartsCost + (ticketPayment.payment?.additionalFees || 0) - (ticketPayment.payment?.discountAmount || 0)
-                    };
-                    
-                    transaction.update(ticketRef, { parts: updatedParts, payment: newPayment });
-                }
+            const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
+            const res = await fetch('/api/inventory/import', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${idToken}`
+                },
+                body: JSON.stringify({
+                    action: 'complete_import',
+                    receiptId: receipt.id,
+                    receiptVersion: (receipt as ImportReceipt & { version?: number }).version || 0,
+                    idempotencyKey: crypto.randomUUID(),
+                    paymentMethod: paymentMethod,
+                    newParts: newParts
+                })
             });
 
-            toastSuccess('Nhập kho thành công!');
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Lá»—i nháº­p kho!');
+
+            toastSuccess('Nháº­p kho thĂ nh cĂ´ng!');
             setImportPreviewModal({ isOpen: false, receipt: null, newParts: {} });
             await fetchDrafts();
         } catch (error) {
             console.error('Final import error:', error);
-            toastError(error instanceof Error ? error.message : 'Lỗi nhập kho!');
+            toastError(error instanceof Error ? error.message : 'Lá»—i nháº­p kho!');
         } finally {
             setIsProcessing(false);
         }
@@ -671,50 +436,31 @@ export default function PartsPage() {
     const handleMarkAvailability = async (receipt: ImportReceipt, item: ImportReceiptItem, isAvailable: boolean) => {
         setIsProcessing(true);
         try {
-            const receiptRef = doc(db, 'import_receipts', receipt.id);
-
-            await runTransaction(db, async (transaction) => {
-                // 1. Read receipt fresh
-                const receiptSnap = await transaction.get(receiptRef);
-                if (!receiptSnap.exists()) throw new Error('Phiếu nhập không tồn tại.');
-                const receiptData = receiptSnap.data();
-                const currentItems = receiptData.items || [];
-
-                // 2. Update item availability
-                const newItems = currentItems.map((i: ImportReceiptItem) => {
-                    if (i.productId === item.productId && i.productName === item.productName) {
-                        return { ...i, availability: isAvailable ? 'in_stock' : 'unavailable' };
-                    }
-                    return i;
-                });
-                transaction.update(receiptRef, { 
-                    items: newItems,
-                    updatedAt: serverTimestamp()
-                });
-
-                // 3. Sync with Repair Ticket (inside same transaction)
-                if (receipt.repairTicketId) {
-                    const ticketRef = doc(db, 'repairs', receipt.repairTicketId);
-                    const ticketSnap = await transaction.get(ticketRef);
-                    if (ticketSnap.exists()) {
-                        const ticketData = ticketSnap.data();
-                        const tParts = Array.isArray(ticketData.parts) ? [...ticketData.parts] : (Array.isArray(ticketData.selectedParts) ? [...ticketData.selectedParts] : []);
-                        const updatedParts = tParts.map((p: NonNullable<RepairTicket['parts']>[number]) => {
-                            if (p.name === item.productName || p.productName === item.productName || p.partName === item.productName) {
-                                return { ...p, availability: isAvailable ? 'in_stock' : 'unavailable', status: isAvailable ? 'in_stock' : 'unavailable' };
-                            }
-                            return p;
-                        });
-                        transaction.update(ticketRef, { parts: updatedParts });
-                    }
-                }
+            const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
+            const res = await fetch('/api/inventory/import', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${idToken}`
+                },
+                body: JSON.stringify({
+                    action: 'mark_availability',
+                    receiptId: receipt.id,
+                    receiptVersion: (receipt as ImportReceipt & { version?: number }).version || 0,
+                    idempotencyKey: crypto.randomUUID(),
+                    partLineId: (item as ImportReceiptItem & { partLineId?: string }).partLineId,
+                    availability: isAvailable ? 'in_stock' : 'unavailable'
+                })
             });
 
-            toastSuccess('Đã cập nhật tình trạng hàng');
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Lá»—i cáº­p nháº­t tĂ¬nh tráº¡ng');
+
+            toastSuccess('ÄĂ£ cáº­p nháº­t tĂ¬nh tráº¡ng hĂ ng');
             await fetchDrafts();
         } catch (error) {
-            console.error(error);
-            toastError(error instanceof Error ? error.message : 'Lỗi cập nhật tình trạng');
+            console.error('Mark availability error:', error);
+            toastError(error instanceof Error ? error.message : 'Lá»—i cáº­p nháº­t tĂ¬nh tráº¡ng');
         } finally {
             setIsProcessing(false);
         }

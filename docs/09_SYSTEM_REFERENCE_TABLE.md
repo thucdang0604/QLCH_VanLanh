@@ -44,7 +44,22 @@ Bảng tổng hợp chi tiết toàn bộ các thành phần, tính năng và lo
 | **On-demand ISR** | Cache Purge | Xóa cache Cloudflare/Next.js ngay khi Admin cập nhật dữ liệu. | `revalidate.ts` |
 | **Image Opt** | WebP Canvas | Tự động tối ưu ảnh sang WebP ngay tại trình duyệt để tiết kiệm băng thông. | `imageOptimizer.ts` |
 
-## 5. Danh mục Collection Firestore (Detailed Schema Summary)
+## 5. Phân hệ Live Chat Omnichannel
+
+| Thành phần | Logic / Tính năng | Mô tả chi tiết | Dữ liệu liên quan |
+| :--- | :--- | :--- | :--- |
+| **Unified Inbox** | Multi-channel | Hiển thị Web, Facebook và Zalo trong cùng màn hình, luôn gắn nhãn nguồn. | `RTDB chats/*`, `chatChannels.ts` |
+| **Channel Settings** | Server-side Secrets | Admin thay token/Page/OA trên web; secret không được trả ngược về client. | `private_config/chat_integrations` |
+| **Facebook Profile** | Graph Lookup | Lấy tên/avatar theo PSID; có endpoint làm mới phòng cũ, không suy diễn link profile công khai. | `chatServer.ts`, `/api/admin/chat/rooms/*/facebook-profile` |
+| **Facebook Media** | Private Image Relay | Anh moi duoc cache private, tai qua API co `chat_support`; Storage client bi chan trong namespace `private/`. | `messages.attachments[]`, `/api/admin/chat/rooms/*/media/*`, `storage.rules` |
+| **Meta Inbox Fallback** | Conversation Jump | Tu room Facebook mo Meta Business Suite Inbox bang Page ID va PSID; khong coi day la URL profile. | `/admin/chat`, `externalPageId`, `externalUserId` |
+| **Quick Replies** | Server-side Templates | Admin cau hinh mau tra loi va `/shortcut`; nhan vien chat chi doc cac mau dang bat. | `private_config/chat_integrations.quickReplies` |
+| **Chat to CRM** | Customer Link | Bấm avatar xem/lưu khách theo số điện thoại và chuyển sang workflow POS/Repair đã điền sẵn. | `customers/{phone}`, `ChatCustomerProfileModal.tsx` |
+| **Customer History** | On-demand Drawer | Bấm tên khách xem lịch sử đơn/sửa chữa theo SĐT; tab sửa chữa chỉ tải khi có quyền module. | `useCustomerActivity.ts`, `CustomerDetailDrawer.tsx` |
+| **Chat Work Queue** | Realtime RBAC Panel | Hiển thị order/repair chưa đóng của room đã liên kết; không cấp dữ liệu nghiệp vụ cho tài khoản chỉ có `chat_support`. | `ChatCustomerActivityPanel.tsx`, `system_config/repairs` |
+| **Business Deep Link** | Existing Modal Target | Link từ CRM/chat mở modal có sẵn qua `orderId` hoặc `ticketId`, vẫn chịu quyền route/module. | `/admin/orders`, `/admin/repairs` |
+
+## 6. Danh mục Collection Firestore (Detailed Schema Summary)
 
 | Collection | Mục đích chính | Field quan quan trọng |
 | :--- | :--- | :--- |
@@ -56,3 +71,5 @@ Bảng tổng hợp chi tiết toàn bộ các thành phần, tính năng và lo
 | **`system_config`** | Cấu hình toàn hệ thống | `repairs`, `layout_settings`, `navigation_settings` |
 | **`articles`** | Tin tức & Blog | `content`, `slug`, `seo`, `authorId` |
 | **`orders`** | Đơn hàng từ Storefront | `items`, `customerInfo`, `total_amount`, `payment_status` |
+| **`customers`** | CRM khách được liên kết từ bán hàng/sửa chữa/chat | `phone`, `name`, `totalSpent`, `totalOrders`, `totalRepairs`, `lastVisit` |
+| **`private_config/chat_integrations`** | Cau hinh chat server-side | `facebook.*`, `zalo.*`, `quickReplies[]` |

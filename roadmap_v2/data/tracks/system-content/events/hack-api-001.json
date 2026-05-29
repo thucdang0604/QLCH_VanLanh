@@ -1,0 +1,15 @@
+{
+  "id": "HACK-API-001",
+  "trackId": "system-content",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Admin SDK mutation routes da co auth/production guard hoac da bi xoa",
+  "summary": "Seed/migration endpoints dung Admin SDK co nguy co mutate DB neu public.",
+  "createdAt": "2026-05-21",
+  "severity": "high",
+  "affectedFiles": [
+    "src/app/api/admin/seed-taxonomy/route.ts",
+    "src/lib/apiAuth.ts"
+  ],
+  "resolvedAt": "2026-05-21"
+}

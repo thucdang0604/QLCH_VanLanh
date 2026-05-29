@@ -1,0 +1,30 @@
+{
+  "id": "system-content",
+  "title": "Hệ thống & Nội dung",
+  "status": "stable",
+  "summaryPath": "system-content/summary.json",
+  "updatedAt": "2026-05-28T03:23:16.930Z",
+  "coreFiles": [
+    "firestore.rules",
+    "database.rules.json",
+    "src/components/ChatWidget.tsx",
+    "src/lib/AuthContext.tsx",
+    "src/lib/chatWorkflowHandoff.ts",
+    "src/app/admin/pos/page.tsx",
+    "src/app/admin/repairs/page.tsx",
+    "src/app/(customer)/tin-tuc/[slug]/ArticleClientParts.tsx",
+    "src/app/api/admin/seed-taxonomy/route.ts",
+    "src/lib/apiAuth.ts",
+    "src/app/api/revalidate/route.ts",
+    "src/lib/revalidate.ts",
+    "src/app/admin/settings/NavigationTab.tsx",
+    "src/app/admin/settings/CategoriesTab.tsx",
+    "src/app/admin/settings/page.tsx",
+    "src/app/api/seed-config/route.ts",
+    "package.json"
+  ],
+  "openEventIds": [],
+  "decisionIds": [],
+  "dependsOn": [],
+  "affectedBy": []
+}

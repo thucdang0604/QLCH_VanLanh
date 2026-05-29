@@ -1,0 +1,125 @@
+[
+  {
+    "id": "BUG-REP-003",
+    "trackId": "repair",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Sản phẩm ma (Custom ID Mapping) — By-Design",
+    "summary": "<b>Hiện tượng</b>: KTV tự gõ tên linh kiện trong phiếu sửa chữa. Linh kiện không có mã, không map với kho.<br><b>Hệ lụy</b>: Không kiểm kho được. Thất thoát linh kiện không rõ lý do.",
+    "createdAt": "17.05.2026",
+    "severity": "high",
+    "affectedFiles": [],
+    "resolvedAt": "17.05.2026"
+  },
+  {
+    "id": "BUG-REP-002",
+    "trackId": "repair",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Ghi đè dữ liệu (Stale Overwrite)",
+    "summary": "<b>Hiện tượng</b>: 2 người cùng sửa 1 phiếu. Người lưu sau đè mất dữ liệu người lưu trước.<br><b>Hệ lụy</b>: Mất lịch sử sửa chữa, sai lệch thông tin khách hàng.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: <code>handleSubmit</code> (edit mode) chuyển sang <code>runTransaction</code> với Optimistic Locking. Đọc <code>version</code> mới nhất từ DB, so sánh với version lúc mở form, reject nếu đã bị sửa bởi người khác.",
+    "createdAt": "17.05.2026",
+    "severity": "high",
+    "affectedFiles": [],
+    "resolvedAt": "17.05.2026"
+  },
+  {
+    "id": "BUG-SER-001",
+    "trackId": "repair",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Cho phép nhập số âm cho giá dịch vụ",
+    "summary": "<b>Hiện tượng</b>: Trong file <code>services/page.tsx</code> (dòng 623), hàm <code>parseInt</code> không chặn số âm khi người dùng nhập giá dịch vụ.<br><b>Hệ lụy</b>: Người dùng có thể vô tình hoặc cố ý nhập giá âm, gây sai lệch dữ liệu tài chính khi tính toán tổng tiền hoặc hiển thị.",
+    "createdAt": "2026-05-26T00:00:00.000Z",
+    "severity": "high",
+    "affectedFiles": []
+  },
+  {
+    "id": "BUG-REP-001",
+    "trackId": "repair",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Gọi tính hoa hồng ngoài Transaction (Repairs)",
+    "summary": "<b>Hiện tượng</b>: Hàm <code>calculateAndSaveCommissions</code> được gọi sau khi transaction hoàn thành.<br><b>Hệ lụy</b>: Nếu hàm này lỗi, phiếu sửa chữa đã hoàn thành nhưng nhân viên không nhận được hoa hồng.<br><br>✅ <b>Đã xác minh ngày 17.05.2026</b>: <code>commissionUtils.ts</code> có guard check payment status và idempotency check, giảm thiểu rủi ro. Commission chạy fire-and-forget có <code>.catch()</code> xử lý lỗi.",
+    "createdAt": "17.05.2026",
+    "severity": "high",
+    "affectedFiles": [],
+    "resolvedAt": "17.05.2026"
+  },
+  {
+    "id": "BUG-REP-004",
+    "trackId": "repair",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Cập nhật trạng thái nhanh không dùng Transaction",
+    "summary": "<b>Hiện tượng</b>: Trong hàm <code>handleQuickStatus</code> (dòng 547), việc cập nhật trạng thái phiếu sửa chữa được thực hiện bằng <code>updateDoc</code> thay vì <code>runTransaction</code>.<br><b>Hệ lụy</b>: Nếu có 2 nhân viên cùng thao tác trên 1 phiếu, sẽ xảy ra tình trạng ghi đè dữ liệu (Lost Update).<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Chuyển <code>handleQuickStatus</code> và các thao tác liên quan sang <code>runTransaction</code> để đảm bảo tính nguyên tử.",
+    "createdAt": "17.05.2026",
+    "severity": "high",
+    "affectedFiles": [],
+    "resolvedAt": "17.05.2026"
+  },
+  {
+    "id": "BUG-REP-005",
+    "trackId": "repair",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Race Condition trong tổng hợp phiếu nhập",
+    "summary": "<b>Hiện tượng</b>: Đọc và cập nhật phiếu nhập tổng hợp không dùng transaction.<br><b>Hệ lụy</b>: Khi nhiều KTV cùng yêu cầu linh kiện, dữ liệu phiếu nhập có thể bị ghi đè.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Chuyển <code>ensureConsolidatedImportReceiptForTicket</code> sang <code>runTransaction</code>.",
+    "createdAt": "17.05.2026",
+    "severity": "high",
+    "affectedFiles": [],
+    "resolvedAt": "17.05.2026"
+  },
+  {
+    "id": "BUG-REP-006",
+    "trackId": "repair",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Missing Transaction trong handleNoteSubmit",
+    "summary": "<b>Hiện tượng</b>: Lưu thông tin phiếu sửa chữa không dùng transaction.<br><b>Hệ lụy</b>: Có thể ghi đè dữ liệu nếu 2 người cùng sửa phiếu.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Chuyển <code>handleNoteSubmit</code> sang <code>runTransaction</code> với fresh read từ Firestore.",
+    "createdAt": "17.05.2026",
+    "severity": "high",
+    "affectedFiles": [],
+    "resolvedAt": "17.05.2026"
+  },
+  {
+    "id": "BUG-REP-007",
+    "trackId": "repair",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Held Counter Corruption trong handleHandover",
+    "summary": "<b>Hiện tượng</b>: Giảm <code>held</code> khi bàn giao máy nhưng KHÔNG BAO GIỜ tăng <code>held</code> khi thêm linh kiện vào phiếu sửa chữa.<br><b>Hệ lụy</b>: Làm âm giá trị <code>held</code> trong kho.<br><br>✅ <b>Đã xác minh ngày 17.05.2026</b>: Thiết kế chấp nhận được — luồng sửa chữa không dùng <code>held</code> (linh kiện trừ <code>stock</code> trực tiếp khi <code>done</code>). handleHandover đã dùng <code>runTransaction</code> đầy đủ.",
+    "createdAt": "17.05.2026",
+    "severity": "high",
+    "affectedFiles": [],
+    "resolvedAt": "17.05.2026"
+  },
+  {
+    "id": "BUG-REP-008",
+    "trackId": "repair",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Race Condition mảng statusTimeline trong handleQuickStatus",
+    "summary": "<b>Hiện tượng</b>: Cập nhật mảng <code>statusTimeline</code> bằng cách đọc từ React state rồi ghi đè bằng <code>updateDoc</code>.<br><b>Hệ lụy</b>: Ghi đè lịch sử trạng thái nếu 2 người cùng cập nhật trạng thái gần như đồng thời.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Chuyển <code>handleQuickStatus</code> sang <code>runTransaction</code>, đọc timeline mới nhất từ Firestore trước khi append.",
+    "createdAt": "17.05.2026",
+    "severity": "high",
+    "affectedFiles": [],
+    "resolvedAt": "17.05.2026"
+  },
+  {
+    "id": "BUG-REPAIR-STOCK-001",
+    "trackId": "repair",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Repair parts khong con tru stock hai lan",
+    "summary": "KTV chon linh kien tru stock, handover done lai tru stock lan nua.",
+    "createdAt": "2026-05-21",
+    "severity": "high",
+    "affectedFiles": [
+      "src/app/admin/technician/page.tsx",
+      "src/app/admin/repairs/page.tsx",
+      "src/app/admin/parts/page.tsx"
+    ],
+    "resolvedAt": "2026-05-21"
+  }
+]

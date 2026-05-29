@@ -1,0 +1,12 @@
+{
+  "id": "BUG-POS-003",
+  "trackId": "pos-orders",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Held Stock Leak (Rò rỉ tồn kho giữ chân)",
+  "summary": "<b>Hiện tượng</b>: POS tạo đơn Pending (cọc một phần) chỉ trừ <code>stock</code> mà không tăng <code>held</code>.<br><b>Hệ lụy</b>: Khi admin chuyển đơn sang Completed, orders page giảm <code>held</code> → held bị âm, gây sai lệch tồn kho.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Thêm logic conditional <code>held: increment(qty)</code> khi POS tạo đơn Pending. Đơn Completed không cần tăng held (hàng giao ngay).",
+  "createdAt": "17.05.2026",
+  "severity": "high",
+  "affectedFiles": [],
+  "resolvedAt": "17.05.2026"
+}

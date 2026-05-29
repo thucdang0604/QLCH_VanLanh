@@ -1,0 +1,16 @@
+{
+  "id": "repair",
+  "title": "Sửa chữa",
+  "status": "stable",
+  "summaryPath": "repair/summary.json",
+  "updatedAt": "2026-05-28T03:23:16.930Z",
+  "coreFiles": [
+    "src/app/admin/technician/page.tsx",
+    "src/app/admin/repairs/page.tsx",
+    "src/app/admin/parts/page.tsx"
+  ],
+  "openEventIds": [],
+  "decisionIds": [],
+  "dependsOn": [],
+  "affectedBy": []
+}

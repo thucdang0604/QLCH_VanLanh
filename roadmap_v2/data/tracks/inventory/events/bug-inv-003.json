@@ -1,0 +1,11 @@
+{
+  "id": "BUG-INV-003",
+  "trackId": "inventory",
+  "type": "bug",
+  "status": "resolved",
+  "title": "KTV tải toàn bộ SP về client để tìm kiếm",
+  "summary": "<b>Hiện tượng</b>: Máy KTV bị đơ, lag khi mở trang tìm kiếm linh kiện.<br><b>Hệ lụy</b>: Tốn băng thông Firebase (đọc hàng ngàn doc mỗi lần), trải nghiệm người dùng tệ.<br><br>✅ <b>Backlog (17.05.2026)</b>: Performance optimization, không gây sai dữ liệu. Ưu tiên thấp — chỉ ảnh hưởng khi số lượng SP lớn (>500). Đã thêm filter và các giới hạn khác để tạm xử lý.",
+  "createdAt": "2026-05-26T00:00:00.000Z",
+  "severity": "high",
+  "affectedFiles": []
+}
