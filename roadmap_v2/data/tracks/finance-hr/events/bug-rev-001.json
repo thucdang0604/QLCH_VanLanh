@@ -1,0 +1,12 @@
+{
+  "id": "BUG-REV-001",
+  "trackId": "finance-hr",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Mất mát dữ liệu báo cáo do giới hạn Query 3 tháng",
+  "summary": "<b>Hiện tượng</b>: Doanh thu bị tính sai kỳ kế toán và MẤT DỮ LIỆU. Hệ thống chỉ fetch dữ liệu đơn hàng có <code>createdAt >= 3 tháng trước</code>, nhưng lại phân tích dựa trên ngày hoàn thành.<br><b>Hệ lụy</b>: Báo cáo tài chính sai lệch nghiêm trọng, thiếu hụt doanh thu thực tế.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Mở rộng query window từ 3 tháng lên 6 tháng trong <code>admin/revenue/page.tsx</code>.",
+  "createdAt": "17.05.2026",
+  "severity": "high",
+  "affectedFiles": [],
+  "resolvedAt": "17.05.2026"
+}

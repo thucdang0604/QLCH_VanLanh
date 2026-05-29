@@ -16,12 +16,20 @@ import {
     ToggleLeft,
     ToggleRight,
     Globe2,
-    MessageCircle
+    MessageCircle,
+    FileText,
+    ClipboardList,
+    ExternalLink,
+    BookText,
+    ImageOff
 } from 'lucide-react';
 import { subscribeToRooms, subscribeToMessages, subscribeToRoomInfo, sendMessage, updateRoomInfo, ChatMessage } from '@/lib/realtimedb';
 import { getAuthInstance } from '@/lib/firebase';
 import { getChatChannelLabel, isExternalChatChannel, normalizeChatChannel, type ChatChannel } from '@/lib/chatChannels';
 import { toastError } from '@/lib/toast';
+import { useAuth } from '@/lib/AuthContext';
+import ChatCustomerProfileModal, { type ChatProfileRoom } from '@/components/admin/chat/ChatCustomerProfileModal';
+import ChatCustomerActivityPanel from '@/components/admin/chat/ChatCustomerActivityPanel';
 
 interface ChatRoom {
     odId: string;
@@ -33,9 +41,20 @@ interface ChatRoom {
     externalUserId?: string;
     externalPageId?: string;
     avatarUrl?: string;
+    phone?: string;
+    customerId?: string;
+    customerName?: string;
+    customerPhone?: string;
     lastMessage: string;
     lastMessageTime: number;
     hasUnread: boolean;
+}
+
+interface ChatQuickReply {
+    id: string;
+    title: string;
+    shortcut: string;
+    text: string;
 }
 
 function getChannelStyle(channel: ChatChannel) {
@@ -102,7 +121,164 @@ function RoomAvatar({
     );
 }
 
+function buildFacebookInboxUrl(room?: ChatRoom): string | null {
+    if (!room || room.channel !== 'facebook' || !room.externalPageId || !room.externalUserId) return null;
+    const params = new URLSearchParams({
+        asset_id: room.externalPageId,
+        selected_item_id: room.externalUserId,
+        thread_type: 'FB_MESSAGE',
+    });
+    return `https://business.facebook.com/latest/inbox/all/?${params.toString()}`;
+}
+
+function ProtectedFacebookImage({
+    roomId,
+    messageId,
+    attachmentIndex,
+    inboxUrl,
+}: {
+    roomId: string;
+    messageId: string;
+    attachmentIndex: number;
+    inboxUrl: string | null;
+}) {
+    const [imageUrl, setImageUrl] = useState('');
+    const [failed, setFailed] = useState(false);
+
+    useEffect(() => {
+        let active = true;
+        let objectUrl = '';
+
+        void (async () => {
+            try {
+                const auth = await getAuthInstance();
+                const token = await auth.currentUser?.getIdToken();
+                if (!token) throw new Error('Missing admin session');
+                const path = `/api/admin/chat/rooms/${encodeURIComponent(roomId)}/media/${encodeURIComponent(messageId)}/${attachmentIndex}`;
+                const response = await fetch(path, { headers: { Authorization: `Bearer ${token}` } });
+                if (!response.ok) throw new Error('Image unavailable');
+                objectUrl = URL.createObjectURL(await response.blob());
+                if (active) setImageUrl(objectUrl);
+            } catch {
+                if (active) setFailed(true);
+            }
+        })();
+
+        return () => {
+            active = false;
+            if (objectUrl) URL.revokeObjectURL(objectUrl);
+        };
+    }, [attachmentIndex, messageId, roomId]);
+
+    if (failed) {
+        return (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs text-gray-500">
+                <div className="flex items-center gap-2">
+                    <ImageOff size={16} />
+                    Ảnh không tải được
+                </div>
+                {inboxUrl && (
+                    <a href={inboxUrl} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-blue-600 hover:underline">
+                        <ExternalLink size={13} />
+                        Mở trên Meta Inbox
+                    </a>
+                )}
+            </div>
+        );
+    }
+
+    if (!imageUrl) {
+        return <div className="h-28 w-48 animate-pulse rounded-lg bg-gray-100" />;
+    }
+
+    return (
+        <a href={imageUrl} target="_blank" rel="noreferrer" className="block" title="Mở ảnh">
+            <Image
+                src={imageUrl}
+                alt="Ảnh Facebook"
+                width={260}
+                height={220}
+                unoptimized
+                className="max-h-64 max-w-[260px] rounded-lg object-contain"
+            />
+        </a>
+    );
+}
+
+function MessageAttachments({
+    message,
+    roomId,
+    inboxUrl,
+}: {
+    message: ChatMessage;
+    roomId: string;
+    inboxUrl: string | null;
+}) {
+    if (!message.attachments || message.attachments.length === 0) return null;
+
+    return (
+        <div className="space-y-2 mb-2">
+            {message.attachments.map((attachment, index) => {
+                if (attachment.type === 'image' && message.id) {
+                    return (
+                        <ProtectedFacebookImage
+                            key={`image-${index}`}
+                            roomId={roomId}
+                            messageId={message.id}
+                            attachmentIndex={index}
+                            inboxUrl={inboxUrl}
+                        />
+                    );
+                }
+                if (attachment.type === 'sticker' && attachment.url) {
+                    return (
+                        <a
+                            key={`${attachment.type}-${index}`}
+                            href={attachment.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="block"
+                            title={attachment.type === 'sticker' ? 'Mở sticker' : 'Mở ảnh'}
+                        >
+                            <Image
+                                src={attachment.url}
+                                alt="Sticker Facebook"
+                                width={132}
+                                height={132}
+                                unoptimized
+                                className="max-h-64 max-w-[132px] rounded-lg object-contain"
+                            />
+                        </a>
+                    );
+                }
+                if (attachment.type === 'audio' && attachment.url) {
+                    return <audio key={`audio-${index}`} controls src={attachment.url} className="max-w-full" />;
+                }
+                if (attachment.type === 'video' && attachment.url) {
+                    return <video key={`video-${index}`} controls src={attachment.url} className="max-w-[260px] rounded-lg" />;
+                }
+                if (attachment.url) {
+                    return (
+                        <a
+                            key={`file-${index}`}
+                            href={attachment.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex items-center gap-2 text-sm text-blue-600 hover:underline"
+                        >
+                            <FileText size={16} />
+                            Mở tệp đính kèm
+                        </a>
+                    );
+                }
+                return null;
+            })}
+        </div>
+    );
+}
+
 export default function AdminChatPage() {
+    const { user } = useAuth();
     const [rooms, setRooms] = useState<ChatRoom[]>([]);
     const [selectedRoom, setSelectedRoom] = useState<string | null>(null);
     const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -113,9 +289,46 @@ export default function AdminChatPage() {
     const [searchQuery, setSearchQuery] = useState('');
     const [showMobileList, setShowMobileList] = useState(true);
     const [botActive, setBotActive] = useState(true);
+    const [profileRoom, setProfileRoom] = useState<ChatRoom | null>(null);
+    const [showMobileActivity, setShowMobileActivity] = useState(false);
+    const [quickReplies, setQuickReplies] = useState<ChatQuickReply[]>([]);
+    const [showQuickReplies, setShowQuickReplies] = useState(false);
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
-    const inputRef = useRef<HTMLInputElement>(null);
+    const inputRef = useRef<HTMLTextAreaElement>(null);
+    const facebookProfileAttempts = useRef(new Set<string>());
+
+    useEffect(() => {
+        setProfileRoom(currentRoom => {
+            if (!currentRoom) return currentRoom;
+            return rooms.find(room => room.odId === currentRoom.odId) || currentRoom;
+        });
+    }, [rooms]);
+
+    useEffect(() => {
+        setShowMobileActivity(false);
+    }, [selectedRoom]);
+
+    useEffect(() => {
+        let active = true;
+        void (async () => {
+            try {
+                const auth = await getAuthInstance();
+                const token = await auth.currentUser?.getIdToken();
+                if (!token) return;
+                const response = await fetch('/api/admin/chat/quick-replies', {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                const data = await response.json().catch(() => ({}));
+                if (active && response.ok && Array.isArray(data.quickReplies)) {
+                    setQuickReplies(data.quickReplies);
+                }
+            } catch {
+                // Quick replies are optional; chat remains usable when unavailable.
+            }
+        })();
+        return () => { active = false; };
+    }, []);
 
     const syncAdminRealtimeRole = async (): Promise<string | null> => {
         const auth = await getAuthInstance();
@@ -124,7 +337,7 @@ export default function AdminChatPage() {
             throw new Error('Missing admin session');
         }
 
-        const idToken = await user.getIdToken();
+        const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
         const res = await fetch('/api/auth/session', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -162,7 +375,7 @@ export default function AdminChatPage() {
                     const sourceLabel = typeof info.sourceLabel === 'string' ? info.sourceLabel : getChatChannelLabel(channel);
                     return {
                         odId: roomId,
-                        displayName: String(info.displayName || 'Khách'),
+                        displayName: String(info.customerName || info.displayName || 'Khách'),
                         email: info.email ? String(info.email) : null,
                         isGuest: (info.isGuest as boolean) ?? true,
                         channel,
@@ -170,6 +383,10 @@ export default function AdminChatPage() {
                         externalUserId: typeof info.externalUserId === 'string' ? info.externalUserId : undefined,
                         externalPageId: typeof info.externalPageId === 'string' ? info.externalPageId : undefined,
                         avatarUrl: typeof info.avatarUrl === 'string' ? info.avatarUrl : undefined,
+                        phone: typeof info.phone === 'string' ? info.phone : undefined,
+                        customerId: typeof info.customerId === 'string' ? info.customerId : undefined,
+                        customerName: typeof info.customerName === 'string' ? info.customerName : undefined,
+                        customerPhone: typeof info.customerPhone === 'string' ? info.customerPhone : undefined,
                         lastMessage: String(info.lastMessage || ''),
                         lastMessageTime: Number(info.lastMessageTime || 0),
                         hasUnread: !!(info.hasUnreadAdmin || info.hasUnread), // Check admin unread
@@ -229,6 +446,36 @@ export default function AdminChatPage() {
         return () => { if (unsubscribe) unsubscribe(); };
     }, [selectedRoom]);
 
+    useEffect(() => {
+        const room = rooms.find(item => item.odId === selectedRoom);
+        if (!room || room.channel !== 'facebook') return;
+        const hasGenericName = !room.displayName
+            || room.displayName === 'Khách'
+            || room.displayName === 'Khach'
+            || room.displayName.startsWith('Facebook ');
+        if (!hasGenericName && room.avatarUrl) return;
+        if (facebookProfileAttempts.current.has(room.odId)) return;
+        facebookProfileAttempts.current.add(room.odId);
+
+        void (async () => {
+            try {
+                const auth = await getAuthInstance();
+                const token = await auth.currentUser?.getIdToken();
+                if (!token) return;
+                const response = await fetch(`/api/admin/chat/rooms/${encodeURIComponent(room.odId)}/facebook-profile`, {
+                    method: 'POST',
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({}));
+                    console.warn('Facebook profile sync unavailable:', data.error || response.status);
+                }
+            } catch (error) {
+                console.warn('Facebook profile sync failed:', error);
+            }
+        })();
+    }, [rooms, selectedRoom]);
+
     // Listen to botActive status for selected room
     useEffect(() => {
         if (!selectedRoom) return;
@@ -258,6 +505,7 @@ export default function AdminChatPage() {
         const messageText = inputMessage.trim();
         const roomData = rooms.find(r => r.odId === selectedRoom);
         setInputMessage('');
+        setShowQuickReplies(false);
         setSendingMessage(true);
 
         try {
@@ -305,6 +553,12 @@ export default function AdminChatPage() {
         setShowMobileList(false);
     };
 
+    const applyQuickReply = (reply: ChatQuickReply) => {
+        setInputMessage(reply.text);
+        setShowQuickReplies(false);
+        requestAnimationFrame(() => inputRef.current?.focus());
+    };
+
     const formatTime = (timestamp: number) => {
         if (!timestamp) return '';
         const date = new Date(timestamp);
@@ -327,7 +581,10 @@ export default function AdminChatPage() {
     };
 
     const selectedRoomData = rooms.find(r => r.odId === selectedRoom);
+    const facebookInboxUrl = buildFacebookInboxUrl(selectedRoomData);
     const selectedChannelStyle = getChannelStyle(selectedRoomData?.channel || 'web');
+    const canViewOrders = user?.role === 'admin' || !!user?.permissions?.includes('manage_orders');
+    const canViewRepairs = user?.role === 'admin' || !!user?.permissions?.includes('manage_repairs');
     const filteredRooms = rooms.filter(room =>
         room.displayName.toLowerCase().includes(searchQuery.toLowerCase()) ||
         room.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -336,6 +593,10 @@ export default function AdminChatPage() {
     );
 
     const unreadCount = rooms.filter(r => r.hasUnread).length;
+    const shortcutQuery = inputMessage.trim().toLowerCase();
+    const visibleQuickReplies = quickReplies.filter(reply => (
+        !shortcutQuery.startsWith('/') || reply.shortcut.toLowerCase().startsWith(shortcutQuery)
+    ));
 
     return (
         <div className="h-[calc(100vh-120px)] flex bg-white rounded-xl shadow-sm overflow-hidden">
@@ -388,22 +649,25 @@ export default function AdminChatPage() {
                         filteredRooms.map((room) => {
                             const channelStyle = getChannelStyle(room.channel);
                             return (
-                            <button
+                            <div
                                 key={room.odId}
-                                onClick={() => selectRoom(room.odId)}
-                                className={`w-full p-4 flex items-start gap-3 hover:bg-gray-50 transition-colors border-b ${selectedRoom === room.odId ? 'bg-orange-50' : ''
-                                    }`}
+                                className={`w-full p-4 flex items-start gap-3 hover:bg-gray-50 transition-colors border-b ${selectedRoom === room.odId ? 'bg-orange-50' : ''}`}
                             >
                                 {/* Avatar */}
-                                <div className="relative flex-shrink-0">
+                                <button
+                                    type="button"
+                                    onClick={() => setProfileRoom(room)}
+                                    className="relative flex-shrink-0"
+                                    title="Xem hồ sơ khách hàng"
+                                >
                                     <RoomAvatar room={room} className="w-12 h-12 rounded-full" iconSize={20} />
                                     {room.hasUnread && (
                                         <Circle size={12} className="absolute -top-0.5 -right-0.5 text-red-500 fill-red-500" />
                                     )}
-                                </div>
+                                </button>
 
                                 {/* Info */}
-                                <div className="flex-1 min-w-0 text-left">
+                                <button type="button" onClick={() => selectRoom(room.odId)} className="flex-1 min-w-0 text-left">
                                     <div className="flex items-center justify-between mb-1">
                                         <span className={`font-medium truncate ${room.hasUnread ? 'text-gray-900' : 'text-gray-700'
                                             }`}>
@@ -425,15 +689,15 @@ export default function AdminChatPage() {
                                             {room.lastMessage}
                                         </p>
                                     </div>
-                                </div>
-                            </button>
+                                </button>
+                            </div>
                             );
                         })
                     )}
                 </div>
             </div>
 
-            {/* Right Panel - Chat View */}
+            {/* Center Panel - Chat View */}
             <div className={`flex-1 flex flex-col ${showMobileList ? 'hidden md:flex' : 'flex'
                 }`}>
                 {!selectedRoom ? (
@@ -459,7 +723,14 @@ export default function AdminChatPage() {
                                 <ChevronLeft size={20} />
                             </button>
 
-                            <RoomAvatar room={selectedRoomData} className="w-10 h-10 rounded-full" iconSize={18} />
+                            <button
+                                type="button"
+                                onClick={() => selectedRoomData && setProfileRoom(selectedRoomData)}
+                                className="rounded-full"
+                                title="Xem hồ sơ khách hàng"
+                            >
+                                <RoomAvatar room={selectedRoomData} className="w-10 h-10 rounded-full" iconSize={18} />
+                            </button>
 
                             <div className="flex-1 min-w-0">
                                 <h3 className="font-semibold text-gray-800 truncate">
@@ -473,6 +744,27 @@ export default function AdminChatPage() {
                             <span className={`text-xs px-2 py-1 rounded-full border ${selectedChannelStyle.badge}`}>
                                 {selectedChannelStyle.label}
                             </span>
+
+                            {facebookInboxUrl && (
+                                <a
+                                    href={facebookInboxUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="rounded-lg border p-2 text-blue-600 hover:bg-blue-50"
+                                    title="Mở hội thoại trong Meta Business Suite"
+                                >
+                                    <ExternalLink size={18} />
+                                </a>
+                            )}
+
+                            <button
+                                type="button"
+                                onClick={() => setShowMobileActivity(true)}
+                                className="xl:hidden rounded-lg border p-2 text-gray-600 hover:bg-gray-50"
+                                title="Xem tác vụ đang mở"
+                            >
+                                <ClipboardList size={18} />
+                            </button>
 
                             {/* Bot Toggle */}
                             {selectedRoomData?.channel === 'web' && (
@@ -532,6 +824,7 @@ export default function AdminChatPage() {
                                                     ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-br-sm'
                                                     : 'bg-white text-gray-800 shadow-sm rounded-bl-sm'
                                                     }`}>
+                                                    <MessageAttachments message={message} roomId={selectedRoom} inboxUrl={facebookInboxUrl} />
                                                     <p className="text-sm whitespace-pre-wrap">{message.text}</p>
                                                 </div>
                                                 <p className={`text-[10px] text-gray-400 mt-1 ${message.senderType === 'admin' ? 'text-right' : ''
@@ -549,15 +842,44 @@ export default function AdminChatPage() {
 
                         {/* Input */}
                         <div className="p-4 border-t bg-white">
-                            <div className="flex gap-2">
-                                <input
+                            <div className="relative flex items-end gap-2">
+                                {(showQuickReplies || shortcutQuery.startsWith('/')) && visibleQuickReplies.length > 0 && (
+                                    <div className="absolute bottom-full left-0 right-14 mb-2 max-h-56 overflow-y-auto rounded-lg border bg-white p-1 shadow-lg">
+                                        {visibleQuickReplies.map(reply => (
+                                            <button
+                                                key={reply.id}
+                                                type="button"
+                                                onClick={() => applyQuickReply(reply)}
+                                                className="block w-full rounded-md px-3 py-2 text-left hover:bg-gray-50"
+                                            >
+                                                <span className="mr-2 font-mono text-xs text-orange-600">{reply.shortcut}</span>
+                                                <span className="text-sm font-medium text-gray-800">{reply.title}</span>
+                                                <p className="truncate text-xs text-gray-500">{reply.text}</p>
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={() => setShowQuickReplies(current => !current)}
+                                    className="h-11 w-11 flex-shrink-0 rounded-full border text-gray-600 hover:bg-gray-50"
+                                    title="Trả lời mẫu"
+                                    disabled={sendingMessage || quickReplies.length === 0}
+                                >
+                                    <BookText size={18} className="mx-auto" />
+                                </button>
+                                <textarea
                                     ref={inputRef}
-                                    type="text"
                                     value={inputMessage}
-                                    onChange={(e) => setInputMessage(e.target.value)}
-                                    onKeyPress={handleKeyPress}
+                                    maxLength={500}
+                                    rows={1}
+                                    onChange={(e) => {
+                                        setInputMessage(e.target.value);
+                                        if (!e.target.value.trim().startsWith('/')) setShowQuickReplies(false);
+                                    }}
+                                    onKeyDown={handleKeyPress}
                                     placeholder="Nhập tin nhắn..."
-                                    className="flex-1 px-4 py-2.5 border rounded-full focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                                    className="max-h-32 min-h-11 flex-1 resize-y rounded-2xl border px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                                     disabled={sendingMessage}
                                 />
                                 <button
@@ -576,6 +898,37 @@ export default function AdminChatPage() {
                     </>
                 )}
             </div>
+            {selectedRoomData && (
+                <aside className="hidden w-80 flex-shrink-0 border-l xl:flex">
+                    <ChatCustomerActivityPanel
+                        room={selectedRoomData}
+                        canViewOrders={canViewOrders}
+                        canViewRepairs={canViewRepairs}
+                        onLinkCustomer={() => setProfileRoom(selectedRoomData)}
+                    />
+                </aside>
+            )}
+            {showMobileActivity && selectedRoomData && (
+                <div className="fixed inset-0 z-40 flex justify-end bg-black/30 xl:hidden" onClick={() => setShowMobileActivity(false)}>
+                    <aside className="h-full w-full max-w-sm" onClick={event => event.stopPropagation()}>
+                        <ChatCustomerActivityPanel
+                            room={selectedRoomData}
+                            canViewOrders={canViewOrders}
+                            canViewRepairs={canViewRepairs}
+                            onLinkCustomer={() => {
+                                setShowMobileActivity(false);
+                                setProfileRoom(selectedRoomData);
+                            }}
+                            onClose={() => setShowMobileActivity(false)}
+                        />
+                    </aside>
+                </div>
+            )}
+            <ChatCustomerProfileModal
+                isOpen={!!profileRoom}
+                room={profileRoom as ChatProfileRoom | null}
+                onClose={() => setProfileRoom(null)}
+            />
         </div>
     );
 }

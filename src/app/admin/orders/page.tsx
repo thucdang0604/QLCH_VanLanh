@@ -8,13 +8,15 @@ import {
     XCircle, Clock, Loader2, ShoppingBag
 } from 'lucide-react';
 import Modal from '@/components/admin/Modal';
-import { collection, query, orderBy, onSnapshot, doc, serverTimestamp, limit, startAfter, runTransaction, getDocs, DocumentSnapshot, where } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, limit, startAfter, getDocs, DocumentSnapshot, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 import { Order } from '@/lib/types';
 import { useAuth } from '@/lib/AuthContext';
 import { useConfig } from '@/lib/ConfigContext';
 import { Receipt } from 'lucide-react';
+import { toastError, toastSuccess } from '@/lib/toast';
+
 
 const formatPrice = (price: number) => new Intl.NumberFormat('vi-VN').format(price) + 'đ';
 const formatDate = (ts: unknown) => {
@@ -119,140 +121,31 @@ export default function OrdersPage() {
 
     const updateStatus = async (orderId: string, newStatus: string) => {
         try {
-            const order = orders.find(o => o.id === orderId);
+            const order = orders.find(o => o.id === orderId)
+                || (selectedOrder?.id === orderId ? selectedOrder : null);
             if (!order) return;
+            if (order.status === newStatus) return;
 
-            const isActiveStatus = (s: string) => ['Pending', 'Confirmed', 'Shipping'].includes(s);
-
-            await runTransaction(db, async (transaction) => {
-                const orderRef = doc(db, 'orders', orderId);
-
-                // Read fresh order status inside transaction to prevent stale state
-                const orderSnap = await transaction.get(orderRef);
-                if (!orderSnap.exists()) throw new Error('Đơn hàng không tồn tại.');
-                const freshOrder = orderSnap.data();
-                const oldStatus = freshOrder.status;
-                if (oldStatus === newStatus) return; // Double-submit guard
-
-                // Phase 1: Read all product docs that need stock changes
-                const needsStockChange = 
-                    (isActiveStatus(oldStatus) && newStatus === 'Cancelled') ||
-                    (isActiveStatus(oldStatus) && newStatus === 'Completed') ||
-                    (oldStatus === 'Completed' && newStatus === 'Cancelled') ||
-                    (oldStatus === 'Cancelled' && isActiveStatus(newStatus));
-
-                const productDocs = new Map<string, { ref: ReturnType<typeof doc>; data: Record<string, unknown> }>();
-                if (needsStockChange && order.items) {
-                    for (const item of order.items) {
-                        if (item.productId && !productDocs.has(item.productId)) {
-                            const pRef = doc(db, 'products', item.productId);
-                            const pSnap = await transaction.get(pRef);
-                            if (pSnap.exists()) {
-                                productDocs.set(item.productId, { ref: pRef, data: pSnap.data() as Record<string, unknown> });
-                            }
-                        }
-                    }
-                }
-
-                // Gom nhóm items theo productId
-                const grouped = new Map<string, { productName: string; totalQty: number }>();
-                if (needsStockChange && order.items) {
-                    for (const item of order.items) {
-                        if (!item.productId || !productDocs.has(item.productId)) continue;
-                        const existing = grouped.get(item.productId);
-                        if (existing) {
-                            existing.totalQty += item.quantity;
-                        } else {
-                            grouped.set(item.productId, { productName: item.productName, totalQty: item.quantity });
-                        }
-                    }
-                }
-
-                // Phase 2: Validate & Write stock changes
-                for (const [pid, group] of grouped.entries()) {
-                    const p = productDocs.get(pid)!;
-                    const currentStock = Number(p.data.stock) || 0;
-                    const currentHeld = Number(p.data.held) || 0;
-
-                    let logType = '';
-                    let stockChange = 0;
-
-                    if (isActiveStatus(oldStatus) && newStatus === 'Cancelled') {
-                        // Active → Cancelled: chỉ held -= qty, kiểm tra âm giữ chỗ
-                        if (currentHeld < group.totalQty) {
-                            throw new Error(`SP "${group.productName}" có số lượng giữ chỗ không khớp (Đang giữ ${currentHeld}, cần giải phóng ${group.totalQty}).`);
-                        }
-                        transaction.update(p.ref, { held: currentHeld - group.totalQty });
-                    } else if (isActiveStatus(oldStatus) && newStatus === 'Completed') {
-                        // Active → Completed: validate nghiêm ngặt rồi trừ cả stock lẫn held
-                        if (currentStock < group.totalQty) {
-                            throw new Error(`SP "${group.productName}" không đủ tồn kho vật lý (Có ${currentStock}, cần ${group.totalQty}).`);
-                        }
-                        if (currentHeld < group.totalQty) {
-                            throw new Error(`SP "${group.productName}" có số lượng giữ chỗ không khớp (Đang giữ ${currentHeld}, cần giải phóng ${group.totalQty}).`);
-                        }
-                        transaction.update(p.ref, {
-                            stock: currentStock - group.totalQty,
-                            held: currentHeld - group.totalQty
-                        });
-                        logType = 'ORDER_COMPLETE';
-                        stockChange = -group.totalQty;
-                    } else if (oldStatus === 'Completed' && newStatus === 'Cancelled') {
-                        // Completed → Cancelled: hoàn trả stock vật lý
-                        transaction.update(p.ref, { stock: currentStock + group.totalQty });
-                        logType = 'ORDER_CANCEL';
-                        stockChange = group.totalQty;
-                    } else if (oldStatus === 'Cancelled' && isActiveStatus(newStatus)) {
-                        // Cancelled → Active: validate khả dụng rồi giữ chỗ, KHÔNG ghi log stock
-                        const available = currentStock - currentHeld;
-                        if (available < group.totalQty) {
-                            throw new Error(`SP "${group.productName}" không đủ khả dụng để kích hoạt lại đơn (Còn ${available}, cần ${group.totalQty}).`);
-                        }
-                        transaction.update(p.ref, { held: currentHeld + group.totalQty });
-                    }
-
-                    // Chỉ ghi log inventory_logs khi thực sự thay đổi stock vật lý
-                    if (logType && stockChange !== 0) {
-                        const logRef = doc(collection(db, 'inventory_logs'));
-                        transaction.set(logRef, {
-                            productId: pid,
-                            productName: group.productName,
-                            quantity: stockChange,
-                            costPriceAtLog: Number(p.data.costPrice) || 0,
-                            type: logType,
-                            referenceId: orderId,
-                            referenceType: 'order',
-                            createdBy: user?.uid || '',
-                            createdByName: user?.displayName || '',
-                            createdAt: serverTimestamp(),
-                        });
-                    }
-                }
-
-                // Update order status and handle remaining payment for deposit orders
-                const orderUpdates: Record<string, unknown> = {
-                    status: newStatus,
-                    updatedAt: serverTimestamp(),
-                    ...(newStatus === 'Completed' ? { completedAt: serverTimestamp() } : {}),
-                };
-
-                if (newStatus === 'Completed') {
-                    const remaining = Math.max(0, (freshOrder.total_amount || 0) - (freshOrder.deposit_amount || 0));
-                    if (remaining > 0) {
-                        const history = [...(freshOrder.paymentHistory || [])];
-                        history.push({
-                            type: 'full',
-                            amount: remaining,
-                            timestamp: Date.now(),
-                            note: `Thanh toán phần còn lại khi hoàn tất đơn hàng`
-                        });
-                        orderUpdates.deposit_amount = freshOrder.total_amount;
-                        orderUpdates.paymentHistory = history;
-                    }
-                }
-
-                transaction.update(orderRef, orderUpdates);
+            const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
+            const res = await fetch('/api/orders/transition', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${idToken}`
+                },
+                body: JSON.stringify({
+                    orderId,
+                    targetStatus: newStatus,
+                    idempotencyKey: crypto.randomUUID()
+                })
             });
+
+            const data = await res.json();
+            if (!res.ok) {
+                throw new Error(data.error || 'Lá»—i khi cáº­p nháº­t tráº¡ng thĂ¡i');
+            }
+
+            toastSuccess('Cáº­p nháº­t tráº¡ng thĂ¡i thĂ nh cĂ´ng');
 
             if (selectedOrder?.id === orderId) {
                 setSelectedOrder(prev => {
@@ -264,7 +157,7 @@ export default function OrdersPage() {
                             type: 'full',
                             amount: remaining,
                             timestamp: Date.now(),
-                            note: `Thanh toán phần còn lại khi hoàn tất đơn hàng`
+                            note: `Thanh toĂ¡n pháº§n cĂ²n láº¡i khi hoĂ n táº¥t Ä‘Æ¡n hĂ ng`
                         });
                         return {
                             ...prev,
@@ -276,10 +169,49 @@ export default function OrdersPage() {
                     return { ...prev, status: newStatus as Order['status'] };
                 });
             }
-        } catch (err) {
+        } catch (err: unknown) {
             console.error('Update status error:', err);
+            toastError((err as Error).message || 'Lỗi khi cập nhật');
         }
     };
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const handleAssignSeller = async (orderId: string) => {
+        const sellerId = prompt('Nháº­p ID nhĂ¢n viĂªn bĂ¡n hĂ ng (sellerId):');
+        if (!sellerId) return;
+
+        try {
+            const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
+            const res = await fetch('/api/orders/assign-seller', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${idToken}`
+                },
+                body: JSON.stringify({ orderId, sellerId })
+            });
+
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Lá»—i gĂ¡n nhĂ¢n viĂªn');
+
+            toastSuccess('GĂ¡n nhĂ¢n viĂªn bĂ¡n hĂ ng thĂ nh cĂ´ng');
+            
+            if (selectedOrder?.id === orderId) {
+                setSelectedOrder(prev => {
+                    if (!prev) return null;
+                    return {
+                        ...prev,
+                        assignedSellerId: data.sellerId,
+                        assignedSellerName: data.sellerName
+                    };
+                });
+            }
+        } catch (err: unknown) {
+            console.error(err);
+            toastError((err as Error).message);
+        }
+    };
+
 
     const filteredOrders = orders.filter((o) => {
         const q = searchQuery.toLowerCase();
@@ -897,3 +829,4 @@ export default function OrdersPage() {
         </div>
     );
 }
+

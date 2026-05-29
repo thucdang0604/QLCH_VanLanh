@@ -1,0 +1,14 @@
+{
+  "id": "BUG-TSC-STALENEXT-001",
+  "trackId": "system-content",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Typecheck standalone regenerate Next route types truoc khi tsc",
+  "summary": "tsc --noEmit doc .next/types stale co the fail gia sau doi route/page/layout.",
+  "createdAt": "2026-05-21",
+  "severity": "low",
+  "affectedFiles": [
+    "package.json"
+  ],
+  "resolvedAt": "2026-05-21"
+}

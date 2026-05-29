@@ -2,6 +2,10 @@
 
 Hệ thống sử dụng **Google Cloud Firestore (NoSQL)** làm cơ sở dữ liệu chính, kết hợp với Realtime Database cho các tính năng Chat.
 
+- Web chat dung Firebase Anonymous Auth; `roomId` la UID da xac thuc, khong dung node `guest_` public.
+- PII chi duoc handoff tu chat sang POS/Repair qua `sessionStorage` cua tab hien tai, khong dua vao URL.
+- Lich su CRM duoc join theo SDT khi mo drawer/panel; quyen doc order/repair van theo module, khong theo quyen chat.
+
 ---
 
 ## 1. Core Collections
@@ -48,6 +52,7 @@ Lưu trữ định danh và phân quyền nhân viên/khách hàng.
 
 ### 1.4. `orders` (Đơn hàng Storefront)
 - `items`: `array<{ productId, productName, quantity, price }>`
+- `customer_info.phone`: khoa doi chieu lich su hien tai; record cu co the dung `customer.phone`.
 - `payment_method`: `'COD' | 'Bank' | 'Momo' | 'Card'`
 - `status`: `'Pending' | 'Confirmed' | 'Shipping' | 'Completed' | 'Cancelled'`
 
@@ -78,6 +83,35 @@ Collection riêng biệt quản lý hoa hồng nhân viên:
   - `amount`: Số tiền (Có thể âm nếu là `_refund` do hoàn phí).
 - **`import_receipts`**: Phiếu nhập hàng từ NCC, dùng để cập nhật `stock` và `costPrice`.
 - **`analytics_visits`**: Lưu vết truy cập để báo cáo Traffic.
+
+---
+
+## 4. Live Chat & Tích hợp kênh ngoài
+
+### 4.1. Firestore `private_config/chat_integrations`
+
+Tài liệu cấu hình server-side cho Facebook Messenger và Zalo OA. Document này chứa token/secret, chỉ API admin phía server đọc hoặc ghi; không trả secret hiện hữu về client.
+
+- `facebook`: `{ enabled, pageId, pageAccessToken, appSecret, verifyToken, graphVersion }`
+- `zalo`: `{ enabled, oaId, oaAccessToken, webhookSecret }`
+- `quickReplies[]`: `{ id, title, shortcut, text, enabled }`, toi da 30 mau, noi dung toi da 500 ky tu.
+
+### 4.2. Realtime Database `chats/{roomId}`
+
+RTDB được dùng cho inbox realtime Web/Facebook/Zalo:
+
+- `info`: metadata phòng, gồm `channel`, `sourceLabel`, `externalUserId`, `displayName`, `avatarUrl`, `profileSyncedAt`, `customerId`, `customerName`, `customerPhone`, trạng thái unread.
+- `messages/{messageId}`: nội dung và nguồn tin; anh Facebook co `attachments[]` luu URL goc va `storagePath` private neu cache thanh cong.
+
+Anh Facebook moi duoc cache vao Firebase Storage duoi prefix `private/chat/facebook/`; browser khong doc public URL ma tai qua API chat da xac thuc.
+
+Khi admin có đủ tên và số điện thoại, phòng chat liên kết với Firestore `customers/{phone}`. Phiếu sửa chữa hoặc đơn POS vẫn được tạo qua module nghiệp vụ tương ứng, không ghi tắt từ RTDB.
+
+- Drawer `/admin/customers` doc `orders` bang `customer_info.phone` va fallback `customer.phone`, doc `repairs` bang `customer.phone`.
+- Panel `/admin/chat` dung cung cach doi chieu nhung chi hien order `Pending|Confirmed|Shipping` va repair/warranty chua terminal.
+- `system_config/repairs.*Statuses[].isTerminal` xac dinh phiếu da dong; code co fallback status legacy neu cau hinh cu thieu co nay.
+- Deep-link noi bo chi dieu huong den modal nghiep vu: `/admin/orders?orderId=<id>` va `/admin/repairs?ticketId=<id>`.
+- Client chi khoi tao query cua module khi co `manage_orders`/`manage_repairs`; khong cap quyen doc orders/repairs cho `chat_support`.
 
 ---
 

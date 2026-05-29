@@ -15,7 +15,9 @@ export type PermissionId =
   | 'manage_ai_creator'
   | 'manage_staff'
   | 'manage_appearance'
-  | 'manage_settings';
+  | 'manage_settings'
+  | 'manage_customers'
+  | 'manage_discounts';
 
 export interface PermissionDefinition {
     id: PermissionId;
@@ -38,6 +40,8 @@ export const PERMISSIONS_REGISTRY: PermissionDefinition[] = [
     { id: 'view_commissions', label: 'Xem Hoa hồng' },
     { id: 'manage_appearance', label: 'Quản lý Giao diện & Biên nhận' },
     { id: 'manage_settings', label: 'Cài đặt Hệ thống' },
+    { id: 'manage_customers', label: 'Quản lý Khách hàng CRM' },
+    { id: 'manage_discounts', label: 'Quản lý Giảm giá & Cấp bậc' },
 ];
 
 export const ROUTE_PERMISSION_MAP: Record<string, PermissionId> = {
@@ -46,11 +50,12 @@ export const ROUTE_PERMISSION_MAP: Record<string, PermissionId> = {
     '/admin/pos': 'manage_orders',
     '/admin/orders': 'manage_orders',
     '/admin/appointments': 'manage_orders',
+    '/admin/customers': 'manage_orders',
     '/admin/repairs': 'manage_repairs',
     '/admin/technician': 'manage_repairs',
     '/admin/services': 'manage_services',
     '/admin/products': 'manage_products',
-    '/admin/parts': 'manage_products',
+    '/admin/parts': 'manage_inventory',
     '/admin/inventory/stock': 'manage_inventory',
     '/admin/inventory': 'manage_inventory',
     '/admin/articles': 'manage_articles',
@@ -63,6 +68,7 @@ export const ROUTE_PERMISSION_MAP: Record<string, PermissionId> = {
     '/admin/settings/repairs': 'manage_appearance',
     '/admin/settings/receipt': 'manage_appearance',
     '/admin/settings/integrations': 'manage_settings',
+    '/admin/settings/discount-rules': 'manage_discounts',
     '/admin/settings': 'manage_settings',
 };
 

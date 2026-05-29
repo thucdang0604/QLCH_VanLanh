@@ -1,0 +1,16 @@
+{
+  "id": "pos-orders",
+  "title": "POS & Đơn hàng",
+  "status": "stable",
+  "summaryPath": "pos-orders/summary.json",
+  "updatedAt": "2026-05-28T03:23:16.930Z",
+  "coreFiles": [
+    "src/app/api/checkout/route.ts",
+    "src/app/admin/pos/page.tsx",
+    "src/app/admin/orders/page.tsx"
+  ],
+  "openEventIds": [],
+  "decisionIds": [],
+  "dependsOn": [],
+  "affectedBy": []
+}

@@ -2,6 +2,7 @@ import { cert, getApps, initializeApp, type App, type ServiceAccount } from 'fir
 import { getAuth, type Auth } from 'firebase-admin/auth';
 import { getFirestore, type Firestore } from 'firebase-admin/firestore';
 import { getDatabase, type Database } from 'firebase-admin/database';
+import { getStorage, type Storage } from 'firebase-admin/storage';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -109,11 +110,14 @@ function initAdminApp(): App {
     || getRequiredEnv('GCLOUD_PROJECT');
   const databaseURL = getRequiredEnv('FIREBASE_DATABASE_URL')
     || ((projectId || fallbackProjectId) ? `https://${projectId || fallbackProjectId}-default-rtdb.asia-southeast1.firebasedatabase.app` : undefined);
+  const storageBucket = getRequiredEnv('FIREBASE_STORAGE_BUCKET')
+    || getRequiredEnv('NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET');
 
   if (serviceAccount) {
     return initializeApp({
       credential: cert(serviceAccount),
       ...(databaseURL ? { databaseURL } : {}),
+      ...(storageBucket ? { storageBucket } : {}),
     }, ADMIN_APP_NAME);
   }
 
@@ -123,6 +127,7 @@ function initAdminApp(): App {
   return initializeApp({
     ...(fallbackProjectId ? { projectId: fallbackProjectId } : {}),
     ...(databaseURL ? { databaseURL } : {}),
+    ...(storageBucket ? { storageBucket } : {}),
   }, ADMIN_APP_NAME);
 }
 
@@ -130,6 +135,7 @@ let cachedAdminApp: App | null = null;
 let cachedAdminAuth: Auth | null = null;
 let cachedAdminDb: Firestore | null = null;
 let cachedAdminRtdb: Database | null = null;
+let cachedAdminStorage: Storage | null = null;
 
 export function getAdminApp(): App {
   if (cachedAdminApp) return cachedAdminApp;
@@ -153,5 +159,11 @@ export function getAdminRtdb(): Database {
   if (cachedAdminRtdb) return cachedAdminRtdb;
   cachedAdminRtdb = getDatabase(getAdminApp());
   return cachedAdminRtdb;
+}
+
+export function getAdminStorage(): Storage {
+  if (cachedAdminStorage) return cachedAdminStorage;
+  cachedAdminStorage = getStorage(getAdminApp());
+  return cachedAdminStorage;
 }
 

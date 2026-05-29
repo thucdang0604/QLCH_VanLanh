@@ -8,10 +8,16 @@ service firebase.storage {
         (request.auth.token.role == 'admin' || request.auth.token.role == 'staff');
     }
 
-    // Default rule: read for authenticated users, write for staff/admin only
-    match /{allPaths=**} {
-      allow read: if request.auth != null;
-      allow write: if isStaff();
+    // Default rule: read for authenticated users, write for staff/admin only.
+    // Reserve the entire private namespace for Admin SDK-backed APIs.
+    match /{topLevel}/{allPaths=**} {
+      allow read: if request.auth != null && topLevel != 'private';
+      allow write: if isStaff() && topLevel != 'private';
+    }
+
+    // Chat customer media is only served through authenticated server APIs.
+    match /private/{allPaths=**} {
+      allow read, write: if false;
     }
     
     // Allow public read for all images

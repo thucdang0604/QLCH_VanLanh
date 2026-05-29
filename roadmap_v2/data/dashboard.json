@@ -1,0 +1,847 @@
+{
+  "corePrinciples": [
+    {
+      "topic": "Inventory",
+      "rule": "<b>Double-Entry:</b> <code>stock</code> và <code>held</code> phải luôn cân bằng. Chỉ dùng <code>writeBatch</code> hoặc <code>transaction</code>."
+    },
+    {
+      "topic": "Images",
+      "rule": "Dùng <code>next/image</code> + <b>Custom Loader</b> (<code>imageLoader.ts</code> → proxy <code>wsrv.nl</code>). Auto WebP + resize. <code>LazyImage</code> component có sẵn nhưng chưa adopt cho storefront (chấp nhận). Admin dùng <code>&lt;img&gt;</code> thô cho dynamic uploads."
+    },
+    {
+      "topic": "Data Fetching",
+      "rule": "Admin: <code>useFirestore</code> (Realtime). Customer: RSC + <code>server-queries.ts</code> (SEO)."
+    },
+    {
+      "topic": "Pagination",
+      "rule": "Admin: <code>useClientPagination</code> + <code>limit(50)</code>. KHÔNG dùng <code>onSnapshot</code> vô hạn."
+    },
+    {
+      "topic": "Security",
+      "rule": "Logic Checkout/Review chỉ chạy ở API Routes. API privileged phải kiểm tra permission server-side; CRM không mở cho mọi staff; PII không đưa vào URL/localStorage."
+    },
+    {
+      "topic": "Live Chat Integrations",
+      "rule": "Webhook phải được kiểm tra đến bước ghi/đọc <code>RTDB chats</code>; web chat dùng Firebase Anonymous Auth; CRM từ chat đi qua API <code>chat_support</code> thay vì client ghi tách rời Firestore/RTDB; secret lưu tại <code>private_config/chat_integrations</code>; token outbound dùng header; giao dịch đi qua POS/Repair hiện có."
+    },
+    {
+      "topic": "Package Manager",
+      "rule": "Chỉ dùng <code>pnpm</code> (v10.30.3). <b>KHÔNG</b> dùng npm/yarn/bun. Lockfile: <code>pnpm-lock.yaml</code>. Cài package: <code>pnpm add</code>, dev: <code>pnpm dev</code>, build: <code>pnpm build</code>."
+    }
+  ],
+  "auditReport": {
+    "date": "26.05.2026",
+    "categories": [
+      {
+        "name": "Tr?ng th?i hi?n t?i",
+        "color": "accent-color",
+        "status": "NEEDS ACTION",
+        "items": [
+          "<b>Open bugs</b>: 1",
+          "<b>Completion</b>: 98%",
+          "<b>roadmap_v2</b>: SPA shell preserved, JSON data rebuilt.",
+          "<b>Warning</b>: migrate:inventory script target is missing."
+        ]
+      },
+      {
+        "name": "Security API/Rules",
+        "color": "success",
+        "status": "VERIFIED",
+        "items": [
+          "<b>HACK-PUBLIC-REVIEWS-001</b>: fixed - public review/comment writes must be pending and schema-validated.",
+          "<b>HACK-API-001</b>: fixed - seed-taxonomy protected; dev mutation routes deleted from current tree.",
+          "<b>HACK-CACHE-001</b>: fixed - revalidate requires secret and admin callers use server action.",
+          "<b>BUG-SEED-CONFIG-001</b>: fixed - settings caller sends Bearer token.",
+          "<b>BUG-REVALIDATE-CALLERS-001</b>: fixed - Navigation/Categories tabs use triggerRevalidate."
+        ]
+      },
+      {
+        "name": "Chat Data Protection",
+        "color": "warning",
+        "status": "READY TO DEPLOY",
+        "items": [
+          "<b>P1 fixed:</b> customers rules now require business permissions instead of every staff account.",
+          "<b>P2 fixed:</b> web chat rooms use Anonymous Auth; public guest_ rule removed.",
+          "<b>P2 fixed:</b> chat APIs require chat_support and Facebook tokens use Authorization header.",
+          "<b>P2 fixed:</b> POS/Repair handoff uses one-time sessionStorage instead of URL PII.",
+          "<b>Regression fixed:</b> customer save/link now uses a protected server API; RTDB link failure no longer reports the CRM write as lost.",
+          "<b>RBAC preserved:</b> chat activity panel and profile aggregate response do not expose orders/repairs without each module permission.",
+          "<b>Media privacy:</b> Facebook customer images are cached under private/chat; Storage namespace private is denied to clients and loaded only through a chat_support-protected API.",
+          "<b>Release gate:</b> enable Firebase Anonymous Auth before deploying new RTDB rules."
+        ]
+      },
+      {
+        "name": "Inventory Refactor",
+        "color": "warning",
+        "status": "VERIFIED",
+        "items": [
+          "<b>BUG-INVENTORY-HELD-001</b>: fixed - pending orders reserve held only.",
+          "<b>BUG-REPAIR-STOCK-001</b>: fixed - repair selected parts reserve held; done consumes stock.",
+          "<b>BUG-MIGRATE-INVENTORY-SCRIPT-MISSING-001</b>: open - restore/remove migrate:inventory script before commit."
+        ]
+      },
+      {
+        "name": "Build Verification",
+        "color": "primary",
+        "status": "VERIFIED",
+        "items": [
+          "<b>BUG-TSC-STALENEXT-001</b>: fixed - typecheck runs next typegen before tsc.",
+          "<b>26.05.2026</b>: chat hardening working tree đã qua <code>npm.cmd run typecheck</code> và <code>npm.cmd run build</code>; còn warning không chặn đã được ghi trong fix report."
+        ]
+      }
+    ]
+  },
+  "scalingRoadmap": [
+    {
+      "name": "Customer UX Optimization",
+      "status": "PENDING",
+      "color": "primary",
+      "desc": "Tối ưu hóa giao diện khách hàng (Mobile-first), tăng trải nghiệm và độ tin cậy.",
+      "tasks": [
+        "<b>Tracking Modal:</b> Popup tra cứu đơn hàng dạng Bottom Sheet",
+        "<b>Speed Dial Chat:</b> Gộp Zalo, Messenger, AI Chatbot thành 1 nút FAB duy nhất",
+        "<b>Pricing Table:</b> Bảng giá dịch vụ trực quan chia theo Tab ngoài trang chủ",
+        "<b>Google Reviews:</b> Tích hợp đánh giá thực tế từ Google Maps API"
+      ],
+      "details": "Implementation plan created and waiting for approval."
+    },
+    {
+      "name": "Live Chat Omnichannel",
+      "status": "DONE",
+      "color": "success",
+      "desc": "Hộp thư Web/Facebook/Zalo có profile, media, CRM và điều hướng tạo đơn nghiệp vụ.",
+      "tasks": [
+        "<b>Đã code:</b> Facebook Graph profile refresh và hiển thị avatar/tên thật",
+        "<b>Đã code:</b> Sticker/ảnh/audio/video/file với RTDB schema và CSP Facebook CDN",
+        "<b>Đã code:</b> Modal CRM và handoff Repair/POS không đưa tên/SDT vào URL",
+        "<b>Đã harden:</b> Anonymous Auth cho web chat, chat_support API, CRM rules và token header",
+        "<b>Đã sửa 26.05:</b> Lưu CRM/liên kết room qua API server; lỗi RTDB tạm thời được báo riêng sau khi lưu hồ sơ",
+        "<b>Đã code 26.05:</b> Panel tác vụ realtime theo SDT và deep-link modal Order/Repair, có gate theo quyền module",
+        "<b>Đã code 27.05:</b> Anh Facebook cache private + Storage deny rules + media API, nut Meta Inbox fallback va tra loi mau /shortcut",
+        "<b>Chờ deploy:</b> Bật Anonymous Auth rồi deploy code + Firestore/RTDB Rules cùng bản",
+        "<b>Chờ xác minh:</b> Test tin thật Facebook/Zalo và chat web ẩn danh trên <code>fixphone.vn</code>",
+        "<b>Guardrail:</b> Không mở RTDB public, không dùng PSID làm URL profile, không ghi tắt giao dịch từ chat"
+      ],
+      "details": "Artifacts: docs/08_CHAT_INTEGRATIONS.md; data/ai_plans/plan_live_chat_omnichannel_v2.md; task_live_chat_omnichannel_v2.md; walkthrough_live_chat_omnichannel_v2.md; .codex-security-scans/working-tree_20260525_chat-data/report.md"
+    },
+    {
+      "name": "Customer CRM",
+      "status": "DONE",
+      "color": "success",
+      "desc": "Hệ thống quản lý khách hàng tập trung, thay thế dữ liệu phân tán trong orders/repairs/pos.",
+      "tasks": [
+        "<b>Schema:</b> Tạo collection <code>customers/{phone}</code> với profile + sub-collections",
+        "<b>Sync Logic:</b> Server-side write vào <code>customers/</code> khi tạo order/repair/appointment",
+        "<b>Security stage 1 đã code:</b> Không còn mở <code>customers</code> cho mọi staff; yêu cầu quyền nghiệp vụ CRM/chat",
+        "<b>Security stage 2 pending:</b> CRM v6 field-level write với <code>manage_customers</code> và aggregate increment-only",
+        "<b>Đã code slice:</b> Drawer tra cứu lịch sử mua hàng/sửa chữa theo SĐT, có RBAC từng module",
+        "<b>Đã code slice:</b> Deep-link từ CRM/chat vào modal chi tiết order/repair sẵn có",
+        "<b>Admin UI v11 pending:</b> appointments, tags, tier và migration/ledger đầy đủ"
+      ],
+      "details": "// customers/{phone} — Document chính\n{\n  name: \"Nguyễn Văn A\",\n  phone: \"0901234567\",      // = document ID\n  address: \"123 Lê Lợi\",\n  totalSpent: 15000000,     // aggregated\n  totalOrders: 5,\n  totalRepairs: 2,\n  lastVisit: Timestamp,\n  tags: [\"VIP\", \"Frequent\"]\n}\n// customers/{phone}/purchases/{id}\n// customers/{phone}/repairs/{id}\n// customers/{phone}/appointments/{id}"
+    },
+    {
+      "name": "k6 Load Testing",
+      "status": "PENDING",
+      "color": "#0ea5e9",
+      "desc": "Stress test <code>fixphone.vn</code> trước chiến dịch marketing.",
+      "tasks": [
+        "<b>Script:</b> Viết k6 test cho 4 endpoints chính: <code>/</code>, <code>/category/*</code>, <code>/product/*</code>, <code>/api/checkout</code>",
+        "<b>Scenarios:</b> Normal (500 VUs), Stress (1000 VUs), Spike (2000 VUs burst)",
+        "<b>Thresholds:</b> p95 < 2s, error rate < 1%, availability> 99.9%"
+      ]
+    },
+    {
+      "name": "Technical Debt Cleanup",
+      "status": "PENDING",
+      "color": "var(--text-muted)",
+      "desc": "Dọn dẹp kỹ thuật dư thừa phát hiện trong audit.",
+      "tasks": [
+        "<b>Firestore Rules:</b> Xóa rule <code>services</code> trùng lặp (line 37 vs line 62)",
+        "<b>LazyImage:</b> Quyết định: xóa component orphan hoặc document lý do giữ",
+        "<b>SEO Meta:</b> Kiểm tra <code>&lt;title&gt;</code> và <code>meta description</code> trên production domain"
+      ]
+    }
+  ],
+  "moduleBugs": [
+    {
+      "module": "RULES",
+      "color": "primary",
+      "bugs": [
+        {
+          "id": "BUG-RULES-001",
+          "title": "Missing Firestore Security Rules cho 4 collections mới (Phase 4/6/8)",
+          "status": "fixed"
+        }
+      ]
+    },
+    {
+      "module": "POS",
+      "color": "primary",
+      "bugs": [
+        {
+          "id": "BUG-POS-003",
+          "title": "Held Stock Leak (Rò rỉ tồn kho giữ chân)",
+          "status": "fixed"
+        },
+        {
+          "id": "BUG-POS-002",
+          "title": "Race Condition POS (Tranh chấp tài nguyên)",
+          "status": "fixed"
+        },
+        {
+          "id": "BUG-POS-004",
+          "title": "Lưu trữ số thực gây lệch tiền (Float Precision)",
+          "status": "fixed"
+        },
+        {
+          "id": "BUG-POS-005",
+          "title": "Cho phép nhập số âm (Negative Input)",
+          "status": "fixed"
+        },
+        {
+          "id": "BUG-POS-006",
+          "title": "Gọi tính hoa hồng ngoài Transaction",
+          "status": "fixed"
+        },
+        {
+          "id": "BUG-POS-007",
+          "title": "Bán dưới giá vốn (Selling below Cost)",
+          "status": "fixed"
+        }
+      ]
+    },
+    {
+      "module": "HACK",
+      "color": "primary",
+      "bugs": [
+        {
+          "id": "HACK-SEC-001",
+          "title": "Hardcoded Fallback Secret trong API tạo Admin",
+          "status": "fixed"
+        },
+        {
+          "id": "HACK-SEC-002",
+          "title": "Firebase RTDB Quyền Đọc/Ghi Công Khai",
+          "status": "fixed"
+        },
+        {
+          "id": "HACK-SEC-003",
+          "title": "Lỗ hổng XSS trong trang chi tiết sản phẩm",
+          "status": "fixed"
+        },
+        {
+          "id": "HACK-SEC-004",
+          "title": "Rò rỉ thông tin nhạy cảm ở Client (ChatWidget)",
+          "status": "fixed"
+        }
+      ]
+    },
+    {
+      "module": "RBAC",
+      "color": "primary",
+      "bugs": [
+        {
+          "id": "BUG-RBAC-001",
+          "title": "RBAC URL Bypass (Vượt rào quyền truy cập)",
+          "status": "fixed"
+        }
+      ]
+    },
+    {
+      "module": "REP",
+      "color": "primary",
+      "bugs": [
+        {
+          "id": "BUG-REP-003",
+          "title": "Sản phẩm ma (Custom ID Mapping) — By-Design",
+          "status": "fixed"
+        },
+        {
+          "id": "BUG-REP-002",
+          "title": "Ghi đè dữ liệu (Stale Overwrite)",
+          "status": "fixed"
+        },
+        {
+          "id": "BUG-REP-001",
+          "title": "Gọi tính hoa hồng ngoài Transaction (Repairs)",
+          "status": "fixed"
+        },
+        {
+          "id": "BUG-REP-004",
+          "title": "Cập nhật trạng thái nhanh không dùng Transaction",
+          "status": "fixed"
+        },
+        {
+          "id": "BUG-REP-005",
+          "title": "Race Condition trong tổng hợp phiếu nhập",
+          "status": "fixed"
+        },
+        {
+          "id": "BUG-REP-006",
+          "title": "Missing Transaction trong handleNoteSubmit",
+          "status": "fixed"
+        },
+        {
+          "id": "BUG-REP-007",
+          "title": "Held Counter Corruption trong handleHandover",
+          "status": "fixed"
+        },
+        {
+          "id": "BUG-REP-008",
+          "title": "Race Condition mảng statusTimeline trong handleQuickStatus",
+          "status": "fixed"
+        }
+      ]
+    },
+    {
+      "module": "INV",
+      "color": "primary",
+      "bugs": [
+        {
+          "id": "BUG-INV-001",
+          "title": "Race Condition cộng kho phiếu nhập",
+          "status": "fixed"
+        },
+        {
+          "id": "BUG-INV-002",
+          "title": "Đề xuất linh kiện bị lưu thành SP bán lẻ",
+          "status": "fixed"
+        },
+        {
+          "id": "BUG-INV-003",
+          "title": "KTV tải toàn bộ SP về client để tìm kiếm",
+          "status": "fixed"
+        },
+        {
+          "id": "BUG-INV-004",
+          "title": "Danh mục chưa đồng bộ ('Linh kiện', 'component')",
+          "status": "fixed"
+        },
+        {
+          "id": "BUG-INV-005",
+          "title": "Race Condition & Thiếu Log trong executeFinalImport",
+          "status": "fixed"
+        },
+        {
+          "id": "BUG-INV-006",
+          "title": "Rò rỉ Held Stock trong luồng Sửa chữa",
+          "status": "fixed"
+        },
+        {
+          "id": "BUG-INV-007",
+          "title": "Xóa sản phẩm gây mồ côi dữ liệu (Orphan Data)",
+          "status": "fixed"
+        },
+        {
+          "id": "BUG-INV-008",
+          "title": "Nguy cơ Tồn kho âm (Negative Stock)",
+          "status": "fixed"
+        },
+        {
+          "id": "BUG-INV-009",
+          "title": "Trừ đúp tồn kho khả dụng (Systemic Double Deduction)",
+          "status": "fixed"
+        },
+        {
+          "id": "BUG-INV-010",
+          "title": "KTV lấy hàng giữ chỗ (Technician Can Take Reserved Items)",
+          "status": "fixed"
+        }
+      ]
+    },
+    {
+      "module": "ORD",
+      "color": "primary",
+      "bugs": [
+        {
+          "id": "BUG-ORD-002",
+          "title": "Hủy đơn Completed gây âm held",
+          "status": "fixed"
+        },
+        {
+          "id": "BUG-ORD-003",
+          "title": "Thiếu kiểm tra cộng dồn số lượng trong Checkout API",
+          "status": "fixed"
+        },
+        {
+          "id": "BUG-ORD-004",
+          "title": "Race Condition & Double Submit trong updateStatus",
+          "status": "fixed"
+        },
+        {
+          "id": "BUG-ORD-005",
+          "title": "Lỗi vi phạm nguyên tắc Transaction ở Web Checkout",
+          "status": "fixed"
+        }
+      ]
+    },
+    {
+      "module": "COM",
+      "color": "primary",
+      "bugs": [
+        {
+          "id": "BUG-COM-002",
+          "title": "Trả hoa hồng trên đơn nợ (Pay Later)",
+          "status": "fixed"
+        },
+        {
+          "id": "BUG-COM-003",
+          "title": "Làm tròn số thực gây lệch tiền (Float Precision)",
+          "status": "fixed"
+        },
+        {
+          "id": "BUG-COM-004",
+          "title": "Phân bổ giảm giá tùy tiện (Arbitrary Discount Distribution)",
+          "status": "fixed"
+        },
+        {
+          "id": "BUG-COM-005",
+          "title": "Thiếu kiểm tra trạng thái thanh toán đơn hàng",
+          "status": "fixed"
+        }
+      ]
+    },
+    {
+      "module": "REV",
+      "color": "primary",
+      "bugs": [
+        {
+          "id": "BUG-REV-001",
+          "title": "Mất mát dữ liệu báo cáo do giới hạn Query 3 tháng",
+          "status": "fixed"
+        },
+        {
+          "id": "BUG-REV-002",
+          "title": "Khấu trừ quà tặng trong Lợi nhuận ròng (NOT A BUG)",
+          "status": "fixed"
+        },
+        {
+          "id": "BUG-REV-003",
+          "title": "Sai lệch số tiền lẻ do không làm tròn số thực trong database",
+          "status": "fixed"
+        }
+      ]
+    },
+    {
+      "module": "SER",
+      "color": "primary",
+      "bugs": [
+        {
+          "id": "BUG-SER-001",
+          "title": "Cho phép nhập số âm cho giá dịch vụ",
+          "status": "fixed"
+        }
+      ]
+    },
+    {
+      "module": "PAR",
+      "color": "primary",
+      "bugs": [
+        {
+          "id": "BUG-PAR-001",
+          "title": "Cập nhật bất đồng bộ (Receipt & Ticket)",
+          "status": "fixed"
+        },
+        {
+          "id": "BUG-PAR-002",
+          "title": "Regression: Mất an toàn Transaction và Thiếu Log khi chốt phiếu nhập",
+          "status": "fixed"
+        },
+        {
+          "id": "BUG-PAR-003",
+          "title": "Race Condition & Stale Data trong executeFinalImport",
+          "status": "fixed"
+        }
+      ]
+    },
+    {
+      "module": "Security",
+      "color": "danger",
+      "bugs": [
+        {
+          "id": "HACK-PUBLIC-REVIEWS-001",
+          "title": "Public reviews/comments bypass moderation da duoc si?t Firestore rules",
+          "status": "fixed"
+        },
+        {
+          "id": "HACK-API-001",
+          "title": "Admin SDK mutation routes da co auth/production guard hoac da bi xoa",
+          "status": "fixed"
+        },
+        {
+          "id": "HACK-CACHE-001",
+          "title": "Revalidate API hardcoded fallback secret da duoc xoa",
+          "status": "fixed"
+        }
+      ]
+    },
+    {
+      "module": "Settings",
+      "color": "primary",
+      "bugs": [
+        {
+          "id": "BUG-REVALIDATE-CALLERS-001",
+          "title": "Admin revalidate callers da chuyen sang server action",
+          "status": "fixed"
+        },
+        {
+          "id": "BUG-SEED-CONFIG-001",
+          "title": "Settings seed-config da gui Bearer token",
+          "status": "fixed"
+        }
+      ]
+    },
+    {
+      "module": "Inventory",
+      "color": "warning",
+      "bugs": [
+        {
+          "id": "BUG-INVENTORY-HELD-001",
+          "title": "Pending orders khong con tru stock va tang held dong thoi",
+          "status": "fixed"
+        },
+        {
+          "id": "BUG-REPAIR-STOCK-001",
+          "title": "Repair parts khong con tru stock hai lan",
+          "status": "fixed"
+        }
+      ]
+    },
+    {
+      "module": "Build",
+      "color": "primary",
+      "bugs": [
+        {
+          "id": "BUG-TSC-STALENEXT-001",
+          "title": "Typecheck standalone regenerate Next route types truoc khi tsc",
+          "status": "fixed"
+        },
+        {
+          "id": "BUG-MIGRATE-INVENTORY-SCRIPT-MISSING-001",
+          "title": "package.json migrate:inventory dang tham chieu script bi thieu",
+          "status": "open"
+        }
+      ]
+    }
+  ],
+  "dependencies": {
+    "packageManager": "pnpm",
+    "packageManagerVersion": "10.30.3",
+    "lastAudit": "19.05.2026",
+    "lockfile": "pnpm-lock.yaml",
+    "production": [
+      {
+        "name": "next",
+        "version": "15.5.18",
+        "purpose": "Framework React SSR/SSG"
+      },
+      {
+        "name": "react",
+        "version": "19.2.6",
+        "purpose": "UI Library"
+      },
+      {
+        "name": "react-dom",
+        "version": "19.2.6",
+        "purpose": "React DOM renderer"
+      },
+      {
+        "name": "firebase",
+        "version": "12.13.0",
+        "purpose": "Client SDK (Auth, Firestore, Storage, RTDB)"
+      },
+      {
+        "name": "firebase-admin",
+        "version": "13.10.0",
+        "purpose": "Server SDK (Admin operations, API routes)"
+      },
+      {
+        "name": "firebase-functions",
+        "version": "7.2.5",
+        "purpose": "Cloud Functions utilities"
+      },
+      {
+        "name": "lucide-react",
+        "version": "0.563.0",
+        "purpose": "Icon library (SVG icons)"
+      },
+      {
+        "name": "xlsx",
+        "version": "0.18.5",
+        "purpose": "Excel import/export (nhập hàng, báo cáo)"
+      },
+      {
+        "name": "sonner",
+        "version": "2.0.7",
+        "purpose": "Toast notification"
+      },
+      {
+        "name": "swiper",
+        "version": "12.1.4",
+        "purpose": "Slider/Carousel (storefront banners)"
+      },
+      {
+        "name": "react-quill-new",
+        "version": "3.8.3",
+        "purpose": "Rich text editor (articles, mô tả SP)"
+      },
+      {
+        "name": "react-player",
+        "version": "3.4.0",
+        "purpose": "Video player (YouTube embed)"
+      },
+      {
+        "name": "@google/generative-ai",
+        "version": "0.24.1",
+        "purpose": "Gemini AI SDK (articles, chatbot)"
+      },
+      {
+        "name": "@ffmpeg/ffmpeg",
+        "version": "0.12.15",
+        "purpose": "Video processing (client-side)"
+      },
+      {
+        "name": "@ffmpeg/util",
+        "version": "0.12.2",
+        "purpose": "FFmpeg utilities"
+      },
+      {
+        "name": "@tailwindcss/typography",
+        "version": "0.5.19",
+        "purpose": "Prose styling cho nội dung bài viết"
+      },
+      {
+        "name": "browser-image-compression",
+        "version": "2.0.2",
+        "purpose": "Nén ảnh trước khi upload"
+      },
+      {
+        "name": "critters",
+        "version": "0.0.23",
+        "purpose": "Critical CSS inlining (optimizeCss)"
+      }
+    ],
+    "devDependencies": [
+      {
+        "name": "typescript",
+        "version": "5.9.3",
+        "purpose": "TypeScript compiler"
+      },
+      {
+        "name": "tailwindcss",
+        "version": "4.3.0",
+        "purpose": "CSS framework"
+      },
+      {
+        "name": "@tailwindcss/postcss",
+        "version": "4.3.0",
+        "purpose": "PostCSS plugin cho Tailwind v4"
+      },
+      {
+        "name": "eslint",
+        "version": "9.39.4",
+        "purpose": "Linter"
+      },
+      {
+        "name": "eslint-config-next",
+        "version": "15.5.18",
+        "purpose": "ESLint rules cho Next.js"
+      },
+      {
+        "name": "@types/node",
+        "version": "20.19.41",
+        "purpose": "Node.js type definitions"
+      },
+      {
+        "name": "@types/react",
+        "version": "19.2.14",
+        "purpose": "React type definitions"
+      },
+      {
+        "name": "@types/react-dom",
+        "version": "19.2.3",
+        "purpose": "React DOM type definitions"
+      }
+    ],
+    "upgradeRecommendations": [
+      {
+        "name": "lucide-react",
+        "current": "0.563.0",
+        "latest": "1.16.0",
+        "risk": "medium",
+        "note": "Major version bump — có thể đổi tên icon. Cần kiểm tra từng icon đang dùng."
+      },
+      {
+        "name": "critters",
+        "current": "0.0.23",
+        "latest": "0.0.25",
+        "risk": "low",
+        "note": "⚠️ Deprecated — nên theo dõi thay thế từ Next.js core."
+      },
+      {
+        "name": "@types/node",
+        "current": "20.19.41",
+        "latest": "25.9.0",
+        "risk": "low",
+        "note": "Dev-only. An toàn nâng cấp."
+      },
+      {
+        "name": "next",
+        "current": "15.5.18",
+        "latest": "16.2.6",
+        "risk": "high",
+        "note": "Major version — cần migration guide. Đợi ổn định trước khi nâng."
+      },
+      {
+        "name": "eslint",
+        "current": "9.39.4",
+        "latest": "10.4.0",
+        "risk": "medium",
+        "note": "Major bump. Cần cập nhật eslint-config-next tương ứng."
+      },
+      {
+        "name": "typescript",
+        "current": "5.9.3",
+        "latest": "6.0.3",
+        "risk": "medium",
+        "note": "Major version — kiểm tra breaking changes trước."
+      }
+    ]
+  },
+  "changelog": [
+    {
+      "date": "2026-05-27 - CHAT MEDIA & QUICK REPLIES",
+      "desc": "Tang do tin cay cua anh Facebook va thao tac ho tro nhan vien tren Live Chat.",
+      "color": "accent-color",
+      "details": [
+        "<b>Facebook image:</b> Tin nhan ghi RTDB truoc, anh moi cache vao Storage private va tai qua API co quyen chat.",
+        "<b>Provider fallback:</b> Nut mo Meta Business Suite Inbox cho room Facebook, khong coi PSID la profile URL.",
+        "<b>Productivity:</b> Cau hinh tra loi mau server-side va chen noi dung bang <code>/shortcut</code>."
+      ]
+    },
+    {
+      "date": "2026-05-26 - CHAT DATA HARDENING & ROADMAP VISIBILITY",
+      "desc": "Khóa các đường lộ dữ liệu trong Live Chat và đưa artifact scan lên giao diện roadmap_v2.",
+      "color": "success",
+      "details": [
+        "<b>[P1]</b> Giới hạn <code>customers/{phone}</code> theo quyền nghiệp vụ trong Firestore Rules.",
+        "<b>[P2]</b> Thay room <code>guest_</code> public bằng Firebase Anonymous Auth và UID-authenticated room.",
+        "<b>[P2]</b> Bắt buộc <code>chat_support</code> cho API chat privileged; token Facebook gửi qua Authorization header.",
+        "<b>[P2]</b> Chuyển handoff POS/Repair sang <code>sessionStorage</code> một lần, không đưa PII vào URL.",
+        "<b>[P3]</b> Dừng lưu raw webhook event mới; hiển thị scan artifact tập trung tại mục Security Scans.",
+        "<b>[Release gate]</b> Bật Firebase Anonymous Auth trước khi deploy RTDB rules mới."
+      ]
+    },
+    {
+      "date": "2026-05-25 - LIVE CHAT OMNICHANNEL",
+      "desc": "Ghi nhận inbox Web/Facebook/Zalo, xử lý lỗi RTDB runtime IAM và nâng cấp profile/media/CRM/chuyển sang POS-Repair.",
+      "color": "accent-color",
+      "details": [
+        "Checkpoint <code>4d3c6fbd</code>: cấu hình tích hợp trên web, Facebook/Zalo webhook, outbound reply, nhãn nguồn.",
+        "Sự cố đã xử lý: webhook nhận payload nhưng ghi RTDB timeout do runtime identity thiếu quyền; không giải quyết bằng rules public.",
+        "Nâng cấp nhánh hiện tại: Graph profile refresh, media attachments, CSP Facebook CDN.",
+        "Nâng cấp nhánh hiện tại: modal CRM, liên kết khách theo số điện thoại, chuyển sang Repair/POS đã prefill.",
+        "Local verification: <code>npm.cmd run typecheck</code> và <code>npm.cmd run build</code> pass; chờ deploy production."
+      ]
+    },
+    {
+      "date": "2026-05-23 - ROADMAP_V2 RESTORE",
+      "desc": "Recovered latest roadmap_v2 data after cleanup removed/staled the v2 roadmap artifacts.",
+      "color": "warning",
+      "details": [
+        "Preserved existing SPA shell files: index.html, app.js, styles.css.",
+        "Updated manifest/dashboard/bug-details from current source verification.",
+        "Detected open regression: scripts/migrate-active-orders.ts missing while package.json still exposes migrate:inventory."
+      ]
+    },
+    {
+      "date": "2026-05-19 - PNPM MIGRATION & DEPENDENCY AUDIT",
+      "desc": "Chuyển đổi toàn bộ package manager từ <b>npm</b> sang <b>pnpm</b>. Thêm theo dõi dependencies vào Roadmap Dashboard.",
+      "color": "accent-color",
+      "details": [
+        "Xóa <code>node_modules/</code>, <code>package-lock.json</code>, <code>yarn.lock</code>",
+        "Cài lại toàn bộ dependencies bằng <code>pnpm install</code> (34s, tiết kiệm ~60% dung lượng)",
+        "Approve build scripts: sharp, @firebase/util, protobufjs, unrs-resolver",
+        "Cập nhật <code>README.md</code> — chỉ còn <code>pnpm dev</code>, xóa npm/yarn/bun",
+        "Fix ESLint: <code>articles/page.tsx</code> (no-explicit-any), <code>login/page.tsx</code> (err: unknown)",
+        "Fix import: <code>seed-config/route.ts</code> — requireAdmin → requireAdminOrStaff",
+        "Build thành công: <code>pnpm build</code> exit code 0",
+        "Thêm section <b>📦 Dependencies</b> vào Dashboard (prod/dev/upgrade recommendations)"
+      ]
+    },
+    {
+      "date": "2026-05-18 - COMPREHENSIVE AUDIT + SCALING ROADMAP",
+      "desc": "Kiểm định toàn diện hệ thống cho 5,000 users/tháng: <b>Performance</b> (Image Loader, LCP, code-split) ✅, <b>Security</b> (RBAC, Firestore Rules, XSS, runTransaction) ✅, <b>Cost</b> (~$2.60/tháng) ✅. Thiết kế Customer CRM schema (sub-collections). Chuẩn bị k6 load test cho <code>fixphone.vn</code>. Cập nhật constraint Images → phản ánh kiến trúc Custom Loader thực tế.",
+      "color": "primary"
+    },
+    {
+      "date": "2026-05-17 - DASHBOARD SYNC + BUG-INV-003: Hoàn thành 100%",
+      "desc": "Đối chiếu mã nguồn xác nhận tất cả bugs đã được vá. <b>BUG-INV-003</b>: Chuyển tìm kiếm linh kiện KTV từ client-side (tải toàn bộ products) sang Firestore server-side (<code>searchKeywords</code> + <code>array-contains</code>). Dashboard: 87% → 100%. <b>0 open bugs</b>.",
+      "color": "purple"
+    },
+    {
+      "date": "2026-05-17 - BATCH 4: QUICK-WIN BUGS (8 bugs)",
+      "desc": "Vá 8 lỗi: <b>BUG-INV-010</b> (KTV held check), <b>BUG-POS-007</b> (Cost price warning), <b>BUG-REP-004+008</b> (runTransaction timeline), <b>BUG-ORD-003</b> (Checkout aggregation), <b>BUG-COM-004</b> (Pro-rata discount), <b>BUG-REV-001</b> (Query window 6 tháng), <b>BUG-INV-008</b> (Confirmed resolved).",
+      "color": "success",
+      "details": [
+        "<b>[BUG-INV-010]</b> Sửa <code>src/app/admin/technician/page.tsx</code> — Stock check trừ held: <code>available = stock - held</code>.",
+        "<b>[BUG-POS-007]</b> Sửa <code>src/app/admin/pos/page.tsx</code> — Thêm confirm() cảnh báo khi bán dưới giá vốn.",
+        "<b>[BUG-REP-004 + BUG-REP-008]</b> Sửa <code>src/app/admin/repairs/page.tsx</code> — handleQuickStatus chuyển sang runTransaction, đọc timeline từ Firestore.",
+        "<b>[BUG-ORD-003]</b> Sửa <code>src/app/api/checkout/route.ts</code> — Pre-aggregate productId trước khi validate stock.",
+        "<b>[BUG-COM-004]</b> Sửa <code>src/lib/commissionUtils.ts</code> — Phân bổ giảm giá pro-rata thay vì sequential.",
+        "<b>[BUG-REV-001]</b> Sửa <code>src/app/admin/revenue/page.tsx</code> — Tăng query window từ 3 → 6 tháng."
+      ]
+    },
+    {
+      "date": "2026-05-17 - BATCH 3: INPUT VALIDATION & FLOAT PRECISION (6 bugs)",
+      "desc": "Vá 6 lỗi module: <b>BUG-COM-003</b> (Float Math.round), <b>BUG-COM-005</b> (Order payment guard), <b>BUG-POS-004</b> (POS rounding), <b>BUG-POS-005</b> (Negative price), <b>BUG-SER-001</b> (Negative service price), <b>BUG-REV-003</b> (Revenue float).",
+      "color": "success",
+      "details": [
+        "<b>[BUG-COM-003 + BUG-COM-005]</b> Sửa <code>src/lib/commissionUtils.ts</code> — Math.round() cho 2 phép tính HH + Guard order status !== Completed.",
+        "<b>[BUG-COM-003]</b> Sửa <code>src/app/admin/commissions/page.tsx</code> — Math.round() cho totalCommission display.",
+        "<b>[BUG-POS-004 + BUG-POS-005]</b> Sửa <code>src/app/admin/pos/page.tsx</code> — Math.round + Math.max(0) + min=\"0\" cho giá bán/giảm giá/cọc.",
+        "<b>[BUG-SER-001]</b> Sửa <code>src/app/admin/services/page.tsx</code> — Math.max(0) cho giá dịch vụ gốc + khuyến mãi."
+      ]
+    },
+    {
+      "date": "2026-05-17 - SECURITY BATCH 2 (5 bugs)",
+      "desc": "Vá thêm 5 lỗi: <b>BUG-POS-003</b> (Held Stock), <b>HACK-SEC-002</b> (RTDB Rules), <b>HACK-SEC-003</b> (XSS), <b>BUG-POS-002</b> (Race Condition), <b>BUG-ORD-002</b> (Âm held).",
+      "color": "success",
+      "details": [
+        "<b>[BUG-POS-003]</b> Sửa <code>src/app/admin/pos/page.tsx</code> — Thêm <code>held: increment(qty)</code> cho đơn Pending.",
+        "<b>[HACK-SEC-003]</b> Tạo <code>src/lib/sanitizeHtml.ts</code> — Shared XSS sanitizer. Áp dụng cho <code>product/[id]/page.tsx</code>.",
+        "<b>[HACK-SEC-002]</b> Siết <code>database.rules.json</code> — Validation text ≤500, senderType whitelist, <code>$other: false</code>.",
+        "<b>[BUG-POS-002]</b> Xác nhận đã fix từ 12.05 (runTransaction). Cập nhật trạng thái.",
+        "<b>[BUG-ORD-002]</b> Xác nhận đã fix từ 12.05 (Completed→Cancelled logic). Cập nhật trạng thái."
+      ]
+    },
+    {
+      "date": "2026-05-17 - SECURITY BATCH 1 (2 bugs)",
+      "desc": "Vá 2 lỗ hổng bảo mật nghiêm trọng: <b>HACK-SEC-001</b> (Hardcoded Secret) và <b>BUG-RBAC-001</b> (RBAC URL Bypass).",
+      "color": "success",
+      "details": [
+        "<b>[HACK-SEC-001]</b> Xóa fallback secret trong <code>src/app/api/seed-admin/route.ts</code>. Bắt buộc dùng env var.",
+        "<b>[BUG-RBAC-001]</b> Thêm 3 file mới: <code>src/lib/sessionCookie.ts</code>, <code>src/app/api/auth/session/route.ts</code>, <code>src/middleware.ts</code>. Sửa <code>src/lib/AuthContext.tsx</code>."
+      ]
+    },
+    {
+      "date": "2026-05-12 - DASHBOARD MIGRATION",
+      "desc": "Chuyển đổi toàn bộ tài liệu tracking từ .md sang <b>Super Dashboard HTML</b>.",
+      "color": "var(--text-muted)",
+      "details": [
+        "F: <code>12.05.html</code>, <code>Plan.md</code> (deprecated), <code>BUG_REPORT.md</code> (deprecated)"
+      ]
+    },
+    {
+      "date": "2026-05-10 - UNIFIED INVENTORY",
+      "desc": "Hợp nhất quy trình nhập hàng Bán lẻ và Linh kiện vào module Parts. Gọn hóa trang Inventory.",
+      "color": "var(--text-muted)"
+    },
+    {
+      "date": "2026-05-08 - GIFT REDEMPTION",
+      "desc": "Thay đổi nhập quà tặng từ số tiền sang chọn sản phẩm trực tiếp từ kho.",
+      "color": "var(--text-muted)"
+    }
+  ]
+}

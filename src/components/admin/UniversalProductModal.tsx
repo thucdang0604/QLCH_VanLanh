@@ -57,6 +57,8 @@ interface RetailFormData {
     status: string;
     condition: string;
     isFlashSale: boolean;
+    // Variant fields
+    seriesId: string;
 }
 
 // ── Component Form Data ──
@@ -99,6 +101,7 @@ export default function UniversalProductModal({
         status: initialData?.status || 'active',
         condition: initialData?.condition || 'new',
         isFlashSale: initialData?.isFlashSale || false,
+        seriesId: initialData?.seriesId || '',
     });
 
     // ── Component state ──
@@ -142,6 +145,7 @@ export default function UniversalProductModal({
                 status: initialData?.status || 'active',
                 condition: initialData?.condition || 'new',
                 isFlashSale: initialData?.isFlashSale || false,
+                seriesId: initialData?.seriesId || '',
             });
             setComponentForm({
                 name: initialData?.name || '',
@@ -209,6 +213,7 @@ export default function UniversalProductModal({
             images,
             specs: initialData?.specs || {},
             searchKeywords: generateSearchKeywords(form.name),
+            seriesId: form.seriesId,
         };
 
         if (isEditing && initialData) {
@@ -569,6 +574,25 @@ function RetailFields({
                     className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 resize-none transition-shadow"
                     placeholder="Mô tả chi tiết sản phẩm..."
                 />
+            </div>
+
+            {/* Variants */}
+            <div className="pt-4 border-t border-gray-100">
+                <h3 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                    <span className="w-1 h-4 bg-orange-500 rounded-full"></span>
+                    Gom nhóm Biến thể
+                </h3>
+                <div className="mb-4">
+                    <label className="block text-xs font-medium text-gray-700 mb-1.5">Mã Dòng (Series ID)</label>
+                    <input
+                        type="text"
+                        value={form.seriesId}
+                        onChange={(e) => setForm(p => ({ ...p, seriesId: e.target.value }))}
+                        className="w-full h-10 px-3 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-500"
+                        placeholder="vd: iphone-15-pro-max"
+                    />
+                    <p className="text-[10px] text-gray-500 mt-1">Các sản phẩm có cùng Mã Dòng sẽ tự động hiển thị liên kết với nhau ở trang chi tiết sản phẩm.</p>
+                </div>
             </div>
         </>
     );

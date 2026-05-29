@@ -1,0 +1,12 @@
+{
+  "id": "HACK-SEC-001",
+  "trackId": "system-content",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Hardcoded Fallback Secret trong API tạo Admin",
+  "summary": "<b>Hiện tượng</b>: API <code>/api/seed-admin</code> sử dụng một chuỗi bí mật cố định làm giá trị dự phòng nếu biến môi trường không được cấu hình.<br><b>Hệ lụy</b>: Kẻ tấn công có thể sử dụng chuỗi bí mật này để tự cấp quyền Admin cho tài khoản của mình, chiếm toàn quyền điều khiển hệ thống.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Xóa fallback. Bắt buộc đọc từ biến môi trường <code>ADMIN_SEED_SECRET</code>. Thiếu → 500, sai → 401.",
+  "createdAt": "17.05.2026",
+  "severity": "critical",
+  "affectedFiles": [],
+  "resolvedAt": "17.05.2026"
+}

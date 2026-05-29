@@ -1,0 +1,12 @@
+{
+  "id": "HACK-SEC-003",
+  "trackId": "system-content",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Lỗ hổng XSS trong trang chi tiết sản phẩm",
+  "summary": "<b>Hiện tượng</b>: Sử dụng <code>dangerouslySetInnerHTML</code> để render mô tả sản phẩm mà không qua sanitize.<br><b>Hệ lụy</b>: Kẻ tấn công có thể chèn mã độc (XSS) vào mô tả sản phẩm để đánh cắp session hoặc cookie của người dùng.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Extract <code>sanitizeHtml()</code> thành shared utility tại <code>src/lib/sanitizeHtml.ts</code>. Áp dụng cho cả product page và article page.",
+  "createdAt": "17.05.2026",
+  "severity": "critical",
+  "affectedFiles": [],
+  "resolvedAt": "17.05.2026"
+}

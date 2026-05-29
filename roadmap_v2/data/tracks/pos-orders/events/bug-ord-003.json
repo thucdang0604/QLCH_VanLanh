@@ -1,0 +1,12 @@
+{
+  "id": "BUG-ORD-003",
+  "trackId": "pos-orders",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Thiếu kiểm tra cộng dồn số lượng trong Checkout API",
+  "summary": "<b>Hiện tượng</b>: API <code>checkout</code> kiểm tra tồn kho cho từng sản phẩm riêng lẻ trong mảng đầu vào, thay vì gộp tổng số lượng của các sản phẩm trùng nhau trước.<br><b>Hệ lụy</b>: Payload chứa nhiều dòng cho cùng 1 SP có thể bypass stock check và làm âm kho.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Thêm pre-aggregation step gom nhóm theo <code>productId</code> trước khi validate trong <code>api/checkout/route.ts</code>.",
+  "createdAt": "17.05.2026",
+  "severity": "high",
+  "affectedFiles": [],
+  "resolvedAt": "17.05.2026"
+}

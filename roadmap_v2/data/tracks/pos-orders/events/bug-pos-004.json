@@ -1,0 +1,11 @@
+{
+  "id": "BUG-POS-004",
+  "trackId": "pos-orders",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Lưu trữ số thực gây lệch tiền (Float Precision)",
+  "summary": "<b>Hiện tượng</b>: Trong <code>pos/page.tsx</code> (dòng 474 và 519), giá bán và giảm giá được đọc bằng <code>Number(e.target.value)</code> và lưu trực tiếp vào database.<br><b>Hệ lụy</b>: Nếu nhân viên nhập số có phần thập phân (ví dụ 100000.5), giá trị lưu trữ sẽ là số thực. Khi cộng dồn doanh thu sẽ gây sai lệch tiền tệ VNĐ vốn không có phần thập phân.",
+  "createdAt": "2026-05-26T00:00:00.000Z",
+  "severity": "high",
+  "affectedFiles": []
+}

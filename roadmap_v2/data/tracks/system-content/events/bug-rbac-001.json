@@ -1,0 +1,12 @@
+{
+  "id": "BUG-RBAC-001",
+  "trackId": "system-content",
+  "type": "bug",
+  "status": "resolved",
+  "title": "RBAC URL Bypass (Vượt rào quyền truy cập)",
+  "summary": "<b>Hiện tượng</b>: Nhân viên chỉ cần gõ trực tiếp URL (VD: /admin/products) là vào được trang dù không có quyền.<br><b>Hệ lụy</b>: Lộ thông tin doanh thu, chỉnh sửa giá bừa bãi. Quyền hạn chỉ mang tính chất 'che mắt' ở UI.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Triển khai Next.js Edge Middleware + HMAC-signed session cookie. Server chặn request TRƯỚC khi render page.",
+  "createdAt": "17.05.2026",
+  "severity": "high",
+  "affectedFiles": [],
+  "resolvedAt": "17.05.2026"
+}

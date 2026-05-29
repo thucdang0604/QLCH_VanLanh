@@ -1,0 +1,12 @@
+{
+  "id": "BUG-POS-002",
+  "trackId": "pos-orders",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Race Condition POS (Tranh chấp tài nguyên)",
+  "summary": "<b>Hiện tượng</b>: 2 máy cùng bán 1 sản phẩm cuối cùng đều báo thành công. Kho bị âm.<br><b>Hệ lụy</b>: Bán khống hàng không có thực. Gây xung đột dữ liệu.<br><br>✅ <b>Đã vá ngày 12.05.2026</b>: Toàn bộ POS checkout flow đã chuyển sang <code>runTransaction</code> atomic. Validate stock availability bên trong transaction.",
+  "createdAt": "12.05.2026",
+  "severity": "high",
+  "affectedFiles": [],
+  "resolvedAt": "12.05.2026"
+}

@@ -97,12 +97,12 @@ export async function POST(request: NextRequest) {
 
     const eventName = getString(body, 'event_name');
     if (eventName && !eventName.toLowerCase().includes('message')) {
-      console.info('Zalo webhook skipped unsupported event:', eventName);
+      console.warn('Zalo webhook skipped unsupported event:', eventName);
       return NextResponse.json({ success: true, skipped: 'unsupported_event' });
     }
 
     const message = extractZaloMessage(body);
-    console.info('Zalo webhook event received:', {
+    console.warn('Zalo webhook event received:', {
       eventName: eventName || 'unknown',
       hasUserId: !!message.externalUserId,
       hasText: !!message.text,
@@ -115,10 +115,9 @@ export async function POST(request: NextRequest) {
       text: message.text,
       timestamp: message.timestamp,
       externalMessageId: message.externalMessageId || undefined,
-      rawEvent: body,
     });
 
-    console.info('Zalo webhook processed:', result);
+    console.warn('Zalo webhook processed:', result);
     return NextResponse.json({ success: true, result });
   } catch (error) {
     console.error('Zalo webhook processing failed:', error);

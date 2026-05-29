@@ -1,0 +1,12 @@
+{
+  "id": "BUG-REP-006",
+  "trackId": "repair",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Missing Transaction trong handleNoteSubmit",
+  "summary": "<b>Hiện tượng</b>: Lưu thông tin phiếu sửa chữa không dùng transaction.<br><b>Hệ lụy</b>: Có thể ghi đè dữ liệu nếu 2 người cùng sửa phiếu.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Chuyển <code>handleNoteSubmit</code> sang <code>runTransaction</code> với fresh read từ Firestore.",
+  "createdAt": "17.05.2026",
+  "severity": "high",
+  "affectedFiles": [],
+  "resolvedAt": "17.05.2026"
+}

@@ -1,0 +1,175 @@
+[
+  {
+    "id": "BUG-RULES-001",
+    "trackId": "system-content",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Missing Firestore Security Rules cho 4 collections mới (Phase 4/6/8)",
+    "summary": "<b>Hiện tượng</b>: Khi mở trang /admin/parts, console báo <code>Firestore: permission-denied</code> cho snapshot listener.<br><b>Hệ lụy</b>: Toàn bộ chức năng liên quan suppliers, supplier_transactions, product_reviews, accessory_discount_rules bị chặn trên client-side.<br><br>✅ <b>Đã vá ngày 19.05.2026</b>: Thêm 4 rule blocks vào <code>firestore.rules</code> và deploy thành công.",
+    "createdAt": "19.05.2026",
+    "severity": "high",
+    "affectedFiles": [
+      "firestore.rules"
+    ],
+    "resolvedAt": "19.05.2026"
+  },
+  {
+    "id": "HACK-SEC-001",
+    "trackId": "system-content",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Hardcoded Fallback Secret trong API tạo Admin",
+    "summary": "<b>Hiện tượng</b>: API <code>/api/seed-admin</code> sử dụng một chuỗi bí mật cố định làm giá trị dự phòng nếu biến môi trường không được cấu hình.<br><b>Hệ lụy</b>: Kẻ tấn công có thể sử dụng chuỗi bí mật này để tự cấp quyền Admin cho tài khoản của mình, chiếm toàn quyền điều khiển hệ thống.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Xóa fallback. Bắt buộc đọc từ biến môi trường <code>ADMIN_SEED_SECRET</code>. Thiếu → 500, sai → 401.",
+    "createdAt": "17.05.2026",
+    "severity": "critical",
+    "affectedFiles": [],
+    "resolvedAt": "17.05.2026"
+  },
+  {
+    "id": "HACK-SEC-002",
+    "trackId": "system-content",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Firebase RTDB Quyền Đọc/Ghi Công Khai",
+    "summary": "<b>Hiện tượng</b>: Room web theo prefix <code>guest_</code> từng cho đọc/ghi không cần xác thực; khi liên kết CRM, room có thể chứa tên và số điện thoại khách.<br><b>Hệ lụy</b>: Người có room ID có thể đọc hoặc sửa hội thoại và PII.<br><br>✅ <b>Đã vá hoàn chỉnh ngày 26.05.2026</b>: Web chat đăng nhập Firebase Anonymous Auth, dùng UID làm room ID và rules không còn cấp quyền public theo prefix.",
+    "createdAt": "26.05.2026",
+    "severity": "critical",
+    "affectedFiles": [
+      "database.rules.json",
+      "src/components/ChatWidget.tsx",
+      "src/lib/AuthContext.tsx"
+    ],
+    "resolvedAt": "26.05.2026"
+  },
+  {
+    "id": "HACK-SEC-003",
+    "trackId": "system-content",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Lỗ hổng XSS trong trang chi tiết sản phẩm",
+    "summary": "<b>Hiện tượng</b>: Sử dụng <code>dangerouslySetInnerHTML</code> để render mô tả sản phẩm mà không qua sanitize.<br><b>Hệ lụy</b>: Kẻ tấn công có thể chèn mã độc (XSS) vào mô tả sản phẩm để đánh cắp session hoặc cookie của người dùng.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Extract <code>sanitizeHtml()</code> thành shared utility tại <code>src/lib/sanitizeHtml.ts</code>. Áp dụng cho cả product page và article page.",
+    "createdAt": "17.05.2026",
+    "severity": "critical",
+    "affectedFiles": [],
+    "resolvedAt": "17.05.2026"
+  },
+  {
+    "id": "HACK-SEC-004",
+    "trackId": "system-content",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Rò rỉ thông tin nhạy cảm ở Client (ChatWidget)",
+    "summary": "<b>Hiện tượng</b>: Dữ liệu nhận diện khách từng được giữ trong <code>localStorage</code>; luồng mới cũng có nguy cơ đưa tên/SĐT vào URL khi chuyển sang POS/Repair.<br><b>Hệ lụy</b>: PII tồn tại lâu trong trình duyệt, history, log hoặc referrer.<br><br>✅ <b>Đã vá hoàn chỉnh ngày 26.05.2026</b>: Xóa lưu PII chat trong localStorage và handoff nghiệp vụ bằng <code>sessionStorage</code> dùng một lần.",
+    "createdAt": "26.05.2026",
+    "severity": "critical",
+    "affectedFiles": [
+      "src/components/ChatWidget.tsx",
+      "src/lib/chatWorkflowHandoff.ts",
+      "src/app/admin/pos/page.tsx",
+      "src/app/admin/repairs/page.tsx"
+    ],
+    "resolvedAt": "26.05.2026"
+  },
+  {
+    "id": "BUG-RBAC-001",
+    "trackId": "system-content",
+    "type": "bug",
+    "status": "resolved",
+    "title": "RBAC URL Bypass (Vượt rào quyền truy cập)",
+    "summary": "<b>Hiện tượng</b>: Nhân viên chỉ cần gõ trực tiếp URL (VD: /admin/products) là vào được trang dù không có quyền.<br><b>Hệ lụy</b>: Lộ thông tin doanh thu, chỉnh sửa giá bừa bãi. Quyền hạn chỉ mang tính chất 'che mắt' ở UI.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Triển khai Next.js Edge Middleware + HMAC-signed session cookie. Server chặn request TRƯỚC khi render page.",
+    "createdAt": "17.05.2026",
+    "severity": "high",
+    "affectedFiles": [],
+    "resolvedAt": "17.05.2026"
+  },
+  {
+    "id": "HACK-PUBLIC-REVIEWS-001",
+    "trackId": "system-content",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Public reviews/comments bypass moderation da duoc si?t Firestore rules",
+    "summary": "Public create vao reviews/product_reviews/article_comments co the gui status approved hoac field la.",
+    "createdAt": "2026-05-21",
+    "severity": "high",
+    "affectedFiles": [
+      "firestore.rules",
+      "src/app/(customer)/tin-tuc/[slug]/ArticleClientParts.tsx"
+    ],
+    "resolvedAt": "2026-05-21"
+  },
+  {
+    "id": "HACK-API-001",
+    "trackId": "system-content",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Admin SDK mutation routes da co auth/production guard hoac da bi xoa",
+    "summary": "Seed/migration endpoints dung Admin SDK co nguy co mutate DB neu public.",
+    "createdAt": "2026-05-21",
+    "severity": "high",
+    "affectedFiles": [
+      "src/app/api/admin/seed-taxonomy/route.ts",
+      "src/lib/apiAuth.ts"
+    ],
+    "resolvedAt": "2026-05-21"
+  },
+  {
+    "id": "HACK-CACHE-001",
+    "trackId": "system-content",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Revalidate API hardcoded fallback secret da duoc xoa",
+    "summary": "/api/revalidate co the bi purge cache neu dung fallback secret hoac caller khong gui secret.",
+    "createdAt": "2026-05-21",
+    "severity": "medium",
+    "affectedFiles": [
+      "src/app/api/revalidate/route.ts",
+      "src/lib/revalidate.ts"
+    ],
+    "resolvedAt": "2026-05-21"
+  },
+  {
+    "id": "BUG-REVALIDATE-CALLERS-001",
+    "trackId": "system-content",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Admin revalidate callers da chuyen sang server action",
+    "summary": "Admin UI fetch /api/revalidate tu browser se fail 401 hoac expose secret neu sua sai.",
+    "createdAt": "2026-05-21",
+    "severity": "medium",
+    "affectedFiles": [
+      "src/app/admin/settings/NavigationTab.tsx",
+      "src/app/admin/settings/CategoriesTab.tsx",
+      "src/lib/revalidate.ts"
+    ],
+    "resolvedAt": "2026-05-21"
+  },
+  {
+    "id": "BUG-SEED-CONFIG-001",
+    "trackId": "system-content",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Settings seed-config da gui Bearer token",
+    "summary": "Nut khoi phuc mac dinh goi protected API nhung thieu Authorization.",
+    "createdAt": "2026-05-21",
+    "severity": "medium",
+    "affectedFiles": [
+      "src/app/admin/settings/page.tsx",
+      "src/app/api/seed-config/route.ts"
+    ],
+    "resolvedAt": "2026-05-21"
+  },
+  {
+    "id": "BUG-TSC-STALENEXT-001",
+    "trackId": "system-content",
+    "type": "bug",
+    "status": "resolved",
+    "title": "Typecheck standalone regenerate Next route types truoc khi tsc",
+    "summary": "tsc --noEmit doc .next/types stale co the fail gia sau doi route/page/layout.",
+    "createdAt": "2026-05-21",
+    "severity": "low",
+    "affectedFiles": [
+      "package.json"
+    ],
+    "resolvedAt": "2026-05-21"
+  }
+]

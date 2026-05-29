@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAdminOrStaff } from '@/lib/apiAuth';
+import { requirePermission } from '@/lib/apiAuth';
 import { sendAdminChatMessage } from '@/lib/chatServer';
 
 export const runtime = 'nodejs';
 
 export async function POST(request: NextRequest) {
   try {
-    const user = await requireAdminOrStaff(request);
+    const user = await requirePermission(request, 'chat_support');
     const body = await request.json();
     const roomId = typeof body.roomId === 'string' ? body.roomId : '';
     const text = typeof body.text === 'string' ? body.text : '';

@@ -1,0 +1,12 @@
+{
+  "id": "BUG-INV-009",
+  "trackId": "inventory",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Trừ đúp tồn kho khả dụng (Systemic Double Deduction)",
+  "summary": "<b>Hiện tượng</b>: Hệ thống tính tồn kho khả dụng bằng <code>available = stock - held</code>. Tuy nhiên, trong <code>api/checkout/route.ts</code>, <code>parts/page.tsx</code> và <code>technician/page.tsx</code>, hệ thống vừa giảm <code>stock</code> vừa tăng <code>held</code>.<br><b>Hệ lụy</b>: Số lượng khả dụng bị giảm gấp đôi so với thực tế, gây hiện tượng báo hết hàng ảo.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Đã cập nhật logic trong pos, web checkout và kỹ thuật viên chỉ cộng held khi Pending, không trừ đúp.",
+  "createdAt": "17.05.2026",
+  "severity": "high",
+  "affectedFiles": [],
+  "resolvedAt": "17.05.2026"
+}

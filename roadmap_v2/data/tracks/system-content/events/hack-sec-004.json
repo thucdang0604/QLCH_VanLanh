@@ -1,0 +1,17 @@
+{
+  "id": "HACK-SEC-004",
+  "trackId": "system-content",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Rò rỉ thông tin nhạy cảm ở Client (ChatWidget)",
+  "summary": "<b>Hiện tượng</b>: Dữ liệu nhận diện khách từng được giữ trong <code>localStorage</code>; luồng mới cũng có nguy cơ đưa tên/SĐT vào URL khi chuyển sang POS/Repair.<br><b>Hệ lụy</b>: PII tồn tại lâu trong trình duyệt, history, log hoặc referrer.<br><br>✅ <b>Đã vá hoàn chỉnh ngày 26.05.2026</b>: Xóa lưu PII chat trong localStorage và handoff nghiệp vụ bằng <code>sessionStorage</code> dùng một lần.",
+  "createdAt": "26.05.2026",
+  "severity": "critical",
+  "affectedFiles": [
+    "src/components/ChatWidget.tsx",
+    "src/lib/chatWorkflowHandoff.ts",
+    "src/app/admin/pos/page.tsx",
+    "src/app/admin/repairs/page.tsx"
+  ],
+  "resolvedAt": "26.05.2026"
+}

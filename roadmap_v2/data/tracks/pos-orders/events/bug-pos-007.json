@@ -1,0 +1,12 @@
+{
+  "id": "BUG-POS-007",
+  "trackId": "pos-orders",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Bán dưới giá vốn (Selling below Cost)",
+  "summary": "<b>Hiện tượng</b>: Cho phép sửa giá bán thấp hơn giá vốn (costPrice) mà không có cảnh báo.<br><b>Hệ lụy</b>: Nhân viên có thể cố ý sửa giá thấp để tẩu tán tài sản cửa hàng, gây lỗ vốn.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Thêm <code>confirm()</code> cảnh báo khi giá bán thấp hơn giá vốn trong <code>pos/page.tsx</code>.",
+  "createdAt": "17.05.2026",
+  "severity": "high",
+  "affectedFiles": [],
+  "resolvedAt": "17.05.2026"
+}

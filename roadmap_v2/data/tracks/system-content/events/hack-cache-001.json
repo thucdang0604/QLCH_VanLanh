@@ -1,0 +1,15 @@
+{
+  "id": "HACK-CACHE-001",
+  "trackId": "system-content",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Revalidate API hardcoded fallback secret da duoc xoa",
+  "summary": "/api/revalidate co the bi purge cache neu dung fallback secret hoac caller khong gui secret.",
+  "createdAt": "2026-05-21",
+  "severity": "medium",
+  "affectedFiles": [
+    "src/app/api/revalidate/route.ts",
+    "src/lib/revalidate.ts"
+  ],
+  "resolvedAt": "2026-05-21"
+}

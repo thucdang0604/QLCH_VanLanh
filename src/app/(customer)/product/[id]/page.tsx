@@ -1,10 +1,12 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { Metadata } from 'next';
 import Link from 'next/link';
 import { ChevronRight, Package } from 'lucide-react';
 import { SITE_URL } from "@/lib/constants";
 import { sanitizeHtml } from '@/lib/sanitizeHtml';
-import { fetchDetailItem, fetchProductVariants, fetchProductReviews } from '../../_lib/server-queries';
-import ProductDetailClient from './ProductDetailClient';
+import { fetchDetailItem, fetchProductVariants, fetchProductReviews, fetchRelatedItems } from '../../_lib/server-queries';
+import ProductDetailClient, { ProductReviews } from './ProductDetailClient';
+import Image from 'next/image';
 
 export const revalidate = 30;
 
@@ -47,9 +49,13 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
 
     // Fetch variants + reviews in parallel
     const seriesId = data ? String(data.seriesId || '') : '';
-    const [variants, reviews] = await Promise.all([
+    const brand = data ? String(data.brand || '') : '';
+    const category = data ? String(data.category || '') : '';
+
+    const [variants, reviews, related] = await Promise.all([
         seriesId ? fetchProductVariants(seriesId, data?.id || id) : Promise.resolve([]),
-        data?._type === 'product' ? fetchProductReviews(data?.id || id) : Promise.resolve([])
+        data?._type === 'product' ? fetchProductReviews(data?.id || id) : Promise.resolve([]),
+        fetchRelatedItems(brand, category)
     ]);
 
     if (!data) {
@@ -119,7 +125,6 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
                     <span className="text-gray-800 font-medium line-clamp-1">{String(data.name ?? '')}</span>
                 </nav>
 
-                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
                 <ProductDetailClient data={data as any} variants={variants} reviews={reviews} />
 
                 {/* Specs Table */}
@@ -156,6 +161,67 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
                         </div>
                     </div>
                 )}
+
+                {/* Related Items */}
+                {(related.services.length > 0 || related.accessories.length > 0) && (
+                    <div className="mt-8 bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+                        <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
+                            <span className="w-1.5 h-6 bg-orange-500 rounded-full"></span>
+                            Có thể bạn quan tâm
+                        </h2>
+                        
+                        {related.services.length > 0 && (
+                            <div className="mb-6 border-b border-gray-100 pb-6 last:border-0 last:pb-0">
+                                <h3 className="text-lg font-semibold text-gray-800 mb-4">Dịch vụ sửa chữa</h3>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                    {related.services.map((item: any) => (
+                                        <Link key={item.id} href={`/product/${item.slug || item.id}`} className="group bg-white rounded-xl border border-gray-100 p-3 hover:border-orange-300 hover:shadow-md transition-all flex flex-col h-full">
+                                            {item.imageUrl && (
+                                                <div className="relative w-full aspect-square rounded-lg overflow-hidden bg-gray-50 mb-3">
+                                                    <Image src={item.imageUrl} alt={item.name} fill className="object-cover group-hover:scale-105 transition-transform" />
+                                                </div>
+                                            )}
+                                            <h4 className="font-semibold text-sm text-gray-800 line-clamp-2 mb-2 group-hover:text-orange-600 transition-colors">{item.name}</h4>
+                                            <div className="mt-auto pt-2">
+                                                <p className="text-red-600 font-bold text-sm">
+                                                    {item.price_promo ? new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(item.price_promo).replace('₫', 'đ') : 
+                                                    (item.price_original ? new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(item.price_original).replace('₫', 'đ') : 'Liên hệ')}
+                                                </p>
+                                            </div>
+                                        </Link>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {related.accessories.length > 0 && (
+                            <div className="pt-2">
+                                <h3 className="text-lg font-semibold text-gray-800 mb-4">Phụ kiện khuyến nghị</h3>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                    {related.accessories.map((item: any) => (
+                                        <Link key={item.id} href={`/product/${item.slug || item.id}`} className="group bg-white rounded-xl border border-gray-100 p-3 hover:border-orange-300 hover:shadow-md transition-all flex flex-col h-full">
+                                            {item.imageUrl && (
+                                                <div className="relative w-full aspect-square rounded-lg overflow-hidden bg-gray-50 mb-3">
+                                                    <Image src={item.imageUrl} alt={item.name} fill className="object-cover group-hover:scale-105 transition-transform" />
+                                                </div>
+                                            )}
+                                            <h4 className="font-semibold text-sm text-gray-800 line-clamp-2 mb-2 group-hover:text-orange-600 transition-colors">{item.name}</h4>
+                                            <div className="mt-auto pt-2">
+                                                <p className="text-red-600 font-bold text-sm">
+                                                    {item.price_promo ? new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(item.price_promo).replace('₫', 'đ') : 
+                                                    (item.price_original ? new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(item.price_original).replace('₫', 'đ') : 'Liên hệ')}
+                                                </p>
+                                            </div>
+                                        </Link>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* Reviews */}
+                <ProductReviews data={data as any} reviews={reviews} />
             </div>
         </div>
     );

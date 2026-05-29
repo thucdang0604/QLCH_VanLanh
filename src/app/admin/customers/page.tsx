@@ -1,22 +1,33 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
-import { Search, Users, Loader2, Star, TrendingUp } from 'lucide-react';
-import { collection, query, orderBy, onSnapshot, limit, startAfter, getDocs, DocumentSnapshot, getDoc, doc } from 'firebase/firestore';
+import { Search, Users, Loader2, Star, TrendingUp, Plus, Download, Filter } from 'lucide-react';
+import { collection, query, orderBy, onSnapshot, limit, startAfter, getDocs, DocumentSnapshot, getDoc, doc, setDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import CustomerDetailDrawer, { type CustomerDetailRecord } from '@/components/admin/customers/CustomerDetailDrawer';
+import CustomerFormModal, { CustomerFormData } from '@/components/admin/customers/CustomerFormModal';
+import { toast } from 'sonner';
+import * as XLSX from 'xlsx';
+import { TierConfig } from '@/lib/customerTiers';
 
-interface Customer {
+interface Customer extends CustomerDetailRecord {
     id: string; // phone
     phone: string;
     name: string;
     type?: 'retail' | 'wholesale';
     totalSpent?: number;
     totalOrders?: number;
+    totalRepairs?: number;
     lastOrderDate?: unknown;
+    lastVisit?: unknown;
     createdAt?: unknown;
     updatedAt?: unknown;
+    tags?: string[];
+    email?: string;
+    address?: string;
+    note?: string;
 }
 
 const formatPrice = (price: number) => new Intl.NumberFormat('vi-VN').format(price) + 'đ';
@@ -33,9 +44,31 @@ export default function CustomersPage() {
     const [searchQuery, setSearchQuery] = useState('');
     const [typeFilter, setTypeFilter] = useState('');
     const [isSearchingDB, setIsSearchingDB] = useState(false);
+    
+    // Drawers & Modals
+    const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+    const [isFormOpen, setIsFormOpen] = useState(false);
+    const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
 
     const [lastDoc, setLastDoc] = useState<DocumentSnapshot | null>(null);
     const [hasMore, setHasMore] = useState(true);
+    const [tiers, setTiers] = useState<TierConfig[]>([]);
+
+    // Load dynamic tiers
+    useEffect(() => {
+        const unsub = onSnapshot(doc(db, 'system_config', 'tier_settings'), snap => {
+            if (snap.exists() && snap.data().tiers) {
+                setTiers(snap.data().tiers as TierConfig[]);
+            }
+        });
+        return () => unsub();
+    }, []);
+
+    const calculateTier = (spent: number) => {
+        if (!tiers || tiers.length === 0) return null;
+        const sorted = [...tiers].sort((a, b) => b.minSpent - a.minSpent);
+        return sorted.find(t => spent >= t.minSpent) || null;
+    };
 
     // Fetch real-time recent customers
     useEffect(() => {
@@ -76,13 +109,12 @@ export default function CustomersPage() {
 
     const searchInDatabase = async () => {
         if (!searchQuery.trim()) {
-            alert('Vui lòng nhập SĐT để tìm kiếm trên Server');
+            toast.error('Vui lòng nhập SĐT để tìm kiếm trên Server');
             return;
         }
         setIsSearchingDB(true);
         try {
-            // Because phone is the document ID, we can look up directly by ID
-            const phone = searchQuery.trim();
+            const phone = searchQuery.replace(/[^0-9]/g, '').trim();
             const docRef = doc(db, 'customers', phone);
             const docSnap = await getDoc(docRef);
             
@@ -93,12 +125,13 @@ export default function CustomersPage() {
                     if (exists) return prev;
                     return [foundCustomer, ...prev];
                 });
+                toast.success('Đã tìm thấy KH từ Server!');
             } else {
-                alert('Không tìm thấy dữ liệu trên máy chủ cho SĐT này.');
+                toast.error('Không tìm thấy dữ liệu trên máy chủ cho SĐT này.');
             }
         } catch (error) {
             console.error("Lỗi khi tìm kiếm trên database", error);
-            alert('Có lỗi khi tìm kiếm.');
+            toast.error('Có lỗi khi tìm kiếm.');
         } finally {
             setIsSearchingDB(false);
         }
@@ -108,7 +141,8 @@ export default function CustomersPage() {
         const q = searchQuery.toLowerCase();
         const matchesSearch = !q ||
             c.id.includes(q) ||
-            (c.name || '').toLowerCase().includes(q);
+            (c.name || '').toLowerCase().includes(q) ||
+            (c.tags || []).some(t => t.toLowerCase().includes(q));
         const matchesType = !typeFilter || c.type === typeFilter;
         return matchesSearch && matchesType;
     });
@@ -118,11 +152,99 @@ export default function CustomersPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     useEffect(() => { resetPage(); }, [searchQuery, typeFilter]);
 
-    // Stats based on currently loaded customers (good for quick view, but remember it's partial data)
+    // Unique tags for combobox
+    const availableTags = useMemo(() => {
+        const tagSet = new Set<string>();
+        customers.forEach(c => c.tags?.forEach(t => tagSet.add(t)));
+        return Array.from(tagSet);
+    }, [customers]);
+
+    // Stats
     const stats = {
         totalLoaded: customers.length,
         retail: customers.filter(c => c.type === 'retail' || !c.type).length,
         wholesale: customers.filter(c => c.type === 'wholesale').length,
+    };
+
+    // Save Customer
+    const handleSaveCustomer = async (data: CustomerFormData) => {
+        const phoneId = data.phone;
+        const ref = doc(db, 'customers', phoneId);
+        
+        if (editingCustomer) {
+            // Update
+            await updateDoc(ref, {
+                name: data.name,
+                type: data.type,
+                tags: data.tags || [],
+                note: data.note || '',
+                address: data.address || '',
+                email: data.email || '',
+                updatedAt: serverTimestamp()
+            });
+            toast.success('Đã cập nhật thông tin khách hàng');
+        } else {
+            // Check existence
+            const snap = await getDoc(ref);
+            if (snap.exists()) {
+                throw new Error('Số điện thoại này đã tồn tại trong hệ thống!');
+            }
+            // Create
+            await setDoc(ref, {
+                phone: data.phone,
+                name: data.name,
+                type: data.type,
+                tags: data.tags || [],
+                note: data.note || '',
+                address: data.address || '',
+                email: data.email || '',
+                totalSpent: 0,
+                totalOrders: 0,
+                totalRepairs: 0,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+                lastVisit: serverTimestamp(),
+            });
+            toast.success('Đã thêm khách hàng mới');
+        }
+    };
+
+    const openAddModal = () => {
+        setEditingCustomer(null);
+        setIsFormOpen(true);
+    };
+
+    const openEditModal = (c: Customer, e: React.MouseEvent) => {
+        e.stopPropagation(); // prevent opening drawer
+        setEditingCustomer(c);
+        setIsFormOpen(true);
+    };
+
+    // Export Excel
+    const handleExportExcel = () => {
+        if (filteredCustomers.length === 0) {
+            toast.error('Không có dữ liệu để xuất');
+            return;
+        }
+        
+        const data = filteredCustomers.map(c => ({
+            'SĐT': c.phone,
+            'Tên KH': c.name,
+            'Loại KH': c.type === 'wholesale' ? 'Khách sỉ' : 'Khách lẻ',
+            'Tags': c.tags?.join(', ') || '',
+            'Tổng chi tiêu': c.totalSpent || 0,
+            'Số đơn hàng': c.totalOrders || 0,
+            'Số lần sửa chữa': c.totalRepairs || 0,
+            'Lần mua/đến cuối': formatDate(c.lastOrderDate || c.lastVisit),
+            'Email': c.email || '',
+            'Địa chỉ': c.address || '',
+            'Ghi chú': c.note || '',
+        }));
+
+        const ws = XLSX.utils.json_to_sheet(data);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Khách hàng");
+        XLSX.writeFile(wb, `Danh_sach_KH_${new Date().toISOString().slice(0, 10)}.xlsx`);
     };
 
     if (loading && customers.length === 0) return (
@@ -134,28 +256,36 @@ export default function CustomersPage() {
     return (
         <div className="space-y-6">
             {/* Page Header */}
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-                        <Users className="text-orange-500" /> Quản lý khách hàng
+                        <Users className="text-orange-500" /> Quản lý khách hàng (CRM)
                     </h1>
-                    <p className="text-gray-500 text-sm mt-0.5">Danh sách khách hàng (CRM)</p>
+                    <p className="text-gray-500 text-sm mt-0.5">Danh sách, phân loại, tags và lịch sử giao dịch</p>
+                </div>
+                <div className="flex gap-2">
+                    <button onClick={handleExportExcel} className="flex items-center gap-2 bg-green-50 text-green-700 px-4 py-2 rounded-xl hover:bg-green-100 font-medium text-sm transition-colors border border-green-200">
+                        <Download size={18} /> Xuất Excel
+                    </button>
+                    <button onClick={openAddModal} className="flex items-center gap-2 bg-orange-500 text-white px-4 py-2 rounded-xl hover:bg-orange-600 font-medium text-sm transition-colors">
+                        <Plus size={18} /> Thêm khách hàng
+                    </button>
                 </div>
             </div>
 
             {/* Stats */}
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <div className="bg-white rounded-xl border p-4 flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
+                    <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 shrink-0">
                         <Users size={20} />
                     </div>
                     <div>
-                        <p className="text-xs text-gray-500">Khách hàng hiển thị</p>
+                        <p className="text-xs text-gray-500">Hiển thị</p>
                         <p className="text-xl font-bold text-gray-800">{stats.totalLoaded}</p>
                     </div>
                 </div>
                 <div className="bg-white rounded-xl border p-4 flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center text-green-600">
+                    <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center text-green-600 shrink-0">
                         <TrendingUp size={20} />
                     </div>
                     <div>
@@ -164,12 +294,21 @@ export default function CustomersPage() {
                     </div>
                 </div>
                 <div className="bg-white rounded-xl border p-4 flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center text-purple-600">
+                    <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 shrink-0">
                         <Star size={20} />
                     </div>
                     <div>
                         <p className="text-xs text-gray-500">Khách sỉ / VIP</p>
                         <p className="text-xl font-bold text-gray-800">{stats.wholesale}</p>
+                    </div>
+                </div>
+                <div className="bg-white rounded-xl border p-4 flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 shrink-0">
+                        <Filter size={20} />
+                    </div>
+                    <div>
+                        <p className="text-xs text-gray-500">Thẻ (Tags)</p>
+                        <p className="text-xl font-bold text-gray-800">{availableTags.length}</p>
                     </div>
                 </div>
             </div>
@@ -180,7 +319,7 @@ export default function CustomersPage() {
                     <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                     <input
                         type="text"
-                        placeholder="Tìm theo Số điện thoại hoặc Tên..."
+                        placeholder="Tìm SĐT, Tên hoặc Tag..."
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         className="w-full h-11 pl-10 pr-4 border rounded-lg focus:border-orange-500 focus:outline-none"
@@ -201,7 +340,7 @@ export default function CustomersPage() {
                     onChange={(e) => setTypeFilter(e.target.value)}
                     className="w-full md:w-48 h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none bg-white"
                 >
-                    <option value="">Loại khách hàng</option>
+                    <option value="">Tất cả loại KH</option>
                     <option value="retail">Khách lẻ</option>
                     <option value="wholesale">Khách sỉ</option>
                 </select>
@@ -214,10 +353,10 @@ export default function CustomersPage() {
                         <thead className="bg-gray-50">
                             <tr>
                                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Khách hàng</th>
-                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Loại</th>
-                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Tổng chi tiêu</th>
-                                <th className="px-6 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Số đơn hàng</th>
-                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Lần mua cuối</th>
+                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Loại & Hạng</th>
+                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Thông tin mở rộng</th>
+                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Giao dịch</th>
+                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Hành động</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
@@ -228,32 +367,67 @@ export default function CustomersPage() {
                                         <p>Không có dữ liệu khách hàng</p>
                                     </td>
                                 </tr>
-                            ) : paginatedData.map((customer) => (
-                                <tr key={customer.id} className="hover:bg-gray-50 transition-colors">
-                                    <td className="px-6 py-4">
-                                        <p className="text-sm font-bold text-gray-900">{customer.name || 'Khách lẻ'}</p>
+                            ) : paginatedData.map((customer) => {
+                                const tier = calculateTier(customer.totalSpent || 0);
+                                return (
+                                <tr key={customer.id} className="hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => setSelectedCustomer(customer)}>
+                                    <td className="px-6 py-4 align-top">
+                                        <p className="text-sm font-bold text-gray-900 group-hover:text-orange-600">
+                                            {customer.name || 'Khách lẻ'}
+                                        </p>
                                         <p className="text-xs text-gray-500 font-mono mt-0.5">{customer.phone}</p>
+                                        {customer.tags && customer.tags.length > 0 && (
+                                            <div className="mt-2 flex flex-wrap gap-1">
+                                                {customer.tags.map(tag => (
+                                                    <span key={tag} className="px-1.5 py-0.5 bg-blue-50 border border-blue-100 text-blue-700 text-[10px] rounded-md font-semibold">
+                                                        {tag}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        )}
                                     </td>
-                                    <td className="px-6 py-4">
-                                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ${
-                                            customer.type === 'wholesale' 
-                                                ? 'bg-purple-100 text-purple-700' 
-                                                : 'bg-green-100 text-green-700'
-                                        }`}>
-                                            {customer.type === 'wholesale' ? 'Sỉ' : 'Lẻ'}
-                                        </span>
+                                    <td className="px-6 py-4 align-top">
+                                        <div className="flex flex-col gap-1.5 items-start">
+                                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold ${
+                                                customer.type === 'wholesale' ? 'bg-purple-100 text-purple-700 border border-purple-200' : 'bg-green-100 text-green-700 border border-green-200'
+                                            }`}>
+                                                {customer.type === 'wholesale' ? 'SỈ / THỢ' : 'LẺ'}
+                                            </span>
+                                            {tier && (
+                                                <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-orange-100 text-orange-700 border border-orange-200">
+                                                    HẠNG: {tier.name.toUpperCase()}
+                                                </span>
+                                            )}
+                                        </div>
                                     </td>
-                                    <td className="px-6 py-4 text-sm font-bold text-orange-600">
-                                        {formatPrice(customer.totalSpent || 0)}
+                                    <td className="px-6 py-4 align-top">
+                                        <div className="text-xs text-gray-600 space-y-1">
+                                            {customer.email && <p><span className="font-medium text-gray-500">Email:</span> {customer.email}</p>}
+                                            {customer.address && <p><span className="font-medium text-gray-500">Địa chỉ:</span> <span className="line-clamp-1">{customer.address}</span></p>}
+                                            {customer.note && <p className="text-orange-600 bg-orange-50 p-1 rounded inline-block max-w-xs truncate"><span className="font-medium">Lưu ý:</span> {customer.note}</p>}
+                                        </div>
                                     </td>
-                                    <td className="px-6 py-4 text-sm text-gray-700 font-medium text-center">
-                                        {customer.totalOrders || 0}
+                                    <td className="px-6 py-4 align-top">
+                                        <p className="text-sm font-bold text-orange-600">
+                                            {formatPrice(customer.totalSpent || 0)}
+                                        </p>
+                                        <div className="flex gap-2 text-[11px] text-gray-500 mt-1 font-medium">
+                                            <span>{customer.totalOrders || 0} ĐH</span>
+                                            <span>•</span>
+                                            <span>{customer.totalRepairs || 0} Sửa chữa</span>
+                                        </div>
+                                        <p className="text-[10px] text-gray-400 mt-1">Gần nhất: {formatDate(customer.lastOrderDate || customer.lastVisit)}</p>
                                     </td>
-                                    <td className="px-6 py-4 text-sm text-gray-500">
-                                        {formatDate(customer.lastOrderDate)}
+                                    <td className="px-6 py-4 align-top">
+                                        <button 
+                                            onClick={(e) => openEditModal(customer, e)}
+                                            className="text-sm font-medium text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-colors"
+                                        >
+                                            Sửa
+                                        </button>
                                     </td>
                                 </tr>
-                            ))}
+                            )})}
                         </tbody>
                     </table>
                 </div>
@@ -279,6 +453,22 @@ export default function CustomersPage() {
                     </div>
                 )}
             </div>
+
+            {/* Modals & Drawers */}
+            <CustomerDetailDrawer
+                customer={selectedCustomer}
+                isOpen={!!selectedCustomer}
+                onClose={() => setSelectedCustomer(null)}
+            />
+
+            <CustomerFormModal 
+                isOpen={isFormOpen} 
+                onClose={() => setIsFormOpen(false)} 
+                onSave={handleSaveCustomer}
+                initialData={editingCustomer as unknown as CustomerFormData}
+                isEditMode={!!editingCustomer}
+                availableTags={availableTags}
+            />
         </div>
     );
 }

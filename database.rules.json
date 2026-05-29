@@ -7,8 +7,8 @@
     "chats": {
       ".read": "auth != null && root.child('admin_roles').child(auth.uid).child('expiresAt').val() > now && (root.child('admin_roles').child(auth.uid).child('role').val() === 'admin' || root.child('admin_roles').child(auth.uid).child('permissions').child('chat_support').val() === true)",
       "$roomId": {
-        ".read": "auth != null && ((root.child('admin_roles').child(auth.uid).child('expiresAt').val() > now && (root.child('admin_roles').child(auth.uid).child('role').val() === 'admin' || root.child('admin_roles').child(auth.uid).child('permissions').child('chat_support').val() === true)) || auth.uid === $roomId) || $roomId.beginsWith('guest_')",
-        ".write": "auth != null && ((root.child('admin_roles').child(auth.uid).child('expiresAt').val() > now && (root.child('admin_roles').child(auth.uid).child('role').val() === 'admin' || root.child('admin_roles').child(auth.uid).child('permissions').child('chat_support').val() === true)) || auth.uid === $roomId) || $roomId.beginsWith('guest_')",
+        ".read": "auth != null && ((root.child('admin_roles').child(auth.uid).child('expiresAt').val() > now && (root.child('admin_roles').child(auth.uid).child('role').val() === 'admin' || root.child('admin_roles').child(auth.uid).child('permissions').child('chat_support').val() === true)) || auth.uid === $roomId)",
+        ".write": "auth != null && ((root.child('admin_roles').child(auth.uid).child('expiresAt').val() > now && (root.child('admin_roles').child(auth.uid).child('role').val() === 'admin' || root.child('admin_roles').child(auth.uid).child('permissions').child('chat_support').val() === true)) || auth.uid === $roomId)",
         "info": {
           ".validate": "newData.hasChildren(['displayName']) || newData.hasChildren(['lastMessage']) || newData.hasChildren(['botActive']) || newData.hasChildren(['hasUnread']) || newData.hasChildren(['channel'])",
           "odId": { ".validate": "newData.isString() && newData.val().length <= 220" },
@@ -19,6 +19,10 @@
           "externalPageId": { ".validate": "newData.isString() && newData.val().length <= 180" },
           "displayName": { ".validate": "newData.isString() && newData.val().length <= 50" },
           "avatarUrl": { ".validate": "newData.isString() && newData.val().length <= 2048" },
+          "profileSyncedAt": { ".validate": "newData.isNumber()" },
+          "customerId": { ".validate": "newData.isString() && newData.val().length <= 20" },
+          "customerName": { ".validate": "newData.isString() && newData.val().length <= 100" },
+          "customerPhone": { ".validate": "newData.isString() && newData.val().length <= 20" },
           "email": { ".validate": "newData.val() === null || (newData.isString() && newData.val().length <= 120)" },
           "isGuest": { ".validate": "newData.isBoolean()" },
           "lastMessage": { ".validate": "newData.isString() && newData.val().length <= 500" },
@@ -31,7 +35,6 @@
           "lastActivity": { ".validate": "newData.isNumber()" },
           "startedAt": { ".validate": "newData.isNumber()" },
           "phone": { ".validate": "newData.isString() && newData.val().length <= 15" },
-          "rawLastEvent": { ".validate": "newData.val() === null || (newData.isString() && newData.val().length <= 2000)" },
           "$other": { ".validate": false }
         },
         "messages": {
@@ -40,7 +43,7 @@
             "text": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 500" },
             "senderId": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 128" },
             "senderType": {
-              ".validate": "newData.isString() && ( ((newData.val() === 'admin' || newData.val() === 'bot' || newData.val() === 'ai') && (auth != null && root.child('admin_roles').child(auth.uid).child('expiresAt').val() > now && (root.child('admin_roles').child(auth.uid).child('role').val() === 'admin' || root.child('admin_roles').child(auth.uid).child('permissions').child('chat_support').val() === true))) || (newData.val() === 'user' && auth != null && auth.uid === newData.parent().child('senderId').val() && auth.uid === $roomId) || (newData.val() === 'guest' && auth == null && $roomId.beginsWith('guest_') && newData.parent().child('senderId').val() === $roomId) )"
+              ".validate": "newData.isString() && ( ((newData.val() === 'admin' || newData.val() === 'bot' || newData.val() === 'ai') && (auth != null && root.child('admin_roles').child(auth.uid).child('expiresAt').val() > now && (root.child('admin_roles').child(auth.uid).child('role').val() === 'admin' || root.child('admin_roles').child(auth.uid).child('permissions').child('chat_support').val() === true))) || (newData.val() === 'user' && auth != null && auth.uid === newData.parent().child('senderId').val() && auth.uid === $roomId) )"
             },
             "timestamp": { ".validate": "newData.isNumber()" },
             "channel": { ".validate": "newData.isString() && (newData.val() === 'web' || newData.val() === 'zalo' || newData.val() === 'facebook')" },
@@ -49,6 +52,17 @@
             "externalUserId": { ".validate": "newData.isString() && newData.val().length <= 180" },
             "externalPageId": { ".validate": "newData.isString() && newData.val().length <= 180" },
             "externalMessageId": { ".validate": "newData.val() === null || (newData.isString() && newData.val().length <= 180)" },
+            "attachments": {
+              "$attachmentId": {
+                ".validate": "newData.hasChildren(['type'])",
+                "type": { ".validate": "newData.isString() && (newData.val() === 'image' || newData.val() === 'sticker' || newData.val() === 'audio' || newData.val() === 'video' || newData.val() === 'file' || newData.val() === 'unknown')" },
+                "url": { ".validate": "newData.isString() && newData.val().length <= 2048" },
+                "stickerId": { ".validate": "newData.isString() && newData.val().length <= 180" },
+                "storagePath": { ".validate": "newData.isString() && newData.val().length <= 300" },
+                "contentType": { ".validate": "newData.isString() && newData.val().length <= 80" },
+                "$other": { ".validate": false }
+              }
+            },
             "$other": { ".validate": false }
           }
         },

@@ -2,42 +2,44 @@
 
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
     Search, ShoppingCart, Plus, Minus, Trash2, User, Phone, Receipt, X,
     Package, CreditCard, Banknote, QrCode, Tag, Loader2, CheckCircle2,
     AlertTriangle, Wrench
 } from 'lucide-react';
-import { collection, getDocs, serverTimestamp, doc, increment, runTransaction, query, where, orderBy as fbOrderBy } from 'firebase/firestore';
-import { upsertCustomerRecord } from '@/lib/customerSync';
+import { collection, getDocs, query, where, orderBy as fbOrderBy } from 'firebase/firestore';
+
 import { useAuth } from '@/lib/AuthContext';
 import { useConfig } from '@/lib/ConfigContext';
 import Modal from '@/components/admin/Modal';
 import UniversalProductModal from '@/components/admin/UniversalProductModal';
 import Image from 'next/image';
-import { db } from '@/lib/firebase';
-import type { Product, Order } from '@/lib/types';
-import { calculateAndSaveCommissions } from '@/lib/commissionUtils';
+import { db, getAuthInstance } from '@/lib/firebase';
+import type { Product } from '@/lib/types';
+
 import { toastError } from '@/lib/toast';
 import { DEFAULT_CONFIG } from '@/lib/config-defaults';
 import { PART_CATEGORY, isPartCategory } from '@/lib/constants';
 import { fetchActiveDiscountRules, calculateAccessoryDiscounts } from '@/lib/discountRuleUtils';
 import CurrencyInput from '@/components/admin/CurrencyInput';
+import { consumeChatWorkflowHandoff } from '@/lib/chatWorkflowHandoff';
 
 
 // ── Receipt item shape (matches orderData.items) ──
 interface OrderLineItem {
     productId: string;
     productName: string;
-    product_id: string;
-    product_name: string;
+    product_id?: string;
+    product_name?: string;
     quantity: number;
     price: number;
-    costPrice: number;
+    costPrice?: number;
 }
 
 interface LastOrderData {
     id: string;
-    customer_info: { name: string; phone: string; email: string; city: string; district: string; ward: string; address: string };
+    customer_info: { name: string; phone: string; email?: string; city?: string; district?: string; ward?: string; address?: string };
     items: OrderLineItem[];
     total_amount: number;
     discount_amount: number;
@@ -55,8 +57,9 @@ interface CartItem {
     image?: string;
     originalPrice: number;
     sellingPrice: number; // Overridable
-    costPrice: number;
+    costPrice?: number;
     quantity: number;
+    isRepairTicket?: boolean;
 }
 
 const paymentMethods = [
@@ -69,6 +72,7 @@ const paymentMethods = [
 export default function POSPage() {
     const { user } = useAuth();
     const { config } = useConfig();
+    const searchParams = useSearchParams();
 
     // Products
     const [products, setProducts] = useState<(Product & { id: string })[]>([]);
@@ -83,6 +87,7 @@ export default function POSPage() {
     const [paymentMethod, setPaymentMethod] = useState('cash');
     const [discount, setDiscount] = useState(0);
     const [deposit, setDeposit] = useState(0);
+    const chatPrefillApplied = useRef(false);
 
     // Checkout
     const [isProcessing, setIsProcessing] = useState(false);
@@ -99,11 +104,22 @@ export default function POSPage() {
         deviceModel: string;
         status: string;
         parts: { productName: string; partType?: string; unitPriceAtUse?: number }[];
+        paymentAmount: number;
+        paymentStatus: string;
     }
     const [linkedRepair, setLinkedRepair] = useState<RepairTicketInfo | null>(null);
     const [repairLoading, setRepairLoading] = useState(false);
     const [autoDiscountAmount, setAutoDiscountAmount] = useState(0);
     const [discountDetails, setDiscountDetails] = useState<{ productName: string; discountAmount: number; ruleName: string }[]>([]);
+
+    useEffect(() => {
+        if (chatPrefillApplied.current || searchParams.get('source') !== 'chat') return;
+        const handoff = consumeChatWorkflowHandoff();
+        if (!handoff) return;
+        setCustomerName(handoff.customerName);
+        setCustomerPhone(handoff.customerPhone);
+        chatPrefillApplied.current = true;
+    }, [searchParams]);
 
     // Lookup repair by phone
     const lookupRepairByPhone = async (phone: string) => {
@@ -134,7 +150,9 @@ export default function POSPage() {
                         productName: String(p.productName || ''),
                         partType: String(p.partType || ''),
                         unitPriceAtUse: Number(p.unitPriceAtUse || 0)
-                    }))
+                    })),
+                    paymentAmount: Number(data.payment?.amount || 0),
+                    paymentStatus: String(data.payment?.status || 'unpaid')
                 });
                 // Auto-fill customer name if empty
                 if (!customerName && data.customerName) {
@@ -292,6 +310,31 @@ export default function POSPage() {
         });
     };
 
+    const addRepairToCart = () => {
+        if (!linkedRepair) return;
+        
+        // Prevent adding if already in cart
+        if (cart.some(c => c.productId === linkedRepair.id)) {
+            toastError('Phiếu sửa chữa đã có trong hóa đơn!');
+            return;
+        }
+
+        if (linkedRepair.paymentStatus === 'paid' || linkedRepair.paymentStatus === 'refunded') {
+            toastError('Phiếu này đã được thanh toán hoặc hoàn tiền!');
+            return;
+        }
+
+        setCart(prev => [{
+            productId: linkedRepair.id,
+            name: `[Phiếu sửa chữa] ${linkedRepair.deviceModel}`,
+            originalPrice: linkedRepair.paymentAmount,
+            sellingPrice: linkedRepair.paymentAmount,
+            costPrice: 0,
+            quantity: 1,
+            isRepairTicket: true
+        }, ...prev]);
+    };
+
     const updateQuantity = (productId: string, delta: number) => {
         setCart(prev =>
             prev.map(c => {
@@ -311,8 +354,8 @@ export default function POSPage() {
 
     const updatePrice = (productId: string, newPrice: number) => {
         const item = cart.find(c => c.productId === productId);
-        if (item && item.costPrice > 0 && newPrice < item.costPrice && newPrice > 0) {
-            if (!confirm(`⚠️ Giá bán (${newPrice.toLocaleString('vi-VN')}đ) thấp hơn giá vốn (${item.costPrice.toLocaleString('vi-VN')}đ). Bạn sẽ lỗ ${(item.costPrice - newPrice).toLocaleString('vi-VN')}đ/sp. Tiếp tục?`)) {
+        if (item && (item.costPrice || 0) > 0 && newPrice < (item.costPrice || 0) && newPrice > 0) {
+            if (!confirm(`⚠️ Giá bán (${newPrice.toLocaleString('vi-VN')}đ) thấp hơn giá vốn (${(item.costPrice || 0).toLocaleString('vi-VN')}đ). Bạn sẽ lỗ ${((item.costPrice || 0) - newPrice).toLocaleString('vi-VN')}đ/sp. Tiếp tục?`)) {
                 return;
             }
         }
@@ -337,7 +380,7 @@ export default function POSPage() {
         setIsProcessing(true);
         try {
             // Pre-processing: gom nhóm cart theo productId chống payload manipulation
-            const groupedCart = new Map<string, { name: string; totalQty: number; costPrice: number; items: typeof cart }>();
+            const groupedCart = new Map<string, { name: string; totalQty: number; costPrice?: number; items: typeof cart }>();
             for (const item of cart) {
                 const existing = groupedCart.get(item.productId);
                 if (existing) {
@@ -353,121 +396,49 @@ export default function POSPage() {
                 }
             }
 
-            const isPending = deposit > 0 && deposit < total;
+            const operationKey = crypto.randomUUID();
+
+            const repairItem = cart.find(c => c.isRepairTicket);
+            const repairTicketId = repairItem ? repairItem.productId : undefined;
 
             const orderData = {
+                idempotencyKey: operationKey,
+                repairTicketId,
                 customer_info: {
                     name: customerName.trim() || 'Khách lẻ',
                     phone: customerPhone.trim(),
-                    email: '', city: '', district: '', ward: '', address: ''
                 },
                 items: cart.map(c => ({
                     productId: c.productId,
                     productName: c.name,
-                    product_id: c.productId, // retain for backward compatibility
-                    product_name: c.name, // retain for backward compatibility
                     quantity: c.quantity,
                     price: c.sellingPrice,
-                    costPrice: c.costPrice || 0,
+                    isRepairTicket: c.isRepairTicket
                 })),
                 total_amount: total,
                 discount_amount: discount,
                 subtotal_amount: subtotal,
                 deposit_amount: deposit,
-                status: isPending ? 'Pending' : 'Completed',
-                is_vat_exported: false,
-                payment_method: paymentMethod === 'cash' ? 'COD' : paymentMethod === 'bank' ? 'Bank' : paymentMethod === 'installment' ? 'Installment' : 'Momo',
-                source: 'pos',
-                createdBy: user?.uid || '',
-                createdByName: user?.displayName || 'POS',
-                createdAt: serverTimestamp(),
-                updatedAt: serverTimestamp(),
-                paymentHistory: [{
-                    type: isPending ? 'deposit' : 'full',
-                    amount: isPending ? deposit : total,
-                    timestamp: Date.now(),
-                    note: isPending
-                        ? `Đặt cọc POS — ${paymentMethod === 'cash' ? 'Tiền mặt' : paymentMethod === 'bank' ? 'Chuyển khoản' : paymentMethod === 'installment' ? 'Trả góp' : 'Momo'}`
-                        : `Thanh toán POS — ${paymentMethod === 'cash' ? 'Tiền mặt' : paymentMethod === 'bank' ? 'Chuyển khoản' : paymentMethod === 'installment' ? 'Trả góp' : 'Momo'}`,
-                }],
+                payment_method: paymentMethod === 'cash' ? 'CASH' : paymentMethod === 'bank' ? 'BANK' : paymentMethod === 'installment' ? 'INSTALLMENT' : 'MOMO',
             };
 
-            // Use runTransaction for atomic order creation + stock update (Double-Entry)
-            const orderRef = doc(collection(db, 'orders'));
-            await runTransaction(db, async (transaction) => {
-                // Phase 1: Read all products (deduplicated by groupedCart)
-                const productDocs = new Map<string, { ref: ReturnType<typeof doc>; data: Record<string, unknown> }>();
-                for (const productId of groupedCart.keys()) {
-                    const ref = doc(db, 'products', productId);
-                    const pDoc = await transaction.get(ref);
-                    if (!pDoc.exists()) throw new Error(`Sản phẩm "${groupedCart.get(productId)!.name}" không tồn tại.`);
-                    productDocs.set(productId, { ref, data: pDoc.data() as Record<string, unknown> });
-                }
-
-                // Phase 2: Validate tổng quantity (chống payload manipulation)
-                for (const [productId, group] of groupedCart.entries()) {
-                    const p = productDocs.get(productId)!;
-                    const available = (Number(p.data.stock) || 0) - (Number(p.data.held) || 0);
-                    if (group.totalQty > available) {
-                        throw new Error(`"${group.name}" chỉ còn ${available} sản phẩm khả dụng (đang bán ${group.totalQty}).`);
-                    }
-                }
-
-                // Đồng bộ Customer CRM (Thực hiện tất cả các READ before WRITES)
-                await upsertCustomerRecord(transaction, db, {
-                    phone: customerPhone.trim(),
-                    name: customerName.trim(),
-                    type: 'order',
-                    amount: total
-                });
-
-                // Write order
-                transaction.set(orderRef, orderData);
-
-                // Phase 3: Decrease stock (+ held if Pending) + Audit Trail
-                for (const [productId, group] of groupedCart.entries()) {
-                    const p = productDocs.get(productId)!;
-                    
-                    if (isPending) {
-                        // Đơn pending/cọc: chỉ tăng held, KHÔNG trừ stock
-                        transaction.update(p.ref, {
-                            held: increment(group.totalQty),
-                        });
-                        // KHÔNG ghi log vào inventory_logs
-                    } else {
-                        // Đơn Completed: chỉ trừ stock, KHÔNG chạm held
-                        transaction.update(p.ref, {
-                            stock: increment(-group.totalQty),
-                        });
-                        
-                        // Ghi log xuất kho vật lý
-                        const logRef = doc(collection(db, 'inventory_logs'));
-                        transaction.set(logRef, {
-                            productId,
-                            productName: group.name,
-                            quantity: -group.totalQty,
-                            costPriceAtLog: Number(p.data.costPrice) || group.costPrice,
-                            type: 'SALE',
-                            referenceId: orderRef.id,
-                            referenceType: 'order',
-                            createdBy: user?.uid || '',
-                            createdByName: user?.displayName || 'POS',
-                            createdAt: serverTimestamp(),
-                        });
-                    }
-                }
+            const auth = await getAuthInstance();
+            const idToken = await auth.currentUser?.getIdToken();
+            const res = await fetch('/api/pos/checkout', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${idToken}`
+                },
+                body: JSON.stringify(orderData)
             });
 
-            // Generate commission (non-blocking)
-            if (user) {
-                calculateAndSaveCommissions(
-                    { uid: user.uid, displayName: user.displayName || 'POS' },
-                    'order',
-                    { id: orderRef.id, ...orderData } as unknown as Order
-                ).catch(console.error);
+            const data = await res.json();
+            if (!res.ok) {
+                throw new Error(data.error || 'Lỗi khi thanh toán qua API');
             }
 
-            setLastOrder({ id: orderRef.id, ...orderData, createdAt: new Date() });
+            setLastOrder({ id: data.orderId, ...orderData, createdAt: new Date() });
             setShowReceipt(true);
 
             // Reset cart
@@ -564,18 +535,20 @@ export default function POSPage() {
                                 <div className="flex items-center gap-1 bg-white rounded-lg border">
                                     <button
                                         onClick={() => updateQuantity(item.productId, -1)}
-                                        className="p-1 hover:bg-gray-100 rounded-l-lg"
+                                        className="p-1 hover:bg-gray-100 rounded-l-lg disabled:opacity-50 disabled:cursor-not-allowed"
                                         aria-label="Giảm số lượng"
                                         title="Giảm số lượng"
+                                        disabled={item.isRepairTicket}
                                     >
                                         <Minus size={14} />
                                     </button>
                                     <span className="px-2 text-sm font-bold min-w-[24px] text-center">{item.quantity}</span>
                                     <button
                                         onClick={() => updateQuantity(item.productId, 1)}
-                                        className="p-1 hover:bg-gray-100 rounded-r-lg"
+                                        className="p-1 hover:bg-gray-100 rounded-r-lg disabled:opacity-50 disabled:cursor-not-allowed"
                                         aria-label="Tăng số lượng"
                                         title="Tăng số lượng"
+                                        disabled={item.isRepairTicket}
                                     >
                                         <Plus size={14} />
                                     </button>
@@ -584,7 +557,8 @@ export default function POSPage() {
                                     <Tag size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" />
                                     <CurrencyInput value={item.sellingPrice}
                                         onChange={v => updatePrice(item.productId, v)}
-                                        className={`w-full pl-7 pr-2 py-1 text-sm border rounded-lg text-right font-semibold ${item.sellingPrice !== item.originalPrice ? 'border-orange-300 text-orange-600 bg-orange-50' : ''}`}
+                                        disabled={item.isRepairTicket}
+                                        className={`w-full pl-7 pr-2 py-1 text-sm border rounded-lg text-right font-semibold ${item.sellingPrice !== item.originalPrice ? 'border-orange-300 text-orange-600 bg-orange-50' : ''} ${item.isRepairTicket ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`}
                                     />
                                 </div>
                                 <span className="text-sm font-bold text-gray-700 whitespace-nowrap min-w-[70px] text-right">
@@ -624,6 +598,28 @@ export default function POSPage() {
                         {linkedRepair.parts.length > 0 && (
                             <p className="text-blue-500">LK: {linkedRepair.parts.map(p => p.productName).join(', ')}</p>
                         )}
+                        
+                        {linkedRepair.paymentAmount > 0 && (
+                            <div className="mt-2 pt-2 border-t border-blue-200 flex items-center justify-between">
+                                <span className="font-semibold text-blue-800">
+                                    Chi phí sửa chữa: {formatPrice(linkedRepair.paymentAmount)}
+                                </span>
+                                {(linkedRepair.paymentStatus === 'paid' || linkedRepair.paymentStatus === 'refunded') ? (
+                                    <span className="text-green-600 font-bold bg-green-100 px-2 py-1 rounded-md">
+                                        Đã thanh toán
+                                    </span>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        onClick={addRepairToCart}
+                                        className="py-1 px-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors"
+                                    >
+                                        Thêm vào HĐ
+                                    </button>
+                                )}
+                            </div>
+                        )}
+
                         {discountDetails.length > 0 && (
                             <div className="mt-1 pt-1 border-t border-blue-200">
                                 <p className="font-semibold text-green-700">🎁 Giảm PK tự động:</p>

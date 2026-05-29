@@ -75,7 +75,7 @@ export default function SettingsPage() {
                 setSeeding(false);
                 return;
             }
-            const idToken = await user.getIdToken();
+            const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
             const res = await fetch('/api/seed-config', {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${idToken}` },

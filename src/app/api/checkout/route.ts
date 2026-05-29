@@ -205,12 +205,13 @@ export async function POST(request: NextRequest) {
             // Đồng bộ Customer CRM
             if (customerRef && customerSnap) {
                 if (!customerSnap.exists) {
+                    // Mới tạo → Không cộng aggregate vì Pending
                     transaction.set(customerRef, {
                         phone: normalizedPhone,
                         name: name.trim() || 'Khách lẻ',
                         address: '',
-                        totalSpent: subtotal_amount,
-                        totalOrders: 1,
+                        totalSpent: 0,
+                        totalOrders: 0,
                         totalRepairs: 0,
                         totalAppointments: 0,
                         lastVisit: FieldValue.serverTimestamp(),
@@ -223,8 +224,6 @@ export async function POST(request: NextRequest) {
                     const updateData: Record<string, unknown> = {
                         updatedAt: FieldValue.serverTimestamp(),
                         lastVisit: FieldValue.serverTimestamp(),
-                        totalSpent: (currentData.totalSpent || 0) + subtotal_amount,
-                        totalOrders: (currentData.totalOrders || 0) + 1,
                     };
                     
                     if (name.trim() !== '' && name.trim() !== 'Khách lẻ' && name.trim() !== currentData.name) {

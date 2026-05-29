@@ -70,7 +70,7 @@ const menuGroups = [
         groupName: 'Kho hàng',
         items: [
             { name: 'Sản phẩm bán lẻ', href: '/admin/products', icon: Package, permission: 'manage_products' },
-            { name: 'Kho linh kiện', href: '/admin/parts', icon: Warehouse, permission: 'manage_products' },
+            { name: 'Kho linh kiện', href: '/admin/parts', icon: Warehouse, permission: 'manage_inventory' },
             { name: 'Tồn kho', href: '/admin/inventory/stock', icon: Warehouse, permission: 'manage_inventory' },
             { name: 'Nhập hàng', href: '/admin/inventory', icon: ArrowDownToLine, permission: 'manage_inventory' },
             { name: 'Nhà cung cấp', href: '/admin/suppliers', icon: Building2, permission: 'manage_inventory' },

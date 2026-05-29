@@ -1,0 +1,8 @@
+﻿- [x] 1. Khá»Ÿi táº¡o cáº¥u trĂºc thÆ° má»¥c `roadmap_v2` vĂ  `roadmap_v2/data`.
+- [x] 2. Copy `manifest.json` tá»« `roadmap/` sang `roadmap_v2/data/`.
+- [x] 3. BĂ³c tĂ¡ch biá»ƒu Ä‘á»“ Mermaid tá»« cĂ¡c file HTML cÅ©.
+- [x] 4. Táº¡o `roadmap_v2/data/workflows.json` chá»©a cáº¥u trĂºc sÆ¡ Ä‘á»“.
+- [x] 5. XĂ¢y dá»±ng `roadmap_v2/index.html` (SPA structure).
+- [x] 6. Viáº¿t `roadmap_v2/styles.css` (giao diá»‡n Dashboard).
+- [x] 7. Viáº¿t `roadmap_v2/app.js` (logic fetch, render menu, váº½ Mermaid).
+- [x] 8. Kiá»ƒm tra vĂ  xĂ¡c minh hoáº¡t Ä‘á»™ng cá»§a trang.

@@ -5,24 +5,7 @@ import { MessageCircle, X, Send, Bot, User, Minimize2, Maximize2, ArrowRight, Sp
 import type { ChatMessage } from '@/lib/realtimedb';
 import { useAuth } from '@/lib/AuthContext';
 import { useConfig } from '@/lib/ConfigContext';
-
-// Mask phone number for localStorage persistence (SEC-004)
-const maskPhone = (phone: string): string => {
-    if (!phone || phone.length < 4) return '****';
-    return phone.slice(0, -4).replace(/./g, '*') + phone.slice(-4);
-};
-
-// Generate or get guest ID
-const getGuestId = (): string => {
-    if (typeof window === 'undefined') return '';
-
-    let guestId = localStorage.getItem('vanlanh_guest_id');
-    if (!guestId) {
-        guestId = `guest_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-        localStorage.setItem('vanlanh_guest_id', guestId);
-    }
-    return guestId;
-};
+import { getAuthInstance } from '@/lib/firebase';
 
 export default function ChatWidget() {
     const [isOpen, setIsOpen] = useState(false);
@@ -33,6 +16,7 @@ export default function ChatWidget() {
     const [isAiTyping, setIsAiTyping] = useState(false);
     const [roomId, setRoomId] = useState<string>('');
     const [unreadCount, setUnreadCount] = useState(0);
+    const [identityError, setIdentityError] = useState('');
 
     // Registration State
     const [isRegistered, setIsRegistered] = useState(false);
@@ -49,23 +33,44 @@ export default function ChatWidget() {
     // Check registration status on load
     useEffect(() => {
         if (typeof window !== 'undefined') {
-            const storedInfo = localStorage.getItem('vanlanh_customer_info');
-            if (storedInfo || user) {
+            localStorage.removeItem('vanlanh_guest_id');
+            localStorage.removeItem('vanlanh_customer_info');
+            if (user) {
                 setIsRegistered(true);
-                if (storedInfo) {
-                    setRegForm(JSON.parse(storedInfo));
-                }
             }
         }
     }, [user]);
 
-    // Determine room ID based on auth state
+    // Use an authenticated anonymous Firebase identity for public chat rooms.
     useEffect(() => {
+        let cancelled = false;
         if (user?.uid) {
             setRoomId(user.uid);
-        } else {
-            setRoomId(getGuestId());
+            setIdentityError('');
+            return;
         }
+
+        setIsRegistered(false);
+        setRegForm({ name: '', phone: '' });
+        void (async () => {
+            const auth = await getAuthInstance();
+            const currentUser = auth.currentUser;
+            const { signInAnonymously } = await import('firebase/auth');
+            const firebaseUser = currentUser || (await signInAnonymously(auth)).user;
+            if (!cancelled) {
+                setRoomId(firebaseUser.uid);
+                setIdentityError('');
+            }
+        })().catch((error) => {
+            console.error('Anonymous chat identity failed:', error);
+            if (!cancelled) {
+                setIdentityError('Khong the khoi tao phien chat an toan. Vui long thu lai.');
+            }
+        });
+
+        return () => {
+            cancelled = true;
+        };
     }, [user]);
 
     // Listen to messages for this room — only when chat is OPEN
@@ -122,10 +127,17 @@ export default function ChatWidget() {
         import('@/lib/realtimedb').then(({ subscribeToRoomInfo }) => {
             subscribeToRoomInfo(roomId, (info) => {
                 setBotActive(info?.botActive !== false);
+                if (!user && typeof info?.displayName === 'string' && info.displayName.trim()) {
+                    setRegForm({
+                        name: info.displayName,
+                        phone: typeof info.phone === 'string' ? info.phone : '',
+                    });
+                    setIsRegistered(true);
+                }
             }).then(fn => { unsub = fn; });
         });
         return () => { if (unsub) unsub(); };
-    }, [roomId, isOpen]);
+    }, [roomId, isOpen, user]);
 
     // Cleanup timeout on unmount
     useEffect(() => {
@@ -153,45 +165,40 @@ export default function ChatWidget() {
     const updateRoomMetadata = useCallback(async () => {
         if (!roomId) return;
 
-        let displayName = 'Khách';
-        let phone = '';
+        const metadata: {
+            odId: string;
+            displayName?: string;
+            phone?: string;
+            email?: string | null;
+            isGuest: boolean;
+            lastActivity: number;
+        } = {
+            odId: roomId,
+            isGuest: !user,
+            lastActivity: Date.now(),
+        };
 
         if (user) {
-            displayName = user.displayName || 'Khách';
-            phone = user.phone || '';
-        } else {
-            const storedInfo = localStorage.getItem('vanlanh_customer_info');
-            if (storedInfo) {
-                const { name, phone: p } = JSON.parse(storedInfo);
-                displayName = name;
-                phone = p;
-            }
+            metadata.displayName = user.displayName || 'Khach';
+            metadata.phone = user.phone || '';
+            metadata.email = user.email || null;
+        } else if (regForm.name.trim() && regForm.phone.trim()) {
+            metadata.displayName = regForm.name.trim().slice(0, 50);
+            metadata.phone = regForm.phone.replace(/[^0-9]/g, '').slice(0, 15);
         }
 
         try {
             const { updateRoomInfo } = await import('@/lib/realtimedb');
-            await updateRoomInfo(roomId, {
-                odId: roomId,
-                displayName,
-                phone,
-                email: user?.email || null,
-                isGuest: !user,
-                lastActivity: Date.now(),
-            });
+            await updateRoomInfo(roomId, metadata);
         } catch (error) {
             console.error('Error updating room metadata:', error);
         }
-    }, [roomId, user]);
+    }, [regForm.name, regForm.phone, roomId, user]);
 
     const handleRegister = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!regForm.name.trim() || !regForm.phone.trim()) return;
 
-        // Store masked phone in localStorage (SEC-004: PII protection)
-        localStorage.setItem('vanlanh_customer_info', JSON.stringify({
-            name: regForm.name,
-            phone: maskPhone(regForm.phone)
-        }));
         setIsRegistered(true);
 
         // Update metadata immediately (full phone sent to server for admin support)
@@ -200,8 +207,8 @@ export default function ChatWidget() {
                 const { updateRoomInfo } = await import('@/lib/realtimedb');
                 await updateRoomInfo(roomId, {
                     odId: roomId,
-                    displayName: regForm.name,
-                    phone: regForm.phone,
+                    displayName: regForm.name.trim().slice(0, 50),
+                    phone: regForm.phone.replace(/[^0-9]/g, '').slice(0, 15),
                     isGuest: true,
                     lastActivity: Date.now(),
                     startedAt: Date.now()
@@ -378,6 +385,9 @@ export default function ChatWidget() {
                                 <p className="text-gray-500 text-sm">Vui lòng để lại thông tin để chúng tôi hỗ trợ bạn tốt nhất.</p>
                             </div>
                             <form onSubmit={handleRegister} className="space-y-4">
+                                {identityError && (
+                                    <p className="text-sm text-red-600">{identityError}</p>
+                                )}
                                 <div>
                                     <input
                                         type="text"
@@ -400,7 +410,8 @@ export default function ChatWidget() {
                                 </div>
                                 <button
                                     type="submit"
-                                    className="w-full py-3 bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold rounded-xl hover:shadow-lg hover:shadow-orange-500/30 transition-all flex items-center justify-center gap-2"
+                                    disabled={!roomId || !!identityError}
+                                    className="w-full py-3 bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold rounded-xl hover:shadow-lg hover:shadow-orange-500/30 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
                                 >
                                     Bắt đầu chat
                                     <ArrowRight size={18} />
@@ -480,6 +491,9 @@ export default function ChatWidget() {
 
                             {/* Input */}
                             <div className="p-4 border-t bg-white flex-shrink-0">
+                                {identityError && (
+                                    <p className="text-xs text-red-600 mb-2">{identityError}</p>
+                                )}
                                 <div className="flex gap-2">
                                     <input
                                         ref={inputRef}
@@ -489,11 +503,11 @@ export default function ChatWidget() {
                                         onKeyPress={handleKeyPress}
                                         placeholder="Nhập tin nhắn..."
                                         className="flex-1 px-4 py-2 border rounded-full focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
-                                        disabled={isLoading}
+                                        disabled={isLoading || !roomId || !!identityError}
                                     />
                                     <button
                                         onClick={sendUserMessage}
-                                        disabled={!inputMessage.trim() || isLoading}
+                                        disabled={!inputMessage.trim() || isLoading || !roomId || !!identityError}
                                         className="w-10 h-10 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-full flex items-center justify-center hover:opacity-90 transition-opacity disabled:opacity-50"
                                     >
                                         <Send size={18} />

@@ -1,0 +1,12 @@
+{
+  "id": "BUG-PAR-001",
+  "trackId": "inventory",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Cập nhật bất đồng bộ (Receipt & Ticket)",
+  "summary": "<b>Hiện tượng</b>: Hàm <code>handleMarkAvailability</code> cập nhật <code>import_receipts</code> và <code>repairs</code> bằng 2 lệnh <code>updateDoc</code> riêng biệt.<br><b>Hệ lụy</b>: Nếu lệnh thứ 2 lỗi, dữ liệu giữa phiếu nhập và phiếu sửa chữa sẽ bị vênh.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Chuyển toàn bộ logic sang <code>runTransaction</code> đảm bảo nguyên tử.",
+  "createdAt": "17.05.2026",
+  "severity": "high",
+  "affectedFiles": [],
+  "resolvedAt": "17.05.2026"
+}

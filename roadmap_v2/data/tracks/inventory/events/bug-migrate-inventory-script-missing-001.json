@@ -1,0 +1,14 @@
+{
+  "id": "BUG-MIGRATE-INVENTORY-SCRIPT-MISSING-001",
+  "trackId": "inventory",
+  "type": "bug",
+  "status": "open",
+  "title": "package.json migrate:inventory dang tham chieu script bi thieu",
+  "summary": "Sau clean code, <code>scripts/migrate-active-orders.ts</code> khong ton tai nhung <code>package.json</code> van co script <code>migrate:inventory</code>.",
+  "createdAt": "2026-05-26T00:00:00.000Z",
+  "severity": "medium",
+  "affectedFiles": [
+    "package.json",
+    "scripts/migrate-active-orders.ts"
+  ]
+}

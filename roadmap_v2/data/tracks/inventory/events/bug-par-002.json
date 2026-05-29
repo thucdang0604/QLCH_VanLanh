@@ -1,0 +1,12 @@
+{
+  "id": "BUG-PAR-002",
+  "trackId": "inventory",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Regression: Mất an toàn Transaction và Thiếu Log khi chốt phiếu nhập",
+  "summary": "<b>Hiện tượng</b>: Hệ thống sử dụng <code>WriteBatch</code> thay vì <code>runTransaction</code> để cập nhật tồn kho.<br><b>Hệ lụy</b>: Gây Race Condition (Lost Update) và thiếu <code>inventory_logs</code> kiểm toán.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Chuyển <code>executeFinalImport</code> sang <code>runTransaction</code> với đầy đủ <code>inventory_logs</code> và giá vốn bình quân động.",
+  "createdAt": "17.05.2026",
+  "severity": "high",
+  "affectedFiles": [],
+  "resolvedAt": "17.05.2026"
+}

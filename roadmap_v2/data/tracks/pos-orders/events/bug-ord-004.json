@@ -1,0 +1,12 @@
+{
+  "id": "BUG-ORD-004",
+  "trackId": "pos-orders",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Race Condition & Double Submit trong updateStatus",
+  "summary": "<b>Hiện tượng</b>: Hàm <code>updateStatus</code> không đọc lại trạng thái từ Firestore bên trong transaction.<br><b>Hệ lụy</b>: Sai lệch số lượng <code>held</code> và <code>stock</code> khi trạng thái bị cập nhật chồng chéo.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Thêm <code>transaction.get(orderRef)</code> để fetch trạng thái mới nhất. Nếu <code>currentStatus === newStatus</code> thì dừng xử lý.",
+  "createdAt": "17.05.2026",
+  "severity": "high",
+  "affectedFiles": [],
+  "resolvedAt": "17.05.2026"
+}

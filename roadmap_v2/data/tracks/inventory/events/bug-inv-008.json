@@ -1,0 +1,12 @@
+{
+  "id": "BUG-INV-008",
+  "trackId": "inventory",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Nguy cơ Tồn kho âm (Negative Stock)",
+  "summary": "<b>Hiện tượng</b>: Trong <code>executeFinalImport</code>, phép tính <code>stock: totalQty - ticketQty</code> không kiểm tra điều kiện tồn kho.<br><b>Hệ lụy</b>: Nếu số lượng yêu cầu lớn hơn số lượng có trong kho, tồn kho sẽ bị âm.<br><br>✅ <b>Xác nhận ngày 17.05.2026</b>: Logic negative stock guard đã có sẵn trong các luồng chính (POS, Orders, Parts). Không cần can thiệp thêm.",
+  "createdAt": "17.05.2026",
+  "severity": "high",
+  "affectedFiles": [],
+  "resolvedAt": "17.05.2026"
+}

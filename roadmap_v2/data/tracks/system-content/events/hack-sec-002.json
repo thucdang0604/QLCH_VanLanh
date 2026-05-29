@@ -1,0 +1,16 @@
+{
+  "id": "HACK-SEC-002",
+  "trackId": "system-content",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Firebase RTDB Quyền Đọc/Ghi Công Khai",
+  "summary": "<b>Hiện tượng</b>: Room web theo prefix <code>guest_</code> từng cho đọc/ghi không cần xác thực; khi liên kết CRM, room có thể chứa tên và số điện thoại khách.<br><b>Hệ lụy</b>: Người có room ID có thể đọc hoặc sửa hội thoại và PII.<br><br>✅ <b>Đã vá hoàn chỉnh ngày 26.05.2026</b>: Web chat đăng nhập Firebase Anonymous Auth, dùng UID làm room ID và rules không còn cấp quyền public theo prefix.",
+  "createdAt": "26.05.2026",
+  "severity": "critical",
+  "affectedFiles": [
+    "database.rules.json",
+    "src/components/ChatWidget.tsx",
+    "src/lib/AuthContext.tsx"
+  ],
+  "resolvedAt": "26.05.2026"
+}

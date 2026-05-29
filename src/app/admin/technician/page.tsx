@@ -8,7 +8,7 @@ import {
     CheckCircle2, Loader2, Image as ImageIcon, Video, AlertCircle, X, Package, Trash2,
     User as UserIcon
 } from 'lucide-react';
-import { collection, query, onSnapshot, doc, updateDoc, serverTimestamp, getDocs, where, runTransaction, getDoc, setDoc, increment, Timestamp, orderBy, limit } from 'firebase/firestore';
+import { collection, query, onSnapshot, doc, updateDoc, serverTimestamp, getDocs, where, setDoc, orderBy, limit } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
 import { isChecklistComplete, isYouTubeUrl, getYouTubeEmbedUrl, areAllPartsReady } from '@/lib/workflowFeatures';
@@ -100,157 +100,85 @@ export default function TechnicianPage() {
         return () => clearTimeout(timer);
     }, [partSearchQuery]);
 
-    // Add part to ticket directly (if in stock or simple selection)
+    // Add part to ticket directly via API
     const handleAddPart = async (ticket: RepairTicket, product: Product) => {
         try {
-            const qty = 1;
-            const productRef = doc(db, 'products', product.id);
-            const ticketRef = doc(db, 'repairs', ticket.id);
-
-            // Atomic: trừ kho + thêm vào repairs.parts
-            const updatedParts = await runTransaction(db, async (tx) => {
-                const [pSnap, tSnap] = await Promise.all([tx.get(productRef), tx.get(ticketRef)]);
-                if (!pSnap.exists()) throw new Error('Không tìm thấy linh kiện trong kho.');
-                if (!tSnap.exists()) throw new Error('Không tìm thấy phiếu sửa chữa.');
-
-                const productData = pSnap.data() as Partial<{
-                    stock: number;
-                    held: number;
-                    costPrice: number;
-                    price_original: number;
-                    price_promo: number;
-                    name: string;
-                    quality: string;
-                    partType: string;
-                }>;
-
-                const currentStock = Number(productData?.stock) || 0;
-                const currentHeld = Number(productData?.held) || 0;
-                const available = currentStock - currentHeld;
-                if (available < qty) {
-                    throw new Error(`Linh kiện "${product.name}" không đủ tồn kho. Tồn: ${currentStock}, đã giữ: ${currentHeld}, khả dụng: ${available}.`);
-                }
-
-                const unitCostAtUse = Number(productData?.costPrice ?? productData?.price_original ?? 0);
-                const unitPriceAtUse = Number(productData?.price_promo || productData?.price_original || 0);
-                const costSource = productData?.costPrice != null ? 'product.costPrice' : 'product.price_original';
-
-                const effectiveQuality = (productData?.quality || '').trim() || selectedPartQuality;
-
-                // [WARRANTY] Đánh dấu linh kiện miễn phí nếu phiếu bảo hành
-                const ticketData = tSnap.data();
-                const isWarrantyTicket = ticketData?.ticketType === 'warranty';
-
-                const newPart = {
-                    productId: product.id,
-                    productName: productData?.name || product.name,
-                    quality: effectiveQuality,
-                    partType: productData?.partType || '',
-                    quantity: qty,
-                    // Backward-compat (ưu tiên unitPriceAtUse ở các chỗ tính mới)
-                    price: unitPriceAtUse,
-                    unitCostAtUse,
-                    unitPriceAtUse,
-                    pricedAt: Timestamp.now(),
-                    costSource,
-                    // selected = đã xuất kho
-                    status: 'selected' as const,
-                    // [WARRANTY] linh kiện bảo hành miễn phí — giá gốc giữ nguyên để audit
-                    ...(isWarrantyTicket ? { isWarrantyCovered: true } : {}),
-                };
-
-                const currentParts = (tSnap.data()?.parts as unknown[]) || [];
-                const nextParts = [...currentParts, newPart];
-
-                const payment = (tSnap.data()?.payment || {}) as Partial<RepairTicket['payment']>;
-                const laborCost = Number(payment?.laborCost) || 0;
-                const additionalFees = Number(payment?.additionalFees) || 0;
-                const nextPartsCost = (nextParts as unknown[])
-                    .filter((p) => {
-                        if (!p || typeof p !== 'object') return false;
-                        const status = (p as { status?: unknown }).status;
-                        const isCovered = (p as { isWarrantyCovered?: unknown }).isWarrantyCovered;
-                        // Chỉ tính parts đã xuất kho VÀ không được bảo hành miễn phí
-                        return String(status || '') === 'selected' && !isCovered;
-                    })
-                    .reduce((sum: number, p) => {
-                        if (!p || typeof p !== 'object') return sum;
-                        const obj = p as { quantity?: unknown; unitPriceAtUse?: unknown; price?: unknown };
-                        const q = Math.max(1, Number(obj.quantity) || 1);
-                        const unit = Number(obj.unitPriceAtUse ?? obj.price ?? 0) || 0;
-                        return sum + unit * q;
-                    }, 0);
-                const nextAmount = nextPartsCost + laborCost + additionalFees;
-
-                tx.update(productRef, { held: increment(qty), updatedAt: serverTimestamp() });
-
-                tx.update(ticketRef, {
-                    parts: nextParts,
-                    'payment.partsCost': nextPartsCost,
-                    'payment.amount': nextAmount,
-                    updatedAt: serverTimestamp(),
-                });
-
-                return nextParts as RepairTicket['parts'];
+            const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
+            const res = await fetch('/api/repairs/confirm-parts', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${idToken}`
+                },
+                body: JSON.stringify({
+                    ticketId: ticket.id,
+                    ticketVersion: ticket.version || 0,
+                    operationKey: crypto.randomUUID(),
+                    command: {
+                        type: 'add_selected',
+                        productId: product.id,
+                        quantity: 1
+                    }
+                })
             });
 
-            // Update local state to reflect immediately
-            setSelectedTicket({ ...ticket, parts: updatedParts });
+            const data = await res.json();
+            if (!res.ok) {
+                throw new Error(data.error || 'Lá»—i thĂªm linh kiá»‡n');
+            }
+
+            setSelectedTicket({ ...ticket, parts: data.parts, payment: data.payment, version: (ticket.version || 0) + 1 });
+            toastSuccess('ÄĂ£ thĂªm linh kiá»‡n thĂ nh cĂ´ng.');
             setPartSearchQuery('');
-        } catch (err) {
+        } catch (err: unknown) {
             console.error('Error adding part:', err);
-            const raw = (err as Error)?.message || 'Không thể xuất linh kiện.';
-            const msg = raw.includes('không đủ tồn kho')
-                ? `${raw} Có thể KTV khác vừa xuất linh kiện này. Vui lòng tải lại danh sách hoặc chuyển sang "Hết (Đề xuất)".`
+            const raw = (err as Error)?.message || 'KhĂ´ng thá»ƒ xuáº¥t linh kiá»‡n.';
+            const msg = raw.includes('khĂ´ng Ä‘á»§ tá»“n kho')
+                ? `${raw} CĂ³ thá»ƒ KTV khĂ¡c vá»«a xuáº¥t linh kiá»‡n nĂ y. Vui lĂ²ng táº£i láº¡i danh sĂ¡ch hoáº·c chuyá»ƒn sang "Háº¿t (Äá» xuáº¥t)".`
                 : raw;
             toastError(msg);
         }
     };
 
-    // Request part (out of stock) -> just add to ticket parts as 'requested', import receipt created on status change
+    // Request part (out of stock) via API
     const handleRequestPart = async (ticket: RepairTicket, product: Product) => {
         try {
-            const currentParts = ticket.parts || [];
-            const newPart = {
-                productId: product.id,
-                productName: product.name,
-                quality: selectedPartQuality,
-                partType: (product as Product & { partType?: string }).partType || '',
-                quantity: 1,
-                status: 'requested' as const
-            };
-            const ticketRef = doc(db, 'repairs', ticket.id);
-            await runTransaction(db, async (tx) => {
-                const snap = await tx.get(ticketRef);
-                const dbVersion = snap.data()?.version || 0;
-                if (dbVersion !== (ticket.version || 0)) {
-                    throw new Error('VERSION_CONFLICT');
-                }
-                tx.update(ticketRef, {
-                    parts: [...currentParts, newPart],
-                    version: increment(1),
-                    updatedAt: serverTimestamp()
-                });
+            const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
+            const res = await fetch('/api/repairs/confirm-parts', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${idToken}`
+                },
+                body: JSON.stringify({
+                    ticketId: ticket.id,
+                    ticketVersion: ticket.version || 0,
+                    operationKey: crypto.randomUUID(),
+                    command: {
+                        type: 'request_part',
+                        productId: product.id,
+                        quantity: 1
+                    }
+                })
             });
-            setSelectedTicket({ ...ticket, parts: [...currentParts, newPart], version: (ticket.version || 0) + 1 });
-            toastSuccess('Đã thêm linh kiện vào danh sách yêu cầu. Phiếu nhập sẽ được tạo khi chuyển trạng thái.');
+
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Lá»—i yĂªu cáº§u linh kiá»‡n');
+
+            setSelectedTicket({ ...ticket, parts: data.parts, version: (ticket.version || 0) + 1 });
+            toastSuccess('ÄĂ£ thĂªm linh kiá»‡n vĂ o danh sĂ¡ch yĂªu cáº§u.');
             setPartSearchQuery('');
         } catch (err: unknown) {
             console.error('Error requesting part:', err);
-            if (err instanceof Error && err.message === 'VERSION_CONFLICT') {
-                toastError('Dữ liệu đã được cập nhật bởi người khác. Vui lòng tải lại trang.');
-            } else {
-                toastError('Lỗi khi tạo yêu cầu.');
-            }
+            toastError((err as Error)?.message || 'Lá»—i khi táº¡o yĂªu cáº§u.');
         }
     };
 
-    // Request custom part (not in inventory) -> just add to ticket parts
+    // Request custom part (not in inventory) via API
     const handleAddCustomPart = async (ticket: RepairTicket) => {
         if (!customPartName.trim()) return;
 
         try {
-            const currentParts = ticket.parts || [];
             const exactName = customPartName.trim();
             
             // Find existing proposed product with this name
@@ -293,108 +221,72 @@ export default function TechnicianPage() {
                 }
             }
 
-            const newPart = {
-                productId: productIdToUse,
-                productName: productNameToUse,
-                quality: selectedPartQuality,
-                partType: '',
-                quantity: 1,
-                status: 'requested' as const
-            };
-            
-            const ticketRef = doc(db, 'repairs', ticket.id);
-            await runTransaction(db, async (tx) => {
-                const snap = await tx.get(ticketRef);
-                const dbVersion = snap.data()?.version || 0;
-                if (dbVersion !== (ticket.version || 0)) {
-                    throw new Error('VERSION_CONFLICT');
-                }
-                tx.update(ticketRef, {
-                    parts: [...currentParts, newPart],
-                    version: increment(1),
-                    updatedAt: serverTimestamp()
-                });
+            const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
+            const res = await fetch('/api/repairs/confirm-parts', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${idToken}`
+                },
+                body: JSON.stringify({
+                    ticketId: ticket.id,
+                    ticketVersion: ticket.version || 0,
+                    operationKey: crypto.randomUUID(),
+                    command: {
+                        type: 'request_part',
+                        productId: productIdToUse,
+                        customName: productNameToUse,
+                        quantity: 1
+                    }
+                })
             });
-            setSelectedTicket({ ...ticket, parts: [...currentParts, newPart], version: (ticket.version || 0) + 1 });
-            toastSuccess('Đã thêm linh kiện đề xuất. Kế toán/Kho sẽ xem xét.');
+
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Lá»—i thĂªm linh kiá»‡n');
+
+            setSelectedTicket({ ...ticket, parts: data.parts, version: (ticket.version || 0) + 1 });
+            toastSuccess('ÄĂ£ thĂªm linh kiá»‡n Ä‘á» xuáº¥t. Káº¿ toĂ¡n/Kho sáº½ xem xĂ©t.');
             setCustomPartName('');
         } catch (err: unknown) {
             console.error('Error adding custom part:', err);
-            if (err instanceof Error && err.message === 'VERSION_CONFLICT') {
-                toastError('Dữ liệu đã được cập nhật bởi người khác. Vui lòng tải lại trang.');
-            } else {
-                toastError('Lỗi khi thêm linh kiện.');
-            }
+            toastError((err as Error)?.message || 'Lá»—i khi thĂªm linh kiá»‡n.');
         }
     };
 
     const handleRemovePart = async (ticket: RepairTicket, partIndex: number) => {
-        if (!confirm('Bạn có chắc chắn muốn xóa linh kiện này khỏi phiếu?')) return;
+        if (!confirm('Báº¡n cĂ³ cháº¯c cháº¯n muá»‘n xĂ³a linh kiá»‡n nĂ y khá»i phiáº¿u?')) return;
         try {
-            const ticketRef = doc(db, 'repairs', ticket.id);
+            const partLineId = ticket.parts?.[partIndex]?.partLineId;
+            if (!partLineId) {
+                throw new Error('Linh kiá»‡n nĂ y chÆ°a cĂ³ mĂ£ dĂ²ng (partLineId). Vui lĂ²ng bĂ¡o Admin cháº¡y migrate.');
+            }
 
-            const updatedParts = await runTransaction(db, async (tx) => {
-                const tSnap = await tx.get(ticketRef);
-                if (!tSnap.exists()) throw new Error('Không tìm thấy phiếu sửa chữa.');
-                const parts = (tSnap.data()?.parts as unknown[]) || [];
-                if (partIndex < 0 || partIndex >= parts.length) return parts;
-
-                const removed = parts[partIndex];
-                const nextParts = [...parts];
-                nextParts.splice(partIndex, 1);
-
-                // Nếu linh kiện đã "xuất" (selected) thì cộng trả kho
-                const removedObj =
-                    removed && typeof removed === 'object'
-                        ? (removed as { status?: unknown; productId?: unknown; quantity?: unknown })
-                        : {};
-                const status = String(removedObj.status || '');
-                const productId = String(removedObj.productId || '');
-                const qty = Math.max(1, Number(removedObj.quantity) || 1);
-                if (status === 'selected' && productId) {
-                    const productRef = doc(db, 'products', productId);
-                    const pSnap = await tx.get(productRef);
-                    if (pSnap.exists()) {
-                        const currentHeld = Number(pSnap.data()?.held) || 0;
-                        if (currentHeld < qty) {
-                            throw new Error(`Số lượng giữ chỗ không khớp khi xóa linh kiện (Đang giữ ${currentHeld}, cần giải phóng ${qty}).`);
-                        }
-                        tx.update(productRef, { held: increment(-qty), updatedAt: serverTimestamp() });
+            const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
+            const res = await fetch('/api/repairs/confirm-parts', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${idToken}`
+                },
+                body: JSON.stringify({
+                    ticketId: ticket.id,
+                    ticketVersion: ticket.version || 0,
+                    operationKey: crypto.randomUUID(),
+                    command: {
+                        type: 'remove_line',
+                        partLineId
                     }
-                }
-
-                const payment = (tSnap.data()?.payment || {}) as Partial<RepairTicket['payment']>;
-                const laborCost = Number(payment?.laborCost) || 0;
-                const additionalFees = Number(payment?.additionalFees) || 0;
-                const nextPartsCost = (nextParts as unknown[])
-                    .filter((p) => {
-                        if (!p || typeof p !== 'object') return false;
-                        const statusVal = (p as { status?: unknown }).status;
-                        const isCovered = (p as { isWarrantyCovered?: unknown }).isWarrantyCovered;
-                        return String(statusVal || '') === 'selected' && !isCovered;
-                    })
-                    .reduce((sum: number, p) => {
-                        if (!p || typeof p !== 'object') return sum;
-                        const obj = p as { quantity?: unknown; unitPriceAtUse?: unknown; price?: unknown };
-                        const q = Math.max(1, Number(obj.quantity) || 1);
-                        const unit = Number(obj.unitPriceAtUse ?? obj.price ?? 0) || 0;
-                        return sum + unit * q;
-                    }, 0);
-                const nextAmount = nextPartsCost + laborCost + additionalFees;
-
-                tx.update(ticketRef, {
-                    parts: nextParts,
-                    'payment.partsCost': nextPartsCost,
-                    'payment.amount': nextAmount,
-                    updatedAt: serverTimestamp(),
-                });
-                return nextParts as unknown as RepairTicket['parts'];
+                })
             });
 
-            setSelectedTicket({ ...ticket, parts: updatedParts as RepairTicket['parts'] });
-        } catch (err) {
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Lá»—i xĂ³a linh kiá»‡n');
+
+            setSelectedTicket({ ...ticket, parts: data.parts, payment: data.payment, version: (ticket.version || 0) + 1 });
+            toastSuccess('XĂ³a linh kiá»‡n thĂ nh cĂ´ng.');
+        } catch (err: unknown) {
             console.error('Error removing part:', err);
-            toastError((err as Error)?.message || 'Lỗi khi xóa linh kiện.');
+            toastError((err as Error)?.message || 'Lá»—i khi xĂ³a linh kiá»‡n.');
         }
     };
 
@@ -418,60 +310,6 @@ export default function TechnicianPage() {
             unsubStatuses();
         };
     }, [user?.uid, user?.role]);
-
-    // Create consolidated import receipt for all requested parts
-    const handleCreateConsolidatedReceipt = async (ticket: RepairTicket) => {
-        const requestedParts = (ticket.parts || []).filter(p => p.status === 'requested');
-        if (requestedParts.length === 0) return;
-
-        try {
-            const receiptId = `draft_${ticket.id}`;
-            const receiptRef = doc(db, 'import_receipts', receiptId);
-
-            const items = requestedParts.map(p => ({
-                productId: p.productId || '',
-                productName: p.productName || p.name || p.partName || PART_CATEGORY,
-                quantity: p.quantity || 1,
-                importPrice: 0,
-                quality: p.quality || 'Zin',
-                category: 'component',
-            }));
-
-            const existingSnap = await getDoc(receiptRef);
-
-            if (existingSnap.exists()) {
-                const existingData = existingSnap.data();
-                if (existingData.status !== 'draft') return; // đã ordered/completed → không sửa
-
-                const existingItems: typeof items = existingData.items || [];
-                const existingProductIds = new Set(existingItems.map((i: { productId: string }) => i.productId));
-
-                // Chỉ thêm các parts mới chưa có trong phiếu
-                const newItems = items.filter(i => !existingProductIds.has(i.productId));
-                if (newItems.length === 0) return; // không có gì mới
-
-                await updateDoc(receiptRef, {
-                    items: [...existingItems, ...newItems],
-                    note: `Tổng hợp linh kiện yêu cầu từ phiếu SC #${ticket.id.slice(-6).toUpperCase()} — ${ticket.customer?.name || ''} — ${ticket.deviceInfo?.model || ''}`,
-                    updatedAt: serverTimestamp(),
-                });
-            } else {
-                await setDoc(receiptRef, {
-                    supplier: `Yêu cầu từ KTV — Phiếu SC #${ticket.id.slice(-6).toUpperCase()}`,
-                    items,
-                    totalAmount: 0,
-                    note: `Tổng hợp ${requestedParts.length} linh kiện yêu cầu từ phiếu SC #${ticket.id.slice(-6).toUpperCase()} — ${ticket.customer?.name || ''} — ${ticket.deviceInfo?.model || ''}`,
-                    status: 'draft',
-                    repairTicketId: ticket.id,
-                    createdBy: user?.uid || 'system',
-                    createdByName: user?.displayName || 'KTV',
-                    createdAt: serverTimestamp()
-                });
-            }
-        } catch (err) {
-            console.error('Error creating consolidated import receipt:', err);
-        }
-    };
 
     const executeStatusChange = async (ticketId: string, newStatus: string) => {
         try {
@@ -524,12 +362,6 @@ export default function TechnicianPage() {
             // ── Payment gate: KTV không xử lý bàn giao, chỉ chuyển trạng thái bình thường ──
             // (requirePaymentGate is handled by cashier in repairs/page.tsx)
 
-            // ── Create consolidated import receipt if there are requested parts ──
-            const requestedParts = (ticket.parts || []).filter(p => p.status === 'requested');
-            if (requestedParts.length > 0) {
-                await handleCreateConsolidatedReceipt(ticket);
-            }
-
             // --- INTERCEPT: If transitioning OUT of "dang_kiem_tra", require Tech Notes ---
             if (ticket.status === 'dang_kiem_tra' && newStatus !== 'dang_kiem_tra') {
                 setTechNoteText(ticket.issue?.notes || '');
@@ -560,44 +392,32 @@ export default function TechnicianPage() {
 
     const finalizeStatusChange = async (ticket: RepairTicket, newStatus: string, newTechNote?: string) => {
         try {
-            const now = Date.now();
-            const timeline = [...(ticket?.statusTimeline || [])];
-
-            // Add duration to last entry
-            if (timeline.length > 0) {
-                const lastEntry = timeline[timeline.length - 1];
-                lastEntry.durationInMinutes = Math.round((now - lastEntry.timestamp) / 60000);
-            }
-            timeline.push({ status: newStatus, timestamp: now });
-
-            const updates: Record<string, unknown> = {
-                status: newStatus,
-                statusTimeline: timeline,
-                updatedAt: serverTimestamp(),
-                version: increment(1),
-            };
-
-            // Only update issue.notes if provided
-            if (newTechNote !== undefined) {
-                updates['issue.notes'] = newTechNote;
-            }
-
-            const ticketRef = doc(db, 'repairs', ticket.id);
-            await runTransaction(db, async (tx) => {
-                const snap = await tx.get(ticketRef);
-                const dbVersion = snap.data()?.version || 0;
-                if (dbVersion !== (ticket.version || 0)) {
-                    throw new Error('VERSION_CONFLICT');
-                }
-                tx.update(ticketRef, updates);
+            const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
+            const res = await fetch('/api/repairs/transition', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${idToken}`
+                },
+                body: JSON.stringify({
+                    ticketId: ticket.id,
+                    ticketVersion: ticket.version || 0,
+                    idempotencyKey: crypto.randomUUID(),
+                    targetStatus: newStatus,
+                    technicianNote: newTechNote || ''
+                })
             });
-        } catch (err: unknown) {
-            if (err instanceof Error && err.message === 'VERSION_CONFLICT') {
-                toastError('Phiếu đã được cập nhật bởi người khác. Vui lòng tải lại trang.');
-            } else {
-                console.error('Status update error:', err);
-                toastError('Lỗi khi cập nhật trạng thái.');
+
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Lá»—i khi cáº­p nháº­t tráº¡ng thĂ¡i');
+
+            toastSuccess('Cáº­p nháº­t tráº¡ng thĂ¡i thĂ nh cĂ´ng.');
+            if (selectedTicket?.id === ticket.id) {
+                setSelectedTicket({ ...ticket, status: newStatus, version: (ticket.version || 0) + 1 });
             }
+        } catch (err: unknown) {
+            console.error('Status update error:', err);
+            toastError((err as Error)?.message || 'Lá»—i khi cáº­p nháº­t tráº¡ng thĂ¡i.');
         }
     };
 

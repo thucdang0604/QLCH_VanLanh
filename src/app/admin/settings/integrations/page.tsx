@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Cable, CheckCircle2, Copy, Facebook, Loader2, MessageCircle, Save, ShieldCheck, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Cable, CheckCircle2, Copy, Facebook, Loader2, MessageCircle, MessageSquarePlus, Plus, Save, ShieldCheck, ToggleLeft, ToggleRight, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { getAuthInstance } from '@/lib/firebase';
 
@@ -20,6 +20,15 @@ type PublicIntegrations = {
         oaAccessTokenSet: boolean;
         webhookSecretSet: boolean;
     };
+    quickReplies: QuickReplyForm[];
+};
+
+type QuickReplyForm = {
+    id: string;
+    title: string;
+    shortcut: string;
+    text: string;
+    enabled: boolean;
 };
 
 type FormState = {
@@ -37,6 +46,7 @@ type FormState = {
         oaAccessToken: string;
         webhookSecret: string;
     };
+    quickReplies: QuickReplyForm[];
 };
 
 const emptyForm: FormState = {
@@ -54,6 +64,7 @@ const emptyForm: FormState = {
         oaAccessToken: '',
         webhookSecret: '',
     },
+    quickReplies: [],
 };
 
 function randomToken(prefix: string) {
@@ -74,7 +85,7 @@ export default function ChatIntegrationsPage() {
         const auth = await getAuthInstance();
         const user = auth.currentUser;
         if (!user) throw new Error('Phiên đăng nhập admin không còn hợp lệ.');
-        return user.getIdToken();
+        return await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
     }
 
     const loadConfig = useCallback(async () => {
@@ -105,6 +116,7 @@ export default function ChatIntegrationsPage() {
                     oaAccessToken: '',
                     webhookSecret: '',
                 },
+                quickReplies: config.quickReplies || [],
             });
         } catch (error) {
             toast.error(error instanceof Error ? error.message : 'Không tải được cấu hình.');
@@ -165,6 +177,32 @@ export default function ChatIntegrationsPage() {
     async function copy(value: string) {
         await navigator.clipboard.writeText(value);
         toast.success('Đã copy.');
+    }
+
+    function addQuickReply() {
+        setForm(current => ({
+            ...current,
+            quickReplies: [
+                ...current.quickReplies,
+                { id: `reply_${Date.now()}`, title: '', shortcut: '', text: '', enabled: true },
+            ],
+        }));
+    }
+
+    function updateQuickReply(index: number, patch: Partial<QuickReplyForm>) {
+        setForm(current => ({
+            ...current,
+            quickReplies: current.quickReplies.map((reply, replyIndex) => (
+                replyIndex === index ? { ...reply, ...patch } : reply
+            )),
+        }));
+    }
+
+    function removeQuickReply(index: number) {
+        setForm(current => ({
+            ...current,
+            quickReplies: current.quickReplies.filter((_, replyIndex) => replyIndex !== index),
+        }));
     }
 
     if (loading) {
@@ -355,6 +393,74 @@ export default function ChatIntegrationsPage() {
                             Kiểm tra Zalo
                         </button>
                     </div>
+                </div>
+            </section>
+
+            <section className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <div className="px-6 py-4 bg-gray-50 border-b flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <MessageSquarePlus size={20} className="text-orange-600" />
+                        <h2 className="font-semibold text-gray-900">Trả lời mẫu</h2>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={addQuickReply}
+                        className="flex items-center gap-1.5 px-3 py-2 border rounded-lg hover:bg-white text-sm"
+                    >
+                        <Plus size={16} />
+                        Thêm mẫu
+                    </button>
+                </div>
+                <div className="p-6 space-y-4">
+                    {form.quickReplies.length === 0 ? (
+                        <p className="text-sm text-gray-500">Chưa có câu trả lời mẫu.</p>
+                    ) : form.quickReplies.map((reply, index) => (
+                        <div key={reply.id} className="grid gap-3 border-b pb-4 last:border-b-0 last:pb-0 md:grid-cols-[180px_150px_1fr_auto]">
+                            <input
+                                value={reply.title}
+                                maxLength={60}
+                                onChange={event => updateQuickReply(index, { title: event.target.value })}
+                                className="px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20"
+                                placeholder="Tên mẫu"
+                            />
+                            <div className="relative">
+                                <span className="absolute left-3 top-2 text-gray-400">/</span>
+                                <input
+                                    value={reply.shortcut.replace(/^\//, '')}
+                                    maxLength={24}
+                                    onChange={event => updateQuickReply(index, { shortcut: event.target.value })}
+                                    className="w-full pl-7 pr-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20"
+                                    placeholder="baohanh"
+                                />
+                            </div>
+                            <textarea
+                                value={reply.text}
+                                maxLength={500}
+                                rows={2}
+                                onChange={event => updateQuickReply(index, { text: event.target.value })}
+                                className="px-3 py-2 border rounded-lg text-sm resize-y focus:outline-none focus:ring-2 focus:ring-orange-500/20"
+                                placeholder="Nội dung gửi cho khách"
+                            />
+                            <div className="flex items-start gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => updateQuickReply(index, { enabled: !reply.enabled })}
+                                    className={`p-2 rounded-lg border ${reply.enabled ? 'text-green-700 bg-green-50 border-green-200' : 'text-gray-500 bg-gray-50'}`}
+                                    title={reply.enabled ? 'Đang sử dụng' : 'Đã tắt'}
+                                >
+                                    {reply.enabled ? <ToggleRight size={20} /> : <ToggleLeft size={20} />}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => removeQuickReply(index)}
+                                    className="p-2 rounded-lg border text-red-600 hover:bg-red-50"
+                                    title="Xóa mẫu"
+                                >
+                                    <Trash2 size={18} />
+                                </button>
+                            </div>
+                        </div>
+                    ))}
                 </div>
             </section>
         </div>

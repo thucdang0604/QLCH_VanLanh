@@ -1,0 +1,14 @@
+{
+  "id": "BUG-ORD-005",
+  "trackId": "pos-orders",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Lỗi vi phạm nguyên tắc Transaction ở Web Checkout",
+  "summary": "API checkout báo lỗi 500: Firestore transactions require all reads to be executed before all writes. Đơn hàng không tạo được.",
+  "createdAt": "2026-05-20",
+  "severity": "high",
+  "affectedFiles": [
+    "src/app/api/checkout/route.ts"
+  ],
+  "resolvedAt": "2026-05-20"
+}

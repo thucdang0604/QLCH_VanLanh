@@ -1,0 +1,12 @@
+{
+  "id": "BUG-REP-005",
+  "trackId": "repair",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Race Condition trong tổng hợp phiếu nhập",
+  "summary": "<b>Hiện tượng</b>: Đọc và cập nhật phiếu nhập tổng hợp không dùng transaction.<br><b>Hệ lụy</b>: Khi nhiều KTV cùng yêu cầu linh kiện, dữ liệu phiếu nhập có thể bị ghi đè.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Chuyển <code>ensureConsolidatedImportReceiptForTicket</code> sang <code>runTransaction</code>.",
+  "createdAt": "17.05.2026",
+  "severity": "high",
+  "affectedFiles": [],
+  "resolvedAt": "17.05.2026"
+}

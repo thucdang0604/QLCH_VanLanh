@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { getAdminAuth, getAdminDb } from '@/lib/firebaseAdmin';
+import type { PermissionId } from '@/lib/permissions';
 
 export type VerifiedUser = {
   uid: string;
@@ -47,6 +48,14 @@ export async function requireAdmin(req: NextRequest): Promise<VerifiedUser> {
   const user = await verifyUser(req);
   if (user.role !== 'admin') {
     throw new Error('Forbidden: admin only');
+  }
+  return user;
+}
+
+export async function requirePermission(req: NextRequest, permission: PermissionId): Promise<VerifiedUser> {
+  const user = await requireAdminOrStaff(req);
+  if (user.role !== 'admin' && !user.permissions.includes(permission)) {
+    throw new Error(`Forbidden: missing ${permission} permission`);
   }
   return user;
 }

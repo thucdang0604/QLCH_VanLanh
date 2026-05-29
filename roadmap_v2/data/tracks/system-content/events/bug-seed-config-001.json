@@ -1,0 +1,15 @@
+{
+  "id": "BUG-SEED-CONFIG-001",
+  "trackId": "system-content",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Settings seed-config da gui Bearer token",
+  "summary": "Nut khoi phuc mac dinh goi protected API nhung thieu Authorization.",
+  "createdAt": "2026-05-21",
+  "severity": "medium",
+  "affectedFiles": [
+    "src/app/admin/settings/page.tsx",
+    "src/app/api/seed-config/route.ts"
+  ],
+  "resolvedAt": "2026-05-21"
+}

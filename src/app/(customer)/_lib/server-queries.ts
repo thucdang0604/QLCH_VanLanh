@@ -277,7 +277,6 @@ export const fetchProductVariants = cache(async (seriesId: string, excludeId: st
         .get();
 
     return snapshot.docs
-        .filter(d => d.id !== excludeId)
         .map(doc => {
             const data = doc.data();
             return {
@@ -320,4 +319,58 @@ export const fetchProductReviews = cache(async (productId: string) => {
             createdAt: data.createdAt?.toDate?.()?.getTime() || Date.now(),
         };
     });
+});
+
+/**
+ * Fetch related services and accessories for a product.
+ */
+export const fetchRelatedItems = cache(async (brand: string, currentCategory: string) => {
+    if (!isAdminAvailable()) return { services: [], accessories: [] };
+
+    const db = getAdminDb();
+    
+    // Fetch some services
+    const servicesSnap = await db.collection('services')
+        .orderBy('createdAt', 'desc')
+        .limit(4)
+        .get();
+
+    const services = servicesSnap.docs
+        .map(doc => {
+            const data = doc.data();
+            return {
+                id: doc.id,
+                _type: 'service',
+                name: data.name || '',
+                slug: data.slug || doc.id,
+                price_original: data.price_original || 0,
+                price_promo: data.price_promo || 0,
+                imageUrl: data.imageUrl || data.image || '',
+                brand: data.brand || '',
+            };
+        });
+
+    // Fetch some accessories (products with category = 'Phụ kiện' or similar)
+    const accessoriesSnap = await db.collection('products')
+        .where('status', '==', 'active')
+        .where('category', '==', 'Phụ kiện')
+        .limit(4)
+        .get();
+
+    const accessories = accessoriesSnap.docs
+        .map(doc => {
+            const data = doc.data();
+            return {
+                id: doc.id,
+                _type: 'product',
+                name: data.name || '',
+                slug: data.slug || doc.id,
+                price_original: data.price_original || 0,
+                price_promo: data.price_promo || 0,
+                imageUrl: data.imageUrl || (data.images ? data.images[0] : ''),
+                brand: data.brand || '',
+            };
+        });
+
+    return { services, accessories };
 });

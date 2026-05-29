@@ -1,0 +1,12 @@
+{
+  "id": "BUG-ORD-002",
+  "trackId": "pos-orders",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Hủy đơn Completed gây âm held",
+  "summary": "<b>Hiện tượng</b>: Hủy đơn hàng đã hoàn thành làm <code>held</code> bị âm.<br><b>Hệ lụy</b>: Sai lệch tồn kho khả dụng trầm trọng.<br><br>✅ <b>Đã vá ngày 12.05.2026</b>: Thêm check trạng thái đơn. Nếu đã <code>Completed</code> thì không trừ <code>held</code> nữa.",
+  "createdAt": "12.05.2026",
+  "severity": "high",
+  "affectedFiles": [],
+  "resolvedAt": "12.05.2026"
+}

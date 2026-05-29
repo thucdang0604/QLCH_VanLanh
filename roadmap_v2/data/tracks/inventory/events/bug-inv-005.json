@@ -1,0 +1,12 @@
+{
+  "id": "BUG-INV-005",
+  "trackId": "inventory",
+  "type": "bug",
+  "status": "resolved",
+  "title": "Race Condition & Thiếu Log trong executeFinalImport",
+  "summary": "<b>Hiện tượng</b>: Khi duyệt nhập kho trong <code>parts/page.tsx</code>, hệ thống tính toán tồn kho dựa trên state cũ và không ghi log lịch sử.<br><b>Hệ lụy</b>: Gây sai lệch tồn kho khi có thao tác đồng thời và không thể truy vết thay đổi.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Duplicate của PAR-002/PAR-003. <code>executeFinalImport</code> đã dùng <code>runTransaction</code> với đọc dữ liệu tươi, giá vốn bình quân động, và <code>inventory_logs</code> đầy đủ.",
+  "createdAt": "17.05.2026",
+  "severity": "high",
+  "affectedFiles": [],
+  "resolvedAt": "17.05.2026"
+}
