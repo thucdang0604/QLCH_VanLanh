@@ -84,7 +84,7 @@ export default async function ServiceDetailPage({ params }: { params: Promise<{ 
                 </nav>
 
                 {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                <ServiceDetailClient service={service as any} />
+                <ServiceDetailClient service={service as unknown as Record<string, unknown>} />
             </div>
         </div>
     );

@@ -2317,7 +2317,7 @@ export default function RepairPage() {
                                     <ul className="text-xs text-amber-700 list-disc list-inside space-y-1">
                                         {warrantyHistory.map((h, i) => {
                                             const d = h.timing?.receivedAt || h.createdAt;
-                                            const dateStr = d && typeof d === 'object' && 'toDate' in d ? (d as any).toDate().toLocaleString('vi-VN') : '—';
+                                            const dateStr = d && typeof d === 'object' && 'toDate' in d ? (d as { toDate: () => Date }).toDate().toLocaleString('vi-VN') : '—';
                                             return <li key={h.id}>Lần {i + 1}: Phiếu #{h.id.slice(-6).toUpperCase()} ({dateStr})</li>;
                                         })}
                                     </ul>

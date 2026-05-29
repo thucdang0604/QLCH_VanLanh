@@ -11,6 +11,30 @@
   "constraints": [],
   "aiPlans": [
     {
+      "id": "plan-customer-ux-optimization",
+      "title": "Customer UX Optimization: Tracking, Speed Dial, Pricing, Reviews, Mobile Search",
+      "date": "29.05.2026",
+      "status": "completed",
+      "completedAt": "29.05.2026",
+      "planFile": "data/ai_plans/plan_customer_ux.md",
+      "taskFile": "data/ai_plans/task_customer_ux.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_customer_ux.md",
+      "scope": [
+        "src/components/TrackingModal.tsx",
+        "src/components/ChatWidget.tsx",
+        "src/components/home/PricingSection.tsx",
+        "src/components/home/GoogleReviewsSection.tsx",
+        "src/components/layout/Header.tsx"
+      ],
+      "decisions": [
+        "Tracking Modal: Thiết kế dạng Bottom Sheet trên mobile để dễ thao tác 1 tay",
+        "Speed Dial Chat: Gộp 3 icon thành 1 Floating Action Button duy nhất",
+        "Pricing: Bảng giá theo tab, vuốt ngang trên điện thoại",
+        "Reviews: Slider đánh giá khách hàng lấy từ Google Maps (hỗ trợ fallback mock data)",
+        "Mobile Search: Đưa ra row riêng ở Header mobile để truy cập nhanh"
+      ]
+    },
+    {
       "id": "plan-roadmap-v2",
       "title": "Roadmap v2 & SPA Migration",
       "date": "18.05.2026",

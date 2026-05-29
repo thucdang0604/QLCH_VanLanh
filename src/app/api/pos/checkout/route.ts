@@ -236,7 +236,7 @@ export async function POST(request: NextRequest) {
                     const repairRef = db.collection('repairs').doc(repairTicketId);
                     const repairSnap = await tx.get(repairRef);
                     if (repairSnap.exists) {
-                        const repairPrice = items.find((i: any) => i.isRepairTicket)?.price || 0;
+                        const repairPrice = items.find((i: Record<string, unknown>) => i.isRepairTicket)?.price || 0;
                         tx.update(repairRef, {
                             'payment.status': 'paid',
                             status: 'out',

@@ -85,7 +85,7 @@ export default function AdminReviewsPage() {
                         status: r.status,
                         createdAt: r.createdAt,
                         typeTag: 'Sản phẩm',
-                        reference: (r as any).productName || r.productId,
+                        reference: (r as Record<string, unknown>).productName || r.productId,
                         source: 'product'
                     });
                 }

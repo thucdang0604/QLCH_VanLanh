@@ -26,6 +26,7 @@ export default function ChatWidget() {
     const inputRef = useRef<HTMLInputElement>(null);
     const aiTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [botActive, setBotActive] = useState(true);
+    const [isSpeedDialOpen, setIsSpeedDialOpen] = useState(false);
 
     const { user } = useAuth();
     const { config } = useConfig();
@@ -293,49 +294,74 @@ export default function ChatWidget() {
         const fbLink = config.contact_info?.facebook_link || 'https://www.facebook.com/vanlanh.vn';
 
         return (
-            <div className="fixed bottom-6 right-6 z-50 hidden md:flex flex-col items-center gap-3">
-                {/* Zalo */}
-                <a
-                    href={zaloLink}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="group relative w-12 h-12 bg-[#0068FF] text-white rounded-full shadow-lg hover:shadow-xl hover:scale-110 transition-all duration-300 flex items-center justify-center"
-                    aria-label="Chat qua Zalo"
+            <div 
+                className="fixed bottom-6 right-6 z-50 hidden md:flex flex-col items-end gap-3"
+                onMouseLeave={() => setIsSpeedDialOpen(false)}
+            >
+                {/* Speed Dial Options */}
+                <div 
+                    className={`flex flex-col items-center gap-3 transition-all duration-300 origin-bottom ${
+                        isSpeedDialOpen ? 'scale-100 opacity-100 mb-2' : 'scale-0 opacity-0 h-0 pointer-events-none'
+                    }`}
                 >
-                    <svg viewBox="0 0 48 48" className="w-7 h-7" fill="currentColor">
-                        <path d="M12.5 7C9.46 7 7 9.46 7 12.5v23C7 38.54 9.46 41 12.5 41H24l8.15 5.44A1.5 1.5 0 0034.5 45V41h1C38.54 41 41 38.54 41 35.5v-23C41 9.46 38.54 7 35.5 7h-23zm3 10h17a1.5 1.5 0 010 3h-17a1.5 1.5 0 010-3zm0 6h13a1.5 1.5 0 010 3h-13a1.5 1.5 0 010-3zm0 6h9a1.5 1.5 0 010 3h-9a1.5 1.5 0 010-3z"/>
-                    </svg>
-                    <span className="absolute right-full mr-3 px-3 py-1.5 bg-gray-900 text-white text-xs font-semibold rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-lg">Chat Zalo</span>
-                    <span className="absolute inset-0 rounded-full bg-[#0068FF] animate-ping opacity-20" />
-                </a>
+                    {/* Zalo */}
+                    <a
+                        href={zaloLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="group relative w-12 h-12 bg-[#0068FF] text-white rounded-full shadow-lg hover:shadow-xl hover:scale-110 transition-all duration-300 flex items-center justify-center"
+                        aria-label="Chat qua Zalo"
+                    >
+                        <svg viewBox="0 0 48 48" className="w-7 h-7" fill="currentColor">
+                            <path d="M12.5 7C9.46 7 7 9.46 7 12.5v23C7 38.54 9.46 41 12.5 41H24l8.15 5.44A1.5 1.5 0 0034.5 45V41h1C38.54 41 41 38.54 41 35.5v-23C41 9.46 38.54 7 35.5 7h-23zm3 10h17a1.5 1.5 0 010 3h-17a1.5 1.5 0 010-3zm0 6h13a1.5 1.5 0 010 3h-13a1.5 1.5 0 010-3zm0 6h9a1.5 1.5 0 010 3h-9a1.5 1.5 0 010-3z"/>
+                        </svg>
+                        <span className="absolute right-full mr-3 px-3 py-1.5 bg-gray-900 text-white text-xs font-semibold rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-lg">Chat Zalo</span>
+                    </a>
 
-                {/* Messenger */}
-                <a
-                    href={fbLink}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="group relative w-12 h-12 bg-gradient-to-br from-[#00B2FF] to-[#006AFF] text-white rounded-full shadow-lg hover:shadow-xl hover:scale-110 transition-all duration-300 flex items-center justify-center"
-                    aria-label="Chat qua Messenger"
-                >
-                    <svg viewBox="0 0 24 24" className="w-6 h-6" fill="currentColor">
-                        <path d="M12 2C6.36 2 2 6.13 2 11.7c0 2.91 1.2 5.42 3.15 7.2.16.15.26.36.27.58l.05 1.82c.02.62.67 1.03 1.24.78l2.03-.9c.18-.08.38-.1.57-.06.9.23 1.86.36 2.85.36 5.64 0 10-4.13 10-9.7S17.64 2 12 2zm5.95 7.56l-2.9 4.62c-.46.74-1.45.93-2.14.42l-2.31-1.73a.58.58 0 00-.7 0l-3.12 2.37c-.42.32-.96-.18-.68-.63l2.9-4.62c.46-.74 1.45-.93 2.14-.42l2.31 1.73a.58.58 0 00.7 0l3.12-2.37c.42-.32.96.18.68.63z"/>
-                    </svg>
-                    <span className="absolute right-full mr-3 px-3 py-1.5 bg-gray-900 text-white text-xs font-semibold rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-lg">Messenger</span>
-                </a>
+                    {/* Messenger */}
+                    <a
+                        href={fbLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="group relative w-12 h-12 bg-gradient-to-br from-[#00B2FF] to-[#006AFF] text-white rounded-full shadow-lg hover:shadow-xl hover:scale-110 transition-all duration-300 flex items-center justify-center"
+                        aria-label="Chat qua Messenger"
+                    >
+                        <svg viewBox="0 0 24 24" className="w-6 h-6" fill="currentColor">
+                            <path d="M12 2C6.36 2 2 6.13 2 11.7c0 2.91 1.2 5.42 3.15 7.2.16.15.26.36.27.58l.05 1.82c.02.62.67 1.03 1.24.78l2.03-.9c.18-.08.38-.1.57-.06.9.23 1.86.36 2.85.36 5.64 0 10-4.13 10-9.7S17.64 2 12 2zm5.95 7.56l-2.9 4.62c-.46.74-1.45.93-2.14.42l-2.31-1.73a.58.58 0 00-.7 0l-3.12 2.37c-.42.32-.96-.18-.68-.63l2.9-4.62c.46-.74 1.45-.93 2.14-.42l2.31 1.73a.58.58 0 00.7 0l3.12-2.37c.42-.32.96.18.68.63z"/>
+                        </svg>
+                        <span className="absolute right-full mr-3 px-3 py-1.5 bg-gray-900 text-white text-xs font-semibold rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-lg">Messenger</span>
+                    </a>
 
-                {/* AI Chatbot */}
+                    {/* AI Chatbot */}
+                    <button
+                        onClick={toggleChat}
+                        className="group relative w-12 h-12 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-full shadow-lg hover:shadow-xl hover:scale-110 transition-all duration-300 flex items-center justify-center"
+                        aria-label="Mở chat hỗ trợ"
+                    >
+                        <Bot size={22} className="group-hover:scale-110 transition-transform" />
+                        <span className="absolute right-full mr-3 px-3 py-1.5 bg-gray-900 text-white text-xs font-semibold rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-lg">Chat AI hỗ trợ</span>
+                    </button>
+                </div>
+
+                {/* Main FAB */}
                 <button
-                    onClick={toggleChat}
-                    className="group relative w-14 h-14 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-full shadow-lg hover:shadow-xl hover:scale-110 transition-all duration-300 flex items-center justify-center"
-                    aria-label="Mở chat hỗ trợ"
+                    onClick={() => setIsSpeedDialOpen(!isSpeedDialOpen)}
+                    onMouseEnter={() => setIsSpeedDialOpen(true)}
+                    className="group relative w-14 h-14 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-full shadow-xl hover:shadow-orange-500/30 transition-all duration-300 flex items-center justify-center z-10"
+                    aria-label="Liên hệ"
                 >
-                    <MessageCircle size={24} className="group-hover:scale-110 transition-transform" />
-                    {unreadCount > 0 && (
-                        <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-600 text-white text-xs font-bold rounded-full flex items-center justify-center animate-bounce">
+                    <div className={`transition-transform duration-300 ${isSpeedDialOpen ? 'rotate-90 scale-0' : 'rotate-0 scale-100'}`}>
+                        <MessageCircle size={26} />
+                    </div>
+                    <div className={`absolute transition-transform duration-300 ${isSpeedDialOpen ? 'rotate-0 scale-100' : '-rotate-90 scale-0'}`}>
+                        <X size={26} />
+                    </div>
+                    
+                    {unreadCount > 0 && !isSpeedDialOpen && (
+                        <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-600 text-white text-xs font-bold rounded-full flex items-center justify-center animate-bounce shadow-sm">
                             {unreadCount}
                         </span>
                     )}
-                    <span className="absolute right-full mr-3 px-3 py-1.5 bg-gray-900 text-white text-xs font-semibold rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-lg">Chat AI hỗ trợ</span>
                     <span className="absolute inset-0 rounded-full bg-orange-500 animate-ping opacity-25" />
                 </button>
             </div>

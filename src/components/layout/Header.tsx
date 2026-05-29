@@ -11,7 +11,7 @@ import {
 import { useConfig } from '@/lib/ConfigContext';
 import { useCart } from '@/lib/CartContext';
 import { getIcon } from '@/lib/icon-map';
-
+import TrackingModal from '@/components/TrackingModal';
 
 export default function Header() {
     const pathname = usePathname();
@@ -21,6 +21,7 @@ export default function Header() {
     const [searchQuery, setSearchQuery] = useState('');
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [scrolled, setScrolled] = useState(false);
+    const [isTrackingModalOpen, setIsTrackingModalOpen] = useState(false);
 
     /* ── Dynamic nav from config ── */
     const mainNav = (config.headerNav || [])
@@ -102,10 +103,10 @@ export default function Header() {
                             <Phone size={13} />
                             <span className="whitespace-nowrap">{formatHotline(mainPhone)}</span>
                         </a>
-                        <Link href="/tracking" className="hidden lg:flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-gray-600 hover:text-copper hover:bg-gray-50 transition-colors">
+                        <button onClick={() => setIsTrackingModalOpen(true)} className="hidden lg:flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-gray-600 hover:text-copper hover:bg-gray-50 transition-colors">
                             <ClipboardList size={15} />
                             <span>Tra cứu</span>
-                        </Link>
+                        </button>
                         <Link href="/info/gioi-thieu" className="hidden lg:flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-gray-600 hover:text-copper hover:bg-gray-50 transition-colors">
                             <MapPin size={15} />
                             <span>Cửa hàng</span>
@@ -130,6 +131,27 @@ export default function Header() {
                     </div>
                 </div>{/* .flex */}
                 </div>{/* max-w */}
+            </div>
+
+            {/* ── Mobile Search Bar — Always visible ── */}
+            <div 
+                className={`md:hidden w-full px-4 py-2.5 border-b border-gray-100 transition-all duration-300 ${scrolled ? 'shadow-md' : ''}`}
+                style={{ backgroundColor: config.headerBg || '#ffffff' }}
+            >
+                <form onSubmit={handleSearch} className="w-full">
+                    <div className="relative w-full shadow-sm rounded-lg">
+                        <input
+                            type="text"
+                            placeholder="Bạn cần tìm gì hôm nay?"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            className="w-full h-10 pl-4 pr-10 rounded-lg text-sm text-gray-800 bg-gray-50 border border-gray-200 focus:outline-none focus:ring-1 focus:ring-copper/50 focus:border-copper transition-all"
+                        />
+                        <button type="submit" aria-label="Tìm kiếm" className="absolute right-0 top-0 h-10 w-10 flex items-center justify-center text-gray-500 hover:text-copper transition-colors">
+                            <Search size={18} />
+                        </button>
+                    </div>
+                </form>
             </div>
 
             {/* ── Desktop nav strip — full width bg, centered inner ── */}
@@ -165,21 +187,6 @@ export default function Header() {
                     <div className="fixed inset-0 top-[50px] bg-black/40 z-20 md:hidden" onClick={() => setMobileMenuOpen(false)} />
                     <div className="w-full relative z-30 md:hidden">
                         <div className="shadow-xl overflow-hidden" style={{ backgroundColor: config.headerBg || '#ffffff' }}>
-                            {/* Mobile Search */}
-                            <form onSubmit={handleSearch} className="p-3 border-b">
-                                <div className="relative">
-                                    <input
-                                        type="text"
-                                        placeholder="Tìm sản phẩm, dịch vụ..."
-                                        value={searchQuery}
-                                        onChange={(e) => setSearchQuery(e.target.value)}
-                                        className="w-full h-9 pl-3 pr-9 rounded-lg border border-gray-200 bg-gray-50 text-sm focus:outline-none focus:border-copper"
-                                    />
-                                    <button type="submit" aria-label="Tìm kiếm" className="absolute right-0 top-0 h-9 w-9 flex items-center justify-center text-gray-400">
-                                        <Search size={15} />
-                                    </button>
-                                </div>
-                            </form>
                             <ul className="py-1">
                                 {mainNav.map((item) => {
                                     const Icon = item.icon;
@@ -203,14 +210,16 @@ export default function Header() {
                                 <a href={`tel:${mainPhone}`} className="flex items-center gap-1">
                                     <Phone size={11} /> {formatHotline(mainPhone)}
                                 </a>
-                                <Link href="/tracking" className="flex items-center gap-1">
+                                <button onClick={() => { setMobileMenuOpen(false); setIsTrackingModalOpen(true); }} className="flex items-center gap-1">
                                     <ClipboardList size={11} /> Tra cứu
-                                </Link>
+                                </button>
                             </div>
                         </div>
                     </div>
                 </>
             )}
+            
+            <TrackingModal isOpen={isTrackingModalOpen} onClose={() => setIsTrackingModalOpen(false)} />
         </header>
     );
 }

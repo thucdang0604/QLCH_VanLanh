@@ -94,16 +94,17 @@
   "scalingRoadmap": [
     {
       "name": "Customer UX Optimization",
-      "status": "PENDING",
-      "color": "primary",
+      "status": "DONE",
+      "color": "success",
       "desc": "Tối ưu hóa giao diện khách hàng (Mobile-first), tăng trải nghiệm và độ tin cậy.",
       "tasks": [
-        "<b>Tracking Modal:</b> Popup tra cứu đơn hàng dạng Bottom Sheet",
-        "<b>Speed Dial Chat:</b> Gộp Zalo, Messenger, AI Chatbot thành 1 nút FAB duy nhất",
-        "<b>Pricing Table:</b> Bảng giá dịch vụ trực quan chia theo Tab ngoài trang chủ",
-        "<b>Google Reviews:</b> Tích hợp đánh giá thực tế từ Google Maps API"
+        "<b>Tracking Modal:</b> Đã code popup tra cứu đơn hàng dạng Bottom Sheet trên Mobile / Desktop",
+        "<b>Speed Dial Chat:</b> Đã code gộp Zalo, Messenger, AI Chatbot thành 1 nút FAB duy nhất gọn gàng",
+        "<b>Pricing Table:</b> Đã code bảng giá sửa chữa thiết bị có Tab vuốt ngang mượt mà tại trang chủ",
+        "<b>Google Reviews:</b> Đã code API lấy đánh giá tự động từ Google Maps và hiển thị kiểu Slider",
+        "<b>Mobile Header:</b> Đã chuyển thanh tìm kiếm ra ngoài giao diện chính giúp dễ sử dụng hơn"
       ],
-      "details": "Implementation plan created and waiting for approval."
+      "details": "Artifacts: task.md, walkthrough_customer_ux.md. Mã nguồn hoàn thiện, test ổn định."
     },
     {
       "name": "Live Chat Omnichannel",
@@ -710,6 +711,18 @@
     ]
   },
   "changelog": [
+    {
+      "date": "2026-05-29 - CUSTOMER UX OPTIMIZATION",
+      "desc": "Tối ưu hóa trải nghiệm người dùng Front-end (Mobile-first).",
+      "color": "success",
+      "details": [
+        "<b>Tracking Modal:</b> Thay trang tra cứu cũ bằng Modal/Bottom-sheet tiện dụng.",
+        "<b>Speed Dial Chat:</b> Gộp 3 nút liên hệ thành 1 Floating Action Button (FAB).",
+        "<b>Pricing Table:</b> Thêm section bảng giá sửa chữa có swipe tab trên trang chủ.",
+        "<b>Google Reviews:</b> Bổ sung reviews từ Google Maps API vào Homepage.",
+        "<b>Mobile Search:</b> Đưa thanh tìm kiếm ra ngoài Header trên mobile."
+      ]
+    },
     {
       "date": "2026-05-27 - CHAT MEDIA & QUICK REPLIES",
       "desc": "Tang do tin cay cua anh Facebook va thao tac ho tro nhan vien tren Live Chat.",

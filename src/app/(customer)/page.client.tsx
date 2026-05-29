@@ -15,6 +15,8 @@ const FlashSale = dynamic(() => import("@/components/home/FlashSale"), { ssr: fa
 const BookingSection = dynamic(() => import("@/components/home/BookingSection"), { ssr: false, loading: () => <div className="h-[300px] bg-white animate-pulse rounded-xl container mx-auto mt-4"></div> });
 const ArticleBlock = dynamic(() => import("@/components/home/ArticleBlock"), { ssr: false, loading: () => <div className="h-[400px] bg-white animate-pulse rounded-xl container mx-auto mt-4"></div> });
 const SuggestedSection = dynamic(() => import("@/components/home/SuggestedSection"), { ssr: false, loading: () => <div className="h-[400px] bg-white animate-pulse rounded-xl container mx-auto mt-4"></div> });
+const PricingSection = dynamic(() => import("@/components/home/PricingSection"), { ssr: false, loading: () => <div className="h-[300px] bg-white animate-pulse rounded-xl container mx-auto mt-4"></div> });
+const GoogleReviewsSection = dynamic(() => import("@/components/home/GoogleReviewsSection"), { ssr: false, loading: () => <div className="h-[300px] bg-white animate-pulse rounded-xl container mx-auto mt-4"></div> });
 import CategoriesSection from "@/components/home/CategoriesSection";
 
 const SECTION_COMPONENTS: Record<string, React.ComponentType<Record<string, unknown>>> = {
@@ -23,6 +25,8 @@ const SECTION_COMPONENTS: Record<string, React.ComponentType<Record<string, unkn
   booking: BookingSection,
   categories: CategoriesSection,
   suggested: SuggestedSection,
+  pricing_table: PricingSection,
+  google_reviews: GoogleReviewsSection,
   articles: ArticleBlock,
 };
 
@@ -59,6 +63,29 @@ export default function Home({ ssrConfig }: { ssrConfig: SSRHomeConfig }) {
   const visibleSections = [...resolvedSections]
     .filter(s => s.visible)
     .sort((a, b) => a.order - b.order);
+
+  // Inject pricing_table if not found in config (for backward compatibility and immediate viewing)
+  if (!visibleSections.find(s => s.component === 'pricing_table')) {
+      visibleSections.splice(visibleSections.length > 0 ? visibleSections.length - 1 : 0, 0, {
+          id: 'temp-pricing',
+          component: 'pricing_table',
+          order: 98,
+          visible: true
+      });
+  }
+
+  // Inject google_reviews if not found in config
+  if (!visibleSections.find(s => s.component === 'google_reviews')) {
+      visibleSections.splice(visibleSections.length > 0 ? visibleSections.length - 1 : 0, 0, {
+          id: 'temp-google-reviews',
+          component: 'google_reviews',
+          order: 99,
+          visible: true
+      });
+  }
+  
+  // Re-sort just in case we injected items
+  visibleSections.sort((a, b) => a.order - b.order);
 
   return (
     <>

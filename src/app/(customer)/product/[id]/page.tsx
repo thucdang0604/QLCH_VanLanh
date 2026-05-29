@@ -125,7 +125,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
                     <span className="text-gray-800 font-medium line-clamp-1">{String(data.name ?? '')}</span>
                 </nav>
 
-                <ProductDetailClient data={data as any} variants={variants} reviews={reviews} />
+                <ProductDetailClient data={data as unknown as Record<string, unknown>} variants={variants} reviews={reviews} />
 
                 {/* Specs Table */}
                 {!!(data.specs) && Object.keys(data.specs as Record<string, unknown>).length > 0 && (
@@ -221,7 +221,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
                 )}
 
                 {/* Reviews */}
-                <ProductReviews data={data as any} reviews={reviews} />
+                <ProductReviews data={data as unknown as Record<string, unknown>} reviews={reviews} />
             </div>
         </div>
     );
