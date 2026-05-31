@@ -18,8 +18,7 @@ import {
     Save,
     Building2,
     QrCode,
-    AlertTriangle,
-    Settings2
+    AlertTriangle
 } from 'lucide-react';
 import { useFirestoreCollection, updateDocument } from '@/lib/useFirestore';
 import { isPartCategory } from '@/lib/constants';
@@ -42,7 +41,6 @@ import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
 import CurrencyInput from '@/components/admin/CurrencyInput';
 import ProductQrLabelModal from '@/components/admin/ProductQrLabelModal';
-import ManageQrCodesModal from '@/components/admin/ManageQrCodesModal';
 import FixHiddenProductsModal from '@/components/admin/FixHiddenProductsModal';
 import { buildProductCodeFromId } from '@/lib/productCodes';
 import { createProductWithCodes } from '@/lib/productCodeRegistry';
@@ -116,7 +114,6 @@ export default function PartsPage() {
     const [isCreateReceiptOpen, setIsCreateReceiptOpen] = useState(false);
     const [editingPart, setEditingPart] = useState<Product | null>(null);
     const [qrPart, setQrPart] = useState<(Product & { id: string }) | null>(null);
-    const [qrManagePart, setQrManagePart] = useState<(Product & { id: string }) | null>(null);
     const [activeTab, setActiveTab] = useState<'parts' | 'proposals' | 'ordered'>('parts');
     const [showFixHidden, setShowFixHidden] = useState(false);
 
@@ -743,16 +740,9 @@ export default function PartsPage() {
                                                     <button
                                                         onClick={() => setQrPart(part as Product & { id: string })}
                                                         className="p-2 hover:bg-orange-100 text-orange-600 rounded-lg transition-colors"
-                                                        title="In tem QR"
+                                                        title="In tem QR / barcode"
                                                     >
                                                         <QrCode size={18} />
-                                                    </button>
-                                                    <button
-                                                        onClick={() => setQrManagePart(part as Product & { id: string })}
-                                                        className="p-2 hover:bg-purple-100 text-purple-600 rounded-lg transition-colors"
-                                                        title="Quản lý mã QR"
-                                                    >
-                                                        <Settings2 size={18} />
                                                     </button>
                                                     <button
                                                         onClick={() => { setEditingPart(part); setIsModalOpen(true); }}
@@ -1232,7 +1222,6 @@ export default function PartsPage() {
                 />
             )}
             <ProductQrLabelModal product={qrPart} onClose={() => setQrPart(null)} />
-            <ManageQrCodesModal product={qrManagePart} onClose={() => setQrManagePart(null)} />
             <FixHiddenProductsModal isOpen={showFixHidden} onClose={() => setShowFixHidden(false)} products={products} />
         </div>
     );
@@ -1587,7 +1576,7 @@ function CreateReceiptModal({ isOpen, onClose, parts, retailProducts, onCreated,
                 const proposedCat = receiptType === 'retail' ? 'product' : 'component';
                 const proposedCatIds = receiptType === 'retail' ? ['san-pham'] : ['component'];
                 const newRef = doc(collection(db, 'products'));
-                const productCode = buildProductCodeFromId(newRef.id);
+                const productCode = buildProductCodeFromId(newRef.id, receiptType === 'component' ? 'component' : 'product');
                 await createProductWithCodes(newRef.id, {
                     sku: productCode,
                     barcode: productCode,

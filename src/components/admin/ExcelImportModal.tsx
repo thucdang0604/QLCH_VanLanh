@@ -9,7 +9,7 @@ import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 import { useConfig } from '@/lib/ConfigContext';
 import { TaxonomyNode } from '@/lib/types';
-import { buildProductCodeFromId, normalizeProductCode } from '@/lib/productCodes';
+import { buildProductCodeFromId, getProductCodeKind } from '@/lib/productCodes';
 import { createProductWithCodes } from '@/lib/productCodeRegistry';
 
 type ImportMode = 'product' | 'service';
@@ -23,14 +23,14 @@ interface ParsedRow {
     finalCategoryName?: string;
 }
 
-const PRODUCT_HEADERS = ['Mã SP', 'Tên SP', 'Thương hiệu', 'Danh mục', 'Giá gốc', 'Giá KM', 'Giá vốn', 'NCC', 'Tồn kho', 'Tình trạng', 'Mô tả'];
+const PRODUCT_HEADERS = ['Tên SP', 'Thương hiệu', 'Danh mục', 'Giá gốc', 'Giá KM', 'Giá vốn', 'NCC', 'Tồn kho', 'Tình trạng', 'Mô tả'];
 const SERVICE_HEADERS = ['Tên DV', 'Dòng máy', 'Danh mục', 'Giá gốc', 'Giá KM', 'Bảo hành', 'Thời gian sửa', 'Mô tả'];
 
 function generateTemplate(mode: ImportMode) {
     const headers = mode === 'product' ? PRODUCT_HEADERS : SERVICE_HEADERS;
     
     // Example data
-    const exampleProduct = ['VL-IP15PM-256', 'iPhone 15 Pro Max 256GB', 'Apple', 'Điện thoại > Apple > iPhone 15 Series', '29000000', '28500000', '27000000', 'NCC VN/A', '10', 'new', 'Hàng chính hãng VN/A nguyên seal'];
+    const exampleProduct = ['iPhone 15 Pro Max 256GB', 'Apple', 'Điện thoại > Apple > iPhone 15 Series', '29000000', '28500000', '27000000', 'NCC VN/A', '10', 'new', 'Hàng chính hãng VN/A nguyên seal'];
     const exampleService = ['Thay pin iPhone 15 Pro Max', 'iPhone 15 Pro Max', 'Sửa chữa > Điện thoại > Thay Pin', '1500000', '1450000', '6 tháng', '30 phút', 'Pin dung lượng cao, zin bóc máy'];
     const exampleRow = mode === 'product' ? exampleProduct : exampleService;
     
@@ -204,7 +204,7 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ImportMode; 
                     if (mode === 'product') {
                         const stock = Number(row.data['Tồn kho']) || 0;
                         const productRef = doc(collection(db, 'products'));
-                        const productCode = normalizeProductCode(row.data['Mã SP']) || buildProductCodeFromId(productRef.id);
+                        const productCode = buildProductCodeFromId(productRef.id, getProductCodeKind({ category: finalCat, categoryIds: finalCatIds }));
                         await createProductWithCodes(productRef.id, {
                             sku: productCode,
                             barcode: productCode,

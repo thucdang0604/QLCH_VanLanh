@@ -11,7 +11,7 @@
 - [x] Add `product_code_registry` helper with legacy alias checks.
 - [x] Claim and release registry entries in Firestore transactions.
 - [x] Integrate manual product create/edit.
-- [x] Integrate QR manager save.
+- [x] Enforce exactly one current code per registry write.
 - [x] Integrate Excel product import.
 - [x] Add Firestore rules.
 
@@ -38,6 +38,8 @@
 - [x] Add camera decode fallback when native `BarcodeDetector` is unavailable.
 - [x] Prevent camera stream restart loops caused by unstable product-filter dependencies.
 - [x] Ignore stale camera-open rejection after scanner cleanup.
+- [x] Decode printed `CODE128` barcodes through the phone camera.
+- [x] Use ZXing multi-format fallback when native camera barcode support is incomplete.
 
 ## Phase 5b - Barcode label printing
 
@@ -45,6 +47,10 @@
 - [x] Add label modes for combined QR and barcode, QR-only, and barcode-only printing.
 - [x] Add paper presets for compact label printers, roll printers, and A4 grid printing.
 - [x] Add copy-count selection before opening the browser print dialog.
+- [x] Generate type-specific automatic QR codes: `SP-XXXXXXXX`, `PK-XXXXXXXX`, and `LK-XXXXXXXX`.
+- [x] Use the same generated code for QR, barcode, SKU aliases, and POS lookup.
+- [x] Remove custom-code input from product forms and Excel import.
+- [x] Remove admin secondary-code management.
 
 ## Phase 6 - Verification
 
@@ -58,9 +64,9 @@
 ## Residual manual checks after rules deploy
 
 - [ ] Create retail, accessory and component products on a real Firestore project.
-- [ ] Confirm duplicate rejection through create, QR manager and Excel import.
+- [ ] Confirm each new product persists one generated code across `sku`, `barcode`, `productCode`, and `qrCodes[0]`.
 - [ ] Verify inventory-only staff can maintain QR and run Smart Fix from `/admin/parts`.
 - [ ] Verify repair-only staff can create proposed components but cannot edit existing catalog records.
-- [ ] Verify camera scan on target phones with native and ZXing fallback paths.
+- [ ] Verify QR and `CODE128` camera scans on target phones with native and ZXing fallback paths.
 - [ ] Test printed barcode recognition on each target scanner model.
 - [ ] Confirm label alignment on the actual printer and paper stock.

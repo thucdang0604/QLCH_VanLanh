@@ -45,8 +45,8 @@ async function findLegacyOwner(code: string, excludedProductId?: string): Promis
 
 export async function assertProductCodesAvailable(codes: string[], excludedProductId?: string): Promise<string[]> {
     const normalizedCodes = normalizeCodes(codes);
-    if (normalizedCodes.length === 0) {
-        throw new Error('San pham phai co it nhat mot ma QR hop le.');
+    if (normalizedCodes.length !== 1) {
+        throw new Error('San pham phai co dung mot ma QR va barcode.');
     }
 
     for (const code of normalizedCodes) {

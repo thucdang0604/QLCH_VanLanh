@@ -3,7 +3,7 @@ import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requirePermission } from '@/lib/apiAuth';
 import { FieldValue } from 'firebase-admin/firestore';
 import type { ImportReceipt, ImportReceiptItem, RepairTicket } from '@/lib/types';
-import { buildProductCodeFromId, normalizeProductCode } from '@/lib/productCodes';
+import { buildProductCodeFromId, getProductCodeKind, normalizeProductCode } from '@/lib/productCodes';
 
 type RepairLine = NonNullable<RepairTicket['parts']>[number];
 type ReceiptItem = ImportReceiptItem & {
@@ -237,13 +237,12 @@ export async function POST(request: NextRequest) {
                             held: FieldValue.increment(additionalHeld),
                             updatedAt: FieldValue.serverTimestamp()
                         };
-                        const existingQrCodes = Array.isArray(pData.qrCodes) ? pData.qrCodes as string[] : [];
                         const productCode = normalizeProductCode(pData.sku || pData.barcode || pData.productCode)
-                            || buildProductCodeFromId(item.productId);
+                            || buildProductCodeFromId(item.productId, getProductCodeKind(pData));
                         updateData.sku = productCode;
                         updateData.barcode = productCode;
                         updateData.productCode = productCode;
-                        updateData.qrCodes = existingQrCodes.length > 0 ? existingQrCodes : [productCode];
+                        updateData.qrCodes = [productCode];
 
                         if (newParts && newParts[item.productId]) {
                             const info = newParts[item.productId];

@@ -47,14 +47,6 @@ export interface Brand {
     updatedAt?: FirestoreDateValue;
 }
 
-// QR Code History (nhật ký thay đổi mã QR)
-export interface QrCodeHistoryEntry {
-    action: 'add' | 'remove' | 'set_primary';
-    code: string;
-    adminName: string;
-    timestamp: FirestoreDateValue;
-}
-
 // Product types
 export interface ProductSpecs {
     screen?: string;
@@ -68,11 +60,10 @@ export interface ProductSpecs {
 
 export interface Product {
     id: string;
-    sku?: string; // Mã SP dùng cho QR/barcode và tra cứu POS
-    barcode?: string; // Alias tương thích với máy quét dạng bàn phím
-    productCode?: string; // Legacy/custom alias nếu dữ liệu cũ đã có
-    qrCodes?: string[]; // Mảng tất cả mã QR (chính + phụ)
-    qrCodeHistory?: QrCodeHistoryEntry[]; // Nhật ký thay đổi mã QR
+    sku?: string; // Mã duy nhất dùng chung cho QR, barcode và tra cứu POS
+    barcode?: string; // Đồng bộ với sku để tương thích dữ liệu cũ
+    productCode?: string; // Đồng bộ với sku để tương thích dữ liệu cũ
+    qrCodes?: string[]; // Tương thích dữ liệu cũ; dữ liệu mới chỉ lưu đúng một mã
     name: string;
     brand: string;
     category: typeof import('./constants').RETAIL_CATEGORIES[number] | string;

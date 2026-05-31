@@ -66,12 +66,13 @@ export default function ProductQrLabelModal({ product, onClose }: ProductQrLabel
     const [copies, setCopies] = useState(1);
     const paper = useMemo(() => PAPER_PRESETS.find((item) => item.id === paperId) || PAPER_PRESETS[1], [paperId]);
     const code = product ? getPrimaryProductCode(product) : '';
+    const barcodeCode = code;
     const price = product ? product.price_promo || product.price_original || 0 : 0;
     const qrUrl = buildProductQrImageUrl(code, 260);
 
     useEffect(() => {
-        if (!barcodePreviewRef.current || !code || labelMode === 'qr') return;
-        JsBarcode(barcodePreviewRef.current, code, {
+        if (!barcodePreviewRef.current || !barcodeCode || labelMode === 'qr') return;
+        JsBarcode(barcodePreviewRef.current, barcodeCode, {
             format: 'CODE128',
             displayValue: true,
             font: 'Arial',
@@ -79,7 +80,7 @@ export default function ProductQrLabelModal({ product, onClose }: ProductQrLabel
             height: paper.barcodeHeight,
             margin: 0,
         });
-    }, [code, labelMode, paper.barcodeHeight]);
+    }, [barcodeCode, labelMode, paper.barcodeHeight]);
 
     if (!product) return null;
 
@@ -87,7 +88,7 @@ export default function ProductQrLabelModal({ product, onClose }: ProductQrLabel
         const printWindow = window.open('', '_blank', 'width=720,height=720');
         if (!printWindow) return;
 
-        const barcodeSvg = labelMode === 'qr' ? '' : renderBarcodeSvg(code, paper.barcodeHeight);
+        const barcodeSvg = labelMode === 'qr' ? '' : renderBarcodeSvg(barcodeCode, paper.barcodeHeight);
         const qrMarkup = labelMode === 'barcode' ? '' : `<img class="qr" src="${qrUrl}" alt="${escapeHtml(code)}" />`;
         const barcodeMarkup = labelMode === 'qr' ? '' : `<div class="barcode">${barcodeSvg}</div>`;
         const labelMarkup = `
@@ -172,7 +173,7 @@ export default function ProductQrLabelModal({ product, onClose }: ProductQrLabel
                         <p className="mt-2 truncate text-xs font-bold text-gray-900">{product.name}</p>
                         <p className="mt-1 text-sm font-bold text-orange-600">{price.toLocaleString('vi-VN')}đ</p>
                     </div>
-                    <p className="mt-2 font-mono text-xs font-semibold text-gray-600">{code}</p>
+                    <p className="mt-2 font-mono text-xs font-semibold text-gray-600">QR: {code}</p>
                 </div>
 
                 <div className="space-y-4">
@@ -228,7 +229,7 @@ export default function ProductQrLabelModal({ product, onClose }: ProductQrLabel
                     </div>
 
                     <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                        Barcode dùng chuẩn <code>CODE128</code>. QR và barcode cùng chứa mã hàng <code>{code}</code>; không chứa thông tin khách hàng.
+                        QR và barcode <code>CODE128</code> dùng chung một mã <code>{code}</code>. Tem không chứa thông tin khách hàng.
                     </div>
                 </div>
 

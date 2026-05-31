@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
-import { Plus, Search, Edit, Trash2, Package, Loader2, FileSpreadsheet, QrCode, AlertTriangle, Settings2 } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, Package, Loader2, FileSpreadsheet, QrCode, AlertTriangle } from 'lucide-react';
 import { useFirestoreCollection, updateDocument } from '@/lib/useFirestore';
 
 import { orderBy } from 'firebase/firestore';
@@ -15,7 +15,6 @@ import CategoryTaxonomySelector from '@/components/admin/CategoryTaxonomySelecto
 import ExcelImportModal from '@/components/admin/ExcelImportModal';
 import ProductSeriesManager from '@/components/admin/ProductSeriesManager';
 import ProductQrLabelModal from '@/components/admin/ProductQrLabelModal';
-import ManageQrCodesModal from '@/components/admin/ManageQrCodesModal';
 import FixHiddenProductsModal from '@/components/admin/FixHiddenProductsModal';
 import type { Product } from '@/lib/types';
 import { useConfig } from '@/lib/ConfigContext';
@@ -43,7 +42,6 @@ export default function ProductsPage() {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingProduct, setEditingProduct] = useState<Product | null>(null);
     const [qrProduct, setQrProduct] = useState<(Product & { id: string }) | null>(null);
-    const [qrManageProduct, setQrManageProduct] = useState<(Product & { id: string }) | null>(null);
     const [showExcelImport, setShowExcelImport] = useState(false);
     const [showFixHidden, setShowFixHidden] = useState(false);
 
@@ -311,16 +309,9 @@ export default function ProductsPage() {
                                             <button
                                                 onClick={() => setQrProduct(product)}
                                                 className="p-2 hover:bg-orange-100 text-orange-600 rounded-lg"
-                                                title="In tem QR"
+                                                title="In tem QR / barcode"
                                             >
                                                 <QrCode size={18} />
-                                            </button>
-                                            <button
-                                                onClick={() => setQrManageProduct(product)}
-                                                className="p-2 hover:bg-purple-100 text-purple-600 rounded-lg"
-                                                title="Quản lý mã QR"
-                                            >
-                                                <Settings2 size={18} />
                                             </button>
                                             <button
                                                 onClick={() => { setEditingProduct(product); setIsModalOpen(true); }}
@@ -453,7 +444,6 @@ export default function ProductsPage() {
 
             {showExcelImport && <ExcelImportModal mode="product" onClose={() => setShowExcelImport(false)} />}
             <ProductQrLabelModal product={qrProduct} onClose={() => setQrProduct(null)} />
-            <ManageQrCodesModal product={qrManageProduct} onClose={() => setQrManageProduct(null)} />
             <FixHiddenProductsModal isOpen={showFixHidden} onClose={() => setShowFixHidden(false)} products={products} />
         </div>
     );

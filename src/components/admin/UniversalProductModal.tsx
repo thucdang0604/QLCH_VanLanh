@@ -15,7 +15,7 @@ import MediaManager from '@/components/admin/MediaManager';
 import CategoryTaxonomySelector from '@/components/admin/CategoryTaxonomySelector';
 import type { Product } from '@/lib/types';
 import { PART_CATEGORY_LABEL } from '@/lib/constants';
-import { buildProductCodeFromId, getPrimaryProductCode, mergePrimaryProductCode, normalizeProductCode } from '@/lib/productCodes';
+import { buildProductCodeFromId, getPrimaryProductCode, getProductCodeKind } from '@/lib/productCodes';
 import { createProductWithCodes, updateProductWithCodes } from '@/lib/productCodeRegistry';
 
 // ── Shared Constants ──
@@ -47,7 +47,6 @@ interface UniversalProductModalProps {
 
 // ── Retail Form Data ──
 interface RetailFormData {
-    productCode: string;
     name: string;
     price_original: number | '';
     price_promo: number | '';
@@ -66,7 +65,6 @@ interface RetailFormData {
 
 // ── Component Form Data ──
 interface ComponentFormData {
-    productCode: string;
     name: string;
     price_original: number | '';
     price_promo: number | '';
@@ -93,7 +91,6 @@ export default function UniversalProductModal({
 
     // ── Retail state ──
     const [retailForm, setRetailForm] = useState<RetailFormData>({
-        productCode: initialData ? getPrimaryProductCode(initialData) : '',
         name: initialData?.name || '',
         price_original: initialData?.price_original || '' as number | '',
         price_promo: initialData?.price_promo || '' as number | '',
@@ -111,7 +108,6 @@ export default function UniversalProductModal({
 
     // ── Component state ──
     const [componentForm, setComponentForm] = useState<ComponentFormData>({
-        productCode: initialData ? getPrimaryProductCode(initialData) : '',
         name: initialData?.name || '',
         price_original: initialData?.price_original || '' as number | '',
         price_promo: initialData?.price_promo || '' as number | '',
@@ -139,7 +135,6 @@ export default function UniversalProductModal({
     useEffect(() => {
         if (isOpen) {
             setRetailForm({
-                productCode: initialData ? getPrimaryProductCode(initialData) : '',
                 name: initialData?.name || '',
                 price_original: initialData?.price_original || '' as number | '',
                 price_promo: initialData?.price_promo || '' as number | '',
@@ -155,7 +150,6 @@ export default function UniversalProductModal({
                 seriesId: initialData?.seriesId || '',
             });
             setComponentForm({
-                productCode: initialData ? getPrimaryProductCode(initialData) : '',
                 name: initialData?.name || '',
                 price_original: initialData?.price_original || '' as number | '',
                 price_promo: initialData?.price_promo || '' as number | '',
@@ -204,7 +198,9 @@ export default function UniversalProductModal({
         const form = retailForm;
         const imageUrl = images[0] || '';
         const productId = isEditing && initialData ? initialData.id : await normalizeDocId(form.name, 'retail', form.category);
-        const productCode = normalizeProductCode(form.productCode) || buildProductCodeFromId(productId);
+        const productCode = initialData
+            ? getPrimaryProductCode(initialData)
+            : buildProductCodeFromId(productId, getProductCodeKind({ category: form.category, categoryIds: form.categoryIds }));
         const searchKeywords = Array.from(new Set([...generateSearchKeywords(form.name), productCode.toLowerCase()])).slice(0, 60);
 
         const data: Record<string, unknown> = {
@@ -229,7 +225,7 @@ export default function UniversalProductModal({
             searchKeywords,
             seriesId: form.seriesId,
         };
-        const qrCodes = initialData ? mergePrimaryProductCode(initialData, productCode) : [productCode];
+        const qrCodes = [productCode];
 
         if (isEditing && initialData) {
             data.sold = initialData?.sold || 0;
@@ -249,7 +245,7 @@ export default function UniversalProductModal({
         const form = componentForm;
         const imageUrl = images[0] || '';
         const productId = isEditing && initialData ? initialData.id : await normalizeDocId(form.name, 'component');
-        const productCode = normalizeProductCode(form.productCode) || buildProductCodeFromId(productId);
+        const productCode = initialData ? getPrimaryProductCode(initialData) : buildProductCodeFromId(productId, 'component');
         const searchKeywords = Array.from(new Set([...generateSearchKeywords(form.name), productCode.toLowerCase()])).slice(0, 60);
 
         const data: Record<string, unknown> = {
@@ -273,7 +269,7 @@ export default function UniversalProductModal({
             specs: {},
             searchKeywords,
         };
-        const qrCodes = initialData ? mergePrimaryProductCode(initialData, productCode) : [productCode];
+        const qrCodes = [productCode];
 
         if (isEditing && initialData) {
             await updateProductWithCodes(initialData.id, qrCodes, data);
@@ -445,18 +441,6 @@ function RetailFields({
                     className="w-full h-11 px-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-shadow"
                     placeholder="iPhone 15 Pro Max 256GB"
                 />
-            </div>
-
-            <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Mã SP / QR</label>
-                <input
-                    type="text"
-                    value={form.productCode}
-                    onChange={(e) => setForm(p => ({ ...p, productCode: normalizeProductCode(e.target.value) }))}
-                    className="w-full h-11 px-4 font-mono border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-shadow"
-                    placeholder="Để trống để tự sinh, ví dụ VL-IP15PM-256"
-                />
-                <p className="text-xs text-gray-500 mt-1">Mã này được in thành QR và máy quét POS dùng để thêm hàng vào giỏ.</p>
             </div>
 
             {/* Price */}
@@ -645,18 +629,6 @@ function ComponentFields({
                     className="w-full h-11 px-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-shadow"
                     placeholder="Vd: Màn hình iPhone 13 Pro Max"
                 />
-            </div>
-
-            <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Mã LK / QR</label>
-                <input
-                    type="text"
-                    value={form.productCode}
-                    onChange={(e) => setForm(p => ({ ...p, productCode: normalizeProductCode(e.target.value) }))}
-                    className="w-full h-11 px-4 font-mono border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-shadow"
-                    placeholder="Để trống để tự sinh, ví dụ VL-LK-MH-IP13"
-                />
-                <p className="text-xs text-gray-500 mt-1">Dùng cho tem QR linh kiện và quét bán phụ kiện/linh kiện tại POS.</p>
             </div>
 
             {/* Category Taxonomy */}

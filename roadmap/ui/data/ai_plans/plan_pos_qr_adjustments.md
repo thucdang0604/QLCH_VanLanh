@@ -8,7 +8,7 @@
 
 Close the operational gaps found after the first POS QR rollout:
 
-1. A product code must resolve to exactly one product.
+1. Each product must have exactly one system-generated code, shared by QR, barcode, and POS lookup.
 2. Every newly created retail product, accessory, or component must receive a usable QR code.
 3. Smart Fix must restore products using the real configured taxonomy.
 4. Inventory staff must be allowed to maintain product QR data from `/admin/parts`.
@@ -26,14 +26,15 @@ Close the operational gaps found after the first POS QR rollout:
   - check legacy aliases `sku`, `barcode`, `productCode`, and `qrCodes[]`;
   - read every registry document before writing;
   - reject a code owned by another product;
-  - claim current codes and release obsolete claims owned by the current product;
+  - reject writes containing zero or multiple current codes;
+  - claim the single current code and release obsolete legacy claims owned by the current product;
   - create or update the product in the same transaction.
 - Existing products remain compatible because legacy aliases are queried before registry claims.
 
 ### 2. Cover all creation flows
 
-- `UniversalProductModal`: initialize `qrCodes`, claim the code transactionally, preserve fixed IDs for existing products.
-- `ExcelImportModal`: initialize `qrCodes`, claim the code transactionally, and write the real `productId` into inventory logs.
+- `UniversalProductModal`: generate the code automatically, initialize singleton `qrCodes`, claim the code transactionally, and preserve fixed IDs for existing products.
+- `ExcelImportModal`: generate the code automatically without a custom-code column, initialize singleton `qrCodes`, claim the code transactionally, and write the real `productId` into inventory logs.
 - Proposed components created by parts and technician workflows receive deterministic codes from their generated Firestore IDs.
 - Inventory completion backfills aliases and `qrCodes` for older proposed products when missing.
 
@@ -54,13 +55,17 @@ Close the operational gaps found after the first POS QR rollout:
 
 - Continue buffering keyboard-scanner input when the POS search input is focused.
 - Preserve manual text entry behavior for other inputs.
-- Add camera decode fallback using `@zxing/browser` when `BarcodeDetector` is unavailable.
+- Decode both `qr_code` and `code_128` with native `BarcodeDetector` when both formats are supported.
+- Fall back to ZXing `BrowserMultiFormatReader` when native barcode support is incomplete so mobile camera scanning still recognizes QR and `CODE128`.
 - Keep retail category filters stable across renders and route camera callbacks through a ref so product refreshes do not restart the active stream.
 - Ignore camera-open rejections emitted after an effect cleanup has already cancelled the previous scanner session.
 
 ### 6. Product labels
 
-- Generate a `CODE128` barcode from the same primary product code used by QR and POS lookup.
+- Generate compact stable automatic QR codes by catalog type: retail product `SP-XXXXXXXX`, accessory `PK-XXXXXXXX`, and component `LK-XXXXXXXX`.
+- Use the same generated code as the QR payload, `CODE128` barcode payload, SKU alias, and POS lookup value.
+- Do not expose custom-code entry or secondary-code management to admin users.
+- Keep tolerant reads for legacy aliases while all new and updated records persist one current code.
 - Offer label-content modes: `QR + barcode`, `QR only`, and `barcode only`.
 - Offer common paper presets: `40x30 mm`, `50x30 mm`, `58x40 mm`, `58 mm roll`, and an `A4` grid.
 - Let staff choose the number of copies before opening the browser print dialog.
@@ -72,7 +77,6 @@ Close the operational gaps found after the first POS QR rollout:
 - `src/lib/productCodes.ts`
 - `src/lib/idNormalizer.ts`
 - `src/components/admin/UniversalProductModal.tsx`
-- `src/components/admin/ManageQrCodesModal.tsx`
 - `src/components/admin/FixHiddenProductsModal.tsx`
 - `src/components/admin/ExcelImportModal.tsx`
 - `src/app/admin/parts/page.tsx`
@@ -95,12 +99,12 @@ Close the operational gaps found after the first POS QR rollout:
 
 ### Manual
 
-- Create retail, accessory, and component products and confirm QR aliases.
-- Attempt duplicate codes through manual create, QR manager, and Excel import.
-- Add and remove secondary QR codes and confirm POS lookup.
+- Create retail, accessory, and component products and confirm one generated `SP-`, `PK-`, or `LK-` code.
+- Confirm QR and barcode on each label contain the same generated code.
+- Confirm admin pages no longer expose custom-code entry or secondary-code management.
 - Open Smart Fix after page load and restore invalid retail and component taxonomy.
 - Verify `/admin/parts` actions with inventory-only staff.
 - Scan while POS search is focused.
-- Verify camera scan on a browser with and without native `BarcodeDetector`.
+- Verify QR and `CODE128` camera scans on browsers with and without complete native `BarcodeDetector` support.
 - Print `QR + barcode`, QR-only, and barcode-only labels on a target label printer.
 - Print an `A4` label grid and confirm labels align with the selected paper preset.

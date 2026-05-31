@@ -29,11 +29,16 @@ type BarcodeDetectionResult = { rawValue?: string };
 type BrowserBarcodeDetector = {
     detect(source: HTMLVideoElement): Promise<BarcodeDetectionResult[]>;
 };
+type BrowserBarcodeDetectorConstructor = {
+    new (options?: { formats?: string[] }): BrowserBarcodeDetector;
+    getSupportedFormats?: () => Promise<string[]>;
+};
 const RETAIL_CATEGORY_IDS = DEFAULT_CONFIG.taxonomy.retail.map((node) => node.id);
+const CAMERA_BARCODE_FORMATS = ['qr_code', 'code_128'];
 
 declare global {
     interface Window {
-        BarcodeDetector?: new (options?: { formats?: string[] }) => BrowserBarcodeDetector;
+        BarcodeDetector?: BrowserBarcodeDetectorConstructor;
     }
 }
 
@@ -251,7 +256,7 @@ export default function POSPage() {
     const zxingControlsRef = useRef<{ stop: () => void } | null>(null);
     const [showScanner, setShowScanner] = useState(false);
     const [manualScanCode, setManualScanCode] = useState('');
-    const [scanStatus, setScanStatus] = useState('Sẵn sàng quét QR sản phẩm');
+    const [scanStatus, setScanStatus] = useState('Sẵn sàng quét QR hoặc barcode sản phẩm');
     const [scannerError, setScannerError] = useState('');
 
     // ── Categories ──
@@ -383,9 +388,16 @@ export default function POSPage() {
                 const video = scannerVideoRef.current;
                 if (!video) return;
 
-                if (!window.BarcodeDetector) {
-                    const { BrowserQRCodeReader } = await import('@zxing/browser');
-                    const reader = new BrowserQRCodeReader();
+                const BarcodeDetector = window.BarcodeDetector;
+                const supportedNativeFormats = BarcodeDetector?.getSupportedFormats
+                    ? await BarcodeDetector.getSupportedFormats()
+                    : [];
+                const canUseNativeScanner = BarcodeDetector
+                    && CAMERA_BARCODE_FORMATS.every((format) => supportedNativeFormats.includes(format));
+
+                if (!canUseNativeScanner) {
+                    const { BrowserMultiFormatReader } = await import('@zxing/browser');
+                    const reader = new BrowserMultiFormatReader();
                     const controls = await reader.decodeFromConstraints(
                         { video: { facingMode: { ideal: 'environment' } }, audio: false },
                         video,
@@ -399,11 +411,11 @@ export default function POSPage() {
                         return;
                     }
                     zxingControlsRef.current = controls;
-                    setScanStatus('Đưa QR vào khung camera');
+                    setScanStatus('Đưa QR hoặc barcode vào khung camera');
                     return;
                 }
 
-                const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+                const detector = new BarcodeDetector({ formats: CAMERA_BARCODE_FORMATS });
                 const stream = await navigator.mediaDevices.getUserMedia({
                     video: { facingMode: { ideal: 'environment' } },
                     audio: false,
@@ -415,7 +427,7 @@ export default function POSPage() {
                 scannerStreamRef.current = stream;
                 video.srcObject = stream;
                 await video.play();
-                setScanStatus('Đưa QR vào khung camera');
+                setScanStatus('Đưa QR hoặc barcode vào khung camera');
 
                 const scan = async () => {
                     if (cancelled || !scannerVideoRef.current) return;
@@ -426,7 +438,7 @@ export default function POSPage() {
                             if (rawValue && handleProductScanRef.current(rawValue, 'camera')) return;
                         }
                     } catch (err) {
-                        console.error('QR scan failed:', err);
+                        console.error('Camera scan failed:', err);
                     }
                     scanFrameRef.current = window.requestAnimationFrame(scan);
                 };
@@ -864,7 +876,7 @@ export default function POSPage() {
                         className="flex items-center gap-1.5 px-4 py-2.5 bg-gray-900 text-white rounded-xl hover:bg-black shadow-sm font-semibold text-sm whitespace-nowrap transition-all"
                     >
                         <Camera size={16} />
-                        Quét QR
+                        Quét mã
                     </button>
                 </div>
 
@@ -956,11 +968,11 @@ export default function POSPage() {
                 </div>
             )}
 
-            {/* ═══ QR Scanner Modal ═══ */}
+            {/* ═══ QR / barcode scanner modal ═══ */}
             <Modal
                 isOpen={showScanner}
                 onClose={() => setShowScanner(false)}
-                title="Quét QR sản phẩm"
+                title="Quét QR hoặc barcode sản phẩm"
                 size="lg"
             >
                 <div className="p-5 space-y-4">

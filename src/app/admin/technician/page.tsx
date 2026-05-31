@@ -206,7 +206,7 @@ export default function TechnicianPage() {
                 } else {
                     // Create new proposed product
                     const newProdRef = doc(productsRef);
-                    const productCode = buildProductCodeFromId(newProdRef.id);
+                    const productCode = buildProductCodeFromId(newProdRef.id, 'component');
                     await createProductWithCodes(newProdRef.id, {
                         sku: productCode,
                         barcode: productCode,

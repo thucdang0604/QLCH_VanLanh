@@ -8,15 +8,8 @@
 
 1. Open `/admin/products` or `/admin/parts`.
 2. Create a new record.
-3. Leave the QR field blank to auto-generate a code, or enter a custom code.
-4. Save. The system rejects a code already used by another product.
-
-### Maintain multiple QR codes
-
-1. Open the QR manager from a product or component row.
-2. Add secondary codes or choose a new primary code.
-3. Save. The system claims all codes transactionally and releases removed codes.
-4. POS recognizes primary and secondary codes.
+3. Save. The system generates one code automatically: `SP-XXXXXXXX`, `PK-XXXXXXXX`, or `LK-XXXXXXXX`.
+4. The generated code is shared by QR, barcode, and POS lookup. Admin users cannot add secondary codes.
 
 ### Restore hidden products
 
@@ -27,16 +20,16 @@
 
 ### Scan at POS
 
-1. Use a keyboard scanner, POS search box, manual QR entry, or camera.
+1. Use a keyboard scanner, POS search box, manual code entry, or camera.
 2. Keyboard scanners remain active while the POS search field is focused.
-3. Camera scan uses native `BarcodeDetector` when available and a ZXing fallback otherwise.
+3. Camera scan recognizes QR and printed `CODE128` barcodes. It uses native `BarcodeDetector` when both formats are supported and ZXing multi-format fallback otherwise.
 
 ### Print product labels
 
 1. Open the label action from a product or component row.
 2. Choose `QR + barcode`, QR-only, or barcode-only.
 3. Choose the matching paper preset and number of copies.
-4. Print. The `CODE128` barcode contains the same primary product code recognized by POS.
+4. Print. QR and `CODE128` barcode contain the same single generated product code.
 
 ## Verification record
 
@@ -55,10 +48,13 @@ Final local verification:
 - Smart Fix now derives choices from configured taxonomy and recomputes after async data load.
 - Firestore rules now align inventory and repair catalog operations with least-required permissions.
 - POS keyboard scan remains active in the search box and camera scan has ZXing fallback.
+- Follow-up fix: phone camera scanning now recognizes printed `CODE128` labels through native multi-format detection or ZXing `BrowserMultiFormatReader`.
 - Follow-up fix: stabilized the POS retail filter and camera callback lifecycle after a runtime report that camera repeatedly opened and closed with `Camera open failed: false`.
 - Follow-up verification: focused POS ESLint, sequential `next typegen && tsc --noEmit`, and production `next build` passed. Build must run while the dev server is stopped because both commands write `.next`.
 - Installed `@zxing/browser@0.2.0` with pnpm v10 to preserve the existing store layout.
 - Added browser-side `CODE128` label rendering with `jsbarcode`, label-content modes, print quantity, and paper presets for compact, roll, and A4 printers.
+- Changed new automatic QR codes to `SP-XXXXXXXX` for retail products, `PK-XXXXXXXX` for accessories, and `LK-XXXXXXXX` for components.
+- Simplified labels and persistence to one system-generated code shared by QR, barcode, SKU aliases, and POS lookup. Removed admin custom-code and secondary-code management.
 - `next typegen`: passed.
 - `tsc --noEmit`: passed when run sequentially after type generation.
 - focused ESLint: passed with zero warnings.
@@ -73,5 +69,5 @@ Residual manual checks:
 - Deploy Firestore rules before testing QR registry writes.
 - Test duplicate rejection against the real Firestore dataset.
 - Test inventory-only and repair-only staff permissions.
-- Test native and ZXing camera paths on target phones.
+- Test QR and printed `CODE128` labels through native and ZXing camera paths on target phones.
 - Test printed `CODE128` recognition on each target scanner and confirm alignment on real paper stock.
