@@ -16,7 +16,10 @@ import {
     Clock,
     PackagePlus,
     Save,
-    Building2
+    Building2,
+    QrCode,
+    AlertTriangle,
+    Settings2
 } from 'lucide-react';
 import { useFirestoreCollection, updateDocument } from '@/lib/useFirestore';
 import { isPartCategory } from '@/lib/constants';
@@ -38,6 +41,11 @@ import { toastError, toastSuccess } from '@/lib/toast';
 import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
 import CurrencyInput from '@/components/admin/CurrencyInput';
+import ProductQrLabelModal from '@/components/admin/ProductQrLabelModal';
+import ManageQrCodesModal from '@/components/admin/ManageQrCodesModal';
+import FixHiddenProductsModal from '@/components/admin/FixHiddenProductsModal';
+import { buildProductCodeFromId } from '@/lib/productCodes';
+import { createProductWithCodes } from '@/lib/productCodeRegistry';
 
 interface ImportReceiptItem {
     productId: string;
@@ -107,7 +115,10 @@ export default function PartsPage() {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isCreateReceiptOpen, setIsCreateReceiptOpen] = useState(false);
     const [editingPart, setEditingPart] = useState<Product | null>(null);
+    const [qrPart, setQrPart] = useState<(Product & { id: string }) | null>(null);
+    const [qrManagePart, setQrManagePart] = useState<(Product & { id: string }) | null>(null);
     const [activeTab, setActiveTab] = useState<'parts' | 'proposals' | 'ordered'>('parts');
+    const [showFixHidden, setShowFixHidden] = useState(false);
 
     // Import Proposals State
     const [draftReceipts, setDraftReceipts] = useState<ImportReceipt[]>([]);
@@ -478,6 +489,13 @@ export default function PartsPage() {
                 </div>
                 <div className="flex items-center gap-3">
                     <button
+                        onClick={() => setShowFixHidden(true)}
+                        className="flex items-center gap-2 border-2 border-amber-300 text-amber-700 px-4 py-2.5 rounded-lg font-medium hover:bg-amber-50 transition-colors text-sm"
+                    >
+                        <AlertTriangle size={18} />
+                        Khắc phục SP bị ẩn
+                    </button>
+                    <button
                         onClick={() => setIsCreateReceiptOpen(true)}
                         className="flex items-center gap-2 bg-blue-500 text-white px-4 py-2.5 rounded-lg font-medium hover:bg-blue-600 transition-colors shadow-sm"
                     >
@@ -722,6 +740,20 @@ export default function PartsPage() {
                                             </td>
                                             <td className="px-6 py-4">
                                                 <div className="flex items-center justify-end gap-2">
+                                                    <button
+                                                        onClick={() => setQrPart(part as Product & { id: string })}
+                                                        className="p-2 hover:bg-orange-100 text-orange-600 rounded-lg transition-colors"
+                                                        title="In tem QR"
+                                                    >
+                                                        <QrCode size={18} />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setQrManagePart(part as Product & { id: string })}
+                                                        className="p-2 hover:bg-purple-100 text-purple-600 rounded-lg transition-colors"
+                                                        title="Quản lý mã QR"
+                                                    >
+                                                        <Settings2 size={18} />
+                                                    </button>
                                                     <button
                                                         onClick={() => { setEditingPart(part); setIsModalOpen(true); }}
                                                         className="p-2 hover:bg-blue-100 text-blue-600 rounded-lg transition-colors"
@@ -1199,6 +1231,9 @@ export default function PartsPage() {
                     onCreated={() => fetchDrafts()}
                 />
             )}
+            <ProductQrLabelModal product={qrPart} onClose={() => setQrPart(null)} />
+            <ManageQrCodesModal product={qrManagePart} onClose={() => setQrManagePart(null)} />
+            <FixHiddenProductsModal isOpen={showFixHidden} onClose={() => setShowFixHidden(false)} products={products} />
         </div>
     );
 }
@@ -1551,7 +1586,12 @@ function CreateReceiptModal({ isOpen, onClose, parts, retailProducts, onCreated,
             } else {
                 const proposedCat = receiptType === 'retail' ? 'product' : 'component';
                 const proposedCatIds = receiptType === 'retail' ? ['san-pham'] : ['component'];
-                const newRef = await addDoc(collection(db, 'products'), {
+                const newRef = doc(collection(db, 'products'));
+                const productCode = buildProductCodeFromId(newRef.id);
+                await createProductWithCodes(newRef.id, {
+                    sku: productCode,
+                    barcode: productCode,
+                    productCode,
                     name: exactName,
                     category: proposedCat,
                     categoryIds: proposedCatIds,
@@ -1562,9 +1602,7 @@ function CreateReceiptModal({ isOpen, onClose, parts, retailProducts, onCreated,
                     sold: 0,
                     price_original: 0,
                     costPrice: 0,
-                    createdAt: serverTimestamp(),
-                    updatedAt: serverTimestamp(),
-                });
+                }, [productCode]);
                 newId = newRef.id;
             }
             setItems([...items, {

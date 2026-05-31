@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
-import { Plus, Search, Edit, Trash2, Package, Loader2, FileSpreadsheet } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, Package, Loader2, FileSpreadsheet, QrCode, AlertTriangle, Settings2 } from 'lucide-react';
 import { useFirestoreCollection, updateDocument } from '@/lib/useFirestore';
 
 import { orderBy } from 'firebase/firestore';
@@ -14,10 +14,14 @@ import UniversalProductModal from '@/components/admin/UniversalProductModal';
 import CategoryTaxonomySelector from '@/components/admin/CategoryTaxonomySelector';
 import ExcelImportModal from '@/components/admin/ExcelImportModal';
 import ProductSeriesManager from '@/components/admin/ProductSeriesManager';
+import ProductQrLabelModal from '@/components/admin/ProductQrLabelModal';
+import ManageQrCodesModal from '@/components/admin/ManageQrCodesModal';
+import FixHiddenProductsModal from '@/components/admin/FixHiddenProductsModal';
 import type { Product } from '@/lib/types';
 import { useConfig } from '@/lib/ConfigContext';
 import { getCategoryPath, collectAllNodeIds } from '@/lib/utils';
 import { isPartCategory } from '@/lib/constants';
+import { productCodeSearchText } from '@/lib/productCodes';
 
 // Product is now imported from @/lib/types
 
@@ -38,7 +42,10 @@ export default function ProductsPage() {
     const [filterCondition, setFilterCondition] = useState('');
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+    const [qrProduct, setQrProduct] = useState<(Product & { id: string }) | null>(null);
+    const [qrManageProduct, setQrManageProduct] = useState<(Product & { id: string }) | null>(null);
     const [showExcelImport, setShowExcelImport] = useState(false);
+    const [showFixHidden, setShowFixHidden] = useState(false);
 
     const handleDelete = async (product: Product) => {
         if (Number(product.stock) > 0) {
@@ -60,7 +67,8 @@ export default function ProductsPage() {
     const filteredProducts = products.filter((p) => {
         if (p.status === 'inactive') return false; // Hide soft-deleted products
         if (isPartCategory(p.category, p.categoryIds)) return false; // Linh kiện managed separately in /admin/parts
-        const matchSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase());
+        const normalizedQuery = searchQuery.toLowerCase();
+        const matchSearch = p.name.toLowerCase().includes(normalizedQuery) || productCodeSearchText(p as Product & { id: string }).includes(normalizedQuery);
         
         let matchCategory = true;
         if (filterCategory) {
@@ -105,6 +113,13 @@ export default function ProductsPage() {
                     <p className="text-gray-500">{products.length} sản phẩm</p>
                 </div>
                 <div className="flex gap-2">
+                    <button
+                        onClick={() => setShowFixHidden(true)}
+                        className="flex items-center gap-2 border-2 border-amber-300 text-amber-700 px-4 py-2.5 rounded-lg font-medium hover:bg-amber-50 transition-colors text-sm"
+                    >
+                        <AlertTriangle size={18} />
+                        Khắc phục SP bị ẩn
+                    </button>
                     <button
                         onClick={() => setShowExcelImport(true)}
                         className="flex items-center gap-2 border-2 border-green-300 text-green-700 px-4 py-2.5 rounded-lg font-medium hover:bg-green-50 transition-colors text-sm"
@@ -294,6 +309,20 @@ export default function ProductsPage() {
                                     <td className="px-6 py-4">
                                         <div className="flex items-center justify-end gap-2">
                                             <button
+                                                onClick={() => setQrProduct(product)}
+                                                className="p-2 hover:bg-orange-100 text-orange-600 rounded-lg"
+                                                title="In tem QR"
+                                            >
+                                                <QrCode size={18} />
+                                            </button>
+                                            <button
+                                                onClick={() => setQrManageProduct(product)}
+                                                className="p-2 hover:bg-purple-100 text-purple-600 rounded-lg"
+                                                title="Quản lý mã QR"
+                                            >
+                                                <Settings2 size={18} />
+                                            </button>
+                                            <button
                                                 onClick={() => { setEditingProduct(product); setIsModalOpen(true); }}
                                                 className="p-2 hover:bg-blue-100 text-blue-600 rounded-lg"
                                             >
@@ -423,6 +452,9 @@ export default function ProductsPage() {
             />
 
             {showExcelImport && <ExcelImportModal mode="product" onClose={() => setShowExcelImport(false)} />}
+            <ProductQrLabelModal product={qrProduct} onClose={() => setQrProduct(null)} />
+            <ManageQrCodesModal product={qrManageProduct} onClose={() => setQrManageProduct(null)} />
+            <FixHiddenProductsModal isOpen={showFixHidden} onClose={() => setShowFixHidden(false)} products={products} />
         </div>
     );
 }

@@ -4,17 +4,19 @@ import { useState, useEffect } from 'react';
 import { Loader2, Plus, X } from 'lucide-react';
 import CurrencyInput from '@/components/admin/CurrencyInput';
 import { ImageIcon } from 'lucide-react';
-import { getDoc, doc, orderBy } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
-import { generateSlug, generateSearchKeywords } from '@/lib/utils';
-import { addDocumentWithId, updateDocument, useFirestoreCollection } from '@/lib/useFirestore';
+import { orderBy } from 'firebase/firestore';
+import { generateSearchKeywords } from '@/lib/utils';
+import { useFirestoreCollection } from '@/lib/useFirestore';
 import { triggerRevalidate } from '@/lib/revalidate';
+import { normalizeDocId } from '@/lib/idNormalizer';
 import { toastError } from '@/lib/toast';
 import Modal from '@/components/admin/Modal';
 import MediaManager from '@/components/admin/MediaManager';
 import CategoryTaxonomySelector from '@/components/admin/CategoryTaxonomySelector';
 import type { Product } from '@/lib/types';
 import { PART_CATEGORY_LABEL } from '@/lib/constants';
+import { buildProductCodeFromId, getPrimaryProductCode, mergePrimaryProductCode, normalizeProductCode } from '@/lib/productCodes';
+import { createProductWithCodes, updateProductWithCodes } from '@/lib/productCodeRegistry';
 
 // ── Shared Constants ──
 
@@ -45,6 +47,7 @@ interface UniversalProductModalProps {
 
 // ── Retail Form Data ──
 interface RetailFormData {
+    productCode: string;
     name: string;
     price_original: number | '';
     price_promo: number | '';
@@ -63,6 +66,7 @@ interface RetailFormData {
 
 // ── Component Form Data ──
 interface ComponentFormData {
+    productCode: string;
     name: string;
     price_original: number | '';
     price_promo: number | '';
@@ -89,6 +93,7 @@ export default function UniversalProductModal({
 
     // ── Retail state ──
     const [retailForm, setRetailForm] = useState<RetailFormData>({
+        productCode: initialData ? getPrimaryProductCode(initialData) : '',
         name: initialData?.name || '',
         price_original: initialData?.price_original || '' as number | '',
         price_promo: initialData?.price_promo || '' as number | '',
@@ -106,6 +111,7 @@ export default function UniversalProductModal({
 
     // ── Component state ──
     const [componentForm, setComponentForm] = useState<ComponentFormData>({
+        productCode: initialData ? getPrimaryProductCode(initialData) : '',
         name: initialData?.name || '',
         price_original: initialData?.price_original || '' as number | '',
         price_promo: initialData?.price_promo || '' as number | '',
@@ -133,6 +139,7 @@ export default function UniversalProductModal({
     useEffect(() => {
         if (isOpen) {
             setRetailForm({
+                productCode: initialData ? getPrimaryProductCode(initialData) : '',
                 name: initialData?.name || '',
                 price_original: initialData?.price_original || '' as number | '',
                 price_promo: initialData?.price_promo || '' as number | '',
@@ -148,6 +155,7 @@ export default function UniversalProductModal({
                 seriesId: initialData?.seriesId || '',
             });
             setComponentForm({
+                productCode: initialData ? getPrimaryProductCode(initialData) : '',
                 name: initialData?.name || '',
                 price_original: initialData?.price_original || '' as number | '',
                 price_promo: initialData?.price_promo || '' as number | '',
@@ -195,8 +203,14 @@ export default function UniversalProductModal({
     const submitRetail = async () => {
         const form = retailForm;
         const imageUrl = images[0] || '';
+        const productId = isEditing && initialData ? initialData.id : await normalizeDocId(form.name, 'retail', form.category);
+        const productCode = normalizeProductCode(form.productCode) || buildProductCodeFromId(productId);
+        const searchKeywords = Array.from(new Set([...generateSearchKeywords(form.name), productCode.toLowerCase()])).slice(0, 60);
 
         const data: Record<string, unknown> = {
+            sku: productCode,
+            barcode: productCode,
+            productCode,
             name: form.name,
             price_original: Number(form.price_original) || 0,
             price_promo: Number(form.price_promo) || 0,
@@ -212,21 +226,21 @@ export default function UniversalProductModal({
             imageUrl,
             images,
             specs: initialData?.specs || {},
-            searchKeywords: generateSearchKeywords(form.name),
+            searchKeywords,
             seriesId: form.seriesId,
         };
+        const qrCodes = initialData ? mergePrimaryProductCode(initialData, productCode) : [productCode];
 
         if (isEditing && initialData) {
             data.sold = initialData?.sold || 0;
-            await updateDocument('products', initialData.id, data);
+            await updateProductWithCodes(initialData.id, qrCodes, data);
             await triggerRevalidate(['/', `/product/${initialData.id}`, '/flash-sale', '/search', '/sitemap.xml'], ['products']);
             onUpdated?.();
         } else {
             data.sold = 0;
-            const slug = await resolveSlug(form.name);
-            await addDocumentWithId('products', slug, data);
-            await triggerRevalidate(['/', `/product/${slug}`, '/flash-sale', '/search', '/sitemap.xml'], ['products']);
-            onCreated?.({ id: slug, ...data } as Product & { id: string });
+            await createProductWithCodes(productId, data, qrCodes);
+            await triggerRevalidate(['/', `/product/${productId}`, '/flash-sale', '/search', '/sitemap.xml'], ['products']);
+            onCreated?.({ id: productId, ...data } as Product & { id: string });
         }
         onClose();
     };
@@ -234,8 +248,14 @@ export default function UniversalProductModal({
     const submitComponent = async () => {
         const form = componentForm;
         const imageUrl = images[0] || '';
+        const productId = isEditing && initialData ? initialData.id : await normalizeDocId(form.name, 'component');
+        const productCode = normalizeProductCode(form.productCode) || buildProductCodeFromId(productId);
+        const searchKeywords = Array.from(new Set([...generateSearchKeywords(form.name), productCode.toLowerCase()])).slice(0, 60);
 
         const data: Record<string, unknown> = {
+            sku: productCode,
+            barcode: productCode,
+            productCode,
             name: form.name,
             category: PART_CATEGORY_LABEL,
             categoryIds: form.categoryIds,
@@ -251,29 +271,19 @@ export default function UniversalProductModal({
             imageUrl,
             images,
             specs: {},
-            searchKeywords: generateSearchKeywords(form.name),
+            searchKeywords,
         };
+        const qrCodes = initialData ? mergePrimaryProductCode(initialData, productCode) : [productCode];
 
         if (isEditing && initialData) {
-            await updateDocument('products', initialData.id, data);
+            await updateProductWithCodes(initialData.id, qrCodes, data);
             onUpdated?.();
         } else {
             data.sold = 0;
-            const slug = await resolveSlug(form.name);
-            await addDocumentWithId('products', slug, data);
-            onCreated?.({ id: slug, ...data } as Product & { id: string });
+            await createProductWithCodes(productId, data, qrCodes);
+            onCreated?.({ id: productId, ...data } as Product & { id: string });
         }
         onClose();
-    };
-
-    /** Generate unique slug — check Firestore for duplicates */
-    const resolveSlug = async (name: string): Promise<string> => {
-        const baseSlug = generateSlug(name);
-        const checkRef = await getDoc(doc(db, 'products', baseSlug));
-        if (checkRef.exists()) {
-            return `${baseSlug}-${Math.floor(Math.random() * 10000)}`;
-        }
-        return baseSlug;
     };
 
     // ── Derive title ──
@@ -435,6 +445,18 @@ function RetailFields({
                     className="w-full h-11 px-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-shadow"
                     placeholder="iPhone 15 Pro Max 256GB"
                 />
+            </div>
+
+            <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Mã SP / QR</label>
+                <input
+                    type="text"
+                    value={form.productCode}
+                    onChange={(e) => setForm(p => ({ ...p, productCode: normalizeProductCode(e.target.value) }))}
+                    className="w-full h-11 px-4 font-mono border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-shadow"
+                    placeholder="Để trống để tự sinh, ví dụ VL-IP15PM-256"
+                />
+                <p className="text-xs text-gray-500 mt-1">Mã này được in thành QR và máy quét POS dùng để thêm hàng vào giỏ.</p>
             </div>
 
             {/* Price */}
@@ -623,6 +645,18 @@ function ComponentFields({
                     className="w-full h-11 px-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-shadow"
                     placeholder="Vd: Màn hình iPhone 13 Pro Max"
                 />
+            </div>
+
+            <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Mã LK / QR</label>
+                <input
+                    type="text"
+                    value={form.productCode}
+                    onChange={(e) => setForm(p => ({ ...p, productCode: normalizeProductCode(e.target.value) }))}
+                    className="w-full h-11 px-4 font-mono border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-shadow"
+                    placeholder="Để trống để tự sinh, ví dụ VL-LK-MH-IP13"
+                />
+                <p className="text-xs text-gray-500 mt-1">Dùng cho tem QR linh kiện và quét bán phụ kiện/linh kiện tại POS.</p>
             </div>
 
             {/* Category Taxonomy */}

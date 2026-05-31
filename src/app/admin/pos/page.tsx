@@ -6,11 +6,10 @@ import { useSearchParams } from 'next/navigation';
 import {
     Search, ShoppingCart, Plus, Minus, Trash2, User, Phone, Receipt, X,
     Package, CreditCard, Banknote, QrCode, Tag, Loader2, CheckCircle2,
-    AlertTriangle, Wrench
+    AlertTriangle, Wrench, Camera, Keyboard
 } from 'lucide-react';
 import { collection, getDocs, query, where, orderBy as fbOrderBy } from 'firebase/firestore';
 
-import { useAuth } from '@/lib/AuthContext';
 import { useConfig } from '@/lib/ConfigContext';
 import Modal from '@/components/admin/Modal';
 import UniversalProductModal from '@/components/admin/UniversalProductModal';
@@ -24,6 +23,19 @@ import { PART_CATEGORY, isPartCategory } from '@/lib/constants';
 import { fetchActiveDiscountRules, calculateAccessoryDiscounts } from '@/lib/discountRuleUtils';
 import CurrencyInput from '@/components/admin/CurrencyInput';
 import { consumeChatWorkflowHandoff } from '@/lib/chatWorkflowHandoff';
+import { extractProductCodeFromScan, getPrimaryProductCode, getProductScanCandidates, productCodeSearchText } from '@/lib/productCodes';
+
+type BarcodeDetectionResult = { rawValue?: string };
+type BrowserBarcodeDetector = {
+    detect(source: HTMLVideoElement): Promise<BarcodeDetectionResult[]>;
+};
+const RETAIL_CATEGORY_IDS = DEFAULT_CONFIG.taxonomy.retail.map((node) => node.id);
+
+declare global {
+    interface Window {
+        BarcodeDetector?: new (options?: { formats?: string[] }) => BrowserBarcodeDetector;
+    }
+}
 
 
 // ── Receipt item shape (matches orderData.items) ──
@@ -70,7 +82,6 @@ const paymentMethods = [
 ];
 
 export default function POSPage() {
-    const { user } = useAuth();
     const { config } = useConfig();
     const searchParams = useSearchParams();
 
@@ -192,18 +203,18 @@ export default function POSPage() {
 
     const searchRef = useRef<HTMLInputElement>(null);
 
-    const retailCategoryIds = DEFAULT_CONFIG.taxonomy.retail.map(n => n.id);
-
     const filterPosProducts = useCallback((data: (Product & { id: string })[]) => {
         return data.filter(p => {
             if (((p.stock || 0) - (p.held || 0)) <= 0) return false;
             if (p.status !== 'active') return false;
+            if (p.isProposed) return false;
+            if (isPartCategory(p.category, p.categoryIds)) return true;
             if (p.categoryIds && p.categoryIds.length > 0) {
-                return retailCategoryIds.includes(p.categoryIds[0]);
+                return RETAIL_CATEGORY_IDS.includes(p.categoryIds[0]);
             }
-            return !isPartCategory(p.category, p.categoryIds) && p.category !== 'Dịch vụ sửa chữa';
+            return p.category !== 'Dịch vụ sửa chữa' && p.category !== 'service';
         });
-    }, [retailCategoryIds]);
+    }, []);
 
     // ── Load products ──
     useEffect(() => {
@@ -230,43 +241,18 @@ export default function POSPage() {
         return () => window.removeEventListener('keydown', handler);
     }, []);
 
-    // ── Barcode Scanner ──
+    // ── Scan state ──
     const barcodeBuffer = useRef('');
     const lastKeyTime = useRef(Date.now());
-
-    useEffect(() => {
-        const handler = (e: KeyboardEvent) => {
-            // Ignore if focus is in an input field (to prevent interference with typing)
-            if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') {
-                return;
-            }
-
-            const now = Date.now();
-            // Most scanners send keys within 10-20ms of each other.
-            // If it's been more than 50ms, assume it's a new scan.
-            if (now - lastKeyTime.current > 50) {
-                barcodeBuffer.current = '';
-            }
-            lastKeyTime.current = now;
-
-            if (e.key === 'Enter') {
-                if (barcodeBuffer.current.length >= 3) {
-                    const code = barcodeBuffer.current;
-                    barcodeBuffer.current = '';
-                    // Try finding by ID (Firestore ID) or barcode field if it exists
-                    const found = products.find(p => p.id === code || (p as unknown as { barcode?: string }).barcode === code);
-                    if (found) {
-                        addToCart(found);
-                        // Optional: play a success sound? (Maybe later)
-                    }
-                }
-            } else if (e.key.length === 1) {
-                barcodeBuffer.current += e.key;
-            }
-        };
-        window.addEventListener('keydown', handler);
-        return () => window.removeEventListener('keydown', handler);
-    }, [products]);
+    const scanStartTime = useRef(Date.now());
+    const scannerVideoRef = useRef<HTMLVideoElement>(null);
+    const scannerStreamRef = useRef<MediaStream | null>(null);
+    const scanFrameRef = useRef<number | null>(null);
+    const zxingControlsRef = useRef<{ stop: () => void } | null>(null);
+    const [showScanner, setShowScanner] = useState(false);
+    const [manualScanCode, setManualScanCode] = useState('');
+    const [scanStatus, setScanStatus] = useState('Sẵn sàng quét QR sản phẩm');
+    const [scannerError, setScannerError] = useState('');
 
     // ── Categories ──
     const categories = ['all', ...Array.from(new Set(products.map(p => p.category)))];
@@ -275,12 +261,12 @@ export default function POSPage() {
     const filtered = products.filter(p => {
         const matchCat = activeCategory === 'all' || p.category === activeCategory;
         const q = searchQuery.toLowerCase();
-        const matchSearch = !q || p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q);
+        const matchSearch = !q || p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q) || productCodeSearchText(p).includes(q);
         return matchCat && matchSearch;
     });
 
     // ── Cart helpers ──
-    const addToCart = (product: Product & { id: string }) => {
+    const addToCart = useCallback((product: Product & { id: string }) => {
         const available = (product.stock || 0) - (product.held || 0);
         if (available <= 0) {
             toastError('Sản phẩm đã hết hàng!');
@@ -308,7 +294,156 @@ export default function POSPage() {
                 quantity: 1,
             }];
         });
-    };
+    }, []);
+
+    const findProductByScanCode = useCallback((rawCode: string) => {
+        const code = extractProductCodeFromScan(rawCode);
+        if (!code) return null;
+        return products.find((product) => getProductScanCandidates(product).some((candidate) => candidate === rawCode.trim() || candidate === code)) || null;
+    }, [products]);
+
+    const handleProductScan = useCallback((rawCode: string, source: 'keyboard' | 'camera' | 'manual') => {
+        const code = extractProductCodeFromScan(rawCode);
+        const found = findProductByScanCode(rawCode);
+        if (!found) {
+            const label = code || rawCode.trim();
+            setScanStatus(`Không tìm thấy mã ${label}`);
+            toastError(`Không tìm thấy sản phẩm với mã ${label}`);
+            return false;
+        }
+        addToCart(found);
+        setScanStatus(`Đã thêm ${found.name}`);
+        if (source === 'camera') setShowScanner(false);
+        return true;
+    }, [addToCart, findProductByScanCode]);
+    const handleProductScanRef = useRef(handleProductScan);
+
+    useEffect(() => {
+        handleProductScanRef.current = handleProductScan;
+    }, [handleProductScan]);
+
+    useEffect(() => {
+        const handler = (e: KeyboardEvent) => {
+            const activeElement = document.activeElement;
+            const isSearchFocused = activeElement === searchRef.current;
+            if ((activeElement?.tagName === 'INPUT' || activeElement?.tagName === 'TEXTAREA') && !isSearchFocused) return;
+
+            const now = Date.now();
+            if (now - lastKeyTime.current > 80) {
+                barcodeBuffer.current = '';
+                scanStartTime.current = now;
+            }
+            lastKeyTime.current = now;
+
+            if (e.key === 'Enter') {
+                const elapsed = now - scanStartTime.current;
+                const looksLikeScannerInput = barcodeBuffer.current.length >= 3 && elapsed <= Math.max(350, barcodeBuffer.current.length * 80);
+                if (looksLikeScannerInput) {
+                    const code = barcodeBuffer.current;
+                    barcodeBuffer.current = '';
+                    if (isSearchFocused) {
+                        e.preventDefault();
+                        setSearchQuery('');
+                    }
+                    handleProductScan(code, 'keyboard');
+                }
+            } else if (e.key.length === 1) {
+                barcodeBuffer.current += e.key;
+            }
+        };
+        window.addEventListener('keydown', handler);
+        return () => window.removeEventListener('keydown', handler);
+    }, [handleProductScan]);
+
+    const stopCameraScanner = useCallback(() => {
+        if (scanFrameRef.current) {
+            window.cancelAnimationFrame(scanFrameRef.current);
+            scanFrameRef.current = null;
+        }
+        scannerStreamRef.current?.getTracks().forEach((track) => track.stop());
+        scannerStreamRef.current = null;
+        zxingControlsRef.current?.stop();
+        zxingControlsRef.current = null;
+        if (scannerVideoRef.current) scannerVideoRef.current.srcObject = null;
+    }, []);
+
+    useEffect(() => {
+        if (!showScanner) {
+            stopCameraScanner();
+            return;
+        }
+
+        let cancelled = false;
+
+        const startScanner = async () => {
+            setScannerError('');
+            setScanStatus('Đang mở camera...');
+
+            try {
+                const video = scannerVideoRef.current;
+                if (!video) return;
+
+                if (!window.BarcodeDetector) {
+                    const { BrowserQRCodeReader } = await import('@zxing/browser');
+                    const reader = new BrowserQRCodeReader();
+                    const controls = await reader.decodeFromConstraints(
+                        { video: { facingMode: { ideal: 'environment' } }, audio: false },
+                        video,
+                        (result) => {
+                            const rawValue = result?.getText();
+                            if (rawValue) handleProductScanRef.current(rawValue, 'camera');
+                        },
+                    );
+                    if (cancelled) {
+                        controls.stop();
+                        return;
+                    }
+                    zxingControlsRef.current = controls;
+                    setScanStatus('Đưa QR vào khung camera');
+                    return;
+                }
+
+                const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: { ideal: 'environment' } },
+                    audio: false,
+                });
+                if (cancelled) {
+                    stream.getTracks().forEach((track) => track.stop());
+                    return;
+                }
+                scannerStreamRef.current = stream;
+                video.srcObject = stream;
+                await video.play();
+                setScanStatus('Đưa QR vào khung camera');
+
+                const scan = async () => {
+                    if (cancelled || !scannerVideoRef.current) return;
+                    try {
+                        if (scannerVideoRef.current.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+                            const results = await detector.detect(scannerVideoRef.current);
+                            const rawValue = results[0]?.rawValue;
+                            if (rawValue && handleProductScanRef.current(rawValue, 'camera')) return;
+                        }
+                    } catch (err) {
+                        console.error('QR scan failed:', err);
+                    }
+                    scanFrameRef.current = window.requestAnimationFrame(scan);
+                };
+                scanFrameRef.current = window.requestAnimationFrame(scan);
+            } catch (err) {
+                if (cancelled) return;
+                console.error('Camera open failed:', err);
+                setScannerError('Không mở được camera. Kiểm tra quyền camera của trình duyệt hoặc nhập mã tay.');
+            }
+        };
+
+        startScanner();
+        return () => {
+            cancelled = true;
+            stopCameraScanner();
+        };
+    }, [showScanner, stopCameraScanner]);
 
     const addRepairToCart = () => {
         if (!linkedRepair) return;
@@ -724,6 +859,13 @@ export default function POSPage() {
                         <Plus size={16} />
                         Thêm SP Mới
                     </button>
+                    <button
+                        onClick={() => setShowScanner(true)}
+                        className="flex items-center gap-1.5 px-4 py-2.5 bg-gray-900 text-white rounded-xl hover:bg-black shadow-sm font-semibold text-sm whitespace-nowrap transition-all"
+                    >
+                        <Camera size={16} />
+                        Quét QR
+                    </button>
                 </div>
 
                 {/* Category Tabs */}
@@ -773,6 +915,7 @@ export default function POSPage() {
                                         )}
                                     </div>
                                     <p className="text-xs font-semibold text-gray-800 line-clamp-2 mb-1">{product.name}</p>
+                                    <p className="text-[10px] font-mono text-gray-400 mb-1">{getPrimaryProductCode(product)}</p>
                                     <p className="text-sm font-bold text-orange-600">{formatPrice(product.price_promo || product.price_original)}</p>
                                     <p className={`text-[10px] mt-0.5 font-medium ${outOfStock ? 'text-red-500' : available <= 3 ? 'text-amber-500' : 'text-gray-400'}`}>
                                         Tồn kho: {product.stock || 0}{(product.held || 0) > 0 ? ` (Đang giữ: ${product.held})` : ''}
@@ -812,6 +955,54 @@ export default function POSPage() {
                     {cartSection}
                 </div>
             )}
+
+            {/* ═══ QR Scanner Modal ═══ */}
+            <Modal
+                isOpen={showScanner}
+                onClose={() => setShowScanner(false)}
+                title="Quét QR sản phẩm"
+                size="lg"
+            >
+                <div className="p-5 space-y-4">
+                    <div className="relative aspect-[4/3] overflow-hidden rounded-xl bg-gray-950">
+                        <video ref={scannerVideoRef} className="h-full w-full object-cover" muted playsInline />
+                        <div className="pointer-events-none absolute inset-8 rounded-2xl border-2 border-white/80 shadow-[0_0_0_999px_rgba(0,0,0,0.28)]" />
+                        <div className="absolute bottom-3 left-3 right-3 rounded-lg bg-black/70 px-3 py-2 text-center text-sm font-medium text-white">
+                            {scannerError || scanStatus}
+                        </div>
+                    </div>
+
+                    {scannerError && (
+                        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                            {scannerError}
+                        </div>
+                    )}
+
+                    <form
+                        className="flex flex-col gap-2 sm:flex-row"
+                        onSubmit={(e) => {
+                            e.preventDefault();
+                            if (handleProductScan(manualScanCode, 'manual')) setManualScanCode('');
+                        }}
+                    >
+                        <div className="relative flex-1">
+                            <Keyboard size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                            <input
+                                value={manualScanCode}
+                                onChange={(e) => setManualScanCode(e.target.value)}
+                                className="h-11 w-full rounded-lg border pl-9 pr-3 font-mono text-sm focus:border-orange-400 focus:outline-none focus:ring-2 focus:ring-orange-500/20"
+                                placeholder="Nhập mã nếu camera không hỗ trợ"
+                            />
+                        </div>
+                        <button
+                            type="submit"
+                            className="h-11 rounded-lg bg-orange-500 px-5 text-sm font-bold text-white hover:bg-orange-600"
+                        >
+                            Thêm vào giỏ
+                        </button>
+                    </form>
+                </div>
+            </Modal>
 
             {/* ═══ Receipt Modal (80mm thermal) ═══ */}
             {lastOrder && (

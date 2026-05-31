@@ -8,7 +8,7 @@ import {
     CheckCircle2, Loader2, Image as ImageIcon, Video, AlertCircle, X, Package, Trash2,
     User as UserIcon
 } from 'lucide-react';
-import { collection, query, onSnapshot, doc, updateDoc, serverTimestamp, getDocs, where, setDoc, orderBy, limit } from 'firebase/firestore';
+import { collection, query, onSnapshot, doc, updateDoc, serverTimestamp, getDocs, where, orderBy, limit } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
 import { isChecklistComplete, isYouTubeUrl, getYouTubeEmbedUrl, areAllPartsReady } from '@/lib/workflowFeatures';
@@ -16,6 +16,8 @@ import type { RepairTicket, Product, WorkflowNode } from '@/lib/types';
 import { toastError, toastSuccess, toastWarning } from '@/lib/toast';
 import { PART_CATEGORY, PART_CATEGORY_LABEL } from '@/lib/constants';
 import Modal from '@/components/admin/Modal';
+import { buildProductCodeFromId } from '@/lib/productCodes';
+import { createProductWithCodes } from '@/lib/productCodeRegistry';
 
 
 const checklistLabels: Record<string, string> = {
@@ -204,7 +206,11 @@ export default function TechnicianPage() {
                 } else {
                     // Create new proposed product
                     const newProdRef = doc(productsRef);
-                    await setDoc(newProdRef, {
+                    const productCode = buildProductCodeFromId(newProdRef.id);
+                    await createProductWithCodes(newProdRef.id, {
+                        sku: productCode,
+                        barcode: productCode,
+                        productCode,
                         name: exactName,
                         category: 'component',
                         categoryIds: ['component'],
@@ -214,9 +220,7 @@ export default function TechnicianPage() {
                         stock: 0,
                         status: 'hidden',
                         isProposed: true,
-                        createdAt: serverTimestamp(),
-                        updatedAt: serverTimestamp()
-                    });
+                    }, [productCode]);
                     productIdToUse = newProdRef.id;
                 }
             }
