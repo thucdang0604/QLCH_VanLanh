@@ -38,7 +38,7 @@ async function getCachedData() {
 
     const products = productsSnap.docs.map(doc => {
         const data = doc.data();
-        const serialized = { ...data, id: doc.id } as FirestoreDoc;
+        const serialized = { ...data, id: doc.id, _type: 'product' } as FirestoreDoc;
         if (typeof serialized.createdAt === 'object' && serialized.createdAt?.toDate) serialized.createdAt = serialized.createdAt.toDate().getTime();
         if (typeof serialized.updatedAt === 'object' && serialized.updatedAt?.toDate) serialized.updatedAt = serialized.updatedAt.toDate().getTime();
         return serialized as Record<string, unknown>;
@@ -47,7 +47,7 @@ async function getCachedData() {
     const services = servicesSnap.docs
         .map(doc => {
             const data = doc.data();
-            const serialized = { ...data, id: doc.id } as FirestoreDoc;
+            const serialized = { ...data, id: doc.id, _type: 'service' } as FirestoreDoc;
             if (typeof serialized.createdAt === 'object' && serialized.createdAt?.toDate) serialized.createdAt = serialized.createdAt.toDate().getTime();
             if (typeof serialized.updatedAt === 'object' && serialized.updatedAt?.toDate) serialized.updatedAt = serialized.updatedAt.toDate().getTime();
             return serialized;
@@ -99,7 +99,51 @@ export async function GET(request: NextRequest) {
             return name.includes(keyword) || category.includes(keyword) || brand.includes(keyword) || description.includes(keyword);
         });
 
-        return NextResponse.json({ results: combined });
+        const db = getAdminDb();
+        const ordersResult: Record<string, unknown>[] = [];
+        const repairsResult: Record<string, unknown>[] = [];
+
+        // Exact match queries for Orders and Repairs (useful for QR codes)
+        const [orderDoc, repairDoc] = await Promise.all([
+            db.collection('orders').doc(q).get(),
+            db.collection('repairs').doc(q).get()
+        ]);
+
+        const serializeDoc = (doc: any, type: string) => {
+            const data = doc.data();
+            const serialized = { ...data, id: doc.id, _type: type };
+            if (typeof serialized.createdAt === 'object' && serialized.createdAt?.toDate) serialized.createdAt = serialized.createdAt.toDate().getTime();
+            if (typeof serialized.updatedAt === 'object' && serialized.updatedAt?.toDate) serialized.updatedAt = serialized.updatedAt.toDate().getTime();
+            if (typeof serialized.completedAt === 'object' && serialized.completedAt?.toDate) serialized.completedAt = serialized.completedAt.toDate().getTime();
+            return serialized;
+        };
+
+        if (orderDoc.exists) {
+            ordersResult.push(serializeDoc(orderDoc, 'order'));
+        }
+        if (repairDoc.exists) {
+            repairsResult.push(serializeDoc(repairDoc, 'repair'));
+        }
+
+        // Phone number query
+        if (/^\d{8,12}$/.test(q)) {
+            const [ordersSnap, repairsSnap] = await Promise.all([
+                db.collection('orders').where('customer.phone', '==', q).limit(5).get(),
+                db.collection('repairs').where('customer.phone', '==', q).limit(5).get()
+            ]);
+            ordersSnap.docs.forEach(doc => {
+                if (!ordersResult.some(o => o.id === doc.id)) {
+                    ordersResult.push(serializeDoc(doc, 'order'));
+                }
+            });
+            repairsSnap.docs.forEach(doc => {
+                if (!repairsResult.some(r => r.id === doc.id)) {
+                    repairsResult.push(serializeDoc(doc, 'repair'));
+                }
+            });
+        }
+
+        return NextResponse.json({ results: [...combined, ...ordersResult, ...repairsResult] });
     } catch (error) {
         console.error('Search API error:', error);
         return NextResponse.json(

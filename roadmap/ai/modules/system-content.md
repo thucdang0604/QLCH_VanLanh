@@ -78,6 +78,7 @@ graph TD
 
 ## FEATURE-GLOBAL-SEARCH-001: Tìm kiếm toàn cục & Quét QR
 
-- **Status:** pending
+- **Status:** in-progress
+- **Branch:** `feature/global-search-qr`
 - **Description:** Xây dựng tính năng tìm kiếm toàn cục (Global Search) trên Admin Header, cho phép tìm kiếm xuyên suốt các collection: Sản phẩm, Dịch vụ, Đơn bán hàng (Orders) và Phiếu sửa chữa (Repair Tickets). Đặc biệt tích hợp tính năng Quét mã QR bằng Camera (sử dụng thư viện `@zxing/browser`) để tra cứu siêu tốc các mã đơn in trên hóa đơn/biên nhận khi khách hàng mang đến.
 - **Files:** `src/components/admin/GlobalSearch.tsx`, `src/app/admin/layout.tsx`, `src/app/api/search/route.ts`

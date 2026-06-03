@@ -40,6 +40,7 @@ import NotificationBell from '@/components/admin/NotificationBell';
 import { Toaster } from 'sonner';
 import { toastError } from '@/lib/toast';
 import { useAdminBadges } from '@/lib/useAdminBadges';
+import GlobalSearch from '@/components/admin/GlobalSearch';
 
 // Menu Groups with Permissions
 const menuGroups = [
@@ -334,13 +335,8 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                         </button>
 
                         {/* Search */}
-                        <div className="hidden md:block relative">
-                            <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                            <input
-                                type="text"
-                                placeholder="Tìm kiếm..."
-                                className="w-80 h-10 pl-10 pr-4 bg-gray-100 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
-                            />
+                        <div className="hidden md:block">
+                            <GlobalSearch />
                         </div>
                     </div>
 
