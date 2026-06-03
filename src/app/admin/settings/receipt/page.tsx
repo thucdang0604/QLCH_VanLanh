@@ -8,6 +8,7 @@ import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import MediaManager from '@/components/admin/MediaManager';
 import { toastError, toastSuccess } from '@/lib/toast';
+import { WarrantyTemplateConfig, WarrantyConfigForm, WarrantyPreview } from './WarrantyComponents';
 
 // ── Receipt Config Interface ──
 export interface ReceiptConfig {
@@ -35,6 +36,9 @@ export interface ReceiptConfig {
         maxWidthPx?: number;
         baseFontSizePx?: number;
     };
+    warrantyDevice?: WarrantyTemplateConfig;
+    warrantyRepair?: WarrantyTemplateConfig;
+    warrantyAccessory?: WarrantyTemplateConfig;
 }
 
 const defaultConfig: ReceiptConfig = {
@@ -67,6 +71,76 @@ const defaultConfig: ReceiptConfig = {
         maxWidthPx: 620,
         baseFontSizePx: 11,
     },
+    warrantyDevice: {
+        title: 'PHIẾU BẢO HÀNH THIẾT BỊ',
+        notesTitle: 'Dùng thử 7 ngày miễn phí:',
+        notes: [
+            'Áp dụng tất cả sản phẩm (Điện thoại, Tablet, Laptop...) mua tại cửa hàng.',
+            'Quý khách hoàn toàn thoải mái đổi máy mới (Cùng loại/khác loại) hoặc trả máy không cần lý do.',
+            'Nếu sản phẩm bị lỗi do NSX quý khách được hoàn trả 100% chi phí.',
+            'LƯU Ý: máy đổi trả phải còn đầy đủ tem và phiếu bảo hành, được giữ nguyên hiện trạng ban đầu. Lỗi cấn móp, rơi vỡ... từ chối bảo hành.'
+        ],
+        tableStyle: '2col',
+        tableHeaders: ['THỜI GIAN', 'QUYỀN LỢI BẢO HÀNH'],
+        tableRows: [
+            { id: '1', col1: '6 tháng', col1Sub: 'Bảo hành tiêu chuẩn', benefits: [
+                'Hư lỗi liên quan tới lỗi phần cứng (bảo hành 6 tháng)',
+                'Từ ngày thứ 31 đến hết 6 tháng, chi phí kiểm tra sửa chữa do cửa hàng chịu trách nhiệm.',
+                'Trong 30 ngày đầu (có tính 7 ngày trải nghiệm), cửa hàng 1 đổi 1 hoặc nhập lại máy với chiết khấu từ 15%.',
+                'Sau 30 ngày nhập lại máy theo giá thoả thuận.'
+            ] }
+        ],
+        footerNote: 'LƯU Ý: Máy gửi bảo hành phải còn đầy đủ tem và phiếu bảo hành.'
+    },
+    warrantyRepair: {
+        title: 'PHIẾU BẢO HÀNH SỬA CHỮA',
+        notesTitle: 'MIỄN PHÍ TRỌN ĐỜI:',
+        notes: [
+            'Bảo hành miễn phí trọn đời trong trường hợp hở keo, hở ron bụi bọt màn hình...',
+            'Bảo hành miễn phí trọn đời hở keo linh kiện thay thế.'
+        ],
+        tableStyle: '3col',
+        tableHeaders: ['DỊCH VỤ', 'THỜI GIAN', 'QUYỀN LỢI BẢO HÀNH'],
+        tableRows: [
+            { id: '1', col1: 'THAY PIN', col1Sub: '3 - 12 tháng', benefits: [
+                'Thay pin iPhone (6 tháng)',
+                'Thay pin iPad (6 tháng)',
+                'Thay pin Macbook (12 tháng)',
+                'Thay pin Apple Watch (3 tháng)',
+                'Thay pin Android (3-6 tháng)'
+            ] },
+            { id: '2', col1: 'THAY MÀN', col1Sub: '30 ngày', benefits: [
+                'Không bảo hành sọc màn, vỡ mực do tỳ đè, cấn vỡ kính, vô nước, mất tem ráp máy...',
+                'Bảo hành cảm ứng 30 ngày.'
+            ] },
+            { id: '3', col1: 'THAY LINH KIỆN', col1Sub: '3 tháng', benefits: [
+                'Sửa chữa phần cứng (mainboard)',
+                'Sửa lỗi FaceID, vân tay...',
+                'Loa trong, loa ngoài, mic...',
+                'Cụm chân sạc, rung, wifi...',
+                'Cáp volume, cáp nguồn...'
+            ] }
+        ],
+        footerNote: 'LƯU Ý: Máy gửi bảo hành phải còn đầy đủ tem và phiếu bảo hành.'
+    },
+    warrantyAccessory: {
+        title: 'PHIẾU BẢO HÀNH PHỤ KIỆN',
+        notesTitle: 'LƯU Ý:',
+        notes: [
+            'Sản phẩm đổi/trả phải còn tem Bảo hành, được giữ nguyên hiện trạng ban đầu (còn hộp nếu có).',
+            'Từ chối bảo hành đối với các trường hợp: Rơi rớt, cấn móp, vô nước, đứt dây, gãy chân sạc...'
+        ],
+        tableStyle: '2col',
+        tableHeaders: ['THỜI GIAN', 'QUYỀN LỢI BẢO HÀNH'],
+        tableRows: [
+            { id: '1', col1: 'PIN SẠC DỰ PHÒNG', col1Sub: '6 tháng', benefits: ['Hư lỗi liên quan tới phần cứng do nhà sản xuất'] },
+            { id: '2', col1: 'BỘ SẠC CÁP/CỐC', col1Sub: '1 tháng', benefits: ['Hư lỗi liên quan tới phần cứng do nhà sản xuất'] },
+            { id: '3', col1: 'AIRPODS, AP WATCH', col1Sub: '3 tháng', benefits: ['Hư lỗi liên quan tới phần cứng do nhà sản xuất'] },
+            { id: '4', col1: 'BAO DA, ỐP LƯNG', col1Sub: 'Không BH', benefits: ['Vui lòng kiểm tra kỹ trước khi thanh toán'] },
+            { id: '5', col1: 'DÁN MÀN, PPF', col1Sub: 'Không BH', benefits: ['Vui lòng kiểm tra kỹ trước khi thanh toán'] }
+        ],
+        footerNote: ''
+    }
 };
 
 export default function ReceiptSettingsPage() {
@@ -74,7 +148,7 @@ export default function ReceiptSettingsPage() {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [showMediaManager, setShowMediaManager] = useState(false);
-    const [previewTab, setPreviewTab] = useState<'receipt' | 'invoice'>('receipt');
+    const [previewTab, setPreviewTab] = useState<'receipt' | 'invoice' | 'warrantyDevice' | 'warrantyRepair' | 'warrantyAccessory'>('receipt');
 
     // ── Load config ──
     useEffect(() => {
@@ -228,8 +302,10 @@ export default function ReceiptSettingsPage() {
                         </div>
                     </fieldset>
 
-                    {/* Receipt Title */}
-                    <fieldset className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+                    {(previewTab === 'receipt' || previewTab === 'invoice') && (
+                        <>
+                            {/* Receipt Title */}
+                            <fieldset className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
                         <legend className="text-sm font-bold text-gray-900 px-2">📋 Tiêu đề biên nhận</legend>
                         <input type="text" value={config.receiptTitle}
                             onChange={e => setConfig(prev => ({ ...prev, receiptTitle: e.target.value }))}
@@ -391,6 +467,29 @@ export default function ReceiptSettingsPage() {
                             />
                         </div>
                     </fieldset>
+
+
+                        </>
+                    )}
+
+                    {previewTab === 'warrantyDevice' && config.warrantyDevice && (
+                        <WarrantyConfigForm
+                            config={config.warrantyDevice}
+                            onChange={updated => setConfig(prev => ({ ...prev, warrantyDevice: updated }))}
+                        />
+                    )}
+                    {previewTab === 'warrantyRepair' && config.warrantyRepair && (
+                        <WarrantyConfigForm
+                            config={config.warrantyRepair}
+                            onChange={updated => setConfig(prev => ({ ...prev, warrantyRepair: updated }))}
+                        />
+                    )}
+                    {previewTab === 'warrantyAccessory' && config.warrantyAccessory && (
+                        <WarrantyConfigForm
+                            config={config.warrantyAccessory}
+                            onChange={updated => setConfig(prev => ({ ...prev, warrantyAccessory: updated }))}
+                        />
+                    )}
                 </div>
 
                 {/* ════ CỘT PHẢI: LIVE PREVIEW ════ */}
@@ -422,6 +521,9 @@ export default function ReceiptSettingsPage() {
                                 >
                                     Hóa đơn
                                 </button>
+                                <button type="button" onClick={() => setPreviewTab('warrantyDevice')} className={`px-2 py-1 rounded-lg text-xs font-bold border transition-colors ${previewTab === 'warrantyDevice' ? 'bg-white text-blue-700 border-blue-200' : 'bg-transparent text-blue-700/70 border-transparent hover:border-blue-200 hover:bg-white/60'}`} title="Bảo hành Thiết bị">BH Thiết bị</button>
+                                <button type="button" onClick={() => setPreviewTab('warrantyRepair')} className={`px-2 py-1 rounded-lg text-xs font-bold border transition-colors ${previewTab === 'warrantyRepair' ? 'bg-white text-purple-700 border-purple-200' : 'bg-transparent text-purple-700/70 border-transparent hover:border-purple-200 hover:bg-white/60'}`} title="Bảo hành Sửa chữa">BH Sửa chữa</button>
+                                <button type="button" onClick={() => setPreviewTab('warrantyAccessory')} className={`px-2 py-1 rounded-lg text-xs font-bold border transition-colors ${previewTab === 'warrantyAccessory' ? 'bg-white text-pink-700 border-pink-200' : 'bg-transparent text-pink-700/70 border-transparent hover:border-pink-200 hover:bg-white/60'}`} title="Bảo hành Phụ kiện">BH Phụ kiện</button>
                             </div>
                         </div>
                         <div className="p-4 bg-gray-100">
@@ -691,6 +793,16 @@ export default function ReceiptSettingsPage() {
                                         </>
                                     );
                                 })()}
+
+                                {previewTab === 'warrantyDevice' && config.warrantyDevice && (
+                                    <WarrantyPreview globalConfig={config} warrantyConfig={config.warrantyDevice} type="device" />
+                                )}
+                                {previewTab === 'warrantyRepair' && config.warrantyRepair && (
+                                    <WarrantyPreview globalConfig={config} warrantyConfig={config.warrantyRepair} type="repair" />
+                                )}
+                                {previewTab === 'warrantyAccessory' && config.warrantyAccessory && (
+                                    <WarrantyPreview globalConfig={config} warrantyConfig={config.warrantyAccessory} type="accessory" />
+                                )}
                             </div>
                         </div>
                     </div>
