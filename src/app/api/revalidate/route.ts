@@ -1,15 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { revalidateTag, revalidatePath } from 'next/cache';
+import { COOKIE_NAME, verifyPayload } from '@/lib/sessionCookie';
 
 export async function POST(request: NextRequest) {
     try {
         const secret = request.headers.get('x-revalidate-secret') || request.nextUrl.searchParams.get('secret');
         const expectedSecret = process.env.REVALIDATE_SECRET;
-        if (!expectedSecret) {
-            console.error('CRITICAL: REVALIDATE_SECRET is not configured');
-            return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
+
+        const isSecretAuthorized = Boolean(expectedSecret && secret === expectedSecret);
+        let isAdminSessionAuthorized = false;
+
+        if (!isSecretAuthorized) {
+            const cookie = request.cookies.get(COOKIE_NAME)?.value;
+            if (cookie) {
+                const session = await verifyPayload(cookie);
+                isAdminSessionAuthorized = session?.role === 'admin';
+            }
         }
-        if (secret !== expectedSecret) {
+
+        if (!isSecretAuthorized && !isAdminSessionAuthorized) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
@@ -26,7 +35,9 @@ export async function POST(request: NextRequest) {
         tagsToRevalidate.forEach((t: string) => revalidateTag(t));
         pathsToRevalidate.forEach((p: string) => {
             if (p === 'layout') {
-                revalidatePath('/', 'layout');
+                // Keep remote config invalidation scoped to the storefront.
+                // Purging the root layout also refreshes the admin auth tree.
+                revalidatePath('/(customer)', 'layout');
             } else {
                 revalidatePath(p);
             }

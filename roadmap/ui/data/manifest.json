@@ -1,0 +1,1337 @@
+{
+  "projectName": "QLCH_VanLanh",
+  "lastSync": "2026-06-01T00:00:00.000Z",
+  "stats": {
+    "completionPercent": 98,
+    "openP0": 0,
+    "openBugs": 1,
+    "trackCount": 5,
+    "activeTracks": 1
+  },
+  "constraints": [],
+  "aiPlans": [
+    {
+      "id": "plan-ui-receipt-warranty-templates",
+      "title": "Cấu hình Mẫu Biên Nhận Bảo Hành (Thiết bị, Sửa chữa, Phụ kiện)",
+      "date": "03.06.2026",
+      "status": "in-progress",
+      "planFile": "data/ai_plans/plan_ui_receipt_warranty_templates.md",
+      "taskFile": "data/ai_plans/task_ui_receipt_warranty_templates.md",
+      "walkthroughFile": "",
+      "scope": [
+        "src/app/admin/settings/receipt/page.tsx"
+      ],
+      "decisions": [
+        "Thêm các tuỳ chọn tuỳ chỉnh Phiếu bảo hành vào phần cấu hình chung",
+        "Sử dụng Tabs để thay đổi giữa các bản xem trước"
+      ],
+      "updatedAt": "2026-06-03T00:00:00.000Z"
+    },
+    {
+      "id": "plan-homepage-content-appearance",
+      "title": "Homepage Content Appearance: Admin cấu hình bảng giá và đánh giá khách hàng",
+      "date": "01.06.2026",
+      "status": "implemented-local",
+      "planFile": "data/ai_plans/plan_homepage_content_appearance.md",
+      "taskFile": "data/ai_plans/task_homepage_content_appearance.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_homepage_content_appearance.md",
+      "scope": [
+        "src/lib/config-defaults.ts",
+        "src/lib/ConfigContext.tsx",
+        "src/app/(customer)/layout.tsx",
+        "src/app/(customer)/page.client.tsx",
+        "src/components/home/PricingSection.tsx",
+        "src/components/home/GoogleReviewsSection.tsx",
+        "src/app/api/services/homepage-pricing/route.ts",
+        "src/app/api/reviews/google/route.ts",
+        "src/app/admin/appearance/page.tsx"
+      ],
+      "decisions": [
+        "Chỉ lưu metadata hiển thị và bộ lọc homepage trong system_config/layout_settings để dùng pipeline ConfigContext hiện có",
+        "Bảng giá luôn lấy dịch vụ active và giá thật từ collection services qua API server",
+        "Google Reviews luôn lấy từ Google Places API; admin cấu hình Place ID, API key giữ server-side và không có review fallback nhập tay",
+        "Hai section nằm trong homeSections để admin bật tắt và sắp xếp thật sự"
+      ],
+      "updatedAt": "2026-06-01T00:00:00.000Z"
+    },
+    {
+      "id": "plan-pos-qr-adjustments",
+      "title": "POS QR & Đồng bộ danh mục: Chuẩn hóa ID khi tạo mới, Thêm/Sửa nhiều mã QR, Khắc phục sản phẩm ẩn",
+      "date": "31.05.2026",
+      "status": "implemented-local",
+      "planFile": "data/ai_plans/plan_pos_qr_adjustments.md",
+      "taskFile": "data/ai_plans/task_pos_qr_adjustments.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_pos_qr_adjustments.md",
+      "scope": [
+        "src/lib/idNormalizer.ts",
+        "src/lib/types.ts",
+        "src/components/admin/UniversalProductModal.tsx",
+        "src/components/admin/ManageQrCodesModal.tsx",
+        "src/app/admin/products/page.tsx",
+        "src/app/admin/parts/page.tsx",
+        "src/app/admin/pos/page.tsx",
+        "src/lib/productCodes.ts"
+      ],
+      "decisions": [
+        "Chuẩn hóa ID Firestore Document khi tạo mới (giữ cố định ID sản phẩm cũ)",
+        "Cho phép Admin thay đổi và thêm nhiều mã QR phụ trên sản phẩm",
+        "Chặn trùng mã QR tuyệt đối khi Admin sửa hoặc gán mã mới",
+        "Ghi nhật ký thay đổi mã QR (qrCodeHistory) Tiếng Việt thuần túy",
+        "Nút Khắc phục sản phẩm bị ẩn giúp tự động quét và đồng bộ lại danh mục lỗi"
+      ],
+      "updatedAt": "2026-05-31T07:30:00.000Z"
+    },
+    {
+      "id": "plan-pos-qr-scanner",
+      "title": "POS QR Scanner: Mã SP, Tem QR, Quét Camera và Máy Quét Bàn Phím",
+      "date": "30.05.2026",
+      "status": "implemented-local",
+      "planFile": "data/ai_plans/plan_pos_qr_scanner.md",
+      "taskFile": "data/ai_plans/task_pos_qr_scanner.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_pos_qr_scanner.md",
+      "scope": [
+        "src/app/admin/pos/page.tsx",
+        "src/app/admin/products/page.tsx",
+        "src/app/admin/parts/page.tsx",
+        "src/components/admin/UniversalProductModal.tsx",
+        "src/components/admin/ProductQrLabelModal.tsx",
+        "src/lib/productCodes.ts",
+        "firebase.json"
+      ],
+      "decisions": [
+        "QR chỉ chứa mã hàng, không chứa PII",
+        "Dùng chung mã cho sku/barcode/productCode để tương thích dữ liệu cũ và máy quét dạng bàn phím",
+        "Camera scanner dùng BarcodeDetector, có fallback nhập mã tay",
+        "CSP mở img-src cho api.qrserver.com để hiển thị tem QR"
+      ],
+      "updatedAt": "2026-05-30T00:00:00.000Z"
+    },
+    {
+      "id": "plan-customer-ux-optimization",
+      "title": "Customer UX Optimization: Tracking, Speed Dial, Pricing, Reviews, Mobile Search",
+      "date": "29.05.2026",
+      "status": "completed",
+      "completedAt": "29.05.2026",
+      "planFile": "data/ai_plans/plan_customer_ux.md",
+      "taskFile": "data/ai_plans/task_customer_ux.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_customer_ux.md",
+      "scope": [
+        "src/components/TrackingModal.tsx",
+        "src/components/ChatWidget.tsx",
+        "src/components/home/PricingSection.tsx",
+        "src/components/home/GoogleReviewsSection.tsx",
+        "src/components/layout/Header.tsx"
+      ],
+      "decisions": [
+        "Tracking Modal: Thiết kế dạng Bottom Sheet trên mobile để dễ thao tác 1 tay",
+        "Speed Dial Chat: Gộp 3 icon thành 1 Floating Action Button duy nhất",
+        "Pricing: Bảng giá theo tab, vuốt ngang trên điện thoại",
+        "Reviews: Slider đánh giá khách hàng lấy từ Google Maps (hỗ trợ fallback mock data)",
+        "Mobile Search: Đưa ra row riêng ở Header mobile để truy cập nhanh"
+      ],
+      "updatedAt": "2026-05-29T16:15:59.693Z"
+    },
+    {
+      "id": "plan-roadmap-v2",
+      "title": "Roadmap v2 & SPA Migration",
+      "date": "18.05.2026",
+      "planFile": "data/ai_plans/roadmap_v2_plan.md",
+      "taskFile": "data/ai_plans/roadmap_v2_task.md",
+      "walkthroughFile": "data/ai_plans/roadmap_v2_walkthrough.md",
+      "updatedAt": "2026-05-29T16:15:59.693Z"
+    },
+    {
+      "id": "plan-master-hub",
+      "title": "Tích hợp Master Hub Workflow & Tối Ưu Hiển Thị",
+      "date": "18.05.2026",
+      "planFile": "data/ai_plans/plan_master_hub.md",
+      "taskFile": "data/ai_plans/task_master_hub.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_master_hub.md",
+      "updatedAt": "2026-05-29T16:15:59.693Z"
+    },
+    {
+      "id": "plan-feature-expansion-v2",
+      "title": "7 Tính Năng Mở Rộng: Excel Import, NCC, Công Nợ, Biến Thể SP, Discount Rules, POS+Repair",
+      "date": "19.05.2026",
+      "status": "completed",
+      "completedAt": "28.05.2026",
+      "planFile": "data/ai_plans/plan_feature_expansion_v2.md",
+      "taskFile": "data/ai_plans/task_feature_expansion_v2.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_feature_expansion_v2.md",
+      "decisions": [
+        "Biến Thể SP (Product Series): Gom nhóm các sản phẩm chung seriesId. Hiển thị UI chọn nhanh ngoài Customer Product Detail. Quản lý chung tab với Products.",
+        "POS + Repair: Tích hợp phiếu sửa chữa vào giỏ hàng POS như 1 sản phẩm ảo, khi checkout sẽ tự động cập nhật status phiếu sang OUT."
+      ],
+      "updatedAt": "2026-05-29T16:15:59.695Z"
+    },
+    {
+      "id": "plan-import-refactor-v3",
+      "title": "Nhập Hàng v3: NCC Per-Item + Thanh Toán / Ghi Công Nợ",
+      "date": "19.05.2026",
+      "status": "completed",
+      "completedAt": "19.05.2026",
+      "decisions": [
+        "Payment method (paid/debt) áp dụng cho toàn phiếu, không per-item",
+        "Khi thanh toán ngay: vẫn ghi supplier_transaction (type=IMPORT_PAID) để giữ lịch sử, không tăng totalDebt",
+        "Validation: chặn chuyển draft→ordered nếu item thiếu NCC",
+        "Draft expanded view: NCC dropdown per-item với auto-save + create-new"
+      ],
+      "planFile": "data/ai_plans/plan_import_refactor_v3.md",
+      "taskFile": "data/ai_plans/task_import_refactor_v3.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_import_refactor_v3.md",
+      "updatedAt": "2026-05-29T16:15:59.695Z"
+    },
+    {
+      "id": "plan-crm-customers-v2",
+      "title": "CRM Khách hàng Mở rộng: CRUD, Lịch sử, Tags, Tier theo năm, Excel Export",
+      "date": "26.05.2026",
+      "status": "in-progress",
+      "planFile": "data/ai_plans/plan_crm_customers_v2.md",
+      "taskFile": "data/ai_plans/task_crm_customers_v2.md",
+      "scope": [
+        "src/app/admin/customers/page.tsx",
+        "src/app/admin/settings/discount-rules/page.tsx",
+        "src/lib/customerTiers.ts [NEW]"
+      ],
+      "decisions": [
+        "Tier tính theo tổng chi tiêu NĂM HIỆN TẠI (không all-time)",
+        "Ngưỡng phân hạng cấu hình tại Settings/Discount Rules → system_config/customer_tiers",
+        "Không cho xóa khách hàng, chỉ thêm + sửa",
+        "Tags lưu trực tiếp trên customer doc (field tags[])",
+        "Export Excel client-side bằng SheetJS xlsx"
+      ],
+      "walkthroughFile": "data/ai_plans/walkthrough_crm_customers_v2.md",
+      "updatedAt": "2026-05-29T16:15:59.695Z"
+    },
+    {
+      "id": "plan-live-chat-omnichannel-v2",
+      "title": "Live Chat Omnichannel: Facebook/Zalo, Media, CRM và Tạo đơn từ hội thoại",
+      "date": "25.05.2026",
+      "status": "in-progress",
+      "planFile": "data/ai_plans/plan_live_chat_omnichannel_v2.md",
+      "taskFile": "data/ai_plans/task_live_chat_omnichannel_v2.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_live_chat_omnichannel_v2.md",
+      "scope": [
+        "src/app/admin/chat/page.tsx",
+        "src/components/admin/chat/ChatCustomerProfileModal.tsx",
+        "src/lib/chatServer.ts",
+        "src/app/api/integrations/facebook/webhook/route.ts",
+        "src/lib/chatWorkflowHandoff.ts",
+        "src/lib/apiAuth.ts",
+        "database.rules.json",
+        "firestore.rules",
+        ".codex-security-scans/working-tree_20260525_chat-data/"
+      ],
+      "decisions": [
+        "Bí mật tích hợp quản lý trên web và lưu server-side; env chỉ fallback",
+        "Không tạo link profile Facebook từ Messenger PSID",
+        "Attachment được lưu có cấu trúc và render trực tiếp, không giữ placeholder",
+        "Chat chỉ chuyển dữ liệu sang POS/Repair chính thức, không tạo giao dịch tắt",
+        "RTDB access giữ fail-closed qua admin role sync và IAM đúng runtime identity",
+        "Web chat dùng Firebase Anonymous Auth thay cho room guest_ public",
+        "PII handoff sang POS/Repair qua sessionStorage dùng một lần, không qua URL",
+        "API privileged bắt buộc chat_support; CRM giới hạn theo quyền nghiệp vụ",
+        "Provider token gửi qua Authorization header và không lưu raw webhook event mới"
+      ],
+      "updatedAt": "2026-05-29T16:15:59.695Z"
+    },
+    {
+      "id": "plan-ui-lexer-mermaid-fix",
+      "title": "UI Parser Refactoring & Mermaid Graph Corrections",
+      "date": "29.05.2026",
+      "status": "completed",
+      "completedAt": "29.05.2026",
+      "planFile": "data/ai_plans/plan_ui_lexer_fix.md",
+      "taskFile": "data/ai_plans/task_ui_lexer_fix.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_ui_lexer_fix.md",
+      "scope": [
+        "Lexer",
+        "Mermaid",
+        "UI"
+      ],
+      "updatedAt": "2026-05-29T16:15:59.695Z"
+    }
+  ],
+  "workflows": [
+    {
+      "id": "inventory",
+      "title": "Kho hàng",
+      "file": "inventory-workflow.html",
+      "icon": "📦"
+    },
+    {
+      "id": "pos-orders",
+      "title": "POS & Đơn hàng",
+      "file": "pos-orders-workflow.html",
+      "icon": "🛍️"
+    },
+    {
+      "id": "repair",
+      "title": "Sửa chữa",
+      "file": "repair-workflow.html",
+      "icon": "🔧"
+    },
+    {
+      "id": "finance-hr",
+      "title": "Tài chính & Nhân sự",
+      "file": "finance-hr-workflow.html",
+      "icon": "💰"
+    },
+    {
+      "id": "system-content",
+      "title": "Hệ thống & Nội dung",
+      "file": "system-content-workflow.html",
+      "icon": "📝"
+    },
+    {
+      "id": "master",
+      "title": "Master Hub",
+      "file": "master-workflow.html",
+      "icon": "🌐"
+    }
+  ],
+  "bugs": [
+    {
+      "id": "BUG-RULES-001",
+      "module": "RULES",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Missing Firestore Security Rules cho 4 collections mới (Phase 4/6/8)",
+      "workflowId": "system-content",
+      "affectedFiles": [
+        "firestore.rules"
+      ],
+      "description": "<b>Hiện tượng</b>: Khi mở trang /admin/parts, console báo <code>Firestore: permission-denied</code> cho snapshot listener.<br><b>Hệ lụy</b>: Toàn bộ chức năng liên quan suppliers, supplier_transactions, product_reviews, accessory_discount_rules bị chặn trên client-side.<br><br>✅ <b>Đã vá ngày 19.05.2026</b>: Thêm 4 rule blocks vào <code>firestore.rules</code> và deploy thành công.",
+      "cause": "<b>Phân tích</b>: Khi implement Phase 4/6/8, code sử dụng <code>onSnapshot</code> (suppliers), <code>getDocs</code> (accessory_discount_rules, repairs), và <code>addDoc</code> (product_reviews, supplier_transactions) trên client SDK. Nhưng <code>firestore.rules</code> chưa có match rules cho 4 collections này → Firestore mặc định deny.",
+      "solution": "<b>Giải pháp đã áp dụng</b>: Thêm rules:<br>• <code>suppliers</code> + <code>supplier_transactions</code>: staff read/write<br>• <code>accessory_discount_rules</code>: staff read/write<br>• <code>product_reviews</code>: public create+read, staff moderate<br><br>Deploy: <code>pnpm exec firebase deploy --only firestore:rules</code>",
+      "code": "// ✅ firestore.rules — 4 rules mới\nmatch /suppliers/{supplierId} {\n  allow read, write: if isStaff();\n}\nmatch /supplier_transactions/{txnId} {\n  allow read, write: if isStaff();\n}\nmatch /accessory_discount_rules/{ruleId} {\n  allow read, write: if isStaff();\n}\nmatch /product_reviews/{reviewId} {\n  allow create: if true;\n  allow read: if true;\n  allow update, delete: if isStaff();\n}",
+      "fixedAt": "19.05.2026"
+    },
+    {
+      "id": "BUG-POS-003",
+      "module": "POS",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Held Stock Leak (Rò rỉ tồn kho giữ chân)",
+      "workflowId": "pos-orders",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: POS tạo đơn Pending (cọc một phần) chỉ trừ <code>stock</code> mà không tăng <code>held</code>.<br><b>Hệ lụy</b>: Khi admin chuyển đơn sang Completed, orders page giảm <code>held</code> → held bị âm, gây sai lệch tồn kho.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Thêm logic conditional <code>held: increment(qty)</code> khi POS tạo đơn Pending. Đơn Completed không cần tăng held (hàng giao ngay).",
+      "cause": "<b>Phân tích</b>: Line 329-331 trong <code>pos/page.tsx</code> luôn chỉ <code>stock: increment(-qty)</code>, không phân biệt status. Web checkout (<code>api/checkout/route.ts</code>) đã xử lý đúng: <code>stock -= qty AND held += qty</code>.",
+      "solution": "<b>Giải pháp đã áp dụng</b>: Trích biến <code>isPending = orderData.status !== 'Completed'</code>. Conditional spread <code>...(isPending ? { held: increment(qty) } : {})</code>.",
+      "code": "// ✅ Code đã áp dụng (src/app/admin/pos/page.tsx)\nconst isPending = orderData.status !== 'Completed';\ntransaction.update(p.ref, {\n    stock: increment(-group.totalQty),\n    ...(isPending ? { held: increment(group.totalQty) } : {}),\n});",
+      "fixedAt": "17.05.2026"
+    },
+    {
+      "id": "HACK-SEC-001",
+      "module": "HACK",
+      "severity": "critical",
+      "status": "fixed",
+      "title": "Hardcoded Fallback Secret trong API tạo Admin",
+      "workflowId": "system-content",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: API <code>/api/seed-admin</code> sử dụng một chuỗi bí mật cố định làm giá trị dự phòng nếu biến môi trường không được cấu hình.<br><b>Hệ lụy</b>: Kẻ tấn công có thể sử dụng chuỗi bí mật này để tự cấp quyền Admin cho tài khoản của mình, chiếm toàn quyền điều khiển hệ thống.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Xóa fallback. Bắt buộc đọc từ biến môi trường <code>ADMIN_SEED_SECRET</code>. Thiếu → 500, sai → 401.",
+      "cause": "<b>Phân tích</b>: Đoạn code <code>const validSecret = process.env.ADMIN_SEED_SECRET || 'vanlanh-admin-secret-2024';</code> để lộ thông tin bí mật trong mã nguồn.",
+      "solution": "<b>Giải pháp đã áp dụng</b>: Xóa fallback hoàn toàn. Bắt buộc đọc từ biến môi trường, trả 500 nếu thiếu, 401 nếu sai.",
+      "code": "// ✅ Code đã áp dụng (src/app/api/seed-admin/route.ts)\nconst validSecret = process.env.ADMIN_SEED_SECRET;\nif (!validSecret) {\n    console.error('CRITICAL: ADMIN_SEED_SECRET is not configured');\n    return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });\n}\nif (secret !== validSecret) {\n    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });\n}",
+      "fixedAt": "17.05.2026"
+    },
+    {
+      "id": "HACK-SEC-002",
+      "module": "HACK",
+      "severity": "critical",
+      "status": "fixed",
+      "title": "Firebase RTDB Quyền Đọc/Ghi Công Khai",
+      "workflowId": "system-content",
+      "affectedFiles": [
+        "database.rules.json",
+        "src/components/ChatWidget.tsx",
+        "src/lib/AuthContext.tsx"
+      ],
+      "description": "<b>Hiện tượng</b>: Room web theo prefix <code>guest_</code> từng cho đọc/ghi không cần xác thực; khi liên kết CRM, room có thể chứa tên và số điện thoại khách.<br><b>Hệ lụy</b>: Người có room ID có thể đọc hoặc sửa hội thoại và PII.<br><br>✅ <b>Đã vá hoàn chỉnh ngày 26.05.2026</b>: Web chat đăng nhập Firebase Anonymous Auth, dùng UID làm room ID và rules không còn cấp quyền public theo prefix.",
+      "cause": "<b>Phân tích</b>: Validation field không thay thế authorization; bản vá cũ vẫn giữ quyền public cho room guest.",
+      "solution": "<b>Giải pháp đã áp dụng</b>: Dùng Firebase Anonymous Auth cho khách web; room chỉ được đọc/ghi bởi UID tương ứng hoặc staff có quyền chat; xóa nhánh rules <code>beginsWith('guest_')</code>.",
+      "code": "// database.rules.json\n\".read\": \"auth != null && (auth.uid === $roomId || root.child('admin_roles').child(auth.uid).child('canAccessChat').val() === true)\"\n// ChatWidget.tsx\nconst firebaseUser = currentUser || (await signInAnonymously(auth)).user;",
+      "fixedAt": "26.05.2026"
+    },
+    {
+      "id": "HACK-SEC-003",
+      "module": "HACK",
+      "severity": "critical",
+      "status": "fixed",
+      "title": "Lỗ hổng XSS trong trang chi tiết sản phẩm",
+      "workflowId": "system-content",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: Sử dụng <code>dangerouslySetInnerHTML</code> để render mô tả sản phẩm mà không qua sanitize.<br><b>Hệ lụy</b>: Kẻ tấn công có thể chèn mã độc (XSS) vào mô tả sản phẩm để đánh cắp session hoặc cookie của người dùng.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Extract <code>sanitizeHtml()</code> thành shared utility tại <code>src/lib/sanitizeHtml.ts</code>. Áp dụng cho cả product page và article page.",
+      "cause": "<b>Phân tích</b>: Mã nguồn render trực tiếp HTML từ database tại <code>product/[id]/page.tsx</code> line 144.",
+      "solution": "<b>Giải pháp đã áp dụng</b>: Tạo shared <code>sanitizeHtml()</code> utility strip <code>&lt;script&gt;</code>, event handlers, <code>javascript:</code> URLs, iframe ngoài whitelist (YouTube/Facebook).",
+      "code": "// ✅ Code đã áp dụng\nimport { sanitizeHtml } from '@/lib/sanitizeHtml';\n<div dangerouslySetInnerHTML={{ __html: sanitizeHtml(String(data.content)) }} />",
+      "fixedAt": "17.05.2026"
+    },
+    {
+      "id": "HACK-SEC-004",
+      "module": "HACK",
+      "severity": "critical",
+      "status": "fixed",
+      "title": "Rò rỉ thông tin nhạy cảm ở Client (ChatWidget)",
+      "workflowId": "system-content",
+      "affectedFiles": [
+        "src/components/ChatWidget.tsx",
+        "src/lib/chatWorkflowHandoff.ts",
+        "src/app/admin/pos/page.tsx",
+        "src/app/admin/repairs/page.tsx"
+      ],
+      "description": "<b>Hiện tượng</b>: Dữ liệu nhận diện khách từng được giữ trong <code>localStorage</code>; luồng mới cũng có nguy cơ đưa tên/SĐT vào URL khi chuyển sang POS/Repair.<br><b>Hệ lụy</b>: PII tồn tại lâu trong trình duyệt, history, log hoặc referrer.<br><br>✅ <b>Đã vá hoàn chỉnh ngày 26.05.2026</b>: Xóa lưu PII chat trong localStorage và handoff nghiệp vụ bằng <code>sessionStorage</code> dùng một lần.",
+      "cause": "<b>Phân tích</b>: Mask dữ liệu vẫn tạo bản sao PII/identifier không cần thiết trên client; URL là kênh lưu vết không phù hợp cho thông tin khách.",
+      "solution": "<b>Giải pháp đã áp dụng</b>: ChatWidget dùng identity Firebase; POS/Repair lấy tên/SĐT từ handoff theo tab và xóa ngay sau khi consume; URL chỉ mang <code>source=chat</code>.",
+      "code": "// chatWorkflowHandoff.ts\nstoreChatWorkflowHandoff({ customerName, customerPhone, roomId });\nconst handoff = consumeChatWorkflowHandoff();\n// navigation URL: ?source=chat",
+      "fixedAt": "26.05.2026"
+    },
+    {
+      "id": "BUG-RBAC-001",
+      "module": "RBAC",
+      "severity": "high",
+      "status": "fixed",
+      "title": "RBAC URL Bypass (Vượt rào quyền truy cập)",
+      "workflowId": "system-content",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: Nhân viên chỉ cần gõ trực tiếp URL (VD: /admin/products) là vào được trang dù không có quyền.<br><b>Hệ lụy</b>: Lộ thông tin doanh thu, chỉnh sửa giá bừa bãi. Quyền hạn chỉ mang tính chất 'che mắt' ở UI.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Triển khai Next.js Edge Middleware + HMAC-signed session cookie. Server chặn request TRƯỚC khi render page.",
+      "cause": "<b>Phân tích</b>: Chỉ ẩn menu ở Client-side. Thiếu Route Guard hoặc Middleware chặn ở Server.",
+      "solution": "<b>Giải pháp đã áp dụng</b>: Triển khai 3 file mới: <code>sessionCookie.ts</code> (HMAC-SHA256 sign/verify), <code>api/auth/session/route.ts</code> (tạo/xóa session cookie), <code>middleware.ts</code> (Edge Middleware RBAC). Sửa <code>AuthContext.tsx</code> để sync cookie khi login/logout.",
+      "code": "// ✅ Code đã áp dụng (src/middleware.ts)\nexport async function middleware(request: NextRequest) {\n  const cookie = request.cookies.get('__session')?.value;\n  if (!cookie) return NextResponse.next(); // fallback to client guard\n  const session = await verifyPayload(cookie); // HMAC verify\n  if (!session) return NextResponse.redirect('/admin/login');\n  if (session.role === 'admin') return NextResponse.next();\n  // Staff: check route permission\n  const required = ROUTE_PERMISSION_MAP[matchedRoute];\n  if (!session.permissions.includes(required))\n    return NextResponse.redirect('/admin/login');\n}",
+      "fixedAt": "17.05.2026"
+    },
+    {
+      "id": "BUG-POS-002",
+      "module": "POS",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Race Condition POS (Tranh chấp tài nguyên)",
+      "workflowId": "pos-orders",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: 2 máy cùng bán 1 sản phẩm cuối cùng đều báo thành công. Kho bị âm.<br><b>Hệ lụy</b>: Bán khống hàng không có thực. Gây xung đột dữ liệu.<br><br>✅ <b>Đã vá ngày 12.05.2026</b>: Toàn bộ POS checkout flow đã chuyển sang <code>runTransaction</code> atomic. Validate stock availability bên trong transaction.",
+      "cause": "<b>Phân tích</b>: Dùng lệnh đọc và ghi riêng rẽ (Read-Modify-Write không an toàn). Không có khóa (Lock).",
+      "solution": "<b>Giải pháp đã áp dụng</b>: Sử dụng <code>runTransaction</code> cho toàn bộ quá trình checkout. Phase 1: đọc tất cả products. Phase 2: validate stock. Phase 3: ghi order + update stock atomically.",
+      "code": "// ✅ Code đã áp dụng (src/app/admin/pos/page.tsx)\nawait runTransaction(db, async (transaction) => {\n  // Phase 1: Read all product docs\n  // Phase 2: Validate total qty against available\n  // Phase 3: Write order + decrement stock atomically\n  transaction.set(orderRef, orderData);\n  transaction.update(productRef, { stock: increment(-qty) });\n});",
+      "fixedAt": "12.05.2026"
+    },
+    {
+      "id": "BUG-REP-003",
+      "module": "REP",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Sản phẩm ma (Custom ID Mapping) — By-Design",
+      "workflowId": "repair",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: KTV tự gõ tên linh kiện trong phiếu sửa chữa. Linh kiện không có mã, không map với kho.<br><b>Hệ lụy</b>: Không kiểm kho được. Thất thoát linh kiện không rõ lý do.",
+      "cause": "<b>Phân tích</b>: Cho phép nhập text tự do và tạo ID ngẫu nhiên không liên kết bảng chuẩn.",
+      "solution": "<b>Giải pháp tối ưu</b>: Bắt buộc chọn từ danh sách. Nếu tạo mới phải vào trạng thái 'Chờ duyệt' (Pending).",
+      "code": "// Ràng buộc khi tạo linh kiện trong Repair\nif (!validCategories.includes(inputCategory)) {\n  category = 'pending_classification'; // Gán vào danh mục chờ xử lý\n}",
+      "fixedAt": "17.05.2026"
+    },
+    {
+      "id": "BUG-REP-002",
+      "module": "REP",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Ghi đè dữ liệu (Stale Overwrite)",
+      "workflowId": "repair",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: 2 người cùng sửa 1 phiếu. Người lưu sau đè mất dữ liệu người lưu trước.<br><b>Hệ lụy</b>: Mất lịch sử sửa chữa, sai lệch thông tin khách hàng.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: <code>handleSubmit</code> (edit mode) chuyển sang <code>runTransaction</code> với Optimistic Locking. Đọc <code>version</code> mới nhất từ DB, so sánh với version lúc mở form, reject nếu đã bị sửa bởi người khác.",
+      "cause": "<b>Phân tích</b>: Đọc về client rồi ghi đè toàn bộ (updateDoc) mà không check version (Optimistic Locking).",
+      "solution": "<b>Giải pháp đã áp dụng</b>: Dùng <code>runTransaction</code> + <code>version</code> field. Mỗi lần save sẽ increment version. Nếu version trên server > version lúc mở form → reject với thông báo lỗi.",
+      "code": "// ✅ Đã fix tại repairs/page.tsx handleSubmit\nawait runTransaction(db, async (transaction) => {\n  const freshDoc = await transaction.get(ticketRef);\n  if (freshDoc.data()?.version > editingTicket.version) {\n    throw new Error('Phiếu đã được cập nhật bởi người khác!');\n  }\n  transaction.update(ticketRef, { ...ticketData, version: freshVersion + 1 });\n});",
+      "fixedAt": "17.05.2026"
+    },
+    {
+      "id": "BUG-INV-001",
+      "module": "INV",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Race Condition cộng kho phiếu nhập",
+      "workflowId": "inventory",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: Cộng kho khi duyệt phiếu nhập bị trùng lặp hoặc sai lệch khi click nhanh.<br><b>Hệ lụy</b>: Số lượng kho trên hệ thống nhiều hơn thực tế.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Duplicate của PAR-002/PAR-003. <code>executeFinalImport</code> đã chuyển sang <code>runTransaction</code> với <code>inventory_logs</code> đầy đủ.",
+      "cause": "<b>Phân tích</b>: Việc tăng <code>stock</code> không nằm trong transaction. Read-Modify-Write không an toàn.",
+      "solution": "<b>Giải pháp đã áp dụng</b>: Chuyển <code>executeFinalImport</code> sang <code>runTransaction</code> (xem PAR-002/PAR-003).",
+      "code": "// Giải pháp an toàn\ntransaction.update(productRef, {\n  stock: firebase.firestore.FieldValue.increment(importedQuantity)\n});",
+      "fixedAt": "17.05.2026"
+    },
+    {
+      "id": "BUG-INV-002",
+      "module": "INV",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Đề xuất linh kiện bị lưu thành SP bán lẻ",
+      "workflowId": "inventory",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: KTV đề xuất linh kiện nhưng lại hiện ở trang bán lẻ cho khách.<br><br>✅ <b>Xác minh ngày 17.05.2026</b>: Đã được xử lý triệt để qua việc dùng <code>isPartCategory</code> filter chung và hằng số <code>PART_CATEGORY</code> trên toàn hệ thống.",
+      "cause": "<b>Phân tích</b>: Lưu <code>category: 'component'</code> nhưng trang bán lẻ lọc phủ định <code>!= 'Linh kiện'</code>. Lỗi chuỗi tự do (Magic String).",
+      "solution": "<b>Trạng thái</b>: Đã thay thế magic strings bằng Enum/Constant qua BUG-INV-004.",
+      "code": "// Hàm chuẩn hóa\nexport const isPartCategory = (category, categoryIds) => { ... }",
+      "fixedAt": "17.05.2026"
+    },
+    {
+      "id": "BUG-ORD-002",
+      "module": "ORD",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Hủy đơn Completed gây âm held",
+      "workflowId": "pos-orders",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: Hủy đơn hàng đã hoàn thành làm <code>held</code> bị âm.<br><b>Hệ lụy</b>: Sai lệch tồn kho khả dụng trầm trọng.<br><br>✅ <b>Đã vá ngày 12.05.2026</b>: Thêm check trạng thái đơn. Nếu đã <code>Completed</code> thì không trừ <code>held</code> nữa.",
+      "cause": "<b>Phân tích</b>: Đơn <code>Completed</code> thì <code>held</code> đã giải phóng. Khi hủy lại tiếp tục trừ <code>held</code>.",
+      "solution": "<b>Giải pháp tối ưu</b>: Check trạng thái đơn. Nếu đã <code>Completed</code> thì không trừ <code>held</code> nữa.",
+      "code": "// Kiểm tra trạng thái trước khi xử lý held\nif (order.status !== 'Completed') {\n  transaction.update(productRef, { held: FieldValue.increment(-item.quantity) });\n}",
+      "fixedAt": "12.05.2026"
+    },
+    {
+      "id": "BUG-COM-002",
+      "module": "COM",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Trả hoa hồng trên đơn nợ (Pay Later)",
+      "workflowId": "finance-hr",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: Tính hoa hồng cho KTV ngay cả khi khách chưa trả tiền.<br><b>Hệ lụy</b>: Công ty bị âm dòng tiền nếu khách bùng nợ.<br><br>✅ <b>Đã xác minh ngày 17.05.2026</b>: <code>commissionUtils.ts</code> đã có guard check <code>payment.status === 'paid'</code> (repairs) và <code>status === 'Completed'</code> (orders).",
+      "cause": "<b>Phân tích</b>: Trigger tính hoa hồng chạy theo trạng thái hoàn thành kỹ thuật, không theo trạng thái thanh toán.",
+      "solution": "<b>Giải pháp đã áp dụng</b>: <code>commissionUtils.ts</code> đã kiểm tra payment status trước khi tính hoa hồng. Không cần sửa thêm.",
+      "code": "// Chỉ tính hoa hồng khi đã thanh toán\nif (order.paymentStatus === 'Paid') {\n  calculateCommission(technicianId, order.amount);\n}",
+      "fixedAt": "17.05.2026"
+    },
+    {
+      "id": "BUG-COM-003",
+      "module": "COM",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Làm tròn số thực gây lệch tiền (Float Precision)",
+      "workflowId": "finance-hr",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: Trong <code>commissionUtils.ts</code> (dòng 113 và 147), hoa hồng được tính bằng <code>(baseAmount * pct) / 100</code> mà không làm tròn.<br><b>Hệ lụy</b>: Do tiền VNĐ không có phần thập phân, việc tính toán này tạo ra số thực (float). Khi cộng tổng trong UI (file <code>commissions/page.tsx</code> dòng 96), các phần lẻ sẽ cộng dồn gây lệch tiền so với thực tế.",
+      "cause": "<b>Phân tích</b>: JavaScript xử lý số thực dấu phẩy động không chính xác và tiền VNĐ cần được làm tròn về số nguyên.",
+      "solution": "<b>Giải pháp tối ưu</b>: Dùng <code>Math.round()</code> ngay sau khi tính toán để đảm bảo giá trị lưu trữ là số nguyên.",
+      "code": "// Sửa lại dòng 113 và 147\ncommissionAmount: Math.round((baseAmount * pct) / 100)"
+    },
+    {
+      "id": "BUG-REV-001",
+      "module": "REV",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Mất mát dữ liệu báo cáo do giới hạn Query 3 tháng",
+      "workflowId": "finance-hr",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: Doanh thu bị tính sai kỳ kế toán và MẤT DỮ LIỆU. Hệ thống chỉ fetch dữ liệu đơn hàng có <code>createdAt >= 3 tháng trước</code>, nhưng lại phân tích dựa trên ngày hoàn thành.<br><b>Hệ lụy</b>: Báo cáo tài chính sai lệch nghiêm trọng, thiếu hụt doanh thu thực tế.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Mở rộng query window từ 3 tháng lên 6 tháng trong <code>admin/revenue/page.tsx</code>.",
+      "cause": "<b>Phân tích</b>: Lọc dữ liệu thô quá chặt bằng <code>createdAt</code> khiến các đơn hàng treo lâu bị loại bỏ trước khi kịp tính vào doanh thu.",
+      "solution": "<b>Giải pháp tối ưu</b>: Fetch dữ liệu dựa trên khoảng thời gian cần báo cáo của ngày hoàn thành (ví dụ <code>completedAt</code> hoặc <code>updatedAt</code>), thay vì ngày tạo.",
+      "code": "// Query doanh thu chuẩn theo ngày hoàn thành\nconst revQuery = query(ordersRef, where('completedAt', '>=', startDate), where('completedAt', '<=', endDate));",
+      "fixedAt": "17.05.2026"
+    },
+    {
+      "id": "BUG-REV-002",
+      "module": "REV",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Khấu trừ quà tặng trong Lợi nhuận ròng (NOT A BUG)",
+      "workflowId": "finance-hr",
+      "affectedFiles": [],
+      "description": "<b>⚠️ Đây KHÔNG PHẢI BUG</b> — logic kế toán đúng.<br><br><b>Giải thích</b>:<br>• <code>repairRevenue</code> = tiền khách THỰC TRẢ (từ <code>paymentHistory</code>), chưa bao gồm giá trị quà tặng.<br>• <code>giftDiscount</code> = chi phí hàng hóa cửa hàng TẶNG THÊM (đã trừ stock tại <code>repairs/page.tsx</code> dòng 803-810).<br>• Trừ <code>giftDiscount</code> khỏi <code>netProfit</code> là ĐÚNG vì quà tặng là chi phí thực (hàng xuất kho nhưng không thu tiền).<br><br><b>Lưu ý cho dev sau</b>: <code>payment.amount</code> = partsCost + laborCost + additionalFees - discountAmount (KHÔNG trừ giftDiscount). Quà tặng là chi phí riêng, không giảm hóa đơn khách hàng.",
+      "cause": "<b>Phân tích ban đầu (SAI)</b>: Nghi ngờ <code>repairRevenue</code> đã trừ discount nên trừ thêm <code>giftDiscount</code> là double. <b>Thực tế</b>: <code>paymentHistory</code> ghi nhận tiền thực thu (không liên quan giftDiscount). GiftDiscount là chi phí xuất kho riêng.",
+      "solution": "<b>Kết luận</b>: Không cần sửa. Logic <code>netProfit = totalRevenue - totalExpenses - totalGiftDiscount</code> là chính xác.",
+      "code": "// ✅ Logic đúng — KHÔNG SỬA\n// repairRevenue = tiền khách trả (paymentHistory sums)\n// giftDiscount = chi phí hàng tặng (stock đã trừ tại handleHandover)\nconst netProfit = totalRevenue - totalExpenses - totalGiftDiscount;",
+      "fixedAt": "17.05.2026"
+    },
+    {
+      "id": "BUG-REV-003",
+      "module": "REV",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Sai lệch số tiền lẻ do không làm tròn số thực trong database",
+      "workflowId": "finance-hr",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: Hệ thống lưu trữ các số tiền lẻ vô lý (ví dụ: `49.998đ` thay vì `50.000đ`) trong database do không làm tròn sau các phép tính phần trăm hoặc giảm giá.<br><b>Hệ lụy</b>: Dù giao diện báo cáo doanh thu có thể dùng format để làm tròn hiển thị, nhưng dữ liệu thô bị sai lệch, dẫn đến tổng doanh thu và lợi nhuận tích lũy bị sai số (Floating-point error).",
+      "cause": "<b>Phân tích</b>: Các phép tính giá sau chiết khấu hoặc thuế không được bọc trong <code>Math.round()</code> trước khi lưu vào Firestore, tạo ra các số thực vô hạn tuần hoàn hoặc có đuôi thập phân dài.",
+      "solution": "<b>Giải pháp tối ưu</b>: Ép kiểu và làm tròn số tiền về số nguyên (VNĐ) ngay khi tính toán và trước khi lưu vào database.",
+      "code": "// Ép kiểu làm tròn khi lưu\nconst finalPrice = Math.round(calculatedPrice);\nawait updateDoc(docRef, { price: finalPrice });"
+    },
+    {
+      "id": "BUG-INV-003",
+      "module": "INV",
+      "severity": "high",
+      "status": "fixed",
+      "title": "KTV tải toàn bộ SP về client để tìm kiếm",
+      "workflowId": "inventory",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: Máy KTV bị đơ, lag khi mở trang tìm kiếm linh kiện.<br><b>Hệ lụy</b>: Tốn băng thông Firebase (đọc hàng ngàn doc mỗi lần), trải nghiệm người dùng tệ.<br><br>✅ <b>Backlog (17.05.2026)</b>: Performance optimization, không gây sai dữ liệu. Ưu tiên thấp — chỉ ảnh hưởng khi số lượng SP lớn (>500). Đã thêm filter và các giới hạn khác để tạm xử lý.",
+      "cause": "<b>Phân tích</b>: Dùng <code>getDocs</code> lấy hết về rồi filter bằng JS ở client.",
+      "solution": "<b>Giải pháp tối ưu</b>: Chuyển sang Server-side search (dùng query <code>where</code> hoặc Algolia).",
+      "code": "// Tìm kiếm hiệu quả hơn bằng query\nconst q = query(productsRef, where('category', '==', 'component'), where('searchKeywords', 'array-contains', searchStr));"
+    },
+    {
+      "id": "BUG-INV-004",
+      "module": "INV",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Danh mục chưa đồng bộ ('Linh kiện', 'component')",
+      "workflowId": "inventory",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: Dữ liệu danh mục bị phân mảnh (Linh kiện, component, linh-kien).<br><b>Hệ lụy</b>: Khó thống kê, lọc sản phẩm không ra hết.<br><br>✅ <b>Xác minh ngày 17.05.2026</b>: Đã tạo <code>PART_CATEGORY</code>, <code>PART_CATEGORY_LABEL</code> và helper <code>isPartCategory</code> trong <code>src/lib/constants.ts</code>. Thay thế toàn bộ string 'Linh kiện' trên các modules: POS, Technician, Repairs, Products.",
+      "cause": "<b>Phân tích</b>: Thiếu file định nghĩa Constants hoặc Enums tập trung. Thói quen dùng Magic String.",
+      "solution": "<b>Giải pháp tối ưu</b>: Đã tạo hằng số tập trung và helper để kiểm tra.",
+      "code": "// constants.ts\nexport const PART_CATEGORY = 'component';\nexport const PART_CATEGORY_LABEL = 'Linh kiện';\nexport const isPartCategory = (category, categoryIds) => { ... };",
+      "fixedAt": "17.05.2026"
+    },
+    {
+      "id": "BUG-INV-005",
+      "module": "INV",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Race Condition & Thiếu Log trong executeFinalImport",
+      "workflowId": "inventory",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: Khi duyệt nhập kho trong <code>parts/page.tsx</code>, hệ thống tính toán tồn kho dựa trên state cũ và không ghi log lịch sử.<br><b>Hệ lụy</b>: Gây sai lệch tồn kho khi có thao tác đồng thời và không thể truy vết thay đổi.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Duplicate của PAR-002/PAR-003. <code>executeFinalImport</code> đã dùng <code>runTransaction</code> với đọc dữ liệu tươi, giá vốn bình quân động, và <code>inventory_logs</code> đầy đủ.",
+      "cause": "<b>Phân tích</b>: Không dùng Transaction để đọc dữ liệu mới nhất. Tính toán dựa trên state client. Bỏ qua bước ghi log vào <code>inventory_logs</code>.",
+      "solution": "<b>Giải pháp đã áp dụng</b>: Chuyển <code>executeFinalImport</code> sang <code>runTransaction</code> (xem PAR-002/PAR-003).",
+      "code": "// ✅ Đã fix - xem PAR-002/PAR-003\nawait runTransaction(db, async (transaction) => {\n  const partDoc = await transaction.get(partRef);\n  const currentStock = partDoc.data().stock;\n  transaction.update(partRef, { stock: newStock });\n  transaction.set(logRef, { ... });\n});",
+      "fixedAt": "17.05.2026"
+    },
+    {
+      "id": "BUG-INV-006",
+      "module": "INV",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Rò rỉ Held Stock trong luồng Sửa chữa",
+      "workflowId": "inventory",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: Khi nhập linh kiện cho Ticket, hệ thống tăng <code>held</code>. Khi Handover, chỉ trừ <code>stock</code> mà quên trừ <code>held</code>.<br><br>✅ <b>Đã xác minh ngày 17.05.2026</b>: Duplicate của REP-007. <code>handleHandover</code> (repairs/page.tsx dòng 790-791) ĐÃ trừ CẢ <code>stock</code> lẫn <code>held</code> trong cùng transaction (<code>stockChange -= qty</code>, <code>heldChange -= qty</code>), và dùng <code>Math.max(0, ...)</code> chống âm.",
+      "cause": "<b>Phân tích</b>: Thiếu logic đồng bộ giữa luồng Nhập (tự động giữ hàng) và luồng Xuất (chỉ trừ tồn kho vật lý).",
+      "solution": "<b>Giải pháp đã áp dụng</b>: <code>handleHandover</code> đã trừ đồng thời cả <code>stock</code> và <code>held</code> (xem REP-007).",
+      "code": "// ✅ Đã fix tại repairs/page.tsx handleHandover\nconst current = productUpdates.get(p.productId) || { stockChange: 0, heldChange: 0 };\ncurrent.stockChange -= qty;\ncurrent.heldChange -= qty;  // ← Đã có\nproductUpdates.set(p.productId, current);",
+      "fixedAt": "17.05.2026"
+    },
+    {
+      "id": "BUG-INV-007",
+      "module": "INV",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Xóa sản phẩm gây mồ côi dữ liệu (Orphan Data)",
+      "workflowId": "inventory",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: Hàm <code>handleDelete</code> trong <code>parts/page.tsx</code> xóa thẳng tài liệu sản phẩm mà không kiểm tra tham chiếu.<br><b>Hệ lụy</b>: Các phiếu nhập hoặc phiếu sửa chữa cũ tham chiếu đến sản phẩm này sẽ bị lỗi không tìm thấy dữ liệu.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Chuyển sang Soft Delete (<code>status: 'inactive'</code>). Chặn xóa SP còn tồn kho (<code>stock > 0</code>). Danh sách hiển thị đã filter ẩn SP inactive.",
+      "cause": "<b>Phân tích</b>: Thiếu ràng buộc toàn vẹn dữ liệu (Integrity Check) trước khi xóa.",
+      "solution": "<b>Giải pháp đã áp dụng</b>: Soft Delete + stock check. SP inactive vẫn tồn tại trong DB để giữ tham chiếu lịch sử.",
+      "code": "// ✅ Đã fix tại parts/page.tsx\nif (Number(part.stock) > 0) { toastError('Không thể xóa...'); return; }\nawait updateDocument('products', part.id, { status: 'inactive' });\n// filteredParts filter: if (p.status === 'inactive') return false;",
+      "fixedAt": "17.05.2026"
+    },
+    {
+      "id": "BUG-INV-008",
+      "module": "INV",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Nguy cơ Tồn kho âm (Negative Stock)",
+      "workflowId": "inventory",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: Trong <code>executeFinalImport</code>, phép tính <code>stock: totalQty - ticketQty</code> không kiểm tra điều kiện tồn kho.<br><b>Hệ lụy</b>: Nếu số lượng yêu cầu lớn hơn số lượng có trong kho, tồn kho sẽ bị âm.<br><br>✅ <b>Xác nhận ngày 17.05.2026</b>: Logic negative stock guard đã có sẵn trong các luồng chính (POS, Orders, Parts). Không cần can thiệp thêm.",
+      "cause": "<b>Phân tích</b>: Thiếu validation logic nghiệp vụ trước khi trừ kho.",
+      "solution": "<b>Giải pháp tối ưu</b>: Thêm kiểm tra <code>if (totalQty < ticketQty) throw new Error(...)</code>.",
+      "code": "// Thêm validation\nif (totalQty < ticketQty) {\n  throw new Error(\"Số lượng không đủ!\");\n}",
+      "fixedAt": "17.05.2026"
+    },
+    {
+      "id": "BUG-COM-004",
+      "module": "COM",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Phân bổ giảm giá tùy tiện (Arbitrary Discount Distribution)",
+      "workflowId": "finance-hr",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: Trong <code>commissionUtils.ts</code> (dòng 107-111), tổng giảm giá của đơn hàng được trừ dần vào các sản phẩm theo thứ tự duyệt mảng.<br><b>Hệ lụy</b>: Kết quả hoa hồng phụ thuộc vào thứ tự ngẫu nhiên của mảng.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Refactor sang pro-rata distribution — phân bổ giảm giá theo tỷ lệ giá trị từng sản phẩm trên tổng giá trị đơn hàng.",
+      "cause": "<b>Phân tích</b>: Thuật toán phân bổ giảm giá chưa công bằng và không nhất quán.",
+      "solution": "<b>Giải pháp tối ưu</b>: Phân bổ giảm giá theo tỷ lệ giá trị của từng sản phẩm trên tổng giá trị đơn hàng (Pro-rata distribution).",
+      "code": "// Giải pháp Pro-rata\nconst ratio = item.price / totalOriginalAmount;\nconst itemDiscount = totalDiscount * ratio;",
+      "fixedAt": "17.05.2026"
+    },
+    {
+      "id": "BUG-COM-005",
+      "module": "COM",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Thiếu kiểm tra trạng thái thanh toán đơn hàng",
+      "workflowId": "finance-hr",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: Trong <code>commissionUtils.ts</code> (dòng 65), hệ thống chỉ kiểm tra trạng thái thanh toán cho tài liệu sửa chữa (<code>docType === 'repair'</code>). Các đơn hàng bán lẻ (Orders) được tính hoa hồng ngay lập tức bất kể trạng thái thanh toán.<br><b>Hệ lụy</b>: Nhân viên có thể tạo đơn hàng ảo, chưa thanh toán (hoặc nợ) để hệ thống ghi nhận hoa hồng, sau đó hủy đơn hoặc bùng nợ.",
+      "cause": "<b>Phân tích</b>: Thiếu sót trong việc đồng bộ logic ghi nhận doanh thu giữa mảng sửa chữa và mảng bán lẻ.",
+      "solution": "<b>Giải pháp tối ưu</b>: Bổ sung kiểm tra trạng thái thanh toán hoặc trạng thái hoàn thành của đơn hàng trước khi tính hoa hồng.",
+      "code": "// Bổ sung kiểm tra cho order\nif (docType === 'order' && docData.paymentStatus !== 'paid') {\n  return []; // Chưa thanh toán thì chưa có hoa hồng\n}"
+    },
+    {
+      "id": "BUG-POS-004",
+      "module": "POS",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Lưu trữ số thực gây lệch tiền (Float Precision)",
+      "workflowId": "pos-orders",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: Trong <code>pos/page.tsx</code> (dòng 474 và 519), giá bán và giảm giá được đọc bằng <code>Number(e.target.value)</code> và lưu trực tiếp vào database.<br><b>Hệ lụy</b>: Nếu nhân viên nhập số có phần thập phân (ví dụ 100000.5), giá trị lưu trữ sẽ là số thực. Khi cộng dồn doanh thu sẽ gây sai lệch tiền tệ VNĐ vốn không có phần thập phân.",
+      "cause": "<b>Phân tích</b>: Thiếu hàm làm tròn số nguyên cho các input tiền tệ.",
+      "solution": "<b>Giải pháp tối ưu</b>: Dùng <code>Math.round()</code> trước khi lưu trữ.",
+      "code": "setDiscount(Math.round(Number(e.target.value)));"
+    },
+    {
+      "id": "BUG-POS-005",
+      "module": "POS",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Cho phép nhập số âm (Negative Input)",
+      "workflowId": "pos-orders",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: Các ô nhập giảm giá và giá bán không chặn số âm.<br><b>Hệ lụy</b>: Nhập giảm giá âm làm tăng tổng tiền vô lý. Nhập giá bán âm làm tổng tiền đơn hàng bị âm, nhân viên có thể lợi dụng để rút tiền khống từ hệ thống.",
+      "cause": "<b>Phân tích</b>: Thiếu validation kiểm tra giá trị lớn hơn hoặc bằng 0.",
+      "solution": "<b>Giải pháp tối ưu</b>: Thêm kiểm tra <code>value < 0</code> và chặn lại.",
+      "code": "if (discount < 0) throw new Error(\"Giảm giá không được âm!\");"
+    },
+    {
+      "id": "BUG-POS-006",
+      "module": "POS",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Gọi tính hoa hồng ngoài Transaction",
+      "workflowId": "pos-orders",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: Hàm <code>calculateAndSaveCommissions</code> được gọi ngoài transaction của đơn hàng (dòng 360).<br><b>Hệ lụy</b>: Nếu transaction thành công nhưng hàm tính hoa hồng lỗi, nhân viên không nhận được hoa hồng.<br><br>✅ <b>Đã xác minh ngày 17.05.2026</b>: Cùng pattern với REP-001. <code>commissionUtils.ts</code> có guard: <code>status !== 'Completed'</code> → skip, và idempotency check. Commission chạy fire-and-forget với <code>.catch(console.error)</code>. Thiết kế chấp nhận được vì commission có cơ chế tự bảo vệ.",
+      "cause": "<b>Phân tích</b>: Commission logic tách rời khỏi transaction nhưng có cơ chế bảo vệ riêng.",
+      "solution": "<b>Giải pháp đã áp dụng</b>: Giữ commission ngoài Tx (thiết kế chấp nhận được). Guard <code>status === 'Completed'</code> + idempotency đã có sẵn.",
+      "code": "// ✅ Fire-and-forget pattern (pos/page.tsx dòng 358-364)\ncalculateAndSaveCommissions(staff, 'order', orderData).catch(console.error);\n// commissionUtils.ts đã có guard:\nif (orderStatus !== 'Completed') return; // Skip",
+      "fixedAt": "17.05.2026"
+    },
+    {
+      "id": "BUG-POS-007",
+      "module": "POS",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Bán dưới giá vốn (Selling below Cost)",
+      "workflowId": "pos-orders",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: Cho phép sửa giá bán thấp hơn giá vốn (costPrice) mà không có cảnh báo.<br><b>Hệ lụy</b>: Nhân viên có thể cố ý sửa giá thấp để tẩu tán tài sản cửa hàng, gây lỗ vốn.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Thêm <code>confirm()</code> cảnh báo khi giá bán thấp hơn giá vốn trong <code>pos/page.tsx</code>.",
+      "cause": "<b>Phân tích</b>: Thiếu business rule kiểm tra biên lợi nhuận.",
+      "solution": "<b>Giải pháp tối ưu</b>: Thêm cảnh báo hoặc yêu cầu quyền admin khi giá bán nhỏ hơn giá vốn.",
+      "code": "if (item.sellingPrice < item.costPrice) {\n  alert(\"Cảnh báo: Giá bán thấp hơn giá vốn!\");\n}",
+      "fixedAt": "17.05.2026"
+    },
+    {
+      "id": "BUG-SER-001",
+      "module": "SER",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Cho phép nhập số âm cho giá dịch vụ",
+      "workflowId": "repair",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: Trong file <code>services/page.tsx</code> (dòng 623), hàm <code>parseInt</code> không chặn số âm khi người dùng nhập giá dịch vụ.<br><b>Hệ lụy</b>: Người dùng có thể vô tình hoặc cố ý nhập giá âm, gây sai lệch dữ liệu tài chính khi tính toán tổng tiền hoặc hiển thị.",
+      "cause": "<b>Phân tích</b>: Thiếu validation trong <code>handleSubmit</code> và <code>onChange</code>.",
+      "solution": "<b>Giải pháp tối ưu</b>: Thêm kiểm tra giá trị âm trong <code>handleSubmit</code> hoặc dùng <code>Math.max(0, parseInt(e.target.value) || 0)</code> trong <code>onChange</code>.",
+      "code": "// Giải pháp: Khống chế giá trị >= 0\nonChange={(e) => setFormData({ ...formData, price_original: Math.max(0, parseInt(e.target.value) || 0) })}"
+    },
+    {
+      "id": "BUG-REP-001",
+      "module": "REP",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Gọi tính hoa hồng ngoài Transaction (Repairs)",
+      "workflowId": "repair",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: Hàm <code>calculateAndSaveCommissions</code> được gọi sau khi transaction hoàn thành.<br><b>Hệ lụy</b>: Nếu hàm này lỗi, phiếu sửa chữa đã hoàn thành nhưng nhân viên không nhận được hoa hồng.<br><br>✅ <b>Đã xác minh ngày 17.05.2026</b>: <code>commissionUtils.ts</code> có guard check payment status và idempotency check, giảm thiểu rủi ro. Commission chạy fire-and-forget có <code>.catch()</code> xử lý lỗi.",
+      "cause": "<b>Phân tích</b>: Commission logic tách rời khỏi transaction nhưng có cơ chế bảo vệ riêng.",
+      "solution": "<b>Giải pháp đã áp dụng</b>: Giữ commission ngoài transaction (thiết kế chấp nhận được vì commission có idempotency guard). Đã thêm guard check payment status trong <code>commissionUtils.ts</code>.",
+      "code": "// ✅ commissionUtils.ts đã có guard\nif (ticket.payment?.status !== 'paid') return; // Chỉ tính khi đã thanh toán",
+      "fixedAt": "17.05.2026"
+    },
+    {
+      "id": "BUG-REP-004",
+      "module": "REP",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Cập nhật trạng thái nhanh không dùng Transaction",
+      "workflowId": "repair",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: Trong hàm <code>handleQuickStatus</code> (dòng 547), việc cập nhật trạng thái phiếu sửa chữa được thực hiện bằng <code>updateDoc</code> thay vì <code>runTransaction</code>.<br><b>Hệ lụy</b>: Nếu có 2 nhân viên cùng thao tác trên 1 phiếu, sẽ xảy ra tình trạng ghi đè dữ liệu (Lost Update).<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Chuyển <code>handleQuickStatus</code> và các thao tác liên quan sang <code>runTransaction</code> để đảm bảo tính nguyên tử.",
+      "cause": "<b>Phân tích</b>: Sử dụng <code>updateDoc</code> cho các dữ liệu có tính cạnh tranh cao mà không có cơ chế khóa.",
+      "solution": "<b>Giải pháp tối ưu</b>: Chuyển sang dùng <code>runTransaction</code> để đảm bảo tính nguyên tử và cô lập.",
+      "code": "// Giải pháp: Chuyển sang runTransaction\nawait runTransaction(db, async (transaction) => {\n  const docSnap = await transaction.get(docRef);\n  transaction.update(docRef, update);\n});",
+      "fixedAt": "17.05.2026"
+    },
+    {
+      "id": "BUG-PAR-001",
+      "module": "PAR",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Cập nhật bất đồng bộ (Receipt & Ticket)",
+      "workflowId": "inventory",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: Hàm <code>handleMarkAvailability</code> cập nhật <code>import_receipts</code> và <code>repairs</code> bằng 2 lệnh <code>updateDoc</code> riêng biệt.<br><b>Hệ lụy</b>: Nếu lệnh thứ 2 lỗi, dữ liệu giữa phiếu nhập và phiếu sửa chữa sẽ bị vênh.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Chuyển toàn bộ logic sang <code>runTransaction</code> đảm bảo nguyên tử.",
+      "cause": "<b>Phân tích</b>: Thiếu transaction khi cập nhật nhiều tài liệu có liên quan.",
+      "solution": "<b>Giải pháp tối ưu</b>: Gộp cả 2 lệnh cập nhật vào một <code>runTransaction</code>.",
+      "code": "// Giải pháp: Sử dụng Transaction\nawait runTransaction(db, async (transaction) => {\n  transaction.update(receiptRef, { items: newItems });\n  transaction.update(ticketRef, { parts: updatedParts });\n});",
+      "fixedAt": "17.05.2026"
+    },
+    {
+      "id": "BUG-PAR-002",
+      "module": "PAR",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Regression: Mất an toàn Transaction và Thiếu Log khi chốt phiếu nhập",
+      "workflowId": "inventory",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: Hệ thống sử dụng <code>WriteBatch</code> thay vì <code>runTransaction</code> để cập nhật tồn kho.<br><b>Hệ lụy</b>: Gây Race Condition (Lost Update) và thiếu <code>inventory_logs</code> kiểm toán.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Chuyển <code>executeFinalImport</code> sang <code>runTransaction</code> với đầy đủ <code>inventory_logs</code> và giá vốn bình quân động.",
+      "cause": "<b>Phân tích</b>: Quá trình gộp file (Unification) đã vô tình hạ cấp mức độ an toàn dữ liệu từ Transaction xuống Batch, và loại bỏ phần code ghi log.",
+      "solution": "<b>Giải pháp tối ưu</b>: Khôi phục lại logic dùng <code>runTransaction</code> và bổ sung ghi log vào <code>inventory_logs</code> như file cũ.",
+      "code": "// Giải pháp: Khôi phục Transaction và Logging\nawait runTransaction(db, async (transaction) => {\n  const productSnap = await transaction.get(productRef);\n  const currentStock = productSnap.data().stock;\n  transaction.update(productRef, { stock: currentStock + newQty });\n  // Thêm log vào inventory_logs...\n});",
+      "fixedAt": "17.05.2026"
+    },
+    {
+      "id": "BUG-INV-009",
+      "module": "INV",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Trừ đúp tồn kho khả dụng (Systemic Double Deduction)",
+      "workflowId": "inventory",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: Hệ thống tính tồn kho khả dụng bằng <code>available = stock - held</code>. Tuy nhiên, trong <code>api/checkout/route.ts</code>, <code>parts/page.tsx</code> và <code>technician/page.tsx</code>, hệ thống vừa giảm <code>stock</code> vừa tăng <code>held</code>.<br><b>Hệ lụy</b>: Số lượng khả dụng bị giảm gấp đôi so với thực tế, gây hiện tượng báo hết hàng ảo.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Đã cập nhật logic trong pos, web checkout và kỹ thuật viên chỉ cộng held khi Pending, không trừ đúp.",
+      "cause": "<b>Phân tích</b>: Công thức tính <code>available</code> dựa trên giả định <code>held</code> là một phần của <code>stock</code>. Khi chuyển hàng vào trạng thái <code>held</code>, không được trừ <code>stock</code> cho đến khi đơn hàng hoàn tất.",
+      "solution": "<b>Giải pháp tối ưu</b>: Khi giữ chỗ (Pending), chỉ tăng <code>held</code> và GIỮ NGUYÊN <code>stock</code>. Khi hoàn thành (Done), mới trừ <code>stock</code> và trừ <code>held</code>.",
+      "code": "// Sai:\n// transaction.update(ref, { stock: currentStock - qty, held: currentHeld + qty });\n\n// Đúng (chỉ giữ chỗ):\n// transaction.update(ref, { held: currentHeld + qty });",
+      "fixedAt": "17.05.2026"
+    },
+    {
+      "id": "BUG-INV-010",
+      "module": "INV",
+      "severity": "high",
+      "status": "fixed",
+      "title": "KTV lấy hàng giữ chỗ (Technician Can Take Reserved Items)",
+      "workflowId": "inventory",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: Trong file <code>technician/page.tsx</code>, khi KTV thêm linh kiện vào phiếu sửa chữa, hệ thống chỉ kiểm tra <code>currentStock < qty</code> thay vì <code>available < qty</code>.<br><b>Hệ lụy</b>: KTV có thể lấy nhầm linh kiện đã được giữ chỗ (held) cho các đơn hàng hoặc phiếu sửa chữa khác.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Sửa điều kiện thành <code>available = stock - held</code> trong <code>technician/page.tsx</code>.",
+      "cause": "<b>Phân tích</b>: Bỏ qua trường <code>held</code> khi kiểm tra tồn kho khả dụng.",
+      "solution": "<b>Giải pháp tối ưu</b>: Kiểm tra <code>(currentStock - currentHeld) < qty</code>.",
+      "code": "// Sửa điều kiện kiểm tra\nconst available = productData.stock - (productData.held || 0);\nif (available < quantity) {\n  alert(\"Không đủ hàng khả dụng!\");\n}",
+      "fixedAt": "17.05.2026"
+    },
+    {
+      "id": "BUG-ORD-003",
+      "module": "ORD",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Thiếu kiểm tra cộng dồn số lượng trong Checkout API",
+      "workflowId": "pos-orders",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: API <code>checkout</code> kiểm tra tồn kho cho từng sản phẩm riêng lẻ trong mảng đầu vào, thay vì gộp tổng số lượng của các sản phẩm trùng nhau trước.<br><b>Hệ lụy</b>: Payload chứa nhiều dòng cho cùng 1 SP có thể bypass stock check và làm âm kho.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Thêm pre-aggregation step gom nhóm theo <code>productId</code> trước khi validate trong <code>api/checkout/route.ts</code>.",
+      "cause": "<b>Phân tích</b>: Thiếu bước validate tổng hợp (Aggregation) dữ liệu đầu vào.",
+      "solution": "<b>Giải pháp tối ưu</b>: Group các sản phẩm theo <code>productId</code> và tính tổng số lượng trước khi kiểm tra tồn kho.",
+      "code": "// Gom nhóm trước khi check\nconst groupedItems = items.reduce((acc, item) => {\n  acc[item.productId] = (acc[item.productId] || 0) + item.quantity;\n  return acc;\n}, {});",
+      "fixedAt": "17.05.2026"
+    },
+    {
+      "id": "BUG-ORD-004",
+      "module": "ORD",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Race Condition & Double Submit trong updateStatus",
+      "workflowId": "pos-orders",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: Hàm <code>updateStatus</code> không đọc lại trạng thái từ Firestore bên trong transaction.<br><b>Hệ lụy</b>: Sai lệch số lượng <code>held</code> và <code>stock</code> khi trạng thái bị cập nhật chồng chéo.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Thêm <code>transaction.get(orderRef)</code> để fetch trạng thái mới nhất. Nếu <code>currentStatus === newStatus</code> thì dừng xử lý.",
+      "cause": "<b>Phân tích</b>: Hàm sử dụng dữ liệu <code>order</code> từ React state thay vì fetch mới trong transaction. Không có bước kiểm tra trạng thái hiện tại trên server trước khi áp dụng logic cộng/trừ kho.",
+      "solution": "<b>Giải pháp tối ưu</b>: Thực hiện <code>transaction.get(orderRef)</code> bên trong transaction để lấy trạng thái mới nhất. Nếu trạng thái đã trùng với <code>newStatus</code> thì dừng xử lý.",
+      "code": "await runTransaction(db, async (transaction) => {\n  const orderSnap = await transaction.get(orderRef);\n  const currentStatus = orderSnap.data().status;\n  if (currentStatus === newStatus) return; // Ngăn Double Submit\n  // ... xử lý logic dựa trên currentStatus\n});",
+      "fixedAt": "17.05.2026"
+    },
+    {
+      "id": "BUG-REP-005",
+      "module": "REP",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Race Condition trong tổng hợp phiếu nhập",
+      "workflowId": "repair",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: Đọc và cập nhật phiếu nhập tổng hợp không dùng transaction.<br><b>Hệ lụy</b>: Khi nhiều KTV cùng yêu cầu linh kiện, dữ liệu phiếu nhập có thể bị ghi đè.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Chuyển <code>ensureConsolidatedImportReceiptForTicket</code> sang <code>runTransaction</code>.",
+      "cause": "<b>Phân tích</b>: Hàm <code>ensureConsolidatedImportReceiptForTicket</code> dùng <code>getDoc</code> rồi <code>updateDoc</code>/<code>setDoc</code> riêng rẽ thay vì dùng <code>runTransaction</code>.",
+      "solution": "<b>Giải pháp tối ưu</b>: Chuyển toàn bộ logic đọc-ghi phiếu nhập tổng hợp vào trong một <code>runTransaction</code>.",
+      "code": "// Cần chuyển sang transaction\nawait runTransaction(db, async (transaction) => {\n  const receiptDoc = await transaction.get(receiptRef);\n  if (!receiptDoc.exists()) {\n    transaction.set(receiptRef, newData);\n  } else {\n    transaction.update(receiptRef, updatedData);\n  }\n});",
+      "fixedAt": "17.05.2026"
+    },
+    {
+      "id": "BUG-REP-006",
+      "module": "REP",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Missing Transaction trong handleNoteSubmit",
+      "workflowId": "repair",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: Lưu thông tin phiếu sửa chữa không dùng transaction.<br><b>Hệ lụy</b>: Có thể ghi đè dữ liệu nếu 2 người cùng sửa phiếu.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Chuyển <code>handleNoteSubmit</code> sang <code>runTransaction</code> với fresh read từ Firestore.",
+      "cause": "<b>Phân tích</b>: Hàm <code>handleSubmit</code> dùng <code>updateDoc</code> trực tiếp mà không kiểm tra version hoặc dùng transaction.",
+      "solution": "<b>Giải pháp tối ưu</b>: Sử dụng <code>runTransaction</code> kết hợp với cơ chế Optimistic Locking (dùng trường <code>version</code> đã có).",
+      "code": "// Cần dùng transaction + version check\nawait runTransaction(db, async (transaction) => {\n  const ticketDoc = await transaction.get(ticketRef);\n  if (ticketDoc.data().version !== currentVersion) {\n    throw new Error(\"Stale data\");\n  }\n  transaction.update(ticketRef, { ...data, version: currentVersion + 1 });\n});",
+      "fixedAt": "17.05.2026"
+    },
+    {
+      "id": "BUG-REP-007",
+      "module": "REP",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Held Counter Corruption trong handleHandover",
+      "workflowId": "repair",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: Giảm <code>held</code> khi bàn giao máy nhưng KHÔNG BAO GIỜ tăng <code>held</code> khi thêm linh kiện vào phiếu sửa chữa.<br><b>Hệ lụy</b>: Làm âm giá trị <code>held</code> trong kho.<br><br>✅ <b>Đã xác minh ngày 17.05.2026</b>: Thiết kế chấp nhận được — luồng sửa chữa không dùng <code>held</code> (linh kiện trừ <code>stock</code> trực tiếp khi <code>done</code>). handleHandover đã dùng <code>runTransaction</code> đầy đủ.",
+      "cause": "<b>Phân tích</b>: Trong <code>handleHandover</code> (khi action === 'done'), hệ thống trừ cả <code>stock</code> và <code>held</code>. Tuy nhiên, luồng sửa chữa không có bước tăng <code>held</code> khi gán linh kiện vào phiếu (ví dụ ở trạng thái <code>processing</code>).",
+      "solution": "<b>Giải pháp tối ưu</b>: Bổ sung logic tăng <code>held</code> khi linh kiện được gán vào phiếu sửa chữa, HOẶC nếu không dùng cơ chế giữ chỗ cho sửa chữa thì không trừ <code>held</code> ở bước Handover.",
+      "code": "// Nếu dùng held cho sửa chữa:\n// 1. Khi thêm linh kiện vào phiếu: tăng held\ntransaction.update(productRef, { held: increment(qty) });\n// 2. Khi bàn giao (Done): giảm stock và held\ntransaction.update(productRef, { stock: increment(-qty), held: increment(-qty) });",
+      "fixedAt": "17.05.2026"
+    },
+    {
+      "id": "BUG-REP-008",
+      "module": "REP",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Race Condition mảng statusTimeline trong handleQuickStatus",
+      "workflowId": "repair",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: Cập nhật mảng <code>statusTimeline</code> bằng cách đọc từ React state rồi ghi đè bằng <code>updateDoc</code>.<br><b>Hệ lụy</b>: Ghi đè lịch sử trạng thái nếu 2 người cùng cập nhật trạng thái gần như đồng thời.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Chuyển <code>handleQuickStatus</code> sang <code>runTransaction</code>, đọc timeline mới nhất từ Firestore trước khi append.",
+      "cause": "<b>Phân tích</b>: Hàm <code>handleQuickStatus</code> không dùng Transaction để đọc dữ liệu mới nhất từ Firestore trước khi push phần tử mới vào mảng <code>statusTimeline</code>.",
+      "solution": "<b>Giải pháp tối ưu</b>: Dùng <code>FieldValue.arrayUnion</code> để append phần tử mới vào mảng một cách atomic, hoặc đưa vào <code>runTransaction</code> nếu cần kiểm tra điều kiện phức tạp.",
+      "code": "// Giải pháp 1: Dùng arrayUnion (Atomic)\ntransaction.update(ticketRef, {\n  statusTimeline: FieldValue.arrayUnion(newTimelineEntry)\n});",
+      "fixedAt": "17.05.2026"
+    },
+    {
+      "id": "BUG-PAR-003",
+      "module": "PAR",
+      "severity": "high",
+      "status": "fixed",
+      "title": "Race Condition & Stale Data trong executeFinalImport",
+      "workflowId": "inventory",
+      "affectedFiles": [],
+      "description": "<b>Hiện tượng</b>: Hàm <code>executeFinalImport</code> dùng dữ liệu từ hook (có thể cũ) và <code>writeBatch</code>.<br><b>Hệ lụy</b>: Race Condition và giá vốn bị tính sai.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Chuyển toàn bộ sang <code>runTransaction</code> với đọc dữ liệu tươi, tính giá vốn bình quân động, và ghi <code>inventory_logs</code>.",
+      "cause": "<b>Phân tích</b>: Dùng dữ liệu từ hook để tính toán giá trị tuyệt đối rồi ghi đè thay vì dùng transaction hoặc increment. Đọc ticket ngoài batch dẫn đến nguy cơ ghi đè dữ liệu ticket.",
+      "solution": "<b>Giải pháp tối ưu</b>: Chuyển toàn bộ logic tính toán và cập nhật vào trong một <code>runTransaction</code>.",
+      "code": "// Giải pháp: Chuyển sang runTransaction\nawait runTransaction(db, async (transaction) => {\n  const pDoc = await transaction.get(productRef);\n  const currentStock = pDoc.data().stock;\n  const currentCost = pDoc.data().costPrice;\n  // Tính toán avgCost dựa trên currentStock và currentCost thực tế\n  const totalQty = currentStock + newQty;\n  const avgCost = Math.round(((currentStock * currentCost) + (newQty * newCost)) / totalQty);\n  transaction.update(productRef, { stock: totalQty, costPrice: avgCost });\n});",
+      "fixedAt": "17.05.2026"
+    },
+    {
+      "id": "BUG-ORD-005",
+      "title": "Lỗi vi phạm nguyên tắc Transaction ở Web Checkout",
+      "module": "ORD",
+      "severity": "high",
+      "symptom": "API checkout báo lỗi 500: Firestore transactions require all reads to be executed before all writes. Đơn hàng không tạo được.",
+      "affectedFiles": [
+        "src/app/api/checkout/route.ts"
+      ],
+      "workflowId": "pos-orders",
+      "workflowLabel": "POS & Đơn hàng",
+      "fixHint": "Cấu trúc lại Transaction: Đưa tất cả lệnh .get() lên trước lệnh .set() và .update()",
+      "status": "fixed",
+      "fixSummary": "Tách biệt Phase 1 (Reads) và Phase 2 (Writes). Gom toàn bộ thao tác đọc (.get) kho hàng và khách hàng lên đầu transaction, trước khi thực thi các lệnh ghi (.set, .update).",
+      "fixedAt": "2026-05-20"
+    },
+    {
+      "id": "HACK-PUBLIC-REVIEWS-001",
+      "module": "Security",
+      "severity": "high",
+      "status": "fixed",
+      "workflowId": "system-content",
+      "title": "Public reviews/comments bypass moderation da duoc si?t Firestore rules",
+      "affectedFiles": [
+        "firestore.rules",
+        "src/app/(customer)/tin-tuc/[slug]/ArticleClientParts.tsx"
+      ],
+      "symptom": "Public create vao reviews/product_reviews/article_comments co the gui status approved hoac field la.",
+      "description": "Firestore rules hien ep public create status == pending, whitelist field bang hasOnly/hasAll, validate rating/name/content/createdAt. Article comment client luon gui status pending.",
+      "cause": "Rules cu cho public create qua rong va client tu quyet dinh status.",
+      "solution": "Dua moderation boundary vao Firestore rules; client chi tao pending. Public read chi doc approved hoac staff permission.",
+      "verificationNotes": "Source verified 2026-05-23: rules co pending/schema guards; ArticleClientParts gui status pending.",
+      "fixedAt": "2026-05-21"
+    },
+    {
+      "id": "HACK-API-001",
+      "module": "Security",
+      "severity": "high",
+      "status": "fixed",
+      "workflowId": "system-content",
+      "title": "Admin SDK mutation routes da co auth/production guard hoac da bi xoa",
+      "affectedFiles": [
+        "src/app/api/admin/seed-taxonomy/route.ts",
+        "src/lib/apiAuth.ts"
+      ],
+      "symptom": "Seed/migration endpoints dung Admin SDK co nguy co mutate DB neu public.",
+      "description": "seed-taxonomy hien la POST + requireAdmin + production guard. Hai route dev cu da bi xoa khoi working tree.",
+      "cause": "Route Admin SDK mutation thieu auth/guard trong ban cu.",
+      "solution": "Moi endpoint mutation dung Admin SDK phai co requireAdmin/requireAdminOrStaff va production guard, hoac chuyen thanh CLI script noi bo.",
+      "verificationNotes": "Source verified 2026-05-23: seed-taxonomy imports requireAdmin and blocks NODE_ENV production. /api/dev/migrate-prices and /api/dev/seed-data are deleted in current working tree.",
+      "fixedAt": "2026-05-21"
+    },
+    {
+      "id": "HACK-CACHE-001",
+      "module": "Security",
+      "severity": "medium",
+      "status": "fixed",
+      "workflowId": "system-content",
+      "title": "Revalidate API hardcoded fallback secret da duoc xoa",
+      "affectedFiles": [
+        "src/app/api/revalidate/route.ts",
+        "src/lib/revalidate.ts"
+      ],
+      "symptom": "/api/revalidate co the bi purge cache neu dung fallback secret hoac caller khong gui secret.",
+      "description": "Route doc duy nhat REVALIDATE_SECRET, fail-closed neu thieu env, tra 401 neu secret sai/thieu. Cross-domain helper gui x-revalidate-secret khi secret ton tai.",
+      "cause": "Fallback secret hardcoded va caller cu goi endpoint truc tiep.",
+      "solution": "Secret-only server-to-server endpoint; admin UI goi triggerRevalidate server action.",
+      "verificationNotes": "Source verified 2026-05-23: khong con chuoi fallback vl-reval; triggerRevalidate gui x-revalidate-secret.",
+      "fixedAt": "2026-05-21"
+    },
+    {
+      "id": "BUG-REVALIDATE-CALLERS-001",
+      "module": "Settings",
+      "severity": "medium",
+      "status": "fixed",
+      "workflowId": "system-content",
+      "title": "Admin revalidate callers da chuyen sang server action",
+      "affectedFiles": [
+        "src/app/admin/settings/NavigationTab.tsx",
+        "src/app/admin/settings/CategoriesTab.tsx",
+        "src/lib/revalidate.ts"
+      ],
+      "symptom": "Admin UI fetch /api/revalidate tu browser se fail 401 hoac expose secret neu sua sai.",
+      "description": "NavigationTab va CategoriesTab import triggerRevalidate thay vi fetch /api/revalidate.",
+      "cause": "Caller cu sai contract cua protected revalidate endpoint.",
+      "solution": "Dung server action de revalidatePath/revalidateTag tren server.",
+      "verificationNotes": "Source verified 2026-05-23: khong con fetch /api/revalidate trong hai tab settings.",
+      "fixedAt": "2026-05-21"
+    },
+    {
+      "id": "BUG-SEED-CONFIG-001",
+      "module": "Settings",
+      "severity": "medium",
+      "status": "fixed",
+      "workflowId": "system-content",
+      "title": "Settings seed-config da gui Bearer token",
+      "affectedFiles": [
+        "src/app/admin/settings/page.tsx",
+        "src/app/api/seed-config/route.ts"
+      ],
+      "symptom": "Nut khoi phuc mac dinh goi protected API nhung thieu Authorization.",
+      "description": "Settings page lay Firebase currentUser idToken qua getAuthInstance va gui Authorization Bearer khi POST /api/seed-config.",
+      "cause": "Client caller thieu token trong khi API requireAdminOrStaff.",
+      "solution": "Gui Firebase ID token; API tiep tuc verify role/permission server-side.",
+      "verificationNotes": "Source verified 2026-05-23: settings page gui Authorization Bearer token.",
+      "fixedAt": "2026-05-21"
+    },
+    {
+      "id": "BUG-INVENTORY-HELD-001",
+      "module": "Inventory",
+      "severity": "high",
+      "status": "fixed",
+      "workflowId": "pos-orders",
+      "title": "Pending orders khong con tru stock va tang held dong thoi",
+      "affectedFiles": [
+        "src/app/api/checkout/route.ts",
+        "src/app/admin/pos/page.tsx",
+        "src/app/admin/orders/page.tsx"
+      ],
+      "symptom": "available = stock - held bi tru hai lan khi tao don pending.",
+      "description": "Checkout online va POS pending chi tang held. POS completed chi tru stock. Orders transitions active/completed/cancelled cap nhat stock/held theo mo hinh stock vat ly va held reservation.",
+      "cause": "Logic cu tron reservation voi physical stock movement.",
+      "solution": "Tao pending: held += qty. Completed: stock -= qty, held -= qty. Cancel active: held -= qty. Cancel completed: stock += qty.",
+      "verificationNotes": "Source verified 2026-05-23: checkout chi update held; POS pending/completed tach logic; orders transitions co validation am stock/held.",
+      "fixedAt": "2026-05-21"
+    },
+    {
+      "id": "BUG-REPAIR-STOCK-001",
+      "module": "Inventory",
+      "severity": "high",
+      "status": "fixed",
+      "workflowId": "repair",
+      "title": "Repair parts khong con tru stock hai lan",
+      "affectedFiles": [
+        "src/app/admin/technician/page.tsx",
+        "src/app/admin/repairs/page.tsx",
+        "src/app/admin/parts/page.tsx"
+      ],
+      "symptom": "KTV chon linh kien tru stock, handover done lai tru stock lan nua.",
+      "description": "KTV add/remove part chi tang/giam held. Handover done moi tru stock va release held. Out/refund chi release held. Parts import gan ticket khong tru ticketQty khoi stock.",
+      "cause": "Thieu ranh gioi selected/reserved va actual consumption.",
+      "solution": "Selected part la reservation; done la physical consumption; out/refund la release reservation.",
+      "verificationNotes": "Source verified 2026-05-23: technician chi dung held increment; repairs handleHandover loc selected parts va chi log khi stockChange != 0.",
+      "fixedAt": "2026-05-21"
+    },
+    {
+      "id": "BUG-TSC-STALENEXT-001",
+      "module": "Build",
+      "severity": "low",
+      "status": "fixed",
+      "workflowId": "system-content",
+      "title": "Typecheck standalone regenerate Next route types truoc khi tsc",
+      "affectedFiles": [
+        "package.json"
+      ],
+      "symptom": "tsc --noEmit doc .next/types stale co the fail gia sau doi route/page/layout.",
+      "description": "package.json co typegen, typecheck = next typegen && tsc --noEmit, verify gom lint/typecheck/build.",
+      "cause": "tsconfig include .next/types nhung generated files co the stale.",
+      "solution": "Chay next typegen truoc tsc trong pipeline verify.",
+      "verificationNotes": "Source verified 2026-05-23: package scripts typegen/typecheck/verify ton tai.",
+      "fixedAt": "2026-05-21"
+    },
+    {
+      "id": "BUG-MIGRATE-INVENTORY-SCRIPT-MISSING-001",
+      "module": "Build",
+      "severity": "medium",
+      "status": "open",
+      "workflowId": "inventory",
+      "title": "package.json migrate:inventory dang tham chieu script bi thieu",
+      "affectedFiles": [
+        "package.json",
+        "scripts/migrate-active-orders.ts"
+      ],
+      "symptom": "Sau clean code, <code>scripts/migrate-active-orders.ts</code> khong ton tai nhung <code>package.json</code> van co script <code>migrate:inventory</code>.",
+      "description": "Current working tree bi mat migration CLI bat buoc cua inventory refactor. Chay <code>npm run migrate:inventory</code> se fail do thieu file.",
+      "cause": "Cleanup da xoa script nhung chua xoa/cap nhat package script va roadmap.",
+      "solution": "Khoi phuc <code>scripts/migrate-active-orders.ts</code> neu can migration du lieu cu, hoac xoa script <code>migrate:inventory</code> sau khi xac nhan migration da chay va khong can nua.",
+      "verificationNotes": "Source verified 2026-05-23: scripts/migrate-active-orders.ts MISSING; package.json still defines migrate:inventory.",
+      "discoveredAt": "2026-05-23"
+    }
+  ],
+  "changelog": [
+    {
+      "date": "2026-05-25",
+      "title": "Live Chat Omnichannel: Facebook/Zalo, Media, CRM và luồng tạo đơn",
+      "status": "in-progress",
+      "items": [
+        "Checkpoint nền 4d3c6fbd: inbox Web/Facebook/Zalo, cấu hình token trên web, webhook và outbound reply",
+        "Đã xác minh production từng nhận tin Facebook sau khi sửa quyền RTDB cho runtime service account",
+        "Nâng cấp hiện tại: tên/avatar Facebook qua Graph API và refresh room cũ",
+        "Nâng cấp hiện tại: lưu/render sticker, ảnh, audio, video, file Facebook cùng CSP CDN",
+        "Nâng cấp hiện tại: modal hồ sơ khách, liên kết customers/{phone}, mở Repair/POS đã điền sẵn",
+        "Guardrails: không mở RTDB public, không dựng link từ PSID, không tạo đơn/tồn kho trực tiếp từ chat",
+        "Xác minh local: typecheck/build pass; chờ deploy và kiểm thử production phần mới"
+      ]
+    },
+    {
+      "date": "2026-05-25",
+      "title": "CRM Khách hàng Mở rộng (6 tính năng)",
+      "status": "in-progress",
+      "items": [
+        "Thêm/Sửa khách hàng (không xóa) — CustomerFormModal",
+        "Slice đã code 26.05: xem lịch sử đơn hàng và phiếu SC — CustomerDetailDrawer (2 tabs lazy-load, RBAC module)",
+        "Pending v11: lịch hẹn, tags, tier và migration/ledger đầy đủ",
+        "Ghi chú & Tags (VIP, nợ xấu, ưu tiên...) — combobox với SUGGESTED_TAGS",
+        "Phân hạng tự động THEO NĂM (Bronze→Silver→Gold→Platinum) — query orders+repairs năm hiện tại",
+        "Cấu hình ngưỡng phân hạng tại Settings/Discount Rules → system_config/customer_tiers",
+        "Export Excel (SheetJS xlsx) — client-side, toàn bộ filtered customers",
+        "Mở rộng bảng: cột Hạng, Địa chỉ, Số SC, Số hẹn"
+      ]
+    },
+    {
+      "date": "2026-05-23",
+      "title": "Kh?i ph?c roadmap_v2 sau cleanup Antigravity",
+      "items": [
+        "Preserved SPA shell and rebuilt data-first roadmap JSON.",
+        "Re-added 2026-05-21 security/inventory/typecheck bug records.",
+        "Opened BUG-MIGRATE-INVENTORY-SCRIPT-MISSING-001 because package script points to a missing migration file."
+      ]
+    },
+    {
+      "date": "2026-05-20",
+      "note": "Tách biệt Phase 1 (Reads) và Phase 2 (Writes). Gom toàn bộ thao tác đọc (.get) kho hàng và khách hàng lên đầu transaction, trước khi thực thi các lệnh ghi (.set, .update).",
+      "fixedBugs": [
+        "BUG-ORD-005"
+      ],
+      "filesTouched": {
+        "BUG-ORD-005": [
+          "src/app/api/checkout/route.ts"
+        ]
+      }
+    },
+    {
+      "date": "19.05.2026",
+      "title": "Phase 4/6/8 Code + Firestore Rules Fix",
+      "items": [
+        "Phase 4: Supplier dropdown + debt tracking (atomic runTransaction)",
+        "Phase 6: Product variants + reviews (server-queries + ProductDetailClient)",
+        "Phase 8: POS phone-based repair lookup + auto accessory discount",
+        "BUG-RULES-001: Added missing Firestore security rules for 4 new collections",
+        "Deployed firestore.rules to production",
+        "Updated source_intelligence.json v2"
+      ]
+    },
+    {
+      "date": "19.05.2026",
+      "title": "PNPM Migration & Dependency Audit",
+      "items": [
+        "Chuyển package manager từ npm → pnpm v10.30.3",
+        "Xóa node_modules, package-lock.json, yarn.lock",
+        "pnpm install + approve build scripts (sharp, protobufjs, etc.)",
+        "Fix ESLint no-explicit-any (articles, login)",
+        "Fix import lỗi requireAdmin → requireAdminOrStaff (seed-config)",
+        "Cập nhật README.md chuẩn hóa pnpm",
+        "Build thành công (pnpm build exit code 0)",
+        "Thêm Dependencies section vào roadmap_v2 Dashboard"
+      ]
+    },
+    {
+      "date": "19.05.2026",
+      "title": "Nhập Hàng v3: NCC Per-Item + Thanh Toán / Ghi Công Nợ (COMPLETED)",
+      "items": [
+        "CreateReceiptModal: NCC dropdown chuyển từ per-receipt → per-item (mỗi row SP chọn NCC riêng) ✅",
+        "ImportPreviewModal: Xóa NCC chung, thêm toggle Thanh Toán Ngay / Ghi Công Nợ ✅",
+        "executeFinalImport: Group debt by supplierId, skip debt if paymentMethod=paid ✅",
+        "ImportReceiptItem: Thêm supplierId field per item ✅",
+        "ImportReceipt: Thêm paymentMethod field (paid|debt) ✅",
+        "handleOrderReceipt: Validation chặn draft→ordered nếu item thiếu NCC ✅",
+        "Draft expanded view: NCC dropdown per-item + auto-save + create-new ✅",
+        "Button disabled + warning banner khi NCC chưa đầy đủ ✅",
+        "source_intelligence.json → v5 ✅",
+        "[DECISION] Payment method áp dụng toàn phiếu (không per-item)",
+        "[DECISION] Thanh toán ngay vẫn ghi supplier_transaction (IMPORT_PAID) để giữ audit trail"
+      ]
+    },
+    {
+      "date": "19.05.2026",
+      "title": "CurrencyInput Refactor — Hoàn Tất Chuẩn Hóa Tiền Tệ Toàn Hệ Thống",
+      "items": [
+        "Phase 1: Tạo CurrencyInput component (formatVND, parseVND, onBlur support)",
+        "Phase 2: UniversalProductModal — price_original, price_promo → CurrencyInput ✅",
+        "Phase 3: Suppliers — paymentAmount → CurrencyInput ✅",
+        "Phase 4: POS — sellingPrice, discount, deposit → CurrencyInput ✅",
+        "Phase 5: Revenue — expense amount → CurrencyInput ✅",
+        "Phase 6: Commissions — baseAmount, amount → CurrencyInput ✅",
+        "Phase 7: Repairs — issue estimatedPrice → CurrencyInput ✅",
+        "Phase 8: Parts — importPrice, price_promo (retail + component) → CurrencyInput ✅",
+        "Phase 9: Services — price_original, price_promo → CurrencyInput ✅",
+        "Không thay đổi: settings (config values), discount-rules (%), commissions (%), quantity inputs"
+      ]
+    },
+    {
+      "date": "19.05.2026",
+      "title": "7 Tính Năng Mở Rộng (Phases 2,3,5,7 hoàn thành)",
+      "items": [
+        "Phase 2: Quản lý NCC (Nhà Cung Cấp) + Công nợ",
+        "Phase 3: Excel Import/Export (sản phẩm, dịch vụ, báo cáo nhập hàng)",
+        "Phase 5: Discount Rules Engine (giảm giá phụ kiện theo case sửa chữa)",
+        "Phase 7: POS Repair Lookup (tra cứu phiếu sửa chữa từ POS)",
+        "Phase 4: Supplier debt dropdown + atomic tracking trong executeFinalImport ✅",
+        "Phase 6: Product variants (seriesId) + Reviews (moderated) + inline submit ✅",
+        "Phase 8: POS repair lookup (phone) + auto accessory discount ✅",
+        "BUG-RULES-001: Thêm Firestore rules cho suppliers, supplier_transactions, product_reviews, accessory_discount_rules ✅"
+      ]
+    },
+    {
+      "date": "18.05.2026",
+      "title": "Roadmap v2 SPA + Master Hub + Comprehensive Audit",
+      "items": [
+        "Chuyển dashboard sang SPA architecture (app.js + JSON data)",
+        "Tích hợp Master Hub Workflow (Mermaid interactive)",
+        "Kiểm định toàn diện: Performance ✅, Security ✅, Cost ✅",
+        "Scaling Roadmap cho 5,000 users/tháng"
+      ]
+    },
+    {
+      "date": "17.05.2026",
+      "title": "Security Audit & Bug Fixes (23 bugs)",
+      "items": [
+        "Vá 23 bugs: RBAC bypass, XSS, hardcoded secrets, race conditions",
+        "Edge Middleware RBAC (HMAC-signed session cookie)",
+        "runTransaction 100% cho tất cả inventory operations",
+        "sanitizeHtml() shared lib chống XSS",
+        "RTDB validation rules siết chặt"
+      ]
+    }
+  ],
+  "schemaVersion": 3,
+  "mode": "active",
+  "projectRoot": "M:\\QLCH_VanLanh",
+  "tracks": [
+    {
+      "id": "system-content",
+      "title": "Hệ thống & Nội dung",
+      "status": "stable",
+      "summaryPath": "system-content/summary.json",
+      "updatedAt": "2026-05-28T03:23:16.930Z",
+      "coreFiles": [
+        "firestore.rules",
+        "database.rules.json",
+        "src/components/ChatWidget.tsx",
+        "src/lib/AuthContext.tsx",
+        "src/lib/chatWorkflowHandoff.ts",
+        "src/app/admin/pos/page.tsx",
+        "src/app/admin/repairs/page.tsx",
+        "src/app/(customer)/tin-tuc/[slug]/ArticleClientParts.tsx",
+        "src/app/api/admin/seed-taxonomy/route.ts",
+        "src/lib/apiAuth.ts",
+        "src/app/api/revalidate/route.ts",
+        "src/lib/revalidate.ts",
+        "src/app/admin/settings/NavigationTab.tsx",
+        "src/app/admin/settings/CategoriesTab.tsx",
+        "src/app/admin/settings/page.tsx",
+        "src/app/api/seed-config/route.ts",
+        "package.json"
+      ],
+      "openEventIds": [],
+      "decisionIds": [],
+      "dependsOn": [],
+      "affectedBy": []
+    },
+    {
+      "id": "pos-orders",
+      "title": "POS & Đơn hàng",
+      "status": "stable",
+      "summaryPath": "pos-orders/summary.json",
+      "updatedAt": "2026-05-28T03:23:16.930Z",
+      "coreFiles": [
+        "src/app/api/checkout/route.ts",
+        "src/app/admin/pos/page.tsx",
+        "src/app/admin/orders/page.tsx"
+      ],
+      "openEventIds": [],
+      "decisionIds": [],
+      "dependsOn": [],
+      "affectedBy": []
+    },
+    {
+      "id": "repair",
+      "title": "Sửa chữa",
+      "status": "stable",
+      "summaryPath": "repair/summary.json",
+      "updatedAt": "2026-05-28T03:23:16.930Z",
+      "coreFiles": [
+        "src/app/admin/technician/page.tsx",
+        "src/app/admin/repairs/page.tsx",
+        "src/app/admin/parts/page.tsx"
+      ],
+      "openEventIds": [],
+      "decisionIds": [],
+      "dependsOn": [],
+      "affectedBy": []
+    },
+    {
+      "id": "inventory",
+      "title": "Kho hàng",
+      "status": "active",
+      "summaryPath": "inventory/summary.json",
+      "updatedAt": "2026-05-28T03:23:16.930Z",
+      "coreFiles": [
+        "package.json",
+        "scripts/migrate-active-orders.ts"
+      ],
+      "openEventIds": [
+        "BUG-MIGRATE-INVENTORY-SCRIPT-MISSING-001"
+      ],
+      "decisionIds": [],
+      "dependsOn": [],
+      "affectedBy": []
+    },
+    {
+      "id": "finance-hr",
+      "title": "Tài chính & Nhân sự",
+      "status": "stable",
+      "summaryPath": "finance-hr/summary.json",
+      "updatedAt": "2026-05-28T03:23:16.930Z",
+      "coreFiles": [],
+      "openEventIds": [],
+      "decisionIds": [],
+      "dependsOn": [],
+      "affectedBy": []
+    }
+  ]
+}

@@ -22,6 +22,31 @@ export interface StoreBranch {
     mapLink: string;
 }
 
+export type PricingIconName = 'smartphone' | 'tablet' | 'laptop' | 'watch';
+
+export interface HomepagePricingCategory {
+    id: string;
+    label: string;
+    icon: PricingIconName;
+    keywords: string[];
+    maxItems: number;
+}
+
+export interface HomepagePricingConfig {
+    title: string;
+    highlightedTitle: string;
+    subtitle: string;
+    ctaLabel: string;
+    ctaHref: string;
+    categories: HomepagePricingCategory[];
+}
+
+export interface HomepageReviewsConfig {
+    eyebrow: string;
+    title: string;
+    googlePlaceId: string;
+}
+
 export interface SectionBackground {
     type: 'none' | 'color' | 'image';
     color?: string;
@@ -35,7 +60,7 @@ export interface SectionBackground {
 
 export interface HomeSectionItem {
     id: string;
-    component: 'hero' | 'categories' | 'flash_sale' | 'suggested' | 'booking' | 'articles';
+    component: 'hero' | 'categories' | 'flash_sale' | 'suggested' | 'booking' | 'articles' | 'pricing_table' | 'google_reviews';
     label: string;
     visible: boolean;
     order: number;
@@ -130,6 +155,8 @@ export interface SiteConfig {
 
     // Homepage layout
     homeSections: HomeSectionItem[];
+    homepagePricing: HomepagePricingConfig;
+    homepageReviews: HomepageReviewsConfig;
 
     // Article comments
     forbiddenWords: string[];
@@ -192,8 +219,52 @@ export const DEFAULT_CONFIG: SiteConfig = {
         { id: 'flash_sale', component: 'flash_sale', label: 'Flash Sale', visible: true, order: 2 },
         { id: 'suggested', component: 'suggested', label: 'Sản phẩm gợi ý', visible: true, order: 3 },
         { id: 'articles', component: 'articles', label: 'Bài Viết Nổi Bật', visible: true, order: 4 },
-        { id: 'booking', component: 'booking', label: 'Đặt lịch sửa chữa', visible: true, order: 5 },
+        { id: 'pricing-table', component: 'pricing_table', label: 'Bảng giá sửa chữa', visible: true, order: 5 },
+        { id: 'google-reviews', component: 'google_reviews', label: 'Đánh giá khách hàng', visible: true, order: 6 },
+        { id: 'booking', component: 'booking', label: 'Đặt lịch sửa chữa', visible: true, order: 7 },
     ],
+    homepagePricing: {
+        title: 'Bảng Giá',
+        highlightedTitle: 'Sửa Chữa',
+        subtitle: 'Minh bạch, rõ ràng, linh kiện chính hãng',
+        ctaLabel: 'Xem tất cả bảng giá',
+        ctaHref: '/category/sua-chua',
+        categories: [
+            {
+                id: 'iphone',
+                label: 'iPhone',
+                icon: 'smartphone',
+                keywords: ['iphone'],
+                maxItems: 6,
+            },
+            {
+                id: 'ipad',
+                label: 'iPad',
+                icon: 'tablet',
+                keywords: ['ipad'],
+                maxItems: 6,
+            },
+            {
+                id: 'macbook',
+                label: 'MacBook',
+                icon: 'laptop',
+                keywords: ['macbook'],
+                maxItems: 6,
+            },
+            {
+                id: 'watch',
+                label: 'Apple Watch',
+                icon: 'watch',
+                keywords: ['apple watch', 'watch'],
+                maxItems: 6,
+            },
+        ],
+    },
+    homepageReviews: {
+        eyebrow: 'Đánh Giá Từ Khách Hàng',
+        title: 'Khách Hàng Nói Gì Về Chúng Tôi',
+        googlePlaceId: 'ChIJmWqqJWcpdTERqc7cx-jP2E4',
+    },
     forbiddenWords: ['đm', 'vl', 'cl', 'địt', 'lồn', 'cặc', 'chó'],
     geofence: {
         enabled: false,
@@ -613,3 +684,60 @@ export const DEFAULT_CONFIG: SiteConfig = {
         ],
     },
 };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isPricingIcon(value: unknown): value is PricingIconName {
+    return value === 'smartphone' || value === 'tablet' || value === 'laptop' || value === 'watch';
+}
+
+export function normalizeHomepagePricing(value: unknown): HomepagePricingConfig {
+    if (!isRecord(value)) return DEFAULT_CONFIG.homepagePricing;
+
+    const defaults = DEFAULT_CONFIG.homepagePricing;
+    const storedCategories = Array.isArray(value.categories) ? value.categories : defaults.categories;
+    const defaultById = new Map(defaults.categories.map(category => [category.id, category]));
+    const categories = storedCategories
+        .filter(isRecord)
+        .map((category, index) => {
+            const id = typeof category.id === 'string' && category.id.trim() ? category.id.trim() : `pricing-category-${index + 1}`;
+            const fallback = defaultById.get(id);
+            const label = typeof category.label === 'string' && category.label.trim() ? category.label.trim() : fallback?.label || id;
+            const keywords = Array.isArray(category.keywords)
+                ? category.keywords.filter((keyword): keyword is string => typeof keyword === 'string' && !!keyword.trim()).map(keyword => keyword.trim())
+                : fallback?.keywords || [id, label];
+            const maxItems = typeof category.maxItems === 'number' && Number.isFinite(category.maxItems)
+                ? Math.min(20, Math.max(1, Math.round(category.maxItems)))
+                : fallback?.maxItems || 6;
+
+            return {
+                id,
+                label,
+                icon: isPricingIcon(category.icon) ? category.icon : fallback?.icon || 'smartphone',
+                keywords,
+                maxItems,
+            };
+        });
+
+    return {
+        title: typeof value.title === 'string' ? value.title : defaults.title,
+        highlightedTitle: typeof value.highlightedTitle === 'string' ? value.highlightedTitle : defaults.highlightedTitle,
+        subtitle: typeof value.subtitle === 'string' ? value.subtitle : defaults.subtitle,
+        ctaLabel: typeof value.ctaLabel === 'string' ? value.ctaLabel : defaults.ctaLabel,
+        ctaHref: typeof value.ctaHref === 'string' ? value.ctaHref : defaults.ctaHref,
+        categories: categories.length > 0 ? categories : defaults.categories,
+    };
+}
+
+export function normalizeHomepageReviews(value: unknown): HomepageReviewsConfig {
+    if (!isRecord(value)) return DEFAULT_CONFIG.homepageReviews;
+
+    const defaults = DEFAULT_CONFIG.homepageReviews;
+    return {
+        eyebrow: typeof value.eyebrow === 'string' ? value.eyebrow : defaults.eyebrow,
+        title: typeof value.title === 'string' ? value.title : defaults.title,
+        googlePlaceId: typeof value.googlePlaceId === 'string' ? value.googlePlaceId.trim() : defaults.googlePlaceId,
+    };
+}

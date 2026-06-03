@@ -11,8 +11,9 @@ export async function triggerRevalidate(paths?: string[], tags?: string[]) {
     if (paths && paths.length > 0) {
       for (const p of paths) {
         if (p === 'layout') {
-          // 'layout' path triggers a full layout revalidation from the root
-          revalidatePath('/', 'layout');
+          // Config changes belong to the customer storefront. Revalidating the
+          // root layout also purges the admin Router Cache and can remount auth.
+          revalidatePath('/(customer)', 'layout');
         } else {
           revalidatePath(p);
         }

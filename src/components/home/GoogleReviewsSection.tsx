@@ -1,46 +1,62 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
-import { Star, ChevronLeft, ChevronRight, MessageSquareQuote } from 'lucide-react';
+import { Star, ChevronLeft, ChevronRight, ExternalLink, MapPin, MessageSquareQuote } from 'lucide-react';
 import Image from 'next/image';
+import { useConfig } from '@/lib/ConfigContext';
 
-interface GoogleReview {
+interface GoogleApiReview {
     author_name: string;
     rating: number;
     text: string;
-    time: number;
-    profile_photo_url: string;
+    profile_photo_url?: string;
 }
 
 interface ReviewsData {
     rating: number;
     total_ratings: number;
-    reviews: GoogleReview[];
+    reviews: GoogleApiReview[];
+}
+
+const DEFAULT_GOOGLE_PLACE_ID = 'ChIJmWqqJWcpdTERqc7cx-jP2E4';
+
+function getGoogleMapsUrl(placeId: string) {
+    const params = new URLSearchParams({
+        api: '1',
+        query: 'Văn Lành Service',
+        query_place_id: placeId || DEFAULT_GOOGLE_PLACE_ID,
+    });
+    return `https://www.google.com/maps/search/?${params.toString()}`;
 }
 
 export default function GoogleReviewsSection() {
+    const { config } = useConfig();
+    const reviewsConfig = config.homepageReviews;
     const [data, setData] = useState<ReviewsData | null>(null);
     const [loading, setLoading] = useState(true);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
+    const googleMapsUrl = getGoogleMapsUrl(reviewsConfig.googlePlaceId);
 
     useEffect(() => {
+        let cancelled = false;
         const fetchReviews = async () => {
             try {
                 const res = await fetch('/api/reviews/google');
                 if (res.ok) {
                     const json = await res.json();
-                    if (!json.error) {
+                    if (!json.error && !cancelled && Array.isArray(json.reviews) && json.reviews.length > 0) {
                         setData(json);
                     }
                 }
             } catch (err) {
                 console.error('Failed to load reviews:', err);
             } finally {
-                setLoading(false);
+                if (!cancelled) setLoading(false);
             }
         };
         fetchReviews();
-    }, []);
+        return () => { cancelled = true; };
+    }, [reviewsConfig.googlePlaceId]);
 
     const scroll = (direction: 'left' | 'right') => {
         if (scrollContainerRef.current) {
@@ -67,7 +83,37 @@ export default function GoogleReviewsSection() {
         );
     }
 
-    if (!data || data.reviews.length === 0) return null;
+    if (!data || data.reviews.length === 0) {
+        return (
+            <section className="py-16 bg-white overflow-hidden relative">
+                <div className="absolute top-0 right-0 w-64 h-64 bg-orange-50 rounded-full blur-3xl -z-10 -translate-y-1/2 translate-x-1/3"></div>
+                <div className="max-w-[1200px] mx-auto px-4 md:px-6">
+                    <div className="rounded-2xl border border-orange-100 bg-gradient-to-r from-orange-50 to-white p-6 md:p-8 flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+                        <div>
+                            <div className="flex items-center gap-2 mb-2">
+                                <MessageSquareQuote size={20} className="text-orange-500" />
+                                <span className="text-orange-600 font-bold text-sm tracking-wider uppercase">{reviewsConfig.eyebrow}</span>
+                            </div>
+                            <h2 className="text-2xl md:text-3xl font-extrabold text-gray-900">{reviewsConfig.title}</h2>
+                            <p className="text-gray-600 mt-3 max-w-2xl">
+                                Xem đánh giá thực tế của khách hàng về Văn Lành Service trực tiếp trên Google Maps.
+                            </p>
+                        </div>
+                        <a
+                            href={googleMapsUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center justify-center gap-2 rounded-xl bg-orange-500 px-5 py-3 font-bold text-white shadow-sm transition-colors hover:bg-orange-600"
+                        >
+                            <MapPin size={20} />
+                            Xem đánh giá trên Google Maps
+                            <ExternalLink size={16} />
+                        </a>
+                    </div>
+                </div>
+            </section>
+        );
+    }
 
     return (
         <section className="py-16 bg-white overflow-hidden relative">
@@ -80,10 +126,10 @@ export default function GoogleReviewsSection() {
                     <div>
                         <div className="flex items-center gap-2 mb-2">
                             <MessageSquareQuote size={20} className="text-orange-500" />
-                            <span className="text-orange-600 font-bold text-sm tracking-wider uppercase">Đánh Giá Từ Khách Hàng</span>
+                            <span className="text-orange-600 font-bold text-sm tracking-wider uppercase">{reviewsConfig.eyebrow}</span>
                         </div>
                         <h2 className="text-3xl md:text-4xl font-extrabold text-gray-900">
-                            Khách Hàng Nói Gì Về Chúng Tôi
+                            {reviewsConfig.title}
                         </h2>
                         
                         <div className="flex items-center gap-3 mt-4">
@@ -134,7 +180,7 @@ export default function GoogleReviewsSection() {
                         >
                             <div className="flex items-center gap-4 mb-4">
                                 {review.profile_photo_url ? (
-                                    <img src={review.profile_photo_url} alt={review.author_name} className="w-12 h-12 rounded-full object-cover" />
+                                    <Image src={review.profile_photo_url} alt={review.author_name} width={48} height={48} className="w-12 h-12 rounded-full object-cover" />
                                 ) : (
                                     <div className="w-12 h-12 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 font-bold text-lg">
                                         {review.author_name.charAt(0)}

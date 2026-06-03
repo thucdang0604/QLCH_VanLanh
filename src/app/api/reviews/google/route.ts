@@ -1,71 +1,91 @@
 import { NextResponse } from 'next/server';
+import { DEFAULT_CONFIG } from '@/lib/config-defaults';
+import { getAdminDb, isAdminAvailable } from '@/lib/firebaseAdmin';
+
+async function getConfiguredPlaceId() {
+    const fallbackPlaceId = process.env.GOOGLE_PLACE_ID || DEFAULT_CONFIG.homepageReviews.googlePlaceId;
+    if (!isAdminAvailable()) return fallbackPlaceId;
+
+    try {
+        const snapshot = await getAdminDb().collection('system_config').doc('layout_settings').get();
+        const homepageReviews = snapshot.data()?.homepageReviews as { googlePlaceId?: unknown } | undefined;
+        return typeof homepageReviews?.googlePlaceId === 'string' && homepageReviews.googlePlaceId.trim()
+            ? homepageReviews.googlePlaceId.trim()
+            : fallbackPlaceId;
+    } catch (error) {
+        console.error('Failed to read Google Place ID from layout settings:', error);
+        return fallbackPlaceId;
+    }
+}
+
+interface GooglePlacesReview {
+    authorAttribution?: {
+        displayName?: string;
+        photoUri?: string;
+    };
+    rating?: number;
+    text?: {
+        text?: string;
+    };
+}
+
+interface GooglePlaceDetails {
+    rating?: number;
+    userRatingCount?: number;
+    reviews?: GooglePlacesReview[];
+}
+
+interface GoogleApiError {
+    error?: {
+        code?: number;
+        message?: string;
+        status?: string;
+    };
+}
 
 export async function GET() {
     try {
         const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-        const placeId = process.env.GOOGLE_PLACE_ID;
+        const placeId = await getConfiguredPlaceId();
 
         if (!apiKey || !placeId) {
-            // Return mock data if not configured
-            return NextResponse.json({
-                rating: 4.9,
-                total_ratings: 156,
-                reviews: [
-                    {
-                        author_name: "Nguyễn Văn A",
-                        rating: 5,
-                        text: "Dịch vụ sửa chữa rất tốt, nhân viên nhiệt tình, báo giá rõ ràng.",
-                        time: Date.now() / 1000 - 86400 * 2,
-                        profile_photo_url: "https://ui-avatars.com/api/?name=Nguyen+Van+A&background=random"
-                    },
-                    {
-                        author_name: "Trần Thị B",
-                        rating: 5,
-                        text: "Mình thay pin iPhone ở đây, xài rất trâu, bảo hành uy tín 12 tháng. Đã giới thiệu cho bạn bè.",
-                        time: Date.now() / 1000 - 86400 * 5,
-                        profile_photo_url: "https://ui-avatars.com/api/?name=Tran+Thi+B&background=random"
-                    },
-                    {
-                        author_name: "Lê Hoàng C",
-                        rating: 5,
-                        text: "Cửa hàng sạch sẽ, thợ chuyên nghiệp. Máy tính mình sửa nhanh lấy ngay, rất tiện.",
-                        time: Date.now() / 1000 - 86400 * 10,
-                        profile_photo_url: "https://ui-avatars.com/api/?name=Le+Hoang+C&background=random"
-                    },
-                    {
-                        author_name: "Phạm Minh D",
-                        rating: 4,
-                        text: "Sửa máy tốt nhưng cuối tuần hơi đông nên đợi khoảng 30 phút.",
-                        time: Date.now() / 1000 - 86400 * 15,
-                        profile_photo_url: "https://ui-avatars.com/api/?name=Pham+Minh+D&background=random"
-                    }
-                ]
-            });
+            return NextResponse.json({ configured: false, reviews: [] });
         }
 
-        const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=rating,user_ratings_total,reviews&key=${apiKey}&language=vi`;
+        const url = new URL(`https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}`);
         const res = await fetch(url, {
-            next: { revalidate: 86400 } // Cache cho 1 ngày
+            headers: {
+                'X-Goog-Api-Key': apiKey,
+                'X-Goog-FieldMask': 'rating,userRatingCount,reviews',
+                'Accept-Language': 'vi',
+            },
+            next: { revalidate: 86400 } // Cache for one day.
         });
 
         if (!res.ok) {
-            throw new Error(`Google API responded with status ${res.status}`);
+            const details = await res.json().catch(() => null) as GoogleApiError | null;
+            const googleStatus = details?.error?.status || 'UNKNOWN';
+            const googleMessage = details?.error?.message || 'No error details returned';
+            throw new Error(`Google API ${res.status} ${googleStatus}: ${googleMessage}`);
         }
 
-        const data = await res.json();
-        
-        if (data.status !== 'OK') {
-            throw new Error(`Google API error: ${data.status}`);
-        }
+        const data = await res.json() as GooglePlaceDetails;
+        const reviews = (data.reviews || []).map(review => ({
+            author_name: review.authorAttribution?.displayName || 'Khach hang Google',
+            rating: review.rating || 0,
+            text: review.text?.text || '',
+            profile_photo_url: review.authorAttribution?.photoUri,
+        })).filter(review => review.text);
 
         return NextResponse.json({
-            rating: data.result.rating,
-            total_ratings: data.result.user_ratings_total,
-            reviews: data.result.reviews || []
+            configured: true,
+            rating: data.rating || 0,
+            total_ratings: data.userRatingCount || 0,
+            reviews
         });
 
     } catch (error: unknown) {
         console.error('Google Reviews Error:', (error as Error).message);
-        return NextResponse.json({ error: 'Failed to fetch reviews' }, { status: 500 });
+        return NextResponse.json({ configured: false, reviews: [] });
     }
 }

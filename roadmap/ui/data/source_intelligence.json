@@ -1,0 +1,1350 @@
+{
+  "_meta": {
+    "description": "Bản đồ trí tuệ mã nguồn — tự động tích lũy khi AI đọc/sửa code. Giúp AI sau chỉ cần đọc file này là hiểu ngay cấu trúc, liên kết, và cách sửa.",
+    "lastUpdated": "2026-06-02T00:00:00.000Z",
+    "version": 18,
+    "changelog": [
+      "v1: Initial creation — mapped collections, key files, cross-links",
+      "v2: Phase 4/6/8 completed — supplier dropdown+debt, variant+review UI, POS repair lookup+auto-discount",
+      "v3: CurrencyInput refactor completed. Planned: Import v3 (NCC per-item + payment method paid/debt)",
+      "v4: Import v3 COMPLETED — NCC per-item (CreateReceiptModal), paymentMethod toggle (ImportPreviewModal), grouped debt (executeFinalImport). Receipt headers derive supplier from items.",
+      "v5: Supplier validation guard — handleOrderReceipt blocks transition if any item missing supplier. Draft expanded view adds NCC dropdown per-item with auto-save+create-new. Button disabled+warning when NCC incomplete.",
+      "Planned CRM expansion: CRUD, appointments, tags, yearly tier (Bronze→Platinum) config in system_config/customer_tiers, Excel export (SheetJS); current slice implements order/repair drawer only",
+      "v7: Live Chat Omnichannel — Facebook/Zalo config, webhook/RTDB runtime lessons, Facebook profile/media rendering, CRM room linkage and Repair/POS prefill",
+      "v8: Automated scan added missing collections (orders, users, expenses, commissions, appointments) and injected root-level guardrails.",
+      "v9: Deep scan identified activities, media_library, and mapped multiple system_config singletons (tier_settings, main_settings, repairs, receipt).",
+      "v10: Added databaseSchema derived from types.ts and mapped core API endpoints from src/app/api.",
+      "v11: Exhaustive mapping of all interfaces from types.ts and all API routes from src/app/api",
+      "v12: Fixed databaseSchema fields mapping to show actual TypeScript types instead of \"any\".",
+      "v13: Bổ sung chi tiết chức năng thực tế của từng API Endpoint thay vì chỉ ghi Mapped từ mã nguồn.",
+      "v14: POS QR Scanner — products now carry sku/barcode/productCode for QR labels; POS can add products by keyboard scanner, camera BarcodeDetector, or manual code entry.",
+      "v15: Homepage appearance config — admin controls presentation filters in system_config/layout_settings; pricing reads active Firestore services and reviews read Google Places API without manual fallback.",
+      "v16: Google homepage reviews migrated from Places API Legacy to Place Details (New); the server uses a field mask and normalizes the response for the storefront.",
+      "v17: Config revalidation sentinel layout now targets /(customer) layout instead of root / layout, preventing admin auth Router Cache purge after appearance saves.",
+      "v18: Admin config saves request background /api/revalidate instead of invoking a Server Action from the browser; the route accepts a signed admin session cookie or the internal secret."
+    ]
+  },
+  "collections": {
+    "products": {
+      "description": "Sản phẩm (linh kiện + bán lẻ + proposed). isProposed=true = chưa nhập kho.",
+      "keyFields": [
+        "sku",
+        "barcode",
+        "productCode",
+        "seriesId",
+        "color",
+        "storageCapacity",
+        "conditionLabel",
+        "categoryIds",
+        "costPrice",
+        "stock",
+        "held",
+        "isProposed",
+        "supplier"
+      ],
+      "usedIn": [
+        "parts/page.tsx",
+        "pos/page.tsx",
+        "ProductDetailClient.tsx",
+        "server-queries.ts"
+      ]
+    },
+    "import_receipts": {
+      "description": "Phiếu nhập kho. status: draft→ordered→completed. Khi completed, executeFinalImport chạy runTransaction cập nhật stock+costPrice+supplierDebt. supplier/supplierId giờ ở item-level.",
+      "keyFields": [
+        "supplier?",
+        "supplierId?",
+        "items[]",
+        "totalAmount",
+        "status",
+        "receiptType",
+        "repairTicketId",
+        "paymentMethod"
+      ],
+      "usedIn": [
+        "parts/page.tsx"
+      ],
+      "changeLog": [
+        "v2: supplierId field added to link to suppliers collection",
+        "v3: supplier+supplierId moved to per-item level. paymentMethod added (paid|debt). Receipt-level supplier optional/backward compat.",
+        "v5: handleOrderReceipt validates all items have supplier before status transition. Draft expanded view has editable NCC dropdown per-item."
+      ]
+    },
+    "suppliers": {
+      "description": "Nhà cung cấp. totalDebt = tổng công nợ hiện tại. Dropdown NCC per-item trong CreateReceiptModal và Draft expanded view.",
+      "keyFields": [
+        "name",
+        "phone",
+        "totalDebt",
+        "isActive"
+      ],
+      "usedIn": [
+        "parts/page.tsx (per-item dropdown in both CreateReceiptModal + draft edit + auto-create)",
+        "admin/suppliers (management page)"
+      ],
+      "changeLog": [
+        "v2: Live dropdown with create-new in both modals. Realtime listener via onSnapshot.",
+        "v3: Dropdown per-item trong CreateReceiptModal. executeFinalImport groups debt by supplierId.",
+        "v5: Dropdown per-item added to draft expanded view. Uses draftSupplierSearch+draftSupplierActiveKey state. handleAutoSaveSupplier persists to Firestore."
+      ]
+    },
+    "supplier_transactions": {
+      "description": "Lịch sử giao dịch NCC. type=IMPORT (ghi nợ) | IMPORT_PAID (thanh toán ngay) | PAYMENT (trả nợ).",
+      "keyFields": [
+        "supplierId",
+        "supplierName",
+        "type",
+        "amount",
+        "importReceiptId"
+      ],
+      "usedIn": [
+        "parts/page.tsx (executeFinalImport transaction)"
+      ],
+      "changeLog": [
+        "v2: Now auto-created when import receipt is completed with a linked supplierId.",
+        "v3: type IMPORT_PAID for thanh toán ngay. Grouped by supplierId (1 phiếu tạo nhiều transactions cho nhiều NCC). COMPLETED."
+      ]
+    },
+    "repairs": {
+      "description": "Phiếu sửa chữa. customerPhone dùng để lookup từ POS. payment.status: pending|partial|paid.",
+      "keyFields": [
+        "customerName",
+        "customerPhone",
+        "status",
+        "payment.status",
+        "payment.amount",
+        "parts[]",
+        "deviceModel"
+      ],
+      "usedIn": [
+        "pos/page.tsx (phone lookup)",
+        "parts/page.tsx (link from import_receipt)"
+      ],
+      "changeLog": [
+        "v2: POS now queries repairs by customerPhone onBlur to auto-link repair tickets."
+      ]
+    },
+    "reviews": {
+      "description": "Đánh giá chung (repair/general). Collection riêng cho product reviews dùng product_reviews.",
+      "keyFields": [
+        "referenceId",
+        "type",
+        "customerName",
+        "phone",
+        "rating",
+        "content",
+        "status"
+      ],
+      "usedIn": [
+        "api/reviews/route.ts"
+      ]
+    },
+    "product_reviews": {
+      "description": "Đánh giá sản phẩm. status: pending → approved/rejected. Hiển thị trên ProductDetailClient.",
+      "keyFields": [
+        "productId",
+        "productName",
+        "customerName",
+        "phone",
+        "rating",
+        "content",
+        "status"
+      ],
+      "usedIn": [
+        "ProductDetailClient.tsx (render + submit form)",
+        "server-queries.ts (fetchProductReviews)",
+        "api/reviews/route.ts"
+      ],
+      "changeLog": [
+        "v2: Created. Reviews are submitted via /api/reviews POST, displayed in ProductDetailClient with admin moderation."
+      ]
+    },
+    "accessory_discount_rules": {
+      "description": "Quy tắc giảm giá phụ kiện theo dịch vụ SC. triggerKeywords match repair parts, targetKeywords match cart items.",
+      "keyFields": [
+        "triggerKeywords",
+        "targetKeywords",
+        "discountType",
+        "discountValue",
+        "isActive",
+        "maxDiscountAmount"
+      ],
+      "usedIn": [
+        "discountRuleUtils.ts",
+        "pos/page.tsx (auto-calculate on cart/repair change)"
+      ],
+      "changeLog": [
+        "v2: Fully integrated into POS. useEffect auto-calculates discounts when repair is linked."
+      ]
+    },
+    "inventory_logs": {
+      "description": "Audit trail tồn kho. Mọi thay đổi stock đều ghi log.",
+      "keyFields": [
+        "productId",
+        "quantity",
+        "type",
+        "referenceId",
+        "referenceType"
+      ],
+      "usedIn": [
+        "parts/page.tsx",
+        "pos/page.tsx",
+        "orders module"
+      ]
+    },
+    "customers": {
+      "docId": "phone (normalized, digits only)",
+      "description": "CRM khách hàng. Doc tự động tạo/cập nhật qua upsertCustomerRecord (POS, web checkout, repair) hoặc được liên kết từ modal live chat khi có tên và số điện thoại.",
+      "keyFields": [
+        "phone",
+        "name",
+        "address",
+        "totalSpent",
+        "totalOrders",
+        "totalRepairs",
+        "totalAppointments",
+        "tags[]",
+        "note",
+        "type",
+        "lastVisit",
+        "createdAt"
+      ],
+      "rules": "isStaff() read/write",
+      "usedIn": [
+        "customers/page.tsx",
+        "CustomerDetailDrawer.tsx",
+        "useCustomerActivity.ts",
+        "ChatCustomerActivityPanel.tsx",
+        "customerSync.ts",
+        "pos/page.tsx",
+        "repairs/page.tsx",
+        "api/checkout/route.ts",
+        "ChatCustomerProfileModal.tsx"
+      ],
+      "tierLogic": "Tier tính dynamic THEO NĂM — query orders+repairs trong năm hiện tại, không lưu vào doc. Ngưỡng cấu hình tại system_config/customer_tiers."
+    },
+    "private_config.chat_integrations": {
+      "description": "Cấu hình bí mật server-side cho Facebook Messenger và Zalo OA; UI chỉ nhận trạng thái token đã lưu.",
+      "keyFields": [
+        "facebook.enabled",
+        "facebook.pageId",
+        "facebook.pageAccessToken",
+        "facebook.appSecret",
+        "facebook.verifyToken",
+        "zalo.oaId",
+        "zalo.oaAccessToken",
+        "zalo.webhookSecret"
+      ],
+      "rules": "Server/Admin API only",
+      "usedIn": [
+        "chatIntegrationConfig.ts",
+        "admin/settings/integrations/page.tsx",
+        "api/admin/chat/integrations/route.ts"
+      ]
+    },
+    "rtdb.chats": {
+      "description": "Inbox realtime cho Web, Facebook và Zalo. info giữ nguồn/profile/customer link; messages giữ text và Facebook attachments.",
+      "keyFields": [
+        "info.channel",
+        "info.externalUserId",
+        "info.displayName",
+        "info.avatarUrl",
+        "info.customerPhone",
+        "messages[].attachments"
+      ],
+      "rules": "Admin/staff chat_support qua admin_roles; guest/user chỉ theo room hợp lệ",
+      "usedIn": [
+        "realtimedb.ts",
+        "chatServer.ts",
+        "admin/chat/page.tsx",
+        "database.rules.json"
+      ]
+    },
+    "orders": {
+      "description": "Đơn hàng bán lẻ từ POS và Web. Liên kết với khách hàng qua customer.phone hoặc customer_info.phone.",
+      "keyFields": [
+        "status",
+        "totalAmount",
+        "discount",
+        "paymentStatus",
+        "customer_info",
+        "items[]",
+        "createdAt"
+      ],
+      "usedIn": [
+        "pos/page.tsx",
+        "orders/page.tsx",
+        "revenue/page.tsx",
+        "useCustomerActivity.ts"
+      ]
+    },
+    "appointments": {
+      "description": "Lịch hẹn đặt trước của khách hàng.",
+      "keyFields": [
+        "status",
+        "customerName",
+        "phone",
+        "appointmentDate",
+        "deviceType",
+        "issue"
+      ],
+      "usedIn": [
+        "appointments/page.tsx",
+        "useAdminBadges.ts"
+      ]
+    },
+    "users": {
+      "description": "Nhân viên và Admin của hệ thống. Dùng cho RBAC và phân quyền.",
+      "keyFields": [
+        "email",
+        "role",
+        "name",
+        "permissions[]",
+        "isActive"
+      ],
+      "usedIn": [
+        "staff/page.tsx",
+        "middleware.ts"
+      ]
+    },
+    "expenses": {
+      "description": "Chi phí của cửa hàng (marketing, mặt bằng, điện nước...).",
+      "keyFields": [
+        "title",
+        "amount",
+        "category",
+        "date",
+        "note"
+      ],
+      "usedIn": [
+        "revenue/page.tsx"
+      ]
+    },
+    "commissions": {
+      "description": "Hoa hồng nhân viên kỹ thuật hoặc sale.",
+      "keyFields": [
+        "technicianId",
+        "amount",
+        "orderId",
+        "repairId",
+        "status"
+      ],
+      "usedIn": [
+        "commissions/page.tsx",
+        "commissionUtils.ts",
+        "revenue/page.tsx"
+      ]
+    },
+    "commission_rules": {
+      "description": "Cấu hình tỷ lệ hoa hồng (phần trăm theo sản phẩm hoặc cố định).",
+      "keyFields": [
+        "targetCategory",
+        "percentage",
+        "fixedAmount",
+        "isActive"
+      ],
+      "usedIn": [
+        "commissionUtils.ts"
+      ]
+    },
+    "system_config.tier_settings": {
+      "description": "Cấu hình ngưỡng phân hạng KH (Bronze/Silver/Gold/Platinum). Admin cấu hình tại discount-rules page. Document ID là tier_settings.",
+      "keyFields": [
+        "bronze.min",
+        "silver.min",
+        "gold.min",
+        "platinum.min"
+      ],
+      "rules": "public read, admin write (system_config/{docId})",
+      "usedIn": [
+        "customers/page.tsx",
+        "discount-rules/page.tsx"
+      ]
+    },
+    "activities": {
+      "description": "Hệ thống thông báo (Notification) nội bộ cho Admin/Staff.",
+      "keyFields": [
+        "title",
+        "message",
+        "type",
+        "read",
+        "createdAt",
+        "link"
+      ],
+      "usedIn": [
+        "NotificationBell.tsx",
+        "useAdminBadges.ts"
+      ]
+    },
+    "media_library": {
+      "description": "Quản lý thư viện hình ảnh và file đính kèm. Dùng chung trên toàn hệ thống.",
+      "keyFields": [
+        "url",
+        "name",
+        "size",
+        "type",
+        "uploadedAt",
+        "uploadedBy"
+      ],
+      "usedIn": [
+        "MediaManager.tsx",
+        "storage.ts"
+      ]
+    },
+    "system_config.main_settings": {
+      "description": "Cấu hình chung hệ thống (Tên cửa hàng, SĐT, Logo, v.v.).",
+      "keyFields": [
+        "storeName",
+        "phone",
+        "address",
+        "logoUrl",
+        "socialLinks"
+      ],
+      "usedIn": [
+        "seed-config/route.ts",
+        "reviews/route.ts",
+        "ConfigContext.tsx"
+      ]
+    },
+    "system_config.layout_settings": {
+      "description": "Cấu hình bố cục và nội dung hiển thị homepage do Admin Appearance quản lý.",
+      "keyFields": [
+        "hero_banners[]",
+        "homeSections[]",
+        "store_branches[]",
+        "background_config",
+        "homepagePricing.categories[].keywords[]",
+        "homepagePricing.categories[].maxItems",
+        "homepageReviews.googlePlaceId"
+      ],
+      "usedIn": [
+        "ConfigContext.tsx",
+        "app/(customer)/layout.tsx",
+        "admin/appearance/page.tsx",
+        "PricingSection.tsx",
+        "GoogleReviewsSection.tsx"
+      ]
+    },
+    "system_config.repairs": {
+      "description": "Cấu hình danh sách trạng thái (statuses) của luồng sửa chữa.",
+      "keyFields": [
+        "statuses[]",
+        "updatedAt"
+      ],
+      "usedIn": [
+        "repairs/page.tsx",
+        "technician/page.tsx",
+        "settings/repairs/page.tsx",
+        "useCustomerActivity.ts"
+      ]
+    },
+    "system_config.receipt": {
+      "description": "Cấu hình máy in biên lai (kích thước, logo hóa đơn, lời chào).",
+      "keyFields": [
+        "paperSize",
+        "headerText",
+        "footerText",
+        "showLogo"
+      ],
+      "usedIn": [
+        "repairs/page.tsx",
+        "settings/receipt/page.tsx"
+      ]
+    }
+  },
+  "files": {
+    "src/app/admin/parts/page.tsx": {
+      "lines": "~2005",
+      "purpose": "Quản lý linh kiện + nhập kho. Chứa: PartsPage, ImportPreviewModal, CreateReceiptModal.",
+      "keyFunctions": {
+        "executeFinalImport(paymentMethod)": {
+          "description": "Chốt nhập kho. runTransaction: đọc products → cập nhật stock/costPrice → mark receipt completed → group items by supplierId → per-supplier debt/IMPORT_PAID → sync repair ticket parts+payment.",
+          "writes": [
+            "products/{id}.stock",
+            "products/{id}.costPrice",
+            "import_receipts/{id}.status",
+            "import_receipts/{id}.paymentMethod",
+            "inventory_logs",
+            "repairs/{id}.parts",
+            "suppliers/{id}.totalDebt",
+            "supplier_transactions"
+          ]
+        },
+        "handleImportReceipt(receipt)": {
+          "description": "Mở ImportPreviewModal. Tính forecast giá vốn trung bình. Xác định new vs existing items. item.supplier cho newParts init."
+        },
+        "handleAutoSaveItem(receiptId, itemIdx, newPrice, newQty)": {
+          "description": "Auto-save khi sửa giá/SL trong expanded receipt. Cập nhật items[] + totalAmount."
+        }
+      },
+      "components": {
+        "ImportPreviewModal": {
+          "props": "importPreviewModal, setImportPreviewModal, forecastCostPrices, partTypeOptions, suppliers, onConfirm",
+          "paymentMethod": "Toggle paid/debt. onConfirm(paymentMethod). Hiển thị debt summary per-supplier từ items.",
+          "confirmButton": "Calls onConfirm(paymentMethod)."
+        },
+        "CreateReceiptModal": {
+          "props": "isOpen, onClose, parts, retailProducts, onCreated, currentUser, suppliers",
+          "supplierInput": "Per-item dropdown in table rows. Create-new NCC inline.",
+          "submitLogic": "addDoc import_receipts (no receipt-level supplier). Items carry supplier+supplierId."
+        }
+      },
+      "localInterfaces": {
+        "ImportReceiptItem": {
+          "fields": [
+            "productId",
+            "productName",
+            "quantity",
+            "importPrice",
+            "quality",
+            "oldCostPrice",
+            "availability",
+            "supplier",
+            "supplierId"
+          ]
+        },
+        "ImportReceipt": {
+          "fields": [
+            "id",
+            "supplier?",
+            "supplierId?",
+            "items[]",
+            "totalAmount",
+            "note",
+            "receiptType",
+            "status",
+            "paymentMethod",
+            "createdBy",
+            "createdByName",
+            "createdAt",
+            "completedAt",
+            "repairTicketId"
+          ]
+        },
+        "SupplierOption": {
+          "fields": [
+            "id",
+            "name",
+            "totalDebt"
+          ]
+        }
+      },
+      "imports": [
+        "useFirestoreCollection",
+        "runTransaction",
+        "increment",
+        "onSnapshot",
+        "addDoc",
+        "CurrencyInput"
+      ]
+    },
+    "src/components/admin/CurrencyInput.tsx": {
+      "lines": 81,
+      "purpose": "Drop-in replacement cho <input type='number'> hiển thị tiền VNĐ với dấu chấm ngăn cách hàng nghìn.",
+      "exports": [
+        "formatVND(value) → '1.500.000'",
+        "parseVND(formatted) → 1500000",
+        "CurrencyInput component"
+      ],
+      "props": "value, onChange(numericValue), onBlur?, className, placeholder, required, min, id, disabled",
+      "usedIn": [
+        "parts/page.tsx (importPrice, price_promo × 3 vị trí)",
+        "services/page.tsx (price_original, price_promo)",
+        "repairs/page.tsx (estimatedPrice)",
+        "pos/page.tsx (sellingPrice, discount, deposit)",
+        "suppliers/page.tsx (paymentAmount)",
+        "revenue/page.tsx (expense amount)",
+        "commissions/page.tsx (baseAmount, amount)",
+        "UniversalProductModal.tsx (price_original, price_promo)"
+      ],
+      "changeLog": [
+        "v3: Created + deployed across all admin modules. onBlur prop added for auto-save patterns."
+      ]
+    },
+    "src/app/(customer)/product/[id]/ProductDetailClient.tsx": {
+      "lines": "~380",
+      "purpose": "Client component hiển thị chi tiết SP + variant selector + review form.",
+      "props": "{ data: ProductData; variants?: VariantItem[]; reviews?: ReviewItem[] }",
+      "features": [
+        "Gallery",
+        "Price",
+        "Actions (add cart/book)",
+        "Trust badges",
+        "Variant selector (by storage/color)",
+        "Reviews list + inline submit form"
+      ],
+      "subComponents": [
+        "ReviewForm — inline form gửi đánh giá qua /api/reviews POST"
+      ]
+    },
+    "src/app/(customer)/product/[id]/page.tsx": {
+      "lines": "~178",
+      "purpose": "Server component fetch product detail + variants + reviews in parallel.",
+      "dataFlow": "fetchDetailItem → fetchProductVariants(seriesId) + fetchProductReviews(id) → pass to ProductDetailClient"
+    },
+    "src/app/(customer)/_lib/server-queries.ts": {
+      "lines": "~302",
+      "purpose": "Server-side Firestore queries dùng Admin SDK. Tất cả có cache/revalidate.",
+      "functions": {
+        "fetchDetailItem": "Fetch single product/service by ID or slug",
+        "fetchCategoryItems": "Fetch products by category slug",
+        "fetchArticles": "Fetch blog articles",
+        "fetchFlashSaleProducts": "Fetch flash sale items",
+        "fetchServices": "Fetch active services",
+        "fetchProductVariants": "Fetch products with same seriesId (excluding current). Uses cache().",
+        "fetchProductReviews": "Fetch approved reviews for productId from product_reviews collection. Uses cache()."
+      }
+    },
+    "src/app/admin/pos/page.tsx": {
+      "lines": "~1160",
+      "purpose": "POS bán hàng. Cart + payment + receipt + repair lookup + auto-discount + QR/barcode scanner.",
+      "keyFunctions": {
+        "handleCheckout": {
+          "description": "Checkout: group cart → build orderData → runTransaction(stock decrement + audit) → commission.",
+          "writes": [
+            "orders/{id}",
+            "products/{id}.stock",
+            "inventory_logs"
+          ]
+        },
+        "lookupRepairByPhone(phone)": {
+          "description": "Query repairs collection by customerPhone. Auto-fills customerName. Sets linkedRepair state.",
+          "reads": [
+            "repairs (where customerPhone == phone, orderBy createdAt desc)"
+          ]
+        },
+        "handleProductScan(rawCode)": {
+          "description": "Normalize QR/barcode payload and add matching product by sku, barcode, productCode, or product id. Supports keyboard scanner, camera BarcodeDetector, and manual entry."
+        }
+      },
+      "autoDiscount": {
+        "description": "useEffect watches [linkedRepair, cart]. Calls fetchActiveDiscountRules() + calculateAccessoryDiscounts(). Shows discount suggestion UI with 'Apply' button.",
+        "stateVars": [
+          "linkedRepair",
+          "autoDiscountAmount",
+          "discountDetails"
+        ]
+      },
+      "customerInputs": {
+        "customerPhone": "Has onBlur → lookupRepairByPhone(). Shows repair card + auto-discount below."
+      },
+      "currencyInputs": [
+        "sellingPrice",
+        "discount",
+        "deposit — all use CurrencyInput since v3"
+      ]
+    },
+    "src/app/admin/services/page.tsx": {
+      "lines": "~740",
+      "purpose": "Quản lý dịch vụ sửa chữa. CRUD + modal form.",
+      "currencyInputs": [
+        "price_original",
+        "price_promo — both use CurrencyInput since v3"
+      ]
+    },
+    "src/app/admin/repairs/page.tsx": {
+      "lines": "~2852",
+      "purpose": "Quản lý phiếu sửa chữa. Kanban board + modals + timeline.",
+      "currencyInputs": [
+        "estimatedPrice (in issue list) — uses CurrencyInput since v3"
+      ]
+    },
+    "src/lib/discountRuleUtils.ts": {
+      "lines": 83,
+      "purpose": "Tính giảm giá phụ kiện dựa trên repair parts + cart items + rules.",
+      "exports": [
+        "fetchActiveDiscountRules",
+        "calculateAccessoryDiscounts"
+      ],
+      "usedIn": [
+        "pos/page.tsx (integrated via useEffect)"
+      ]
+    },
+    "src/lib/types.ts": {
+      "lines": 544,
+      "purpose": "TypeScript interfaces cho toàn bộ hệ thống.",
+      "relevantTypes": {
+        "Product": "seriesId, color, storageCapacity, conditionLabel đã có",
+        "RepairTicket": "customer.phone dùng lookup, payment.status cần auto-update",
+        "Supplier": "totalDebt cần increment khi nhập hàng (nếu paymentMethod=debt)",
+        "SupplierTransaction": "type IMPORT|IMPORT_PAID|PAYMENT — auto-created in executeFinalImport",
+        "ProductReview": "status pending|approved — submitted via /api/reviews",
+        "AccessoryDiscountRule": "triggerKeywords, targetKeywords, discountType, discountValue",
+        "ImportReceipt": "supplier/supplierId giờ optional (backward compat). Per-item supplier trong ImportReceiptItem. paymentMethod: paid|debt"
+      }
+    },
+    "src/app/api/reviews/route.ts": {
+      "lines": 234,
+      "purpose": "API submit đánh giá. Có rate limit + geofence. Lưu vào collection 'reviews'. Product reviews gửi qua đây với productId.",
+      "collections": [
+        "reviews",
+        "product_reviews"
+      ],
+      "security": [
+        "Rate limit per-minute (3/min)",
+        "Rate limit per-day (3/day)",
+        "Honeypot",
+        "Geofence"
+      ]
+    }
+  },
+  "crossFileLinks": {
+    "import_receipt_to_repair": "parts/page.tsx executeFinalImport → repairs collection (if repairTicketId exists)",
+    "pos_to_repairs": "pos/page.tsx lookupRepairByPhone() → queries repairs by customerPhone → auto-fill name + show ticket info + calculate discount",
+    "product_to_variants": "page.tsx (server) fetchProductVariants(seriesId) → ProductDetailClient variants prop → render variant cards with links",
+    "product_to_reviews": "page.tsx (server) fetchProductReviews(productId) → ProductDetailClient reviews prop → render + inline submit form",
+    "import_to_supplier_debt": "executeFinalImport → groups items by supplierId → per-supplier: debt (increment totalDebt + IMPORT tx) or paid (IMPORT_PAID tx, no debt). Atomic runTransaction.",
+    "discount_rules_to_pos": "discountRuleUtils.ts calculateAccessoryDiscounts() called in pos/page.tsx useEffect when linkedRepair + cart changes",
+    "supplier_dropdown": "CreateReceiptModal: per-item dropdown in table. ImportPreviewModal: payment method toggle only (no supplier input). Both can create new suppliers inline.",
+    "currency_input_chain": "CurrencyInput.tsx → used by: parts, services, repairs, pos, suppliers, revenue, commissions, UniversalProductModal",
+    "customer_sync_chain": "customerSync.ts upsertCustomerRecord() → called from: pos/page.tsx (transaction), api/checkout/route.ts (inline). Updates totalSpent/totalOrders/totalRepairs/totalAppointments.",
+    "customer_tier_chain": "customerTiers.ts getCustomerTier() → called from: customers/page.tsx. Reads config from system_config/customer_tiers. Queries orders+repairs for yearly spending.",
+    "customer_drawer_queries": "CustomerDetailDrawer → useCustomerActivity → orders (customer_info.phone with customer.phone legacy fallback) and repairs (customer.phone). Queries run only for the open customer and permitted module; appointments remain pending.",
+    "chat_activity_panel": "ChatCustomerActivityPanel → useCustomerActivity for the linked room phone; open orders = Pending/Confirmed/Shipping, open repairs = non-terminal workflow status; listeners require manage_orders/manage_repairs.",
+    "chat_inbound_chain": "Facebook/Zalo webhook → chatServer.upsertExternalInboundMessage() → RTDB chats → admin/chat subscription.",
+    "facebook_profile_chain": "Facebook webhook or authenticated refresh endpoint → Graph API first_name/last_name/profile_pic → RTDB room.info → RoomAvatar/displayName.",
+    "chat_customer_workflow": "ChatCustomerProfileModal → customers/{phone} + RTDB room.info link → one-time sessionStorage handoff → /admin/repairs or /admin/pos → existing transactional workflow; no customer PII in URL.",
+    "chat_access_guardrail": "Web guest → Firebase Anonymous Auth → chats/{uid}; admin role sync → admin_roles/{uid}; API chat requires chat_support; IAM/credential failures must be fixed at runtime identity, never by widening RTDB public read."
+  },
+  "completedPhases": {
+    "phase4_supplier_debt": {
+      "status": "COMPLETED",
+      "date": "2026-05-19",
+      "summary": "Supplier dropdown with create-new in both modals. Atomic debt tracking in executeFinalImport."
+    },
+    "phase6_variants_reviews": {
+      "status": "COMPLETED",
+      "date": "2026-05-19",
+      "summary": "fetchProductVariants + fetchProductReviews queries. ProductDetailClient renders variants + reviews + inline submit form."
+    },
+    "phase8_pos_repair_discount": {
+      "status": "COMPLETED",
+      "date": "2026-05-19",
+      "summary": "Phone-based repair lookup in POS. Auto-discount calculation from linked repair parts. Apply button for discount."
+    },
+    "currency_input_refactor": {
+      "status": "COMPLETED",
+      "date": "2026-05-19",
+      "summary": "CurrencyInput component (formatVND/parseVND/onBlur). Deployed to 9 modules: parts, services, repairs, POS, suppliers, revenue, commissions, UniversalProductModal."
+    },
+    "import_v3_per_item_ncc": {
+      "status": "COMPLETED",
+      "date": "2026-05-19",
+      "summary": "NCC per-item thay vì per-receipt. paymentMethod (paid/debt) cho toàn phiếu. Grouped debt by supplierId trong executeFinalImport.",
+      "decisions": [
+        "Payment method áp dụng toàn phiếu (không per-item)",
+        "Thanh toán ngay vẫn ghi supplier_transaction (IMPORT_PAID) để giữ audit trail"
+      ],
+      "completedChanges": {
+        "ImportReceiptItem_interface": "Added supplierId?: string per item",
+        "ImportReceipt_interface": "Added paymentMethod?: 'paid' | 'debt'. supplier/supplierId now optional.",
+        "CreateReceiptModal": "Removed top-level supplier dropdown. Added per-item supplier dropdown in table rows with create-new NCC inline.",
+        "ImportPreviewModal": "Removed supplier selection. Added payment method toggle (debt/paid). Shows per-supplier debt summary from items.",
+        "executeFinalImport": "Signature: (paymentMethod). Groups items by supplierId. debt → IMPORT tx + increment totalDebt. paid → IMPORT_PAID tx (no debt).",
+        "receipt_headers": "Draft+ordered list headers now derive supplier names from items (IIFE with Set + filter). Shows 'Chưa gán NCC' fallback.",
+        "handleImportReceipt": "NewPartInfo.supplier uses item.supplier instead of receipt.supplier.",
+        "draft_item_rows": "Added purple badge showing item.supplier in expanded draft view."
+      }
+    },
+    "crm_customers_v2": {
+      "status": "IN-PROGRESS",
+      "date": "2026-05-25",
+      "summary": "CRM planned expansion remains pending for CRUD, appointments, tags, yearly tier and export. Implemented slice 26.05.2026 adds an order/repair history drawer and RBAC-gated chat activity panel with business deep-links.",
+      "decisions": [
+        "Tier tính theo tổng chi tiêu NĂM HIỆN TẠI (không all-time totalSpent)",
+        "Ngưỡng cấu hình tại Settings/Discount Rules → system_config/customer_tiers",
+        "Không cho xóa KH, chỉ thêm + sửa",
+        "Drawer lazy-load: chỉ query khi mở, limit 10 per tab"
+      ]
+    },
+    "live_chat_omnichannel_v2": {
+      "status": "IN-PROGRESS",
+      "date": "2026-05-25",
+      "summary": "Unified Web/Facebook/Zalo inbox plus Facebook profile/media rendering, CRM linkage from avatar and prefilling official Repair/POS flows.",
+      "verified": [
+        "Production webhook event and RTDB write succeeded after runtime RTDB IAM fix",
+        "npm.cmd run typecheck passed on current enhancement branch",
+        "npm.cmd run build passed on current enhancement branch"
+      ],
+      "pending": [
+        "Deploy current enhancement branch and test Facebook name/avatar/media with live messages",
+        "Validate CRM save and Repair/POS prefill in production",
+        "Validate Zalo after OA API/token availability"
+      ],
+      "guardrails": [
+        "Keep secrets server-side and editable through admin settings",
+        "Do not infer Facebook public profile URL from PSID",
+        "Do not widen RTDB rules to mask IAM or role-sync failures",
+        "Do not create inventory or payment transactions directly in chat"
+      ]
+    }
+  },
+  "guardrails": [
+    "LUÔN dùng runTransaction (Atomic Write) khi đụng đến Tồn kho (stock/held) hoặc Công nợ (supplierDebt) để tránh Race Condition.",
+    "KHÔNG BAO GIỜ xóa cứng dữ liệu (Hard Delete) trừ khi thực sự cần thiết. Hãy dùng trạng thái status: 'inactive' (Soft Delete).",
+    "KHÔNG ghi đè dữ liệu trực tiếp trong repair ticket. Phải check version (Optimistic Locking) trước khi update.",
+    "Bí mật server-side (chat_integrations) không được lộ ra client, đọc qua Server Components hoặc Middleware.",
+    "LUÔN dùng component CurrencyInput cho các trường nhập tiền tệ. Các giá trị lưu vào database phải là số nguyên (sử dụng Math.round())."
+  ],
+  "databaseSchema": {
+    "User": {
+      "fields": {
+        "uid": "string",
+        "email": "string",
+        "displayName": "string",
+        "role": "'admin' | 'staff' | 'customer'",
+        "membership_level": "'Smember' | 'Gold' | 'Silver' | 'Bronze'",
+        "phone": "string",
+        "address": "string",
+        "createdAt": "Date"
+      },
+      "description": "Auto-mapped from types.ts"
+    },
+    "Category": {
+      "fields": {
+        "id": "string",
+        "name": "string",
+        "slug": "string",
+        "type": "'retail' | 'service' | 'component'",
+        "keywords": "string[]",
+        "icon": "string",
+        "displayCount": "string",
+        "subCategories": "string[];",
+        "createdAt": "FirestoreDateValue",
+        "updatedAt": "FirestoreDateValue"
+      },
+      "description": "Auto-mapped from types.ts"
+    },
+    "TaxonomyNode": {
+      "fields": {
+        "id": "string;",
+        "name": "string;",
+        "slug": "string;",
+        "icon": "string",
+        "seoKeywords": "string",
+        "seoDescription": "string",
+        "children": "TaxonomyNode[]"
+      },
+      "description": "Auto-mapped from types.ts"
+    },
+    "Brand": {
+      "fields": {
+        "id": "string",
+        "name": "string",
+        "logoUrl": "string",
+        "createdAt": "FirestoreDateValue",
+        "updatedAt": "FirestoreDateValue"
+      },
+      "description": "Auto-mapped from types.ts"
+    },
+    "ProductSpecs": {
+      "fields": {
+        "screen": "string",
+        "cpu": "string",
+        "ram": "string",
+        "storage": "string",
+        "battery": "string",
+        "camera": "string"
+      },
+      "description": "Auto-mapped from types.ts"
+    },
+    "Product": {
+      "fields": {
+        "id": "string",
+        "name": "string",
+        "brand": "string",
+        "category": "typeof import('./constants').RETAIL_CATEGORIES[number] | string",
+        "categoryIds": "string[];",
+        "subCategory": "string",
+        "price_original": "number",
+        "price_promo": "number",
+        "costPrice": "number;",
+        "oldCostPrice": "number",
+        "supplier": "string;",
+        "specs": "ProductSpecs",
+        "images": "string[]",
+        "imageUrl": "string",
+        "imageWidth": "number",
+        "imageHeight": "number",
+        "status": "'active' | 'hidden' | 'inactive'",
+        "condition": "'new' | 'like-new' | 'used'",
+        "isFlashSale": "boolean",
+        "sold": "number",
+        "quality": "string",
+        "partType": "string",
+        "description": "string",
+        "videoEmbedUrl": "string",
+        "stock": "number",
+        "held": "number",
+        "isProposed": "boolean;",
+        "seriesId": "string;",
+        "color": "string;",
+        "storageCapacity": "string;",
+        "conditionLabel": "string;",
+        "createdAt": "Date",
+        "updatedAt": "Date"
+      },
+      "description": "Auto-mapped from types.ts"
+    },
+    "Service": {
+      "fields": {
+        "id": "string",
+        "name": "string",
+        "price_original": "number",
+        "price_promo": "number",
+        "device_model": "string",
+        "category": "string",
+        "categoryIds": "string[];",
+        "description": "string",
+        "seoDescription": "string",
+        "warranty_text": "string",
+        "repair_time": "string",
+        "slug": "string",
+        "tags": "string[]",
+        "videoEmbedUrl": "string",
+        "imageUrl": "string",
+        "isActive": "boolean",
+        "createdAt": "FirestoreDateValue",
+        "updatedAt": "FirestoreDateValue"
+      },
+      "description": "Auto-mapped from types.ts"
+    },
+    "OrderItem": {
+      "fields": {
+        "productId": "string",
+        "productName": "string",
+        "quantity": "number",
+        "price": "number",
+        "image": "string"
+      },
+      "description": "Auto-mapped from types.ts"
+    },
+    "CustomerInfo": {
+      "fields": {
+        "name": "string",
+        "phone": "string",
+        "email": "string",
+        "address": "string",
+        "note": "string"
+      },
+      "description": "Auto-mapped from types.ts"
+    },
+    "Order": {
+      "fields": {
+        "id": "string",
+        "customer_info": "CustomerInfo"
+      },
+      "description": "Auto-mapped from types.ts"
+    },
+    "Article": {
+      "fields": {
+        "id": "string",
+        "title": "string",
+        "content": "string;",
+        "type": "'News' | 'Promo' | 'Tips'",
+        "thumbnail": "string",
+        "author": "string",
+        "tags": "string[]",
+        "videoEmbedUrl": "string",
+        "publishedAt": "Date",
+        "createdAt": "Date"
+      },
+      "description": "Auto-mapped from types.ts"
+    },
+    "ArticleComment": {
+      "fields": {
+        "id": "string",
+        "articleId": "string",
+        "rating": "number;",
+        "name": "string",
+        "phone": "string",
+        "content": "string",
+        "status": "'pending' | 'approved'",
+        "reply": "{",
+        "createdAt": "FirestoreDateValue"
+      },
+      "description": "Auto-mapped from types.ts"
+    },
+    "ChatMessage": {
+      "fields": {
+        "id": "string",
+        "sessionId": "string",
+        "content": "string",
+        "sender": "'user' | 'bot' | 'staff'",
+        "timestamp": "number"
+      },
+      "description": "Auto-mapped from types.ts"
+    },
+    "ChatSession": {
+      "fields": {
+        "id": "string",
+        "userId": "string",
+        "userName": "string",
+        "status": "'active' | 'closed'",
+        "lastMessage": "string",
+        "createdAt": "FirestoreDateValue",
+        "updatedAt": "FirestoreDateValue"
+      },
+      "description": "Auto-mapped from types.ts"
+    },
+    "PaymentHistoryEntry": {
+      "fields": {
+        "amount": "number",
+        "method": "string",
+        "date": "FirestoreDateValue",
+        "timestamp": "number",
+        "type": "'deposit' | 'payment' | 'full' | 'additional' | 'refund'",
+        "note": "string"
+      },
+      "description": "Auto-mapped from types.ts"
+    },
+    "WorkflowNode": {
+      "fields": {
+        "id": "string",
+        "label": "string",
+        "color": "string",
+        "allowedNext": "string[]",
+        "allowedFeatures": "string[]",
+        "isTerminal": "boolean"
+      },
+      "description": "Auto-mapped from types.ts"
+    },
+    "TrackingGroup": {
+      "fields": {
+        "id": "string",
+        "name": "string",
+        "mappedStatuses": "string[]",
+        "order": "number",
+        "isTerminal": "boolean"
+      },
+      "description": "Auto-mapped from types.ts"
+    },
+    "StatusTimelineEntry": {
+      "fields": {
+        "status": "string",
+        "timestamp": "number",
+        "durationInMinutes": "number"
+      },
+      "description": "Auto-mapped from types.ts"
+    },
+    "DeviceChecklist": {
+      "fields": {
+        "body": "string;",
+        "screen": "string;",
+        "touch": "string;",
+        "camera": "string;",
+        "speaker": "string;",
+        "connectivity": "string;",
+        "battery": "string;",
+        "biometric": "string;",
+        "hasPriorRepair": "boolean",
+        "hasWaterDamage": "boolean",
+        "hasNonGenuineParts": "boolean"
+      },
+      "description": "Auto-mapped from types.ts"
+    },
+    "RepairIssue": {
+      "fields": {
+        "id": "string",
+        "label": "string",
+        "estimatedPrice": "number",
+        "status": "'pending' | 'resolved' | 'unresolved'"
+      },
+      "description": "Auto-mapped from types.ts"
+    },
+    "GiftItem": {
+      "fields": {
+        "productId": "string",
+        "productName": "string",
+        "price": "number;",
+        "quantity": "number"
+      },
+      "description": "Auto-mapped from types.ts"
+    },
+    "RepairTicket": {
+      "fields": {
+        "id": "string",
+        "version": "number;",
+        "partsLockedAt": "FirestoreDateValue;",
+        "appointmentId": "string",
+        "workflowConfigId": "string;",
+        "categoryPath": "string[]",
+        "serviceName": "string",
+        "customer": "{",
+        "name": "string",
+        "phone": "string"
+      },
+      "description": "Auto-mapped from types.ts"
+    },
+    "ImportReceiptItem": {
+      "fields": {
+        "productId": "string",
+        "productName": "string",
+        "quantity": "number",
+        "importPrice": "number;",
+        "oldCostPrice": "number;",
+        "quality": "string;"
+      },
+      "description": "Auto-mapped from types.ts"
+    },
+    "Review": {
+      "fields": {
+        "id": "string",
+        "referenceId": "string;",
+        "type": "'repair' | 'order'",
+        "customerName": "string",
+        "phone": "string;",
+        "rating": "number;",
+        "content": "string",
+        "images": "string[]",
+        "status": "'pending' | 'approved'",
+        "createdAt": "FirestoreDateValue"
+      },
+      "description": "Auto-mapped from types.ts"
+    },
+    "ImportReceipt": {
+      "fields": {
+        "id": "string",
+        "supplier": "string",
+        "supplierId": "string;",
+        "items": "ImportReceiptItem[]",
+        "totalAmount": "number",
+        "note": "string",
+        "receiptType": "'component' | 'retail'",
+        "status": "'draft' | 'ordered' | 'completed'",
+        "paymentStatus": "'paid' | 'partial' | 'unpaid';",
+        "paidAmount": "number;",
+        "createdBy": "string",
+        "createdByName": "string",
+        "createdAt": "FirestoreDateValue",
+        "completedAt": "FirestoreDateValue"
+      },
+      "description": "Auto-mapped from types.ts"
+    },
+    "CommissionRule": {
+      "fields": {
+        "id": "string",
+        "name": "string",
+        "type": "'repair' | 'order' | 'all'",
+        "percentage": "number;",
+        "fixedAmount": "number;",
+        "hierarchyLevel": "1 | 2 | 3;",
+        "targetType": "'general' | 'category' | 'specific';",
+        "targetValue": "string;",
+        "isActive": "boolean",
+        "applyAfterDiscount": "boolean;",
+        "createdAt": "FirestoreDateValue"
+      },
+      "description": "Auto-mapped from types.ts"
+    },
+    "Commission": {
+      "fields": {
+        "id": "string",
+        "staffId": "string",
+        "staffName": "string",
+        "ruleId": "string",
+        "sourceType": "'repair' | 'order'",
+        "sourceId": "string;",
+        "amount": "number;",
+        "baseAmount": "number;",
+        "createdAt": "FirestoreDateValue"
+      },
+      "description": "Auto-mapped from types.ts"
+    },
+    "WarrantyRule": {
+      "fields": {
+        "partType": "string;",
+        "warrantyMonths": "number;"
+      },
+      "description": "Auto-mapped from types.ts"
+    },
+    "Expense": {
+      "fields": {
+        "id": "string",
+        "category": "'rent' | 'utilities' | 'supplies' | 'salary' | 'other'",
+        "description": "string",
+        "amount": "number",
+        "date": "FirestoreDateValue",
+        "createdBy": "string",
+        "createdByName": "string",
+        "createdAt": "FirestoreDateValue"
+      },
+      "description": "Auto-mapped from types.ts"
+    },
+    "InventoryLog": {
+      "fields": {
+        "id": "string",
+        "productId": "string",
+        "productName": "string",
+        "quantity": "number;",
+        "costPriceAtLog": "number;",
+        "type": "'IMPORT' | 'SALE' | 'WEB_ORDER'",
+        "referenceId": "string",
+        "referenceType": "'import_receipt' | 'order' | 'repair'",
+        "createdBy": "string",
+        "createdByName": "string",
+        "createdAt": "FirestoreDateValue"
+      },
+      "description": "Auto-mapped from types.ts"
+    },
+    "Supplier": {
+      "fields": {
+        "id": "string",
+        "name": "string",
+        "phone": "string",
+        "email": "string",
+        "address": "string",
+        "taxCode": "string;",
+        "bankAccount": "string;",
+        "bankName": "string",
+        "contactPerson": "string;",
+        "totalDebt": "number;",
+        "note": "string",
+        "isActive": "boolean",
+        "createdAt": "FirestoreDateValue",
+        "updatedAt": "FirestoreDateValue"
+      },
+      "description": "Auto-mapped from types.ts"
+    },
+    "SupplierTransaction": {
+      "fields": {
+        "id": "string",
+        "supplierId": "string",
+        "supplierName": "string",
+        "type": "'IMPORT' | 'PAYMENT';",
+        "amount": "number;",
+        "importReceiptId": "string;",
+        "paymentMethod": "string;",
+        "note": "string",
+        "createdBy": "string",
+        "createdByName": "string",
+        "createdAt": "FirestoreDateValue"
+      },
+      "description": "Auto-mapped from types.ts"
+    },
+    "AccessoryDiscountRule": {
+      "fields": {
+        "id": "string",
+        "name": "string;",
+        "triggerServiceCategory": "string;",
+        "triggerKeywords": "string[];",
+        "discountType": "'percentage' | 'fixed'",
+        "discountValue": "number;",
+        "targetProductCategory": "string;",
+        "targetKeywords": "string[];",
+        "maxDiscountAmount": "number;",
+        "isActive": "boolean",
+        "createdAt": "FirestoreDateValue",
+        "updatedAt": "FirestoreDateValue"
+      },
+      "description": "Auto-mapped from types.ts"
+    },
+    "ProductReview": {
+      "fields": {
+        "id": "string",
+        "productId": "string",
+        "customerName": "string",
+        "phone": "string;",
+        "rating": "number;",
+        "content": "string",
+        "images": "string[]",
+        "status": "'pending' | 'approved'",
+        "reply": "{",
+        "createdAt": "FirestoreDateValue"
+      },
+      "description": "Auto-mapped from types.ts"
+    },
+    "RepairWorkflowNode": {
+      "fields": {
+        "id": "string",
+        "label": "string",
+        "isTerminal": "boolean",
+        "allowedNext": "string[]",
+        "allowedFeatures": "string[]"
+      },
+      "description": "Auto-mapped from types.ts"
+    },
+    "RepairWorkflowConfig": {
+      "fields": {
+        "id": "string",
+        "name": "string",
+        "nodes": "RepairWorkflowNode[]"
+      },
+      "description": "Auto-mapped from types.ts"
+    }
+  },
+  "apiEndpoints": {
+    "admin": {
+      "/api/admin/ai": "POST: Xử lý request nội bộ từ Admin Panel tới AI Assistant.",
+      "/api/admin/chat/integrations": "GET/POST/PUT: Cấu hình tích hợp Webhook cho Facebook, Zalo OA.",
+      "/api/admin/chat/quick-replies": "GET: Lấy danh sách tin nhắn mẫu (nhanh) cho staff.",
+      "/api/admin/chat/rooms/[roomId]/customer": "GET/POST: Liên kết khách hàng trong hệ thống CRM với 1 phòng chat.",
+      "/api/admin/chat/rooms/[roomId]/facebook-profile": "POST: Lấy thông tin public profile của khách từ Facebook Graph API.",
+      "/api/admin/chat/rooms/[roomId]/media/[messageId]/[attachmentIndex]": "GET: Proxy tải ảnh/video đính kèm từ chat platform để tránh lỗi CORS.",
+      "/api/admin/chat/send": "POST: Nhận tin nhắn từ Admin/Staff và đẩy ra API của Facebook/Zalo.",
+      "/api/admin/seed-taxonomy": "POST: Khởi tạo dữ liệu danh mục tĩnh (Taxonomy) cho hệ thống."
+    },
+    "ai": {
+      "/api/ai": "POST: Xử lý request từ client tới AI."
+    },
+    "analytics": {
+      "/api/analytics/visit": "POST: Ghi nhận lượt truy cập web cho Analytics."
+    },
+    "appointments": {
+      "/api/appointments": "POST: Đặt lịch hẹn sửa chữa từ Web khách hàng."
+    },
+    "auth": {
+      "/api/auth/session": "POST/DELETE: Tạo/Hủy HTTP-only Cookie phiên đăng nhập của Admin/Staff bằng Firebase Admin Auth."
+    },
+    "checkout": {
+      "/api/checkout": "POST: Xử lý giỏ hàng Web. Tạo Order, cập nhật Customer, trừ tồn kho (stock/held)."
+    },
+    "integrations": {
+      "/api/integrations/facebook/webhook": "GET/POST: Nơi nhận Webhook sự kiện nhắn tin từ Facebook Messenger.",
+      "/api/integrations/facebook/webhook/test": "GET/POST: Webhook test nội bộ.",
+      "/api/integrations/zalo/webhook": "GET/POST: Nơi nhận Webhook sự kiện nhắn tin từ Zalo OA."
+    },
+    "inventory": {
+      "/api/inventory/import": "POST: Xử lý chốt phiếu nhập kho, cộng tồn kho thực tế, tính lại giá vốn bình quân (costPrice)."
+    },
+    "orders": {
+      "/api/orders/assign-seller": "POST: Phân công nhân viên sale chăm sóc đơn hàng.",
+      "/api/orders/transition": "POST: Cập nhật trạng thái đơn hàng (VD: Pending -> Confirmed -> Shipping)."
+    },
+    "pos": {
+      "/api/pos/checkout": "POST: Bán hàng tại quầy (POS). Tạo Order, trừ kho, ghi nhận doanh thu và dòng tiền (PaymentHistory)."
+    },
+    "products": {
+      "/api/products": "GET: Fetch danh sách sản phẩm nhanh."
+    },
+    "repairs": {
+      "/api/repairs/confirm-parts": "POST: Chốt linh kiện dùng cho ca sửa chữa. Snap giá linh kiện và chuyển trạng thái linh kiện sang in_stock/selected.",
+      "/api/repairs/handover": "POST: Bàn giao máy cho khách. Trừ kho vật lý các linh kiện đã dùng, ghi log Inventory, tính hoa hồng.",
+      "/api/repairs/payment-edit": "POST: Cập nhật thông tin thanh toán (deposit, discount, final amount) cho phiếu sửa chữa.",
+      "/api/repairs/transition": "POST: Chuyển đổi trạng thái quy trình sửa chữa (Nhận máy -> Đang sửa -> Xong)."
+    },
+    "revalidate": {
+      "/api/revalidate": "POST: Revalidate Next.js App Router Cache (ISR). Chấp nhận secret nội bộ hoặc signed admin session cookie; sentinel layout chỉ invalidates /(customer) storefront layout."
+    },
+    "reviews": {
+      "/api/reviews/google": "GET: Fetch Google Business Reviews with server-side Place Details (New), field mask, one-day cache, and storefront response normalization.",
+      "/api/reviews/product": "POST: Lưu đánh giá riêng cho 1 sản phẩm cụ thể.",
+      "/api/reviews": "GET/POST: Lưu đánh giá chung (dịch vụ, cửa hàng) có kèm Honeypot chống spam."
+    },
+    "search": {
+      "/api/search": "GET: Global Search nhanh (dùng trên Header của web)."
+    },
+    "services": {
+      "/api/services/homepage-pricing": "GET: Lấy dịch vụ active và giá thật từ collection services cho bảng giá homepage."
+    },
+    "seed-admin": {
+      "/api/seed-admin": "GET/POST: Tạo tài khoản Admin đầu tiên để khởi tạo hệ thống."
+    },
+    "seed-config": {
+      "/api/seed-config": "GET/POST: Tạo các Config cơ bản (main_settings, repairs workflow) lần đầu."
+    },
+    "tracking": {
+      "/api/tracking": "POST: Khách hàng tự tra cứu tiến độ sửa chữa/đơn hàng bằng số điện thoại."
+    }
+  }
+}

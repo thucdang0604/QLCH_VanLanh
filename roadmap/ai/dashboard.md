@@ -1,0 +1,226 @@
+# 📊 Dashboard
+
+## Core Principles
+
+### Inventory
+<b>Double-Entry:</b> <code>stock</code> và <code>held</code> phải luôn cân bằng. Chỉ dùng <code>writeBatch</code> hoặc <code>transaction</code>.
+
+### Images
+Dùng <code>next/image</code> + <b>Custom Loader</b> (<code>imageLoader.ts</code> → proxy <code>wsrv.nl</code>). Auto WebP + resize. <code>LazyImage</code> component có sẵn nhưng chưa adopt cho storefront (chấp nhận). Admin dùng <code>&lt;img&gt;</code> thô cho dynamic uploads.
+
+### Data Fetching
+Admin: <code>useFirestore</code> (Realtime). Customer: RSC + <code>server-queries.ts</code> (SEO).
+
+### Pagination
+Admin: <code>useClientPagination</code> + <code>limit(50)</code>. KHÔNG dùng <code>onSnapshot</code> vô hạn.
+
+### Security
+Logic Checkout/Review chỉ chạy ở API Routes. API privileged phải kiểm tra permission server-side; CRM không mở cho mọi staff; PII không đưa vào URL/localStorage.
+
+### Live Chat Integrations
+Webhook phải được kiểm tra đến bước ghi/đọc <code>RTDB chats</code>; web chat dùng Firebase Anonymous Auth; CRM từ chat đi qua API <code>chat_support</code> thay vì client ghi tách rời Firestore/RTDB; secret lưu tại <code>private_config/chat_integrations</code>; token outbound dùng header; giao dịch đi qua POS/Repair hiện có.
+
+### Package Manager
+Chỉ dùng <code>pnpm</code> (v10.30.3). <b>KHÔNG</b> dùng npm/yarn/bun. Lockfile: <code>pnpm-lock.yaml</code>. Cài package: <code>pnpm add</code>, dev: <code>pnpm dev</code>, build: <code>pnpm build</code>.
+
+## Scaling Roadmap
+
+### Customer UX Optimization
+- **Status:** DONE
+- **Color:** success
+Tối ưu hóa giao diện khách hàng (Mobile-first), tăng trải nghiệm và độ tin cậy.
+
+- [ ] <b>Tracking Modal:</b> Đã code popup tra cứu đơn hàng dạng Bottom Sheet trên Mobile / Desktop
+- [ ] <b>Speed Dial Chat:</b> Đã code gộp Zalo, Messenger, AI Chatbot thành 1 nút FAB duy nhất gọn gàng
+- [ ] <b>Pricing Table:</b> Đã code bảng giá sửa chữa thiết bị có Tab vuốt ngang mượt mà tại trang chủ
+- [ ] <b>Google Reviews:</b> Đã code API lấy đánh giá tự động từ Google Maps và hiển thị kiểu Slider
+- [ ] <b>Mobile Header:</b> Đã chuyển thanh tìm kiếm ra ngoài giao diện chính giúp dễ sử dụng hơn
+
+### Live Chat Omnichannel
+- **Status:** DONE
+- **Color:** success
+Hộp thư Web/Facebook/Zalo có profile, media, CRM và điều hướng tạo đơn nghiệp vụ.
+
+- [ ] <b>Đã code:</b> Facebook Graph profile refresh và hiển thị avatar/tên thật
+- [ ] <b>Đã code:</b> Sticker/ảnh/audio/video/file với RTDB schema và CSP Facebook CDN
+- [ ] <b>Đã code:</b> Modal CRM và handoff Repair/POS không đưa tên/SDT vào URL
+- [ ] <b>Đã harden:</b> Anonymous Auth cho web chat, chat_support API, CRM rules và token header
+- [ ] <b>Đã sửa 26.05:</b> Lưu CRM/liên kết room qua API server; lỗi RTDB tạm thời được báo riêng sau khi lưu hồ sơ
+- [ ] <b>Đã code 26.05:</b> Panel tác vụ realtime theo SDT và deep-link modal Order/Repair, có gate theo quyền module
+- [ ] <b>Đã code 27.05:</b> Anh Facebook cache private + Storage deny rules + media API, nut Meta Inbox fallback va tra loi mau /shortcut
+- [ ] <b>Chờ deploy:</b> Bật Anonymous Auth rồi deploy code + Firestore/RTDB Rules cùng bản
+- [ ] <b>Chờ xác minh:</b> Test tin thật Facebook/Zalo và chat web ẩn danh trên <code>fixphone.vn</code>
+- [ ] <b>Guardrail:</b> Không mở RTDB public, không dùng PSID làm URL profile, không ghi tắt giao dịch từ chat
+
+### Customer CRM
+- **Status:** DONE
+- **Color:** success
+Hệ thống quản lý khách hàng tập trung, thay thế dữ liệu phân tán trong orders/repairs/pos.
+
+- [ ] <b>Schema:</b> Tạo collection <code>customers/{phone}</code> với profile + sub-collections
+- [ ] <b>Sync Logic:</b> Server-side write vào <code>customers/</code> khi tạo order/repair/appointment
+- [ ] <b>Security stage 1 đã code:</b> Không còn mở <code>customers</code> cho mọi staff; yêu cầu quyền nghiệp vụ CRM/chat
+- [ ] <b>Security stage 2 pending:</b> CRM v6 field-level write với <code>manage_customers</code> và aggregate increment-only
+- [ ] <b>Đã code slice:</b> Drawer tra cứu lịch sử mua hàng/sửa chữa theo SĐT, có RBAC từng module
+- [ ] <b>Đã code slice:</b> Deep-link từ CRM/chat vào modal chi tiết order/repair sẵn có
+- [ ] <b>Admin UI v11 pending:</b> appointments, tags, tier và migration/ledger đầy đủ
+
+### k6 Load Testing
+- **Status:** PENDING
+- **Color:** #0ea5e9
+Stress test <code>fixphone.vn</code> trước chiến dịch marketing.
+
+- [ ] <b>Script:</b> Viết k6 test cho 4 endpoints chính: <code>/</code>, <code>/category/*</code>, <code>/product/*</code>, <code>/api/checkout</code>
+- [ ] <b>Scenarios:</b> Normal (500 VUs), Stress (1000 VUs), Spike (2000 VUs burst)
+- [ ] <b>Thresholds:</b> p95 < 2s, error rate < 1%, availability> 99.9%
+
+### Technical Debt Cleanup
+- **Status:** PENDING
+- **Color:** var(--text-muted)
+Dọn dẹp kỹ thuật dư thừa phát hiện trong audit.
+
+- [ ] <b>Firestore Rules:</b> Xóa rule <code>services</code> trùng lặp (line 37 vs line 62)
+- [ ] <b>LazyImage:</b> Quyết định: xóa component orphan hoặc document lý do giữ
+- [ ] <b>SEO Meta:</b> Kiểm tra <code>&lt;title&gt;</code> và <code>meta description</code> trên production domain
+
+## Changelog
+
+### 2026-06-01 - HOMEPAGE CONTENT APPEARANCE CONFIG
+- **Color:** accent-color
+- **Summary:** Cho phép Admin tự chỉnh bảng giá sửa chữa và đánh giá khách hàng ngoài trang chủ.
+
+- <b>Firestore config:</b> Lưu metadata hiển thị, bộ lọc bảng giá và Google Place ID trong <code>system_config/layout_settings</code>.
+- <b>Admin Appearance:</b> Quản lý nhóm bảng giá, từ khóa lọc, giới hạn item và Place ID; không nhập tay giá hoặc review.
+- <b>Storefront:</b> Bảng giá lấy dịch vụ active từ collection <code>services</code>; review lấy từ Google Places API và không fallback dữ liệu giả.
+- <b>Guardrail:</b> Google API key giữ server-side; storefront tiếp tục nhận config server-side.
+
+### 2026-05-30 - POS QR SCANNER & PRODUCT CODES
+- **Color:** accent-color
+- **Summary:** Nâng cấp POS để bán hàng bằng tem QR/mã sản phẩm.
+
+- <b>Mã hàng:</b> Sản phẩm, phụ kiện và linh kiện có <code>sku</code>/<code>barcode</code>/<code>productCode</code> dùng chung cho QR.
+- <b>Tem QR:</b> Admin Products/Parts có nút xem và in tem QR cho từng hàng.
+- <b>Quét POS:</b> POS hỗ trợ máy quét dạng bàn phím, camera điện thoại qua <code>BarcodeDetector</code>, và nhập mã tay fallback.
+- <b>Guardrail:</b> Scanner chỉ thêm item vào giỏ; thanh toán vẫn qua <code>/api/pos/checkout</code> để server kiểm tra tồn kho.
+
+### 2026-05-29 - CUSTOMER UX OPTIMIZATION
+- **Color:** success
+- **Summary:** Tối ưu hóa trải nghiệm người dùng Front-end (Mobile-first).
+
+- <b>Tracking Modal:</b> Thay trang tra cứu cũ bằng Modal/Bottom-sheet tiện dụng.
+- <b>Speed Dial Chat:</b> Gộp 3 nút liên hệ thành 1 Floating Action Button (FAB).
+- <b>Pricing Table:</b> Thêm section bảng giá sửa chữa có swipe tab trên trang chủ.
+- <b>Google Reviews:</b> Bổ sung reviews từ Google Maps API vào Homepage.
+- <b>Mobile Search:</b> Đưa thanh tìm kiếm ra ngoài Header trên mobile.
+
+### 2026-05-27 - CHAT MEDIA & QUICK REPLIES
+- **Color:** accent-color
+- **Summary:** Tang do tin cay cua anh Facebook va thao tac ho tro nhan vien tren Live Chat.
+
+- <b>Facebook image:</b> Tin nhan ghi RTDB truoc, anh moi cache vao Storage private va tai qua API co quyen chat.
+- <b>Provider fallback:</b> Nut mo Meta Business Suite Inbox cho room Facebook, khong coi PSID la profile URL.
+- <b>Productivity:</b> Cau hinh tra loi mau server-side va chen noi dung bang <code>/shortcut</code>.
+
+### 2026-05-26 - CHAT DATA HARDENING & ROADMAP VISIBILITY
+- **Color:** success
+- **Summary:** Khóa các đường lộ dữ liệu trong Live Chat và đưa artifact scan lên giao diện roadmap_v2.
+
+- <b>[P1]</b> Giới hạn <code>customers/{phone}</code> theo quyền nghiệp vụ trong Firestore Rules.
+- <b>[P2]</b> Thay room <code>guest_</code> public bằng Firebase Anonymous Auth và UID-authenticated room.
+- <b>[P2]</b> Bắt buộc <code>chat_support</code> cho API chat privileged; token Facebook gửi qua Authorization header.
+- <b>[P2]</b> Chuyển handoff POS/Repair sang <code>sessionStorage</code> một lần, không đưa PII vào URL.
+- <b>[P3]</b> Dừng lưu raw webhook event mới; hiển thị scan artifact tập trung tại mục Security Scans.
+- <b>[Release gate]</b> Bật Firebase Anonymous Auth trước khi deploy RTDB rules mới.
+
+### 2026-05-25 - LIVE CHAT OMNICHANNEL
+- **Color:** accent-color
+- **Summary:** Ghi nhận inbox Web/Facebook/Zalo, xử lý lỗi RTDB runtime IAM và nâng cấp profile/media/CRM/chuyển sang POS-Repair.
+
+- Checkpoint <code>4d3c6fbd</code>: cấu hình tích hợp trên web, Facebook/Zalo webhook, outbound reply, nhãn nguồn.
+- Sự cố đã xử lý: webhook nhận payload nhưng ghi RTDB timeout do runtime identity thiếu quyền; không giải quyết bằng rules public.
+- Nâng cấp nhánh hiện tại: Graph profile refresh, media attachments, CSP Facebook CDN.
+- Nâng cấp nhánh hiện tại: modal CRM, liên kết khách theo số điện thoại, chuyển sang Repair/POS đã prefill.
+- Local verification: <code>npm.cmd run typecheck</code> và <code>npm.cmd run build</code> pass; chờ deploy production.
+
+### 2026-05-23 - ROADMAP_V2 RESTORE
+- **Color:** warning
+- **Summary:** Recovered latest roadmap_v2 data after cleanup removed/staled the v2 roadmap artifacts.
+
+- Preserved existing SPA shell files: index.html, app.js, styles.css.
+- Updated manifest/dashboard/bug-details from current source verification.
+- Detected open regression: scripts/migrate-active-orders.ts missing while package.json still exposes migrate:inventory.
+
+### 2026-05-19 - PNPM MIGRATION & DEPENDENCY AUDIT
+- **Color:** accent-color
+- **Summary:** Chuyển đổi toàn bộ package manager từ <b>npm</b> sang <b>pnpm</b>. Thêm theo dõi dependencies vào Roadmap Dashboard.
+
+- Xóa <code>node_modules/</code>, <code>package-lock.json</code>, <code>yarn.lock</code>
+- Cài lại toàn bộ dependencies bằng <code>pnpm install</code> (34s, tiết kiệm ~60% dung lượng)
+- Approve build scripts: sharp, @firebase/util, protobufjs, unrs-resolver
+- Cập nhật <code>README.md</code> — chỉ còn <code>pnpm dev</code>, xóa npm/yarn/bun
+- Fix ESLint: <code>articles/page.tsx</code> (no-explicit-any), <code>login/page.tsx</code> (err: unknown)
+- Fix import: <code>seed-config/route.ts</code> — requireAdmin → requireAdminOrStaff
+- Build thành công: <code>pnpm build</code> exit code 0
+- Thêm section <b>📦 Dependencies</b> vào Dashboard (prod/dev/upgrade recommendations)
+
+### 2026-05-18 - COMPREHENSIVE AUDIT + SCALING ROADMAP
+- **Color:** primary
+- **Summary:** Kiểm định toàn diện hệ thống cho 5,000 users/tháng: <b>Performance</b> (Image Loader, LCP, code-split) ✅, <b>Security</b> (RBAC, Firestore Rules, XSS, runTransaction) ✅, <b>Cost</b> (~$2.60/tháng) ✅. Thiết kế Customer CRM schema (sub-collections). Chuẩn bị k6 load test cho <code>fixphone.vn</code>. Cập nhật constraint Images → phản ánh kiến trúc Custom Loader thực tế.
+
+
+### 2026-05-17 - DASHBOARD SYNC + BUG-INV-003: Hoàn thành 100%
+- **Color:** purple
+- **Summary:** Đối chiếu mã nguồn xác nhận tất cả bugs đã được vá. <b>BUG-INV-003</b>: Chuyển tìm kiếm linh kiện KTV từ client-side (tải toàn bộ products) sang Firestore server-side (<code>searchKeywords</code> + <code>array-contains</code>). Dashboard: 87% → 100%. <b>0 open bugs</b>.
+
+
+### 2026-05-17 - BATCH 4: QUICK-WIN BUGS (8 bugs)
+- **Color:** success
+- **Summary:** Vá 8 lỗi: <b>BUG-INV-010</b> (KTV held check), <b>BUG-POS-007</b> (Cost price warning), <b>BUG-REP-004+008</b> (runTransaction timeline), <b>BUG-ORD-003</b> (Checkout aggregation), <b>BUG-COM-004</b> (Pro-rata discount), <b>BUG-REV-001</b> (Query window 6 tháng), <b>BUG-INV-008</b> (Confirmed resolved).
+
+- <b>[BUG-INV-010]</b> Sửa <code>src/app/admin/technician/page.tsx</code> — Stock check trừ held: <code>available = stock - held</code>.
+- <b>[BUG-POS-007]</b> Sửa <code>src/app/admin/pos/page.tsx</code> — Thêm confirm() cảnh báo khi bán dưới giá vốn.
+- <b>[BUG-REP-004 + BUG-REP-008]</b> Sửa <code>src/app/admin/repairs/page.tsx</code> — handleQuickStatus chuyển sang runTransaction, đọc timeline từ Firestore.
+- <b>[BUG-ORD-003]</b> Sửa <code>src/app/api/checkout/route.ts</code> — Pre-aggregate productId trước khi validate stock.
+- <b>[BUG-COM-004]</b> Sửa <code>src/lib/commissionUtils.ts</code> — Phân bổ giảm giá pro-rata thay vì sequential.
+- <b>[BUG-REV-001]</b> Sửa <code>src/app/admin/revenue/page.tsx</code> — Tăng query window từ 3 → 6 tháng.
+
+### 2026-05-17 - BATCH 3: INPUT VALIDATION & FLOAT PRECISION (6 bugs)
+- **Color:** success
+- **Summary:** Vá 6 lỗi module: <b>BUG-COM-003</b> (Float Math.round), <b>BUG-COM-005</b> (Order payment guard), <b>BUG-POS-004</b> (POS rounding), <b>BUG-POS-005</b> (Negative price), <b>BUG-SER-001</b> (Negative service price), <b>BUG-REV-003</b> (Revenue float).
+
+- <b>[BUG-COM-003 + BUG-COM-005]</b> Sửa <code>src/lib/commissionUtils.ts</code> — Math.round() cho 2 phép tính HH + Guard order status !== Completed.
+- <b>[BUG-COM-003]</b> Sửa <code>src/app/admin/commissions/page.tsx</code> — Math.round() cho totalCommission display.
+- <b>[BUG-POS-004 + BUG-POS-005]</b> Sửa <code>src/app/admin/pos/page.tsx</code> — Math.round + Math.max(0) + min="0" cho giá bán/giảm giá/cọc.
+- <b>[BUG-SER-001]</b> Sửa <code>src/app/admin/services/page.tsx</code> — Math.max(0) cho giá dịch vụ gốc + khuyến mãi.
+
+### 2026-05-17 - SECURITY BATCH 2 (5 bugs)
+- **Color:** success
+- **Summary:** Vá thêm 5 lỗi: <b>BUG-POS-003</b> (Held Stock), <b>HACK-SEC-002</b> (RTDB Rules), <b>HACK-SEC-003</b> (XSS), <b>BUG-POS-002</b> (Race Condition), <b>BUG-ORD-002</b> (Âm held).
+
+- <b>[BUG-POS-003]</b> Sửa <code>src/app/admin/pos/page.tsx</code> — Thêm <code>held: increment(qty)</code> cho đơn Pending.
+- <b>[HACK-SEC-003]</b> Tạo <code>src/lib/sanitizeHtml.ts</code> — Shared XSS sanitizer. Áp dụng cho <code>product/[id]/page.tsx</code>.
+- <b>[HACK-SEC-002]</b> Siết <code>database.rules.json</code> — Validation text ≤500, senderType whitelist, <code>$other: false</code>.
+- <b>[BUG-POS-002]</b> Xác nhận đã fix từ 12.05 (runTransaction). Cập nhật trạng thái.
+- <b>[BUG-ORD-002]</b> Xác nhận đã fix từ 12.05 (Completed→Cancelled logic). Cập nhật trạng thái.
+
+### 2026-05-17 - SECURITY BATCH 1 (2 bugs)
+- **Color:** success
+- **Summary:** Vá 2 lỗ hổng bảo mật nghiêm trọng: <b>HACK-SEC-001</b> (Hardcoded Secret) và <b>BUG-RBAC-001</b> (RBAC URL Bypass).
+
+- <b>[HACK-SEC-001]</b> Xóa fallback secret trong <code>src/app/api/seed-admin/route.ts</code>. Bắt buộc dùng env var.
+- <b>[BUG-RBAC-001]</b> Thêm 3 file mới: <code>src/lib/sessionCookie.ts</code>, <code>src/app/api/auth/session/route.ts</code>, <code>src/middleware.ts</code>. Sửa <code>src/lib/AuthContext.tsx</code>.
+
+### 2026-05-12 - DASHBOARD MIGRATION
+- **Color:** var(--text-muted)
+- **Summary:** Chuyển đổi toàn bộ tài liệu tracking từ .md sang <b>Super Dashboard HTML</b>.
+
+- F: <code>12.05.html</code>, <code>Plan.md</code> (deprecated), <code>BUG_REPORT.md</code> (deprecated)
+
+### 2026-05-10 - UNIFIED INVENTORY
+- **Color:** var(--text-muted)
+- **Summary:** Hợp nhất quy trình nhập hàng Bán lẻ và Linh kiện vào module Parts. Gọn hóa trang Inventory.
+
+
+### 2026-05-08 - GIFT REDEMPTION
+- **Color:** var(--text-muted)
+- **Summary:** Thay đổi nhập quà tặng từ số tiền sang chọn sản phẩm trực tiếp từ kho.

@@ -1,0 +1,8 @@
+﻿- [x] 1. Khởi tạo cấu trúc thư mục `roadmap_v2` và `roadmap_v2/data`.
+- [x] 2. Copy `manifest.json` từ `roadmap/` sang `roadmap_v2/data/`.
+- [x] 3. Bóc tách biểu đồ Mermaid từ các file HTML cũ.
+- [x] 4. Tạo `roadmap_v2/data/workflows.json` chứa cấu trúc sơ đồ.
+- [x] 5. Xây dựng `roadmap_v2/index.html` (SPA structure).
+- [x] 6. Viết `roadmap_v2/styles.css` (giao diện Dashboard).
+- [x] 7. Viết `roadmap_v2/app.js` (logic fetch, render menu, vẽ Mermaid).
+- [x] 8. Kiểm tra và xác minh hoạt động của trang.

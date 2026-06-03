@@ -3,10 +3,14 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { doc, onSnapshot, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from './firebase';
-import { triggerRevalidate } from './revalidate';
+import { requestRevalidate } from './requestRevalidate';
 
 import {
     type HeroBanner,
+    type HomepagePricingCategory,
+    type HomepagePricingConfig,
+    type HomepageReviewsConfig,
+    type PricingIconName,
     type BackgroundConfig,
     type StoreBranch,
     type SectionBackground,
@@ -14,11 +18,17 @@ import {
     type ContactInfo,
     type GeofenceConfig,
     type SiteConfig,
-    DEFAULT_CONFIG
+    DEFAULT_CONFIG,
+    normalizeHomepagePricing,
+    normalizeHomepageReviews
 } from './config-defaults';
 
 export type {
     HeroBanner,
+    HomepagePricingCategory,
+    HomepagePricingConfig,
+    HomepageReviewsConfig,
+    PricingIconName,
     BackgroundConfig,
     StoreBranch,
     SectionBackground,
@@ -82,6 +92,14 @@ function injectImageProxyState(disableImageProxy: boolean) {
     }
 }
 
+function formatHotline(raw: string) {
+    if (!raw) return '';
+    if (raw.length === 10) {
+        return `${raw.slice(0, 4)}.${raw.slice(4, 7)}.${raw.slice(7)}`;
+    }
+    return raw;
+}
+
 // =========== Split Config Definitions ===========
 const KEY_MAP: Record<string, string> = {
     // taxonomy_settings
@@ -97,6 +115,8 @@ const KEY_MAP: Record<string, string> = {
     hero_banners: 'layout_settings',
     homeSections: 'layout_settings',
     store_branches: 'layout_settings',
+    homepagePricing: 'layout_settings',
+    homepageReviews: 'layout_settings',
     background_config: 'layout_settings',
     geofence: 'layout_settings',
 };
@@ -145,6 +165,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
                     hero_banners: DEFAULT_CONFIG.hero_banners,
                     homeSections: DEFAULT_CONFIG.homeSections,
                     store_branches: DEFAULT_CONFIG.store_branches,
+                    homepagePricing: DEFAULT_CONFIG.homepagePricing,
+                    homepageReviews: DEFAULT_CONFIG.homepageReviews,
                     background_config: DEFAULT_CONFIG.background_config,
                     geofence: DEFAULT_CONFIG.geofence,
                 };
@@ -189,6 +211,11 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
                                 if (targetDoc === docName) {
                                     (next as Record<string, unknown>)[key] = data[key];
                                 }
+                            }
+
+                            if (docName === 'layout_settings') {
+                                next.homepagePricing = normalizeHomepagePricing(next.homepagePricing);
+                                next.homepageReviews = normalizeHomepageReviews(next.homepageReviews);
                             }
 
                             // Special logic for homeSections to add missing defaults
@@ -255,17 +282,9 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
 
         await Promise.all(promises);
         
-        // Trigger global layout revalidation to apply config changes (colors, header, layout)
-        triggerRevalidate(['layout'], ['config']).catch(err => console.error('Config revalidation error:', err));
-    };
-
-    // Format raw phone number for display
-    const formatHotline = (raw: string) => {
-        if (!raw) return '';
-        if (raw.length === 10) {
-            return `${raw.slice(0, 2)}.${raw.slice(2, 6)}.${raw.slice(6)}`;
-        }
-        return raw;
+        // Keep cache invalidation detached from the admin React tree. Calling a
+        // Server Action here can refresh the current admin route after saving.
+        void requestRevalidate(['layout'], ['config']);
     };
 
     return (
@@ -288,14 +307,6 @@ export function ServerConfigProvider({ children, initialConfig }: { children: Re
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const updateConfig = async (_partial: Partial<SiteConfig>) => {
         console.warn('updateConfig called in ServerConfigProvider — this is a no-op. Use admin ConfigProvider instead.');
-    };
-
-    const formatHotline = (raw: string) => {
-        if (!raw) return '';
-        if (raw.length === 10) {
-            return `${raw.slice(0, 2)}.${raw.slice(2, 6)}.${raw.slice(6)}`;
-        }
-        return raw;
     };
 
     return (

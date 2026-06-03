@@ -1,6 +1,11 @@
 import { getAdminDb, isAdminAvailable } from "@/lib/firebaseAdmin";
 import { ServerConfigProvider } from "@/lib/ConfigContext";
-import { DEFAULT_CONFIG, type SiteConfig } from "@/lib/config-defaults";
+import {
+    DEFAULT_CONFIG,
+    normalizeHomepagePricing,
+    normalizeHomepageReviews,
+    type SiteConfig
+} from "@/lib/config-defaults";
 import CustomerLayoutShell from "./layout.shell";
 
 export const revalidate = 30;
@@ -64,6 +69,8 @@ async function getServerConfig(): Promise<SiteConfig> {
             hero_banners: (data.hero_banners as SiteConfig['hero_banners']) || DEFAULT_CONFIG.hero_banners,
             background_config: { ...DEFAULT_CONFIG.background_config, ...(data.background_config as Record<string, unknown> | undefined) },
             store_branches: (data.store_branches as SiteConfig['store_branches']) || DEFAULT_CONFIG.store_branches,
+            homepagePricing: normalizeHomepagePricing(data.homepagePricing),
+            homepageReviews: normalizeHomepageReviews(data.homepageReviews),
             homeSections,
             forbiddenWords: (data.forbiddenWords as string[]) || DEFAULT_CONFIG.forbiddenWords,
             geofence: { ...DEFAULT_CONFIG.geofence, ...(data.geofence as Record<string, unknown> | undefined) },

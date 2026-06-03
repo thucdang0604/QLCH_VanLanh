@@ -1,0 +1,172 @@
+{
+  "date": "18.05.2026",
+  "auditor": "Antigravity AI + Human Review",
+  "scores": [
+    { "value": "A+", "label": "Performance", "status": "pass" },
+    { "value": "A+", "label": "Security", "status": "pass" },
+    { "value": "$2.60", "label": "Cost/Month", "status": "pass" },
+    { "value": "B", "label": "Data Architecture", "status": "warn" }
+  ],
+  "sections": [
+    {
+      "id": "performance",
+      "title": "⚡ Performance & UX/UI",
+      "color": "success",
+      "desc": "Đánh giá khả năng phục vụ 5,000 users/tháng trên Firebase App Hosting.",
+      "type": "table",
+      "headers": ["Hạng mục", "Trạng thái", "Chi tiết"],
+      "rows": [
+        ["<b>Image Optimization</b>", {"text": "✅ PASS", "class": "status-pass"}, "Custom Loader (<code>imageLoader.ts</code>) → proxy <code>wsrv.nl</code> → Auto WebP + resize. Bypass <code>/_next/image</code> endpoint không ổn định trên Firebase Hosting."],
+        ["<b>LCP (Largest Contentful Paint)</b>", {"text": "✅ PASS", "class": "status-pass"}, "HeroSection dùng <code>priority</code> + <code>fetchPriority=\"high\"</code> + <code>unoptimized</code> cho ảnh đầu. Đúng pattern."],
+        ["<b>SSR & Caching</b>", {"text": "✅ PASS", "class": "status-pass"}, "Store pages dùng RSC + <code>unstable_cache</code>. Minimizes Firestore reads cho repeated visits."],
+        ["<b>Admin Pagination</b>", {"text": "✅ PASS", "class": "status-pass"}, "<code>useClientPagination</code> + <code>limit(50)</code>. Không dùng <code>onSnapshot</code> vô hạn."],
+        ["<b>LazyImage Component</b>", {"text": "ℹ️ ORPHAN", "class": "status-info"}, "Component có sẵn (<code>LazyImage.tsx</code>) với skeleton + error fallback. Chưa adopt cho storefront. <b>Quyết định: Giữ nguyên.</b>"],
+        ["<b>Code Splitting</b>", {"text": "✅ PASS", "class": "status-pass"}, "Next.js auto code-split per route. Dynamic imports cho heavy modules (repair, POS)."],
+        ["<b>CLS Prevention</b>", {"text": "✅ PASS", "class": "status-pass"}, "All <code>&lt;Image&gt;</code> dùng <code>fill</code> + <code>sizes</code> hoặc fixed <code>width/height</code>. No layout shift."]
+      ]
+    },
+    {
+      "id": "image-arch",
+      "title": "🖼️ Kiến Trúc Ảnh Chi Tiết",
+      "color": "purple",
+      "type": "mixed",
+      "blocks": [
+        {
+          "type": "diagram",
+          "content": "next/image component → imageLoader.ts → [ Firebase Storage? ] → wsrv.nl proxy → WebP + resize → Browser\n<br> → [ Google User Content? ] → Google =wN resize → Browser\n<br> → [ Local/Other? ] → Return nguyên bản → Browser"
+        },
+        {
+          "type": "heading",
+          "content": "📋 Chi Tiết Từng File Customer"
+        },
+        {
+          "type": "table",
+          "headers": ["File", "Component", "Render", "Skeleton", "Ghi chú"],
+          "rows": [
+            ["<code>HeroSection.tsx</code>", "Banner chính", {"text": "Image + priority", "class": "status-pass"}, "❌", "LCP — đúng pattern"],
+            ["<code>ServiceCard.tsx</code>", "Card SP/DV", {"text": "Image fill", "class": "status-pass"}, "Fallback icon", "OK"],
+            ["<code>ArticleBlock.tsx</code>", "Card bài viết", {"text": "Image fill", "class": "status-pass"}, {"text": "✅ ArticleSkeleton", "class": "status-pass"}, "Tốt nhất"],
+            ["<code>ProductDetailClient.tsx</code>", "Gallery SP", {"text": "Image fill + priority", "class": "status-pass"}, "Fallback icon", "OK"],
+            ["<code>CategoryClient.tsx</code>", "Danh sách SP", {"text": "Image fill", "class": "status-pass"}, "❌", "OK"],
+            ["<code>flash-sale</code>", "Flash Sale", {"text": "Image fill", "class": "status-pass"}, "❌", "OK"],
+            ["<code>tin-tuc</code>", "DS tin tức", {"text": "Image fill", "class": "status-pass"}, "❌", "OK"],
+            ["<code>cart/checkout</code>", "Giỏ hàng", {"text": "Image (thumbnail)", "class": "status-pass"}, "❌", "Ảnh nhỏ, OK"]
+          ]
+        },
+        {
+          "type": "heading",
+          "content": "🔧 Admin Pages"
+        },
+        {
+          "type": "table",
+          "headers": ["Module", "Render", "Lý do"],
+          "rows": [
+            ["Technician (ảnh sửa chữa)", "<code>&lt;img&gt;</code> thô", "URL động từ Firebase Storage, kích thước không cố định"],
+            ["Settings/Receipt (QR/logo)", "<code>&lt;img&gt;</code> thô", "Dynamic upload preview, thay đổi liên tục"],
+            ["Media Manager", "<code>&lt;img&gt;</code> thô", "Gallery preview cho upload mới"],
+            ["Products/Services/Articles", "<code>Image</code>", "Standard admin CRUD"]
+          ]
+        },
+        {
+          "type": "alert",
+          "status": "success",
+          "content": "✅ <b>Kết luận:</b> Admin pages không cần tối ưu image (internal users, < 5 người, không ảnh hưởng SEO/CWV)."
+        }
+      ]
+    },
+    {
+      "id": "security",
+      "title": "🔒 Security Posture",
+      "color": "success",
+      "type": "table",
+      "headers": ["Lớp bảo vệ", "Trạng thái", "Cơ chế"],
+      "rows": [
+        ["<b>Edge Middleware RBAC</b>", {"text": "✅ ACTIVE", "class": "status-pass"}, "HMAC-SHA256 signed cookies. Chặn tất cả <code>/admin/*</code> routes trước khi render."],
+        ["<b>Firestore Rules</b>", {"text": "✅ HARDENED", "class": "status-pass"}, "RBAC <code>isAdmin()</code> / <code>isStaff()</code> / <code>isOwner()</code>. Public read chỉ cho products/services/articles."],
+        ["<b>Atomic Transactions</b>", {"text": "✅ 100%", "class": "status-pass"}, "<code>runTransaction</code> bắt buộc cho tất cả operations thay đổi stock/held. Inventory logs audit trail."],
+        ["<b>XSS Prevention</b>", {"text": "✅ SANITIZED", "class": "status-pass"}, "<code>sanitizeHtml()</code> shared lib áp dụng cho product/article descriptions."],
+        ["<b>RTDB Validation</b>", {"text": "✅ HARDENED", "class": "status-pass"}, "Text ≤500 chars, senderType whitelist, <code>$other: false</code> chặn field injection."],
+        ["<b>HSTS + CSP Headers</b>", {"text": "✅ CONFIGURED", "class": "status-pass"}, "<code>max-age=63072000; includeSubDomains; preload</code>. CSP whitelist Firebase/Google/wsrv.nl."],
+        ["<b>Admin Seed API</b>", {"text": "✅ SECURED", "class": "status-pass"}, "Bắt buộc <code>ADMIN_SEED_SECRET</code> env var. Không fallback. Thiếu → 500, sai → 401."],
+        ["<b>localStorage (Cart)</b>", {"text": "⚠️ ACCEPTED", "class": "status-warn"}, "Cart data lưu không mã hóa. Same-origin policy bảo vệ. Risk thấp — chấp nhận."]
+      ]
+    },
+    {
+      "id": "cost",
+      "title": "💰 Ước Lượng Chi Phí Firebase (5,000 users/tháng)",
+      "color": "success",
+      "type": "cost",
+      "bars": [
+        {"label": "📖 Reads (150K)", "width": "200px", "value": "$0.54"},
+        {"label": "✏️ Writes (5K)", "width": "30px", "value": "$0.09"},
+        {"label": "🗑️ Deletes (1K)", "width": "5px", "value": "$0.02"},
+        {"label": "📤 Storage (1GB)", "width": "8px", "value": "$0.03"},
+        {"label": "🔐 Auth (200 logins)", "width": "2px", "value": "$0.00"},
+        {"label": "🌐 Hosting BW (10GB)", "width": "250px", "value": "$1.90 ⚠️", "color": "warning"}
+      ],
+      "cards": [
+        {"value": "$2.60", "label": "TỔNG / THÁNG", "color": "success"},
+        {"value": "BW", "label": "BOTTLENECK CHÍNH", "color": "warning"},
+        {"value": "CDN", "label": "GIẢI PHÁP", "color": "primary"}
+      ],
+      "note": "ℹ️ <b>Ghi chú:</b> Chi phí có thể tăng nếu admin sử dụng module Revenue/Commission thường xuyên (nhiều Firestore reads). Hosting bandwidth là yếu tố chính — giải quyết bằng CDN cache headers + <code>wsrv.nl</code> proxy đã có sẵn.",
+      "noteColor": "primary"
+    },
+    {
+      "id": "data-arch",
+      "title": "🗄️ Data Architecture — Customer CRM",
+      "color": "warning",
+      "desc": "Kiến trúc được chọn để quản lý thông tin khách hàng tập trung.",
+      "type": "mixed",
+      "blocks": [
+        {
+          "type": "heading",
+          "content": "📊 Hiện trạng — Dữ liệu phân tán"
+        },
+        {
+          "type": "diagram",
+          "align": "left",
+          "content": "orders/{orderId} → customer.name, customer.phone ← <span style=\"color: var(--danger);\">TRÙNG LẶP</span>\n<br>repairs/{repairId} → customer.name, customer.phone ← <span style=\"color: var(--danger);\">TRÙNG LẶP</span>\n<br>pos_orders/{posId} → customer.name, customer.phone ← <span style=\"color: var(--danger);\">TRÙNG LẶP</span>\n<br>reviews/{reviewId} → customerName, phone ← <span style=\"color: var(--danger);\">TRÙNG LẶP</span>"
+        },
+        {
+          "type": "heading",
+          "content": "✅ Thiết kế mới — Sub-Collections"
+        },
+        {
+          "type": "code",
+          "content": "// customers/{phone} — Document chính\n{\nname: \"Nguyễn Văn A\",\nphone: \"0901234567\", // = document ID\naddress: \"123 Lê Lợi, Q.1\",\nemail: \"a@gmail.com\", // optional\ntotalSpent: 15000000, // computed aggregate\ntotalOrders: 5,\ntotalRepairs: 2,\nlastVisit: Timestamp,\ncreatedAt: Timestamp,\ntags: [\"VIP\", \"Frequent\"] // admin-defined labels\n}\n\n// customers/{phone}/purchases/{id}\n{\norderRef: \"orders/abc123\", // reference gốc\nitems: [{name, qty, price}],\ntotal: 5000000,\ntype: \"online\" | \"pos\",\ndate: Timestamp,\nstatus: \"completed\"\n}\n\n// customers/{phone}/repairs/{id}\n{\nrepairRef: \"repairs/xyz789\",\ndevice: \"iPhone 14 Pro Max\",\nissue: \"Thay màn hình\",\ncost: 3500000,\nstatus: \"completed\",\nwarranty_until: Timestamp\n}\n\n// customers/{phone}/appointments/{id}\n{\nservice: \"Thay pin iPhone\",\ndate: Timestamp,\nstatus: \"confirmed\" | \"completed\" | \"cancelled\"\n}"
+        },
+        {
+          "type": "heading",
+          "content": "⚖️ Đánh giá"
+        },
+        {
+          "type": "table",
+          "headers": ["Tiêu chí", "Đánh giá"],
+          "rows": [
+            ["Query \"lịch sử 1 KH\"", {"text": "1 sub-collection read → nhanh, rẻ", "class": "status-pass"}],
+            ["Scalability", {"text": "Sub-collections không giới hạn size", "class": "status-pass"}],
+            ["Consistency", {"text": "Cần server-side sync khi tạo order/repair", "class": "status-warn"}],
+            ["Cloud Functions", {"text": "KHÔNG cần — sync trong API Routes hiện có", "class": "status-pass"}],
+            ["Chi phí thêm", {"text": "~$0/tháng (vẫn trong free tier)", "class": "status-pass"}],
+            ["Effort triển khai", {"text": "~8 giờ development", "class": "status-info"}]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "action-items",
+      "title": "📋 Action Items — Thứ Tự Ưu Tiên",
+      "color": "warning",
+      "type": "table",
+      "headers": ["#", "Hạng mục", "Effort", "Impact", "Status"],
+      "rows": [
+        ["1", "<b>Customer CRM Schema</b> — Tạo <code>customers/{phone}</code> + sync logic", "~8h", "⭐⭐⭐", {"text": "PENDING", "class": "status-warn"}],
+        ["2", "<b>Firestore Rules</b> — Thêm rules cho customers + xóa services trùng", "~30min", "⭐⭐", {"text": "PENDING", "class": "status-warn"}],
+        ["3", "<b>k6 Load Test</b> — Script stress test cho <code>fixphone.vn</code>", "~2h", "⭐⭐⭐", {"text": "PENDING", "class": "status-warn"}],
+        ["4", "<b>LazyImage Decision</b> — Xóa hoặc document orphan component", "~15min", "⭐", {"text": "PENDING", "class": "status-warn"}],
+        ["5", "<b>SEO Audit</b> — Verify meta tags trên production domain", "~1h", "⭐⭐", {"text": "PENDING", "class": "status-warn"}]
+      ]
+    }
+  ]
+}

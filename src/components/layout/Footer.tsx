@@ -11,7 +11,6 @@ const policies = [
     { name: 'Chính sách trả góp', href: '/info/tra-gop' },
     { name: 'Chính sách bảo mật', href: '/info/chinh-sach-bao-mat' },
     { name: 'Điều khoản dịch vụ', href: '/info/dieu-khoan-dich-vu' },
-    { name: 'Xóa dữ liệu người dùng', href: '/info/xoa-du-lieu-nguoi-dung' },
 ];
 
 const aboutLinks = [

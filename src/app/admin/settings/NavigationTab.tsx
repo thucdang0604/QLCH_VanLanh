@@ -13,7 +13,6 @@ import {
     Eye, EyeOff, GripVertical, CheckCircle2, AlertCircle,
     PanelTop, PanelLeft, PanelBottom, ChevronRight, X, FolderTree, ImageIcon,
 } from 'lucide-react';
-import { triggerRevalidate } from '@/lib/revalidate';
 
 const MediaManager = dynamic(() => import('@/components/admin/MediaManager'), { ssr: false });
 
@@ -262,9 +261,6 @@ export default function NavigationTab() {
                 footerServices: normalizedFooter,
                 homeServiceCategories: normalizedHomeServiceCategories,
             });
-
-            // Revalidate customer pages
-            try { await triggerRevalidate(['layout'], ['config']); } catch { /* non-blocking */ }
 
             setMessage({ type: 'success', text: 'Đã lưu menu thành công!' });
         } catch (err) {

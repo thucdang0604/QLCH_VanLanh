@@ -1,9 +1,13 @@
 'use client';
 import { SITE_URL } from "@/lib/constants";
+import { useConfig } from "@/lib/ConfigContext";
 
 export default function ChinhSachMuaHangPage() {
+    const { config, formatHotline } = useConfig();
+    const branches = config.store_branches || [];
+    const mainPhone = config.contact_info?.main_phone || branches[0]?.phone || '';
     const seoTitle = 'Chính sách mua hàng & giao nhận | Văn Lành Service';
-    const seoDescription = 'Chính sách mua hàng từ xa, khu vực giao hàng toàn quốc, giá cả và hỗ trợ đặt hàng tại Văn Lành Service. Hotline: 0932.242.026.';
+    const seoDescription = `Chính sách mua hàng từ xa, khu vực giao hàng toàn quốc, giá cả và hỗ trợ đặt hàng tại Văn Lành Service.${mainPhone ? ` Hotline: ${formatHotline(mainPhone)}.` : ''}`;
     const canonicalUrl = `${SITE_URL}/info/chinh-sach-mua-hang`;
     const articleSchema = {
         '@context': 'https://schema.org',
@@ -47,16 +51,13 @@ export default function ChinhSachMuaHangPage() {
                     Không cần trực tiếp đến cửa hàng, khách hàng có thể lựa chọn cách mua hàng online. Gọi điện thoại đến tổng đài thời gian từ 7h30–21h00 (cả CN & ngày lễ) để đặt hàng, nhân viên Văn Lành Service luôn sẵn sàng phục vụ, tư vấn và hỗ trợ quý khách mua được sản phẩm ưng ý.
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="bg-orange-50 border border-orange-200 rounded-xl p-4">
-                        <h3 className="font-semibold text-gray-800 text-sm mb-1">🏪 Trụ sở chính</h3>
-                        <p className="text-xs text-gray-600">117 Nguyên Hồng, P. Bình Lợi Trung, Bình Thạnh, TP.HCM</p>
-                        <p className="text-xs text-gray-600">📞 <a href="tel:0975242026" className="text-copper font-bold">0975.242.026</a></p>
-                    </div>
-                    <div className="bg-orange-50 border border-orange-200 rounded-xl p-4">
-                        <h3 className="font-semibold text-gray-800 text-sm mb-1">🏪 Chi nhánh</h3>
-                        <p className="text-xs text-gray-600">75B Thiên Phước, P.15, Quận 11, TP.HCM</p>
-                        <p className="text-xs text-gray-600">📞 <a href="tel:0981242026" className="text-copper font-bold">0981.242.026</a></p>
-                    </div>
+                    {branches.map((branch) => (
+                        <div key={branch.id} className="bg-orange-50 border border-orange-200 rounded-xl p-4">
+                            <h3 className="font-semibold text-gray-800 text-sm mb-1">🏪 {branch.name}</h3>
+                            <p className="text-xs text-gray-600">{branch.address}</p>
+                            <p className="text-xs text-gray-600">📞 <a href={`tel:${branch.phone}`} className="text-copper font-bold">{formatHotline(branch.phone)}</a></p>
+                        </div>
+                    ))}
                 </div>
             </section>
 
@@ -79,7 +80,7 @@ export default function ChinhSachMuaHangPage() {
 
             <div className="bg-gray-100 rounded-xl p-5 text-center">
                 <p className="text-sm text-gray-600">
-                    Cần hỗ trợ mua hàng? Gọi ngay: <a href="tel:0932242026" className="text-copper font-bold hover:underline">0932.242.026</a>
+                    Cần hỗ trợ mua hàng? Gọi ngay: {mainPhone ? <a href={`tel:${mainPhone}`} className="text-copper font-bold hover:underline">{formatHotline(mainPhone)}</a> : 'Đang cập nhật'}
                 </p>
             </div>
         </article>

@@ -1,0 +1,8 @@
+﻿- [x] 1. Cập nhật `styles.css` cho giao diện full-screen Mermaid và tối ưu layout.
+- [x] 2. Chỉnh sửa `index.html` và `app.js` để tổ chức lại các nhóm Dashboard: Workflow, Bug, Tính năng mới, AI Plan & Task, Đợt Kiểm Định.
+- [x] 3. Xây dựng cấu trúc dữ liệu lưu trữ AI Plan & Task (chống ghi đè) trong thư mục `roadmap_v2/data/ai_plans/`.
+- [x] 4. Tích hợp chức năng lưu trữ và đọc các file markdown từ AI (kế hoạch và task) thông qua `manifest.json`.
+- [/] 5. Cập nhật `workflows.json` để thêm sơ đồ Master Hub (Unified Workflow).
+- [x] 6. Cài đặt logic Interactive Highlight (DOM Traversal) cho Mermaid SVG trong `app.js`.
+- [x] 7. Kiểm tra hiển thị chi tiết cho từng đợt kiểm định thay vì hiện full nội dung.
+- [x] 8. Kiểm tra và xác nhận mọi chức năng hoạt động đúng.

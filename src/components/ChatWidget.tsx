@@ -28,7 +28,7 @@ export default function ChatWidget() {
     const [botActive, setBotActive] = useState(true);
     const [isSpeedDialOpen, setIsSpeedDialOpen] = useState(false);
 
-    const { user } = useAuth();
+    const { user, loading: authLoading } = useAuth();
     const { config } = useConfig();
 
     // Check registration status on load
@@ -45,6 +45,11 @@ export default function ChatWidget() {
     // Use an authenticated anonymous Firebase identity for public chat rooms.
     useEffect(() => {
         let cancelled = false;
+
+        // Bỏ qua nếu AuthContext đang trong quá trình khôi phục session.
+        // Tránh lỗi gọi signInAnonymously() đè mất Admin session.
+        if (authLoading) return;
+
         if (user?.uid) {
             setRoomId(user.uid);
             setIdentityError('');

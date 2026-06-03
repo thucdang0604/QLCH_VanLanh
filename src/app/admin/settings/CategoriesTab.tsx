@@ -10,7 +10,7 @@ import { generateSlug } from '@/lib/utils';
 import { toastSuccess, toastError, toastWarning } from '@/lib/toast';
 import { Plus, Edit, Trash2, Tag, Search, Image as ImageIcon, FolderTree, Sparkles, ChevronRight, ChevronDown, Package } from 'lucide-react';
 import Image from 'next/image';
-import { triggerRevalidate } from '@/lib/revalidate';
+import { requestRevalidate } from '@/lib/requestRevalidate';
 
 export default function CategoriesTab() {
     const [activeSubTab, setActiveSubTab] = useState<'categories' | 'brands'>('categories');
@@ -439,7 +439,7 @@ function BrandsList() {
         try {
             await deleteDocument('brands', id);
             toastSuccess('Đã xoá thương hiệu');
-            triggerRevalidate(['layout'], ['categories', 'config']).catch(console.error);
+            void requestRevalidate(['layout'], ['categories', 'config']);
         } catch {
             toastError('Lỗi khi xoá thương hiệu');
         }
@@ -562,7 +562,7 @@ function BrandModal({ isOpen, onClose, initialData }: { isOpen: boolean, onClose
                 await addDocument('brands', payload);
                 toastSuccess('Thêm thương hiệu mới thành công');
             }
-            triggerRevalidate(['layout'], ['categories', 'config']).catch(console.error);
+            void requestRevalidate(['layout'], ['categories', 'config']);
             onClose();
         } catch {
             toastError('Lỗi khi lưu thương hiệu');

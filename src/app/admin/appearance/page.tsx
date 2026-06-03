@@ -2,12 +2,20 @@
 
 /* eslint-disable @next/next/no-img-element */
 import { useState, useEffect } from 'react';
-import { useConfig, DEFAULT_CONFIG, type SiteConfig, type HeroBanner, type StoreBranch } from '@/lib/ConfigContext';
+import {
+    useConfig,
+    DEFAULT_CONFIG,
+    type SiteConfig,
+    type HeroBanner,
+    type HomepagePricingCategory,
+    type PricingIconName,
+    type StoreBranch
+} from '@/lib/ConfigContext';
 import MediaManager from '@/components/admin/MediaManager';
 import {
     Palette, Type, LayoutDashboard, Save, Loader2,
     Trash2, Plus, GripVertical, Eye, EyeOff, ArrowUp, ArrowDown,
-    CheckCircle2, X, RotateCcw, MapPin, Edit2, ImageIcon
+    CheckCircle2, X, RotateCcw, MapPin, Edit2, ImageIcon, Star
 } from 'lucide-react';
 
 // ========= Toast =========
@@ -152,6 +160,32 @@ export default function AdminAppearancePage() {
         setLocal({ ...local, store_branches: updated });
         setEditBranch(null);
         setBranchForm({ name: '', address: '', phone: '', mapLink: '' });
+    };
+
+    // ---- Homepage Pricing CRUD ----
+    const updatePricingCategory = (categoryId: string, partial: Partial<HomepagePricingCategory>) => {
+        setLocal(prev => ({
+            ...prev,
+            homepagePricing: {
+                ...prev.homepagePricing,
+                categories: prev.homepagePricing.categories.map(category => category.id === categoryId ? { ...category, ...partial } : category),
+            },
+        }));
+    };
+
+    const addPricingCategory = () => {
+        const category: HomepagePricingCategory = {
+            id: `pricing-category-${Date.now()}`,
+            label: 'Nhóm mới',
+            icon: 'smartphone',
+            keywords: [],
+            maxItems: 6,
+        };
+        setLocal(prev => ({ ...prev, homepagePricing: { ...prev.homepagePricing, categories: [...prev.homepagePricing.categories, category] } }));
+    };
+
+    const removePricingCategory = (categoryId: string) => {
+        setLocal(prev => ({ ...prev, homepagePricing: { ...prev.homepagePricing, categories: prev.homepagePricing.categories.filter(category => category.id !== categoryId) } }));
     };
 
     return (
@@ -393,7 +427,71 @@ export default function AdminAppearancePage() {
                 <SaveBtn onClick={() => save({ store_branches: local.store_branches }, 'Đã lưu chi nhánh!')} saving={saving} label="Lưu chi nhánh" />
             </SectionCard>
 
-        {/* 6. Homepage Section Layout */}
+            {/* 6. Homepage Pricing */}
+            <SectionCard title="Bảng giá sửa chữa trang chủ" icon={<Type size={20} />}>
+                <div className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <input value={local.homepagePricing.title} onChange={e => setLocal({ ...local, homepagePricing: { ...local.homepagePricing, title: e.target.value } })} placeholder="Tiêu đề thường" className="px-3 py-2 border rounded-lg text-sm" />
+                        <input value={local.homepagePricing.highlightedTitle} onChange={e => setLocal({ ...local, homepagePricing: { ...local.homepagePricing, highlightedTitle: e.target.value } })} placeholder="Tiêu đề nổi bật" className="px-3 py-2 border rounded-lg text-sm" />
+                        <input value={local.homepagePricing.subtitle} onChange={e => setLocal({ ...local, homepagePricing: { ...local.homepagePricing, subtitle: e.target.value } })} placeholder="Mô tả ngắn" className="px-3 py-2 border rounded-lg text-sm md:col-span-2" />
+                        <input value={local.homepagePricing.ctaLabel} onChange={e => setLocal({ ...local, homepagePricing: { ...local.homepagePricing, ctaLabel: e.target.value } })} placeholder="Nhãn nút xem thêm" className="px-3 py-2 border rounded-lg text-sm" />
+                        <input value={local.homepagePricing.ctaHref} onChange={e => setLocal({ ...local, homepagePricing: { ...local.homepagePricing, ctaHref: e.target.value } })} placeholder="/category/sua-chua" className="px-3 py-2 border rounded-lg text-sm" />
+                    </div>
+
+                    {local.homepagePricing.categories.map(category => (
+                        <div key={category.id} className="border rounded-xl bg-gray-50 p-4 space-y-3">
+                            <div className="flex flex-col md:flex-row gap-2">
+                                <input value={category.label} onChange={e => updatePricingCategory(category.id, { label: e.target.value })} placeholder="Tên nhóm" className="flex-1 px-3 py-2 border rounded-lg text-sm" />
+                                <select value={category.icon} onChange={e => updatePricingCategory(category.id, { icon: e.target.value as PricingIconName })} className="px-3 py-2 border rounded-lg text-sm bg-white">
+                                    <option value="smartphone">Điện thoại</option>
+                                    <option value="tablet">Máy tính bảng</option>
+                                    <option value="laptop">Laptop</option>
+                                    <option value="watch">Đồng hồ</option>
+                                </select>
+                                <button onClick={() => removePricingCategory(category.id)} className="px-3 py-2 text-red-500 hover:bg-red-50 rounded-lg" title="Xóa nhóm"><Trash2 size={16} /></button>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_140px] gap-2">
+                                <input
+                                    value={category.keywords.join(', ')}
+                                    onChange={e => updatePricingCategory(category.id, { keywords: e.target.value.split(',').map(keyword => keyword.trim()).filter(Boolean) })}
+                                    placeholder="Từ khóa lọc Firestore, VD: iphone, pin iphone"
+                                    className="px-3 py-2 border rounded-lg text-sm"
+                                />
+                                <input
+                                    type="number"
+                                    min="1"
+                                    max="20"
+                                    value={category.maxItems}
+                                    onChange={e => updatePricingCategory(category.id, { maxItems: Math.min(20, Math.max(1, Number(e.target.value) || 1)) })}
+                                    className="px-3 py-2 border rounded-lg text-sm"
+                                    title="Số dịch vụ tối đa"
+                                />
+                            </div>
+                            <p className="text-xs text-gray-500">Homepage tự đọc collection <code>services</code> Firestore và hiển thị dịch vụ active khớp ít nhất một từ khóa.</p>
+                        </div>
+                    ))}
+
+                    <button onClick={addPricingCategory} className="flex items-center gap-2 px-4 py-2.5 border-2 border-dashed border-gray-300 rounded-lg hover:border-orange-400 hover:bg-orange-50 text-gray-600 transition-colors w-full justify-center">
+                        <Plus size={16} /> Thêm nhóm bảng giá
+                    </button>
+                </div>
+                <SaveBtn onClick={() => save({ homepagePricing: local.homepagePricing }, 'Đã lưu bảng giá trang chủ!')} saving={saving} label="Lưu bảng giá" />
+            </SectionCard>
+
+            {/* 7. Homepage Reviews */}
+            <SectionCard title="Đánh giá khách hàng trang chủ" icon={<Star size={20} />}>
+                <div className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <input value={local.homepageReviews.eyebrow} onChange={e => setLocal({ ...local, homepageReviews: { ...local.homepageReviews, eyebrow: e.target.value } })} placeholder="Nhãn nhỏ phía trên" className="px-3 py-2 border rounded-lg text-sm" />
+                        <input value={local.homepageReviews.title} onChange={e => setLocal({ ...local, homepageReviews: { ...local.homepageReviews, title: e.target.value } })} placeholder="Tiêu đề section" className="px-3 py-2 border rounded-lg text-sm" />
+                        <input value={local.homepageReviews.googlePlaceId} onChange={e => setLocal({ ...local, homepageReviews: { ...local.homepageReviews, googlePlaceId: e.target.value } })} placeholder="Google Place ID của cửa hàng" className="px-3 py-2 border rounded-lg text-sm md:col-span-2" />
+                    </div>
+                    <p className="text-xs text-gray-500">Nội dung review luôn lấy trực tiếp từ Google Places API. Chỉ nhập Place ID tại đây; API key giữ server-side trong <code>GOOGLE_MAPS_API_KEY</code>.</p>
+                </div>
+                <SaveBtn onClick={() => save({ homepageReviews: local.homepageReviews }, 'Đã lưu đánh giá trang chủ!')} saving={saving} label="Lưu đánh giá" />
+            </SectionCard>
+
+        {/* 8. Homepage Section Layout */}
             <SectionCard title="Sắp xếp & Giao diện trang chủ" icon={<LayoutDashboard size={20} />}>
                 <p className="text-sm text-gray-500 mb-4">Sắp xếp thứ tự, bật/tắt và tuỳ chỉnh nền cho từng khối.</p>
                 <div className="space-y-3">

@@ -64,29 +64,6 @@ export default function Home({ ssrConfig }: { ssrConfig: SSRHomeConfig }) {
     .filter(s => s.visible)
     .sort((a, b) => a.order - b.order);
 
-  // Inject pricing_table if not found in config (for backward compatibility and immediate viewing)
-  if (!visibleSections.find(s => s.component === 'pricing_table')) {
-      visibleSections.splice(visibleSections.length > 0 ? visibleSections.length - 1 : 0, 0, {
-          id: 'temp-pricing',
-          component: 'pricing_table',
-          order: 98,
-          visible: true
-      });
-  }
-
-  // Inject google_reviews if not found in config
-  if (!visibleSections.find(s => s.component === 'google_reviews')) {
-      visibleSections.splice(visibleSections.length > 0 ? visibleSections.length - 1 : 0, 0, {
-          id: 'temp-google-reviews',
-          component: 'google_reviews',
-          order: 99,
-          visible: true
-      });
-  }
-  
-  // Re-sort just in case we injected items
-  visibleSections.sort((a, b) => a.order - b.order);
-
   return (
     <>
       {/* SEO for Homepage */}
