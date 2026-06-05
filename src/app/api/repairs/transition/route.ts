@@ -2,10 +2,9 @@ import { NextResponse, NextRequest } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requirePermission } from '@/lib/apiAuth';
 import { FieldValue } from 'firebase-admin/firestore';
-import type { RepairTicket, RepairWorkflowConfig } from '@/lib/types';
+import type { RepairTicket } from '@/lib/types';
+import { loadRepairWorkflow, requireWorkflowNode, workflowNodeHasFeature } from '@/lib/repairWorkflowServer';
 import { isChecklistComplete } from '@/lib/workflowFeatures';
-
-const LEGACY_TERMINAL_STATUSES = ['done', 'out', 'refund', 'bh_hoan_tat', 'bh_tu_choi', 'bh_refund'];
 
 interface RepairTransitionRequest {
     ticketId?: string;
@@ -55,54 +54,14 @@ export async function POST(request: NextRequest) {
 
             if (ticket.status === targetStatus) return { success: true };
 
-            // Dynamic Terminal Guard & AllowedNext
-            let isCurrentTerminal = false;
-            let isTargetTerminal = false;
-            let isAllowed = true;
-            let requireChecklist = false;
-            let requirePartsReady = false;
-
-            if (ticket.workflowConfigId) {
-                const wfRef = db.collection('system_config').doc('repair_workflows');
-                const wfSnap = await tx.get(wfRef);
-                if (wfSnap.exists) {
-                    const configs = wfSnap.data()?.configs as RepairWorkflowConfig[];
-                    const cfg = configs?.find(c => c.id === ticket.workflowConfigId);
-                    if (cfg) {
-                        const currentNode = cfg.nodes.find(n => n.id === ticket.status);
-                        const targetNode = cfg.nodes.find(n => n.id === targetStatus);
-                        
-                        if (currentNode?.isTerminal) isCurrentTerminal = true;
-                        if (targetNode?.isTerminal) isTargetTerminal = true;
-                        
-                        if (currentNode && currentNode.allowedNext) {
-                            if (!currentNode.allowedNext.includes(targetStatus)) {
-                                isAllowed = false;
-                            }
-                        }
-                        
-                        if (targetNode) {
-                            requireChecklist = !!targetNode.requireChecklist;
-                            requirePartsReady = !!targetNode.requirePartsReady;
-                        }
-                    }
-                }
-            } else {
-                // Legacy workflow
-                const legacyAllowed: Record<string, string[]> = {
-                    'new': ['dang_kiem_tra', 'cancel'],
-                    'dang_kiem_tra': ['bao_gia', 'repairing', 'cho_ban_giao_khach', 'cancel'],
-                    'bao_gia': ['repairing', 'cho_ban_giao_khach', 'cancel'],
-                    'repairing': ['cho_ban_giao_khach'],
-                    'cho_ban_giao_khach': ['done', 'out']
-                };
-                if (legacyAllowed[ticket.status] && !legacyAllowed[ticket.status].includes(targetStatus)) {
-                    isAllowed = false; // Fallback loose check
-                }
-            }
-
-            if (!isCurrentTerminal && LEGACY_TERMINAL_STATUSES.includes(ticket.status)) isCurrentTerminal = true;
-            if (!isTargetTerminal && LEGACY_TERMINAL_STATUSES.includes(targetStatus)) isTargetTerminal = true;
+            const workflow = await loadRepairWorkflow(tx, db, ticket);
+            const currentNode = requireWorkflowNode(workflow, ticket.status);
+            const targetNode = requireWorkflowNode(workflow, targetStatus);
+            const isCurrentTerminal = !!currentNode.isTerminal;
+            const isTargetTerminal = !!targetNode.isTerminal;
+            const isAllowed = currentNode.allowedNext?.includes(targetStatus) ?? false;
+            const requireChecklist = workflowNodeHasFeature(targetNode, 'requireChecklist');
+            const requirePartsReady = workflowNodeHasFeature(targetNode, 'requirePartsReady');
 
             if (isCurrentTerminal) {
                 throw new Error(`Phiếu đã ở trạng thái kết thúc (${ticket.status}), không thể thay đổi.`);
@@ -156,7 +115,7 @@ export async function POST(request: NextRequest) {
                 status: targetStatus,
                 statusTimeline: FieldValue.arrayUnion({
                     status: targetStatus,
-                    at: FieldValue.serverTimestamp(),
+                    at: new Date(),
                     by: caller.uid,
                     note: technicianNote || null
                 }),

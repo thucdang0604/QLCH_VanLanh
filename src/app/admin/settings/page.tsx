@@ -307,6 +307,8 @@ export default function SettingsPage() {
                                 </div>
                                 <button
                                     type="button"
+                                    title="Bật/Tắt xác minh vị trí"
+                                    aria-label="Bật/Tắt xác minh vị trí"
                                     onClick={() => setGeofence(g => ({ ...g, enabled: !g.enabled }))}
                                     className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors ${
                                         geofence.enabled ? 'bg-orange-500' : 'bg-gray-300'

@@ -107,6 +107,42 @@ export async function POST(request: NextRequest) {
                 customerSnap = await transaction.get(customerRef);
             }
 
+            // READ 3: Đọc taxonomy để lấy cấu hình bảo hành mặc định
+            const taxonomySnap = await transaction.get(db.collection('system_config').doc('taxonomy_settings'));
+            const retailTrees = taxonomySnap.data()?.taxonomy?.retail || [];
+
+            function resolveWarranty(productData: { warrantyType?: string; warrantyMonths?: string | number; category?: string; [key: string]: unknown }): { warrantyType: string, warrantyMonths: number } | null {
+                // Ưu tiên override từ sản phẩm
+                if (productData.warrantyType && productData.warrantyType !== 'none') {
+                    return { warrantyType: productData.warrantyType, warrantyMonths: Number(productData.warrantyMonths) || 0 };
+                }
+                if (productData.warrantyType === 'none') return null;
+
+                // Fallback xuống danh mục
+                const categoryPath = productData.category || '';
+                if (!categoryPath) return null;
+
+                const segments = categoryPath.split('/');
+                let currentNodes = retailTrees;
+                let lastFoundWarranty: { warrantyType: string, warrantyMonths: number } | null = null;
+
+                for (let i = 0; i < segments.length; i++) {
+                    const partialId = segments.slice(0, i + 1).join('/');
+                    const node = currentNodes.find((n: { id?: string; slug?: string; warrantyType?: string; warrantyMonths?: string | number; children?: Record<string, unknown>[] }) => n.id === partialId || n.slug === segments[i]);
+                    if (!node) break;
+
+                    if (node.warrantyType && node.warrantyType !== 'none') {
+                        lastFoundWarranty = { warrantyType: node.warrantyType, warrantyMonths: Number(node.warrantyMonths) || 0 };
+                    } else if (node.warrantyType === 'none') {
+                        lastFoundWarranty = null;
+                    }
+
+                    if (!node.children || node.children.length === 0) break;
+                    currentNodes = node.children;
+                }
+                return lastFoundWarranty;
+            }
+
             // Validate aggregated totals against available stock
             for (const [productId, totalQty] of preAggregated.entries()) {
                 const productSnap = productDocs.get(productId)!;
@@ -130,6 +166,8 @@ export async function POST(request: NextRequest) {
                 const promoPrice = productData.price_promo || 0;
                 const finalPrice = promoPrice > 0 ? promoPrice : originalPrice;
 
+                const warrantyInfo = resolveWarranty(productData);
+
                 normalizedItems.push({
                     id: cartItemId,
                     productId,
@@ -139,6 +177,9 @@ export async function POST(request: NextRequest) {
                     image: productData.images?.[0] || productData.imageUrl || productData.image || item.image || '',
                     color: item.color || null,
                     storage: item.storage || null,
+                    warrantyType: warrantyInfo?.warrantyType || 'none',
+                    warrantyMonths: warrantyInfo?.warrantyMonths || 0,
+                    imeis: [], // To be filled by Admin later
                 });
 
                 subtotal_amount += finalPrice * quantity;

@@ -28,6 +28,8 @@ interface CurrencyInputProps {
     min?: number;
     id?: string;
     disabled?: boolean;
+    title?: string;
+    'aria-label'?: string;
 }
 
 /**
@@ -47,6 +49,8 @@ export default function CurrencyInput({
     min,
     id,
     disabled,
+    title,
+    'aria-label': ariaLabel,
 }: CurrencyInputProps) {
     const displayValue = value === '' || value === 0 ? '' : formatVND(value);
 
@@ -75,6 +79,8 @@ export default function CurrencyInput({
             placeholder={placeholder}
             required={required}
             disabled={disabled}
+            title={title}
+            aria-label={ariaLabel}
         />
     );
 }

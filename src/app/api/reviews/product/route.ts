@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { FieldValue } from 'firebase-admin/firestore';
+import { getAdminDb, isAdminAvailable } from '@/lib/firebaseAdmin';
 import { isRateLimited } from '@/lib/rateLimit';
 
 function getNextMidnightUTC7(): number {
@@ -49,6 +49,13 @@ export async function POST(request: NextRequest) {
 
         const { productId, productName, customerName, phone, rating, content, images } = body;
 
+        if (!isAdminAvailable()) {
+            return NextResponse.json(
+                { error: 'Service unavailable' },
+                { status: 503 }
+            );
+        }
+
         // ── 3. Validate required fields ──
         if (!productId || typeof productId !== 'string') {
             return NextResponse.json(
@@ -93,10 +100,10 @@ export async function POST(request: NextRequest) {
             content: (content || '').trim(),
             images: validImages,
             status: 'pending', // Phải được duyệt mới hiển thị
-            createdAt: serverTimestamp(),
+            createdAt: FieldValue.serverTimestamp(),
         };
 
-        const docRef = await addDoc(collection(db, 'product_reviews'), review);
+        const docRef = await getAdminDb().collection('product_reviews').add(review);
 
         return NextResponse.json({
             success: true,

@@ -1,5 +1,9 @@
-const fs = require('fs');
-let code = fs.readFileSync('m:/QLCH_VanLanh/roadmap/ui/app.js', 'utf8');
-code = code.replace(/ğı?c \<code>\.codex-security-scans<\/code>\/g, 'ğı?c <code>.codex-security-scans</code>');
-code = code.replace(/ğı?c \\.codex-security-scans\/g, 'ğı?c <code>.codex-security-scans</code>');
-fs.writeFileSync('m:/QLCH_VanLanh/roadmap/ui/app.js', code, 'utf8');
+ï»¿const fs = require('fs');
+
+const appPath = 'm:/QLCH_VanLanh/roadmap/ui/app.js';
+let code = fs.readFileSync(appPath, 'utf8');
+
+code = code.replace(/Ä‘á»c <code>\.codex-security-scans<\/code>/g, 'Ä‘á»c <code>.codex-security-scans</code>');
+code = code.replace(/Ä‘á»c \\.codex-security-scans/g, 'Ä‘á»c <code>.codex-security-scans</code>');
+
+fs.writeFileSync(appPath, code, 'utf8');

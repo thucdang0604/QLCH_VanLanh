@@ -2,9 +2,8 @@ import { NextResponse, NextRequest } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requirePermission } from '@/lib/apiAuth';
 import { FieldValue } from 'firebase-admin/firestore';
-import type { RepairTicket, RepairWorkflowConfig } from '@/lib/types';
-
-const LEGACY_TERMINAL_STATUSES = ['done', 'out', 'refund', 'bh_hoan_tat', 'bh_tu_choi', 'bh_refund'];
+import type { RepairTicket } from '@/lib/types';
+import { loadRepairWorkflow, requireWorkflowNode } from '@/lib/repairWorkflowServer';
 
 export async function POST(request: NextRequest) {
     try {
@@ -49,24 +48,9 @@ export async function POST(request: NextRequest) {
                 throw new Error(`Không thể sửa chi phí khi phiếu đã thanh toán hoặc hoàn tiền.`);
             }
 
-            let isTerminal = false;
-            if (ticket.workflowConfigId) {
-                const wfRef = db.collection('system_config').doc('repair_workflows');
-                const wfSnap = await tx.get(wfRef);
-                if (wfSnap.exists) {
-                    const configs = wfSnap.data()?.configs as RepairWorkflowConfig[];
-                    const cfg = configs?.find(c => c.id === ticket.workflowConfigId);
-                    if (cfg) {
-                        const currentNode = cfg.nodes.find(n => n.id === ticket.status);
-                        if (currentNode?.isTerminal) {
-                            isTerminal = true;
-                        }
-                    }
-                }
-            }
-            if (!isTerminal && LEGACY_TERMINAL_STATUSES.includes(ticket.status)) {
-                isTerminal = true;
-            }
+            const workflow = await loadRepairWorkflow(tx, db, ticket);
+            const currentNode = requireWorkflowNode(workflow, ticket.status);
+            const isTerminal = !!currentNode.isTerminal;
 
             if (isTerminal) {
                 throw new Error(`Không thể sửa chi phí khi phiếu đã ở trạng thái kết thúc (${ticket.status})`);

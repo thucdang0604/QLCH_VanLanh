@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 /* eslint-disable @next/next/no-img-element */
 import { useState, useCallback } from 'react';
@@ -105,7 +105,7 @@ function TaxonomySuggestPopup({ trees, onSelect, onClose }: {
                         <FolderTree size={16} className="text-orange-500" />
                         Gợi ý từ Danh mục
                     </h3>
-                    <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded"><X size={16} /></button>
+                    <button title="Đóng" aria-label="Đóng" onClick={onClose} className="p-1 hover:bg-gray-100 rounded"><X size={16} /></button>
                 </div>
                 <div className="overflow-y-auto max-h-[55vh] p-4 space-y-3">
                     {trees.map(({ label, nodes }) => (
@@ -115,6 +115,8 @@ function TaxonomySuggestPopup({ trees, onSelect, onClose }: {
                                 <div key={l1.id} className="ml-1">
                                     <div className="flex items-center gap-2">
                                         <button
+                                            title="Mở rộng"
+                                            aria-label="Mở rộng"
                                             onClick={() => setExpandedL1(expandedL1 === l1.id ? null : l1.id)}
                                             className="text-gray-400 hover:text-gray-600"
                                         >
@@ -132,6 +134,8 @@ function TaxonomySuggestPopup({ trees, onSelect, onClose }: {
                                         <div key={l2.id} className="ml-6">
                                             <div className="flex items-center gap-2">
                                                 <button
+                                                    title="Mở rộng"
+                                                    aria-label="Mở rộng"
                                                     onClick={() => setExpandedL2(expandedL2 === l2.id ? null : l2.id)}
                                                     className="text-gray-400 hover:text-gray-600"
                                                 >

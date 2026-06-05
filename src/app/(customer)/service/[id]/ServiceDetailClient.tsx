@@ -18,7 +18,7 @@ import Image from 'next/image';
 import { useConfig } from '@/lib/ConfigContext';
 import VideoEmbed from '@/components/VideoEmbed';
 
-interface ServiceData {
+export interface ServiceData {
     id: string;
     name: string;
     price?: number;

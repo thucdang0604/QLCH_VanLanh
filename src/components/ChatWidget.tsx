@@ -77,7 +77,7 @@ export default function ChatWidget() {
         return () => {
             cancelled = true;
         };
-    }, [user]);
+    }, [user, authLoading]);
 
     // Listen to messages for this room — only when chat is OPEN
     useEffect(() => {

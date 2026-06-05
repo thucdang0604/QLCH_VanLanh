@@ -466,6 +466,21 @@ tsc --noEmit doc .next/types stale co the fail gia sau doi route/page/layout.
 tsconfig include .next/types nhung generated files co the stale.
 ### Solution
 Chay next typegen truoc tsc trong pipeline verify.
+## BUG-FIREBASE-DEPLOY-SHARP-001: Firebase SSR deploy fail vi npm ci va sharp peer conflict
+- **Status:** fixed
+- **Severity:** high
+- **Module:** Build
+- **Files:** package.json, pnpm-lock.yaml, roadmap/ai/modules/system-content.md, roadmap/ai/dashboard.md
+### Symptom
+Local <code>pnpm typecheck</code> va <code>pnpm build</code> pass nhung <code>firebase deploy --only hosting</code> fail o buoc update Functions SSR: <code>firebase-frameworks-qlch-vanlanh:ssrqlchvanlanh(asia-southeast1)</code>. Log Cloud Build dung tai <code>npm ci</code> voi loi <code>package.json</code> va <code>package-lock.json</code> khong dong bo, thuong thay <code>sharp@0.34.5</code> khong thoa <code>sharp@0.33.5</code> hoac thieu cac goi <code>@img/sharp-*</code>.
+### Cause
+Firebase Frameworks sinh bundle SSR trong <code>.firebase/.../functions</code> va bundle nay dung npm lock rieng, du du an goc dung pnpm. <code>firebase-frameworks@0.11.8</code> chi chap nhan peer optional <code>sharp ^0.32 || ^0.33</code>, trong khi <code>next@15.5.x</code> can optional <code>sharp ^0.34.3</code>. Neu root function khong pin <code>sharp</code>, lock npm generated de bi lech va Cloud Build <code>npm ci</code> se fail. Warning <code>@zxing/library requires node >=24</code> la warning, khong phai nguyen nhan dung deploy.
+### Solution
+Giu du an dung pnpm: root <code>package.json</code> phai co <code>packageManager: pnpm@10.30.3</code>, <code>engines.node: 22</code>, va <code>verify</code> chay bang pnpm. Them root dependency <code>sharp: 0.33.5</code> de thoa peer cua <code>firebase-frameworks</code>; Next van tu giu nested <code>sharp@0.34.x</code>. Sau khi sua dependency, chay <code>pnpm install</code>, clean <code>.firebase/</code>, roi deploy lai.
+### Verification
+<code>pnpm list sharp next firebase-frameworks --depth 1</code> phai cho thay root co <code>sharp@0.33.5</code> va <code>next</code> co nested <code>sharp@0.34.x</code>. Da verify <code>pnpm typecheck</code> pass, <code>pnpm build</code> pass, generated function <code>npm ci --dry-run</code> pass, va <code>firebase deploy --only hosting</code> pass.
+### Guardrail
+Khong commit <code>package-lock.json</code> hoac artifact <code>.firebase/</code> trong repo pnpm. Khi deploy fail sau build local pass, doc dung stage log: neu fail tai Cloud Build <code>npm ci</code>, kiem tra generated function lock, package manager, va peer conflict <code>firebase-frameworks</code>/<code>sharp</code> truoc khi sua source UI/TypeScript.
 ## BUG-MIGRATE-INVENTORY-SCRIPT-MISSING-001: package.json migrate:inventory dang tham chieu script bi thieu
 - **Status:** open
 - **Severity:** medium
@@ -477,3 +492,32 @@ Sau clean code, <code>scripts/migrate-active-orders.ts</code> khong ton tai nhun
 Cleanup da xoa script nhung chua xoa/cap nhat package script va roadmap.
 ### Solution
 Khoi phuc <code>scripts/migrate-active-orders.ts</code> neu can migration du lieu cu, hoac xoa script <code>migrate:inventory</code> sau khi xac nhan migration da chay va khong can nua.
+## Lỗi thuộc Module: encoding
+# 🐛 Bugs
+## BUG-ENCODING-001: Mojibake (Lỗi font tiếng Việt) trong technician/page.tsx
+- **Status:** fixed
+- **Severity:** medium
+- **Module:** Encoding
+- **Files:** src/app/admin/technician/page.tsx
+### Symptom
+5 chuỗi tiếng Việt trong file `technician/page.tsx` bị hiển thị sai font (mojibake). Ví dụ: `Báº¡n cĂ³ cháº¯c` thay vì `Bạn có chắc`, `Lá»—i khi cáº­p nháº­t` thay vì `Lỗi khi cập nhật`.
+### Cause
+**Phân tích**: Các chuỗi UTF-8 tiếng Việt bị **double-encode** — byte UTF-8 bị đọc lại như Latin-1/Windows-1252 rồi encode lại thành UTF-8. Nguyên nhân gốc: một tool hoặc editor đã lưu file với encoding sai (ví dụ: save as Latin-1 rồi reopen as UTF-8, hoặc AI agent ghi file không đảm bảo UTF-8 BOM/encoding).
+### Solution
+**Giải pháp đã áp dụng**: Thay thế thủ công 5 chuỗi bị lỗi bằng tiếng Việt đúng.
+
+**⚠️ QUY TẮC PHÒNG TRÁNH CHO AI AGENT:**
+1. **KHÔNG BAO GIỜ** dùng regex replace hoặc bulk string replacement trên các chuỗi tiếng Việt có dấu mà không verify encoding output.
+2. Khi sửa file chứa tiếng Việt, **LUÔN** kiểm tra lại file sau khi lưu (view lại ít nhất 1 dòng có dấu) để đảm bảo không bị mojibake.
+3. Nếu phát hiện chuỗi bị garbled (ký tự như `Ă`, `á»`, `áº`, `Æ°`...), đó là dấu hiệu UTF-8 double-encoding. Sửa bằng cách thay bằng chuỗi tiếng Việt đúng.
+4. Khi tạo file mới hoặc ghi nội dung, đảm bảo output encoding là **UTF-8 without BOM**.
+
+### Code
+```
+// 5 chuỗi đã sửa tại technician/page.tsx:
+// Line 261: 'Bạn có chắc chắn muốn xóa linh kiện này khỏi phiếu?'
+// Line 265: 'Linh kiện này chưa có mã dòng (partLineId). Vui lòng báo Admin chạy migrate.'
+// Line 416: 'Lỗi khi cập nhật trạng thái'
+// Line 418: 'Cập nhật trạng thái thành công.'
+// Line 424: 'Lỗi khi cập nhật trạng thái.'
+```

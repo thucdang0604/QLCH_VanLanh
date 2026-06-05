@@ -13,7 +13,7 @@ export interface User {
 // Firestore timestamp types
 export type FirestoreTimestamp = import('firebase/firestore').Timestamp;
 export type FirestoreWriteTimestamp = import('firebase/firestore').FieldValue;
-export type FirestoreDateValue = FirestoreTimestamp | FirestoreWriteTimestamp;
+export type FirestoreDateValue = FirestoreTimestamp | FirestoreWriteTimestamp | Date | number;
 
 // Category and Brand types (Dynamic)
 export interface Category {
@@ -36,6 +36,8 @@ export interface TaxonomyNode {
     icon?: string;
     seoKeywords?: string;
     seoDescription?: string;
+    warrantyType?: 'none' | 'warrantyDevice' | 'warrantyRepair' | 'warrantyAccessory';
+    warrantyMonths?: number;
     children?: TaxonomyNode[];
 }
 
@@ -82,9 +84,11 @@ export interface Product {
     status: 'active' | 'hidden' | 'inactive';
     condition?: 'new' | 'like-new' | 'used';
     isFlashSale?: boolean;
+    warrantyType?: 'none' | 'warrantyDevice' | 'warrantyRepair' | 'warrantyAccessory';
     sold?: number;
     quality?: string;
     partType?: string;
+    warrantyMonths?: number;
     description?: string;
     videoEmbedUrl?: string;
     stock?: number;
@@ -128,6 +132,11 @@ export interface OrderItem {
     quantity: number;
     price: number;
     image?: string;
+    imeis?: string[];
+    warrantyMonths?: number;
+    warrantyStartedAt?: number;
+    warrantyExpiresAt?: number;
+    warrantyType?: 'none' | 'warrantyDevice' | 'warrantyAccessory';
 }
 
 export interface CustomerInfo {

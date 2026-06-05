@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { FieldValue } from 'firebase-admin/firestore';
+import { getAdminDb } from '@/lib/firebaseAdmin';
 
 // This API route creates an admin user in Firestore
 // Usage: POST /api/seed-admin with body { uid, email }
@@ -37,23 +37,23 @@ export async function POST(request: NextRequest) {
         }
 
         // Check if user already exists
-        const userRef = doc(db, 'users', uid);
-        const userDoc = await getDoc(userRef);
+        const userRef = getAdminDb().collection('users').doc(uid);
+        const userDoc = await userRef.get();
 
-        if (userDoc.exists()) {
+        if (userDoc.exists) {
             // Update to admin
-            await setDoc(userRef, {
+            await userRef.set({
                 ...userDoc.data(),
                 role: 'admin',
-                updatedAt: serverTimestamp(),
+                updatedAt: FieldValue.serverTimestamp(),
             }, { merge: true });
         } else {
             // Create new admin user
-            await setDoc(userRef, {
+            await userRef.set({
                 email,
                 displayName: 'Admin',
                 role: 'admin',
-                createdAt: serverTimestamp(),
+                createdAt: FieldValue.serverTimestamp(),
             });
         }
 
@@ -86,10 +86,10 @@ export async function GET(request: NextRequest) {
     }
 
     try {
-        const userRef = doc(db, 'users', uid);
-        const userDoc = await getDoc(userRef);
+        const userRef = getAdminDb().collection('users').doc(uid);
+        const userDoc = await userRef.get();
 
-        if (!userDoc.exists()) {
+        if (!userDoc.exists) {
             return NextResponse.json({
                 success: true,
                 isAdmin: false,
@@ -97,7 +97,7 @@ export async function GET(request: NextRequest) {
             });
         }
 
-        const data = userDoc.data();
+        const data = userDoc.data() ?? {};
         return NextResponse.json({
             success: true,
             isAdmin: data.role === 'admin',

@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
 import { useState } from 'react';
@@ -33,7 +32,7 @@ const formatPrice = (price: number | string | undefined) => {
     }).format(numPrice).replace('₫', 'đ');
 };
 
-interface ProductData {
+export interface ProductData {
     id: string;
     name: string;
     _type?: string;
@@ -84,10 +83,9 @@ interface ReviewItem {
 interface ProductDetailClientProps {
     data: ProductData;
     variants?: VariantItem[];
-    reviews?: ReviewItem[];
 }
 
-export default function ProductDetailClient({ data, variants = [], reviews = [] }: ProductDetailClientProps) {
+export default function ProductDetailClient({ data, variants = [] }: ProductDetailClientProps) {
     const [activeImage, setActiveImage] = useState(0);
     const [quantity, setQuantity] = useState(1);
     const { addItem } = useCart();
@@ -128,6 +126,8 @@ export default function ProductDetailClient({ data, variants = [], reviews = [] 
                             <button
                                 key={idx}
                                 onClick={() => setActiveImage(idx)}
+                                title={`Xem ảnh ${idx + 1}`}
+                                aria-label={`Xem ảnh ${idx + 1}`}
                                 className={`relative w-20 h-20 flex-shrink-0 rounded-lg overflow-hidden border-2 transition-all ${
                                     activeImage === idx ? 'border-orange-500 ring-2 ring-orange-100' : 'border-gray-100 hover:border-orange-200'
                                 }`}
@@ -234,6 +234,8 @@ export default function ProductDetailClient({ data, variants = [], reviews = [] 
                         <div className="flex items-center border-2 border-gray-100 rounded-xl bg-white h-12">
                             <button
                                 onClick={() => setQuantity(Math.max(1, quantity - 1))}
+                                title="Giảm số lượng"
+                                aria-label="Giảm số lượng"
                                 className="px-4 h-full hover:bg-gray-50 transition-colors"
                             >
                                 <Minus size={16} />
@@ -241,6 +243,8 @@ export default function ProductDetailClient({ data, variants = [], reviews = [] 
                             <span className="w-12 text-center font-bold">{quantity}</span>
                             <button
                                 onClick={() => setQuantity(quantity + 1)}
+                                title="Tăng số lượng"
+                                aria-label="Tăng số lượng"
                                 className="px-4 h-full hover:bg-gray-50 transition-colors"
                             >
                                 <Plus size={16} />
@@ -277,7 +281,7 @@ export default function ProductDetailClient({ data, variants = [], reviews = [] 
                         </Link>
                     )}
 
-                    <button className="h-12 w-12 flex items-center justify-center border-2 border-gray-100 rounded-xl hover:bg-red-50 hover:border-red-100 group transition-all">
+                    <button title="Thêm vào danh sách yêu thích" aria-label="Thêm vào danh sách yêu thích" className="h-12 w-12 flex items-center justify-center border-2 border-gray-100 rounded-xl hover:bg-red-50 hover:border-red-100 group transition-all">
                         <Heart size={20} className="text-gray-400 group-hover:text-red-500 transition-colors" />
                     </button>
                 </div>
@@ -304,7 +308,7 @@ export default function ProductDetailClient({ data, variants = [], reviews = [] 
     );
 }
 
-export function ProductReviews({ data, reviews = [] }: { data: any, reviews: any[] }) {
+export function ProductReviews({ data, reviews = [] }: { data: ProductData, reviews?: ReviewItem[] }) {
     if (data._type !== 'product') return null;
     
     return (
@@ -379,7 +383,7 @@ function ReviewForm({ productId, productName }: { productId: string; productName
                 />
                 <div className="flex items-center gap-1">
                     {Array.from({ length: 5 }).map((_, i) => (
-                        <button key={i} type="button" onClick={() => setRating(i + 1)}>
+                        <button key={i} type="button" title={`Đánh giá ${i + 1} sao`} aria-label={`Đánh giá ${i + 1} sao`} onClick={() => setRating(i + 1)}>
                             <Star size={24}
                                 className={i < rating ? 'text-yellow-400 fill-yellow-400' : 'text-gray-200 hover:text-yellow-300'}
                             />

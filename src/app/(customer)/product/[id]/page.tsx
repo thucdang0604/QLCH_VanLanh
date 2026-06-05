@@ -1,11 +1,10 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { Metadata } from 'next';
 import Link from 'next/link';
 import { ChevronRight, Package } from 'lucide-react';
 import { SITE_URL } from "@/lib/constants";
 import { sanitizeHtml } from '@/lib/sanitizeHtml';
 import { fetchDetailItem, fetchProductVariants, fetchProductReviews, fetchRelatedItems } from '../../_lib/server-queries';
-import ProductDetailClient, { ProductReviews } from './ProductDetailClient';
+import ProductDetailClient, { ProductReviews, type ProductData } from './ProductDetailClient';
 import Image from 'next/image';
 
 export const revalidate = 30;
@@ -49,13 +48,10 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
 
     // Fetch variants + reviews in parallel
     const seriesId = data ? String(data.seriesId || '') : '';
-    const brand = data ? String(data.brand || '') : '';
-    const category = data ? String(data.category || '') : '';
-
     const [variants, reviews, related] = await Promise.all([
         seriesId ? fetchProductVariants(seriesId, data?.id || id) : Promise.resolve([]),
         data?._type === 'product' ? fetchProductReviews(data?.id || id) : Promise.resolve([]),
-        fetchRelatedItems(brand, category)
+        fetchRelatedItems()
     ]);
 
     if (!data) {
@@ -125,7 +121,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
                     <span className="text-gray-800 font-medium line-clamp-1">{String(data.name ?? '')}</span>
                 </nav>
 
-                <ProductDetailClient data={data as any} variants={variants} reviews={reviews} />
+                <ProductDetailClient data={data as unknown as ProductData} variants={variants} />
 
                 {/* Specs Table */}
                 {!!(data.specs) && Object.keys(data.specs as Record<string, unknown>).length > 0 && (
@@ -174,7 +170,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
                             <div className="mb-6 border-b border-gray-100 pb-6 last:border-0 last:pb-0">
                                 <h3 className="text-lg font-semibold text-gray-800 mb-4">Dịch vụ sửa chữa</h3>
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                    {related.services.map((item: any) => (
+                                    {related.services.map((item) => (
                                         <Link key={item.id} href={`/product/${item.slug || item.id}`} className="group bg-white rounded-xl border border-gray-100 p-3 hover:border-orange-300 hover:shadow-md transition-all flex flex-col h-full">
                                             {item.imageUrl && (
                                                 <div className="relative w-full aspect-square rounded-lg overflow-hidden bg-gray-50 mb-3">
@@ -198,7 +194,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
                             <div className="pt-2">
                                 <h3 className="text-lg font-semibold text-gray-800 mb-4">Phụ kiện khuyến nghị</h3>
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                    {related.accessories.map((item: any) => (
+                                    {related.accessories.map((item) => (
                                         <Link key={item.id} href={`/product/${item.slug || item.id}`} className="group bg-white rounded-xl border border-gray-100 p-3 hover:border-orange-300 hover:shadow-md transition-all flex flex-col h-full">
                                             {item.imageUrl && (
                                                 <div className="relative w-full aspect-square rounded-lg overflow-hidden bg-gray-50 mb-3">
@@ -221,7 +217,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
                 )}
 
                 {/* Reviews */}
-                <ProductReviews data={data as any} reviews={reviews} />
+                <ProductReviews data={data as unknown as ProductData} reviews={reviews} />
             </div>
         </div>
     );

@@ -277,6 +277,7 @@ export const fetchProductVariants = cache(async (seriesId: string, excludeId: st
         .get();
 
     return snapshot.docs
+        .filter(doc => doc.id !== excludeId)
         .map(doc => {
             const data = doc.data();
             return {
@@ -324,7 +325,7 @@ export const fetchProductReviews = cache(async (productId: string) => {
 /**
  * Fetch related services and accessories for a product.
  */
-export const fetchRelatedItems = cache(async (brand: string, currentCategory: string) => {
+export const fetchRelatedItems = cache(async () => {
     if (!isAdminAvailable()) return { services: [], accessories: [] };
 
     const db = getAdminDb();

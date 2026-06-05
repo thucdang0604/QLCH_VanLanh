@@ -1,4 +1,5 @@
 import React from 'react';
+import Image from 'next/image';
 import { Plus, Trash2, X } from 'lucide-react';
 import { ReceiptConfig } from './page';
 
@@ -240,9 +241,12 @@ export function WarrantyPreview({ globalConfig, warrantyConfig, type }: Warranty
                         <div style={{ fontSize: 7, fontWeight: 700 }}>CSKH/Zalo: {globalConfig.hotline}</div>
                     </div>
                 </div>
-                <img 
+                <Image
                     src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&margin=2&data=HD-123456" 
                     alt="QR Code" 
+                    width={45}
+                    height={45}
+                    unoptimized
                     style={{ width: 45, height: 45, objectFit: 'contain', border: '1px solid #000', padding: 2 }} 
                 />
             </div>
