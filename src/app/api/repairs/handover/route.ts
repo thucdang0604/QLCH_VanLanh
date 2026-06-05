@@ -1,8 +1,8 @@
-import { NextResponse, NextRequest } from 'next/server';
+﻿import { NextResponse, NextRequest } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requirePermission } from '@/lib/apiAuth';
 import { FieldValue } from 'firebase-admin/firestore';
-import type { RepairTicket, RepairWorkflowConfig } from '@/lib/types';
+import type { RepairTicket } from '@/lib/types';
 import { calculateAndSaveCommissionsServer } from '@/lib/commissionCalcServer';
 
 const LEGACY_TERMINAL_STATUSES = ['done', 'out', 'refund', 'bh_hoan_tat', 'bh_tu_choi', 'bh_refund'];
@@ -10,7 +10,7 @@ const LEGACY_TERMINAL_STATUSES = ['done', 'out', 'refund', 'bh_hoan_tat', 'bh_tu
 export async function POST(request: NextRequest) {
     try {
         const caller = await requirePermission(request, 'manage_repairs');
-        
+
         const body = await request.json();
         const { ticketId, targetStatus, ticketVersion, idempotencyKey } = body;
 
@@ -34,48 +34,51 @@ export async function POST(request: NextRequest) {
 
             const ticketRef = db.collection('repairs').doc(ticketId);
             const ticketSnap = await tx.get(ticketRef);
-            
+
             if (!ticketSnap.exists) {
-                throw new Error('Phiếu sửa chữa không tồn tại.');
+                throw new Error('Phiáº¿u sá»­a chá»¯a khĂ´ng tá»“n táº¡i.');
             }
 
             const ticket = ticketSnap.data() as RepairTicket;
 
             if (ticket.version !== undefined && ticket.version !== ticketVersion) {
-                throw new Error('Dữ liệu đã bị thay đổi bởi người khác. Vui lòng tải lại trang.');
+                throw new Error('Dá»¯ liá»‡u Ä‘Ă£ bá»‹ thay Ä‘á»•i bá»Ÿi ngÆ°á»i khĂ¡c. Vui lĂ²ng táº£i láº¡i trang.');
             }
 
             if (ticket.status === targetStatus) return { success: true };
 
-            // Terminal Guard
+            // Terminal Guard & Warranty Rules Config
             let isTargetTerminal = false;
-            if (ticket.workflowConfigId) {
-                const wfRef = db.collection('system_config').doc('repair_workflows');
-                const wfSnap = await tx.get(wfRef);
-                if (wfSnap.exists) {
-                    const configs = wfSnap.data()?.configs as RepairWorkflowConfig[];
-                    const cfg = configs?.find(c => c.id === ticket.workflowConfigId);
-                    if (cfg) {
-                        const targetNode = cfg.nodes.find(n => n.id === targetStatus);
-                        if (targetNode?.isTerminal) {
-                            isTargetTerminal = true;
-                        }
+            let warrantyRules: Record<string, unknown>[] = [];
+            const configSnap = await tx.get(db.collection('system_config').doc('repairs'));
+            if (configSnap.exists) {
+                const configData = configSnap.data();
+                warrantyRules = configData?.warrantyRules || [];
+                const workflow = ticket.ticketType === 'warranty'
+                    ? configData?.warrantyStatuses
+                    : configData?.repairStatuses ?? configData?.statuses;
+
+                if (Array.isArray(workflow)) {
+                    const targetNode = workflow.find((n: { id?: string; isTerminal?: boolean }) => n.id === targetStatus);
+                    if (targetNode?.isTerminal) {
+                        isTargetTerminal = true;
                     }
                 }
             }
+
             if (!isTargetTerminal && LEGACY_TERMINAL_STATUSES.includes(targetStatus)) {
                 isTargetTerminal = true;
             }
 
             if (!isTargetTerminal) {
-                throw new Error(`Trạng thái ${targetStatus} không phải là trạng thái Bàn giao (Kết thúc). Vui lòng dùng chức năng Chuyển Trạng Thái.`);
+                throw new Error(`Tráº¡ng thĂ¡i ${targetStatus} khĂ´ng pháº£i lĂ  tráº¡ng thĂ¡i BĂ n giao (Káº¿t thĂºc). Vui lĂ²ng dĂ¹ng chá»©c nÄƒng Chuyá»ƒn Tráº¡ng ThĂ¡i.`);
             }
 
             // Check if any selected part missing priceConfirmedAt
             const selectedParts = (ticket.parts || []).filter(p => p.status === 'selected');
             const missingSnapshot = selectedParts.find(p => !p.priceConfirmedAt);
             if (missingSnapshot) {
-                throw new Error(`Linh kiện "${missingSnapshot.productName}" chưa có snapshot giá. Yêu cầu quản trị viên đối soát trước khi bàn giao.`);
+                throw new Error(`Linh kiá»‡n "${missingSnapshot.productName}" chÆ°a cĂ³ snapshot giĂ¡. YĂªu cáº§u quáº£n trá»‹ viĂªn Ä‘á»‘i soĂ¡t trÆ°á»›c khi bĂ n giao.`);
             }
 
             // Recompute payment strictly
@@ -89,7 +92,7 @@ export async function POST(request: NextRequest) {
                 status: targetStatus,
                 statusTimeline: FieldValue.arrayUnion({
                     status: targetStatus,
-                    at: FieldValue.serverTimestamp(),
+                    at: new Date(),
                     by: caller.uid
                 }),
                 payment: {
@@ -103,10 +106,22 @@ export async function POST(request: NextRequest) {
 
             const isWarranty = targetStatus.startsWith('bh_');
 
+            // --- READ PHASE ---
+            let custSnap: FirebaseFirestore.DocumentSnapshot | null = null;
+            let custRef: FirebaseFirestore.DocumentReference | null = null;
+            const productDocs = new Map<string, { ref: FirebaseFirestore.DocumentReference; data: FirebaseFirestore.DocumentData }>();
+
             if (!isWarranty) {
-                // Stock Deduction
+                // Read customer
+                if (ticket.customer?.phone) {
+                    const phone = ticket.customer.phone;
+                    custRef = db.collection('customers').doc(phone);
+                    custSnap = await tx.get(custRef);
+                }
+
+
+                // Read products
                 if (selectedParts.length > 0) {
-                    const productDocs = new Map<string, { ref: FirebaseFirestore.DocumentReference; data: FirebaseFirestore.DocumentData }>();
                     for (const p of selectedParts) {
                         if (p.productId && !productDocs.has(p.productId)) {
                             const pRef = db.collection('products').doc(p.productId);
@@ -116,28 +131,89 @@ export async function POST(request: NextRequest) {
                             }
                         }
                     }
+                }
+            }
+            // --- END READ PHASE ---
 
+            if (!isWarranty) {
+                // Stamp Warranty
+                if (ticket.parts && ticket.parts.length > 0) {
+                    const ruleMap = new Map<string, number>();
+                    for (const r of warrantyRules) {
+                        if (typeof r.partType === 'string') {
+                            ruleMap.set(r.partType, Number(r.warrantyMonths) || 0);
+                        }
+                    }
+
+                    const nowMs = Date.now();
+                    ticket.parts = ticket.parts.map(p => {
+                        const partStatus = String(p.status || '');
+                        if (partStatus === 'rejected' || partStatus === 'cancelled') return p;
+                        if (p.warrantyExpiresAt) return p;
+
+                        const pData = p.productId ? productDocs.get(p.productId)?.data : null;
+                        const rawPartType = String(p.partType || pData?.partType || '');
+                        const partType = rawPartType.trim().toLowerCase();
+
+                        let months = 0;
+                        // Find exact match (case-insensitive)
+                        for (const [key, val] of ruleMap.entries()) {
+                            if (key.trim().toLowerCase() === partType) {
+                                months = val;
+                                break;
+                            }
+                        }
+                        // Fallback to "KhĂ¡c"
+                        if (months === 0 && partType !== '') {
+                             for (const [key, val] of ruleMap.entries()) {
+                                if (key.trim().toLowerCase() === 'khĂ¡c') {
+                                    months = val;
+                                    break;
+                                }
+                            }
+                        }
+
+                        console.warn(`[Handover] Part: ${p.productName} | RawType: "${rawPartType}" | Mapped Months: ${months}`);
+
+                        if (months <= 0) return { ...p, warrantyMonths: 0 };
+
+                        const expiresAt = new Date(nowMs);
+                        expiresAt.setMonth(expiresAt.getMonth() + months);
+
+                        return {
+                            ...p,
+                            warrantyMonths: months,
+                            warrantyExpiresAt: expiresAt.getTime(),
+                            partType: rawPartType
+                        };
+                    });
+
+                    updateData.parts = ticket.parts;
+                }
+
+                // Stock Deduction
+                if (selectedParts.length > 0) {
                     for (const p of selectedParts) {
                         if (!p.productId) continue;
                         const pData = productDocs.get(p.productId);
                         if (!pData) continue;
-                        
+
                         const currentStock = Number(pData.data.stock) || 0;
                         const currentHeld = Number(pData.data.held) || 0;
-                        
+
                         if (currentStock < p.quantity) {
-                            throw new Error(`Sản phẩm ${p.productName} không đủ tồn kho (Có: ${currentStock}, Cần: ${p.quantity})`);
+                            throw new Error(`Sáº£n pháº©m ${p.productName} khĂ´ng Ä‘á»§ tá»“n kho (CĂ³: ${currentStock}, Cáº§n: ${p.quantity})`);
                         }
                         if (currentHeld < p.quantity) {
-                            throw new Error(`Lỗi giữ chỗ cho ${p.productName} (Held: ${currentHeld}, Cần: ${p.quantity})`);
+                            throw new Error(`Lá»—i giá»¯ chá»— cho ${p.productName} (Held: ${currentHeld}, Cáº§n: ${p.quantity})`);
                         }
 
                         tx.update(pData.ref, {
                             stock: currentStock - p.quantity,
                             held: currentHeld - p.quantity
                         });
-                        
-                        // Cập nhật memory cache
+
+                        // Cáº­p nháº­t memory cache
                         pData.data.stock = currentStock - p.quantity;
                         pData.data.held = currentHeld - p.quantity;
 
@@ -162,11 +238,7 @@ export async function POST(request: NextRequest) {
                 (updateData.payment as Record<string, unknown>).paidAt = FieldValue.serverTimestamp();
 
                 // Customer Aggregate (if valid customer)
-                if (ticket.customer?.phone) {
-                    const phone = ticket.customer.phone;
-                    const custRef = db.collection('customers').doc(phone);
-                    const custSnap = await tx.get(custRef);
-                    
+                if (custRef && custSnap) {
                     if (custSnap.exists) {
                         tx.update(custRef, {
                             totalSpent: FieldValue.increment(amount),
@@ -174,25 +246,24 @@ export async function POST(request: NextRequest) {
                             updatedAt: FieldValue.serverTimestamp()
                         });
                     }
-                    
                     // Ledger
                     const ledgerRef = db.collection('customer_ledger').doc();
                     tx.set(ledgerRef, {
-                        customerId: phone,
+                        customerId: ticket.customer?.phone,
                         type: 'repair_payment',
                         amount: amount,
                         referenceId: ticketId,
                         date: FieldValue.serverTimestamp()
                     });
                 }
-                
+
                 // Commission Server-Side Calculation
                 const docDataForCommission = {
                     ...ticket,
                     status: targetStatus,
                     payment: updateData.payment
                 } as RepairTicket;
-                
+
                 await calculateAndSaveCommissionsServer(tx, { uid: caller.uid, displayName: '' }, 'repair', docDataForCommission);
             } else {
                 // Warranty case: we may not charge anything, or just record handover
@@ -219,7 +290,7 @@ export async function POST(request: NextRequest) {
         const message = error instanceof Error ? error.message : 'Internal server error';
         return NextResponse.json(
             { error: message },
-            { status: message.includes('không') || message.includes('Vui lòng') ? 400 : 500 }
+            { status: message.includes('khĂ´ng') || message.includes('Vui lĂ²ng') ? 400 : 500 }
         );
     }
 }

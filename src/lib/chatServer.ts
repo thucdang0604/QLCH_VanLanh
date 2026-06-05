@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 import { getAdminRtdb, getAdminStorage } from '@/lib/firebaseAdmin';
 import {
   buildExternalChatRoomId,

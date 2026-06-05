@@ -2,6 +2,7 @@
 
 # dependencies
 /node_modules
+/.pnpm-store/
 /.pnp
 .pnp.*
 .yarn/*
@@ -53,6 +54,7 @@ compile.log
 
 # AI Cache & scratch files
 .ai_cache/
+scratch/
 AI_FILE_MAP.md
 FILE_DEPENDENCIES.md
 AI_fix_bug.md

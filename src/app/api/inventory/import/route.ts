@@ -288,7 +288,7 @@ export async function POST(request: NextRequest) {
                                     line.status = 'selected';
                                     line.unitPriceAtUse = Number(pData.price) || 0; // Snapshot catalog price
                                     line.unitCostAtUse = newCostPrice; // Snapshot new cost
-                                    line.priceConfirmedAt = FieldValue.serverTimestamp();
+                                    line.priceConfirmedAt = new Date() as unknown as RepairLine['priceConfirmedAt'];
                                 }
                             });
                         }

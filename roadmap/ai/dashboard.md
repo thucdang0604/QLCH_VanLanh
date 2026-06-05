@@ -22,6 +22,14 @@ Webhook phải được kiểm tra đến bước ghi/đọc <code>RTDB chats</c
 
 ### Package Manager
 Chỉ dùng <code>pnpm</code> (v10.30.3). <b>KHÔNG</b> dùng npm/yarn/bun. Lockfile: <code>pnpm-lock.yaml</code>. Cài package: <code>pnpm add</code>, dev: <code>pnpm dev</code>, build: <code>pnpm build</code>.
+Deploy Firebase Frameworks phải đọc từ root <code>packageManager: pnpm@10.30.3</code>. Nếu Cloud Build chạy <code>npm ci</code> hoặc báo lệch <code>package-lock.json</code>, kiểm tra artifact <code>.firebase/**/functions</code>, clean <code>.firebase/</code>, và giữ root <code>sharp@0.33.5</code> để thỏa peer của <code>firebase-frameworks</code>; Next vẫn dùng nested <code>sharp@0.34.x</code>. Không tạo/commit npm lockfile trong repo này.
+
+### Firestore Transactions
+<b>Read-Before-Write Strict Rule:</b> Trong mọi Transaction của Firestore (Admin SDK lẫn Client SDK), BẮT BUỘC phải thực thi toàn bộ các lệnh đọc (`tx.get`) lên đầu tiên. Tuyệt đối không gọi `tx.get` sau khi đã gọi `tx.set`, `tx.update` hoặc `tx.delete`. Việc vi phạm sẽ khiến Firestore ném lỗi chặn ngay lập tức.
+<b>Timestamp in Arrays:</b> Không được dùng <code>FieldValue.serverTimestamp()</code> bên trong mảng (<code>FieldValue.arrayUnion()</code>). Thay vào đó phải dùng <code>new Date()</code> (JS native) để tránh lỗi Firestore Array Element.
+
+### Data Matching
+<b>Config Matching:</b> Khi so khớp dữ liệu từ client/database (như loại linh kiện, tên danh mục) với cấu hình hệ thống (<code>system_config</code>), luôn phải làm sạch chuỗi: <code>.trim().toLowerCase()</code> ở cả 2 phía để tránh lỗi rác khoảng trắng và sai khác chữ hoa/thường.
 
 ## Scaling Roadmap
 
@@ -84,6 +92,47 @@ Dọn dẹp kỹ thuật dư thừa phát hiện trong audit.
 - [ ] <b>SEO Meta:</b> Kiểm tra <code>&lt;title&gt;</code> và <code>meta description</code> trên production domain
 
 ## Changelog
+
+### 2026-06-05 - BUILD/LINT RECOVERY
+- **Color:** success
+- **Summary:** Khôi phục gate kiểm lỗi sau khi JSX bị cắt và lint quét nhầm runtime artifacts.
+
+- <b>Deploy Package Manager:</b> Sửa nguyên nhân Firebase SSR deploy chạy `npm ci` trên generated functions bundle dù dự án dùng pnpm; root `package.json` đã khai báo `packageManager: pnpm@10.30.3`, `engines.node: 22`, `verify` chạy bằng pnpm, pin `sharp@0.33.5` cho peer của `firebase-frameworks`, artifact `.firebase/` cũ đã được clean, và `firebase deploy --only hosting` đã pass.
+- <b>JSX Repair:</b> Nối lại các đoạn bị cắt trong `products/page.tsx`, `repairs/page.tsx`, và khôi phục `NavigationTab.tsx` về cấu trúc hợp lệ.
+- <b>Lint Dependency:</b> Thêm `eslint-plugin-react-hooks` đúng devDependency và loại `scratch/**` khỏi phạm vi ESLint vì đây là profile Chrome runtime.
+- <b>Type Hygiene:</b> Bỏ các `no-explicit-any` suppression liên quan, type rõ Product/Service detail, ProductSeries errors, Admin Reviews, POS taxonomy và warranty date shape.
+- <b>Debug Guard:</b> `/api/debug/users` chuyển sang `getAdminDb()` và yêu cầu quyền `manage_staff`.
+- <b>Accessibility:</b> Sửa 2 lỗi Edge Tools `axe/forms` trong `CategoriesTab.tsx`; mọi `<select>` mới phải có accessible name qua `label htmlFor/id`, `aria-label` hoặc `title` dù build vẫn pass.
+- <b>Verification:</b> `pnpm lint`, `pnpm typecheck`, `pnpm build` đều pass; lint còn warnings ở utility scripts/roadmap nhưng không còn error.
+
+### 2026-06-04 - REPAIR WARRANTY & HELD STOCK UI
+- **Color:** success
+- **Summary:** Sửa lỗi không sinh hạn bảo hành khi hoàn tất phiếu sửa chữa và cải thiện UI hiển thị tồn kho khả dụng cho KTV.
+
+- <b>Warranty Stamping:</b> Đưa logic tính toán bảo hành từ config vào trực tiếp API `handover/route.ts`.
+- <b>Case-Insensitive Matching:</b> Thêm logic `.trim().toLowerCase()` khi so khớp `partType` với `warrantyRules` để chống lỗi sai khác do người dùng nhập dư khoảng trắng hoặc viết thường/hoa lẫn lộn. Rớt xuống nhánh `Khác` nếu không khớp.
+- <b>Transaction Rule:</b> Tuân thủ tuyệt đối quy tắc của Firestore: Gom toàn bộ lệnh ĐỌC (get) lên đầu Transaction, trước khi bắt đầu thực hiện các lệnh GHI (set/update).
+- <b>Held Stock UI:</b> Thêm cột `(giữ: X)` vào bảng Quản lý linh kiện (`/admin/parts`) tương tự như bên danh sách Sản phẩm.
+- <b>Available Stock Guard:</b> Sửa UI tìm kiếm linh kiện của KTV (`/admin/technician/page.tsx`), hiển thị Tồn kho khả dụng (đã trừ tạm giữ) và khóa (disable) nút Thêm ngay từ Frontend nếu số lượng khả dụng <= 0, ngăn lỗi vặt.
+
+
+### 2026-06-03 - CATEGORY WARRANTY PRINTING
+- **Color:** success
+- **Summary:** Tích hợp cấu hình in phiếu bảo hành (Warranty Receipt) động theo cây danh mục (Category Taxonomy).
+
+- <b>Taxonomy Schema:</b> Bổ sung <code>warrantyType</code> (<code>'none' | 'warrantyDevice' | 'warrantyRepair' | 'warrantyAccessory'</code>) vào <code>TaxonomyNode</code>.
+- <b>Admin Settings:</b> Cập nhật <code>CategoryModal</code> trong Taxonomy settings để quản trị viên có thể map từng nhánh category với 1 loại phiếu bảo hành mặc định.
+- <b>Print Engine:</b> Đã tạo Component <code>PrintableWarranty.tsx</code>.
+- <b>Repair/Order Integration:</b> Đã hiển thị nút "In BH" tự động detect mẫu phiếu phù hợp dựa vào <code>categoryPath</code> của phiếu sửa chữa và data <code>taxonomyTree</code>.
+
+### 2026-06-03 - GLOBAL SEARCH QR BUILD FIX
+- **Color:** success
+- **Summary:** Vá lỗi typecheck chặn production build trên branch <code>feature/global-search-qr</code>.
+
+- <b>Search API:</b> Chuẩn hóa serialize Firestore snapshot để chấp nhận <code>data()</code> có thể rỗng trước khi trả kết quả order/repair QR.
+- <b>Product detail:</b> Gỡ <code>no-explicit-any</code> suppression, type rõ dữ liệu product/review và bỏ tham số related không dùng.
+- <b>Receipt preview:</b> Đổi ảnh QR demo sang <code>next/image</code> và khai báo host <code>api.qrserver.com</code>.
+- <b>Verification:</b> <code>next build</code> pass; còn warning dependency <code>protobufjs</code> từ Firebase import trace, không phải lỗi source app.
 
 ### 2026-06-01 - HOMEPAGE CONTENT APPEARANCE CONFIG
 - **Color:** accent-color

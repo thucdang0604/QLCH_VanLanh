@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { chatWithGemini } from '@/lib/gemini';
-import { db } from '@/lib/firebase';
-import { collection, query, where, getDocs, limit } from 'firebase/firestore';
+import { getAdminDb, isAdminAvailable } from '@/lib/firebaseAdmin';
 import { isRateLimited } from '@/lib/rateLimit';
 
 const RATE_LIMIT_MAX = 5;
@@ -47,12 +46,14 @@ export async function POST(request: NextRequest) {
             const pLower = prompt.toLowerCase();
             const keywords = pLower.split(' ').filter((word: string) => word.length > 2); // Bỏ qua các từ quá ngắn
 
-            if (pLower.includes('giá') || pLower.includes('bao nhiêu') || pLower.includes('thay') || pLower.includes('sửa') || pLower.includes('mua') || pLower.includes('bán') || pLower.includes('có') || pLower.includes('không') || keywords.length > 0) {
-                const productsRef = collection(db, 'products');
+            if (isAdminAvailable() && (pLower.includes('giá') || pLower.includes('bao nhiêu') || pLower.includes('thay') || pLower.includes('sửa') || pLower.includes('mua') || pLower.includes('bán') || pLower.includes('có') || pLower.includes('không') || keywords.length > 0)) {
                 // Vì Firestore không hỗ trợ full-text search tốt, ta lấy danh sách sản phẩm active
                 // và filter bằng Javascript dựa trên keywords trong tên sản phẩm
-                const q = query(productsRef, where('status', '==', 'active'), limit(250));
-                const snapshot = await getDocs(q);
+                const snapshot = await getAdminDb()
+                    .collection('products')
+                    .where('status', '==', 'active')
+                    .limit(250)
+                    .get();
 
                 if (!snapshot.empty) {
                     const allProducts: RAGProduct[] = [];

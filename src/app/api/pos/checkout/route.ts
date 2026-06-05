@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+
 import { NextResponse, NextRequest } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requirePermission } from '@/lib/apiAuth';
@@ -51,6 +51,40 @@ export async function POST(request: NextRequest) {
                 productDocs.set(productId, { ref: pRef, data: (pSnap.data() || {}) as FirebaseFirestore.DocumentData });
             }
 
+            // Fetch taxonomy for warranty config
+            const taxonomySnap = await tx.get(db.collection('system_config').doc('taxonomy_settings'));
+            const retailTrees = taxonomySnap.data()?.taxonomy?.retail || [];
+
+            function resolveWarranty(productData: { warrantyType?: string; warrantyMonths?: string | number; category?: string; [key: string]: unknown }): { warrantyType: string, warrantyMonths: number } | null {
+                if (productData.warrantyType && productData.warrantyType !== 'none') {
+                    return { warrantyType: productData.warrantyType, warrantyMonths: Number(productData.warrantyMonths) || 0 };
+                }
+                if (productData.warrantyType === 'none') return null;
+
+                const categoryPath = productData.category || '';
+                if (!categoryPath) return null;
+
+                const segments = categoryPath.split('/');
+                let currentNodes = retailTrees;
+                let lastFoundWarranty: { warrantyType: string, warrantyMonths: number } | null = null;
+
+                for (let i = 0; i < segments.length; i++) {
+                    const partialId = segments.slice(0, i + 1).join('/');
+                    const node = currentNodes.find((n: { id?: string; slug?: string; warrantyType?: string; warrantyMonths?: string | number; children?: Record<string, unknown>[] }) => n.id === partialId || n.slug === segments[i]);
+                    if (!node) break;
+
+                    if (node.warrantyType && node.warrantyType !== 'none') {
+                        lastFoundWarranty = { warrantyType: node.warrantyType, warrantyMonths: Number(node.warrantyMonths) || 0 };
+                    } else if (node.warrantyType === 'none') {
+                        lastFoundWarranty = null;
+                    }
+
+                    if (!node.children || node.children.length === 0) break;
+                    currentNodes = node.children;
+                }
+                return lastFoundWarranty;
+            }
+
             // Verify stock
             for (const [productId, totalQty] of preAggregated.entries()) {
                 const pSnap = productDocs.get(productId)!;
@@ -87,8 +121,23 @@ export async function POST(request: NextRequest) {
                 const pSnap = productDocs.get(pid)!;
                 const d = pSnap.data;
                 
-                // Allow client price to override if it's POS, or strict server pricing?
-                // POS usually allows price override. We'll trust the client price but log it.
+                const warrantyInfo = resolveWarranty(d);
+                const warrantyType = warrantyInfo?.warrantyType || 'none';
+                const warrantyMonths = warrantyInfo?.warrantyMonths || 0;
+
+                let imeis: string[] = [];
+                if (warrantyType === 'warrantyDevice') {
+                    if (Array.isArray(item.imeis)) {
+                        imeis = item.imeis.map((x: unknown) => String(x).trim()).filter(Boolean);
+                    }
+                    // For POS, if not pending deposit, we might require IMEI immediately.
+                    // But maybe we just save what is provided and let Admin Details warn if missing?
+                    // The plan says "validate độ dài mảng IMEI". Let's enforce it if it's not a pending deposit.
+                    // Actually, if it's pending, they might not have the item yet.
+                    if (imeis.length > qty) {
+                        throw new Error(`Sản phẩm "${d.name}" chỉ mua ${qty} nhưng cung cấp ${imeis.length} IMEI.`);
+                    }
+                }
                 
                 normalizedItems.push({
                     id: String(item.id || item.productId),
@@ -97,6 +146,9 @@ export async function POST(request: NextRequest) {
                     price,
                     quantity: qty,
                     image: d.images?.[0] || d.imageUrl || '',
+                    warrantyType,
+                    warrantyMonths,
+                    imeis,
                 });
 
                 serverSubtotal += price * qty;

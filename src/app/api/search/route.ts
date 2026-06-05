@@ -1,3 +1,4 @@
+type SerializedDoc = { id: string; _type?: string } & Record<string, unknown>;
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDb, isAdminAvailable } from '@/lib/firebaseAdmin';
 import { isRateLimited } from '@/lib/rateLimit';
@@ -109,12 +110,18 @@ export async function GET(request: NextRequest) {
             db.collection('repairs').doc(q).get()
         ]);
 
-        const serializeDoc = (doc: any, type: string) => {
-            const data = doc.data();
-            const serialized = { ...data, id: doc.id, _type: type };
-            if (typeof serialized.createdAt === 'object' && serialized.createdAt?.toDate) serialized.createdAt = serialized.createdAt.toDate().getTime();
-            if (typeof serialized.updatedAt === 'object' && serialized.updatedAt?.toDate) serialized.updatedAt = serialized.updatedAt.toDate().getTime();
-            if (typeof serialized.completedAt === 'object' && serialized.completedAt?.toDate) serialized.completedAt = serialized.completedAt.toDate().getTime();
+        const serializeDoc = (doc: { id: string; data: () => Record<string, unknown> | undefined }, type: string) => {
+            const data = doc.data() ?? {};
+            const serialized: SerializedDoc = { ...data, id: doc.id, _type: type };
+            if (serialized.createdAt && typeof (serialized.createdAt as { toDate?: unknown }).toDate === 'function') {
+                serialized.createdAt = (serialized.createdAt as { toDate: () => Date }).toDate().getTime();
+            }
+            if (serialized.updatedAt && typeof (serialized.updatedAt as { toDate?: unknown }).toDate === 'function') {
+                serialized.updatedAt = (serialized.updatedAt as { toDate: () => Date }).toDate().getTime();
+            }
+            if (serialized.completedAt && typeof (serialized.completedAt as { toDate?: unknown }).toDate === 'function') {
+                serialized.completedAt = (serialized.completedAt as { toDate: () => Date }).toDate().getTime();
+            }
             return serialized;
         };
 

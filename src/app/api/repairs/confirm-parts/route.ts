@@ -2,7 +2,8 @@ import { NextResponse, NextRequest } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requirePermission } from '@/lib/apiAuth';
 import { FieldValue, type DocumentReference } from 'firebase-admin/firestore';
-import type { FirestoreDateValue, RepairTicket, RepairWorkflowConfig } from '@/lib/types';
+import type { FirestoreDateValue, RepairTicket } from '@/lib/types';
+import { loadRepairWorkflow, requireWorkflowNode } from '@/lib/repairWorkflowServer';
 import { randomUUID } from 'crypto';
 
 type RepairLine = NonNullable<RepairTicket['parts']>[number];
@@ -26,16 +27,17 @@ type DraftReceiptData = {
     note?: string;
 };
 
-function timestampValue(): FirestoreDateValue {
+function documentTimestampValue(): FirestoreDateValue {
     return FieldValue.serverTimestamp() as unknown as FirestoreDateValue;
+}
+
+function arrayTimestampValue(): FirestoreDateValue {
+    return new Date() as unknown as FirestoreDateValue;
 }
 
 function errorMessage(error: unknown): string {
     return error instanceof Error ? error.message : 'Internal server error';
 }
-
-// Get fallback terminal statuses
-const LEGACY_TERMINAL_STATUSES = ['done', 'out', 'refund', 'bh_hoan_tat', 'bh_tu_choi', 'bh_refund'];
 
 export async function POST(request: NextRequest) {
     try {
@@ -80,25 +82,9 @@ export async function POST(request: NextRequest) {
                 throw new Error('Phiếu chưa được migrate partLineId. Vui lòng liên hệ Admin.');
             }
 
-            // Dynamic Terminal Guard
-            let isTerminal = false;
-            if (ticket.workflowConfigId) {
-                const wfRef = db.collection('system_config').doc('repair_workflows');
-                const wfSnap = await tx.get(wfRef);
-                if (wfSnap.exists) {
-                    const configs = wfSnap.data()?.configs as RepairWorkflowConfig[];
-                    const cfg = configs?.find(c => c.id === ticket.workflowConfigId);
-                    if (cfg) {
-                        const currentNode = cfg.nodes.find(n => n.id === ticket.status);
-                        if (currentNode?.isTerminal) {
-                            isTerminal = true;
-                        }
-                    }
-                }
-            }
-            if (!isTerminal && LEGACY_TERMINAL_STATUSES.includes(ticket.status)) {
-                isTerminal = true;
-            }
+            const workflow = await loadRepairWorkflow(tx, db, ticket);
+            const currentNode = requireWorkflowNode(workflow, ticket.status);
+            const isTerminal = !!currentNode.isTerminal;
 
             if (isTerminal) {
                 throw new Error(`Không thể thay đổi linh kiện khi phiếu đã ở trạng thái kết thúc (${ticket.status})`);
@@ -149,13 +135,13 @@ export async function POST(request: NextRequest) {
                     quantity,
                     status: 'selected',
                             quality: String(pData.quality || ''),
-                    unitPriceAtUse: Number(pData.price) || 0,
+                    unitPriceAtUse: Number(pData.price_promo) || Number(pData.price_original) || 0,
                     unitCostAtUse: Number(pData.costPrice) || 0,
-                    priceConfirmedAt: timestampValue()
+                    priceConfirmedAt: arrayTimestampValue()
                 });
-                
+
                 if (!partsLockedAt) {
-                    partsLockedAt = timestampValue();
+                    partsLockedAt = documentTimestampValue();
                 }
 
             } else if (command.type === 'request_part') {
@@ -224,9 +210,9 @@ export async function POST(request: NextRequest) {
                             quantity: delta,
                             status: 'selected',
                             quality: String(pData.quality || ''),
-                            unitPriceAtUse: Number(pData.price) || 0,
+                            unitPriceAtUse: Number(pData.price_promo) || Number(pData.price_original) || 0,
                             unitCostAtUse: Number(pData.costPrice) || 0,
-                            priceConfirmedAt: timestampValue()
+                            priceConfirmedAt: arrayTimestampValue()
                         });
                         // Do not modify old line quantity to keep old price for old quantity
                     } else if (delta < 0) {

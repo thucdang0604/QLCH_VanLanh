@@ -19,7 +19,6 @@ import {
     LogOut,
     Menu,
     X,
-    Search,
     User,
     Users,
     ShieldAlert,

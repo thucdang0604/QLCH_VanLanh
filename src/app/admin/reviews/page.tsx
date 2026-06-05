@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
 /* eslint-disable @next/next/no-img-element */
@@ -12,7 +11,7 @@ import {
 import { collection, query, orderBy, onSnapshot, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
-import type { Review, ProductReview } from '@/lib/types';
+import type { FirestoreDateValue, Review, ProductReview } from '@/lib/types';
 import { toastError, toastSuccess } from '@/lib/toast';
 import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
@@ -26,7 +25,7 @@ interface UnifiedReview {
     content: string;
     images?: string[];
     status: 'pending' | 'approved';
-    createdAt: any;
+    createdAt: FirestoreDateValue;
     
     // Thuộc tính riêng biệt
     typeTag: string;
@@ -74,7 +73,7 @@ export default function AdminReviewsPage() {
                         source: 'store'
                     });
                 } else {
-                    const r = docData as ProductReview;
+                    const r = docData as ProductReview & { productName?: string };
                     data.push({
                         id: docSnap.id,
                         customerName: r.customerName,
@@ -85,7 +84,7 @@ export default function AdminReviewsPage() {
                         status: r.status,
                         createdAt: r.createdAt,
                         typeTag: 'Sản phẩm',
-                        reference: (r as any).productName || r.productId,
+                        reference: r.productName || r.productId,
                         source: 'product'
                     });
                 }
@@ -130,9 +129,11 @@ export default function AdminReviewsPage() {
         }
     };
 
-    const formatDate = (timestamp: any) => {
+    const formatDate = (timestamp: FirestoreDateValue | undefined) => {
         if (!timestamp) return '';
-        const d = typeof timestamp?.toDate === 'function' ? timestamp.toDate() : new Date(timestamp);
+        const d = typeof timestamp === 'object' && 'toDate' in timestamp && typeof timestamp.toDate === 'function'
+            ? timestamp.toDate()
+            : new Date(timestamp as Date | number);
         return new Intl.DateTimeFormat('vi-VN', {
             day: '2-digit', month: '2-digit', year: 'numeric',
             hour: '2-digit', minute: '2-digit'

@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 /* eslint-disable @next/next/no-img-element */
 import { useState, useEffect } from 'react';
@@ -19,15 +18,16 @@ import {
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
 import { useConfig } from '@/lib/ConfigContext';
-import type { RepairTicket, RepairStatus, PaymentStatus, DeviceChecklist, StatusTimelineEntry, WorkflowNode, GiftItem, Product, RepairIssue } from '@/lib/types';
-import { PART_CATEGORY, PART_CATEGORY_LABEL, isPartCategory } from '@/lib/constants';
+import type { RepairTicket, RepairStatus, PaymentStatus, DeviceChecklist, WorkflowNode, GiftItem, Product, RepairIssue, TaxonomyNode } from '@/lib/types';
+import { PART_CATEGORY_LABEL, isPartCategory } from '@/lib/constants';
 import { uploadMedia } from '@/lib/storage';
 import { isChecklistComplete, isYouTubeUrl, getYouTubeEmbedUrl, areAllPartsReady } from '@/lib/workflowFeatures';
 import PrintableReceipt from '@/components/admin/PrintableReceipt';
 import PrintableRepairInvoice from '@/components/admin/PrintableRepairInvoice';
+import PrintableWarranty from '@/components/admin/PrintableWarranty';
 import type { ReceiptConfig } from '@/components/admin/PrintableReceipt';
+import type { WarrantyTemplateConfig } from '@/app/admin/settings/receipt/WarrantyComponents';
 import { toastError, toastSuccess, toastWarning } from '@/lib/toast';
-import { stampWarrantyOnParts } from '@/lib/warrantyUtils';
 import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
 import Modal from '@/components/admin/Modal';
@@ -43,54 +43,6 @@ const paymentLabels: Record<PaymentStatus, { label: string; color: string }> = {
     refunded: { label: 'Đã hoàn tiền', color: 'text-orange-600 bg-orange-50' },
     warranty: { label: 'Bảo hành', color: 'text-blue-600 bg-blue-50' },
 };
-async function ensureConsolidatedImportReceiptForTicket(
-    ticket: RepairTicket,
-    actor: { uid?: string; displayName?: string | null } | null
-) {
-    const requestedParts = (ticket.parts || []).filter(p => p.status === 'requested');
-    if (requestedParts.length === 0) return;
-    // ID cố định: 1 phiếu draft duy nhất cho mỗi phiếu SC
-    const receiptId = `draft_${ticket.id}`;
-    const receiptRef = doc(db, 'import_receipts', receiptId);
-    const items = requestedParts.map((p) => ({
-        productId: p.productId || '',
-        productName: p.productName || p.partName || p.name || PART_CATEGORY_LABEL,
-        quantity: p.quantity || 1,
-        importPrice: 0,
-        quality: p.quality || 'Zin',
-        category: PART_CATEGORY,
-    }));
-    await runTransaction(db, async (transaction) => {
-        const existingSnap = await transaction.get(receiptRef);
-        if (existingSnap.exists()) {
-            const existingData = existingSnap.data();
-            if (existingData.status !== 'draft') return; // đã ordered/completed → không sửa
-            const existingItems: typeof items = existingData.items || [];
-            const existingProductIds = new Set(existingItems.map((i: { productId: string }) => i.productId));
-            // Chỉ thêm các parts mới chưa có trong phiếu
-            const newItems = items.filter(i => !existingProductIds.has(i.productId));
-            if (newItems.length === 0) return; // không có gì mới
-            transaction.update(receiptRef, {
-                items: [...existingItems, ...newItems],
-                note: `Tổng hợp linh kiện yêu cầu từ phiếu SC #${ticket.id.slice(-6).toUpperCase()} — ${ticket.customer?.name || ''} — ${ticket.deviceInfo?.model || ''}`,
-                updatedAt: serverTimestamp(),
-            });
-        } else {
-            // Tạo mới với ID cố định
-            transaction.set(receiptRef, {
-                supplier: '', // Left blank so it doesn't get saved as a real supplier during import
-                items,
-                totalAmount: 0,
-                note: `Yêu cầu từ KTV — Phiếu SC #${ticket.id.slice(-6).toUpperCase()} — ${ticket.customer?.name || ''} — ${ticket.deviceInfo?.model || ''}`,
-                status: 'draft',
-                repairTicketId: ticket.id,
-                createdBy: actor?.uid || 'system',
-                createdByName: actor?.displayName || 'Admin',
-                createdAt: serverTimestamp(),
-            });
-        }
-    });
-}
 const formatPrice = (p: number) => p > 0 ? p.toLocaleString('vi-VN') + 'đ' : '—';
 // ── Appointment type (local) ──
 interface Appointment {
@@ -119,7 +71,7 @@ interface ServiceModel {
 // ══════════════════════════════════════════════════════════════════════════════
 export default function RepairPage() {
     const { user } = useAuth();
-    useConfig();
+    const { config } = useConfig();
     const searchParams = useSearchParams();
     // Data
     const [tickets, setTickets] = useState<RepairTicket[]>([]);
@@ -130,6 +82,8 @@ export default function RepairPage() {
     const [staffs, setStaffs] = useState<{ uid: string; displayName: string }[]>([]);
     const [services, setServices] = useState<ServiceModel[]>([]);
     const [receiptConfig, setReceiptConfig] = useState<ReceiptConfig | undefined>(undefined);
+    type WarrantyPrintType = 'warrantyDevice' | 'warrantyRepair' | 'warrantyAccessory';
+    const [printWarrantyType, setPrintWarrantyType] = useState<WarrantyPrintType | null>(null);
     // Media upload states
     const [preMediaFiles, setPreMediaFiles] = useState<string[]>([]);
     const [postMediaFiles, setPostMediaFiles] = useState<string[]>([]);
@@ -143,7 +97,7 @@ export default function RepairPage() {
     // Modals
     const [showModal, setShowModal] = useState(false);
     const [editingTicket, setEditingTicket] = useState<RepairTicket | null>(null);
-    const [printMode, setPrintMode] = useState<'receipt' | 'invoice' | null>(null);
+    const [printMode, setPrintMode] = useState<'receipt' | 'invoice' | 'warranty' | null>(null);
     const [printTicket, setPrintTicket] = useState<RepairTicket | null>(null);
     // Delivery / Cancel note modal
     const [noteModal, setNoteModal] = useState<{ ticket: RepairTicket; targetStatus: RepairStatus } | null>(null);
@@ -251,6 +205,43 @@ export default function RepairPage() {
     const [, setStatusLoading] = useState(true);
     const getWorkflowForTicket = (ticket: RepairTicket): WorkflowNode[] => {
         return ticket.ticketType === 'warranty' ? warrantyStatuses : dynamicStatuses;
+    };
+
+    const mapWarrantyTypeToPrintType = (type: WarrantyPrintType): 'device' | 'repair' | 'accessory' => {
+        if (type === 'warrantyDevice') return 'device';
+        if (type === 'warrantyRepair') return 'repair';
+        return 'accessory';
+    };
+
+    const resolveWarrantyTypeFromPath = (nodes: TaxonomyNode[], categoryPath: string[]): WarrantyPrintType | null => {
+        let currentLevel = nodes;
+        let foundWarrantyType: TaxonomyNode['warrantyType'];
+
+        for (const pathId of categoryPath) {
+            const node = currentLevel.find(n => n.id === pathId);
+            if (!node) break;
+            if (node.warrantyType) foundWarrantyType = node.warrantyType;
+            currentLevel = node.children || [];
+        }
+
+        return foundWarrantyType && foundWarrantyType !== 'none' ? foundWarrantyType : null;
+    };
+
+    const getWarrantyTypeForTicket = (ticket: RepairTicket): WarrantyPrintType | null => {
+        const categoryPath = ticket.categoryPath || [];
+        if (categoryPath.length === 0) return null;
+
+        const taxonomyRoots = [
+            ...(config.taxonomy?.service || []),
+            ...(config.taxonomy?.retail || []),
+            ...(config.taxonomy?.component || []),
+        ];
+
+        return resolveWarrantyTypeFromPath(taxonomyRoots, categoryPath);
+    };
+
+    const getWarrantyConfigForType = (type: WarrantyPrintType | null): WarrantyTemplateConfig | undefined => {
+        return type && receiptConfig ? receiptConfig[type] : undefined;
     };
     // ── Realtime Tickets & Statuses ──
     useEffect(() => {
@@ -511,8 +502,6 @@ export default function RepairPage() {
                 return;
             }
         }
-        const nextCfg = workflow.find(s => s.id === nextStatus);
-
         try {
             const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
             const res = await fetch('/api/repairs/transition', {
@@ -884,9 +873,18 @@ export default function RepairPage() {
         try { await deleteDoc(doc(db, 'repairs', id)); } catch (e) { console.error(e); }
     };
     // ── Print ──
-    const openPrint = (ticket: RepairTicket, mode: 'receipt' | 'invoice') => {
+    const openPrint = (ticket: RepairTicket, mode: 'receipt' | 'invoice' | 'warranty', warrantyType: WarrantyPrintType | null = null) => {
+        if (mode === 'warranty' && !getWarrantyConfigForType(warrantyType)) {
+            toastWarning('Danh mục này chưa có mẫu phiếu bảo hành khả dụng.');
+            return;
+        }
         setPrintMode(mode);
         setPrintTicket(ticket);
+        if (mode === 'warranty') {
+            setPrintWarrantyType(warrantyType);
+        } else {
+            setPrintWarrantyType(null);
+        }
         // Chờ render template trước khi gọi print (một số máy render chậm)
         requestAnimationFrame(() => {
             requestAnimationFrame(() => {
@@ -1238,6 +1236,17 @@ export default function RepairPage() {
                                                         <FileText size={16} />
                                                     </button>
                                                 )}
+                                                {(() => {
+                                                    const warrantyType = getWarrantyTypeForTicket(ticket);
+                                                    if (!getWarrantyConfigForType(warrantyType)) return null;
+                                                    return (
+                                                        <button onClick={() => openPrint(ticket, 'warranty', warrantyType)}
+                                                            className="flex items-center gap-1 px-2 py-1 text-[10px] font-semibold rounded-lg bg-yellow-50 text-yellow-700 border border-yellow-200 hover:bg-yellow-100 transition-colors"
+                                                            title="In phiếu bảo hành">
+                                                            In BH
+                                                        </button>
+                                                    );
+                                                })()}
                                                 {/* Nút Kích hoạt Bảo hành — chỉ hiện khi phiếu done và có linh kiện còn hạn BH */}
                                                 {ticket.status === 'done' && ticket.ticketType !== 'warranty' && (ticket.parts || []).some(p =>
                                                     !['rejected', 'cancelled'].includes(String(p.status || '')) && p.warrantyMonths && p.warrantyMonths > 0 &&
@@ -1790,6 +1799,29 @@ export default function RepairPage() {
             {printTicket && printMode === 'invoice' && (
                 <PrintableRepairInvoice ticket={printTicket} receiptConfig={receiptConfig} />
             )}
+            {printTicket && printMode === 'warranty' && printWarrantyType && receiptConfig && (() => {
+                const warrantyConfig = getWarrantyConfigForType(printWarrantyType);
+                if (!warrantyConfig) return null;
+                const payload = {
+                    customerName: printTicket.customer.name,
+                    customerPhone: printTicket.customer.phone,
+                    deviceModel: printTicket.deviceInfo?.model || '—',
+                    deviceColor: printTicket.deviceInfo?.color,
+                    deviceImei: printTicket.deviceInfo?.imei,
+                    devicePasscode: printTicket.deviceInfo?.passcode,
+                    services: (printTicket.issues?.map((i: { label: string }) => i.label).join(', ')) || printTicket.issue?.description,
+                    totalCost: Number(printTicket.payment?.amount || 0),
+                    createdAt: printTicket.createdAt
+                };
+                return (
+                    <PrintableWarranty
+                        payload={payload}
+                        globalConfig={receiptConfig}
+                        warrantyConfig={warrantyConfig}
+                        type={mapWarrantyTypeToPrintType(printWarrantyType)}
+                    />
+                );
+            })()}
             {/* ═══ Handover Confirmation Modal (Enhanced with full breakdown) ═══ */}
             {handoverModal && (() => {
                 const t = handoverModal.ticket;

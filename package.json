@@ -2,12 +2,16 @@
   "name": "temp-project",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@10.30.3",
+  "engines": {
+    "node": "22"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "typegen": "next typegen",
     "typecheck": "next typegen && tsc --noEmit",
-    "verify": "npm run lint && npm run typecheck && npm run build",
+    "verify": "pnpm lint && pnpm typecheck && pnpm build",
     "start": "next start",
     "lint": "eslint",
     "clean": "npx rimraf .next .firebase tsconfig.tsbuildinfo",
@@ -36,6 +40,7 @@
     "react-dom": "^19.0.0",
     "react-player": "^3.4.0",
     "react-quill-new": "^3.8.3",
+    "sharp": "0.33.5",
     "sonner": "^2.0.7",
     "svg-pan-zoom": "^3.6.2",
     "swiper": "^12.1.0",
@@ -50,6 +55,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "^15.5.14",
+    "eslint-plugin-react-hooks": "5.2.0",
     "puppeteer-core": "^25.0.4",
     "tailwindcss": "^4",
     "tsx": "^4.19.2",

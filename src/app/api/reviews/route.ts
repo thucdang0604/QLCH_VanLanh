@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { addDoc, collection, doc, getDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { FieldValue } from 'firebase-admin/firestore';
+import { getAdminDb, isAdminAvailable } from '@/lib/firebaseAdmin';
 import { isRateLimited } from '@/lib/rateLimit';
 
 // ── Haversine distance (meters) ──
@@ -45,10 +45,11 @@ const DEFAULT_GEOFENCE: GeofenceData = {
 
 async function getGeofenceConfig(): Promise<GeofenceData> {
     try {
-        const snap = await getDoc(doc(db, 'system_config', 'main_settings'));
-        if (snap.exists()) {
+        if (!isAdminAvailable()) return DEFAULT_GEOFENCE;
+        const snap = await getAdminDb().collection('system_config').doc('main_settings').get();
+        if (snap.exists) {
             const data = snap.data();
-            if (data.geofence) {
+            if (data?.geofence) {
                 return { ...DEFAULT_GEOFENCE, ...data.geofence };
             }
         }
@@ -104,6 +105,13 @@ export async function POST(request: NextRequest) {
         }
 
         const { referenceId, type, customerName, phone, rating, content, images, lat, lng, pin } = body;
+
+        if (!isAdminAvailable()) {
+            return NextResponse.json(
+                { error: 'Service unavailable' },
+                { status: 503 }
+            );
+        }
 
         // ── 3. Validate required fields ──
         if (!customerName || typeof customerName !== 'string' || customerName.trim().length < 2) {
@@ -172,13 +180,13 @@ export async function POST(request: NextRequest) {
             content: (content || '').trim(),
             images: validImages,
             status: 'pending',
-            createdAt: serverTimestamp(),
+            createdAt: FieldValue.serverTimestamp(),
             ...(geo.enabled && {
                 verification: pin ? 'pin' : 'geolocation',
             }),
         };
 
-        const docRef = await addDoc(collection(db, 'reviews'), review);
+        const docRef = await getAdminDb().collection('reviews').add(review);
 
         return NextResponse.json({
             success: true,

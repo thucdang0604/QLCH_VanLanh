@@ -16,4 +16,5 @@
 - [finance-hr](modules/finance-hr.md)
 - [system-content](modules/system-content.md)
 - [master](modules/master.md)
+- [agent-chat](modules/agent-chat.md)
 - [Bugs Khác](modules/other_bugs.md)

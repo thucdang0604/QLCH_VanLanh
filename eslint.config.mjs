@@ -17,11 +17,19 @@ const eslintConfig = [
     },
   },
   {
+    files: ["**/*.js"],
+    rules: {
+      '@typescript-eslint/no-require-imports': 'off',
+    },
+  },
+  {
     ignores: [
       ".next/**",
       "out/**",
       "build/**",
       ".firebase/**",
+      ".ai_cache/**",
+      "scratch/**",
       "firebase-debug.log",
       "firestore-debug.log",
       "next-env.d.ts",

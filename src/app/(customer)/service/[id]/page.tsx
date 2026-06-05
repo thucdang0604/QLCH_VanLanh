@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { ChevronRight, Wrench } from 'lucide-react';
 import { SITE_URL } from "@/lib/constants";
 import { fetchDetailItem } from '../../_lib/server-queries';
-import ServiceDetailClient from './ServiceDetailClient';
+import ServiceDetailClient, { type ServiceData } from './ServiceDetailClient';
 
 export const revalidate = 30;
 
@@ -83,8 +83,7 @@ export default async function ServiceDetailPage({ params }: { params: Promise<{ 
                     <span className="text-gray-800 font-medium line-clamp-1">{String(service.name ?? '')}</span>
                 </nav>
 
-                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                <ServiceDetailClient service={service as any} />
+                <ServiceDetailClient service={service as unknown as ServiceData} />
             </div>
         </div>
     );

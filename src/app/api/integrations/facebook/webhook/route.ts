@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+/* eslint-disable no-console */
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchFacebookUserProfile, upsertExternalInboundMessage, type ChatAttachment } from '@/lib/chatServer';
 import { getEffectiveChatIntegrationConfig } from '@/lib/chatIntegrationConfig';

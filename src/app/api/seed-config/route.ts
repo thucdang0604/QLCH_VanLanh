@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { FieldValue } from 'firebase-admin/firestore';
+import { getAdminDb } from '@/lib/firebaseAdmin';
 import { DEFAULT_CONFIG } from '@/lib/ConfigContext';
 import { requireAdminOrStaff } from '@/lib/apiAuth';
 
@@ -13,11 +13,11 @@ export async function POST(request: NextRequest) {
     try {
         await requireAdminOrStaff(request);
 
-        const docRef = doc(db, 'system_config', 'main_settings');
+        const docRef = getAdminDb().collection('system_config').doc('main_settings');
         const force = request.nextUrl.searchParams.get('force') === 'true';
-        const existing = await getDoc(docRef);
+        const existing = await docRef.get();
 
-        if (existing.exists() && !force) {
+        if (existing.exists && !force) {
             return NextResponse.json({
                 success: true,
                 message: 'Config already exists, skipping seed. Use ?force=true to overwrite.',
@@ -25,10 +25,10 @@ export async function POST(request: NextRequest) {
             });
         }
 
-        await setDoc(docRef, {
+        await docRef.set({
             ...DEFAULT_CONFIG,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
+            createdAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
         });
 
         return NextResponse.json({
@@ -49,12 +49,12 @@ export async function GET(request: NextRequest) {
     try {
         await requireAdminOrStaff(request);
 
-        const docRef = doc(db, 'system_config', 'main_settings');
-        const snapshot = await getDoc(docRef);
+        const docRef = getAdminDb().collection('system_config').doc('main_settings');
+        const snapshot = await docRef.get();
 
         return NextResponse.json({
-            exists: snapshot.exists(),
-            data: snapshot.exists() ? snapshot.data() : null,
+            exists: snapshot.exists,
+            data: snapshot.exists ? snapshot.data() : null,
         });
     } catch (error: unknown) {
         const message = error instanceof Error ? error.message : 'Unknown error';

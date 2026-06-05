@@ -14,7 +14,7 @@ import { useAuth } from '@/lib/AuthContext';
 import { isChecklistComplete, isYouTubeUrl, getYouTubeEmbedUrl, areAllPartsReady } from '@/lib/workflowFeatures';
 import type { RepairTicket, Product, WorkflowNode } from '@/lib/types';
 import { toastError, toastSuccess, toastWarning } from '@/lib/toast';
-import { PART_CATEGORY, PART_CATEGORY_LABEL } from '@/lib/constants';
+import { PART_CATEGORY_LABEL, isPartCategory } from '@/lib/constants';
 import Modal from '@/components/admin/Modal';
 import { buildProductCodeFromId } from '@/lib/productCodes';
 import { createProductWithCodes } from '@/lib/productCodeRegistry';
@@ -25,6 +25,43 @@ const checklistLabels: Record<string, string> = {
     speaker: 'Loa/Mic', connectivity: 'Kết nối', battery: 'Pin', biometric: 'FaceID/Vân tay',
 };
 const CHECKLIST_VALUES = ['OK', 'Trầy', 'Nứt', 'Móp', 'Lỗi', 'Không có'];
+
+type PartSearchProduct = Product & {
+    code?: string;
+    model?: string;
+    searchKeywords?: string[];
+};
+
+function normalizePartSearch(value: string): string {
+    return value
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/đ/gi, 'd')
+        .toLowerCase()
+        .trim();
+}
+
+function productMatchesPartSearch(product: PartSearchProduct, normalizedQuery: string): boolean {
+    const terms = normalizedQuery.split(/\s+/).filter(Boolean);
+    if (terms.length === 0) return false;
+
+    const haystack = normalizePartSearch([
+        product.name,
+        product.code,
+        product.sku,
+        product.productCode,
+        product.barcode,
+        ...(product.qrCodes || []),
+        product.brand,
+        product.model,
+        product.partType,
+        product.category,
+        ...(product.categoryIds || []),
+        ...(product.searchKeywords || []),
+    ].filter(Boolean).join(' '));
+
+    return terms.every(term => haystack.includes(term));
+}
 
 export default function TechnicianPage() {
     const { user } = useAuth();
@@ -68,12 +105,7 @@ export default function TechnicianPage() {
             setIsSearchingParts(true);
             try {
                 // Normalize query the same way as generateSearchKeywords
-                const normalizedQ = partSearchQuery
-                    .normalize('NFD')
-                    .replace(/[\u0300-\u036f]/g, '')
-                    .replace(/đ/gi, 'd')
-                    .toLowerCase()
-                    .trim();
+                const normalizedQ = normalizePartSearch(partSearchQuery);
 
                 if (!normalizedQ) {
                     setPartSearchResults([]);
@@ -90,7 +122,23 @@ export default function TechnicianPage() {
 
                 const results = snap.docs
                     .map(d => ({ id: d.id, ...d.data() } as Product))
-                    .filter(p => p.category === PART_CATEGORY || p.categoryIds?.includes('component'));
+                    .filter(p => isPartCategory(p.category, p.categoryIds));
+
+                if (results.length < 10) {
+                    const existingIds = new Set(results.map(p => p.id));
+                    const fallbackSnap = await getDocs(query(
+                        collection(db, 'products'),
+                        where('status', '==', 'active'),
+                        limit(300)
+                    ));
+
+                    fallbackSnap.docs
+                        .map(d => ({ id: d.id, ...d.data() } as Product))
+                        .filter(p => !existingIds.has(p.id))
+                        .filter(p => isPartCategory(p.category, p.categoryIds))
+                        .filter(p => productMatchesPartSearch(p, normalizedQ))
+                        .forEach(p => results.push(p));
+                }
 
                 setPartSearchResults(results.slice(0, 10));
             } catch (err) {
@@ -126,17 +174,17 @@ export default function TechnicianPage() {
 
             const data = await res.json();
             if (!res.ok) {
-                throw new Error(data.error || 'Lá»—i thĂªm linh kiá»‡n');
+                throw new Error(data.error || 'Lỗi thêm linh kiện');
             }
 
             setSelectedTicket({ ...ticket, parts: data.parts, payment: data.payment, version: (ticket.version || 0) + 1 });
-            toastSuccess('ÄĂ£ thĂªm linh kiá»‡n thĂ nh cĂ´ng.');
+            toastSuccess('Đã thêm linh kiện thành công.');
             setPartSearchQuery('');
         } catch (err: unknown) {
             console.error('Error adding part:', err);
-            const raw = (err as Error)?.message || 'KhĂ´ng thá»ƒ xuáº¥t linh kiá»‡n.';
-            const msg = raw.includes('khĂ´ng Ä‘á»§ tá»“n kho')
-                ? `${raw} CĂ³ thá»ƒ KTV khĂ¡c vá»«a xuáº¥t linh kiá»‡n nĂ y. Vui lĂ²ng táº£i láº¡i danh sĂ¡ch hoáº·c chuyá»ƒn sang "Háº¿t (Äá» xuáº¥t)".`
+            const raw = (err as Error)?.message || 'Không thể xuất linh kiện.';
+            const msg = raw.includes('không đủ tồn kho')
+                ? `${raw} Có thể KTV khác vừa xuất linh kiện này. Vui lòng tải lại danh sách hoặc chuyển sang "Hết (Đề xuất)".`
                 : raw;
             toastError(msg);
         }
@@ -165,14 +213,14 @@ export default function TechnicianPage() {
             });
 
             const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'Lá»—i yĂªu cáº§u linh kiá»‡n');
+            if (!res.ok) throw new Error(data.error || 'Lỗi yêu cầu linh kiện');
 
             setSelectedTicket({ ...ticket, parts: data.parts, version: (ticket.version || 0) + 1 });
-            toastSuccess('ÄĂ£ thĂªm linh kiá»‡n vĂ o danh sĂ¡ch yĂªu cáº§u.');
+            toastSuccess('Đã thêm linh kiện vào danh sách yêu cầu.');
             setPartSearchQuery('');
         } catch (err: unknown) {
             console.error('Error requesting part:', err);
-            toastError((err as Error)?.message || 'Lá»—i khi táº¡o yĂªu cáº§u.');
+            toastError((err as Error)?.message || 'Lỗi khi tạo yêu cầu.');
         }
     };
 
@@ -246,23 +294,23 @@ export default function TechnicianPage() {
             });
 
             const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'Lá»—i thĂªm linh kiá»‡n');
+            if (!res.ok) throw new Error(data.error || 'Lỗi thêm linh kiện');
 
             setSelectedTicket({ ...ticket, parts: data.parts, version: (ticket.version || 0) + 1 });
-            toastSuccess('ÄĂ£ thĂªm linh kiá»‡n Ä‘á» xuáº¥t. Káº¿ toĂ¡n/Kho sáº½ xem xĂ©t.');
+            toastSuccess('Đã thêm linh kiện đề xuất. Kế toán/Kho sẽ xem xét.');
             setCustomPartName('');
         } catch (err: unknown) {
             console.error('Error adding custom part:', err);
-            toastError((err as Error)?.message || 'Lá»—i khi thĂªm linh kiá»‡n.');
+            toastError((err as Error)?.message || 'Lỗi khi thêm linh kiện.');
         }
     };
 
     const handleRemovePart = async (ticket: RepairTicket, partIndex: number) => {
-        if (!confirm('Báº¡n cĂ³ cháº¯c cháº¯n muá»‘n xĂ³a linh kiá»‡n nĂ y khá»i phiáº¿u?')) return;
+        if (!confirm('Bạn có chắc chắn muốn xóa linh kiện này khỏi phiếu?')) return;
         try {
             const partLineId = ticket.parts?.[partIndex]?.partLineId;
             if (!partLineId) {
-                throw new Error('Linh kiá»‡n nĂ y chÆ°a cĂ³ mĂ£ dĂ²ng (partLineId). Vui lĂ²ng bĂ¡o Admin cháº¡y migrate.');
+                throw new Error('Linh kiện này chưa có mã dòng (partLineId). Vui lòng báo Admin chạy migrate.');
             }
 
             const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
@@ -284,13 +332,13 @@ export default function TechnicianPage() {
             });
 
             const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'Lá»—i xĂ³a linh kiá»‡n');
+            if (!res.ok) throw new Error(data.error || 'Lỗi xóa linh kiện');
 
             setSelectedTicket({ ...ticket, parts: data.parts, payment: data.payment, version: (ticket.version || 0) + 1 });
-            toastSuccess('XĂ³a linh kiá»‡n thĂ nh cĂ´ng.');
+            toastSuccess('Xóa linh kiện thành công.');
         } catch (err: unknown) {
             console.error('Error removing part:', err);
-            toastError((err as Error)?.message || 'Lá»—i khi xĂ³a linh kiá»‡n.');
+            toastError((err as Error)?.message || 'Lỗi khi xóa linh kiện.');
         }
     };
 
@@ -413,15 +461,15 @@ export default function TechnicianPage() {
             });
 
             const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'Lá»—i khi cáº­p nháº­t tráº¡ng thĂ¡i');
+            if (!res.ok) throw new Error(data.error || 'Lỗi khi cập nhật trạng thái');
 
-            toastSuccess('Cáº­p nháº­t tráº¡ng thĂ¡i thĂ nh cĂ´ng.');
+            toastSuccess('Cập nhật trạng thái thành công.');
             if (selectedTicket?.id === ticket.id) {
                 setSelectedTicket({ ...ticket, status: newStatus, version: (ticket.version || 0) + 1 });
             }
         } catch (err: unknown) {
             console.error('Status update error:', err);
-            toastError((err as Error)?.message || 'Lá»—i khi cáº­p nháº­t tráº¡ng thĂ¡i.');
+            toastError((err as Error)?.message || 'Lỗi khi cập nhật trạng thái.');
         }
     };
 
@@ -1044,10 +1092,19 @@ export default function TechnicianPage() {
                                                             <div key={product.id} className="p-2 hover:bg-orange-50 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                                                                 <div>
                                                                     <p className="text-sm font-medium text-gray-800 line-clamp-1">{product.name}</p>
-                                                                    <p className="text-[10px] text-gray-500">Tồn kho: {product.stock || 0}</p>
+                                                                    {(() => {
+                                                                        const available = Math.max(0, (product.stock || 0) - (product.held || 0));
+                                                                        return (
+                                                                            <p className={`text-[10px] ${available > 0 ? 'text-gray-500' : 'text-red-500 font-medium'}`}>
+                                                                                Khả dụng: {available}
+                                                                                {((product.held || 0) > 0) && ` (Đang giữ: ${product.held})`}
+                                                                            </p>
+                                                                        );
+                                                                    })()}
                                                                 </div>
                                                                     <div className="flex items-center gap-1.5 shrink-0">
                                                                         {(() => {
+                                                                            const available = Math.max(0, (product.stock || 0) - (product.held || 0));
                                                                             const isAlreadyRequested = selectedTicket.parts?.some(
                                                                                 p => p.productId === product.id && p.status === 'requested'
                                                                             );
@@ -1055,8 +1112,8 @@ export default function TechnicianPage() {
                                                                                 <>
                                                                                     <button
                                                                                         onClick={() => handleAddPart(selectedTicket, product)}
-                                                                                        disabled={(product.stock || 0) <= 0}
-                                                                                        className={`px-2 py-1 border text-xs font-semibold rounded ${(product.stock || 0) > 0 ? 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50' : 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed opacity-70'}`}
+                                                                                        disabled={available <= 0}
+                                                                                        className={`px-2 py-1 border text-xs font-semibold rounded ${available > 0 ? 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50' : 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed opacity-70'}`}
                                                                                     >
                                                                                         Có sẵn (Thêm)
                                                                                     </button>

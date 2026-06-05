@@ -26,7 +26,7 @@ export default function GlobalSearch() {
     const [selectedDevice, setSelectedDevice] = useState<string>('');
     const videoRef = useRef<HTMLVideoElement>(null);
     const codeReader = useRef<BrowserMultiFormatReader | null>(null);
-    const controlsRef = useRef<any>(null);
+    const controlsRef = useRef<{ stop: () => void } | null>(null);
     const router = useRouter();
 
     const searchWrapperRef = useRef<HTMLDivElement>(null);
@@ -218,7 +218,7 @@ export default function GlobalSearch() {
                             <div className="bg-gray-100 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3">
                                 <Search size={20} className="text-gray-400" />
                             </div>
-                            <p className="text-sm">Không tìm thấy kết quả nào cho "{query}"</p>
+                            <p className="text-sm">Không tìm thấy kết quả nào cho &quot;{query}&quot;</p>
                         </div>
                     )}
                 </div>

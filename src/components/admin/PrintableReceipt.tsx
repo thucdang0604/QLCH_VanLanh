@@ -1,6 +1,7 @@
 'use client';
 
 import type { RepairTicket } from '@/lib/types';
+import type { WarrantyTemplateConfig } from '@/app/admin/settings/receipt/WarrantyComponents';
 
 const formatPrice = (p: number) => p > 0 ? p.toLocaleString('vi-VN') + 'đ' : '—';
 
@@ -38,6 +39,9 @@ export interface ReceiptConfig {
         maxWidthPx?: number;
         baseFontSizePx?: number;
     };
+    warrantyDevice?: WarrantyTemplateConfig;
+    warrantyRepair?: WarrantyTemplateConfig;
+    warrantyAccessory?: WarrantyTemplateConfig;
 }
 
 const defaultReceiptConfig: ReceiptConfig = {

@@ -1,15 +1,15 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
 import React, { useState, useMemo } from 'react';
 import { useFirestoreCollection, updateDocument } from '@/lib/useFirestore';
 import { Product } from '@/lib/types';
 import { orderBy } from 'firebase/firestore';
-import { Search, Layers, Box, Link2Off, Link2, CheckSquare, Square, SearchIcon, Loader2, Save } from 'lucide-react';
+import { Layers, Box, Link2Off, Link2, CheckSquare, Square, SearchIcon, Loader2 } from 'lucide-react';
 import Image from 'next/image';
 import { toastSuccess, toastError } from '@/lib/toast';
 
 const formatPrice = (p: number) => p > 0 ? p.toLocaleString('vi-VN') + 'đ' : '—';
+const getErrorMessage = (error: unknown) => error instanceof Error ? error.message : 'Lỗi không xác định';
 
 export default function ProductSeriesManager() {
     const { data: products, loading } = useFirestoreCollection<Product>('products', [orderBy('createdAt', 'desc')]);
@@ -79,8 +79,8 @@ export default function ProductSeriesManager() {
         try {
             await updateDocument('products', product.id, { seriesId: '' });
             toastSuccess('Đã gỡ sản phẩm khỏi nhóm biến thể.');
-        } catch (error: any) {
-            toastError('Lỗi gỡ sản phẩm: ' + error.message);
+        } catch (error: unknown) {
+            toastError('Lỗi gỡ sản phẩm: ' + getErrorMessage(error));
         }
     };
 
@@ -103,8 +103,8 @@ export default function ProductSeriesManager() {
             setSelectedProductIds([]);
             setNewSeriesId('');
             setActiveTab('grouped');
-        } catch (error: any) {
-            toastError('Lỗi gom nhóm: ' + error.message);
+        } catch (error: unknown) {
+            toastError('Lỗi gom nhóm: ' + getErrorMessage(error));
         } finally {
             setIsAssigning(false);
         }

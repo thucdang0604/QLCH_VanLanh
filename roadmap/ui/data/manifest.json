@@ -1090,6 +1090,23 @@
       "solution": "Khoi phuc <code>scripts/migrate-active-orders.ts</code> neu can migration du lieu cu, hoac xoa script <code>migrate:inventory</code> sau khi xac nhan migration da chay va khong can nua.",
       "verificationNotes": "Source verified 2026-05-23: scripts/migrate-active-orders.ts MISSING; package.json still defines migrate:inventory.",
       "discoveredAt": "2026-05-23"
+    },
+    {
+      "id": "BUG-ENCODING-001",
+      "module": "Encoding",
+      "severity": "medium",
+      "status": "fixed",
+      "workflowId": "repair",
+      "title": "Mojibake (Lỗi font tiếng Việt) trong technician/page.tsx",
+      "affectedFiles": [
+        "src/app/admin/technician/page.tsx"
+      ],
+      "symptom": "5 chuỗi tiếng Việt bị hiển thị sai font (mojibake): Báº¡n cĂ³ cháº¯c thay vì Bạn có chắc.",
+      "description": "Các chuỗi UTF-8 tiếng Việt bị double-encode (UTF-8 bytes đọc lại như Latin-1 rồi encode lại thành UTF-8). Xảy ra khi tool hoặc AI agent ghi file với encoding sai.",
+      "cause": "Tool hoặc editor lưu file với encoding Latin-1/Windows-1252 thay vì UTF-8, gây double-encoding trên các ký tự tiếng Việt có dấu.",
+      "solution": "Thay thế thủ công 5 chuỗi bị lỗi. Quy tắc phòng tránh: luôn verify encoding sau khi sửa file tiếng Việt, nhận diện ký tự garbled (Ă, á», áº, Æ°) là dấu hiệu double-encoding.",
+      "verificationNotes": "Đã kiểm tra lại file sau khi sửa, tất cả 5 chuỗi hiển thị đúng tiếng Việt.",
+      "fixedAt": "2026-06-03"
     }
   ],
   "changelog": [

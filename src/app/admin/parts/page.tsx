@@ -629,9 +629,16 @@ export default function PartsPage() {
                                                     <p className="text-xs text-gray-500 mt-1 line-clamp-1">{part.description}</p>
                                                 )}
                                             </div>
-                                            <span className={`text-sm font-bold ml-3 ${(part.stock || 0) > 10 ? 'text-green-600' : (part.stock || 0) > 0 ? 'text-yellow-600' : 'text-red-600'}`}>
-                                                Tồn: {part.stock || 0}
-                                            </span>
+                                            <div className="flex items-baseline ml-3">
+                                                <span className={`text-sm font-bold ${(part.stock || 0) > 10 ? 'text-green-600' : (part.stock || 0) > 0 ? 'text-yellow-600' : 'text-red-600'}`}>
+                                                    Tồn: {part.stock || 0}
+                                                </span>
+                                                {(part.held || 0) > 0 && (
+                                                    <span className="text-xs font-medium text-gray-400 ml-1">
+                                                        (giữ: {part.held})
+                                                    </span>
+                                                )}
+                                            </div>
                                         </div>
                                         <div className="flex items-center justify-between bg-gray-50/80 rounded-lg px-3 py-2">
                                             <div>
@@ -731,9 +738,16 @@ export default function PartsPage() {
                                                 <p className="text-sm font-bold text-orange-600">{formatPrice(part.price_promo || 0)}</p>
                                             </td>
                                             <td className="px-6 py-4 text-center">
-                                                <span className={`text-sm font-bold ${(part.stock || 0) > 10 ? 'text-green-600' : (part.stock || 0) > 0 ? 'text-yellow-600' : 'text-red-600'}`}>
-                                                    {part.stock || 0}
-                                                </span>
+                                                <div className="flex flex-col items-center justify-center">
+                                                    <span className={`text-sm font-bold ${(part.stock || 0) > 10 ? 'text-green-600' : (part.stock || 0) > 0 ? 'text-yellow-600' : 'text-red-600'}`}>
+                                                        {part.stock || 0}
+                                                    </span>
+                                                    {(part.held || 0) > 0 && (
+                                                        <span className="text-[10px] font-medium text-gray-400 mt-0.5">
+                                                            (giữ: {part.held})
+                                                        </span>
+                                                    )}
+                                                </div>
                                             </td>
                                             <td className="px-6 py-4">
                                                 <div className="flex items-center justify-end gap-2">
@@ -1438,6 +1452,8 @@ function ImportPreviewModal({
                                                         <select
                                                             value={info.partType || ''}
                                                             onChange={(e) => handleNewPartChange(item.productId, 'partType', e.target.value)}
+                                                            title="Loại linh kiện"
+                                                            aria-label="Loại linh kiện"
                                                             className="w-full h-9 px-3 text-sm border border-gray-300 rounded-lg focus:border-orange-500 outline-none appearance-none bg-white transition-colors"
                                                         >
                                                             <option value="" disabled>-- Chọn loại --</option>
@@ -1757,12 +1773,14 @@ function CreateReceiptModal({ isOpen, onClose, parts, retailProducts, onCreated,
                                                 <td className="px-4 py-3">
                                                     <input 
                                                         type="number" value={item.quantity} onChange={(e) => updateItem(idx, 'quantity', Number(e.target.value))}
+                                                        title="Số lượng" aria-label="Số lượng" placeholder="SL"
                                                         className="w-full h-8 text-center border rounded" min={1}
                                                     />
                                                 </td>
                                                 <td className="px-4 py-3">
                                                     <CurrencyInput 
                                                         value={item.importPrice} onChange={(v) => updateItem(idx, 'importPrice', v)}
+                                                        title="Giá nhập" aria-label="Giá nhập" placeholder="Giá nhập"
                                                         className="w-full h-8 text-right px-2 border rounded"
                                                     />
                                                 </td>
@@ -1827,7 +1845,7 @@ function CreateReceiptModal({ isOpen, onClose, parts, retailProducts, onCreated,
                                                     )}
                                                 </td>
                                                 <td className="px-4 py-3 text-center">
-                                                    <button type="button" onClick={() => removeItem(idx)} className="text-red-400 hover:text-red-600 pt-1"><Trash2 size={16} /></button>
+                                                    <button type="button" title="Xóa" aria-label="Xóa" onClick={() => removeItem(idx)} className="text-red-400 hover:text-red-600 pt-1"><Trash2 size={16} /></button>
                                                 </td>
                                             </tr>
                                         ))}

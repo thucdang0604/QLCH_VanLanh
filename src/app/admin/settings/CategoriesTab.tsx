@@ -168,7 +168,7 @@ function CategoriesList() {
                 <div className={`flex items-center gap-3 px-4 py-3 hover:bg-orange-50/50 group border-b border-gray-50 transition-colors ${level > 0 ? 'ml-' + (level*6) : ''}`}>
                     <div className="flex items-center gap-2 w-8">
                         {hasChildren ? (
-                            <button onClick={() => toggleExpand(node.id)} className="p-1 text-gray-400 hover:text-orange-500 rounded-md">
+                            <button title="Mở rộng" aria-label="Mở rộng" onClick={() => toggleExpand(node.id)} className="p-1 text-gray-400 hover:text-orange-500 rounded-md">
                                 {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                             </button>
                         ) : <div className="w-6" />}
@@ -228,6 +228,8 @@ function CategoriesList() {
                         <select
                             value={filterType}
                             onChange={(e) => setFilterType(e.target.value as 'retail' | 'service' | 'component')}
+                            title="Lọc loại danh mục"
+                            aria-label="Lọc loại danh mục"
                             className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 bg-gray-50/50"
                         >
                             <option value="retail">Sản phẩm bán lẻ</option>
@@ -275,7 +277,8 @@ function CategoryModal({ isOpen, onClose, initialData, onSave }: { isOpen: boole
         slug: '',
         icon: '',
         seoKeywords: '',
-        seoDescription: ''
+        seoDescription: '',
+        warrantyType: 'none'
     });
     const [saving, setSaving] = useState(false);
     const [showMediaForIcon, setShowMediaForIcon] = useState(false);
@@ -287,7 +290,8 @@ function CategoryModal({ isOpen, onClose, initialData, onSave }: { isOpen: boole
                 slug: initialData.slug,
                 icon: initialData.icon || '',
                 seoKeywords: initialData.seoKeywords || '',
-                seoDescription: initialData.seoDescription || ''
+                seoDescription: initialData.seoDescription || '',
+                warrantyType: initialData.warrantyType || 'none'
             });
         }
     }, [initialData]);
@@ -406,6 +410,27 @@ function CategoryModal({ isOpen, onClose, initialData, onSave }: { isOpen: boole
                                 placeholder="Cách nhau bằng dấu phẩy. VD: điện thoại, điện thoại cũ, iphone"
                             />
                         </div>
+                    </div>
+                </div>
+
+                <div className="border-t pt-4 mt-2">
+                    <p className="text-sm font-medium text-gray-700 mb-3">📄 Cấu hình In Phiếu Bảo Hành</p>
+                    <div>
+                        <label htmlFor="category-warranty-type" className="text-sm font-medium text-gray-700 block mb-1">Loại phiếu bảo hành mặc định</label>
+                        <select
+                            id="category-warranty-type"
+                            value={formData.warrantyType || 'none'}
+                            onChange={(e) => setFormData(prev => ({ ...prev, warrantyType: e.target.value as TaxonomyNode['warrantyType'] }))}
+                            title="Loại phiếu bảo hành mặc định"
+                            aria-label="Loại phiếu bảo hành mặc định"
+                            className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 bg-gray-50"
+                        >
+                            <option value="none">Không in phiếu</option>
+                            <option value="warrantyDevice">Phiếu Bảo Hành Máy</option>
+                            <option value="warrantyRepair">Phiếu Bảo Hành Sửa Chữa</option>
+                            <option value="warrantyAccessory">Phiếu Bảo Hành Phụ Kiện</option>
+                        </select>
+                        <p className="text-xs text-gray-500 mt-1">Khi in hóa đơn cho sản phẩm thuộc danh mục này, hệ thống sẽ sử dụng mẫu phiếu bảo hành tương ứng được thiết lập trong Cài đặt chung.</p>
                     </div>
                 </div>
 

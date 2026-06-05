@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDocs, collection, query, where, limit as firestoreLimit, orderBy, type QueryConstraint } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { getAdminDb, isAdminAvailable } from '@/lib/firebaseAdmin';
 
 export async function GET(request: NextRequest) {
     try {
@@ -10,17 +9,23 @@ export async function GET(request: NextRequest) {
         const status = searchParams.get('status') || 'active';
         const limitParam = parseInt(searchParams.get('limit') || '20');
 
-        const constraints: QueryConstraint[] = [];
+        if (!isAdminAvailable()) {
+            return NextResponse.json(
+                { error: 'Service unavailable' },
+                { status: 503 }
+            );
+        }
 
-        if (status) constraints.push(where('status', '==', status));
-        if (category) constraints.push(where('category', '==', category));
-        if (brand) constraints.push(where('brand', '==', brand));
+        let productsQuery = getAdminDb().collection('products') as FirebaseFirestore.Query;
 
-        constraints.push(orderBy('createdAt', 'desc'));
-        constraints.push(firestoreLimit(limitParam));
+        if (status) productsQuery = productsQuery.where('status', '==', status);
+        if (category) productsQuery = productsQuery.where('category', '==', category);
+        if (brand) productsQuery = productsQuery.where('brand', '==', brand);
 
-        const q = query(collection(db, 'products'), ...constraints);
-        const snapshot = await getDocs(q);
+        const snapshot = await productsQuery
+            .orderBy('createdAt', 'desc')
+            .limit(limitParam)
+            .get();
 
         const products = snapshot.docs.map((doc) => ({
             id: doc.id,

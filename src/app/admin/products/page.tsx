@@ -153,6 +153,7 @@ export default function ProductsPage() {
 
             {mainTab === 'series' ? (
                 <ProductSeriesManager />
+
             ) : (
                 <>
             {/* Filters */}
@@ -174,6 +175,8 @@ export default function ProductsPage() {
                             setFilterCategory(e.target.value);
                             if (e.target.value) setFilterCategoryIds([]);
                         }}
+                        title="Lọc theo danh mục"
+                        aria-label="Lọc theo danh mục"
                         className="h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
                     >
                         <option value="">Tất cả danh mục cũ</option>
@@ -184,6 +187,8 @@ export default function ProductsPage() {
                     <select
                         value={filterCondition}
                         onChange={(e) => setFilterCondition(e.target.value)}
+                        title="Lọc theo tình trạng"
+                        aria-label="Lọc theo tình trạng"
                         className="h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
                     >
                         {CONDITIONS.map((c) => (
