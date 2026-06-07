@@ -14,6 +14,15 @@
 - **Summary:** Sản phẩm/phụ kiện/linh kiện dùng chung mã `sku`/`barcode`/`productCode`; admin in tem QR; POS thêm vào giỏ bằng máy quét dạng bàn phím, camera `BarcodeDetector`, hoặc nhập mã tay.
 - **Guardrail:** Quét QR chỉ thay thao tác chọn hàng. Checkout vẫn chạy `/api/pos/checkout` để validate stock/held và ghi đơn.
 
+### ✅ Feature POS-QR-002: Tối ưu in tem QR/barcode vừa giấy thực tế
+- **Status:** implemented-local
+- **Date:** 2026-06-07
+- **Branch:** `codex/optimize-qr-barcode-label-printing`
+- **Files:** `src/components/admin/ProductQrLabelModal.tsx`, `roadmap/ui/data/ai_plans/plan_qr_barcode_label_print_fit.md`, `roadmap/ui/data/ai_plans/task_qr_barcode_label_print_fit.md`, `roadmap/ui/data/ai_plans/walkthrough_qr_barcode_label_print_fit.md`
+- **Summary:** Thêm preset tem nhỏ, custom width/height theo mm, bố cục `2 tem/dòng` với số lượng tính theo hàng, chỉnh khe giữa tem, dòng brand tên cửa hàng, barcode ngắn cho tem nhỏ, chế độ chữ gọn, scale nội dung và lề an toàn để tem QR + `CODE128` không tràn khổ giấy đang dùng.
+- **Guardrail:** Chỉ tối ưu rendering/print và scan alias. QR vẫn dùng mã hàng chính; barcode có thể dùng alias ngắn. Không đổi schema sản phẩm, `product_code_registry` hoặc `/api/pos/checkout`.
+- **Manual check còn lại:** In thử trên đúng máy/giấy của cửa hàng và scan lại bằng máy quét/camera POS.
+
 ```mermaid
 graph TD
             subgraph POS [Bán Hàng Tại Quầy - POS]

@@ -11,16 +11,54 @@
   "constraints": [],
   "aiPlans": [
     {
+      "id": "plan-qr-barcode-label-print-fit",
+      "title": "QR/Barcode Label Print Fit: Tối ưu in tem vừa khổ giấy thực tế",
+      "date": "07.06.2026",
+      "status": "implemented-local",
+      "planFile": "data/ai_plans/plan_qr_barcode_label_print_fit.md",
+      "taskFile": "data/ai_plans/task_qr_barcode_label_print_fit.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_qr_barcode_label_print_fit.md",
+      "scope": [
+        "src/components/admin/ProductQrLabelModal.tsx",
+        "roadmap/ui/data/ai_plans/plan_qr_barcode_label_print_fit.md",
+        "roadmap/ui/data/ai_plans/task_qr_barcode_label_print_fit.md",
+        "roadmap/ui/data/ai_plans/walkthrough_qr_barcode_label_print_fit.md",
+        "roadmap/ai/modules/pos-orders.md",
+        "roadmap/ai/dashboard.md",
+        "roadmap/ui/data/source_intelligence.json"
+      ],
+      "decisions": [
+        "Tach rieng nhanh toi uu fit tem QR/barcode vi loi hien tai nam o kich thuoc in that, khong phai ma san pham hay POS scan",
+        "Them preset 30x20, 40x20, 40x25 va custom width/height theo mm de khop giay dang co",
+        "Them bo cuc 1 tem/dong hoac 2 tem/dong, mac dinh 2 tem/dong cho giay co hai tem nam ngang nhu anh thuc te",
+        "Khi chon 2 tem/dong, so luong duoc hieu la so hang tem; nhap 1 se in du 2 tem tren cung mot hang",
+        "Them Khe giua tem theo mm de can chinh khoang cach vat ly giua hai cot tem",
+        "Them barcode ngan de in CODE128 de scan hon tren tem nho; POS scan candidates nhan ca ma chinh va alias ngan",
+        "Them ten cua hang tu siteName len dau moi tem de nhan dien thuong hieu",
+        "Them che do chu Ten ngan, Chi ma, Ten + gia de tem nho co the bo noi dung phu",
+        "Them co noi dung 70-100% va le an toan 0-3mm de bu sai so printer/driver",
+        "Giu nguyen payload QR va CODE128 tren cung mot generated product code; khong doi schema hay registry"
+      ],
+      "updatedAt": "2026-06-07T00:00:00.000Z"
+    },
+    {
       "id": "plan-initial-excel-bootstrap",
       "title": "Initial Excel Bootstrap: Khởi tạo sản phẩm, phụ kiện, linh kiện và dịch vụ",
       "date": "05.06.2026",
-      "status": "implemented-local",
+      "status": "pushed-github",
       "planFile": "data/ai_plans/plan_initial_excel_bootstrap.md",
       "taskFile": "data/ai_plans/task_initial_excel_bootstrap.md",
       "walkthroughFile": "",
       "scope": [
         "src/components/admin/ExcelImportModal.tsx",
-        "src/app/admin/initial-data/page.tsx"
+        "src/app/admin/initial-data/page.tsx",
+        "src/components/admin/MediaGalleryField.tsx",
+        "src/components/admin/MediaManager.tsx",
+        "src/components/admin/UniversalProductModal.tsx",
+        "src/app/admin/services/page.tsx",
+        "src/app/(customer)/service/[id]/ServiceDetailClient.tsx",
+        "roadmap/ui/data/ai_plans/plan_initial_excel_bootstrap.md",
+        "roadmap/ui/data/ai_plans/task_initial_excel_bootstrap.md"
       ],
       "decisions": [
         "Tách công cụ import dữ liệu ban đầu vào route riêng không nằm trong sidebar admin",
@@ -33,9 +71,12 @@
         "Sản phẩm, phụ kiện và linh kiện ghi products, product_code_registry và inventory_logs trong cùng transaction",
         "Các luồng tạo/nhập mới không còn ghi categoryIds giả san-pham hoặc component; mặt hàng active phải chọn taxonomy thật",
         "Bảng preview là gate bắt buộc; còn lỗi thì khóa import, warning không chặn",
-        "Gỡ entry point import cũ khỏi trang sản phẩm để bootstrap chỉ nằm ở /admin/initial-data"
+        "Gỡ entry point import cũ khỏi trang sản phẩm để bootstrap chỉ nằm ở /admin/initial-data",
+        "Template Excel duoc nang cap thanh workbook nhieu sheet: Huong_dan, Quy_uoc_cot, Gia_tri_hop_le, Anh_va_Media, Taxonomy_mau, Vi_du_day_du",
+        "Khi chon anh local trung base name voi anh da upload (.png/.jpg -> .webp), he thong dung lai URL MediaManager thay vi upload trung",
+        "Branch codex/initial-excel-bootstrap da duoc push len GitHub tai commit ef4d4ee6"
       ],
-      "updatedAt": "2026-06-05T00:00:00.000Z"
+      "updatedAt": "2026-06-07T00:00:00.000Z"
     },
     {
       "id": "plan-ui-receipt-warranty-templates",
@@ -1137,6 +1178,21 @@
     }
   ],
   "changelog": [
+    {
+      "date": "2026-06-07",
+      "title": "QR/Barcode Label Print Fit Optimization",
+      "status": "implemented-local",
+      "items": [
+        "Tạo branch codex/optimize-qr-barcode-label-printing cho phần in tem QR/barcode.",
+        "Thêm preset giấy nhỏ 30x20, 40x20, 40x25 và custom width/height theo mm.",
+        "Thêm bố cục 2 tem/dòng và chỉnh khe giữa tem cho loại giấy có hai tem nằm ngang trên cùng một hàng.",
+        "Thêm mã barcode ngắn cho tem nhỏ và cho POS nhận alias ngắn khi scan.",
+        "Thêm tên cửa hàng từ cấu hình siteName lên đầu tem để nhận diện thương hiệu.",
+        "Thêm chế độ chữ Tên ngắn, Chỉ mã, Tên + giá để tem nhỏ không bị tràn.",
+        "Thêm co nội dung và lề an toàn để bù sai số máy in/driver.",
+        "Focused ESLint cho ProductQrLabelModal.tsx đã pass; còn cần in thử trên giấy thực tế và scan lại."
+      ]
+    },
     {
       "date": "2026-05-25",
       "title": "Live Chat Omnichannel: Facebook/Zalo, Media, CRM và luồng tạo đơn",

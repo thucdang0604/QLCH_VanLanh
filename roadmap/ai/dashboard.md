@@ -93,6 +93,21 @@ Dọn dẹp kỹ thuật dư thừa phát hiện trong audit.
 
 ## Changelog
 
+### 2026-06-07 - QR/BARCODE LABEL PRINT FIT
+- **Color:** accent-color
+- **Summary:** Tạo nhánh tối ưu riêng cho in tem QR/barcode để tem vừa khổ giấy thực tế đang dùng.
+
+- <b>Branch:</b> Tạo branch <code>codex/optimize-qr-barcode-label-printing</code>.
+- <b>Small presets:</b> Bổ sung khổ <code>30x20 mm</code>, <code>40x20 mm</code>, <code>40x25 mm</code> và giữ các khổ cũ.
+- <b>Custom size:</b> Cho phép nhập rộng/cao tem theo mm khi giấy thực tế không khớp preset.
+- <b>Two-up stock:</b> Thêm bố cục <code>2 tem/dòng</code> và chỉnh <code>Khe giữa tem</code> cho giấy có hai tem nằm ngang như ảnh thực tế; khi chọn 2 tem/dòng, số nhập là số hàng nên <code>1</code> sẽ in đủ 2 tem.
+- <b>Compact barcode:</b> Barcode <code>CODE128</code> mặc định dùng alias ngắn (ví dụ <code>SP-1KGMMMI0</code> → <code>1KGMMMI0</code>) để dễ scan trên tem nhỏ; POS nhận cả mã chính và alias ngắn.
+- <b>Branding:</b> Mỗi tem in thêm dòng tên cửa hàng ở trên cùng, lấy từ cấu hình <code>siteName</code>, để nhận diện thương hiệu.
+- <b>Content density:</b> Thêm chế độ <code>Tên ngắn</code>, <code>Chỉ mã</code>, <code>Tên + giá</code> để tem nhỏ không bị ép quá nhiều chữ.
+- <b>Print fit:</b> Thêm <code>Co nội dung</code> và <code>Lề an toàn</code> để bù sai số driver/máy in khi bị cắt mép.
+- <b>Guardrail:</b> QR và <code>CODE128</code> vẫn dùng chung một mã sản phẩm; không đổi schema, registry hoặc POS checkout.
+- <b>Verification:</b> Focused ESLint cho <code>ProductQrLabelModal.tsx</code> pass; còn cần in thử trên đúng giấy/máy quét thực tế.
+
 ### 2026-06-05 - INITIAL EXCEL BOOTSTRAP
 - **Color:** accent-color
 - **Summary:** Tách công cụ khởi tạo dữ liệu ban đầu bằng Excel vào một nơi riêng cho admin.
@@ -109,6 +124,14 @@ Dọn dẹp kỹ thuật dư thừa phát hiện trong audit.
 - <b>Taxonomy consistency:</b> Các luồng tạo/nhập mới không còn ghi <code>categoryIds</code> giả như <code>san-pham</code> hoặc <code>component</code>; mặt hàng active phải chọn taxonomy thật.
 - <b>Single entry point:</b> Gỡ nút import Excel khỏi trang sản phẩm để bootstrap chỉ nằm ở <code>/admin/initial-data</code>.
 - <b>Guardrail:</b> Ảnh trong Excel dùng URL public/URL media hoặc đường dẫn local cần resolve bằng file picker; không trích ảnh nhúng binary từ workbook và không lưu đường dẫn ổ đĩa vào dữ liệu sản phẩm.
+
+### 2026-06-07 - INITIAL EXCEL BOOTSTRAP FINALIZATION
+- **Color:** success
+- **Summary:** Cap nhat day du phan template Excel, tai su dung anh MediaManager va trang thai GitHub cua nhanh bootstrap.
+
+- <b>Template workbook:</b> Mau Excel da co them cac sheet <code>Huong_dan</code>, <code>Quy_uoc_cot</code>, <code>Gia_tri_hop_le</code>, <code>Anh_va_Media</code>, <code>Taxonomy_mau</code> va <code>Vi_du_day_du</code>; sheet du lieu import van nam dau tien de importer doc dung.
+- <b>Media reuse:</b> Khi admin chon file local trung base name voi anh da co trong MediaManager, vi du <code>ten-anh.png</code> voi <code>ten-anh.webp</code>, he thong dung lai URL da upload thay vi upload trung.
+- <b>GitHub:</b> Branch <code>codex/initial-excel-bootstrap</code> da push len GitHub tai commit <code>ef4d4ee6</code>.
 
 ### 2026-06-05 - BUILD/LINT RECOVERY
 - **Color:** success
