@@ -76,6 +76,13 @@ export function getPrimaryProductCode(product: ProductCodeTarget): string {
         || buildProductCodeFromId(product.id || '', getProductCodeKind(product));
 }
 
+export function getCompactProductBarcode(product: ProductCodeTarget): string {
+    const primaryCode = getPrimaryProductCode(product);
+    const compactMatch = primaryCode.match(/^(SP|PK|LK)-([A-Z0-9]{6,})$/);
+    if (compactMatch) return compactMatch[2];
+    return primaryCode.replace(/[^A-Z0-9]/g, '').slice(0, 12);
+}
+
 export function getProductScanCandidates(product: ProductCodeTarget): string[] {
     const values: (string | undefined)[] = [
         product.sku,
@@ -83,6 +90,7 @@ export function getProductScanCandidates(product: ProductCodeTarget): string[] {
         product.productCode,
         product.id,
         getPrimaryProductCode(product),
+        getCompactProductBarcode(product),
         ...(product.qrCodes || []),
     ];
     return Array.from(

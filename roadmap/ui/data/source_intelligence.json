@@ -1,8 +1,8 @@
 {
   "_meta": {
     "description": "Bản đồ trí tuệ mã nguồn — tự động tích lũy khi AI đọc/sửa code. Giúp AI sau chỉ cần đọc file này là hiểu ngay cấu trúc, liên kết, và cách sửa.",
-    "lastUpdated": "2026-06-02T00:00:00.000Z",
-    "version": 18,
+    "lastUpdated": "2026-06-07T00:00:00.000Z",
+    "version": 19,
     "changelog": [
       "v1: Initial creation — mapped collections, key files, cross-links",
       "v2: Phase 4/6/8 completed — supplier dropdown+debt, variant+review UI, POS repair lookup+auto-discount",
@@ -21,7 +21,8 @@
       "v15: Homepage appearance config — admin controls presentation filters in system_config/layout_settings; pricing reads active Firestore services and reviews read Google Places API without manual fallback.",
       "v16: Google homepage reviews migrated from Places API Legacy to Place Details (New); the server uses a field mask and normalizes the response for the storefront.",
       "v17: Config revalidation sentinel layout now targets /(customer) layout instead of root / layout, preventing admin auth Router Cache purge after appearance saves.",
-      "v18: Admin config saves request background /api/revalidate instead of invoking a Server Action from the browser; the route accepts a signed admin session cookie or the internal secret."
+      "v18: Admin config saves request background /api/revalidate instead of invoking a Server Action from the browser; the route accepts a signed admin session cookie or the internal secret.",
+      "v19: QR/Barcode label print fit optimization — ProductQrLabelModal now supports smaller paper presets, custom mm size, two-labels-per-row stock, column gap tuning, configured shop-name branding, compact barcode aliases, text density, content scale, and safe margins without changing product code schema or checkout behavior."
     ]
   },
   "collections": {
