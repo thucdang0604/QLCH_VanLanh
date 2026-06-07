@@ -110,6 +110,14 @@ Dọn dẹp kỹ thuật dư thừa phát hiện trong audit.
 - <b>Single entry point:</b> Gỡ nút import Excel khỏi trang sản phẩm để bootstrap chỉ nằm ở <code>/admin/initial-data</code>.
 - <b>Guardrail:</b> Ảnh trong Excel dùng URL public/URL media hoặc đường dẫn local cần resolve bằng file picker; không trích ảnh nhúng binary từ workbook và không lưu đường dẫn ổ đĩa vào dữ liệu sản phẩm.
 
+### 2026-06-07 - INITIAL EXCEL BOOTSTRAP FINALIZATION
+- **Color:** success
+- **Summary:** Cap nhat day du phan template Excel, tai su dung anh MediaManager va trang thai GitHub cua nhanh bootstrap.
+
+- <b>Template workbook:</b> Mau Excel da co them cac sheet <code>Huong_dan</code>, <code>Quy_uoc_cot</code>, <code>Gia_tri_hop_le</code>, <code>Anh_va_Media</code>, <code>Taxonomy_mau</code> va <code>Vi_du_day_du</code>; sheet du lieu import van nam dau tien de importer doc dung.
+- <b>Media reuse:</b> Khi admin chon file local trung base name voi anh da co trong MediaManager, vi du <code>ten-anh.png</code> voi <code>ten-anh.webp</code>, he thong dung lai URL da upload thay vi upload trung.
+- <b>GitHub:</b> Branch <code>codex/initial-excel-bootstrap</code> da push len GitHub tai commit <code>ef4d4ee6</code>.
+
 ### 2026-06-05 - BUILD/LINT RECOVERY
 - **Color:** success
 - **Summary:** Khôi phục gate kiểm lỗi sau khi JSX bị cắt và lint quét nhầm runtime artifacts.

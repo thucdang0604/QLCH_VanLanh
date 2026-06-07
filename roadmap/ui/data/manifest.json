@@ -14,13 +14,20 @@
       "id": "plan-initial-excel-bootstrap",
       "title": "Initial Excel Bootstrap: Khởi tạo sản phẩm, phụ kiện, linh kiện và dịch vụ",
       "date": "05.06.2026",
-      "status": "implemented-local",
+      "status": "pushed-github",
       "planFile": "data/ai_plans/plan_initial_excel_bootstrap.md",
       "taskFile": "data/ai_plans/task_initial_excel_bootstrap.md",
       "walkthroughFile": "",
       "scope": [
         "src/components/admin/ExcelImportModal.tsx",
-        "src/app/admin/initial-data/page.tsx"
+        "src/app/admin/initial-data/page.tsx",
+        "src/components/admin/MediaGalleryField.tsx",
+        "src/components/admin/MediaManager.tsx",
+        "src/components/admin/UniversalProductModal.tsx",
+        "src/app/admin/services/page.tsx",
+        "src/app/(customer)/service/[id]/ServiceDetailClient.tsx",
+        "roadmap/ui/data/ai_plans/plan_initial_excel_bootstrap.md",
+        "roadmap/ui/data/ai_plans/task_initial_excel_bootstrap.md"
       ],
       "decisions": [
         "Tách công cụ import dữ liệu ban đầu vào route riêng không nằm trong sidebar admin",
@@ -33,9 +40,12 @@
         "Sản phẩm, phụ kiện và linh kiện ghi products, product_code_registry và inventory_logs trong cùng transaction",
         "Các luồng tạo/nhập mới không còn ghi categoryIds giả san-pham hoặc component; mặt hàng active phải chọn taxonomy thật",
         "Bảng preview là gate bắt buộc; còn lỗi thì khóa import, warning không chặn",
-        "Gỡ entry point import cũ khỏi trang sản phẩm để bootstrap chỉ nằm ở /admin/initial-data"
+        "Gỡ entry point import cũ khỏi trang sản phẩm để bootstrap chỉ nằm ở /admin/initial-data",
+        "Template Excel duoc nang cap thanh workbook nhieu sheet: Huong_dan, Quy_uoc_cot, Gia_tri_hop_le, Anh_va_Media, Taxonomy_mau, Vi_du_day_du",
+        "Khi chon anh local trung base name voi anh da upload (.png/.jpg -> .webp), he thong dung lai URL MediaManager thay vi upload trung",
+        "Branch codex/initial-excel-bootstrap da duoc push len GitHub tai commit ef4d4ee6"
       ],
-      "updatedAt": "2026-06-05T00:00:00.000Z"
+      "updatedAt": "2026-06-07T00:00:00.000Z"
     },
     {
       "id": "plan-ui-receipt-warranty-templates",
