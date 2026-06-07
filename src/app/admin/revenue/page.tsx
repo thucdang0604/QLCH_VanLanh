@@ -331,10 +331,10 @@ export default function RevenuePage() {
             {period === 'custom' && (
                 <div className="flex gap-3 items-center bg-gray-50 rounded-xl px-4 py-2">
                     <Calendar size={16} className="text-gray-400" />
-                    <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)}
+                    <input type="date" title="Ngày bắt đầu" value={customFrom} onChange={e => setCustomFrom(e.target.value)}
                         className="px-3 py-1.5 border rounded-lg text-sm" />
                     <span className="text-gray-400">→</span>
-                    <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)}
+                    <input type="date" title="Ngày kết thúc" value={customTo} onChange={e => setCustomTo(e.target.value)}
                         className="px-3 py-1.5 border rounded-lg text-sm" />
                 </div>
             )}
@@ -397,15 +397,15 @@ export default function RevenuePage() {
                                 <div key={i} className="flex-1 min-w-[24px] flex flex-col items-center gap-0.5 group relative">
                                     {/* Revenue bar */}
                                     <div
+                                        title={`Thu: ${formatPrice(d.revenue)}`}
                                         className="w-full bg-green-400 rounded-t-sm hover:bg-green-500 transition-colors"
                                         style={{ height: `${(d.revenue / chartMax) * 160}px`, minHeight: d.revenue > 0 ? '4px' : '0px' }}
-                                        title={`Thu: ${formatPrice(d.revenue)}`}
                                     />
                                     {/* Expense bar */}
                                     <div
+                                        title={`Chi: ${formatPrice(d.expense)}`}
                                         className="w-full bg-red-400 rounded-b-sm hover:bg-red-500 transition-colors"
                                         style={{ height: `${(d.expense / chartMax) * 160}px`, minHeight: d.expense > 0 ? '4px' : '0px' }}
-                                        title={`Chi: ${formatPrice(d.expense)}`}
                                     />
                                     {/* Date label */}
                                     <span className="absolute -bottom-5 text-[8px] text-gray-400 whitespace-nowrap">
@@ -513,7 +513,7 @@ export default function RevenuePage() {
                         <div className="px-6 py-4 space-y-4">
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Danh mục</label>
-                                <select value={expCategory} onChange={e => setExpCategory(e.target.value)}
+                                <select title="Chọn danh mục" value={expCategory} onChange={e => setExpCategory(e.target.value)}
                                     className="w-full px-4 py-2 border rounded-lg bg-white">
                                     {expenseCategories.map(c => (
                                         <option key={c.key} value={c.key}>{c.icon} {c.label}</option>

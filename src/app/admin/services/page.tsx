@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
@@ -7,12 +7,10 @@ import {
     Search,
     Edit,
     Trash2,
-    Upload,
     Loader2,
     Wrench
 } from 'lucide-react';
 import { useFirestoreCollection, addDocumentWithId, updateDocument, deleteDocument } from '@/lib/useFirestore';
-import { uploadImage, deleteImage } from '@/lib/storage';
 
 import { generateSlug } from '@/lib/utils';
 import type { FirestoreDateValue } from '@/lib/types';
@@ -22,10 +20,10 @@ import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
 import { triggerRevalidate } from '@/lib/revalidate';
 import Modal from '@/components/admin/Modal';
-import MediaManager from '@/components/admin/MediaManager';
 import CategoryTaxonomySelector from '@/components/admin/CategoryTaxonomySelector';
 import CurrencyInput from '@/components/admin/CurrencyInput';
 import { useConfig } from '@/lib/ConfigContext';
+import MediaGalleryField from '@/components/admin/MediaGalleryField';
 
 interface Service {
     id: string;
@@ -36,6 +34,7 @@ interface Service {
     price_promo?: number;
     device_model: string;
     imageUrl?: string;
+    images?: string[];
     icon?: string;
     category: string;
     categoryIds?: string[];
@@ -47,9 +46,9 @@ interface Service {
     createdAt?: FirestoreDateValue;
 }
 
-const formatPrice = (p: number) => p > 0 ? new Intl.NumberFormat('vi-VN').format(p) + ' đ' : 'Liên hệ';
+const formatPrice = (p: number) => p > 0 ? new Intl.NumberFormat('vi-VN').format(p) + ' Ä‘' : 'LiĂªn há»‡';
 
-/** Parse legacy string price like "Từ 200.000đ" or "100000" to number */
+/** Parse legacy string price like "Tá»« 200.000Ä‘" or "100000" to number */
 function parseLegacyPrice(s?: string): number {
     if (!s) return 0;
     const cleaned = s.replace(/[^\d]/g, '');
@@ -73,15 +72,12 @@ export default function ServicesPage() {
     const [reassignProgress, setReassignProgress] = useState<{current: number, total: number} | null>(null);
 
     const handleDelete = async (service: Service) => {
-        if (confirm(`Bạn có chắc muốn xóa dịch vụ "${service.name}"?`)) {
+        if (confirm(`Báº¡n cĂ³ cháº¯c muá»‘n xĂ³a dá»‹ch vá»¥ "${service.name}"?`)) {
             try {
-                if (service.imageUrl) {
-                    await deleteImage(service.imageUrl);
-                }
                 await deleteDocument('services', service.id);
                 await triggerRevalidate(['/', `/service/${service.id}`, '/category/sua-chua', '/sitemap.xml'], ['services']);
             } catch {
-                toastError('Lỗi khi xóa dịch vụ!');
+                toastError('Lá»—i khi xĂ³a dá»‹ch vá»¥!');
             }
         }
     };
@@ -112,9 +108,9 @@ export default function ServicesPage() {
             }
             
             if (errorCount > 0) {
-                toastWarning(`Hoàn tất gán lại ${successCount}/${targets.length} dịch vụ (${errorCount} lỗi)`);
+                toastWarning(`HoĂ n táº¥t gĂ¡n láº¡i ${successCount}/${targets.length} dá»‹ch vá»¥ (${errorCount} lá»—i)`);
             } else {
-                toastSuccess(`Đã gán lại thành công ${successCount} dịch vụ từ "${reassignFrom}" sang "${reassignTo}"`);
+                toastSuccess(`ÄĂ£ gĂ¡n láº¡i thĂ nh cĂ´ng ${successCount} dá»‹ch vá»¥ tá»« "${reassignFrom}" sang "${reassignTo}"`);
             }
             
             setShowReassign(false);
@@ -123,7 +119,7 @@ export default function ServicesPage() {
             setReassignToIds([]);
             setReassignProgress(null);
         } catch {
-            toastError('Lỗi khi gán lại danh mục!');
+            toastError('Lá»—i khi gĂ¡n láº¡i danh má»¥c!');
         } finally {
             setIsReassigning(false);
         }
@@ -168,11 +164,11 @@ export default function ServicesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     useEffect(() => { resetPage(); }, [searchQuery, filterCategoryIds]);
 
-    /** Get display price — prefers numeric fields, falls back to legacy string */
+    /** Get display price â€” prefers numeric fields, falls back to legacy string */
     const getDisplayPrice = (s: Service) => {
         if (s.price_original > 0) return formatPrice(s.price_original);
         if (s.price) return s.price; // legacy string
-        return 'Liên hệ';
+        return 'LiĂªn há»‡';
     };
 
     const getPromoPrice = (s: Service) => {
@@ -187,15 +183,15 @@ export default function ServicesPage() {
             {/* Header */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-900">Quản lý dịch vụ</h1>
-                    <p className="text-gray-500">{services.length} dịch vụ</p>
+                    <h1 className="text-2xl font-bold text-gray-900">Quáº£n lĂ½ dá»‹ch vá»¥</h1>
+                    <p className="text-gray-500">{services.length} dá»‹ch vá»¥</p>
                 </div>
                 <button
                     onClick={() => { setEditingService(null); setIsModalOpen(true); }}
                     className="flex items-center gap-2 bg-orange-500 text-white px-4 py-2.5 rounded-lg font-medium hover:bg-orange-600 transition-colors"
                 >
                     <Plus size={20} />
-                    Thêm dịch vụ
+                    ThĂªm dá»‹ch vá»¥
                 </button>
             </div>
 
@@ -204,10 +200,10 @@ export default function ServicesPage() {
                 <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex flex-col sm:flex-row items-start justify-between gap-3">
                     <div>
                         <p className="font-medium flex items-center gap-2">
-                            ⚠️ Có {missingCategoryCount} dịch vụ đang bị mất danh mục!
+                            â ï¸ CĂ³ {missingCategoryCount} dá»‹ch vá»¥ Ä‘ang bá»‹ máº¥t danh má»¥c!
                         </p>
                         <p className="text-sm mt-1 text-red-600">
-                            Các danh mục không tồn tại: {missingCategories.join(', ')}.
+                            CĂ¡c danh má»¥c khĂ´ng tá»“n táº¡i: {missingCategories.join(', ')}.
                         </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -217,7 +213,7 @@ export default function ServicesPage() {
                                 onClick={() => { setReassignFrom(cat); setShowReassign(true); }}
                                 className="px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 text-sm font-medium rounded-md transition-colors"
                             >
-                                Gán lại &quot;{cat}&quot;
+                                GĂ¡n láº¡i &quot;{cat}&quot;
                             </button>
                         ))}
                     </div>
@@ -231,7 +227,7 @@ export default function ServicesPage() {
                         <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                         <input
                             type="text"
-                            placeholder="Tìm dịch vụ..."
+                            placeholder="TĂ¬m dá»‹ch vá»¥..."
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                             className="w-full h-11 pl-10 pr-4 border rounded-lg focus:border-orange-500 focus:outline-none"
@@ -240,7 +236,7 @@ export default function ServicesPage() {
                 </div>
                 {/* Modern Taxonomy Filter */}
                 <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
-                    <p className="text-xs font-medium text-gray-500 mb-2">Lọc theo danh mục:</p>
+                    <p className="text-xs font-medium text-gray-500 mb-2">Lá»c theo danh má»¥c:</p>
                     <CategoryTaxonomySelector
                         type="service"
                         value={filterCategoryIds}
@@ -257,7 +253,7 @@ export default function ServicesPage() {
             ) : filteredServices.length === 0 ? (
                 <div className="text-center py-20 bg-white rounded-xl">
                     <Wrench size={48} className="mx-auto text-gray-300 mb-4" />
-                    <p className="text-gray-500">Chưa có dịch vụ nào</p>
+                    <p className="text-gray-500">ChÆ°a cĂ³ dá»‹ch vá»¥ nĂ o</p>
                 </div>
             ) : (
                 <>
@@ -282,12 +278,14 @@ export default function ServicesPage() {
                                 </div>
                                 <div className="flex gap-1">
                                     <button
+                                        title="Sá»­a dá»‹ch vá»¥"
                                         onClick={() => { setEditingService(service); setIsModalOpen(true); }}
                                         className="p-2 hover:bg-blue-100 text-blue-600 rounded-lg"
                                     >
                                         <Edit size={16} />
                                     </button>
                                     <button
+                                        title="XĂ³a dá»‹ch vá»¥"
                                         onClick={() => handleDelete(service)}
                                         className="p-2 hover:bg-red-100 text-red-600 rounded-lg"
                                     >
@@ -302,12 +300,12 @@ export default function ServicesPage() {
                                 const deepestId = service.categoryIds?.[service.categoryIds.length - 1];
                                 const path = deepestId ? getCategoryPath(deepestId, serviceTaxonomy) : null;
                                 if (status === 'orphan') {
-                                    return <p className="text-xs text-red-600 bg-red-50 px-2 py-0.5 rounded inline-block mb-1">⚠ Lệch danh mục: {deepestId || service.category}</p>;
+                                    return <p className="text-xs text-red-600 bg-red-50 px-2 py-0.5 rounded inline-block mb-1">â  Lá»‡ch danh má»¥c: {deepestId || service.category}</p>;
                                 }
                                 if (status === 'unassigned') {
-                                    return <p className="text-xs text-yellow-600 bg-yellow-50 px-2 py-0.5 rounded inline-block mb-1">Chưa gán danh mục</p>;
+                                    return <p className="text-xs text-yellow-600 bg-yellow-50 px-2 py-0.5 rounded inline-block mb-1">ChÆ°a gĂ¡n danh má»¥c</p>;
                                 }
-                                return path ? <p className="text-xs text-gray-400 mb-1">📂 {path}</p> : null;
+                                return path ? <p className="text-xs text-gray-400 mb-1">đŸ“‚ {path}</p> : null;
                             })()}
                             <p className="text-sm text-gray-500 line-clamp-2 mb-3">{service.description}</p>
                             <div className="flex items-center justify-between">
@@ -323,7 +321,7 @@ export default function ServicesPage() {
                                 </div>
                                 <span className={`px-2 py-1 text-xs rounded-full ${service.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
                                     }`}>
-                                    {service.isActive ? 'Hoạt động' : 'Tạm dừng'}
+                                    {service.isActive ? 'Hoáº¡t Ä‘á»™ng' : 'Táº¡m dá»«ng'}
                                 </span>
                             </div>
                         </div>
@@ -337,7 +335,7 @@ export default function ServicesPage() {
                     totalAll={services.length}
                     onPageChange={setPage}
                     onPageSizeChange={setPageSize}
-                    entityLabel="dịch vụ"
+                    entityLabel="dá»‹ch vá»¥"
                 />
                 </>
             )}
@@ -351,13 +349,13 @@ export default function ServicesPage() {
             />
 
             {/* Batch Reassign Modal */}
-            <Modal isOpen={showReassign} onClose={() => setShowReassign(false)} title="Gán lại danh mục hàng loạt" size="md">
+            <Modal isOpen={showReassign} onClose={() => setShowReassign(false)} title="GĂ¡n láº¡i danh má»¥c hĂ ng loáº¡t" size="md">
                 <div className="p-6 space-y-4">
                     <p className="text-sm text-gray-600">
-                        Chọn danh mục mới cho các dịch vụ đang thuộc danh mục <strong className="text-gray-900">&quot;{reassignFrom}&quot;</strong>.
+                        Chá»n danh má»¥c má»›i cho cĂ¡c dá»‹ch vá»¥ Ä‘ang thuá»™c danh má»¥c <strong className="text-gray-900">&quot;{reassignFrom}&quot;</strong>.
                     </p>
                     <div>
-                        <label className="block text-sm font-medium mb-1">Danh mục mới *</label>
+                        <label className="block text-sm font-medium mb-1">Danh má»¥c má»›i *</label>
                         <CategoryTaxonomySelector
                             type="service"
                             value={reassignToIds}
@@ -368,7 +366,7 @@ export default function ServicesPage() {
                         />
                     </div>
                     <div className="flex gap-3 pt-4">
-                        <button onClick={() => setShowReassign(false)} className="flex-1 py-2.5 border rounded-lg hover:bg-gray-50 font-medium">Hủy</button>
+                        <button onClick={() => setShowReassign(false)} className="flex-1 py-2.5 border rounded-lg hover:bg-gray-50 font-medium">Há»§y</button>
                         <button 
                             onClick={handleBatchReassign} 
                             disabled={!reassignTo || isReassigning}
@@ -376,8 +374,8 @@ export default function ServicesPage() {
                         >
                             {isReassigning && <Loader2 size={16} className="animate-spin" />}
                             {isReassigning 
-                                ? (reassignProgress ? `Đang xử lý ${reassignProgress.current}/${reassignProgress.total}...` : 'Đang xử lý...') 
-                                : 'Xác nhận gán lại'}
+                                ? (reassignProgress ? `Äang xá»­ lĂ½ ${reassignProgress.current}/${reassignProgress.total}...` : 'Äang xá»­ lĂ½...')
+                                : 'XĂ¡c nháº­n gĂ¡n láº¡i'}
                         </button>
                     </div>
                 </div>
@@ -429,39 +427,22 @@ function ServiceModal({
                 seoDescription: service?.seoDescription || '',
                 tags: service?.tags?.join(', ') || '',
             });
-            setSelectedImageUrl(service?.imageUrl || '');
-            setImagePreview(service?.imageUrl || '');
-            setImageFile(null);
+            setImages(service?.images?.length ? service.images : (service?.imageUrl ? [service.imageUrl] : []));
         }
     }, [isOpen, service]);
-    const [imageFile, setImageFile] = useState<File | null>(null);
-    const [selectedImageUrl, setSelectedImageUrl] = useState<string>(service?.imageUrl || '');
-    const [imagePreview, setImagePreview] = useState<string>(service?.imageUrl || '');
+    const [images, setImages] = useState<string[]>(service?.images?.length ? service.images : (service?.imageUrl ? [service.imageUrl] : []));
     const [isSubmitting, setIsSubmitting] = useState(false);
-    const [isMediaManagerOpen, setIsMediaManagerOpen] = useState(false);
-
-    const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (file) {
-            setImageFile(file);
-            setImagePreview(URL.createObjectURL(file));
-            setSelectedImageUrl('');
-        }
-    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (formData.categoryIds.length === 0) {
+            toastError('Vui lĂ²ng chá»n danh má»¥c taxonomy cho dá»‹ch vá»¥.');
+            return;
+        }
         setIsSubmitting(true);
 
         try {
-            let imageUrl = selectedImageUrl || service?.imageUrl || '';
-
-            if (imageFile) {
-                if (service?.imageUrl) {
-                    await deleteImage(service.imageUrl);
-                }
-                imageUrl = await uploadImage(imageFile, 'services');
-            }
+            const imageUrl = images[0] || '';
 
             const tagsArray = formData.tags.split(',').map(t => t.trim()).filter(Boolean);
 
@@ -479,6 +460,7 @@ function ServiceModal({
                 seoDescription: formData.seoDescription || '',
                 tags: tagsArray,
                 imageUrl,
+                images,
             };
 
             // Remove legacy string price field when saving new data
@@ -492,7 +474,7 @@ function ServiceModal({
             } else {
                 const docId = generateSlug(formData.name);
                 if (existingIds.includes(docId)) {
-                    toastError(`ID "${docId}" đã tồn tại! Hãy đổi tên dịch vụ.`);
+                    toastError(`ID "${docId}" Ä‘Ă£ tá»“n táº¡i! HĂ£y Ä‘á»•i tĂªn dá»‹ch vá»¥.`);
                     setIsSubmitting(false);
                     return;
                 }
@@ -503,60 +485,28 @@ function ServiceModal({
             onClose();
         } catch (error) {
             console.error('Error saving service:', error);
-            toastError('Lỗi khi lưu dịch vụ!');
+            toastError('Lá»—i khi lÆ°u dá»‹ch vá»¥!');
         } finally {
             setIsSubmitting(false);
         }
     };
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title={service ? 'Sửa dịch vụ' : 'Thêm dịch vụ'} size="lg">
+        <Modal isOpen={isOpen} onClose={onClose} title={service ? 'Sá»­a dá»‹ch vá»¥' : 'ThĂªm dá»‹ch vá»¥'} size="2xl">
 
                 <form onSubmit={handleSubmit} className="p-6 space-y-4">
-                    {/* Image */}
-                    <div>
-                        <label className="block text-sm font-medium mb-2">Ảnh dịch vụ</label>
-                        <div className="border-2 border-dashed rounded-xl p-4 text-center">
-                            {imagePreview ? (
-                                <div className="relative w-20 h-20 mx-auto mb-3">
-                                    <Image src={imagePreview} alt="Preview" fill className="object-cover rounded-lg" />
-                                </div>
-                            ) : (
-                                <div className="w-20 h-20 mx-auto mb-3 bg-gray-100 rounded-lg flex items-center justify-center">
-                                    <Upload size={24} className="text-gray-400" />
-                                </div>
-                            )}
-                            <input type="file" accept="image/*" onChange={handleImageChange} className="hidden" id="service-image" />
-                            <div className="flex items-center justify-center gap-4 mt-2">
-                                <label htmlFor="service-image" className="cursor-pointer text-orange-600 hover:text-orange-700 font-medium text-sm">
-                                    {imagePreview ? 'Đổi ảnh (upload mới)' : 'Upload ảnh mới'}
-                                </label>
-                                <button
-                                    type="button"
-                                    onClick={() => setIsMediaManagerOpen(true)}
-                                    className="text-xs text-gray-600 hover:text-orange-600 underline"
-                                >
-                                    Chọn từ thư viện
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* MediaManager — shared component */}
-                    <MediaManager
-                        isOpen={isMediaManagerOpen}
-                        onClose={() => setIsMediaManagerOpen(false)}
-                        onSelect={(url) => {
-                            setSelectedImageUrl(url);
-                            setImagePreview(url);
-                            setImageFile(null);
-                        }}
-                        title="Chọn ảnh dịch vụ"
+                    <MediaGalleryField
+                        label={'\u1EA2nh d\u1ECBch v\u1EE5'}
+                        mediaTitle={'Ch\u1ECDn \u1EA3nh d\u1ECBch v\u1EE5'}
+                        value={images}
+                        onChange={setImages}
+                        emptyText={'Ch\u1ECDn \u1EA3nh d\u1ECBch v\u1EE5 t\u1EEB th\u01B0 vi\u1EC7n'}
+                        defaultFolder="services"
                     />
 
                     {/* Name */}
                     <div>
-                        <label className="block text-sm font-medium mb-1">Tên dịch vụ *</label>
+                        <label className="block text-sm font-medium mb-1">TĂªn dá»‹ch vá»¥ *</label>
                         <input
                             type="text"
                             value={formData.name}
@@ -569,7 +519,7 @@ function ServiceModal({
 
                     {/* Device Model with suggestions */}
                     <div>
-                        <label className="block text-sm font-medium mb-1">Dòng máy hỗ trợ</label>
+                        <label className="block text-sm font-medium mb-1">DĂ²ng mĂ¡y há»— trá»£</label>
                         <input
                             type="text"
                             list="device-model-suggestions"
@@ -588,13 +538,13 @@ function ServiceModal({
                                 'iPad Pro', 'iPad Air', 'iPad mini', 'Samsung Galaxy Tab',
                             ].map(m => <option key={m} value={m} />)}
                         </datalist>
-                        <p className="text-xs text-gray-400 mt-1">Nhấn vào gợi ý bên dưới để thêm nhanh:</p>
+                        <p className="text-xs text-gray-400 mt-1">Nháº¥n vĂ o gá»£i Ă½ bĂªn dÆ°á»›i Ä‘á»ƒ thĂªm nhanh:</p>
                         <div className="flex flex-wrap gap-1.5 mt-1.5">
                             {[
-                                { group: '🍎', items: ['iPhone 16 Pro Max', 'iPhone 15 Pro Max', 'iPhone 14', 'iPhone 13', 'iPhone 12', 'iPhone 11'] },
-                                { group: '🌌', items: ['Galaxy S25 Ultra', 'Galaxy S24 Ultra', 'Galaxy A55', 'Galaxy Z Fold6'] },
-                                { group: '📱', items: ['Xiaomi 14', 'Redmi Note 13 Pro', 'OPPO Reno 12', 'OPPO A78', 'Vivo V30'] },
-                                { group: '💻', items: ['MacBook Pro', 'MacBook Air', 'Dell XPS', 'HP Pavilion', 'Lenovo ThinkPad'] },
+                                { group: 'đŸ', items: ['iPhone 16 Pro Max', 'iPhone 15 Pro Max', 'iPhone 14', 'iPhone 13', 'iPhone 12', 'iPhone 11'] },
+                                { group: 'đŸŒŒ', items: ['Galaxy S25 Ultra', 'Galaxy S24 Ultra', 'Galaxy A55', 'Galaxy Z Fold6'] },
+                                { group: 'đŸ“±', items: ['Xiaomi 14', 'Redmi Note 13 Pro', 'OPPO Reno 12', 'OPPO A78', 'Vivo V30'] },
+                                { group: 'đŸ’»', items: ['MacBook Pro', 'MacBook Air', 'Dell XPS', 'HP Pavilion', 'Lenovo ThinkPad'] },
                             ].map(g => g.items.map(item => (
                                 <button
                                     key={item}
@@ -615,7 +565,7 @@ function ServiceModal({
                     {/* Price */}
                     <div className="grid grid-cols-2 gap-3">
                         <div>
-                            <label className="block text-sm font-medium mb-1">Giá dịch vụ (đ) *</label>
+                            <label className="block text-sm font-medium mb-1">GiĂ¡ dá»‹ch vá»¥ (Ä‘) *</label>
                             <CurrencyInput
                                 value={formData.price_original || ''}
                                 onChange={(v) => setFormData({ ...formData, price_original: v })}
@@ -624,19 +574,19 @@ function ServiceModal({
                             />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium mb-1">Giá khuyến mãi (đ)</label>
+                            <label className="block text-sm font-medium mb-1">GiĂ¡ khuyáº¿n mĂ£i (Ä‘)</label>
                             <CurrencyInput
                                 value={formData.price_promo || ''}
                                 onChange={(v) => setFormData({ ...formData, price_promo: v })}
                                 className="w-full h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
-                                placeholder="Để trống nếu không giảm"
+                                placeholder="Äá»ƒ trá»‘ng náº¿u khĂ´ng giáº£m"
                             />
                         </div>
                     </div>
 
                     {/* Category */}
                     <div>
-                        <label className="block text-sm font-medium mb-1">Danh mục *</label>
+                        <label className="block text-sm font-medium mb-1">Danh má»¥c *</label>
                         <CategoryTaxonomySelector
                             type="service"
                             value={formData.categoryIds}
@@ -646,61 +596,61 @@ function ServiceModal({
 
                     {/* Description */}
                     <div>
-                        <label className="block text-sm font-medium mb-1">Mô tả</label>
+                        <label className="block text-sm font-medium mb-1">MĂ´ táº£</label>
                         <textarea
                             value={formData.description}
                             onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                             rows={3}
                             className="w-full px-4 py-3 border rounded-lg focus:border-orange-500 focus:outline-none resize-none"
-                            placeholder="Mô tả dịch vụ..."
+                            placeholder="MĂ´ táº£ dá»‹ch vá»¥..."
                         />
                     </div>
 
                     {/* SEO & Service Details */}
                     <div className="border-t pt-4 mt-2">
-                        <p className="text-sm font-medium text-gray-700 mb-3">📋 Thông tin bổ sung & SEO</p>
+                        <p className="text-sm font-medium text-gray-700 mb-3">đŸ“‹ ThĂ´ng tin bá»• sung & SEO</p>
                         <div className="grid grid-cols-2 gap-3 mb-3">
                             <div>
-                                <label className="block text-xs font-medium text-gray-600 mb-1">Bảo hành</label>
+                                <label className="block text-xs font-medium text-gray-600 mb-1">Báº£o hĂ nh</label>
                                 <input
                                     type="text"
                                     value={formData.warranty_text}
                                     onChange={(e) => setFormData({ ...formData, warranty_text: e.target.value })}
                                     className="w-full h-10 px-3 text-sm border rounded-lg focus:border-orange-500 focus:outline-none"
-                                    placeholder="BH 12 tháng"
+                                    placeholder="BH 12 thĂ¡ng"
                                 />
                             </div>
                             <div>
-                                <label className="block text-xs font-medium text-gray-600 mb-1">Thời gian sửa</label>
+                                <label className="block text-xs font-medium text-gray-600 mb-1">Thá»i gian sá»­a</label>
                                 <input
                                     type="text"
                                     value={formData.repair_time}
                                     onChange={(e) => setFormData({ ...formData, repair_time: e.target.value })}
                                     className="w-full h-10 px-3 text-sm border rounded-lg focus:border-orange-500 focus:outline-none"
-                                    placeholder="30 phút"
+                                    placeholder="30 phĂºt"
                                 />
                             </div>
                         </div>
                         <div className="mb-3">
-                            <label className="block text-xs font-medium text-gray-600 mb-1">Mô tả SEO (hiển thị trên Google)</label>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">MĂ´ táº£ SEO (hiá»ƒn thá»‹ trĂªn Google)</label>
                             <textarea
                                 value={formData.seoDescription}
                                 onChange={(e) => setFormData({ ...formData, seoDescription: e.target.value })}
                                 rows={2}
                                 maxLength={160}
                                 className="w-full px-3 py-2 text-sm border rounded-lg focus:border-orange-500 focus:outline-none resize-none"
-                                placeholder="Mô tả ngắn gọn cho SEO (tối đa 160 ký tự)"
+                                placeholder="MĂ´ táº£ ngáº¯n gá»n cho SEO (tá»‘i Ä‘a 160 kĂ½ tá»±)"
                             />
                             <p className="text-xs text-gray-400 mt-0.5">{formData.seoDescription.length}/160</p>
                         </div>
                         <div>
-                            <label className="block text-xs font-medium text-gray-600 mb-1">Tags (phân cách bằng dấu phẩy)</label>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Tags (phĂ¢n cĂ¡ch báº±ng dáº¥u pháº©y)</label>
                             <input
                                 type="text"
                                 value={formData.tags}
                                 onChange={(e) => setFormData({ ...formData, tags: e.target.value })}
                                 className="w-full h-10 px-3 text-sm border rounded-lg focus:border-orange-500 focus:outline-none"
-                                placeholder="thay pin, iphone, bảo hành"
+                                placeholder="thay pin, iphone, báº£o hĂ nh"
                             />
                         </div>
                     </div>
@@ -714,14 +664,14 @@ function ServiceModal({
                                 onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
                                 className="w-5 h-5 accent-orange-500"
                             />
-                            <span className="text-sm font-medium">Đang hoạt động</span>
+                            <span className="text-sm font-medium">Äang hoáº¡t Ä‘á»™ng</span>
                         </label>
                     </div>
 
                     {/* Actions */}
                     <div className="flex gap-3 pt-4">
                         <button type="button" onClick={onClose} className="flex-1 py-3 border rounded-lg font-medium hover:bg-gray-50">
-                            Hủy
+                            Há»§y
                         </button>
                         <button
                             type="submit"
@@ -729,7 +679,7 @@ function ServiceModal({
                             className="flex-1 py-3 bg-orange-500 text-white rounded-lg font-medium hover:bg-orange-600 disabled:opacity-50 flex items-center justify-center gap-2"
                         >
                             {isSubmitting && <Loader2 size={18} className="animate-spin" />}
-                            {service ? 'Cập nhật' : 'Thêm dịch vụ'}
+                            {service ? 'Cáº­p nháº­t' : 'ThĂªm dá»‹ch vá»¥'}
                         </button>
                     </div>
                 </form>

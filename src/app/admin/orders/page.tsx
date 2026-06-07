@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { useState, useEffect } from 'react';
 import { useClientPagination } from '@/lib/useClientPagination';
@@ -21,20 +21,20 @@ import { Receipt } from 'lucide-react';
 import { toastError, toastSuccess } from '@/lib/toast';
 
 
-const formatPrice = (price: number) => new Intl.NumberFormat('vi-VN').format(price) + 'Ä‘';
+const formatPrice = (price: number) => new Intl.NumberFormat('vi-VN').format(price) + 'đ';
 const formatDate = (ts: unknown) => {
-    if (!ts) return 'â€”';
+    if (!ts) return '—';
     const maybe = ts as { toDate?: () => Date };
     const d = typeof maybe?.toDate === 'function' ? maybe.toDate() : new Date(ts as string | number | Date);
     return d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 
 const statusConfig: Record<string, { color: string; icon: React.ComponentType<{ size?: number }>; label: string }> = {
-    Pending: { color: 'bg-yellow-100 text-yellow-700', icon: Clock, label: 'Chá» xá»­ lĂ½' },
-    Confirmed: { color: 'bg-blue-100 text-blue-700', icon: Package, label: 'ÄĂ£ xĂ¡c nháº­n' },
-    Shipping: { color: 'bg-purple-100 text-purple-700', icon: Truck, label: 'Äang giao' },
-    Completed: { color: 'bg-green-100 text-green-700', icon: CheckCircle, label: 'HoĂ n thĂ nh' },
-    Cancelled: { color: 'bg-red-100 text-red-700', icon: XCircle, label: 'ÄĂ£ há»§y' },
+    Pending: { color: 'bg-yellow-100 text-yellow-700', icon: Clock, label: 'Chờ xử lý' },
+    Confirmed: { color: 'bg-blue-100 text-blue-700', icon: Package, label: 'Đã xác nhận' },
+    Shipping: { color: 'bg-purple-100 text-purple-700', icon: Truck, label: 'Đang giao' },
+    Completed: { color: 'bg-green-100 text-green-700', icon: CheckCircle, label: 'Hoàn thành' },
+    Cancelled: { color: 'bg-red-100 text-red-700', icon: XCircle, label: 'Đã hủy' },
 };
 
 export default function OrdersPage() {
@@ -98,7 +98,7 @@ export default function OrdersPage() {
 
     const searchInDatabase = async () => {
         if (!searchQuery.trim()) {
-            alert('Vui lĂ²ng nháº­p SÄT Ä‘á»ƒ tĂ¬m kiáº¿m trĂªn Server');
+            alert('Vui lòng nhập SĐT để tìm kiếm trên Server');
             return;
         }
         setIsSearchingDB(true);
@@ -119,11 +119,11 @@ export default function OrdersPage() {
                      return [...prev, ...newOrders];
                  });
             } else {
-                alert('KhĂ´ng tĂ¬m tháº¥y dá»¯ liá»‡u trĂªn mĂ¡y chá»§ cho SÄT nĂ y.');
+                alert('Không tìm thấy dữ liệu trên máy chủ cho SĐT này.');
             }
         } catch (error) {
-            console.error("Lá»—i khi tĂ¬m kiáº¿m trĂªn database", error);
-            alert('CĂ³ lá»—i khi tĂ¬m kiáº¿m.');
+            console.error("Lỗi khi tìm kiếm trên database", error);
+            alert('Có lỗi khi tìm kiếm.');
         } finally {
             setIsSearchingDB(false);
         }
@@ -152,10 +152,10 @@ export default function OrdersPage() {
 
             const data = await res.json();
             if (!res.ok) {
-                throw new Error(data.error || 'LĂ¡Â»â€”i khi cĂ¡ÂºÂ­p nhĂ¡ÂºÂ­t trĂ¡ÂºÂ¡ng thÄ‚Â¡i');
+                throw new Error(data.error || 'Lỗi khi cập nhật trạng thái');
             }
 
-            toastSuccess('CĂ¡ÂºÂ­p nhĂ¡ÂºÂ­t trĂ¡ÂºÂ¡ng thÄ‚Â¡i thÄ‚Â nh cÄ‚Â´ng');
+            toastSuccess('Cập nhật trạng thái thành công');
 
             if (selectedOrder?.id === orderId) {
                 setSelectedOrder(prev => {
@@ -167,7 +167,7 @@ export default function OrdersPage() {
                             type: 'full',
                             amount: remaining,
                             timestamp: Date.now(),
-                            note: `Thanh toÄ‚Â¡n phĂ¡ÂºÂ§n cÄ‚Â²n lĂ¡ÂºÂ¡i khi hoÄ‚Â n tĂ¡ÂºÂ¥t Ă„â€˜Ă†Â¡n hÄ‚Â ng`
+                            note: `Thanh toán phần còn lại khi hoàn tất đơn hàng`
                         });
                         return {
                             ...prev,
@@ -181,7 +181,7 @@ export default function OrdersPage() {
             }
         } catch (err: unknown) {
             console.error('Update status error:', err);
-            toastError((err as Error).message || 'Lá»—i khi cáº­p nháº­t');
+            toastError((err as Error).message || 'Lỗi khi cập nhật');
         }
     };
 
@@ -199,9 +199,9 @@ export default function OrdersPage() {
             });
 
             const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'Lá»—i cáº­p nháº­t IMEI');
+            if (!res.ok) throw new Error(data.error || 'Lỗi cập nhật IMEI');
 
-            toastSuccess('Cáº­p nháº­t IMEI thĂ nh cĂ´ng');
+            toastSuccess('Cập nhật IMEI thành công');
 
             if (selectedOrder?.id === orderId) {
                 setSelectedOrder(prev => {
@@ -241,10 +241,10 @@ export default function OrdersPage() {
                         config: wConfig,
                         type: it.warrantyType === 'warrantyDevice' ? 'device' : 'accessory',
                         payload: {
-                            customerName: selectedOrder.customer?.name || selectedOrder.customer_info?.name || 'KhĂ¡ch láº»',
-                            customerPhone: selectedOrder.customer?.phone || selectedOrder.customer_info?.phone || 'â€”',
+                            customerName: selectedOrder.customer?.name || selectedOrder.customer_info?.name || 'Khách lẻ',
+                            customerPhone: selectedOrder.customer?.phone || selectedOrder.customer_info?.phone || '—',
                             deviceModel: it.name || it.product_name || '',
-                            deviceImei: it.imeis?.[i] || 'â€”',
+                            deviceImei: it.imeis?.[i] || '—',
                             totalCost: it.price || 0,
                             createdAt: selectedOrder.createdAt
                         }
@@ -254,12 +254,12 @@ export default function OrdersPage() {
         }
 
         if (hasIncompleteImei) {
-            toastError('Vui lĂ²ng cáº­p nháº­t Ä‘áº§y Ä‘á»§ sá»‘ IMEI/Serial cho cĂ¡c thiáº¿t bá»‹ cáº§n báº£o hĂ nh!');
+            toastError('Vui lòng cập nhật đầy đủ số IMEI/Serial cho các thiết bị cần bảo hành!');
             return;
         }
 
         if (payloads.length === 0) {
-            toastError('ÄÆ¡n hĂ ng khĂ´ng cĂ³ sáº£n pháº©m báº£o hĂ nh');
+            toastError('Đơn hàng không có sản phẩm bảo hành');
             return;
         }
 
@@ -316,24 +316,24 @@ export default function OrdersPage() {
             <div className="flex items-center justify-between">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-                        <ShoppingBag className="text-orange-500" /> Quáº£n lĂ½ Ä‘Æ¡n hĂ ng
+                        <ShoppingBag className="text-orange-500" /> Quản lý đơn hàng
                     </h1>
-                    <p className="text-gray-500 text-sm mt-0.5">Tá»•ng cá»™ng {stats.total} Ä‘Æ¡n hĂ ng</p>
+                    <p className="text-gray-500 text-sm mt-0.5">Tổng cộng {stats.total} đơn hàng</p>
                 </div>
             </div>
 
             {/* Stats */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <div className="bg-white rounded-xl border p-4">
-                    <p className="text-xs text-gray-500">Tá»•ng Ä‘Æ¡n</p>
+                    <p className="text-xs text-gray-500">Tổng đơn</p>
                     <p className="text-2xl font-bold text-gray-800">{stats.total}</p>
                 </div>
                 <div className="bg-white rounded-xl border p-4">
-                    <p className="text-xs text-gray-500">Chá» xá»­ lĂ½</p>
+                    <p className="text-xs text-gray-500">Chờ xử lý</p>
                     <p className="text-2xl font-bold text-yellow-600">{stats.pending}</p>
                 </div>
                 <div className="bg-white rounded-xl border p-4">
-                    <p className="text-xs text-gray-500">HoĂ n thĂ nh</p>
+                    <p className="text-xs text-gray-500">Hoàn thành</p>
                     <p className="text-2xl font-bold text-green-600">{stats.completed}</p>
                 </div>
                 <div className="bg-white rounded-xl border p-4">
@@ -350,9 +350,9 @@ export default function OrdersPage() {
                 return (
                     <div className="flex gap-2 flex-wrap">
                         {[
-                            { key: 'all' as const, label: 'Táº¥t cáº£', count: orders.length, icon: 'đŸ“‹' },
-                            { key: 'web' as const, label: 'Website', count: webCount, icon: 'đŸŒ', pending: webPending },
-                            { key: 'pos' as const, label: 'POS', count: posCount, icon: 'đŸª' },
+                            { key: 'all' as const, label: 'Tất cả', count: orders.length, icon: '🔍' },
+                            { key: 'web' as const, label: 'Website', count: webCount, icon: '🌐', pending: webPending },
+                            { key: 'pos' as const, label: 'POS', count: posCount, icon: '🔑' },
                         ].map(tab => (
                             <button
                                 key={tab.key}
@@ -370,7 +370,7 @@ export default function OrdersPage() {
                                 }`}>{tab.count}</span>
                                 {tab.pending && tab.pending > 0 && sourceFilter !== tab.key && (
                                     <span className="ml-0.5 px-1.5 py-0.5 rounded-full text-xs font-bold bg-red-500 text-white animate-pulse">
-                                        {tab.pending} má»›i
+                                        {tab.pending} mới
                                     </span>
                                 )}
                             </button>
@@ -385,7 +385,7 @@ export default function OrdersPage() {
                     <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                     <input
                         type="text"
-                        placeholder="TĂ¬m theo mĂ£ Ä‘Æ¡n, SÄT..."
+                        placeholder="Tìm theo mã đơn, SĐT..."
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         className="w-full h-11 pl-10 pr-4 border rounded-lg focus:border-orange-500 focus:outline-none"
@@ -398,17 +398,17 @@ export default function OrdersPage() {
                         className="h-11 px-4 bg-orange-100 text-orange-600 rounded-lg hover:bg-orange-200 transition-colors whitespace-nowrap flex items-center gap-2 font-medium"
                     >
                         {isSearchingDB ? <Loader2 className="animate-spin" size={18} /> : <Search size={18} />}
-                        TĂ¬m trĂªn Server
+                        Tìm trên Server
                     </button>
                 )}
                 <select
                     value={statusFilter}
                     onChange={(e) => setStatusFilter(e.target.value)}
-                    title="Lá»c theo tráº¡ng thĂ¡i"
-                    aria-label="Lá»c theo tráº¡ng thĂ¡i"
+                    title="Lọc theo trạng thái"
+                    aria-label="Lọc theo trạng thái"
                     className="w-full md:w-48 h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none bg-white"
                 >
-                    <option value="">Táº¥t cáº£ tráº¡ng thĂ¡i</option>
+                    <option value="">Tất cả trạng thái</option>
                     {Object.entries(statusConfig).map(([key, value]) => (
                         <option key={key} value={key}>{value.label}</option>
                     ))}
@@ -422,13 +422,13 @@ export default function OrdersPage() {
                     {filteredOrders.length === 0 ? (
                         <div className="text-center py-12 text-gray-400">
                             <ShoppingBag size={48} className="mx-auto mb-3 opacity-50" />
-                            <p>KhĂ´ng cĂ³ Ä‘Æ¡n hĂ ng nĂ o</p>
+                            <p>Không có đơn hàng nào</p>
                         </div>
                     ) : paginatedOrders.map((order) => {
                         const status = statusConfig[order.status] || statusConfig.Pending;
                         const StIcon = status.icon;
-                        const cName = order.customer?.name || order.customer_info?.name || 'KhĂ¡ch láº»';
-                        const cPhone = order.customer?.phone || order.customer_info?.phone || 'â€”';
+                        const cName = order.customer?.name || order.customer_info?.name || 'Khách lẻ';
+                        const cPhone = order.customer?.phone || order.customer_info?.phone || '—';
                         return (
                             <div key={order.id} className="p-4 space-y-3 bg-white hover:bg-gray-50 transition-colors">
                                 <div className="flex items-start justify-between">
@@ -452,11 +452,11 @@ export default function OrdersPage() {
                                 </div>
                                 <div className="grid grid-cols-2 gap-2 text-sm bg-gray-50/50 p-2.5 rounded-lg border border-gray-50">
                                     <div>
-                                        <p className="text-[11px] text-gray-500 uppercase font-medium">Tá»•ng tiá»n</p>
+                                        <p className="text-[11px] text-gray-500 uppercase font-medium">Tổng tiền</p>
                                         <p className="font-bold text-orange-600">{formatPrice(order.total_amount || 0)}</p>
                                     </div>
                                     <div className="text-right">
-                                        <p className="text-[11px] text-gray-500 uppercase font-medium">NgĂ y táº¡o</p>
+                                            <p className="text-[11px] text-gray-500 uppercase font-medium">Ngày tạo</p>
                                         <p className="text-gray-700 font-medium text-xs">{formatDate(order.createdAt)}</p>
                                     </div>
                                 </div>
@@ -465,7 +465,7 @@ export default function OrdersPage() {
                                         onClick={() => setSelectedOrder(order)}
                                         className="w-full py-2.5 bg-white text-gray-700 text-sm font-medium rounded-lg flex items-center justify-center gap-2 transition-colors border border-gray-200 active:bg-gray-50"
                                     >
-                                        <Eye size={16} /> Xem chi tiáº¿t Ä‘Æ¡n hĂ ng
+                                        <Eye size={16} /> Xem chi tiết đơn hàng
                                     </button>
                                 </div>
                             </div>
@@ -478,13 +478,13 @@ export default function OrdersPage() {
                     <table className="w-full">
                         <thead className="bg-gray-50">
                             <tr>
-                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">MĂ£ Ä‘Æ¡n</th>
-                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">KhĂ¡ch hĂ ng</th>
-                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Tá»•ng tiá»n</th>
-                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Thanh toĂ¡n</th>
-                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Tráº¡ng thĂ¡i</th>
-                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">NgĂ y táº¡o</th>
-                                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase">HĂ nh Ä‘á»™ng</th>
+                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Mã đơn</th>
+                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Khách hàng</th>
+                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Tổng tiền</th>
+                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Thanh toán</th>
+                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Trạng thái</th>
+                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Ngày tạo</th>
+                                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Hình động</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
@@ -492,14 +492,14 @@ export default function OrdersPage() {
                                 <tr>
                                     <td colSpan={7} className="text-center py-16 text-gray-400">
                                         <ShoppingBag size={48} className="mx-auto mb-3 opacity-50" />
-                                        <p>KhĂ´ng cĂ³ Ä‘Æ¡n hĂ ng nĂ o</p>
+                                        <p>Không có đơn hàng nào</p>
                                     </td>
                                 </tr>
                             ) : paginatedOrders.map((order) => {
                                 const status = statusConfig[order.status] || statusConfig.Pending;
                                 const StIcon = status.icon;
-                                const cName = order.customer?.name || order.customer_info?.name || 'KhĂ¡ch láº»';
-                                const cPhone = order.customer?.phone || order.customer_info?.phone || 'â€”';
+                                const cName = order.customer?.name || order.customer_info?.name || 'Khách lẻ';
+                                const cPhone = order.customer?.phone || order.customer_info?.phone || '—';
                                 return (
                                     <tr key={order.id} className="hover:bg-gray-50">
                                         <td className="padding-6 py-4">
@@ -516,7 +516,7 @@ export default function OrdersPage() {
                                             <p className="text-xs text-gray-500">{cPhone}</p>
                                         </td>
                                         <td className="px-6 py-4 font-medium text-gray-900">{formatPrice(order.total_amount || 0)}</td>
-                                        <td className="px-6 py-4 text-sm text-gray-600">{order.payment_method || 'â€”'}</td>
+                                        <td className="px-6 py-4 text-sm text-gray-600">{order.payment_method || '—'}</td>
                                         <td className="px-6 py-4">
                                             <span className={`inline-flex items-center gap-1 px-3 py-1 text-xs font-medium rounded-full ${status.color}`}>
                                                 <StIcon size={14} />
@@ -529,7 +529,7 @@ export default function OrdersPage() {
                                                 <button
                                                     onClick={() => setSelectedOrder(order)}
                                                     className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                                                    title="Xem chi tiáº¿t"
+                                                    title="Xem chi tiết"
                                                 >
                                                     <Eye size={18} />
                                                 </button>
@@ -549,7 +549,7 @@ export default function OrdersPage() {
                     totalAll={orders.length}
                     onPageChange={setPage}
                     onPageSizeChange={setPageSize}
-                    entityLabel="Ä‘Æ¡n hĂ ng"
+                    entityLabel="đơn hàng"
                 />
 
                 {hasMore && !searchQuery && (
@@ -558,7 +558,7 @@ export default function OrdersPage() {
                             onClick={loadMoreData}
                             className="px-6 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-lg transition-colors flex items-center gap-2"
                         >
-                            Táº£i thĂªm lá»‹ch sá»­ cÅ©
+                            Tải thêm lịch sử cũ
                         </button>
                     </div>
                 )}
@@ -571,10 +571,10 @@ export default function OrdersPage() {
                         {/* Modal Header */}
                         <div className="flex items-center justify-between p-4 md:p-6 border-b shrink-0 bg-white sticky top-0 rounded-t-2xl z-10">
                             <div>
-                                <h2 className="text-lg md:text-xl font-bold text-gray-900">Chi tiáº¿t Ä‘Æ¡n hĂ ng</h2>
+                                <h2 className="text-lg md:text-xl font-bold text-gray-900">Chi tiết đơn hàng</h2>
                                 <p className="text-gray-500 text-sm font-mono mt-0.5">#{selectedOrder.id.slice(-6).toUpperCase()}</p>
                             </div>
-                            <button title="ÄĂ³ng" aria-label="ÄĂ³ng" onClick={() => setSelectedOrder(null)} className="p-2 bg-gray-100 hover:bg-gray-200 rounded-full transition-colors">
+                            <button title="Đóng" aria-label="Đóng" onClick={() => setSelectedOrder(null)} className="p-2 bg-gray-100 hover:bg-gray-200 rounded-full transition-colors">
                                 <X size={20} className="text-gray-600" />
                             </button>
                         </div>
@@ -596,8 +596,8 @@ export default function OrdersPage() {
                                 <select
                                     value={selectedOrder.status}
                                     onChange={(e) => updateStatus(selectedOrder.id, e.target.value)}
-                                    title="Cáº­p nháº­t tráº¡ng thĂ¡i"
-                                    aria-label="Cáº­p nháº­t tráº¡ng thĂ¡i"
+                                    title="Cập nhật trạng thái"
+                                    aria-label="Cập nhật trạng thái"
                                     className="h-10 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
                                 >
                                     {Object.entries(statusConfig).map(([key, value]) => (
@@ -608,15 +608,15 @@ export default function OrdersPage() {
 
                             {/* Customer Info */}
                             <div className="bg-gray-50 rounded-xl p-4">
-                                <h3 className="font-semibold text-gray-900 mb-3">ThĂ´ng tin khĂ¡ch hĂ ng</h3>
+                                <h3 className="font-semibold text-gray-900 mb-3">Thông tin khách hàng</h3>
                                 <div className="grid grid-cols-2 gap-4 text-sm">
                                     <div>
-                                        <span className="text-gray-500">Há» tĂªn:</span>
+                                        <span className="text-gray-500">Họ tên:</span>
                                         <span className="ml-2 font-medium">{selectedOrder.customer?.name || selectedOrder.customer_info?.name || 'KhĂ¡ch láº»'}</span>
                                     </div>
                                     <div>
-                                        <span className="text-gray-500">SÄT:</span>
-                                        <span className="ml-2 font-medium">{selectedOrder.customer?.phone || selectedOrder.customer_info?.phone || 'â€”'}</span>
+                                        <span className="text-gray-500">SĐT:</span>
+                                        <span className="ml-2 font-medium">{selectedOrder.customer?.phone || selectedOrder.customer_info?.phone || '—'}</span>
                                     </div>
                                     {(selectedOrder.customer?.email || selectedOrder.customer_info?.email) && (
                                         <div className="col-span-2">
@@ -626,7 +626,7 @@ export default function OrdersPage() {
                                     )}
                                     {selectedOrder.createdByName && (
                                         <div className="col-span-2">
-                                            <span className="text-gray-500">NgÆ°á»i táº¡o:</span>
+                                            <span className="text-gray-500">Người tạo:</span>
                                             <span className="ml-2 font-medium">{selectedOrder.createdByName}</span>
                                         </div>
                                     )}
@@ -635,7 +635,7 @@ export default function OrdersPage() {
 
                             {/* Order Items */}
                             <div>
-                                <h3 className="font-semibold text-gray-900 mb-3">Chi tiáº¿t sáº£n pháº©m</h3>
+                                <h3 className="font-semibold text-gray-900 mb-3">Chi tiết sản phẩm</h3>
                                 <div className="space-y-3">
                                     {selectedOrder.items?.map((item, index: number) => {
                                         const it = item as Partial<{ name: string; product_name: string; quantity: number; price: number; warrantyType: string; imeis: string[] }>;
@@ -646,19 +646,19 @@ export default function OrdersPage() {
                                             <div className="flex justify-between items-center">
                                                 <div>
                                                     <p className="font-medium text-gray-900">{it.name || it.product_name}</p>
-                                                    <p className="text-sm text-gray-500">SL: {qty} Ă— {formatPrice(price)}</p>
+                                                    <p className="text-sm text-gray-500">SL: {qty} x {formatPrice(price)}</p>
                                                 </div>
                                                 <p className="font-medium text-gray-900">{formatPrice(price * qty)}</p>
                                             </div>
                                             {it.warrantyType === 'warrantyDevice' && (
                                                 <div className="mt-3 pt-3 border-t border-dashed">
-                                                    <p className="text-xs font-semibold text-gray-700 mb-2">ThĂ´ng tin IMEI/Serial ({qty})</p>
+                                                    <p className="text-xs font-semibold text-gray-700 mb-2">Thông tin IMEI/Serial ({qty})</p>
                                                     <div className="space-y-2">
                                                         {Array.from({ length: qty }).map((_, i) => (
                                                             <div key={i} className="flex items-center gap-2">
                                                                 <input
                                                                     type="text"
-                                                                    placeholder={`Nháº­p IMEI/Serial #${i + 1}`}
+                                                                    placeholder={`Nhập IMEI/Serial #${i + 1}`}
                                                                     defaultValue={it.imeis?.[i] || ''}
                                                                     onBlur={(e) => {
                                                                         const newImeis = [...(it.imeis || [])];
@@ -681,28 +681,28 @@ export default function OrdersPage() {
                                 </div>
                                 {(selectedOrder.discount_amount || 0) > 0 && (
                                     <div className="flex justify-between items-center pt-2 text-sm text-green-600">
-                                        <span>Giáº£m giĂ¡</span>
+                                        <span>Giảm giá</span>
                                         <span>-{formatPrice(selectedOrder.discount_amount || 0)}</span>
                                     </div>
                                 )}
                                 <div className="flex justify-between items-center pt-4 text-lg font-bold">
-                                    <span>Tá»•ng cá»™ng:</span>
+                                    <span>Tổng cộng:</span>
                                     <span className="text-red-600">{formatPrice(selectedOrder.total_amount || 0)}</span>
                                 </div>
                                 {(selectedOrder.deposit_amount || 0) > 0 && (
                                     selectedOrder.status === 'Completed' ? (
                                         <div className="flex justify-between items-center pt-2 text-base font-semibold text-gray-700">
-                                            <span>ÄĂ£ thanh toĂ¡n:</span>
+                                            <span>Đã thanh toán:</span>
                                             <span>{formatPrice(selectedOrder.total_amount || 0)}</span>
                                         </div>
                                     ) : (
                                         <>
                                             <div className="flex justify-between items-center pt-2 text-base font-semibold text-gray-700">
-                                                <span>ÄĂ£ cá»c:</span>
+                                                <span>Đã cọc:</span>
                                                 <span>{formatPrice(selectedOrder.deposit_amount || 0)}</span>
                                             </div>
                                             <div className="flex justify-between items-center pt-2 text-lg font-bold text-orange-600">
-                                                <span>CĂ²n láº¡i:</span>
+                                                <span>Còn lại:</span>
                                                 <span>{formatPrice(Math.max(0, (selectedOrder.total_amount || 0) - (selectedOrder.deposit_amount || 0)))}</span>
                                             </div>
                                         </>
@@ -716,10 +716,10 @@ export default function OrdersPage() {
                                     className="w-full md:w-auto p-3 md:p-2.5 border rounded-xl md:rounded-lg bg-gray-50 font-medium outline-none cursor-pointer text-center text-sm"
                                     value={printTemplate}
                                     onChange={e => setPrintTemplate(e.target.value as 'thermal' | 'a5')}
-                                    title="Chá»n khá»• in"
-                                    aria-label="Chá»n khá»• in"
+                                    title="Chọn khổ in"
+                                    aria-label="Chọn khổ in"
                                 >
-                                    <option value="thermal">Khá»• 80mm</option>
+                                    <option value="thermal">Khổ 80mm</option>
                                     <option value="a5">Khá»• A5</option>
                                 </select>
                                 <button
@@ -745,7 +745,7 @@ export default function OrdersPage() {
                                             const receiptHtml = `
                                                 <html>
                                                 <head>
-                                                    <title>HĂ³a Ä‘Æ¡n bĂ¡n hĂ ng #${selectedOrder.id.slice(-6).toUpperCase()}</title>
+                                                    <title>Hóa đơn bán hàng #${selectedOrder.id.slice(-6).toUpperCase()}</title>
                                                     <style>
                                                         @page { size: 80mm auto; margin: 0; }
                                                         body { font-family: monospace; font-size: 11px; width: 302px; margin: 0 auto; padding: 12px; box-sizing: border-box; }
@@ -758,35 +758,35 @@ export default function OrdersPage() {
                                                 <body>
                                                     <div class="text-center font-bold" style="font-size: 14px; text-transform: uppercase;">${config.siteName || 'VÄƒn LĂ nh Service'}</div>
                                                     <div class="text-center">Hotline: ${config.contact_info?.main_phone || '0932.242.026'}</div>
-                                                    <div class="text-center font-bold" style="margin-top: 8px;">HĂ“A ÄÆ N BĂN HĂ€NG</div>
+                                                    <div class="text-center font-bold" style="margin-top: 8px;">HÓA ĐƠN BÁN HÀNG</div>
                                                     <div class="text-center">${dateStr} | #${selectedOrder.id.slice(-6).toUpperCase()}</div>
                                                     <hr/>
                                                     <div>KH: ${cName}</div>
-                                                    ${cPhone ? `<div>SÄT: ${cPhone}</div>` : ''}
+                                                    ${cPhone ? `<div>SĐT: ${cPhone}</div>` : ''}
                                                     <hr/>
                                                     ${itemsHtml}
                                                     <hr/>
                                                     <div style="display: flex; justify-content: space-between;">
-                                                        <span>Tá»•ng cá»™ng:</span>
-                                                        <span class="font-bold">${(selectedOrder.total_amount || 0).toLocaleString('vi-VN')}Ä‘</span>
+                                                        <span>Tổng cộng:</span>
+                                                        <span class="font-bold">${(selectedOrder.total_amount || 0).toLocaleString('vi-VN')}đ</span>
                                                     </div>
                                                     ${(selectedOrder.deposit_amount || 0) > 0 ? (
                                                         selectedOrder.status === 'Completed' ? `
                                                         <div style="display: flex; justify-content: space-between;">
-                                                            <span>ÄĂ£ thanh toĂ¡n:</span>
-                                                            <span class="font-bold">${(selectedOrder.total_amount || 0).toLocaleString('vi-VN')}Ä‘</span>
+                                                            <span>Đã thanh toán:</span>
+                                                            <span class="font-bold">${(selectedOrder.total_amount || 0).toLocaleString('vi-VN')}đ</span>
                                                         </div>` : `
                                                         <div style="display: flex; justify-content: space-between;">
-                                                            <span>ÄĂ£ cá»c:</span>
-                                                            <span>${(selectedOrder.deposit_amount || 0).toLocaleString('vi-VN')}Ä‘</span>
+                                                            <span>Đã cọc:</span>
+                                                            <span>${(selectedOrder.deposit_amount || 0).toLocaleString('vi-VN')}đ</span>
                                                         </div>
                                                         <div style="display: flex; justify-content: space-between;" class="font-bold">
-                                                            <span>CĂ’N Láº I:</span>
-                                                            <span>${Math.max(0, (selectedOrder.total_amount || 0) - (selectedOrder.deposit_amount || 0)).toLocaleString('vi-VN')}Ä‘</span>
+                                                            <span>Còn lại:</span>
+                                                            <span>${Math.max(0, (selectedOrder.total_amount || 0) - (selectedOrder.deposit_amount || 0)).toLocaleString('vi-VN')}đ</span>
                                                         </div>`
                                                     ) : ''}
                                                     <hr/>
-                                                    <div class="text-center" style="margin-top: 16px;"><i>Cáº£m Æ¡n quĂ½ khĂ¡ch!</i></div>
+                                                    <div class="text-center" style="margin-top: 16px;"><i>Cảm ơn quý khách!</i></div>
                                                 </body>
                                                 </html>
                                             `;
@@ -799,7 +799,7 @@ export default function OrdersPage() {
                                             const receiptHtml = `
                                                 <html>
                                                 <head>
-                                                    <title>HĂ³a Ä‘Æ¡n bĂ¡n hĂ ng #${selectedOrder.id.slice(-6).toUpperCase()}</title>
+                                                    <title>Hóa đơn bán hàng #${selectedOrder.id.slice(-6).toUpperCase()}</title>
                                                     <style>
                                                         body { font-family: 'Times New Roman', serif; font-size: 14px; line-height: 1.4; padding: 20px; color: #000; }
                                                         .header { display: flex; justify-content: space-between; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 20px; }
@@ -830,34 +830,34 @@ export default function OrdersPage() {
                                                     <div class="header">
                                                         <div class="store-info">
                                                             <h2>${config.siteName || 'VÄ‚N LĂ€NH SERVICE'}</h2>
-                                                            <p><b>Äá»‹a chá»‰:</b> ${config.contact_info?.address || 'An PhĂº ÄĂ´ng, Q12, TPHCM'}</p>
-                                                            <p><b>Äiá»‡n thoáº¡i:</b> ${config.contact_info?.main_phone || '0932.242.026'}</p>
+                                                            <p><b>Địa chỉ:</b> ${config.contact_info?.address || '11 Nguyên Hồng, Bình Lợi Trung (P11 cũ), Bình Thạnh, HCM'}</p>
+                                                            <p><b>Điện thoại:</b> ${config.contact_info?.main_phone || '0932.242.026'}</p>
                                                         </div>
                                                         <div style="text-align: right;">
-                                                            <p><b>Sá»‘:</b> #${selectedOrder.id.slice(-6).toUpperCase()}</p>
-                                                            <p><b>NgĂ y:</b> ${dateStr}</p>
-                                                            <p><b>NhĂ¢n viĂªn:</b> ${selectedOrder.createdByName || 'Admin'}</p>
+                                                            <p><b>Số:</b> #${selectedOrder.id.slice(-6).toUpperCase()}</p>
+                                                            <p><b>Ngày:</b> ${dateStr}</p>
+                                                            <p><b>Nhân viên:</b> ${selectedOrder.createdByName || 'Admin'}</p>
                                                         </div>
                                                     </div>
 
                                                     <div class="title">
-                                                        <h1>HĂ“A ÄÆ N BĂN HĂ€NG</h1>
+                                                        <h1>HÓA ĐƠN BÁN HÀNG</h1>
                                                     </div>
 
                                                     <div>
-                                                        <div class="info-row"><div class="label">KhĂ¡ch hĂ ng:</div><div><b>${cName}</b></div></div>
-                                                        <div class="info-row"><div class="label">Äiá»‡n thoáº¡i:</div><div>${cPhone}</div></div>
-                                                        <div class="info-row"><div class="label">HĂ¬nh thá»©c TT:</div><div>${selectedOrder.payment_method === 'COD' ? 'Tiá»n máº·t' : selectedOrder.payment_method === 'Installment' ? 'Tráº£ gĂ³p' : 'Chuyá»ƒn khoáº£n / Momo'}</div></div>
+                                                            <div class="info-row"><div class="label">Khách hàng:</div><div><b>${cName}</b></div></div>
+                                                        <div class="info-row"><div class="label">Điện thoại:</div><div>${cPhone}</div></div>
+                                                        <div class="info-row"><div class="label">Hình thức TT:</div><div>${selectedOrder.payment_method === 'COD' ? 'Tiền mặt' : selectedOrder.payment_method === 'Installment' ? 'Trả góp' : 'Chuyển khoản / Momo'}</div></div>
                                                     </div>
 
                                                     <table>
                                                         <thead>
                                                             <tr>
                                                                 <th style="width: 40px;">STT</th>
-                                                                <th>TĂªn HĂ ng HĂ³a / Dá»‹ch Vá»¥</th>
+                                                                <th>Tên Hàng Hóa / Dịch Vụ</th>
                                                                 <th style="width: 60px;">SL</th>
-                                                                <th style="width: 100px;">ÄÆ¡n GiĂ¡</th>
-                                                                <th style="width: 120px;">ThĂ nh Tiá»n</th>
+                                                                <th style="width: 100px;">Đơn Giá</th>
+                                                                <th style="width: 120px;">Thành Tiền</th>
                                                             </tr>
                                                         </thead>
                                                         <tbody>
@@ -879,27 +879,27 @@ export default function OrdersPage() {
                                                     </table>
 
                                                     <div class="summary">
-                                                        <div class="summary-row"><span>Tá»•ng tiá»n hĂ ng:</span><span>${(selectedOrder.total_amount || 0).toLocaleString('vi-VN')} Ä‘</span></div>
-                                                        ${(selectedOrder.discount_amount || 0) > 0 ? `<div class="summary-row"><span>Chiáº¿t kháº¥u:</span><span>- ${(selectedOrder.discount_amount || 0).toLocaleString('vi-VN')} Ä‘</span></div>` : ''}
+                                                        <div class="summary-row"><span>Tổng tiền hàng:</span><span>${(selectedOrder.total_amount || 0).toLocaleString('vi-VN')} đ</span></div>
+                                                        ${(selectedOrder.discount_amount || 0) > 0 ? `<div class="summary-row"><span>Chiết khấu:</span><span>- ${(selectedOrder.discount_amount || 0).toLocaleString('vi-VN')} đ</span></div>` : ''}
                                                         <div class="summary-row bold" style="font-size: 16px; margin-top: 5px; border-top: 1px dotted #ccc; padding-top: 5px;">
-                                                            <span>Tá»•ng thanh toĂ¡n:</span><span>${(selectedOrder.total_amount || 0).toLocaleString('vi-VN')} Ä‘</span>
+                                                            <span>Tổng thanh toán:</span><span>${(selectedOrder.total_amount || 0).toLocaleString('vi-VN')} đ</span>
                                                         </div>
                                                         ${(selectedOrder.deposit_amount || 0) > 0 ? (
                                                             selectedOrder.status === 'Completed' ? `
-                                                            <div class="summary-row" style="margin-top: 5px;"><span>ÄĂ£ thanh toĂ¡n:</span><span>${(selectedOrder.total_amount || 0).toLocaleString('vi-VN')} Ä‘</span></div>` : `
-                                                            <div class="summary-row" style="margin-top: 5px;"><span>ÄĂ£ cá»c:</span><span>${(selectedOrder.deposit_amount || 0).toLocaleString('vi-VN')} Ä‘</span></div>
-                                                            <div class="summary-row bold" style="color: red; font-size: 16px;"><span>CĂ’N Láº I:</span><span>${Math.max(0, (selectedOrder.total_amount || 0) - (selectedOrder.deposit_amount || 0)).toLocaleString('vi-VN')} Ä‘</span></div>`
+                                                            <div class="summary-row" style="margin-top: 5px;"><span>Đã thanh toán:</span><span>${(selectedOrder.total_amount || 0).toLocaleString('vi-VN')} đ</span></div>` : `
+                                                            <div class="summary-row" style="margin-top: 5px;"><span>Đã cọc:</span><span>${(selectedOrder.deposit_amount || 0).toLocaleString('vi-VN')} đ</span></div>
+                                                            <div class="summary-row bold" style="color: red; font-size: 16px;"><span>Còn lại:</span><span>${Math.max(0, (selectedOrder.total_amount || 0) - (selectedOrder.deposit_amount || 0)).toLocaleString('vi-VN')} đ</span></div>`
                                                         ) : ''}
                                                     </div>
 
                                                     <div class="signatures">
                                                         <div>
-                                                            <p class="title">KhĂ¡ch hĂ ng</p>
-                                                            <p style="color: #666; font-style: italic;">(KĂ½, ghi rĂµ há» tĂªn)</p>
+                                                            <p class="title">Khách hàng</p>
+                                                            <p style="color: #666; font-style: italic;">(Ký, ghi rõ họ tên)</p>
                                                         </div>
                                                         <div>
-                                                            <p class="title">NgÆ°á»i láº­p phiáº¿u</p>
-                                                            <p style="color: #666; font-style: italic;">(KĂ½, ghi rĂµ há» tĂªn)</p>
+                                                            <p class="title">Người lập phiếu</p>
+                                                            <p style="color: #666; font-style: italic;">(Ký, ghi rõ họ tên)</p>
                                                         </div>
                                                     </div>
                                                 </body>
@@ -914,13 +914,13 @@ export default function OrdersPage() {
                                     }}
                                     className="px-4 md:px-5 py-2.5 md:py-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold rounded-xl md:rounded-lg shadow-sm transition-all flex items-center justify-center gap-2 flex-1 md:flex-none"
                                 >
-                                    <Receipt size={18} /> In hĂ³a Ä‘Æ¡n
+                                    <Receipt size={18} /> In hóa đơn
                                 </button>
                                 <button
                                     onClick={handlePrintWarranty}
                                     className="px-4 md:px-5 py-2.5 md:py-2 bg-blue-500 hover:bg-blue-600 text-white text-sm font-semibold rounded-xl md:rounded-lg shadow-sm transition-all flex items-center justify-center gap-2 flex-1 md:flex-none"
                                 >
-                                    In báº£o hĂ nh
+                                    In bảo hành
                                 </button>
                             </div>
                         </div>

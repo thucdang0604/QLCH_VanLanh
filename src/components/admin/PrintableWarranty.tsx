@@ -42,7 +42,7 @@ export default function PrintableWarranty({ globalConfig, warrantyConfig, type, 
     const totalCost = Number(payload.totalCost || 0);
 
     return (
-        <div className="print-warranty hidden print:block bg-white text-black p-4 text-[12px] leading-relaxed mx-auto" style={{ maxWidth: '80mm', fontFamily: 'sans-serif' }}>
+        <div title="Phiếu bảo hành" className="print-warranty hidden print:block bg-white text-black p-4 text-[12px] leading-relaxed mx-auto" style={{ maxWidth: '80mm', fontFamily: 'sans-serif' }}>
             {/* HEADER */}
             <div className="flex items-center justify-between mb-2 border-b-2 border-black pb-2">
                 <div className="flex items-center gap-2">
@@ -125,7 +125,7 @@ export default function PrintableWarranty({ globalConfig, warrantyConfig, type, 
                                 widthStr = i === 0 ? '30%' : i === 1 ? '20%' : '50%';
                             }
                             return (
-                                <div key={i} style={{ width: widthStr }} className={`p-1 ${!isLast ? 'border-r border-black' : ''}`}>
+                                <div title={header} key={i} style={{ width: widthStr }} className={`p-1 ${!isLast ? 'border-r border-black' : ''}`}>
                                     {header}
                                 </div>
                             )

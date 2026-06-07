@@ -174,6 +174,7 @@ export default function FixHiddenProductsModal({ isOpen, onClose, products }: Fi
                                             <td className="px-4 py-3 text-xs text-red-500">{product.categoryIds?.[0] || product.category || 'Trống'}</td>
                                             <td className="px-4 py-3">
                                                 <select
+                                                    title="Taxonomy khôi phục"
                                                     value={fixes[product.id] || ''}
                                                     onChange={(event) => handleCategoryChange(product.id, event.target.value)}
                                                     className="h-9 w-full px-3 text-sm border rounded-lg focus:border-orange-500 focus:outline-none"

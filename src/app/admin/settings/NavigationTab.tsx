@@ -442,10 +442,10 @@ export default function NavigationTab() {
                                 {item.visible ? <Eye size={14} /> : <EyeOff size={14} />}
                             </button>
                             <div className="flex flex-col">
-                                <button onClick={() => setHeaderNav(prev => moveUp(prev, idx))} className="text-gray-400 hover:text-gray-600" disabled={idx === 0}><ChevronUp size={12} /></button>
-                                <button onClick={() => setHeaderNav(prev => moveDown(prev, idx))} className="text-gray-400 hover:text-gray-600" disabled={idx === headerNav.length - 1}><ChevronDown size={12} /></button>
+                                <button title="Lên" onClick={() => setHeaderNav(prev => moveUp(prev, idx))} className="text-gray-400 hover:text-gray-600" disabled={idx === 0}><ChevronUp size={12} /></button>
+                                <button title="Xuống" onClick={() => setHeaderNav(prev => moveDown(prev, idx))} className="text-gray-400 hover:text-gray-600" disabled={idx === headerNav.length - 1}><ChevronDown size={12} /></button>
                             </div>
-                            <button onClick={() => removeHeaderItem(idx)} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button title="Xóa" onClick={() => removeHeaderItem(idx)} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
                                 <Trash2 size={14} />
                             </button>
                             <TaxonomyBadge slug={item.slug} taxonomyRef={item.taxonomyRef} allTrees={allTaxonomyTrees} />
@@ -525,10 +525,10 @@ export default function NavigationTab() {
                                         {item.visible ? <Eye size={14} /> : <EyeOff size={14} />}
                                     </button>
                                     <div className="flex flex-col">
-                                        <button onClick={() => setSidebarMenu(prev => moveUp(prev, idx))} className="text-gray-400 hover:text-gray-600" disabled={idx === 0}><ChevronUp size={12} /></button>
-                                        <button onClick={() => setSidebarMenu(prev => moveDown(prev, idx))} className="text-gray-400 hover:text-gray-600" disabled={idx === sidebarMenu.length - 1}><ChevronDown size={12} /></button>
+                                        <button title="Lên" onClick={() => setSidebarMenu(prev => moveUp(prev, idx))} className="text-gray-400 hover:text-gray-600" disabled={idx === 0}><ChevronUp size={12} /></button>
+                                        <button title="Xuống" onClick={() => setSidebarMenu(prev => moveDown(prev, idx))} className="text-gray-400 hover:text-gray-600" disabled={idx === sidebarMenu.length - 1}><ChevronDown size={12} /></button>
                                     </div>
-                                    <button onClick={() => removeSidebarItem(idx)} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button title="Xóa" onClick={() => removeSidebarItem(idx)} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
                                         <Trash2 size={14} />
                                     </button>
                                     <TaxonomyBadge slug={item.slug} taxonomyRef={item.taxonomyRef} allTrees={allTaxonomyTrees} />
@@ -556,6 +556,7 @@ export default function NavigationTab() {
                                                         placeholder="Tên nhóm (vd: Dòng máy)"
                                                     />
                                                     <button
+                                                        title="Xóa nhóm con"
                                                         onClick={() => removeSubGroup(idx, gi)}
                                                         className="text-gray-300 hover:text-red-500 p-1"
                                                     >
@@ -630,10 +631,10 @@ export default function NavigationTab() {
                                 {item.visible ? <Eye size={14} /> : <EyeOff size={14} />}
                             </button>
                             <div className="flex flex-col">
-                                <button onClick={() => setFooterServices(prev => moveUp(prev, idx))} className="text-gray-400 hover:text-gray-600" disabled={idx === 0}><ChevronUp size={12} /></button>
-                                <button onClick={() => setFooterServices(prev => moveDown(prev, idx))} className="text-gray-400 hover:text-gray-600" disabled={idx === footerServices.length - 1}><ChevronDown size={12} /></button>
+                                <button title="Lên" onClick={() => setFooterServices(prev => moveUp(prev, idx))} className="text-gray-400 hover:text-gray-600" disabled={idx === 0}><ChevronUp size={12} /></button>
+                                <button title="Xuống" onClick={() => setFooterServices(prev => moveDown(prev, idx))} className="text-gray-400 hover:text-gray-600" disabled={idx === footerServices.length - 1}><ChevronDown size={12} /></button>
                             </div>
-                            <button onClick={() => removeFooterItem(idx)} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button title="Xóa" onClick={() => removeFooterItem(idx)} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
                                 <Trash2 size={14} />
                             </button>
                             <TaxonomyBadge slug={item.slug} taxonomyRef={item.taxonomyRef} allTrees={allTaxonomyTrees} />
@@ -710,10 +711,10 @@ export default function NavigationTab() {
                                 {item.visible ? <Eye size={14} /> : <EyeOff size={14} />}
                             </button>
                             <div className="flex flex-col">
-                                <button onClick={() => setHomeServiceCategories(prev => moveUp(prev, idx))} className="text-gray-400 hover:text-gray-600" disabled={idx === 0}><ChevronUp size={12} /></button>
-                                <button onClick={() => setHomeServiceCategories(prev => moveDown(prev, idx))} className="text-gray-400 hover:text-gray-600" disabled={idx === homeServiceCategories.length - 1}><ChevronDown size={12} /></button>
+                                <button title="Lên" onClick={() => setHomeServiceCategories(prev => moveUp(prev, idx))} className="text-gray-400 hover:text-gray-600" disabled={idx === 0}><ChevronUp size={12} /></button>
+                                <button title="Xuống" onClick={() => setHomeServiceCategories(prev => moveDown(prev, idx))} className="text-gray-400 hover:text-gray-600" disabled={idx === homeServiceCategories.length - 1}><ChevronDown size={12} /></button>
                             </div>
-                            <button onClick={() => removeHomeServiceCategory(idx)} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button title="Xóa" onClick={() => removeHomeServiceCategory(idx)} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
                                 <Trash2 size={14} />
                             </button>
                             <TaxonomyBadge slug={item.slug} taxonomyRef={item.taxonomyRef} allTrees={allTaxonomyTrees} />

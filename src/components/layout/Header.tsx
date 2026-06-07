@@ -121,6 +121,7 @@ export default function Header() {
                             )}
                         </button>
                         <button
+                            title={mobileMenuOpen ? 'Đóng menu' : 'Mở menu'}
                             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
                             aria-label={mobileMenuOpen ? 'Đóng menu' : 'Mở menu'}
                             aria-expanded={mobileMenuOpen}

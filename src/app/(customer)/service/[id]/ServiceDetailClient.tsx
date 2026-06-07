@@ -26,6 +26,7 @@ export interface ServiceData {
     price_promo?: number;
     image?: string;
     imageUrl?: string;
+    images?: string[];
     videoEmbedUrl?: string;
     repair_time?: string;
     warranty_text?: string;
@@ -56,6 +57,7 @@ const formatPrice = (p: number) => {
 export default function ServiceDetailClient({ service }: { service: ServiceData }) {
     const { config } = useConfig();
     const branches = config.store_branches || [];
+    const [activeImage, setActiveImage] = useState(0);
 
     // Booking form
     const [formData, setFormData] = useState({
@@ -147,7 +149,10 @@ export default function ServiceDetailClient({ service }: { service: ServiceData 
     const discount = promoPrice && originalPrice
         ? Math.round(((originalPrice - promoPrice) / originalPrice) * 100)
         : 0;
-    const displayImage = service.image || service.imageUrl || '';
+    const images = service.images?.length
+        ? service.images
+        : (service.imageUrl ? [service.imageUrl] : (service.image ? [service.image] : []));
+    const displayImage = images[activeImage] || '';
 
     return (
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
@@ -179,6 +184,32 @@ export default function ServiceDetailClient({ service }: { service: ServiceData 
                             </span>
                         )}
                     </div>
+
+                    {images.length > 1 && (
+                        <div className="flex gap-2 overflow-x-auto p-4 pt-0">
+                            {images.map((img, index) => (
+                                <button
+                                    key={`${img}-${index}`}
+                                    type="button"
+                                    onClick={() => setActiveImage(index)}
+                                    className={`relative h-20 w-20 shrink-0 overflow-hidden rounded-lg border-2 bg-gray-100 transition-all ${
+                                        activeImage === index ? 'border-copper ring-2 ring-copper/15' : 'border-gray-100 hover:border-copper/40'
+                                    }`}
+                                    aria-label={`Xem ảnh dịch vụ ${index + 1}`}
+                                    title={`Xem ảnh dịch vụ ${index + 1}`}
+                                >
+                                    <Image
+                                        src={img}
+                                        alt={`${service.name} ${index + 1}`}
+                                        fill
+                                        unoptimized
+                                        className="object-cover"
+                                        sizes="80px"
+                                    />
+                                </button>
+                            ))}
+                        </div>
+                    )}
 
                     {/* Video Embed */}
                     {service.videoEmbedUrl && (

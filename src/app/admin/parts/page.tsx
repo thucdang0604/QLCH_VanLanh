@@ -21,7 +21,7 @@ import {
     AlertTriangle
 } from 'lucide-react';
 import { useFirestoreCollection, updateDocument } from '@/lib/useFirestore';
-import { isPartCategory } from '@/lib/constants';
+import { PART_CATEGORY_LABEL, isPartCategory } from '@/lib/constants';
 
 import CategoryTaxonomySelector from '@/components/admin/CategoryTaxonomySelector';
 import Modal from '@/components/admin/Modal';
@@ -1282,13 +1282,28 @@ function ImportPreviewModal({
         }));
     };
 
+    const handleNewPartTaxonomyChange = (productId: string, ids: string[], category: string) => {
+        setImportPreviewModal((prev) => ({
+            ...prev,
+            newParts: {
+                ...prev.newParts,
+                [productId]: {
+                    ...prev.newParts[productId],
+                    categoryIds: ids,
+                    category,
+                }
+            }
+        }));
+    };
+
     const isRetail = receipt?.receiptType === 'retail';
     const isReady = newItems.every((item: ImportReceiptItem) => {
         const info = newParts[item.productId];
+        const hasTaxonomy = Boolean(info?.categoryIds && info.categoryIds.length > 0);
         if (isRetail) {
-            return info && info.categoryIds && info.categoryIds.length > 0 && Number(info.price_promo) > 0;
+            return info && hasTaxonomy && Number(info.price_promo) > 0;
         }
-        return info && info.model && info.partType && Number(info.price_promo) > 0;
+        return info && hasTaxonomy && info.model && info.partType && Number(info.price_promo) > 0;
     });
 
     return (
@@ -1410,7 +1425,7 @@ function ImportPreviewModal({
                                                             <CategoryTaxonomySelector
                                                                 type="retail"
                                                                 value={info.categoryIds || []}
-                                                                onChange={(ids) => handleNewPartChange(item.productId, 'categoryIds', ids)}
+                                                                onChange={(ids, catName) => handleNewPartTaxonomyChange(item.productId, ids, catName)}
                                                             />
                                                         </div>
                                                         <div>
@@ -1434,55 +1449,63 @@ function ImportPreviewModal({
                                                         </div>
                                                     </>
                                                 ) : (
-                                                    /* Component: model + partType fields */
+                                                    /* Component: taxonomy + model + partType fields */
                                                     <>
-                                                <div>
-                                                    <label className="block text-xs font-medium text-gray-700 mb-1">Dòng máy tương thích *</label>
-                                                    <input
-                                                        type="text"
-                                                        value={info.model || ''}
-                                                        onChange={(e) => handleNewPartChange(item.productId, 'model', e.target.value)}
-                                                        className="w-full h-9 px-3 text-sm border border-gray-300 rounded-lg focus:border-orange-500 outline-none transition-colors"
-                                                        placeholder="Vd: iPhone 13 Pro Max"
-                                                    />
-                                                </div>
-                                                <div>
-                                                    <label className="block text-xs font-medium text-gray-700 mb-1">Loại linh kiện *</label>
-                                                    <div className="relative">
-                                                        <select
-                                                            value={info.partType || ''}
-                                                            onChange={(e) => handleNewPartChange(item.productId, 'partType', e.target.value)}
-                                                            title="Loại linh kiện"
-                                                            aria-label="Loại linh kiện"
-                                                            className="w-full h-9 px-3 text-sm border border-gray-300 rounded-lg focus:border-orange-500 outline-none appearance-none bg-white transition-colors"
-                                                        >
-                                                            <option value="" disabled>-- Chọn loại --</option>
-                                                            {partTypeOptions.map((opt: string) => (
-                                                                <option key={opt} value={opt}>{opt}</option>
-                                                            ))}
-                                                        </select>
-                                                        <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-                                                    </div>
-                                                </div>
-                                                <div>
-                                                    <label className="block text-xs font-medium text-gray-700 mb-1">Nguồn cung cấp *</label>
-                                                    <input
-                                                        type="text"
-                                                        value={info.supplier || ''}
-                                                        onChange={(e) => handleNewPartChange(item.productId, 'supplier', e.target.value)}
-                                                        className="w-full h-9 px-3 text-sm border border-gray-300 rounded-lg focus:border-orange-500 outline-none transition-colors"
-                                                        placeholder="Vd: Zin LK Sài Gòn"
-                                                    />
-                                                </div>
-                                                <div>
-                                                    <label className="block text-xs font-medium text-gray-700 mb-1">Giá bán sửa chữa *</label>
-                                                    <CurrencyInput
-                                                        value={info.price_promo || ''}
-                                                        onChange={(v) => handleNewPartChange(item.productId, 'price_promo', v)}
-                                                        className="w-full h-9 px-3 text-sm border border-gray-300 rounded-lg focus:border-orange-500 outline-none transition-colors"
-                                                        placeholder="Vd: 500.000"
-                                                    />
-                                                </div>
+                                                        <div className="md:col-span-2">
+                                                            <label className="block text-xs font-medium text-gray-700 mb-1">Danh mục linh kiện *</label>
+                                                            <CategoryTaxonomySelector
+                                                                type="component"
+                                                                value={info.categoryIds || []}
+                                                                onChange={(ids) => handleNewPartTaxonomyChange(item.productId, ids, PART_CATEGORY_LABEL)}
+                                                            />
+                                                        </div>
+                                                        <div>
+                                                            <label className="block text-xs font-medium text-gray-700 mb-1">Dòng máy tương thích *</label>
+                                                            <input
+                                                                type="text"
+                                                                value={info.model || ''}
+                                                                onChange={(e) => handleNewPartChange(item.productId, 'model', e.target.value)}
+                                                                className="w-full h-9 px-3 text-sm border border-gray-300 rounded-lg focus:border-orange-500 outline-none transition-colors"
+                                                                placeholder="Vd: iPhone 13 Pro Max"
+                                                            />
+                                                        </div>
+                                                        <div>
+                                                            <label className="block text-xs font-medium text-gray-700 mb-1">Loại linh kiện *</label>
+                                                            <div className="relative">
+                                                                <select
+                                                                    value={info.partType || ''}
+                                                                    onChange={(e) => handleNewPartChange(item.productId, 'partType', e.target.value)}
+                                                                    title="Loại linh kiện"
+                                                                    aria-label="Loại linh kiện"
+                                                                    className="w-full h-9 px-3 text-sm border border-gray-300 rounded-lg focus:border-orange-500 outline-none appearance-none bg-white transition-colors"
+                                                                >
+                                                                    <option value="" disabled>-- Chọn loại --</option>
+                                                                    {partTypeOptions.map((opt: string) => (
+                                                                        <option key={opt} value={opt}>{opt}</option>
+                                                                    ))}
+                                                                </select>
+                                                                <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                                                            </div>
+                                                        </div>
+                                                        <div>
+                                                            <label className="block text-xs font-medium text-gray-700 mb-1">Nguồn cung cấp *</label>
+                                                            <input
+                                                                type="text"
+                                                                value={info.supplier || ''}
+                                                                onChange={(e) => handleNewPartChange(item.productId, 'supplier', e.target.value)}
+                                                                className="w-full h-9 px-3 text-sm border border-gray-300 rounded-lg focus:border-orange-500 outline-none transition-colors"
+                                                                placeholder="Vd: Zin LK Sài Gòn"
+                                                            />
+                                                        </div>
+                                                        <div>
+                                                            <label className="block text-xs font-medium text-gray-700 mb-1">Giá bán sửa chữa *</label>
+                                                            <CurrencyInput
+                                                                value={info.price_promo || ''}
+                                                                onChange={(v) => handleNewPartChange(item.productId, 'price_promo', v)}
+                                                                className="w-full h-9 px-3 text-sm border border-gray-300 rounded-lg focus:border-orange-500 outline-none transition-colors"
+                                                                placeholder="Vd: 500.000"
+                                                            />
+                                                        </div>
                                                     </>
                                                 )}
                                             </div>
@@ -1497,7 +1520,7 @@ function ImportPreviewModal({
                 
                 <div className="bg-gray-50/80 px-6 py-4 flex items-center gap-3 justify-between border-t border-gray-100 shrink-0">
                     <p className="text-sm text-gray-500">
-                        {newItems.length > 0 && !isReady ? 'Vui lòng điền đủ thông tin cho linh kiện mới' : 'Xác nhận nhập kho sẽ cập nhật giá vốn và tồn kho'}
+                        {newItems.length > 0 && !isReady ? 'Vui lòng chọn đúng taxonomy và điền đủ thông tin cho mặt hàng mới' : 'Xác nhận nhập kho sẽ cập nhật giá vốn và tồn kho'}
                     </p>
                     <div className="flex items-center gap-2">
                         <button
@@ -1589,8 +1612,6 @@ function CreateReceiptModal({ isOpen, onClose, parts, retailProducts, onCreated,
             if (!proposedSnap.empty) {
                 newId = proposedSnap.docs[0].id;
             } else {
-                const proposedCat = receiptType === 'retail' ? 'product' : 'component';
-                const proposedCatIds = receiptType === 'retail' ? ['san-pham'] : ['component'];
                 const newRef = doc(collection(db, 'products'));
                 const productCode = buildProductCodeFromId(newRef.id, receiptType === 'component' ? 'component' : 'product');
                 await createProductWithCodes(newRef.id, {
@@ -1598,9 +1619,9 @@ function CreateReceiptModal({ isOpen, onClose, parts, retailProducts, onCreated,
                     barcode: productCode,
                     productCode,
                     name: exactName,
-                    category: proposedCat,
-                    categoryIds: proposedCatIds,
-                    status: 'active',
+                    category: '',
+                    categoryIds: [],
+                    status: 'hidden',
                     isProposed: true,
                     stock: 0,
                     held: 0,

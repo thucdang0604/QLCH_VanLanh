@@ -134,9 +134,9 @@ export default function CustomerDetailDrawer({ customer, isOpen, onClose }: Prop
 
                     <div className="flex border-b" role="tablist">
                         <button
+                            title="Đơn hàng"
                             type="button"
                             role="tab"
-                            aria-selected={activeTab === 'orders'}
                             onClick={() => setActiveTab('orders')}
                             className={`flex flex-1 items-center justify-center gap-2 border-b-2 px-3 py-3 text-sm font-medium ${activeTab === 'orders' ? 'border-orange-500 text-orange-700' : 'border-transparent text-gray-500'}`}
                         >
@@ -144,9 +144,9 @@ export default function CustomerDetailDrawer({ customer, isOpen, onClose }: Prop
                             Đơn hàng
                         </button>
                         <button
+                            title="Sửa chữa"
                             type="button"
                             role="tab"
-                            aria-selected={activeTab === 'repairs'}
                             onClick={() => setActiveTab('repairs')}
                             className={`flex flex-1 items-center justify-center gap-2 border-b-2 px-3 py-3 text-sm font-medium ${activeTab === 'repairs' ? 'border-orange-500 text-orange-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
                         >
@@ -154,9 +154,9 @@ export default function CustomerDetailDrawer({ customer, isOpen, onClose }: Prop
                             Sửa chữa
                         </button>
                         <button
+                            title="Lịch hẹn"
                             type="button"
                             role="tab"
-                            aria-selected={activeTab === 'appointments'}
                             onClick={() => setActiveTab('appointments')}
                             className={`flex flex-1 items-center justify-center gap-2 border-b-2 px-3 py-3 text-sm font-medium ${activeTab === 'appointments' ? 'border-orange-500 text-orange-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
                         >
@@ -177,6 +177,7 @@ export default function CustomerDetailDrawer({ customer, isOpen, onClose }: Prop
                                 <p className="rounded-lg bg-gray-50 p-4 text-sm text-gray-500">Khách hàng chưa có đơn mua hàng.</p>
                             ) : activity.orders.map(order => (
                                 <button
+                                    title="Xem chi tiết"
                                     key={order.id}
                                     type="button"
                                     onClick={() => openDestination(`/admin/orders?orderId=${encodeURIComponent(order.id)}`)}
@@ -211,6 +212,7 @@ export default function CustomerDetailDrawer({ customer, isOpen, onClose }: Prop
                                 <p className="rounded-lg bg-gray-50 p-4 text-sm text-gray-500">Khách hàng chưa có phiếu sửa chữa.</p>
                             ) : activity.repairs.map(repair => (
                                 <button
+                                    title="Xem chi tiết"
                                     key={repair.id}
                                     type="button"
                                     onClick={() => openDestination(`/admin/repairs?ticketId=${encodeURIComponent(repair.id)}`)}
@@ -239,6 +241,7 @@ export default function CustomerDetailDrawer({ customer, isOpen, onClose }: Prop
                                 <p className="rounded-lg bg-gray-50 p-4 text-sm text-gray-500">Khách hàng chưa có lịch hẹn nào.</p>
                             ) : appointments.map(apt => (
                                 <div
+                                    title="Xem chi tiết"
                                     key={apt.id}
                                     className="flex w-full flex-col justify-between rounded-lg border p-3 text-left bg-white"
                                 >

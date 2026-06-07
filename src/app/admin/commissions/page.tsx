@@ -322,7 +322,7 @@ export default function CommissionsPage() {
             {activeTab === 'history' && (
                 <div className="space-y-3">
                     <div className="flex items-center justify-between">
-                        <input type="month" value={filterMonth} onChange={e => setFilterMonth(e.target.value)}
+                        <input type="month" title="Chọn tháng" value={filterMonth} onChange={e => setFilterMonth(e.target.value)}
                             className="px-4 py-2 border rounded-xl text-sm bg-white" />
                         {isAdmin && (
                             <button onClick={() => setShowManualModal(true)}
@@ -431,6 +431,7 @@ export default function CommissionsPage() {
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">Loại</label>
                                     <select
+                                        title="Chọn loại"
                                         value={ruleType}
                                         onChange={(e) => {
                                             const v = e.target.value;
@@ -444,7 +445,7 @@ export default function CommissionsPage() {
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">% Hoa hồng</label>
-                                    <input type="number" value={rulePercentage} onChange={e => setRulePercentage(Number(e.target.value))}
+                                    <input type="number" title="Nhập % hoa hồng" placeholder="Nhập % hoa hồng" value={rulePercentage} onChange={e => setRulePercentage(Number(e.target.value))}
                                         min={0} max={100}
                                         className="w-full px-4 py-2 border rounded-lg" />
                                 </div>
@@ -472,7 +473,7 @@ export default function CommissionsPage() {
                                 {ruleHierarchy === 2 && (
                                     <div>
                                         <label className="block text-xs font-medium text-gray-600 mb-1">Danh mục áp dụng</label>
-                                        <select value={ruleTargetValue} onChange={e => setRuleTargetValue(e.target.value)}
+                                        <select title="Chọn danh mục" value={ruleTargetValue} onChange={e => setRuleTargetValue(e.target.value)}
                                             className="w-full px-3 py-2 text-sm border rounded-lg bg-white">
                                             <option value="">— Chọn danh mục —</option>
                                             <option value="Phone">Điện thoại</option>
@@ -487,9 +488,8 @@ export default function CommissionsPage() {
                                 {ruleHierarchy === 3 && (
                                     <div>
                                         <label className="block text-xs font-medium text-gray-600 mb-1">Product ID</label>
-                                        <input type="text" value={ruleTargetValue}
+                                        <input type="text" title="Nhập Product ID" value={ruleTargetValue}
                                             onChange={e => setRuleTargetValue(e.target.value)}
-                                            placeholder="Nhập ID sản phẩm cụ thể"
                                             className="w-full px-3 py-2 text-sm border rounded-lg" />
                                     </div>
                                 )}
@@ -500,13 +500,13 @@ export default function CommissionsPage() {
 
                             <div className="flex flex-col gap-2">
                                 <label className="flex items-center gap-2 cursor-pointer">
-                                    <input type="checkbox" checked={ruleActive} onChange={e => setRuleActive(e.target.checked)}
+                                    <input type="checkbox" title="Đang hoạt động" checked={ruleActive} onChange={e => setRuleActive(e.target.checked)}
                                         className="w-4 h-4 rounded border-gray-300 text-orange-500 focus:ring-orange-500" />
                                     <span className="text-sm font-medium text-gray-700">Đang hoạt động</span>
                                 </label>
                                 
                                 <label className="flex items-center gap-2 cursor-pointer bg-orange-50 p-2 rounded border border-orange-100">
-                                    <input type="checkbox" checked={ruleApplyAfterDiscount} onChange={e => setRuleApplyAfterDiscount(e.target.checked)}
+                                    <input type="checkbox" title="Trừ khuyến mãi phụ kiện trước khi tính HH" checked={ruleApplyAfterDiscount} onChange={e => setRuleApplyAfterDiscount(e.target.checked)}
                                         className="w-4 h-4 rounded border-gray-300 text-orange-500 focus:ring-orange-500" />
                                     <span className="text-[11px] font-medium text-orange-800">Trừ khuyến mãi phụ kiện trước khi tính HH (Dành cho máy ghép phụ kiện)</span>
                                 </label>
@@ -527,7 +527,7 @@ export default function CommissionsPage() {
                         <div className="px-6 py-4 space-y-4">
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Nhân viên</label>
-                                <select value={manualStaffId} onChange={e => setManualStaffId(e.target.value)}
+                                <select title="Chọn nhân viên" value={manualStaffId} onChange={e => setManualStaffId(e.target.value)}
                                     className="w-full px-4 py-2 border rounded-lg bg-white">
                                     <option value="">— Chọn nhân viên —</option>
                                     {staffList.map(s => <option key={s.uid} value={s.uid}>{s.displayName}</option>)}
@@ -549,6 +549,7 @@ export default function CommissionsPage() {
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">Loại</label>
                                     <select
+                                        title="Chọn loại"
                                         value={manualSourceType}
                                         onChange={(e) => {
                                             const v = e.target.value;
@@ -561,8 +562,8 @@ export default function CommissionsPage() {
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">Mã nguồn (tùy chọn)</label>
-                                    <input type="text" value={manualSourceId} onChange={e => setManualSourceId(e.target.value)}
-                                        placeholder="Mã phiếu / đơn" className="w-full px-4 py-2 border rounded-lg" />
+                                    <input type="text" title="Nhập mã nguồn" placeholder="Nhập mã nguồn" value={manualSourceId} onChange={e => setManualSourceId(e.target.value)}
+                                        className="w-full px-4 py-2 border rounded-lg" />
                                 </div>
                             </div>
                         </div>

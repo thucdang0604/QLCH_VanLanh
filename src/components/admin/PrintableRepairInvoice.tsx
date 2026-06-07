@@ -100,6 +100,7 @@ export default function PrintableRepairInvoice({ ticket, receiptConfig }: Printa
     return (
         <div id="printable-repair-invoice" className="hidden print:block print:w-full print:bg-white print:text-black">
             <div
+                title="Hóa đơn sửa chữa"
                 className="mx-auto px-4 py-3 leading-relaxed border border-gray-300 bg-white"
                 style={{ maxWidth: maxWidthPx, fontSize: baseFontSizePx }}
             >
@@ -111,6 +112,7 @@ export default function PrintableRepairInvoice({ ticket, receiptConfig }: Printa
                         <img
                             src={cfg.logoUrl}
                             alt="Logo"
+                            title="Logo"
                             className="shrink-0 w-[70px] h-[70px] object-contain rounded-lg border border-gray-300"
                         />
                     ) : (

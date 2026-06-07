@@ -26,7 +26,7 @@ function Toast({ message, onClose }: { message: string; onClose: () => void }) {
             <div className="bg-green-500 text-white px-6 py-4 rounded-xl shadow-2xl flex items-center gap-3 max-w-sm">
                 <CheckCircle2 size={20} className="flex-shrink-0" />
                 <span className="text-sm font-medium">{message}</span>
-                <button onClick={onClose} className="ml-2 hover:bg-green-600 rounded p-0.5"><X size={16} /></button>
+                <button title="Đóng" onClick={onClose} className="ml-2 hover:bg-green-600 rounded p-0.5"><X size={16} /></button>
             </div>
         </div>
     );
@@ -210,30 +210,30 @@ export default function AdminAppearancePage() {
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">Màu chính</label>
                         <div className="flex items-center gap-3">
-                            <input type="color" value={local.primaryColor} onChange={(e) => handlePrimaryColorChange(e.target.value)} className="w-12 h-12 rounded-lg cursor-pointer border-2 border-gray-200" />
-                            <input type="text" value={local.primaryColor} onChange={(e) => handlePrimaryColorChange(e.target.value)} className="w-28 px-3 py-2 border rounded-lg text-sm font-mono" />
+                            <input type="color" title="Chọn màu chính" value={local.primaryColor} onChange={(e) => handlePrimaryColorChange(e.target.value)} className="w-12 h-12 rounded-lg cursor-pointer border-2 border-gray-200" />
+                            <input type="text" title="Nhập màu chính" value={local.primaryColor} onChange={(e) => handlePrimaryColorChange(e.target.value)} className="w-28 px-3 py-2 border rounded-lg text-sm font-mono" />
                         </div>
                     </div>
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">Màu tối (auto)</label>
                         <div className="flex items-center gap-3">
-                            <div className="w-12 h-12 rounded-lg border-2 border-gray-200" style={{ backgroundColor: local.primaryColorDark }} />
+                            <div title="Màu tối" className="w-12 h-12 rounded-lg border-2 border-gray-200" style={{ backgroundColor: local.primaryColorDark }} />
                             <span className="text-sm font-mono text-gray-500">{local.primaryColorDark}</span>
                         </div>
                     </div>
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">Màu sáng (auto)</label>
                         <div className="flex items-center gap-3">
-                            <div className="w-12 h-12 rounded-lg border-2 border-gray-200" style={{ backgroundColor: local.primaryColorLight }} />
+                            <div title="Màu sáng" className="w-12 h-12 rounded-lg border-2 border-gray-200" style={{ backgroundColor: local.primaryColorLight }} />
                             <span className="text-sm font-mono text-gray-500">{local.primaryColorLight}</span>
                         </div>
                     </div>
                 </div>
                 <div className="mt-4 p-4 rounded-lg border" style={{ borderColor: local.primaryColor }}>
-                    <div className="flex items-center gap-3">
-                        <div className="px-4 py-2 rounded-lg text-white text-sm font-medium" style={{ backgroundColor: local.primaryColor }}>Primary</div>
-                        <div className="px-4 py-2 rounded-lg text-white text-sm font-medium" style={{ backgroundColor: local.primaryColorDark }}>Dark</div>
-                        <span className="text-sm font-medium" style={{ color: local.primaryColor }}>Text preview</span>
+                    <div title="Màu chính" className="flex items-center gap-3">
+                        <div title="Màu chính" className="px-4 py-2 rounded-lg text-white text-sm font-medium" style={{ backgroundColor: local.primaryColor }}>Primary</div>
+                        <div title="Màu tối (auto)" className="px-4 py-2 rounded-lg text-white text-sm font-medium" style={{ backgroundColor: local.primaryColorDark }}>Dark</div>
+                        <span title="Màu chính" className="text-sm font-medium" style={{ color: local.primaryColor }}>Text preview</span>
                     </div>
                 </div>
                 <SaveBtn onClick={() => save({ primaryColor: local.primaryColor, primaryColorDark: local.primaryColorDark, primaryColorLight: local.primaryColorLight }, 'Đã lưu màu!')} saving={saving} label="Lưu màu" />
@@ -244,7 +244,7 @@ export default function AdminAppearancePage() {
                 <div className="space-y-4">
                     <div className="flex items-center gap-3">
                         <label className="relative inline-flex items-center cursor-pointer">
-                            <input type="checkbox" checked={local.topBarEnabled} onChange={(e) => setLocal({ ...local, topBarEnabled: e.target.checked })} className="sr-only peer" />
+                            <input type="checkbox" title="Hiện thanh thông báo" checked={local.topBarEnabled} onChange={(e) => setLocal({ ...local, topBarEnabled: e.target.checked })} className="sr-only peer" />
                             <div className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-500" />
                         </label>
                         <span className="text-sm text-gray-700">Hiện thanh thông báo</span>
@@ -268,7 +268,7 @@ export default function AdminAppearancePage() {
                                 <p className="text-sm text-gray-700 font-medium">Logo hiện tại</p>
                                 <p className="text-xs text-gray-400 truncate max-w-xs">{local.logoUrl}</p>
                             </div>
-                            <button onClick={() => setLocal({ ...local, logoUrl: '' })} className="text-red-400 hover:text-red-600 p-2">
+                            <button title="Xóa logo" onClick={() => setLocal({ ...local, logoUrl: '' })} className="text-red-400 hover:text-red-600 p-2">
                                 <Trash2 size={18} />
                             </button>
                         </div>
@@ -278,7 +278,7 @@ export default function AdminAppearancePage() {
                             <p className="text-sm text-gray-400">Chưa có logo — Đang dùng tên cửa hàng dạng text</p>
                         </div>
                     )}
-                    <button onClick={() => openMediaFor('logo')} className="flex items-center gap-2 px-4 py-2.5 border-2 border-dashed border-gray-300 rounded-lg hover:border-orange-400 hover:bg-orange-50 text-gray-600 transition-colors w-full justify-center">
+                    <button title="Chọn ảnh từ thư viện" onClick={() => openMediaFor('logo')} className="flex items-center gap-2 px-4 py-2.5 border-2 border-dashed border-gray-300 rounded-lg hover:border-orange-400 hover:bg-orange-50 text-gray-600 transition-colors w-full justify-center">
                         <ImageIcon size={16} /> Chọn ảnh từ thư viện
                     </button>
                 </div>
@@ -288,9 +288,9 @@ export default function AdminAppearancePage() {
                         <p className="text-xs text-gray-400">Thay vì màu trắng mặc định</p>
                     </div>
                     <div className="flex items-center gap-2">
-                        <input type="color" value={local.headerBg || '#ffffff'} onChange={e => setLocal({ ...local, headerBg: e.target.value })}
+                        <input type="color" title="Chọn màu nền Header" value={local.headerBg || '#ffffff'} onChange={e => setLocal({ ...local, headerBg: e.target.value })}
                             className="w-10 h-10 rounded-lg cursor-pointer border-2 border-gray-200 flex-shrink-0" />
-                        <input type="text" value={local.headerBg || '#ffffff'} onChange={e => setLocal({ ...local, headerBg: e.target.value })}
+                        <input type="text" title="Nhập màu nền Header" value={local.headerBg || '#ffffff'} onChange={e => setLocal({ ...local, headerBg: e.target.value })}
                             className="w-24 px-2 py-1.5 border rounded-lg text-sm font-mono" />
                         {local.headerBg && local.headerBg !== '#ffffff' && (
                             <button onClick={() => setLocal({ ...local, headerBg: '#ffffff' })} className="text-xs text-gray-400 hover:text-gray-600 px-1.5">Reset</button>
@@ -303,7 +303,7 @@ export default function AdminAppearancePage() {
             {/* 3. Hero Banners */}
             <SectionCard title="Banner trang chủ (Hero)" icon={<ImageIcon size={20} />}>
                 <div className="space-y-4">
-                    <button onClick={() => openMediaFor('banner')} className="flex items-center gap-2 px-4 py-2.5 border-2 border-dashed border-gray-300 rounded-lg hover:border-orange-400 hover:bg-orange-50 text-gray-600 transition-colors w-full justify-center">
+                    <button title="Chọn ảnh từ thư viện" onClick={() => openMediaFor('banner')} className="flex items-center gap-2 px-4 py-2.5 border-2 border-dashed border-gray-300 rounded-lg hover:border-orange-400 hover:bg-orange-50 text-gray-600 transition-colors w-full justify-center">
                         <Plus size={16} /> Chọn ảnh từ thư viện
                     </button>
                     {local.hero_banners.length === 0 ? (
@@ -318,7 +318,7 @@ export default function AdminAppearancePage() {
                                         <input type="text" value={b.alt} onChange={(e) => { const u = local.hero_banners.map(x => x.id === b.id ? { ...x, alt: e.target.value } : x); setLocal({ ...local, hero_banners: u }); }} placeholder="Mô tả banner" className="w-full px-3 py-1.5 border rounded text-sm" />
                                         <input type="text" value={b.link || ''} onChange={(e) => { const u = local.hero_banners.map(x => x.id === b.id ? { ...x, link: e.target.value } : x); setLocal({ ...local, hero_banners: u }); }} placeholder="Link khi click (tùy chọn)" className="w-full px-3 py-1.5 border rounded text-sm" />
                                     </div>
-                                    <button onClick={() => setLocal({ ...local, hero_banners: local.hero_banners.filter(x => x.id !== b.id) })} className="text-red-400 hover:text-red-600 p-2">
+                                    <button title="Xóa banner" onClick={() => setLocal({ ...local, hero_banners: local.hero_banners.filter(x => x.id !== b.id) })} className="text-red-400 hover:text-red-600 p-2">
                                         <Trash2 size={18} />
                                     </button>
                                 </div>
@@ -334,7 +334,7 @@ export default function AdminAppearancePage() {
                 <div className="space-y-4">
                     <div className="flex items-center gap-3">
                         <label className="relative inline-flex items-center cursor-pointer">
-                            <input type="checkbox" checked={local.background_config.is_active} onChange={(e) => setLocal({ ...local, background_config: { ...local.background_config, is_active: e.target.checked } })} className="sr-only peer" />
+                            <input type="checkbox" title="Bật background tùy chỉnh" checked={local.background_config.is_active} onChange={(e) => setLocal({ ...local, background_config: { ...local.background_config, is_active: e.target.checked } })} className="sr-only peer" />
                             <div className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-500" />
                         </label>
                         <span className="text-sm text-gray-700">Bật background tùy chỉnh</span>
@@ -349,8 +349,8 @@ export default function AdminAppearancePage() {
                     </div>
                     {local.background_config.type === 'color' ? (
                         <div className="flex items-center gap-3">
-                            <input type="color" value={local.background_config.value || '#f9fafb'} onChange={(e) => setLocal({ ...local, background_config: { ...local.background_config, value: e.target.value } })} className="w-12 h-12 rounded-lg cursor-pointer border-2" />
-                            <input type="text" value={local.background_config.value} onChange={(e) => setLocal({ ...local, background_config: { ...local.background_config, value: e.target.value } })} className="w-28 px-3 py-2 border rounded-lg text-sm font-mono" />
+                            <input type="color" title="Chọn màu nền" value={local.background_config.value || '#f9fafb'} onChange={(e) => setLocal({ ...local, background_config: { ...local.background_config, value: e.target.value } })} className="w-12 h-12 rounded-lg cursor-pointer border-2" />
+                            <input type="text" title="Nhập màu nền" value={local.background_config.value} onChange={(e) => setLocal({ ...local, background_config: { ...local.background_config, value: e.target.value } })} className="w-28 px-3 py-2 border rounded-lg text-sm font-mono" />
                         </div>
                     ) : (
                         <div className="space-y-3">
@@ -360,7 +360,7 @@ export default function AdminAppearancePage() {
                             {local.background_config.value && local.background_config.value.startsWith('http') && (
                                 <div className="relative">
                                     <img src={local.background_config.value} alt="Background preview" className="w-full h-32 object-cover rounded-lg" />
-                                    <button onClick={() => setLocal({ ...local, background_config: { ...local.background_config, value: '' } })} className="absolute top-2 right-2 bg-red-500 text-white w-7 h-7 rounded-full flex items-center justify-center hover:bg-red-600">
+                                    <button title="Xóa ảnh nền" onClick={() => setLocal({ ...local, background_config: { ...local.background_config, value: '' } })} className="absolute top-2 right-2 bg-red-500 text-white w-7 h-7 rounded-full flex items-center justify-center hover:bg-red-600">
                                         <X size={14} />
                                     </button>
                                 </div>
@@ -376,7 +376,7 @@ export default function AdminAppearancePage() {
                 <div className="space-y-4 p-4 border rounded-lg bg-gray-50">
                     <div className="flex items-start gap-3">
                         <label className="relative inline-flex items-center cursor-pointer mt-1">
-                            <input type="checkbox" checked={local.disableImageProxy ?? false} onChange={(e) => setLocal({ ...local, disableImageProxy: e.target.checked })} className="sr-only peer" />
+                            <input type="checkbox" title="Tắt máy chủ nén ảnh bên ngoài (Kill-Switch)" checked={local.disableImageProxy ?? false} onChange={(e) => setLocal({ ...local, disableImageProxy: e.target.checked })} className="sr-only peer" />
                             <div className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-500" />
                         </label>
                         <div>
@@ -399,8 +399,8 @@ export default function AdminAppearancePage() {
                                 <p className="text-xs text-gray-500">📞 {branch.phone}</p>
                             </div>
                             <div className="flex gap-1 self-start">
-                                <button onClick={() => startEditBranch(branch)} className="text-blue-500 hover:text-blue-700 p-1.5"><Edit2 size={14} /></button>
-                                <button onClick={() => removeBranch(branch.id)} className="text-red-400 hover:text-red-600 p-1.5"><Trash2 size={14} /></button>
+                                <button title="Sửa chi nhánh" onClick={() => startEditBranch(branch)} className="text-blue-500 hover:text-blue-700 p-1.5"><Edit2 size={14} /></button>
+                                <button title="Xóa chi nhánh" onClick={() => removeBranch(branch.id)} className="text-red-400 hover:text-red-600 p-1.5"><Trash2 size={14} /></button>
                             </div>
                         </div>
                     ))}
@@ -442,7 +442,7 @@ export default function AdminAppearancePage() {
                         <div key={category.id} className="border rounded-xl bg-gray-50 p-4 space-y-3">
                             <div className="flex flex-col md:flex-row gap-2">
                                 <input value={category.label} onChange={e => updatePricingCategory(category.id, { label: e.target.value })} placeholder="Tên nhóm" className="flex-1 px-3 py-2 border rounded-lg text-sm" />
-                                <select value={category.icon} onChange={e => updatePricingCategory(category.id, { icon: e.target.value as PricingIconName })} className="px-3 py-2 border rounded-lg text-sm bg-white">
+                                <select title="Chọn icon" value={category.icon} onChange={e => updatePricingCategory(category.id, { icon: e.target.value as PricingIconName })} className="px-3 py-2 border rounded-lg text-sm bg-white">
                                     <option value="smartphone">Điện thoại</option>
                                     <option value="tablet">Máy tính bảng</option>
                                     <option value="laptop">Laptop</option>
@@ -517,9 +517,9 @@ export default function AdminAppearancePage() {
                                         </span>
                                     )}
                                     <div className="flex items-center gap-1">
-                                        <button onClick={() => moveSection(index, 'up')} disabled={index === 0} className="p-1.5 rounded hover:bg-gray-100 disabled:opacity-30 text-gray-500"><ArrowUp size={16} /></button>
-                                        <button onClick={() => moveSection(index, 'down')} disabled={index === local.homeSections.length - 1} className="p-1.5 rounded hover:bg-gray-100 disabled:opacity-30 text-gray-500"><ArrowDown size={16} /></button>
-                                        <button onClick={() => { const u = local.homeSections.map(s => s.id === section.id ? { ...s, visible: !s.visible } : s); setLocal({ ...local, homeSections: u }); }}
+                                        <button title="Di chuyển lên" onClick={() => moveSection(index, 'up')} disabled={index === 0} className="p-1.5 rounded hover:bg-gray-100 disabled:opacity-30 text-gray-500"><ArrowUp size={16} /></button>
+                                        <button title="Di chuyển xuống" onClick={() => moveSection(index, 'down')} disabled={index === local.homeSections.length - 1} className="p-1.5 rounded hover:bg-gray-100 disabled:opacity-30 text-gray-500"><ArrowDown size={16} /></button>
+                                        <button title="Hiển thị/ẩn khối" onClick={() => { const u = local.homeSections.map(s => s.id === section.id ? { ...s, visible: !s.visible } : s); setLocal({ ...local, homeSections: u }); }}
                                             className={`p-1.5 rounded hover:bg-gray-100 ${section.visible ? 'text-green-500' : 'text-gray-400'}`}>
                                             {section.visible ? <Eye size={16} /> : <EyeOff size={16} />}
                                         </button>
@@ -533,7 +533,7 @@ export default function AdminAppearancePage() {
                                     {/* Type selector */}
                                     <div className="flex gap-2 flex-wrap">
                                         {(['none', 'color', 'image'] as const).map(t => (
-                                            <button key={t} onClick={() => updateBg({ type: t })}
+                                            <button title="Chọn loại nền" key={t} onClick={() => updateBg({ type: t })}
                                                 className={`px-3 py-1.5 rounded-lg text-xs border font-medium transition-all ${bg.type === t ? 'border-orange-500 bg-orange-50 text-orange-600' : 'border-gray-200 text-gray-500 hover:border-gray-300'}`}>
                                                 {t === 'none' ? '⬜ Không nền' : t === 'color' ? '🎨 Màu nền' : '🖼️ Ảnh nền'}
                                             </button>
@@ -548,10 +548,10 @@ export default function AdminAppearancePage() {
                                                 <p className="text-[10px] text-gray-400">(Tùy khối, VD: Đặt Lịch)</p>
                                             </div>
                                             <div className="flex items-center gap-2">
-                                                <input type="color" value={bg.outerBg || '#1a1a2e'} onChange={e => updateBg({ outerBg: e.target.value })}
+                                                <input type="color" title="Chọn màu nền khối ngoài" value={bg.outerBg || '#1a1a2e'} onChange={e => updateBg({ outerBg: e.target.value })}
                                                     className="w-7 h-7 rounded cursor-pointer border border-gray-200 flex-shrink-0" />
                                                 {bg.outerBg && (
-                                                    <button onClick={() => updateBg({ outerBg: undefined })} className="text-[10px] text-gray-400 hover:text-gray-600">Reset</button>
+                                                    <button title="Reset" onClick={() => updateBg({ outerBg: undefined })} className="text-[10px] text-gray-400 hover:text-gray-600">Reset</button>
                                                 )}
                                             </div>
                                         </div>
@@ -563,10 +563,10 @@ export default function AdminAppearancePage() {
                                                 <p className="text-[10px] text-gray-400">(Nền trắng của nội dung)</p>
                                             </div>
                                             <div className="flex items-center gap-2">
-                                                <input type="color" value={bg.cardBg || '#ffffff'} onChange={e => updateBg({ cardBg: e.target.value })}
+                                                <input type="color" title="Chọn màu nền thẻ trong" value={bg.cardBg || '#ffffff'} onChange={e => updateBg({ cardBg: e.target.value })}
                                                     className="w-7 h-7 rounded cursor-pointer border border-gray-200 flex-shrink-0" />
                                                 {bg.cardBg && bg.cardBg !== '#ffffff' && (
-                                                    <button onClick={() => updateBg({ cardBg: '#ffffff' })} className="text-[10px] text-gray-400 hover:text-gray-600">Reset</button>
+                                                    <button title="Reset" onClick={() => updateBg({ cardBg: '#ffffff' })} className="text-[10px] text-gray-400 hover:text-gray-600">Reset</button>
                                                 )}
                                             </div>
                                         </div>
@@ -575,9 +575,9 @@ export default function AdminAppearancePage() {
                                     {/* Color picker */}
                                     {bg.type === 'color' && (
                                         <div className="flex items-center gap-3">
-                                            <input type="color" value={bg.color || '#ffffff'} onChange={e => updateBg({ color: e.target.value })}
+                                            <input type="color" title="Chọn màu nền" value={bg.color || '#ffffff'} onChange={e => updateBg({ color: e.target.value })}
                                                 className="w-10 h-10 rounded-lg cursor-pointer border-2 border-gray-200 flex-shrink-0" />
-                                            <input type="text" value={bg.color || '#ffffff'} onChange={e => updateBg({ color: e.target.value })}
+                                            <input type="text" title="Nhập màu nền" value={bg.color || '#ffffff'} onChange={e => updateBg({ color: e.target.value })}
                                                 className="w-28 px-3 py-1.5 border rounded-lg text-sm font-mono" />
                                             <div className="w-10 h-10 rounded-lg border" style={{ backgroundColor: bg.color || '#ffffff' }} />
                                         </div>
@@ -586,14 +586,14 @@ export default function AdminAppearancePage() {
                                     {/* Image picker */}
                                     {bg.type === 'image' && (
                                         <div className="space-y-2">
-                                            <button onClick={() => { setMediaTarget(`section_bg_${section.id}` as 'banner'); setMediaOpen(true); }}
+                                            <button title="Chọn ảnh nền từ thư viện" onClick={() => { setMediaTarget(`section_bg_${section.id}` as 'banner'); setMediaOpen(true); }}
                                                 className="flex items-center gap-2 px-3 py-2 border-2 border-dashed border-gray-300 rounded-lg hover:border-orange-400 hover:bg-orange-50 text-gray-600 text-sm w-full justify-center transition-colors">
                                                 <ImageIcon size={14} /> {bg.imageUrl ? 'Đổi ảnh nền' : 'Chọn ảnh nền từ thư viện'}
                                             </button>
                                             {bg.imageUrl && (
                                                 <div className="relative">
                                                     <img src={bg.imageUrl} alt="bg preview" className="w-full h-24 object-cover rounded-lg" />
-                                                    <button onClick={() => updateBg({ imageUrl: '' })}
+                                                    <button title="Xóa ảnh nền" onClick={() => updateBg({ imageUrl: '' })}
                                                         className="absolute top-1 right-1 bg-red-500 text-white w-6 h-6 rounded-full flex items-center justify-center hover:bg-red-600">
                                                         <X size={12} />
                                                     </button>
@@ -601,13 +601,13 @@ export default function AdminAppearancePage() {
                                             )}
                                             <div className="flex items-center gap-3">
                                                 <label className="text-xs text-gray-500">Độ mờ</label>
-                                                <input type="range" min={10} max={100} step={5} value={bg.opacity ?? 100} onChange={e => updateBg({ opacity: Number(e.target.value) })}
+                                                <input type="range" title="Độ mờ" min={10} max={100} step={5} value={bg.opacity ?? 100} onChange={e => updateBg({ opacity: Number(e.target.value) })}
                                                     className="flex-1 accent-orange-500" />
                                                 <span className="text-xs font-mono w-8 text-center">{bg.opacity ?? 100}%</span>
                                             </div>
                                             <div className="flex gap-2">
                                                 {(['cover', 'contain', 'repeat'] as const).map(s => (
-                                                    <button key={s} onClick={() => updateBg({ size: s })}
+                                                    <button title="Chọn kích thước nền" key={s} onClick={() => updateBg({ size: s })}
                                                         className={`px-2.5 py-1 text-xs rounded border ${(bg.size ?? 'cover') === s ? 'border-orange-500 bg-orange-50 text-orange-600' : 'border-gray-200 text-gray-500'}`}>
                                                         {s === 'cover' ? 'Phủ đầy' : s === 'contain' ? 'Vừa khung' : 'Lặp lại'}
                                                     </button>
@@ -620,14 +620,14 @@ export default function AdminAppearancePage() {
                                     {bg.type !== 'none' && (
                                         <div className="border-t pt-3 space-y-2">
                                             <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Khung viền trang trí (tuỳ chọn)</p>
-                                            <button onClick={() => { setMediaTarget(`section_frame_${section.id}` as 'banner'); setMediaOpen(true); }}
+                                            <button title="Chọn ảnh khung từ thư viện" onClick={() => { setMediaTarget(`section_frame_${section.id}` as 'banner'); setMediaOpen(true); }}
                                                 className="flex items-center gap-2 px-3 py-2 border-2 border-dashed border-purple-200 rounded-lg hover:border-purple-400 hover:bg-purple-50 text-gray-600 text-sm w-full justify-center transition-colors">
                                                 <ImageIcon size={14} /> {bg.frameUrl ? 'Đổi ảnh khung' : 'Chọn ảnh khung từ thư viện'}
                                             </button>
                                             {bg.frameUrl && (
                                                 <div className="relative">
                                                     <img src={bg.frameUrl} alt="frame preview" className="w-full h-20 object-fill rounded-lg border" />
-                                                    <button onClick={() => updateBg({ frameUrl: '' })}
+                                                    <button title="Xóa ảnh khung" onClick={() => updateBg({ frameUrl: '' })}
                                                         className="absolute top-1 right-1 bg-red-500 text-white w-6 h-6 rounded-full flex items-center justify-center hover:bg-red-600">
                                                         <X size={12} />
                                                     </button>

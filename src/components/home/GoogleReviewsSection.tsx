@@ -153,12 +153,14 @@ export default function GoogleReviewsSection() {
                     {/* Navigation Buttons Desktop */}
                     <div className="hidden md:flex gap-3">
                         <button 
+                            title="Quay lại"
                             onClick={() => scroll('left')}
                             className="w-12 h-12 rounded-full border border-gray-200 flex items-center justify-center text-gray-600 hover:bg-orange-50 hover:text-orange-600 hover:border-orange-200 transition-colors bg-white shadow-sm"
                         >
                             <ChevronLeft size={24} />
                         </button>
                         <button 
+                            title="Tiếp theo"
                             onClick={() => scroll('right')}
                             className="w-12 h-12 rounded-full border border-gray-200 flex items-center justify-center text-gray-600 hover:bg-orange-50 hover:text-orange-600 hover:border-orange-200 transition-colors bg-white shadow-sm"
                         >

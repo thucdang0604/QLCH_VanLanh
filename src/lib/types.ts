@@ -120,6 +120,7 @@ export interface Service {
     tags?: string[];
     videoEmbedUrl?: string;
     imageUrl?: string;
+    images?: string[];
     isActive?: boolean;
     createdAt?: FirestoreDateValue;
     updatedAt?: FirestoreDateValue;

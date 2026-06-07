@@ -11,6 +11,33 @@
   "constraints": [],
   "aiPlans": [
     {
+      "id": "plan-initial-excel-bootstrap",
+      "title": "Initial Excel Bootstrap: Khởi tạo sản phẩm, phụ kiện, linh kiện và dịch vụ",
+      "date": "05.06.2026",
+      "status": "implemented-local",
+      "planFile": "data/ai_plans/plan_initial_excel_bootstrap.md",
+      "taskFile": "data/ai_plans/task_initial_excel_bootstrap.md",
+      "walkthroughFile": "",
+      "scope": [
+        "src/components/admin/ExcelImportModal.tsx",
+        "src/app/admin/initial-data/page.tsx"
+      ],
+      "decisions": [
+        "Tách công cụ import dữ liệu ban đầu vào route riêng không nằm trong sidebar admin",
+        "Ảnh trong Excel dùng URL public, URL media hoặc đường dẫn local cần resolve bằng file picker trước khi import",
+        "Trang bootstrap có ô kiểm tra URL hoặc file local để xem trước ảnh; upload qua MediaManager vẫn convert WebP",
+        "Preview Excel cho phép chọn file/thư mục ảnh local, khớp theo tên file, upload WebP lên Storage rồi thay bằng URL Firebase",
+        "Sản phẩm, phụ kiện, linh kiện và dịch vụ dùng chung gallery images[] + imageUrl; admin chỉnh bằng MediaManager hiện có",
+        "MediaManager mở từ gallery tự chọn thư mục upload mặc định theo loại item: products, parts hoặc services",
+        "Preview kiểm trùng tên, ID chuẩn hóa và QR/barcode trong file lẫn Firestore trước khi import",
+        "Sản phẩm, phụ kiện và linh kiện ghi products, product_code_registry và inventory_logs trong cùng transaction",
+        "Các luồng tạo/nhập mới không còn ghi categoryIds giả san-pham hoặc component; mặt hàng active phải chọn taxonomy thật",
+        "Bảng preview là gate bắt buộc; còn lỗi thì khóa import, warning không chặn",
+        "Gỡ entry point import cũ khỏi trang sản phẩm để bootstrap chỉ nằm ở /admin/initial-data"
+      ],
+      "updatedAt": "2026-06-05T00:00:00.000Z"
+    },
+    {
       "id": "plan-ui-receipt-warranty-templates",
       "title": "Cấu hình Mẫu Biên Nhận Bảo Hành (Thiết bị, Sửa chữa, Phụ kiện)",
       "date": "03.06.2026",

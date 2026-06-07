@@ -221,10 +221,12 @@ export default function CheckoutPage() {
                                                 <p className="text-sm font-bold text-red-600 whitespace-nowrap">
                                                     {formatPrice(item.price * item.quantity)}
                                                 </p>
-                                                
+
                                                 <div className="flex items-center bg-white border rounded-lg p-0.5 shadow-sm">
                                                     <button
                                                         type="button"
+                                                        aria-label="Giảm số lượng"
+                                                        title="Giảm số lượng"
                                                         onClick={() => updateQuantity(item.id, item.quantity - 1)}
                                                         className="w-7 h-7 flex items-center justify-center hover:text-orange-500 transition-colors"
                                                     >
@@ -235,6 +237,8 @@ export default function CheckoutPage() {
                                                     </span>
                                                     <button
                                                         type="button"
+                                                        aria-label="Tăng số lượng"
+                                                        title="Tăng số lượng"
                                                         onClick={() => updateQuantity(item.id, item.quantity + 1)}
                                                         disabled={item.quantity >= item.stock}
                                                         className="w-7 h-7 flex items-center justify-center hover:text-orange-500 transition-colors disabled:opacity-50"
@@ -244,7 +248,7 @@ export default function CheckoutPage() {
                                                 </div>
                                             </div>
                                         </div>
-                                        
+
                                         <button
                                             type="button"
                                             onClick={() => removeItem(item.id)}

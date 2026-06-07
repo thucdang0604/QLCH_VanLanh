@@ -343,11 +343,11 @@ export default function RepairStatusSettingsPage() {
                                     </div>
                                     <span className="text-xs font-mono text-gray-400 w-4">{index + 1}</span>
 
-                                    <input type="text" value={status.label}
+                                    <input title="Tên trạng thái" type="text" value={status.label}
                                         onChange={e => updateLabel(status.id, e.target.value)}
                                         className="flex-1 px-3 py-1.5 text-sm border font-semibold text-gray-900 rounded-lg focus:border-orange-500 focus:outline-none min-w-[120px]" />
 
-                                    <button onClick={() => handleDeleteStatus(status.id)}
+                                    <button title="Xóa trạng thái" onClick={() => handleDeleteStatus(status.id)}
                                         className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
                                         <Trash2 size={16} />
                                     </button>
@@ -355,7 +355,7 @@ export default function RepairStatusSettingsPage() {
 
                                 <div className="flex flex-wrap items-center gap-2 pl-9">
                                     <span className="text-xs font-mono text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">{status.id}</span>
-                                    <select value={status.color} onChange={e => updateColor(status.id, e.target.value)}
+                                    <select title="Màu trạng thái" value={status.color} onChange={e => updateColor(status.id, e.target.value)}
                                         className="text-xs px-2 py-1 border rounded-md focus:outline-none">
                                         {colorOptions.map(c => (
                                             <option key={c} value={c}>{c.split(' ')[0].replace('bg-', '').replace('-100', '')}</option>
@@ -453,12 +453,12 @@ export default function RepairStatusSettingsPage() {
                                         {index + 1}
                                     </div>
 
-                                    <input type="text" value={group.name}
+                                    <input title="Tên nhóm tra cứu" type="text" value={group.name}
                                         onChange={e => updateGroupName(group.id, e.target.value)}
                                         placeholder="Nhập tên nhóm tra cứu..."
                                         className="flex-1 px-3 py-2 text-sm border font-bold text-gray-900 rounded-lg focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500" />
 
-                                    <button onClick={() => handleDeleteGroup(group.id)}
+                                    <button title="Xóa nhóm tra cứu" onClick={() => handleDeleteGroup(group.id)}
                                         className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
                                         <Trash2 size={16} />
                                     </button>
@@ -541,6 +541,7 @@ export default function RepairStatusSettingsPage() {
                                     <td className="px-4 py-2 text-gray-400 text-xs">{idx + 1}</td>
                                     <td className="px-4 py-2">
                                         <input
+                                            title="Loại linh kiện"
                                             type="text"
                                             value={rule.partType}
                                             onChange={e => {
@@ -554,6 +555,7 @@ export default function RepairStatusSettingsPage() {
                                     </td>
                                     <td className="px-4 py-2">
                                         <input
+                                            title="Thời gian bảo hành"
                                             type="number"
                                             min={0}
                                             value={rule.warrantyMonths}
@@ -567,6 +569,7 @@ export default function RepairStatusSettingsPage() {
                                     </td>
                                     <td className="px-4 py-2 text-right">
                                         <button
+                                            title="Xóa loại linh kiện"
                                             onClick={() => setWarrantyRules(prev => prev.filter((_, i) => i !== idx))}
                                             className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
                                         >

@@ -14,7 +14,7 @@ function Toast({ message, onClose }: { message: string; onClose: () => void }) {
             <div className="bg-green-500 text-white px-6 py-4 rounded-xl shadow-2xl flex items-center gap-3 max-w-sm">
                 <CheckCircle2 size={22} className="flex-shrink-0" />
                 <span className="text-sm font-medium">{message}</span>
-                <button onClick={onClose} className="ml-2 hover:bg-green-600 rounded p-0.5 transition-colors">
+                <button title="Đóng" onClick={onClose} className="ml-2 hover:bg-green-600 rounded p-0.5 transition-colors">
                     <X size={16} />
                 </button>
             </div>

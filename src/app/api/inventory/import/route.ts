@@ -4,6 +4,7 @@ import { requirePermission } from '@/lib/apiAuth';
 import { FieldValue } from 'firebase-admin/firestore';
 import type { ImportReceipt, ImportReceiptItem, RepairTicket } from '@/lib/types';
 import { buildProductCodeFromId, getProductCodeKind, normalizeProductCode } from '@/lib/productCodes';
+import { PART_CATEGORY_LABEL } from '@/lib/constants';
 
 type RepairLine = NonNullable<RepairTicket['parts']>[number];
 type ReceiptItem = ImportReceiptItem & {
@@ -246,6 +247,12 @@ export async function POST(request: NextRequest) {
 
                         if (newParts && newParts[item.productId]) {
                             const info = newParts[item.productId];
+                            const categoryIds = Array.isArray(info.categoryIds)
+                                ? info.categoryIds.filter((value: unknown) => typeof value === 'string' && value.trim())
+                                : [];
+                            if (categoryIds.length === 0) {
+                                throw new Error(`Mặt hàng "${item.productName}" chưa được gán taxonomy.`);
+                            }
                             updateData.name = item.productName;
                             updateData.price_original = item.importPrice;
                             updateData.price_promo = Number(info.price_promo) || 0;
@@ -255,11 +262,13 @@ export async function POST(request: NextRequest) {
                             updateData.isProposed = false;
                             
                             if (receipt.receiptType === 'retail') {
-                                updateData.category = 'product';
-                                updateData.categoryIds = info.categoryIds || ['san-pham'];
+                                updateData.category = typeof info.category === 'string' && info.category.trim()
+                                    ? info.category.trim()
+                                    : pData.category || '';
+                                updateData.categoryIds = categoryIds;
                             } else {
-                                updateData.category = 'component';
-                                updateData.categoryIds = ['component'];
+                                updateData.category = PART_CATEGORY_LABEL;
+                                updateData.categoryIds = categoryIds;
                                 updateData.partType = info.partType || pData.partType || '';
                                 updateData.description = info.model || pData.description || '';
                             }

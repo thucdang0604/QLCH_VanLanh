@@ -1,0 +1,23 @@
+# Task Initial Excel Bootstrap
+
+- [x] Đọc `roadmap/ai/master.md`, `AI_readme.md`, dashboard và inventory workflow.
+- [x] Kiểm tra importer Excel hiện có và schema sản phẩm/dịch vụ/linh kiện.
+- [x] Mở rộng modal import để hỗ trợ sản phẩm, phụ kiện, linh kiện và dịch vụ.
+- [x] Bổ sung template Excel có cột ảnh URL và dữ liệu đầy đủ hơn.
+- [x] Thêm ô kiểm tra link/file hình ảnh ngay trên trang bootstrap trước khi đưa URL vào Excel.
+- [x] Cho phép Excel chứa đường dẫn ảnh local; preview bắt chọn file/thư mục ảnh, upload WebP rồi thay bằng URL trước khi import.
+- [x] Đồng bộ gallery nhiều ảnh cho sản phẩm, phụ kiện, linh kiện và dịch vụ theo chuẩn `images[] + imageUrl`.
+- [x] Dùng lại MediaManager cho admin chỉnh gallery; không xóa file gốc khi chỉ bỏ ảnh khỏi một item.
+- [x] MediaManager mở từ từng loại item tự chọn đúng thư mục upload mặc định: `products`, `parts`, `services`.
+- [x] Thêm bảng preview tổng hợp theo từng trường sau khi đọc Excel.
+- [x] Kiểm trùng ID chuẩn hóa, tên, mã QR/barcode trong file và trên Firestore trước khi import.
+- [x] Đồng nhất taxonomy cho các luồng tạo/nhập mới; bỏ fallback `san-pham` và `component` trong `categoryIds`.
+- [x] Khóa import nếu còn lỗi; chỉ cho import toàn bộ file khi dữ liệu đã qua gate kiểm duyệt.
+- [x] Ghi sản phẩm, registry mã hàng và inventory log trong cùng transaction để tránh dữ liệu lệch.
+- [x] Tạo dịch vụ bằng transaction check tồn tại trước, không overwrite doc cũ.
+- [x] Tạo route admin riêng `/admin/initial-data`, không thêm vào sidebar.
+- [x] Gỡ nút import Excel khỏi trang sản phẩm để chỉ còn một điểm bootstrap riêng.
+- [x] Bắt buộc chọn taxonomy khi lưu sản phẩm, linh kiện, dịch vụ hoặc hoàn tất nhập kho mặt hàng mới.
+- [x] Ghi inventory log cho tồn kho ban đầu.
+- [x] Chạy lint/typecheck/build sau khi hoàn tất sửa code.
+- [x] Nang cap template Excel thanh workbook nhieu sheet gom huong dan nhanh, quy uoc cot, gia tri hop le, anh/MediaManager, taxonomy mau va vi du day du.

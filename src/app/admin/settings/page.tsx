@@ -329,6 +329,7 @@ export default function SettingsPage() {
                                                 Vĩ độ (Latitude)
                                             </label>
                                             <input
+                                                title="Vĩ độ"
                                                 type="number"
                                                 step="0.0001"
                                                 value={geofence.lat}
@@ -342,6 +343,7 @@ export default function SettingsPage() {
                                                 Kinh độ (Longitude)
                                             </label>
                                             <input
+                                                title="Kinh độ"
                                                 type="number"
                                                 step="0.0001"
                                                 value={geofence.lng}
@@ -355,6 +357,7 @@ export default function SettingsPage() {
                                                 Bán kính (mét)
                                             </label>
                                             <input
+                                                title="Bán kính"
                                                 type="number"
                                                 min={50}
                                                 max={5000}
@@ -366,6 +369,7 @@ export default function SettingsPage() {
                                     </div>
                                     <button
                                         type="button"
+                                        title="Lấy vị trí hiện tại"
                                         onClick={() => {
                                             if (!navigator.geolocation) {
                                                 alert('Trình duyệt không hỗ trợ định vị.');
@@ -396,6 +400,7 @@ export default function SettingsPage() {
                                         </label>
                                         <input
                                             type="text"
+                                            title="Mã PIN"
                                             value={geofence.pin}
                                             onChange={(e) => setGeofence(g => ({ ...g, pin: e.target.value }))}
                                             className="w-full max-w-xs px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all font-mono text-lg tracking-widest"
@@ -412,6 +417,7 @@ export default function SettingsPage() {
                         <div className="px-6 py-4 bg-gray-50 border-t flex items-center justify-end gap-3">
                             <button
                                 type="button"
+                                title="Hủy thay đổi"
                                 onClick={() => {
                                     setFormData(config.contact_info || DEFAULT_CONFIG.contact_info);
                                     setShopName(config.siteName || '');
@@ -425,6 +431,7 @@ export default function SettingsPage() {
                             </button>
                             <button
                                 type="submit"
+                                title="Lưu cài đặt"
                                 disabled={saving}
                                 className="flex items-center gap-2 px-6 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 shadow-lg shadow-orange-500/30 disabled:opacity-50 transition-all transform active:scale-95"
                             >

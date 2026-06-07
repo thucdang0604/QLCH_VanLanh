@@ -62,13 +62,14 @@ function SupplierModal({ supplier, onClose, onSave }: {
             <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
                 <div className="flex items-center justify-between p-5 border-b">
                     <h2 className="text-lg font-bold">{supplier ? 'Sửa NCC' : 'Thêm nhà cung cấp'}</h2>
-                    <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded-lg"><X size={20} /></button>
+                    <button title="Đóng" onClick={onClose} className="p-1 hover:bg-gray-100 rounded-lg"><X size={20} /></button>
                 </div>
                 <div className="p-5 space-y-3">
                     {fields.map(f => (
                         <div key={f.key}>
                             <label className="text-sm text-gray-600 mb-1 block">{f.label}</label>
                             <input
+                                title={f.label}
                                 type={f.type || 'text'}
                                 value={form[f.key]}
                                 onChange={e => setForm(prev => ({ ...prev, [f.key]: e.target.value }))}
@@ -79,6 +80,7 @@ function SupplierModal({ supplier, onClose, onSave }: {
                     <div>
                         <label className="text-sm text-gray-600 mb-1 block">Ghi chú</label>
                         <textarea
+                            title="Ghi chú"
                             value={form.note}
                             onChange={e => setForm(prev => ({ ...prev, note: e.target.value }))}
                             rows={2}
@@ -122,7 +124,7 @@ function PaymentModal({ supplier, onClose, onPay }: {
             <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
                 <div className="flex items-center justify-between p-5 border-b">
                     <h2 className="text-lg font-bold">Thanh toán công nợ</h2>
-                    <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded-lg"><X size={20} /></button>
+                    <button title="Đóng" onClick={onClose} className="p-1 hover:bg-gray-100 rounded-lg"><X size={20} /></button>
                 </div>
                 <div className="p-5 space-y-3">
                     <div className="bg-orange-50 rounded-lg p-3 text-sm">
@@ -136,14 +138,14 @@ function PaymentModal({ supplier, onClose, onPay }: {
                     </div>
                     <div>
                         <label className="text-sm text-gray-600 mb-1 block">Phương thức</label>
-                        <select value={method} onChange={e => setMethod(e.target.value)}
+                        <select title="Phương thức" value={method} onChange={e => setMethod(e.target.value)}
                             className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none">
                             <option>Tiền mặt</option><option>Chuyển khoản</option><option>Khác</option>
                         </select>
                     </div>
                     <div>
                         <label className="text-sm text-gray-600 mb-1 block">Ghi chú</label>
-                        <input type="text" value={note} onChange={e => setNote(e.target.value)}
+                        <input title="Ghi chú" type="text" value={note} onChange={e => setNote(e.target.value)}
                             className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none" />
                     </div>
                 </div>
@@ -284,12 +286,12 @@ export default function SuppliersPage() {
                                 </div>
                                 <div className="flex gap-1">
                                     {(s.totalDebt || 0) > 0 && (
-                                        <button onClick={() => setPaySupplier(s)} className="text-xs px-2 py-1 bg-green-50 text-green-700 rounded-lg hover:bg-green-100">Thanh toán</button>
+                                        <button title="Thanh toán" onClick={() => setPaySupplier(s)} className="text-xs px-2 py-1 bg-green-50 text-green-700 rounded-lg hover:bg-green-100">Thanh toán</button>
                                     )}
-                                    <button onClick={() => { setEditSupplier(s); setShowModal(true); }} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400">
+                                    <button title="Chỉnh sửa" onClick={() => { setEditSupplier(s); setShowModal(true); }} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400">
                                         <Edit2 size={14} />
                                     </button>
-                                    <button onClick={() => toggleExpand(s.id)} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400">
+                                    <button title="Mở rộng" onClick={() => toggleExpand(s.id)} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400">
                                         {expandedId === s.id ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                                     </button>
                                 </div>

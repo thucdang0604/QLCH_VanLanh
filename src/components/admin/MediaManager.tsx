@@ -46,13 +46,25 @@ interface MediaManagerProps {
     onSelectMultiple?: (urls: string[]) => void;
     multiple?: boolean;
     title?: string;
+    defaultFolder?: string;
 }
 
 function isVideoType(type: string): boolean {
     return type.includes('video');
 }
 
-export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultiple, multiple = false, title = 'Chọn media' }: MediaManagerProps) {
+function normalizeMediaBaseName(value: string): string {
+    const fileName = value
+        .trim()
+        .replace(/^file:\/+/i, '')
+        .replace(/\\/g, '/')
+        .split('/')
+        .filter(Boolean)
+        .pop() || value.trim();
+    return fileName.replace(/\.[^.]+$/, '').toLowerCase();
+}
+
+export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultiple, multiple = false, title = 'Chọn media', defaultFolder = 'general' }: MediaManagerProps) {
     const [tab, setTab] = useState<'upload' | 'library'>('library');
     const [items, setItems] = useState<MediaItem[]>([]);
     const [loading, setLoading] = useState(true);
@@ -64,20 +76,21 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
     const [cleaning, setCleaning] = useState(false);
     const [cleanProgress, setCleanProgress] = useState('');
     const [compressProgress, setCompressProgress] = useState<{name: string, ratio: number} | null>(null);
-    const [uploadFolder, setUploadFolder] = useState<string>('general');
+    const [uploadFolder, setUploadFolder] = useState<string>(defaultFolder);
     const [filterFolder, setFilterFolder] = useState<string>('all');
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Fetch media library from Firestore
     useEffect(() => {
         if (!isOpen) return;
+        setUploadFolder(defaultFolder);
         const q = query(collection(db, 'media_library'), orderBy('createdAt', 'desc'), limit(200));
         const unsub = onSnapshot(q, (snap) => {
             setItems(snap.docs.map(d => ({ id: d.id, ...d.data() } as MediaItem)));
             setLoading(false);
         }, () => setLoading(false));
         return () => unsub();
-    }, [isOpen]);
+    }, [isOpen, defaultFolder]);
 
     // Upload handler
     const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -185,6 +198,8 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                     url,
                     path: storagePath,
                     name: fileToUpload.name,
+                    originalName: file.name,
+                    normalizedBaseName: normalizeMediaBaseName(file.name),
                     type: fileToUpload.type,
                     size: fileToUpload.size,
                     folder: uploadFolder,
@@ -277,7 +292,7 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                 {/* Header */}
                 <div className="flex items-center justify-between px-6 py-4 border-b">
                     <h2 className="text-lg font-bold text-gray-800">{title}</h2>
-                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1">
+                    <button title="Đóng" onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1">
                         <X size={20} />
                     </button>
                 </div>
@@ -308,6 +323,7 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                             <div className="flex items-center gap-3 bg-gray-50 p-3 rounded-xl border">
                                 <label className="text-sm font-medium text-gray-700 min-w-max">Lưu vào thư mục:</label>
                                 <select 
+                                    title="Lưu vào thư mục"
                                     value={uploadFolder}
                                     onChange={(e) => setUploadFolder(e.target.value)}
                                     className="flex-1 p-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:border-orange-500"
@@ -319,6 +335,7 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                             </div>
 
                             <input
+                                title="Chọn file"
                                 ref={fileInputRef}
                                 type="file"
                                 accept="image/*,video/mp4,video/webm"
@@ -327,6 +344,8 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                                 className="hidden"
                             />
                             <button
+                                title="Kéo thả hoặc click để chọn file"
+                                type="button"
                                 onClick={() => fileInputRef.current?.click()}
                                 disabled={uploading}
                                 className="w-full h-48 border-2 border-dashed border-gray-300 rounded-xl hover:border-orange-400 hover:bg-orange-50 transition-colors flex flex-col items-center justify-center gap-3 text-gray-500"
@@ -377,6 +396,7 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                             {/* Search + Clean + Filter */}
                             <div className="flex items-center gap-2">
                                 <select
+                                    title="Chọn thư mục"
                                     value={filterFolder}
                                     onChange={(e) => setFilterFolder(e.target.value)}
                                     className="py-2.5 px-3 border rounded-lg text-sm bg-gray-50 focus:outline-none focus:border-orange-400 font-medium text-gray-700"
@@ -390,6 +410,7 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                                     <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                                     <input
                                         type="text"
+                                        title="Tìm theo tên file"
                                         placeholder="Tìm theo tên file..."
                                         value={searchQuery}
                                         onChange={(e) => setSearchQuery(e.target.value)}
@@ -398,10 +419,10 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                                 </div>
                                 <button
                                     type="button"
+                                    title="Quét và tự động xoá các file đã mất trên Storage"
                                     onClick={handleCleanBroken}
                                     disabled={cleaning}
                                     className="flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium whitespace-nowrap border border-red-200 text-red-600 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
-                                    title="Quét và tự động xoá các file đã mất trên Storage"
                                 >
                                     {cleaning ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
                                     Quét rác

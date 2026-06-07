@@ -336,6 +336,7 @@ export default function CustomersPage() {
                     </button>
                 )}
                 <select
+                    title="Chọn loại khách hàng"
                     value={typeFilter}
                     onChange={(e) => setTypeFilter(e.target.value)}
                     className="w-full md:w-48 h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none bg-white"

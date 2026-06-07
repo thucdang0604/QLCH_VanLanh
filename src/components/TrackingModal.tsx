@@ -92,6 +92,7 @@ export default function TrackingModal({ isOpen, onClose }: TrackingModalProps) {
                 <div className="flex items-center justify-between p-5 border-b border-gray-100">
                     <h3 className="font-bold text-lg text-gray-900">Tra cứu nhanh</h3>
                     <button 
+                        title="Đóng"
                         onClick={onClose}
                         className="p-2 bg-gray-100 hover:bg-gray-200 text-gray-500 rounded-full transition-colors"
                     >

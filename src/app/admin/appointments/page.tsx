@@ -217,6 +217,7 @@ export default function AppointmentsPage() {
                 )}
                 <div className={searchQuery.trim().length > 0 && filteredAppointments.length === 0 ? "md:col-span-2 grid grid-cols-2 gap-4" : "md:col-span-2 grid grid-cols-2 gap-4"}>
                     <select
+                        title="Chọn trạng thái"
                         value={statusFilter}
                         onChange={(e) => setStatusFilter(e.target.value)}
                         className="w-full h-10 px-4 border rounded-lg focus:border-orange-500 focus:outline-none bg-white"
@@ -229,6 +230,7 @@ export default function AppointmentsPage() {
                 </div>
                 <div>
                     <select
+                        title="Chọn chi nhánh"
                         value={storeFilter}
                         onChange={(e) => setStoreFilter(e.target.value)}
                         className="w-full h-10 px-4 border rounded-lg focus:border-orange-500 focus:outline-none bg-white"
@@ -294,6 +296,7 @@ export default function AppointmentsPage() {
                                     {app.status !== 'completed' && (
                                         <div className="flex items-center gap-2">
                                             <select
+                                                title="Chọn trạng thái"
                                                 value={app.status}
                                                 onChange={(e) => handleUpdateStatus(app.id, e.target.value)}
                                                 className="flex-1 text-sm border-gray-300 rounded-lg py-2 pl-3 pr-8 bg-white border"
@@ -397,6 +400,7 @@ export default function AppointmentsPage() {
                                                 ) : (
                                                     <>
                                                         <select
+                                                            title="Chọn trạng thái"
                                                             value={app.status}
                                                             onChange={(e) => handleUpdateStatus(app.id, e.target.value)}
                                                             className="text-sm border-gray-300 rounded-md shadow-sm focus:border-orange-300 focus:ring focus:ring-orange-200 focus:ring-opacity-50 py-1 pl-2 pr-8"

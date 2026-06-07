@@ -63,6 +63,7 @@ export default function CartDrawer() {
                         </span>
                     </div>
                     <button 
+                        title="Đóng"
                         onClick={handleClose}
                         className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
                     >
@@ -114,6 +115,7 @@ export default function CartDrawer() {
                                         </div>
                                         <div className="flex items-center bg-gray-50 rounded-lg border border-gray-100">
                                             <button 
+                                                title="Trừ"
                                                 onClick={() => updateQuantity(item.id, item.quantity - 1)}
                                                 className="p-1 px-2 text-gray-500 hover:text-copper transition-colors"
                                             >
@@ -121,6 +123,7 @@ export default function CartDrawer() {
                                             </button>
                                             <span className="text-xs font-medium w-6 text-center">{item.quantity}</span>
                                             <button 
+                                                title="Thêm"
                                                 onClick={() => updateQuantity(item.id, item.quantity + 1)}
                                                 className="p-1 px-2 text-gray-500 hover:text-copper transition-colors"
                                             >
@@ -130,6 +133,7 @@ export default function CartDrawer() {
                                     </div>
                                 </div>
                                 <button
+                                    title="Xóa"
                                     onClick={() => removeItem(item.id)}
                                     className="absolute top-2 right-2 p-1.5 text-gray-300 hover:text-red-500 bg-white rounded-full transition-all"
                                 >
@@ -148,6 +152,7 @@ export default function CartDrawer() {
                             <span className="text-xl font-bold text-red-600">{formatPrice(totalAmount)}</span>
                         </div>
                         <button 
+                            title="Tiến hành thanh toán"
                             onClick={handleCheckout}
                             className="w-full bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white font-bold py-3.5 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 group"
                         >

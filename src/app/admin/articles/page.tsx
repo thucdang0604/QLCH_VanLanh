@@ -227,9 +227,9 @@ export default function ArticlesPage() {
                                         <span>{formatDate(article.createdAt)}</span>
                                     </div>
                                     <div className="flex items-center gap-1">
-                                        <button onClick={() => setManagingCommentsFor(article)} className="p-2 hover:bg-green-100 text-green-600 rounded-lg"><MessageCircle size={18} /></button>
-                                        <button onClick={() => { setEditingArticle(article); setIsModalOpen(true); }} className="p-2 hover:bg-blue-100 text-blue-600 rounded-lg"><Edit size={18} /></button>
-                                        <button onClick={() => deleteArticle(article.id)} className="p-2 hover:bg-red-100 text-red-600 rounded-lg"><Trash2 size={18} /></button>
+                                        <button title="Quản lý bình luận" onClick={() => setManagingCommentsFor(article)} className="p-2 hover:bg-green-100 text-green-600 rounded-lg"><MessageCircle size={18} /></button>
+                                        <button title="Sửa bài viết" onClick={() => { setEditingArticle(article); setIsModalOpen(true); }} className="p-2 hover:bg-blue-100 text-blue-600 rounded-lg"><Edit size={18} /></button>
+                                        <button title="Xóa bài viết" onClick={() => deleteArticle(article.id)} className="p-2 hover:bg-red-100 text-red-600 rounded-lg"><Trash2 size={18} /></button>
                                     </div>
                                 </div>
                             </div>
@@ -294,19 +294,21 @@ export default function ArticlesPage() {
                                             <td className="px-6 py-4">
                                                 <div className="flex items-center justify-end gap-2">
                                                     <button
+                                                        title="Quản lý bình luận"
                                                         onClick={() => setManagingCommentsFor(article)}
                                                         className="p-2 hover:bg-green-100 text-green-600 rounded-lg transition-colors"
-                                                        title="Quản lý bình luận"
                                                     >
                                                         <MessageCircle size={18} />
                                                     </button>
                                                     <button
+                                                        title="Sửa bài viết"
                                                         onClick={() => { setEditingArticle(article); setIsModalOpen(true); }}
                                                         className="p-2 hover:bg-blue-100 text-blue-600 rounded-lg transition-colors"
                                                     >
                                                         <Edit size={18} />
                                                     </button>
                                                     <button
+                                                        title="Xóa bài viết"
                                                         onClick={() => deleteArticle(article.id)}
                                                         className="p-2 hover:bg-red-100 text-red-600 rounded-lg transition-colors"
                                                     >
@@ -870,7 +872,7 @@ function ArticleModal({
                             <span className="md:hidden">Sửa SEO</span>
                         </button>
 
-                        <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg">
+                        <button title="Đóng" onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg">
                             <X size={20} />
                         </button>
                     </div>
@@ -943,7 +945,7 @@ function ArticleModal({
                                     <Star size={18} className="text-blue-500" /> Báo cáo chuẩn SEO (Ollama AI)
                                     {isCheckingSeo && <Loader2 size={14} className="animate-spin text-blue-500" />}
                                 </h3>
-                                <button type="button" onClick={() => setSeoResult({ type: '', content: '' })} className="p-1 rounded-lg transition-colors text-blue-400 hover:bg-blue-100">
+                                <button title="Đóng" type="button" onClick={() => setSeoResult({ type: '', content: '' })} className="p-1 rounded-lg transition-colors text-blue-400 hover:bg-blue-100">
                                     <X size={16} />
                                 </button>
                             </div>
@@ -973,7 +975,7 @@ function ArticleModal({
                                     {isRefining && <Loader2 size={14} className="animate-spin text-emerald-500" />}
                                 </h3>
                                 {!isRefining && (
-                                    <button type="button" onClick={() => { setSeoResult({ type: '', content: '' }); setRefineProgress([]); }} className="p-1 rounded-lg transition-colors text-emerald-400 hover:bg-emerald-100">
+                                    <button title="Đóng" type="button" onClick={() => { setSeoResult({ type: '', content: '' }); setRefineProgress([]); }} className="p-1 rounded-lg transition-colors text-emerald-400 hover:bg-emerald-100">
                                         <X size={16} />
                                     </button>
                                 )}
@@ -1027,6 +1029,7 @@ function ArticleModal({
                                 <div className="relative w-24 h-16 rounded-lg overflow-hidden border">
                                     <Image src={formData.thumbnail} alt="" fill className="object-cover" />
                                     <button
+                                        title="Xóa ảnh thumbnail"
                                         onClick={() => setFormData({ ...formData, thumbnail: '' })}
                                         className="absolute top-0.5 right-0.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center"
                                     >
@@ -1040,6 +1043,7 @@ function ArticleModal({
                             )}
                             <button
                                 type="button"
+                                title="Chọn ảnh thumbnail"
                                 onClick={() => fileRef.current?.click()}
                                 disabled={uploading}
                                 className="flex items-center gap-2 px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 disabled:opacity-50"
@@ -1049,13 +1053,14 @@ function ArticleModal({
                             </button>
                             <button
                                 type="button"
+                                title="Chọn ảnh từ thư viện"
                                 onClick={() => setMediaPickerOpen(true)}
                                 className="flex items-center gap-2 px-4 py-2 border rounded-lg text-sm bg-orange-50 text-orange-600 border-orange-200 hover:bg-orange-100 transition-colors"
                             >
                                 <ImageIcon size={16} />
                                 Thư viện
                             </button>
-                            <input ref={fileRef} type="file" accept="image/*" onChange={handleThumbnailUpload} className="hidden" />
+                            <input ref={fileRef} type="file" accept="image/*" onChange={handleThumbnailUpload} className="hidden" title="Chọn ảnh thumbnail" />
                         </div>
                         <MediaManager
                             isOpen={mediaPickerOpen}
@@ -1070,6 +1075,7 @@ function ArticleModal({
                         <div>
                             <label className="block text-sm font-medium mb-1">Loại bài</label>
                             <select
+                                title="Chọn loại bài"
                                 value={formData.type}
                                 onChange={(e) => setFormData({ ...formData, type: e.target.value })}
                                 className="w-full h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
@@ -1082,6 +1088,7 @@ function ArticleModal({
                         <div>
                             <label className="block text-sm font-medium mb-1">Trạng thái</label>
                             <select
+                                title="Chọn trạng thái"
                                 value={formData.status}
                                 onChange={(e) => setFormData({ ...formData, status: e.target.value })}
                                 className="w-full h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
@@ -1100,6 +1107,7 @@ function ArticleModal({
                         </label>
                         <input
                             type="url"
+                            title="Nhập URL video"
                             value={formData.videoEmbedUrl}
                             onChange={(e) => setFormData({ ...formData, videoEmbedUrl: e.target.value })}
                             className="w-full h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
@@ -1113,6 +1121,7 @@ function ArticleModal({
                         <label className="block text-sm font-medium mb-1">Tags (cách nhau bằng dấu phẩy)</label>
                         <input
                             type="text"
+                            title="Nhập tags"
                             value={formData.tags}
                             onChange={(e) => setFormData({ ...formData, tags: e.target.value })}
                             className="w-full h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
@@ -1146,12 +1155,14 @@ function ArticleModal({
                     <div className="flex gap-3 p-4 border-t sticky bottom-0 bg-white mt-auto shrink-0 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] md:shadow-none">
                         <button
                             type="button"
+                            title="Đóng"
                             onClick={onClose}
                             className="flex-1 py-3 border rounded-lg font-medium hover:bg-gray-50 transition-colors"
                         >
                             Hủy
                         </button>
                         <button
+                            title="Lưu bài viết"
                             onClick={handleSave}
                             disabled={saving}
                             className="flex-1 py-3 bg-orange-500 text-white rounded-lg font-medium hover:bg-orange-600 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
@@ -1243,7 +1254,7 @@ function CommentsModal({ article, onClose }: { article: Article, onClose: () => 
                     <h2 className="text-xl font-bold">Quản lý bình luận</h2>
                     <p className="text-sm text-gray-500 mt-1 line-clamp-1">Bài viết: {article.title}</p>
                 </div>
-                <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg">
+                <button title="Đóng" onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg">
                     <X size={20} />
                 </button>
             </div>
@@ -1278,9 +1289,9 @@ function CommentsModal({ article, onClose }: { article: Article, onClose: () => 
                                                 </div>
                                                 <p className="text-sm text-blue-900 whitespace-pre-wrap">{c.reply.content}</p>
                                                 <button
+                                                    title="Xóa phản hồi"
                                                     onClick={() => handleDeleteReply(c.id)}
                                                     className="absolute top-2 right-2 p-1 text-blue-400 hover:text-red-500 hover:bg-red-50 rounded opacity-0 group-hover:opacity-100 transition-all"
-                                                    title="Xóa phản hồi"
                                                 >
                                                     <Trash2 size={12} />
                                                 </button>
@@ -1290,6 +1301,7 @@ function CommentsModal({ article, onClose }: { article: Article, onClose: () => 
                                         {replyingTo === c.id && (
                                             <div className="mt-3 bg-white p-3 rounded-lg border shadow-sm">
                                                 <textarea
+                                                    title="Nhập nội dung phản hồi"
                                                     value={replyContent}
                                                     onChange={(e) => setReplyContent(e.target.value)}
                                                     className="w-full text-sm p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
@@ -1299,6 +1311,7 @@ function CommentsModal({ article, onClose }: { article: Article, onClose: () => 
                                                 />
                                                 <div className="flex justify-end gap-2 mt-2">
                                                     <button
+                                                        title="Hủy phản hồi"
                                                         onClick={() => { setReplyingTo(null); setReplyContent(''); }}
                                                         className="px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
                                                         disabled={savingReply}
@@ -1306,6 +1319,7 @@ function CommentsModal({ article, onClose }: { article: Article, onClose: () => 
                                                         Hủy
                                                     </button>
                                                     <button
+                                                        title="Lưu phản hồi"
                                                         onClick={() => handleSaveReply(c.id)}
                                                         className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-1"
                                                         disabled={savingReply || !replyContent.trim()}
@@ -1319,12 +1333,14 @@ function CommentsModal({ article, onClose }: { article: Article, onClose: () => 
                                     </div>
                                     <div className="flex sm:flex-col gap-2 shrink-0 border-t sm:border-t-0 sm:border-l pt-3 sm:pt-0 sm:pl-4 justify-center">
                                         <button
+                                            title="Duyệt hiển thị"
                                             onClick={() => handleApprove(c.id, c.status)}
                                             className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors w-full ${c.status === 'approved' ? 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100' : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 shadow-sm'}`}
                                         >
                                             {c.status === 'approved' ? 'Đã hiển thị' : 'Duyệt hiển thị'}
                                         </button>
                                         <button
+                                            title="Phản hồi"
                                             onClick={() => {
                                                 setReplyingTo(replyingTo === c.id ? null : c.id);
                                                 if (replyingTo !== c.id) {
@@ -1336,6 +1352,7 @@ function CommentsModal({ article, onClose }: { article: Article, onClose: () => 
                                             {c.reply ? 'Sửa phản hồi' : 'Phản hồi'}
                                         </button>
                                         <button
+                                            title="Xóa bình luận"
                                             onClick={() => handleDelete(c.id)}
                                             className="px-3 py-1.5 rounded-lg text-xs font-medium text-red-600 bg-red-50 border border-red-100 hover:bg-red-100 transition-colors w-full"
                                         >

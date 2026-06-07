@@ -93,6 +93,23 @@ Dọn dẹp kỹ thuật dư thừa phát hiện trong audit.
 
 ## Changelog
 
+### 2026-06-05 - INITIAL EXCEL BOOTSTRAP
+- **Color:** accent-color
+- **Summary:** Tách công cụ khởi tạo dữ liệu ban đầu bằng Excel vào một nơi riêng cho admin.
+
+- <b>Route riêng:</b> Thêm <code>/admin/initial-data</code> để import sản phẩm, phụ kiện, linh kiện và dịch vụ; không thêm vào sidebar admin vì chỉ dùng giai đoạn setup.
+- <b>Excel template:</b> Mỗi nhóm có template riêng với danh mục taxonomy, mã hàng, giá, giá vốn, tồn kho, ảnh URL hoặc đường dẫn local, specs/bảo hành và SEO/tags dịch vụ.
+- <b>Image preview:</b> Trang bootstrap có ô paste URL hoặc chọn file local để xem trước ảnh; upload qua MediaManager vẫn resize và convert WebP trước khi lưu Storage.
+- <b>Local image import:</b> Nếu Excel chứa đường dẫn <code>M:\...</code>, preview bắt admin chọn file/thư mục ảnh để khớp theo tên file, upload WebP lên Storage rồi thay bằng URL Firebase trước khi mở khóa import.
+- <b>Reusable gallery:</b> Sản phẩm bán lẻ, phụ kiện, linh kiện và dịch vụ dùng chung chuẩn <code>images[] + imageUrl</code>; admin chỉnh nhiều ảnh qua field dùng lại MediaManager, customer service detail hiển thị thumbnail gallery như sản phẩm.
+- <b>Storage folders:</b> MediaManager mở từ gallery tự chọn thư mục upload mặc định theo ngữ cảnh: <code>products</code>, <code>parts</code>, hoặc <code>services</code>; admin vẫn có thể đổi thủ công nếu cần.
+- <b>Preview gate:</b> Sau khi chọn Excel, admin phải xem bảng kiểm duyệt từng trường; import bị khóa nếu còn dòng lỗi, warning chỉ nhắc rà soát.
+- <b>Duplicate guard:</b> Preview kiểm trùng tên, ID chuẩn hóa và mã QR/barcode trong file lẫn dữ liệu Firestore hiện có trước khi cho import.
+- <b>Inventory integrity:</b> Sản phẩm/phụ kiện/linh kiện ghi <code>products</code>, <code>product_code_registry</code> và <code>inventory_logs</code> trong cùng transaction; dịch vụ check tồn tại trước khi tạo, không overwrite doc cũ.
+- <b>Taxonomy consistency:</b> Các luồng tạo/nhập mới không còn ghi <code>categoryIds</code> giả như <code>san-pham</code> hoặc <code>component</code>; mặt hàng active phải chọn taxonomy thật.
+- <b>Single entry point:</b> Gỡ nút import Excel khỏi trang sản phẩm để bootstrap chỉ nằm ở <code>/admin/initial-data</code>.
+- <b>Guardrail:</b> Ảnh trong Excel dùng URL public/URL media hoặc đường dẫn local cần resolve bằng file picker; không trích ảnh nhúng binary từ workbook và không lưu đường dẫn ổ đĩa vào dữ liệu sản phẩm.
+
 ### 2026-06-05 - BUILD/LINT RECOVERY
 - **Color:** success
 - **Summary:** Khôi phục gate kiểm lỗi sau khi JSX bị cắt và lint quét nhầm runtime artifacts.

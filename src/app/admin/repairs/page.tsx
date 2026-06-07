@@ -1766,24 +1766,23 @@ export default function RepairPage() {
                                         )}
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Ngày trả dự kiến</label>
-                                        <input type="date" value={formData.estimatedReturnDate}
+                                        <input type="date" title="Ngày trả dự kiến" value={formData.estimatedReturnDate}
                                             onChange={e => setFormData(p => ({ ...p, estimatedReturnDate: e.target.value }))}
                                             aria-label="Ngày trả dự kiến"
-                                            title="Ngày trả dự kiến"
                                             className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20" />
                                     </div>
                                 </div>
                             </fieldset>
                             <div className="flex justify-end gap-3 pt-4 border-t sticky bottom-0 bg-white pb-2">
                                 {editingTicket && (
-                                    <button type="button" onClick={() => handleDelete(editingTicket.id)}
+                                    <button type="button" title="Xóa phiếu" onClick={() => handleDelete(editingTicket.id)}
                                         className="mr-auto px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg">
                                         Xóa phiếu
                                     </button>
                                 )}
-                                <button type="button" onClick={() => setShowModal(false)}
+                                <button type="button" title="Hủy bỏ" onClick={() => setShowModal(false)}
                                     className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200">Hủy bỏ</button>
-                                <button type="submit"
+                                <button type="submit" title="Lưu phiếu"
                                     className="px-5 py-2 text-sm font-semibold text-white bg-orange-500 rounded-lg hover:bg-orange-600 flex items-center gap-2">
                                     <Save size={18} /> Lưu phiếu
                                 </button>
@@ -2013,6 +2012,7 @@ export default function RepairPage() {
                                                         <span className="text-pink-600 font-medium">{(g.price * g.quantity).toLocaleString('vi-VN')}đ</span>
                                                         <button
                                                             type="button"
+                                                            title="Xóa sản phẩm tặng kèm"
                                                             onClick={() => setHandoverGiftItems(prev => prev.filter((_, idx) => idx !== i))}
                                                             className="text-gray-400 hover:text-red-500 transition-colors"
                                                         >
@@ -2130,7 +2130,7 @@ export default function RepairPage() {
                         <div className="flex justify-end gap-3 px-6 py-4 border-t sticky bottom-0 bg-white">
                             <button onClick={() => { setHandoverModal(null); setHandoverNote(''); setPaymentConfirmed(false); setHandoverAdditionalFees(''); setHandoverDiscountAmount(''); }}
                                 className="px-4 py-2 text-sm bg-gray-100 rounded-lg hover:bg-gray-200">Hủy</button>
-                            <button onClick={handleHandover}
+                            <button title="Xác nhận bàn giao" onClick={handleHandover}
                                 disabled={
                                     (action === 'done' && remaining > 0 && !paymentConfirmed) ||
                                     (action === 'out' && outRefundAmount > 0 && !paymentConfirmed) ||

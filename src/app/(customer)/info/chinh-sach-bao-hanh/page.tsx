@@ -75,7 +75,7 @@ export default function ChinhSachBaoHanhPage() {
             <div className="bg-gray-100 rounded-xl p-5 text-center">
                 <p className="text-sm text-gray-600">
                     Mọi thắc mắc về bảo hành, vui lòng liên hệ: <a href="tel:0932242026" className="text-copper font-bold hover:underline">0932.242.026</a>
-                    {' '}hoặc truy cập <a href="https://vanlanhservice.com.vn" target="_blank" className="text-copper font-bold hover:underline">vanlanhservice.com.vn</a>
+                    {' '}hoặc truy cập <a href="https://vanlanhservice.com.vn" target="_blank" rel="noopener noreferrer" className="text-copper font-bold hover:underline">vanlanhservice.com.vn</a>
                 </p>
             </div>
         </article>

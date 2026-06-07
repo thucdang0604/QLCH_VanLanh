@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 
 import { useState, useEffect, useRef, useCallback } from 'react';
@@ -30,7 +30,7 @@ type BrowserBarcodeDetector = {
     detect(source: HTMLVideoElement): Promise<BarcodeDetectionResult[]>;
 };
 type BrowserBarcodeDetectorConstructor = {
-    new (options?: { formats?: string[] }): BrowserBarcodeDetector;
+    new(options?: { formats?: string[] }): BrowserBarcodeDetector;
     getSupportedFormats?: () => Promise<string[]>;
 };
 const RETAIL_CATEGORY_IDS = DEFAULT_CONFIG.taxonomy.retail.map((node) => node.id);
@@ -43,7 +43,7 @@ declare global {
 }
 
 
-// â”€â”€ Receipt item shape (matches orderData.items) â”€â”€
+// ── Receipt item shape (matches orderData.items) ──
 interface OrderLineItem {
     productId: string;
     productName: string;
@@ -67,7 +67,7 @@ interface LastOrderData {
     createdAt: Date;
 }
 
-// â”€â”€ Cart Item â”€â”€
+// ── Cart Item ──
 interface CartItem {
     productId: string;
     name: string;
@@ -82,10 +82,10 @@ interface CartItem {
 }
 
 const paymentMethods = [
-    { key: 'cash', label: 'Tiá»n máº·t', icon: Banknote },
-    { key: 'bank', label: 'Chuyá»ƒn khoáº£n', icon: CreditCard },
+    { key: 'cash', label: 'Tiền mặt', icon: Banknote },
+    { key: 'bank', label: 'Chuyển khoản', icon: CreditCard },
     { key: 'momo', label: 'MoMo', icon: QrCode },
-    { key: 'installment', label: 'Tráº£ gĂ³p', icon: CreditCard },
+    { key: 'installment', label: 'Trả góp', icon: CreditCard },
 ];
 
 export default function POSPage() {
@@ -241,11 +241,11 @@ export default function POSPage() {
             if (p.categoryIds && p.categoryIds.length > 0) {
                 return RETAIL_CATEGORY_IDS.includes(p.categoryIds[0]);
             }
-            return p.category !== 'Dá»‹ch vá»¥ sá»­a chá»¯a' && p.category !== 'service';
+            return p.category !== 'Dịch vụ sửa chữa' && p.category !== 'service';
         });
     }, []);
 
-    // â”€â”€ Load products â”€â”€
+    // ── Load products ──
     useEffect(() => {
         const load = async () => {
             try {
@@ -270,7 +270,7 @@ export default function POSPage() {
         return () => window.removeEventListener('keydown', handler);
     }, []);
 
-    // â”€â”€ Scan state â”€â”€
+    // ── Scan state ──
     const barcodeBuffer = useRef('');
     const lastKeyTime = useRef(Date.now());
     const scanStartTime = useRef(Date.now());
@@ -280,13 +280,13 @@ export default function POSPage() {
     const zxingControlsRef = useRef<{ stop: () => void } | null>(null);
     const [showScanner, setShowScanner] = useState(false);
     const [manualScanCode, setManualScanCode] = useState('');
-    const [scanStatus, setScanStatus] = useState('Sáºµn sĂ ng quĂ©t QR hoáº·c barcode sáº£n pháº©m');
+    const [scanStatus, setScanStatus] = useState('Sẵn sàng quét QR hoặc barcode sản phẩm');
     const [scannerError, setScannerError] = useState('');
 
-    // â”€â”€ Categories â”€â”€
+    // ── Categories ──
     const categories = ['all', ...Array.from(new Set(products.map(p => p.category)))];
 
-    // â”€â”€ Filtered products â”€â”€
+    // ── Filtered products ──
     const filtered = products.filter(p => {
         const matchCat = activeCategory === 'all' || p.category === activeCategory;
         const q = searchQuery.toLowerCase();
@@ -294,11 +294,11 @@ export default function POSPage() {
         return matchCat && matchSearch;
     });
 
-    // â”€â”€ Cart helpers â”€â”€
+    // ── Cart helpers ──
     const addToCart = useCallback((product: Product & { id: string }) => {
         const available = (product.stock || 0) - (product.held || 0);
         if (available <= 0) {
-            toastError('Sáº£n pháº©m Ä‘Ă£ háº¿t hĂ ng!');
+            toastError('Sản phẩm đã hết hàng!');
             return;
         }
         setCart(prev => {
@@ -306,7 +306,7 @@ export default function POSPage() {
             if (existing) {
                 // Prevent exceeding available stock
                 if (existing.quantity >= available) {
-                    toastError(`Kháº£ dá»¥ng chá»‰ cĂ²n ${available}. KhĂ´ng thá»ƒ thĂªm.`);
+                    toastError(`Khả dụng chỉ còn ${available}. Không thể thêm.`);
                     return prev;
                 }
                 return prev.map(c =>
@@ -339,12 +339,12 @@ export default function POSPage() {
         const found = findProductByScanCode(rawCode);
         if (!found) {
             const label = code || rawCode.trim();
-            setScanStatus(`KhĂ´ng tĂ¬m tháº¥y mĂ£ ${label}`);
-            toastError(`KhĂ´ng tĂ¬m tháº¥y sáº£n pháº©m vá»›i mĂ£ ${label}`);
+            setScanStatus(`Không tìm thấy mã ${label}`);
+            toastError(`Không tìm thấy sản phẩm với mã ${label}`);
             return false;
         }
         addToCart(found);
-        setScanStatus(`ÄĂ£ thĂªm ${found.name}`);
+        setScanStatus(`Đã thêm ${found.name}`);
         if (source === 'camera') setShowScanner(false);
         return true;
     }, [addToCart, findProductByScanCode]);
@@ -409,7 +409,7 @@ export default function POSPage() {
 
         const startScanner = async () => {
             setScannerError('');
-            setScanStatus('Äang má»Ÿ camera...');
+            setScanStatus('Đang mở camera...');
 
             try {
                 const video = scannerVideoRef.current;
@@ -438,7 +438,7 @@ export default function POSPage() {
                         return;
                     }
                     zxingControlsRef.current = controls;
-                    setScanStatus('ÄÆ°a QR hoáº·c barcode vĂ o khung camera');
+                    setScanStatus('Đưa QR hoặc barcode vào khung camera');
                     return;
                 }
 
@@ -454,7 +454,7 @@ export default function POSPage() {
                 scannerStreamRef.current = stream;
                 video.srcObject = stream;
                 await video.play();
-                setScanStatus('ÄÆ°a QR hoáº·c barcode vĂ o khung camera');
+                setScanStatus('Đưa QR hoặc barcode vào khung camera');
 
                 const scan = async () => {
                     if (cancelled || !scannerVideoRef.current) return;
@@ -473,7 +473,7 @@ export default function POSPage() {
             } catch (err) {
                 if (cancelled) return;
                 console.error('Camera open failed:', err);
-                setScannerError('KhĂ´ng má»Ÿ Ä‘Æ°á»£c camera. Kiá»ƒm tra quyá»n camera cá»§a trĂ¬nh duyá»‡t hoáº·c nháº­p mĂ£ tay.');
+                setScannerError('Không mở được camera. Kiểm tra quyền camera của trình duyệt hoặc nhập mã tay.');
             }
         };
 
@@ -489,18 +489,18 @@ export default function POSPage() {
 
         // Prevent adding if already in cart
         if (cart.some(c => c.productId === linkedRepair.id)) {
-            toastError('Phiáº¿u sá»­a chá»¯a Ä‘Ă£ cĂ³ trong hĂ³a Ä‘Æ¡n!');
+            toastError('Phiếu sửa chữa đã có trong hóa đơn!');
             return;
         }
 
         if (linkedRepair.paymentStatus === 'paid' || linkedRepair.paymentStatus === 'refunded') {
-            toastError('Phiáº¿u nĂ y Ä‘Ă£ Ä‘Æ°á»£c thanh toĂ¡n hoáº·c hoĂ n tiá»n!');
+            toastError('Phiếu này đã được thanh toán hoặc hoàn tiền!');
             return;
         }
 
         setCart(prev => [{
             productId: linkedRepair.id,
-            name: `[Phiáº¿u sá»­a chá»¯a] ${linkedRepair.deviceModel}`,
+            name: `[Phiếu sửa chữa] ${linkedRepair.deviceModel}`,
             originalPrice: linkedRepair.paymentAmount,
             sellingPrice: linkedRepair.paymentAmount,
             costPrice: 0,
@@ -518,7 +518,7 @@ export default function POSPage() {
                 const product = products.find(p => p.id === productId);
                 const maxAvailable = (product?.stock || 0) - (product?.held || 0);
                 if (newQty > maxAvailable) {
-                    toastError(`Kháº£ dá»¥ng chá»‰ cĂ²n ${maxAvailable}.`);
+                    toastError(`Khả dụng chỉ còn ${maxAvailable}.`);
                     return c;
                 }
                 return { ...c, quantity: newQty };
@@ -529,7 +529,7 @@ export default function POSPage() {
     const updatePrice = (productId: string, newPrice: number) => {
         const item = cart.find(c => c.productId === productId);
         if (item && (item.costPrice || 0) > 0 && newPrice < (item.costPrice || 0) && newPrice > 0) {
-            if (!confirm(`â ï¸ GiĂ¡ bĂ¡n (${newPrice.toLocaleString('vi-VN')}Ä‘) tháº¥p hÆ¡n giĂ¡ vá»‘n (${(item.costPrice || 0).toLocaleString('vi-VN')}Ä‘). Báº¡n sáº½ lá»— ${((item.costPrice || 0) - newPrice).toLocaleString('vi-VN')}Ä‘/sp. Tiáº¿p tá»¥c?`)) {
+            if (!confirm(`Giá bán (${newPrice.toLocaleString('vi-VN')}đ) thấp hơn giá vốn (${(item.costPrice || 0).toLocaleString('vi-VN')}đ). Bạn sẽ lỗ ${((item.costPrice || 0) - newPrice).toLocaleString('vi-VN')}đ/sp. Tiếp tục?`)) {
                 return;
             }
         }
@@ -545,15 +545,15 @@ export default function POSPage() {
     const subtotal = cart.reduce((sum, c) => sum + c.sellingPrice * c.quantity, 0);
     const total = Math.max(0, subtotal - discount);
 
-    const formatPrice = (n: number) => n.toLocaleString('vi-VN') + 'Ä‘';
+    const formatPrice = (n: number) => n.toLocaleString('vi-VN') + 'đ';
 
-    // â”€â”€ Checkout â”€â”€
+    // ── Checkout ──
     const handleCheckout = async () => {
         if (cart.length === 0) return;
 
         setIsProcessing(true);
         try {
-            // Pre-processing: gom nhĂ³m cart theo productId chá»‘ng payload manipulation
+            // Pre-processing: gom nhóm cart theo productId chống payload manipulation
             const groupedCart = new Map<string, { name: string; totalQty: number; costPrice?: number; items: typeof cart }>();
             for (const item of cart) {
                 const existing = groupedCart.get(item.productId);
@@ -574,8 +574,8 @@ export default function POSPage() {
             for (const item of cart) {
                 if (item.warrantyType === 'warrantyDevice') {
                     const validImeis = (item.imeis || []).map(i => i.trim()).filter(Boolean);
-                    if (validImeis.length < item.quantity && deposit === 0) { // Náº¿u cĂ³ deposit thĂ¬ cĂ³ thá»ƒ lĂ  pending order, nhÆ°ng POS ta require luĂ´n náº¿u khĂ´ng cĂ³ cá»c
-                        toastError(`Vui lĂ²ng nháº­p Ä‘á»§ ${item.quantity} IMEI/Serial cho sáº£n pháº©m ${item.name}`);
+                    if (validImeis.length < item.quantity && deposit === 0) { // Nếu có deposit thì có thể là pending order, nhưng POS ta require luôn nếu không có cọc
+                        toastError(`Vui lòng nhập đủ ${item.quantity} IMEI/Serial cho sản phẩm ${item.name}`);
                         setIsProcessing(false);
                         return;
                     }
@@ -591,7 +591,7 @@ export default function POSPage() {
                 idempotencyKey: operationKey,
                 repairTicketId,
                 customer_info: {
-                    name: customerName.trim() || 'KhĂ¡ch láº»',
+                    name: customerName.trim() || 'Khách lẻ',
                     phone: customerPhone.trim(),
                 },
                 items: cart.map(c => ({
@@ -622,7 +622,7 @@ export default function POSPage() {
 
             const data = await res.json();
             if (!res.ok) {
-                throw new Error(data.error || 'Lá»—i khi thanh toĂ¡n qua API');
+                throw new Error(data.error || 'Lỗi khi thanh toán qua API');
             }
 
             setLastOrder({ id: data.orderId, ...orderData, createdAt: new Date() });
@@ -636,16 +636,16 @@ export default function POSPage() {
             setDeposit(0);
         } catch (err: unknown) {
             console.error(err);
-            toastError(err instanceof Error ? err.message : 'Lá»—i khi táº¡o Ä‘Æ¡n hĂ ng!');
+            toastError(err instanceof Error ? err.message : 'Lỗi khi tạo đơn hàng!');
         } finally {
             setIsProcessing(false);
         }
     };
 
-    // â”€â”€ Category label map â”€â”€
+    // ── Category label map ──
     const catLabel: Record<string, string> = {
-        all: 'Táº¥t cáº£', Phone: 'Äiá»‡n thoáº¡i', Laptop: 'Laptop', Tablet: 'Tablet',
-        Audio: 'Ă‚m thanh', Watch: 'Äá»“ng há»“', Accessory: 'Phá»¥ kiá»‡n', [PART_CATEGORY]: PART_CATEGORY,
+        all: 'Tất cả', Phone: 'Điện thoại', Laptop: 'Laptop', Tablet: 'Tablet',
+        Audio: 'Âm thanh', Watch: 'Đồng hồ', Accessory: 'Phụ kiện', [PART_CATEGORY]: PART_CATEGORY,
     };
 
     // Reload products after adding new one
@@ -672,7 +672,7 @@ export default function POSPage() {
             {/* Cart Header */}
             <div className="px-4 py-3 border-b flex items-center gap-2">
                 <ShoppingCart size={20} className="text-orange-500" />
-                <h2 className="font-bold text-gray-800">Giá» hĂ ng</h2>
+                <h2 className="font-bold text-gray-800">Giỏ hàng</h2>
                 <span className="ml-auto bg-orange-100 text-orange-600 text-xs font-bold px-2 py-0.5 rounded-full">
                     {cart.reduce((s, c) => s + c.quantity, 0)} SP
                 </span>
@@ -680,8 +680,8 @@ export default function POSPage() {
                 <button
                     onClick={() => setShowMobileCart(false)}
                     className="md:hidden p-1 text-gray-400 hover:text-gray-600"
-                    aria-label="ÄĂ³ng giá» hĂ ng"
-                    title="ÄĂ³ng giá» hĂ ng"
+                    aria-label="Đóng giỏ hàng"
+                    title="Đóng giỏ hàng"
                 >
                     <X size={20} />
                 </button>
@@ -692,7 +692,7 @@ export default function POSPage() {
                 {cart.length === 0 && (
                     <div className="text-center py-12 text-gray-300">
                         <ShoppingCart size={36} className="mx-auto mb-2 opacity-40" />
-                        <p className="text-sm">ChÆ°a cĂ³ sáº£n pháº©m</p>
+                        <p className="text-sm">Chưa có sản phẩm</p>
                     </div>
                 )}
                 {cart.map(item => {
@@ -712,8 +712,8 @@ export default function POSPage() {
                                 <button
                                     onClick={() => removeFromCart(item.productId)}
                                     className="text-red-400 hover:text-red-600 p-0.5"
-                                    aria-label="XĂ³a khá»i giá»"
-                                    title="XĂ³a khá»i giá»"
+                                    aria-label="Xóa khỏi giỏ"
+                                    title="Xóa khỏi giỏ"
                                 >
                                     <Trash2 size={14} />
                                 </button>
@@ -723,8 +723,8 @@ export default function POSPage() {
                                     <button
                                         onClick={() => updateQuantity(item.productId, -1)}
                                         className="p-1 hover:bg-gray-100 rounded-l-lg disabled:opacity-50 disabled:cursor-not-allowed"
-                                        aria-label="Giáº£m sá»‘ lÆ°á»£ng"
-                                        title="Giáº£m sá»‘ lÆ°á»£ng"
+                                        aria-label="Giảm số lượng"
+                                        title="Giảm số lượng"
                                         disabled={item.isRepairTicket}
                                     >
                                         <Minus size={14} />
@@ -733,8 +733,8 @@ export default function POSPage() {
                                     <button
                                         onClick={() => updateQuantity(item.productId, 1)}
                                         className="p-1 hover:bg-gray-100 rounded-r-lg disabled:opacity-50 disabled:cursor-not-allowed"
-                                        aria-label="TÄƒng sá»‘ lÆ°á»£ng"
-                                        title="TÄƒng sá»‘ lÆ°á»£ng"
+                                        aria-label="Tăng số lượng"
+                                        title="Tăng số lượng"
                                         disabled={item.isRepairTicket}
                                     >
                                         <Plus size={14} />
@@ -754,12 +754,12 @@ export default function POSPage() {
                             </div>
                             {item.warrantyType === 'warrantyDevice' && (
                                 <div className="mt-2 space-y-2 border-t pt-2 border-gray-100">
-                                    <p className="text-xs font-semibold text-gray-600">Báº¯t buá»™c nháº­p IMEI / Serial ({item.quantity})</p>
+                                    <p className="text-xs font-semibold text-gray-600">Bắt buộc nhập IMEI / Serial ({item.quantity})</p>
                                     {Array.from({ length: item.quantity }).map((_, idx) => (
                                         <div key={idx} className="relative">
                                             <input
                                                 type="text"
-                                                placeholder={`Nháº­p IMEI/Serial #${idx + 1}`}
+                                                placeholder={`Nhập IMEI/Serial #${idx + 1}`}
                                                 value={item.imeis?.[idx] || ''}
                                                 onChange={(e) => {
                                                     const val = e.target.value;
@@ -789,26 +789,26 @@ export default function POSPage() {
                 <div className="grid grid-cols-2 gap-2">
                     <div className="relative">
                         <User size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                        <input type="text" placeholder="TĂªn KH" value={customerName}
+                        <input type="text" placeholder="Tên KH" value={customerName}
                             onChange={e => setCustomerName(e.target.value)}
                             className="w-full pl-8 pr-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-orange-500/20" />
                     </div>
                     <div className="relative">
                         <Phone size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                        <input type="text" placeholder="SÄT" value={customerPhone}
+                        <input type="text" placeholder="SĐT" value={customerPhone}
                             onChange={e => setCustomerPhone(e.target.value)}
                             onBlur={() => lookupRepairByPhone(customerPhone)}
                             className="w-full pl-8 pr-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-orange-500/20" />
                     </div>
                 </div>
                 {/* Repair ticket link */}
-                {repairLoading && <p className="text-xs text-gray-400 animate-pulse">Äang tra cá»©u phiáº¿u sá»­a...</p>}
+                {repairLoading && <p className="text-xs text-gray-400 animate-pulse">Đang tra cứu phiếu sửa...</p>}
                 {linkedRepair && (
                     <div className="bg-blue-50 rounded-lg p-2.5 text-xs space-y-1 border border-blue-100">
                         <div className="flex items-center gap-1.5 font-semibold text-blue-700">
-                            <Wrench size={13} /> Phiáº¿u sá»­a #{linkedRepair.id.slice(-6)}
+                            <Wrench size={13} /> Phiếu sửa #{linkedRepair.id.slice(-6)}
                         </div>
-                        <p className="text-blue-600">MĂ¡y: {linkedRepair.deviceModel} â€” {linkedRepair.status}</p>
+                        <p className="text-blue-600">Máy: {linkedRepair.deviceModel} — {linkedRepair.status}</p>
                         {linkedRepair.parts.length > 0 && (
                             <p className="text-blue-500">LK: {linkedRepair.parts.map(p => p.productName).join(', ')}</p>
                         )}
@@ -816,11 +816,11 @@ export default function POSPage() {
                         {linkedRepair.paymentAmount > 0 && (
                             <div className="mt-2 pt-2 border-t border-blue-200 flex items-center justify-between">
                                 <span className="font-semibold text-blue-800">
-                                    Chi phĂ­ sá»­a chá»¯a: {formatPrice(linkedRepair.paymentAmount)}
+                                    Chi phí sửa chữa: {formatPrice(linkedRepair.paymentAmount)}
                                 </span>
                                 {(linkedRepair.paymentStatus === 'paid' || linkedRepair.paymentStatus === 'refunded') ? (
                                     <span className="text-green-600 font-bold bg-green-100 px-2 py-1 rounded-md">
-                                        ÄĂ£ thanh toĂ¡n
+                                        Đã thanh toán
                                     </span>
                                 ) : (
                                     <button
@@ -828,7 +828,7 @@ export default function POSPage() {
                                         onClick={addRepairToCart}
                                         className="py-1 px-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors"
                                     >
-                                        ThĂªm vĂ o HÄ
+                                        Thêm vào HĐ
                                     </button>
                                 )}
                             </div>
@@ -836,10 +836,10 @@ export default function POSPage() {
 
                         {discountDetails.length > 0 && (
                             <div className="mt-1 pt-1 border-t border-blue-200">
-                                <p className="font-semibold text-green-700">đŸ Giáº£m PK tá»± Ä‘á»™ng:</p>
+                                <p className="font-semibold text-green-700">🎁 Giảm PK tự động:</p>
                                 {discountDetails.map((d, i) => (
                                     <p key={i} className="text-green-600">
-                                        {d.productName}: -{d.discountAmount.toLocaleString('vi-VN')}Ä‘ ({d.ruleName})
+                                        {d.productName}: -{d.discountAmount.toLocaleString('vi-VN')}đ ({d.ruleName})
                                     </p>
                                 ))}
                                 <button
@@ -847,7 +847,7 @@ export default function POSPage() {
                                     onClick={() => setDiscount(prev => prev + autoDiscountAmount)}
                                     className="mt-1 w-full py-1.5 bg-green-600 text-white rounded-lg text-xs font-semibold hover:bg-green-700 transition-colors"
                                 >
-                                    Ăp dá»¥ng giáº£m {autoDiscountAmount.toLocaleString('vi-VN')}Ä‘
+                                    Áp dụng giảm {autoDiscountAmount.toLocaleString('vi-VN')}đ
                                 </button>
                             </div>
                         )}
@@ -865,39 +865,39 @@ export default function POSPage() {
                     ))}
                 </div>
                 <div className="flex items-center gap-2 text-sm">
-                    <span className="text-gray-500">Giáº£m giĂ¡:</span>
+                    <span className="text-gray-500">Giảm giá:</span>
                     <CurrencyInput value={discount || ''} onChange={v => setDiscount(v)}
                         placeholder="0" className="flex-1 px-3 py-1.5 border rounded-lg text-right text-sm" />
                 </div>
                 <div className="flex items-center gap-2 text-sm">
-                    <span className="text-gray-500">KhĂ¡ch cá»c:</span>
+                    <span className="text-gray-500">Khách cọc:</span>
                     <CurrencyInput value={deposit || ''} onChange={v => setDeposit(v)}
                         placeholder="0" className="flex-1 px-3 py-1.5 border rounded-lg text-right text-sm" />
                 </div>
                 <div className="space-y-1 text-sm">
                     <div className="flex justify-between text-gray-500">
-                        <span>Táº¡m tĂ­nh ({cart.reduce((s, c) => s + c.quantity, 0)} SP)</span>
+                        <span>Tạm tính ({cart.reduce((s, c) => s + c.quantity, 0)} SP)</span>
                         <span>{formatPrice(subtotal)}</span>
                     </div>
                     {discount > 0 && (
                         <div className="flex justify-between text-green-600">
-                            <span>Giáº£m giĂ¡</span>
+                            <span>Giảm giá</span>
                             <span>-{formatPrice(discount)}</span>
                         </div>
                     )}
                     <div className="flex justify-between font-bold text-lg text-orange-600 pt-1 border-t">
-                        <span>Tá»”NG</span>
+                        <span>TỔNG</span>
                         <span>{formatPrice(total)}</span>
                     </div>
                     {deposit > 0 && (
                         <div className="flex justify-between text-blue-600 pt-1">
-                            <span>ÄĂ£ cá»c</span>
+                            <span>Đã cọc</span>
                             <span>{formatPrice(deposit)}</span>
                         </div>
                     )}
                     {deposit > 0 && (
                         <div className="flex justify-between font-bold text-red-600 pt-1">
-                            <span>CĂ’N Láº I</span>
+                            <span>CÒN LẠI</span>
                             <span>{formatPrice(Math.max(0, total - deposit))}</span>
                         </div>
                     )}
@@ -905,9 +905,9 @@ export default function POSPage() {
                 <button onClick={handleCheckout} disabled={cart.length === 0 || isProcessing}
                     className="w-full py-3 rounded-xl font-bold text-white bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-orange-200/50 transition-all active:scale-[0.98]">
                     {isProcessing ? (
-                        <><Loader2 className="animate-spin" size={18} /> Äang xá»­ lĂ½...</>
+                        <><Loader2 className="animate-spin" size={18} /> Đang xử lý...</>
                     ) : (
-                        <><Receipt size={18} /> Thanh toĂ¡n & Xuáº¥t hĂ³a Ä‘Æ¡n</>
+                        <><Receipt size={18} /> Thanh toán & Xuất hóa đơn</>
                     )}
                 </button>
             </div>
@@ -916,7 +916,7 @@ export default function POSPage() {
 
     return (
         <div className="h-[calc(100vh-80px)] flex gap-4 p-4">
-            {/* â•â•â• LEFT: Product Grid â•â•â• */}
+            {/* ═══ LEFT: Product Grid ═══ */}
             <div className="flex-1 flex flex-col min-w-0">
                 {/* Search + Category Filter + Quick Add */}
                 <div className="flex gap-3 mb-4">
@@ -925,7 +925,7 @@ export default function POSPage() {
                         <input
                             ref={searchRef}
                             type="text"
-                            placeholder="TĂ¬m sáº£n pháº©m... (F1)"
+                            placeholder="Tìm sản phẩm... (F1)"
                             value={searchQuery}
                             onChange={e => setSearchQuery(e.target.value)}
                             className="w-full pl-10 pr-4 py-2.5 border rounded-xl focus:ring-2 focus:ring-orange-500/30 focus:border-orange-400 bg-white shadow-sm"
@@ -936,14 +936,14 @@ export default function POSPage() {
                         className="flex items-center gap-1.5 px-4 py-2.5 bg-green-600 text-white rounded-xl hover:bg-green-700 shadow-sm font-semibold text-sm whitespace-nowrap transition-all"
                     >
                         <Plus size={16} />
-                        ThĂªm SP Má»›i
+                        Thêm SP Mới
                     </button>
                     <button
                         onClick={() => setShowScanner(true)}
                         className="flex items-center gap-1.5 px-4 py-2.5 bg-gray-900 text-white rounded-xl hover:bg-black shadow-sm font-semibold text-sm whitespace-nowrap transition-all"
                     >
                         <Camera size={16} />
-                        QuĂ©t mĂ£
+                        Quét mã
                     </button>
                 </div>
 
@@ -974,16 +974,15 @@ export default function POSPage() {
                                     key={product.id}
                                     onClick={() => !outOfStock && addToCart(product)}
                                     disabled={outOfStock}
-                                    className={`bg-white rounded-xl border border-gray-100 p-3 text-left transition-all group relative ${
-                                        outOfStock
+                                    className={`bg-white rounded-xl border border-gray-100 p-3 text-left transition-all group relative ${outOfStock
                                             ? 'opacity-50 cursor-not-allowed'
                                             : 'hover:shadow-lg hover:border-orange-200 active:scale-[0.97]'
-                                    }`}
+                                        }`}
                                 >
                                     {/* Out-of-stock badge */}
                                     {outOfStock && (
                                         <div className="absolute top-2 right-2 z-10 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm flex items-center gap-1">
-                                            <AlertTriangle size={10} /> Háº¿t hĂ ng
+                                            <AlertTriangle size={10} /> Hết hàng
                                         </div>
                                     )}
                                     <div className="aspect-square rounded-lg bg-gray-50 mb-2 overflow-hidden flex items-center justify-center">
@@ -997,7 +996,7 @@ export default function POSPage() {
                                     <p className="text-[10px] font-mono text-gray-400 mb-1">{getPrimaryProductCode(product)}</p>
                                     <p className="text-sm font-bold text-orange-600">{formatPrice(product.price_promo || product.price_original)}</p>
                                     <p className={`text-[10px] mt-0.5 font-medium ${outOfStock ? 'text-red-500' : available <= 3 ? 'text-amber-500' : 'text-gray-400'}`}>
-                                        Tá»“n kho: {product.stock || 0}{(product.held || 0) > 0 ? ` (Äang giá»¯: ${product.held})` : ''}
+                                        Tồn kho: {product.stock || 0}{(product.held || 0) > 0 ? ` (Đang giữ: ${product.held})` : ''}
                                     </p>
                                 </button>
                             );
@@ -1005,41 +1004,41 @@ export default function POSPage() {
                         {filtered.length === 0 && (
                             <div className="col-span-full text-center py-16 text-gray-400">
                                 <Package size={48} className="mx-auto mb-3 opacity-50" />
-                                <p>KhĂ´ng tĂ¬m tháº¥y sáº£n pháº©m</p>
+                                <p>Không tìm thấy sản phẩm</p>
                             </div>
                         )}
                     </div>
                 </div>
             </div>
 
-            {/* â•â•â• RIGHT: Cart & Checkout (Desktop) â•â•â• */}
+            {/* ═══ RIGHT: Cart & Checkout (Desktop) ═══ */}
             <div className="hidden md:flex w-[380px] flex-shrink-0 bg-white rounded-2xl border shadow-sm flex-col">
                 {cartSection}
             </div>
 
-            {/* â•â•â• Mobile: Sticky Bottom Bar â•â•â• */}
+            {/* ═══ Mobile: Sticky Bottom Bar ═══ */}
             {!showMobileCart && (
                 <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg px-4 py-3 z-40">
                     <button onClick={() => setShowMobileCart(true)}
                         className="w-full py-3 rounded-xl font-bold text-white bg-gradient-to-r from-orange-500 to-orange-600 flex items-center justify-center gap-2 shadow-lg shadow-orange-200/50 active:scale-[0.98]">
                         <ShoppingCart size={18} />
-                        Giá» hĂ ng ({cart.reduce((s, c) => s + c.quantity, 0)}) â€” {formatPrice(total)}
+                        Giỏ hàng ({cart.reduce((s, c) => s + c.quantity, 0)}) — {formatPrice(total)}
                     </button>
                 </div>
             )}
 
-            {/* â•â•â• Mobile: Full-screen Cart Sheet â•â•â• */}
+            {/* ═══ Mobile: Full-screen Cart Sheet ═══ */}
             {showMobileCart && (
                 <div className="md:hidden fixed inset-0 bg-white z-50 flex flex-col">
                     {cartSection}
                 </div>
             )}
 
-            {/* â•â•â• QR / barcode scanner modal â•â•â• */}
+            {/* ═══ QR / barcode scanner modal ═══ */}
             <Modal
                 isOpen={showScanner}
                 onClose={() => setShowScanner(false)}
-                title="QuĂ©t QR hoáº·c barcode sáº£n pháº©m"
+                title="Quét QR hoặc barcode sản phẩm"
                 size="lg"
             >
                 <div className="p-5 space-y-4">
@@ -1070,20 +1069,20 @@ export default function POSPage() {
                                 value={manualScanCode}
                                 onChange={(e) => setManualScanCode(e.target.value)}
                                 className="h-11 w-full rounded-lg border pl-9 pr-3 font-mono text-sm focus:border-orange-400 focus:outline-none focus:ring-2 focus:ring-orange-500/20"
-                                placeholder="Nháº­p mĂ£ náº¿u camera khĂ´ng há»— trá»£"
+                                placeholder="Nhập mã nếu camera không hỗ trợ"
                             />
                         </div>
                         <button
                             type="submit"
                             className="h-11 rounded-lg bg-orange-500 px-5 text-sm font-bold text-white hover:bg-orange-600"
                         >
-                            ThĂªm vĂ o giá»
+                            Thêm vào giỏ
                         </button>
                     </form>
                 </div>
             </Modal>
 
-            {/* â•â•â• Receipt Modal (80mm thermal) â•â•â• */}
+            {/* ═══ Receipt Modal (80mm thermal) ═══ */}
             {lastOrder && (
                 <Modal
                     isOpen={showReceipt}
@@ -1093,13 +1092,13 @@ export default function POSPage() {
                         <div className="flex items-center justify-between px-4 py-3 border-b flex-shrink-0">
                             <div className="flex items-center gap-2 text-green-600">
                                 <CheckCircle2 size={20} />
-                                <span className="font-bold">Thanh toĂ¡n thĂ nh cĂ´ng!</span>
+                                <span className="font-bold">Thanh toán thành công!</span>
                             </div>
                             <button
                                 onClick={() => setShowReceipt(false)}
                                 className="text-gray-400 hover:text-gray-600"
-                                aria-label="ÄĂ³ng hĂ³a Ä‘Æ¡n"
-                                title="ÄĂ³ng"
+                                aria-label="Đóng hóa đơn"
+                                title="Đóng"
                             >
                                 <X size={20} />
                             </button>
@@ -1111,11 +1110,11 @@ export default function POSPage() {
                                 <button
                                     onClick={() => setPrintTemplate('thermal')}
                                     className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-all ${printTemplate === 'thermal' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-                                >Máº«u Nhiá»‡t 80mm</button>
+                                >Mẫu Nhiệt 80mm</button>
                                 <button
                                     onClick={() => setPrintTemplate('a5')}
                                     className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-all ${printTemplate === 'a5' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-                                >Máº«u A4/A5</button>
+                                >Mẫu A4/A5</button>
                             </div>
                         </div>
 
@@ -1123,9 +1122,9 @@ export default function POSPage() {
                             {printTemplate === 'thermal' ? (
                                 <div id="pos-receipt-thermal" className="px-6 py-4 text-xs space-y-3" style={{ maxWidth: '302px', margin: '0 auto' }}>
                                     <div className="text-center">
-                                        <h3 className="font-bold text-sm uppercase">{config.siteName || 'VÄƒn LĂ nh Service'}</h3>
+                                        <h3 className="font-bold text-sm uppercase">{config.siteName || 'Văn Lành Service'}</h3>
                                         <p className="text-gray-500 text-[10px]">Hotline: {config.contact_info?.main_phone || '0932.242.026'}</p>
-                                        <p className="font-bold mt-1">HĂ“A ÄÆ N BĂN HĂ€NG</p>
+                                        <p className="font-bold mt-1">HÓA ĐƠN BÁN HÀNG</p>
                                         <p className="text-gray-500 text-[10px]">
                                             {new Date().toLocaleString('vi-VN')} | #{lastOrder.id.slice(-6).toUpperCase()}
                                         </p>
@@ -1133,7 +1132,7 @@ export default function POSPage() {
                                     <hr className="border-dashed" />
                                     <div>
                                         <p>KH: <b>{lastOrder.customer_info.name}</b></p>
-                                        {lastOrder.customer_info.phone && <p>SÄT: {lastOrder.customer_info.phone}</p>}
+                                        {lastOrder.customer_info.phone && <p>SĐT: {lastOrder.customer_info.phone}</p>}
                                     </div>
                                     <hr className="border-dashed" />
                                     <table className="w-full">
@@ -1141,7 +1140,7 @@ export default function POSPage() {
                                             <tr className="border-b text-left">
                                                 <th className="py-1">SP</th>
                                                 <th className="text-center">SL</th>
-                                                <th className="text-right">GiĂ¡</th>
+                                                <th className="text-right">Giá</th>
                                                 <th className="text-right">TT</th>
                                             </tr>
                                         </thead>
@@ -1157,39 +1156,39 @@ export default function POSPage() {
                                         </tbody>
                                     </table>
                                     <div className="space-y-0.5 pt-1">
-                                        <div className="flex justify-between text-gray-600"><span>Tá»•ng tiá»n hĂ ng</span><span>{formatPrice(lastOrder.subtotal_amount)}</span></div>
+                                        <div className="flex justify-between text-gray-600"><span>Tổng tiền hàng</span><span>{formatPrice(lastOrder.subtotal_amount)}</span></div>
                                         {lastOrder.discount_amount > 0 && (
-                                            <div className="flex justify-between"><span>Giáº£m giĂ¡</span><span>-{formatPrice(lastOrder.discount_amount)}</span></div>
+                                            <div className="flex justify-between"><span>Giảm giá</span><span>-{formatPrice(lastOrder.discount_amount)}</span></div>
                                         )}
                                         <div className="flex justify-between font-bold text-sm border-t pt-1">
-                                            <span>Tá»”NG Cá»˜NG</span>
+                                            <span>TỔNG CỘNG</span>
                                             <span>{formatPrice(lastOrder.total_amount)}</span>
                                         </div>
                                         {lastOrder.deposit_amount > 0 && (
                                             <>
-                                                <div className="flex justify-between text-blue-600 mt-1"><span>KhĂ¡ch Ä‘Ă£ cá»c</span><span>{formatPrice(lastOrder.deposit_amount)}</span></div>
-                                                <div className="flex justify-between font-bold text-red-600"><span>CĂ’N Láº I</span><span>{formatPrice(Math.max(0, lastOrder.total_amount - lastOrder.deposit_amount))}</span></div>
+                                                <div className="flex justify-between text-blue-600 mt-1"><span>Khách đã cọc</span><span>{formatPrice(lastOrder.deposit_amount)}</span></div>
+                                                <div className="flex justify-between font-bold text-red-600"><span>CÒN LẠI</span><span>{formatPrice(Math.max(0, lastOrder.total_amount - lastOrder.deposit_amount))}</span></div>
                                             </>
                                         )}
                                         <div className="flex justify-between text-gray-500 pt-1">
                                             <span>HTTT</span>
-                                            <span>{lastOrder.payment_method === 'COD' ? 'Tiá»n máº·t' : lastOrder.payment_method === 'Installment' ? 'Tráº£ gĂ³p' : 'Chuyá»ƒn khoáº£n/MoMo'}</span>
+                                            <span>{lastOrder.payment_method === 'COD' ? 'Tiền mặt' : lastOrder.payment_method === 'Installment' ? 'Trả góp' : 'Chuyển khoản/MoMo'}</span>
                                         </div>
                                     </div>
                                     <hr className="border-dashed" />
-                                    <p className="text-center text-gray-400 text-[10px]">Cáº£m Æ¡n quĂ½ khĂ¡ch! Háº¹n gáº·p láº¡i.</p>
+                                    <p className="text-center text-gray-400 text-[10px]">Cảm ơn quý khách! Hẹn gặp lại.</p>
                                 </div>
                             ) : (
                                 <div className="px-6 py-4 flex flex-col items-center opacity-70">
                                     <div className="w-[150px] aspect-[1/1.414] bg-white border shadow-sm rounded flex flex-col p-2 text-[4px] leading-tight text-center relative overflow-hidden pointer-events-none">
-                                        <b className="mb-1 uppercase">{config.siteName || 'VÄ‚N LĂ€NH SERVICE'}</b>
-                                        <p>HĂ“A ÄÆ N BĂN HĂ€NG</p>
+                                        <b className="mb-1 uppercase">{config.siteName || 'VĂN LÀNH SERVICE'}</b>
+                                        <p>HÓA ĐƠN BÁN HÀNG</p>
                                         <div className="border-t my-1"></div>
                                         <div className="text-left"><p>KH: {lastOrder.customer_info.name}</p></div>
                                         <div className="bg-gray-100 flex-1 my-1 rounded"></div>
-                                        <div className="text-right font-bold text-orange-500">Tá»”NG: {formatPrice(lastOrder.total_amount)}</div>
+                                        <div className="text-right font-bold text-orange-500">TỔNG: {formatPrice(lastOrder.total_amount)}</div>
                                     </div>
-                                    <p className="text-center text-xs text-gray-500 mt-3">Sáº½ má»Ÿ cá»­a sá»• in khá»• A5 chi tiáº¿t khi báº¥m nĂºt in.</p>
+                                    <p className="text-center text-xs text-gray-500 mt-3">Sẽ mở cửa sổ in khổ A5 chi tiết khi bấm nút in.</p>
                                 </div>
                             )}
                         </div>
@@ -1197,14 +1196,14 @@ export default function POSPage() {
                         <div className="px-4 py-4 flex gap-2 border-t mt-auto flex-shrink-0">
                             <button onClick={() => setShowReceipt(false)}
                                 className="flex-1 py-2.5 rounded-xl text-sm font-semibold bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors">
-                                ÄĂ³ng
+                                Đóng
                             </button>
                             <button onClick={() => {
                                 if (printTemplate === 'thermal') {
                                     const printContent = document.getElementById('pos-receipt-thermal')?.innerHTML;
                                     if (printContent) {
                                         const w = window.open('', '_blank', 'width=320,height=600');
-                                        w?.document.write(`<html><head><title>HĂ³a Ä‘Æ¡n POS</title>
+                                        w?.document.write(`<html><head><title>Hóa đơn POS</title>
                                             <style>body{font-family:monospace;font-size:11px;padding:8px;max-width:302px;margin:0 auto}
                                             table{width:100%;border-collapse:collapse}th,td{padding:2px 0}hr{border:none;border-top:1px dashed #ccc}
                                             .font-bold,b{font-weight:bold}.text-center{text-align:center}.text-right{text-align:right}
@@ -1216,7 +1215,7 @@ export default function POSPage() {
                                     const receiptHtml = `
                                         <html>
                                         <head>
-                                            <title>HĂ³a Ä‘Æ¡n bĂ¡n hĂ ng #${lastOrder.id.slice(-6).toUpperCase()}</title>
+                                            <title>Hóa đơn bán hàng #${lastOrder.id.slice(-6).toUpperCase()}</title>
                                             <style>
                                                 body { font-family: 'Times New Roman', serif; font-size: 14px; line-height: 1.4; padding: 20px; color: #000; }
                                                 .header { display: flex; justify-content: space-between; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 20px; }
@@ -1246,35 +1245,35 @@ export default function POSPage() {
                                         <body>
                                             <div class="header">
                                                 <div class="store-info">
-                                                    <h2>${config.siteName || 'VÄ‚N LĂ€NH SERVICE'}</h2>
-                                                    <p><b>Äá»‹a chá»‰:</b> ${config.contact_info?.address || 'An PhĂº ÄĂ´ng, Q12, TPHCM'}</p>
-                                                    <p><b>Äiá»‡n thoáº¡i:</b> ${config.contact_info?.main_phone || '0932.242.026'}</p>
+                                                    <h2>${config.siteName || 'VĂN LÀNH SERVICE'}</h2>
+                                                    <p><b>Địa chỉ:</b> ${config.contact_info?.address || 'An Phú Đông, Q12, TPHCM'}</p>
+                                                    <p><b>Điện thoại:</b> ${config.contact_info?.main_phone || '0932.242.026'}</p>
                                                 </div>
                                                 <div style="text-align: right;">
-                                                    <p><b>Sá»‘:</b> #${lastOrder.id.slice(-6).toUpperCase()}</p>
-                                                    <p><b>NgĂ y:</b> ${new Date().toLocaleDateString('vi-VN')}</p>
-                                                    <p><b>NhĂ¢n viĂªn:</b> ${lastOrder.createdByName || 'Admin'}</p>
+                                                    <p><b>Số:</b> #${lastOrder.id.slice(-6).toUpperCase()}</p>
+                                                    <p><b>Ngày:</b> ${new Date().toLocaleDateString('vi-VN')}</p>
+                                                    <p><b>Nhân viên:</b> ${lastOrder.createdByName || 'Admin'}</p>
                                                 </div>
                                             </div>
 
                                             <div class="title">
-                                                <h1>HĂ“A ÄÆ N BĂN HĂ€NG</h1>
+                                                <h1>HÓA ĐƠN BÁN HÀNG</h1>
                                             </div>
 
                                             <div>
-                                                <div class="info-row"><div class="label">KhĂ¡ch hĂ ng:</div><div><b>${lastOrder.customer_info.name}</b></div></div>
-                                                <div class="info-row"><div class="label">Äiá»‡n thoáº¡i:</div><div>${lastOrder.customer_info.phone || ''}</div></div>
-                                                <div class="info-row"><div class="label">Äá»‹a chá»‰:</div><div>${lastOrder.customer_info.address || ''}</div></div>
+                                                <div class="info-row"><div class="label">Khách hàng:</div><div><b>${lastOrder.customer_info.name}</b></div></div>
+                                                <div class="info-row"><div class="label">Điện thoại:</div><div>${lastOrder.customer_info.phone || ''}</div></div>
+                                                <div class="info-row"><div class="label">Địa chỉ:</div><div>${lastOrder.customer_info.address || ''}</div></div>
                                             </div>
 
                                             <table>
                                                 <thead>
                                                     <tr>
                                                         <th style="width: 40px;">STT</th>
-                                                        <th>TĂªn HĂ ng HĂ³a / Dá»‹ch Vá»¥</th>
+                                                        <th>Tên Hàng Hóa / Dịch Vụ</th>
                                                         <th style="width: 60px;">SL</th>
-                                                        <th style="width: 100px;">ÄÆ¡n GiĂ¡</th>
-                                                        <th style="width: 120px;">ThĂ nh Tiá»n</th>
+                                                        <th style="width: 100px;">Đơn Giá</th>
+                                                        <th style="width: 120px;">Thành Tiền</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
@@ -1291,25 +1290,25 @@ export default function POSPage() {
                                             </table>
 
                                             <div class="summary">
-                                                <div class="summary-row"><span>Tá»•ng tiá»n hĂ ng:</span><span>${lastOrder.subtotal_amount.toLocaleString('vi-VN')} Ä‘</span></div>
-                                                ${lastOrder.discount_amount > 0 ? `<div class="summary-row"><span>Chiáº¿t kháº¥u:</span><span>- ${lastOrder.discount_amount.toLocaleString('vi-VN')} Ä‘</span></div>` : ''}
+                                                <div class="summary-row"><span>Tổng tiền hàng:</span><span>${lastOrder.subtotal_amount.toLocaleString('vi-VN')} đ</span></div>
+                                                ${lastOrder.discount_amount > 0 ? `<div class="summary-row"><span>Chiết khấu:</span><span>- ${lastOrder.discount_amount.toLocaleString('vi-VN')} đ</span></div>` : ''}
                                                 <div class="summary-row bold" style="font-size: 16px; margin-top: 5px; border-top: 1px dotted #ccc; padding-top: 5px;">
-                                                    <span>Tá»•ng thanh toĂ¡n:</span><span>${lastOrder.total_amount.toLocaleString('vi-VN')} Ä‘</span>
+                                                    <span>Tổng thanh toán:</span><span>${lastOrder.total_amount.toLocaleString('vi-VN')} đ</span>
                                                 </div>
-                                                ${lastOrder.deposit_amount > 0 ? `<div class="summary-row" style="margin-top: 5px;"><span>ÄĂ£ thanh toĂ¡n (cá»c):</span><span>${lastOrder.deposit_amount.toLocaleString('vi-VN')} Ä‘</span></div>
-                                                <div class="summary-row bold" style="color: red; font-size: 16px;"><span>CĂ’N Láº I:</span><span>${Math.max(0, lastOrder.total_amount - lastOrder.deposit_amount).toLocaleString('vi-VN')} Ä‘</span></div>` : ''}
+                                                ${lastOrder.deposit_amount > 0 ? `<div class="summary-row" style="margin-top: 5px;"><span>Đã thanh toán (cọc):</span><span>${lastOrder.deposit_amount.toLocaleString('vi-VN')} đ</span></div>
+                                                <div class="summary-row bold" style="color: red; font-size: 16px;"><span>CÒN LẠI:</span><span>${Math.max(0, lastOrder.total_amount - lastOrder.deposit_amount).toLocaleString('vi-VN')} đ</span></div>` : ''}
                                             </div>
 
-                                            <p style="text-align: right; font-style: italic; margin-top: 10px;">HĂ¬nh thá»©c TT: ${lastOrder.payment_method === 'COD' ? 'Tiá»n máº·t' : lastOrder.payment_method === 'Installment' ? 'Tráº£ gĂ³p' : 'Chuyá»ƒn khoáº£n / Momo'}</p>
+                                            <p style="text-align: right; font-style: italic; margin-top: 10px;">Hành thức TT: ${lastOrder.payment_method === 'COD' ? 'Tiền mặt' : lastOrder.payment_method === 'Installment' ? 'Trả góp' : 'Chuyển khoản / Momo'}</p>
 
                                             <div class="signatures">
                                                 <div>
-                                                    <p class="title">KhĂ¡ch hĂ ng</p>
-                                                    <p style="color: #666; font-style: italic;">(KĂ½, ghi rĂµ há» tĂªn)</p>
+                                                    <p class="title">Khách hàng</p>
+                                                    <p style="color: #666; font-style: italic;">(Ký, ghi rõ họ tên)</p>
                                                 </div>
                                                 <div>
-                                                    <p class="title">NgÆ°á»i láº­p phiáº¿u</p>
-                                                    <p style="color: #666; font-style: italic;">(KĂ½, ghi rĂµ há» tĂªn)</p>
+                                                    <p class="title">Người lập phiếu</p>
+                                                    <p style="color: #666; font-style: italic;">(Ký, ghi rõ họ tên)</p>
                                                 </div>
                                             </div>
                                         </body>
@@ -1323,7 +1322,7 @@ export default function POSPage() {
                                 }
                             }}
                                 className="flex-1 py-2.5 rounded-xl text-sm font-semibold bg-orange-500 text-white hover:bg-orange-600 flex items-center justify-center gap-1.5 shadow-lg shadow-orange-200 transition-all">
-                                <Receipt size={16} /> In hĂ³a Ä‘Æ¡n ({printTemplate === 'a5' ? 'A5' : '80mm'})
+                                <Receipt size={16} /> In hóa đơn ({printTemplate === 'a5' ? 'A5' : '80mm'})
                             </button>
                         </div>
                     </div>
@@ -1334,13 +1333,13 @@ export default function POSPage() {
             {lastOrder && (
                 <div className="fixed inset-0 bg-white z-[100] p-4 hidden print:block" style={{ maxWidth: '302px', margin: '0 auto', fontFamily: 'monospace', fontSize: '11px' }}>
                     <div className="text-center mb-2">
-                        <p className="font-bold text-sm">{config.siteName || 'VÄƒn LĂ nh Service'}</p>
-                        <p>HĂ“A ÄÆ N BĂN HĂ€NG</p>
+                        <p className="font-bold text-sm">{config.siteName || 'Văn Lành Service'}</p>
+                        <p>HÓA ĐƠN BÁN HÀNG</p>
                         <p>{new Date().toLocaleString('vi-VN')} | #{lastOrder.id.slice(-6).toUpperCase()}</p>
                     </div>
                     <hr style={{ borderTop: '1px dashed #000' }} />
                     <p>KH: {lastOrder.customer_info.name}</p>
-                    {lastOrder.customer_info.phone && <p>SÄT: {lastOrder.customer_info.phone}</p>}
+                    {lastOrder.customer_info.phone && <p>SĐT: {lastOrder.customer_info.phone}</p>}
                     <hr style={{ borderTop: '1px dashed #000' }} />
                     <table style={{ width: '100%' }}>
                         <tbody>
@@ -1354,19 +1353,19 @@ export default function POSPage() {
                         </tbody>
                     </table>
                     <hr style={{ borderTop: '1px dashed #000' }} />
-                    <p style={{ textAlign: 'right', fontWeight: 'bold' }}>Tá»”NG: {formatPrice(lastOrder.total_amount)}</p>
+                    <p style={{ textAlign: 'right', fontWeight: 'bold' }}>TỔNG: {formatPrice(lastOrder.total_amount)}</p>
                     <hr style={{ borderTop: '1px dashed #000' }} />
-                    <p style={{ textAlign: 'center', marginTop: '8px' }}>Cáº£m Æ¡n quĂ½ khĂ¡ch!</p>
+                    <p style={{ textAlign: 'center', marginTop: '8px' }}>Cảm ơn quý khách!</p>
                 </div>
             )}
 
-            {/* â•â•â• Quick Add Product Modal â•â•â• */}
+            {/* ═══ Quick Add Product Modal ═══ */}
             <UniversalProductModal
                 isOpen={showProductModal}
                 onClose={() => setShowProductModal(false)}
                 mode="retail"
                 onCreated={reloadProducts}
-                submitLabel="Táº¡o & ÄÆ°a vĂ o POS"
+                submitLabel="Tạo & Đưa vào POS"
             />
         </div>
     );
