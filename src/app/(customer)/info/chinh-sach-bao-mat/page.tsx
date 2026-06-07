@@ -70,7 +70,7 @@ export default function ChinhSachBaoMatPage() {
             <div className="bg-gray-100 rounded-xl p-5 text-center">
                 <p className="text-sm text-gray-600">
                     Liên hệ: <a href="tel:0932242026" className="text-copper font-bold hover:underline">0932.242.026</a>
-                    {' | '}<a href="https://vanlanhservice.com.vn" target="_blank" className="text-copper font-bold hover:underline">vanlanhservice.com.vn</a>
+                    {' | '}<a href="https://vanlanhservice.com.vn" target="_blank" rel="noopener noreferrer" className="text-copper font-bold hover:underline">vanlanhservice.com.vn</a>
                 </p>
             </div>
         </article>

@@ -399,6 +399,7 @@ export default function ChatWidget() {
                     <button
                         onClick={toggleChat}
                         className="p-2 hover:bg-white/20 rounded-lg transition-colors"
+                        title="Đóng"
                     >
                         <X size={18} />
                     </button>
@@ -537,6 +538,7 @@ export default function ChatWidget() {
                                         disabled={isLoading || !roomId || !!identityError}
                                     />
                                     <button
+                                        title="Gửi"
                                         onClick={sendUserMessage}
                                         disabled={!inputMessage.trim() || isLoading || !roomId || !!identityError}
                                         className="w-10 h-10 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-full flex items-center justify-center hover:opacity-90 transition-opacity disabled:opacity-50"

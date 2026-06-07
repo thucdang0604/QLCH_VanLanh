@@ -717,6 +717,7 @@ export default function AdminChatPage() {
                         {/* Chat Header */}
                         <div className="p-4 border-b bg-white flex items-center gap-3">
                             <button
+                                title="Xem danh sách hội thoại"
                                 onClick={() => setShowMobileList(true)}
                                 className="md:hidden p-2 hover:bg-gray-100 rounded-lg"
                             >
@@ -725,9 +726,9 @@ export default function AdminChatPage() {
 
                             <button
                                 type="button"
+                                title="Xem hồ sơ khách hàng"
                                 onClick={() => selectedRoomData && setProfileRoom(selectedRoomData)}
                                 className="rounded-full"
-                                title="Xem hồ sơ khách hàng"
                             >
                                 <RoomAvatar room={selectedRoomData} className="w-10 h-10 rounded-full" iconSize={18} />
                             </button>
@@ -769,12 +770,12 @@ export default function AdminChatPage() {
                             {/* Bot Toggle */}
                             {selectedRoomData?.channel === 'web' && (
                             <button
+                                title={botActive ? 'AI Bot đang bật — click để tắt' : 'AI Bot đang tắt — click để bật'}
                                 onClick={toggleBot}
                                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${botActive
                                         ? 'bg-green-50 text-green-700 border border-green-200 hover:bg-green-100'
                                         : 'bg-gray-100 text-gray-500 border border-gray-200 hover:bg-gray-200'
                                     }`}
-                                title={botActive ? 'AI Bot đang bật — click để tắt' : 'AI Bot đang tắt — click để bật'}
                             >
                                 <Bot size={14} />
                                 {botActive ? <ToggleRight size={18} /> : <ToggleLeft size={18} />}

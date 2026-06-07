@@ -69,7 +69,7 @@ export default function ExportImportReportButton() {
 
     return (
         <div className="relative inline-block">
-            <button onClick={() => setShowPicker(!showPicker)}
+            <button title="Xuất báo cáo" onClick={() => setShowPicker(!showPicker)}
                 className="flex items-center gap-2 px-3 py-2 text-sm border border-green-300 text-green-700 rounded-lg hover:bg-green-50 font-medium">
                 <FileDown size={16} /> Xuất báo cáo
             </button>
@@ -78,12 +78,12 @@ export default function ExportImportReportButton() {
                 <div className="absolute right-0 top-full mt-2 bg-white rounded-xl shadow-lg border p-4 z-20 w-72 space-y-3">
                     <p className="text-sm font-bold text-gray-700">Chọn khoảng ngày</p>
                     <div className="flex gap-2">
-                        <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)}
+                        <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} title="Từ ngày"
                             className="flex-1 border rounded-lg px-2 py-1.5 text-sm" />
-                        <input type="date" value={toDate} onChange={e => setToDate(e.target.value)}
+                        <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} title="Đến ngày"
                             className="flex-1 border rounded-lg px-2 py-1.5 text-sm" />
                     </div>
-                    <button onClick={handleExport} disabled={exporting}
+                    <button title="Xuất Excel" onClick={handleExport} disabled={exporting}
                         className="w-full py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium flex items-center justify-center gap-2">
                         {exporting ? <><Loader2 size={16} className="animate-spin" /> Đang xuất...</> : 'Xuất Excel'}
                     </button>

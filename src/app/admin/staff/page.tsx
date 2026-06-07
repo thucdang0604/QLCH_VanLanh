@@ -254,6 +254,7 @@ export default function StaffPage() {
                                 </td>
                                 <td className="px-6 py-4 text-right">
                                     <button
+                                        title="Chỉnh sửa nhân viên"
                                         onClick={() => handleOpenModal(staff)}
                                         className="p-2 text-gray-400 hover:text-orange-500 hover:bg-orange-50 rounded-lg transition-colors"
                                     >
@@ -288,6 +289,7 @@ export default function StaffPage() {
                                 </div>
                             </div>
                             <button
+                                title="Chỉnh sửa nhân viên"
                                 onClick={() => handleOpenModal(staff)}
                                 className="p-2 text-gray-400 hover:text-orange-500 hover:bg-orange-50 rounded-lg transition-colors shrink-0"
                             >
@@ -400,6 +402,7 @@ export default function StaffPage() {
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">Họ tên</label>
                                     <input
+                                        title="Họ tên"
                                         type="text"
                                         value={formData.displayName}
                                         onChange={e => setFormData({ ...formData, displayName: e.target.value })}
@@ -410,6 +413,7 @@ export default function StaffPage() {
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
                                     <input
+                                        title="Email"
                                         type="email"
                                         value={formData.email}
                                         className="w-full px-4 py-2 border rounded-lg bg-gray-50 text-gray-500"
@@ -424,6 +428,7 @@ export default function StaffPage() {
                                 <div className="flex gap-4">
                                     <label className="flex items-center gap-2 cursor-pointer">
                                         <input
+                                            title="Vai trò"
                                             type="radio"
                                             name="role"
                                             value="staff"
@@ -435,6 +440,7 @@ export default function StaffPage() {
                                     </label>
                                     <label className="flex items-center gap-2 cursor-pointer">
                                         <input
+                                            title="Vai trò"
                                             type="radio"
                                             name="role"
                                             value="admin"

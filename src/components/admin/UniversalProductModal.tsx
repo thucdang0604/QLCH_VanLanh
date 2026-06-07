@@ -1,9 +1,8 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect } from 'react';
-import { Loader2, Plus, X } from 'lucide-react';
+import { Loader2, Plus } from 'lucide-react';
 import CurrencyInput from '@/components/admin/CurrencyInput';
-import { ImageIcon } from 'lucide-react';
 import { orderBy } from 'firebase/firestore';
 import { generateSearchKeywords } from '@/lib/utils';
 import { useFirestoreCollection } from '@/lib/useFirestore';
@@ -11,14 +10,14 @@ import { triggerRevalidate } from '@/lib/revalidate';
 import { normalizeDocId } from '@/lib/idNormalizer';
 import { toastError } from '@/lib/toast';
 import Modal from '@/components/admin/Modal';
-import MediaManager from '@/components/admin/MediaManager';
 import CategoryTaxonomySelector from '@/components/admin/CategoryTaxonomySelector';
+import MediaGalleryField from '@/components/admin/MediaGalleryField';
 import type { Product } from '@/lib/types';
 import { PART_CATEGORY_LABEL } from '@/lib/constants';
 import { buildProductCodeFromId, getPrimaryProductCode, getProductCodeKind } from '@/lib/productCodes';
 import { createProductWithCodes, updateProductWithCodes } from '@/lib/productCodeRegistry';
 
-// ── Shared Constants ──
+// €€ Shared Constants €€
 
 const CONDITIONS = [
     { value: 'new', label: 'Mới 100%' },
@@ -27,7 +26,7 @@ const CONDITIONS = [
 ];
 const QUALITY_OPTIONS = ['Zin', 'Loại 1', 'Loại 2', 'Bóc máy'];
 
-// ── Props ──
+// €€ Props €€
 interface UniversalProductModalProps {
     isOpen: boolean;
     onClose: () => void;
@@ -45,7 +44,7 @@ interface UniversalProductModalProps {
     submitLabel?: string;
 }
 
-// ── Retail Form Data ──
+// €€ Retail Form Data €€
 interface RetailFormData {
     name: string;
     price_original: number | '';
@@ -63,7 +62,7 @@ interface RetailFormData {
     seriesId: string;
 }
 
-// ── Component Form Data ──
+// €€ Component Form Data €€
 interface ComponentFormData {
     name: string;
     price_original: number | '';
@@ -89,7 +88,7 @@ export default function UniversalProductModal({
 }: UniversalProductModalProps) {
     const isEditing = !!initialData;
 
-    // ── Retail state ──
+    // €€ Retail Form State €€
     const [retailForm, setRetailForm] = useState<RetailFormData>({
         name: initialData?.name || '',
         price_original: initialData?.price_original || '' as number | '',
@@ -106,7 +105,7 @@ export default function UniversalProductModal({
         seriesId: initialData?.seriesId || '',
     });
 
-    // ── Component state ──
+    // €€ Component Form State €€
     const [componentForm, setComponentForm] = useState<ComponentFormData>({
         name: initialData?.name || '',
         price_original: initialData?.price_original || '' as number | '',
@@ -120,12 +119,11 @@ export default function UniversalProductModal({
         supplier: initialData?.supplier || '',
     });
 
-    // ── Shared state ──
+    // €€ Shared Form State €€
     const [images, setImages] = useState<string[]>(initialData?.images || []);
-    const [mediaOpen, setMediaOpen] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
 
-    // ── Dynamic Data ──
+    // €€ Dynamic Data (Brands) €€
     
     const { data: brandsData } = useFirestoreCollection<{ name: string }>('brands', [orderBy('name', 'asc')]);
     
@@ -165,17 +163,7 @@ export default function UniversalProductModal({
         }
     }, [isOpen, initialData]);
 
-    const handleMediaSelect = (url: string) => {
-        if (!images.includes(url)) {
-            setImages(prev => [...prev, url]);
-        }
-    };
-
-    const handleRemoveImage = (index: number) => {
-        setImages(prev => prev.filter((_, i) => i !== index));
-    };
-
-    // ── Submit ──
+    // €€ Submit Form €€
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setIsSubmitting(true);
@@ -196,6 +184,10 @@ export default function UniversalProductModal({
 
     const submitRetail = async () => {
         const form = retailForm;
+        if (form.categoryIds.length === 0) {
+            toastError('Vui lòng chọn danh mục taxonomy cho sản phẩm.');
+            return;
+        }
         const imageUrl = images[0] || '';
         const productId = isEditing && initialData ? initialData.id : await normalizeDocId(form.name, 'retail', form.category);
         const productCode = initialData
@@ -243,6 +235,10 @@ export default function UniversalProductModal({
 
     const submitComponent = async () => {
         const form = componentForm;
+        if (form.categoryIds.length === 0) {
+            toastError('Vui lòng chọn danh mục taxonomy cho linh kiện.');
+            return;
+        }
         const imageUrl = images[0] || '';
         const productId = isEditing && initialData ? initialData.id : await normalizeDocId(form.name, 'component');
         const productCode = initialData ? getPrimaryProductCode(initialData) : buildProductCodeFromId(productId, 'component');
@@ -282,12 +278,12 @@ export default function UniversalProductModal({
         onClose();
     };
 
-    // ── Derive title ──
+    // €€ Derive title €€
     const title = isEditing
         ? (mode === 'retail' ? 'Sửa sản phẩm' : 'Sửa thông tin linh kiện')
         : (mode === 'retail' ? 'Thêm sản phẩm mới' : 'Tạo linh kiện mới');
 
-    // ── Derive default submit label ──
+    // €€ Derive default submit label €€
     const defaultLabel = isEditing
         ? (mode === 'retail' ? 'Cập nhật' : 'Cập nhật linh kiện')
         : (mode === 'retail' ? 'Thêm sản phẩm' : 'Lưu linh kiện mới');
@@ -295,16 +291,6 @@ export default function UniversalProductModal({
 
     return (
         <>
-            <MediaManager
-                isOpen={mediaOpen}
-                onClose={() => setMediaOpen(false)}
-                onSelect={(url) => {
-                    handleMediaSelect(url);
-                    // Retail single image: close after pick
-                    if (mode === 'retail') setMediaOpen(false);
-                }}
-                title={mode === 'retail' ? 'Chọn ảnh sản phẩm' : 'Chọn hình ảnh linh kiện'}
-            />
             <Modal
                 isOpen={isOpen}
                 onClose={onClose}
@@ -312,72 +298,17 @@ export default function UniversalProductModal({
                 size="2xl"
             >
                 <form onSubmit={handleSubmit} className="p-6 space-y-5 overflow-y-auto flex-1">
-                    {/* ═══ Image Section ═══ */}
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                            {mode === 'retail' ? 'Ảnh sản phẩm' : 'Hình ảnh linh kiện'}
-                        </label>
+                    {/* Image Section */}
+                    <MediaGalleryField
+                        label={mode === 'retail' ? 'Ảnh sản phẩm' : 'Hình ảnh linh kiện'}
+                        mediaTitle={mode === 'retail' ? 'Chọn ảnh sản phẩm' : 'Chọn hình ảnh linh kiện'}
+                        value={images}
+                        onChange={setImages}
+                        emptyText={mode === 'retail' ? 'Chọn ảnh sản phẩm từ thư viện' : 'Chọn ảnh linh kiện từ thư viện'}
+                        defaultFolder={mode === 'retail' ? 'products' : 'parts'}
+                    />
 
-                        {mode === 'retail' ? (
-                            /* Retail: single image picker */
-                            <div className="border-2 border-dashed rounded-xl p-4 text-center">
-                                {images[0] ? (
-                                    /* eslint-disable-next-line @next/next/no-img-element */
-                                    <img src={images[0]} alt="" className="w-24 h-24 object-cover rounded-lg mx-auto mb-2" />
-                                ) : (
-                                    <ImageIcon className="mx-auto text-gray-300 mb-2" size={32} />
-                                )}
-                                <div className="flex flex-col items-center gap-1">
-                                    <button
-                                        type="button"
-                                        onClick={() => setMediaOpen(true)}
-                                        className="cursor-pointer text-orange-600 hover:text-orange-700 font-medium text-sm underline"
-                                    >
-                                        {images[0] ? 'Đổi ảnh từ thư viện' : 'Chọn ảnh từ thư viện'}
-                                    </button>
-                                </div>
-                            </div>
-                        ) : (
-                            /* Component: multi-image picker */
-                            <>
-                                <p className="text-xs text-gray-500 mb-2">
-                                    Bạn có thể upload ảnh mới vào kho linh kiện hoặc chọn ảnh đã có trong thư viện.
-                                </p>
-                                <div className="flex flex-wrap items-center gap-3 mb-2">
-                                    <button
-                                        type="button"
-                                        onClick={() => setMediaOpen(true)}
-                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-orange-300 bg-orange-50 text-orange-700 rounded-lg text-sm font-medium hover:bg-orange-100 transition-colors"
-                                    >
-                                        <ImageIcon size={16} />
-                                        Chọn ảnh linh kiện
-                                    </button>
-                                </div>
-                                {images.length > 0 && (
-                                    <div className="grid grid-cols-4 gap-3">
-                                        {images.map((url, index) => (
-                                            <div key={index} className="relative aspect-square rounded-lg border border-gray-200 overflow-hidden bg-gray-100 group">
-                                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                                <img src={url} alt={`Preview ${index + 1}`} className="w-full h-full object-cover" />
-                                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => handleRemoveImage(index)}
-                                                        className="p-1.5 bg-red-500 text-white rounded-full hover:bg-red-600 transition-colors shadow-sm cursor-pointer"
-                                                        title="Xóa hình ảnh"
-                                                    >
-                                                        <X size={14} />
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </>
-                        )}
-                    </div>
-
-                    {/* ═══ Mode-specific Fields ═══ */}
+                    {/* Mode-specific Fields €€ */}
                     {mode === 'retail' ? (
                         <RetailFields
                             form={retailForm}
@@ -392,7 +323,7 @@ export default function UniversalProductModal({
                         />
                     )}
 
-                    {/* ═══ Actions ═══ */}
+                    {/* €€ Actions €€ */}
                     <div className="flex gap-3 pt-4 border-t sticky bottom-0 bg-white z-10 -mx-6 px-6 pb-6 md:pb-0 mt-6 pointer-events-auto items-center">
                         <button
                             type="button"
@@ -416,9 +347,7 @@ export default function UniversalProductModal({
     );
 }
 
-// ════════════════════════════════════════════════════
-// Retail Fields Sub-component
-// ════════════════════════════════════════════════════
+// €€ Retail Fields Sub-component €€
 function RetailFields({
     form,
     setForm,
@@ -446,7 +375,7 @@ function RetailFields({
             {/* Price */}
             <div className="grid grid-cols-2 gap-4">
                 <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Giá gốc (VNĐ) *</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Giá gốc (VND) *</label>
                     <CurrencyInput
                         value={form.price_original}
                         onChange={(v) => setForm(p => ({ ...p, price_original: v || '' }))}
@@ -604,9 +533,7 @@ function RetailFields({
     );
 }
 
-// ════════════════════════════════════════════════════
-// Component (Linh kiện) Fields Sub-component
-// ════════════════════════════════════════════════════
+// €€ Component Fields Sub-component €€
 function ComponentFields({
     form,
     setForm,
@@ -719,7 +646,7 @@ function ComponentFields({
             {/* Prices */}
             <div className="grid grid-cols-2 gap-4">
                 <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Giá vốn (VNĐ) *</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Giá vốn (VND) *</label>
                     <CurrencyInput
                         value={form.price_original}
                         onChange={(v) => setForm(p => ({ ...p, price_original: v || '' }))}
@@ -730,7 +657,7 @@ function ComponentFields({
                     />
                 </div>
                 <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Giá Bán / Giá Sửa thay thế (VNĐ) *</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Giá Bán / Giá Sửa thay thế (VND) *</label>
                     <CurrencyInput
                         value={form.price_promo}
                         onChange={(v) => setForm(p => ({ ...p, price_promo: v || '' }))}

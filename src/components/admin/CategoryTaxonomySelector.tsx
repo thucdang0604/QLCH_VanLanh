@@ -68,6 +68,7 @@ export default function CategoryTaxonomySelector({ type, value, onChange }: Cate
             {/* Level 1 */}
             <div>
                 <select
+                    title="Danh mục chính"
                     value={l1Id}
                     onChange={(e) => handleChange(1, e.target.value)}
                     className="w-full h-11 px-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-shadow text-sm"
@@ -83,6 +84,7 @@ export default function CategoryTaxonomySelector({ type, value, onChange }: Cate
             {l2Options.length > 0 && (
                 <div>
                     <select
+                        title="Danh mục cấp 2"
                         value={l2Id}
                         onChange={(e) => handleChange(2, e.target.value)}
                         className="w-full h-11 px-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-shadow text-sm"
@@ -99,6 +101,7 @@ export default function CategoryTaxonomySelector({ type, value, onChange }: Cate
             {l3Options.length > 0 && (
                 <div>
                     <select
+                        title="Danh mục cấp 3"
                         value={l3Id}
                         onChange={(e) => handleChange(3, e.target.value)}
                         className="w-full h-11 px-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-shadow text-sm"

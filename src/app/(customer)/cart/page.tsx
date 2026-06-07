@@ -154,6 +154,7 @@ export default function CartPage() {
                                                 </button>
                                                 <span className="px-3 font-medium">{item.quantity}</span>
                                                 <button
+                                                    title="Thêm"
                                                     onClick={() => handleUpdateQuantity(item.id, 1)}
                                                     className="p-2 hover:bg-gray-100 transition-colors"
                                                 >
@@ -161,6 +162,7 @@ export default function CartPage() {
                                                 </button>
                                             </div>
                                             <button
+                                                title="Xóa"
                                                 onClick={() => removeItem(item.id)}
                                                 className="p-2 text-gray-400 hover:text-red-500 transition-colors"
                                             >

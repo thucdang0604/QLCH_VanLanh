@@ -189,14 +189,14 @@ function CategoriesList() {
                     
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         {canAddChild && (
-                            <button onClick={() => handleOpenModal(undefined, currentPath, indexPath)} className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors" title="Thêm danh mục con">
+                            <button title="Thêm danh mục con" onClick={() => handleOpenModal(undefined, currentPath, indexPath)} className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors">
                                 <Plus size={15} />
                             </button>
                         )}
-                        <button onClick={() => handleOpenModal(node, pPath, indexPath)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Sửa">
+                        <button title="Sửa" onClick={() => handleOpenModal(node, pPath, indexPath)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
                             <Edit size={15} />
                         </button>
-                        <button onClick={() => handleDelete(indexPath)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Xoá">
+                        <button title="Xoá" onClick={() => handleDelete(indexPath)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
                             <Trash2 size={15} />
                         </button>
                     </div>
@@ -237,6 +237,7 @@ function CategoriesList() {
                             <option value="component">Linh kiện</option>
                         </select>
                         <button
+                            title="Thêm danh mục gốc"
                             onClick={() => handleOpenModal(undefined, [])}
                             className="flex items-center gap-1.5 px-4 py-2 bg-orange-500 text-white text-sm rounded-lg hover:bg-orange-600 shadow-sm shadow-orange-500/20 transition-all active:scale-95 font-medium"
                         >
@@ -251,7 +252,7 @@ function CategoriesList() {
                         <div className="px-5 py-12 text-center">
                             <Package size={40} className="mx-auto text-gray-300 mb-3" />
                             <p className="text-gray-400 text-sm">Chưa có danh mục nào trong nhánh này.</p>
-                            <button onClick={() => handleOpenModal(undefined, [])} className="mt-3 text-sm text-orange-600 hover:text-orange-700 font-medium">+ Thêm danh mục gốc</button>
+                            <button title="Thêm danh mục gốc" onClick={() => handleOpenModal(undefined, [])} className="mt-3 text-sm text-orange-600 hover:text-orange-700 font-medium">+ Thêm danh mục gốc</button>
                         </div>
                     ) : (
                         currentList.map((node, i) => renderNode(node, 0, [], [i]))
@@ -334,6 +335,7 @@ function CategoryModal({ isOpen, onClose, initialData, onSave }: { isOpen: boole
                         <input
                             type="text"
                             required
+                            title="Tên danh mục"
                             value={formData.name}
                             onChange={(e) => {
                                 const val = e.target.value;
@@ -368,6 +370,7 @@ function CategoryModal({ isOpen, onClose, initialData, onSave }: { isOpen: boole
                         )}
                         <button
                             type="button"
+                            title="Chọn hình"
                             onClick={() => setShowMediaForIcon(true)}
                             className="px-3 py-1.5 text-sm border rounded-lg hover:bg-gray-50 transition-colors"
                         >
@@ -376,6 +379,7 @@ function CategoryModal({ isOpen, onClose, initialData, onSave }: { isOpen: boole
                         {formData.icon && (
                             <button
                                 type="button"
+                                title="Xoá icon"
                                 onClick={() => setFormData(prev => ({ ...prev, icon: '' }))}
                                 className="px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                             >
@@ -391,6 +395,7 @@ function CategoryModal({ isOpen, onClose, initialData, onSave }: { isOpen: boole
                         <div>
                             <label className="text-sm font-medium text-gray-700">Mô tả SEO</label>
                             <textarea
+                                title="Mô tả SEO"
                                 value={formData.seoDescription || ''}
                                 onChange={(e) => setFormData(prev => ({ ...prev, seoDescription: e.target.value }))}
                                 rows={2}
@@ -404,6 +409,7 @@ function CategoryModal({ isOpen, onClose, initialData, onSave }: { isOpen: boole
                             <label className="text-sm font-medium text-gray-700">Từ khoá SEO (Keywords)</label>
                             <input
                                 type="text"
+                                title="Từ khoá SEO"
                                 value={formData.seoKeywords || ''}
                                 onChange={(e) => setFormData(prev => ({ ...prev, seoKeywords: e.target.value }))}
                                 className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 bg-gray-50"
@@ -419,9 +425,9 @@ function CategoryModal({ isOpen, onClose, initialData, onSave }: { isOpen: boole
                         <label htmlFor="category-warranty-type" className="text-sm font-medium text-gray-700 block mb-1">Loại phiếu bảo hành mặc định</label>
                         <select
                             id="category-warranty-type"
+                            title="Loại phiếu bảo hành mặc định"
                             value={formData.warrantyType || 'none'}
                             onChange={(e) => setFormData(prev => ({ ...prev, warrantyType: e.target.value as TaxonomyNode['warrantyType'] }))}
-                            title="Loại phiếu bảo hành mặc định"
                             aria-label="Loại phiếu bảo hành mặc định"
                             className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 bg-gray-50"
                         >
@@ -435,10 +441,10 @@ function CategoryModal({ isOpen, onClose, initialData, onSave }: { isOpen: boole
                 </div>
 
                 <div className="flex justify-end gap-3 pt-5 border-t border-gray-100">
-                    <button type="button" onClick={onClose} className="px-5 py-2.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors font-medium">
+                    <button type="button" title="Hủy" onClick={onClose} className="px-5 py-2.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors font-medium">
                         Hủy
                     </button>
-                    <button type="submit" disabled={saving} className="flex items-center gap-2 px-6 py-2.5 text-sm bg-orange-500 text-white rounded-lg hover:bg-orange-600 shadow-lg shadow-orange-500/25 disabled:opacity-50 transition-all active:scale-95 font-medium">
+                    <button type="submit" title="Lưu" disabled={saving} className="flex items-center gap-2 px-6 py-2.5 text-sm bg-orange-500 text-white rounded-lg hover:bg-orange-600 shadow-lg shadow-orange-500/25 disabled:opacity-50 transition-all active:scale-95 font-medium">
                         {saving ? 'Đang lưu...' : initialData ? '💾 Cập nhật' : '✨ Tạo danh mục'}
                     </button>
                 </div>
@@ -499,6 +505,7 @@ function BrandsList() {
                             />
                         </div>
                         <button
+                            title="Thêm thương hiệu"
                             onClick={() => handleOpenModal()}
                             className="flex items-center gap-1.5 px-4 py-2 bg-orange-500 text-white text-sm rounded-lg hover:bg-orange-600 shadow-sm shadow-orange-500/20 transition-all active:scale-95 font-medium"
                         >
@@ -619,6 +626,7 @@ function BrandModal({ isOpen, onClose, initialData }: { isOpen: boolean, onClose
                     <input
                         type="text"
                         required
+                        title="Tên thương hiệu"
                         value={formData.name}
                         onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
                         className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
@@ -641,6 +649,7 @@ function BrandModal({ isOpen, onClose, initialData }: { isOpen: boolean, onClose
                         <div className="space-y-2">
                             <button
                                 type="button"
+                                title="Chọn Logo"
                                 onClick={() => setShowMediaForLogo(true)}
                                 className="px-3 py-1.5 text-sm border rounded-lg hover:bg-gray-50 transition-colors block"
                             >
@@ -649,6 +658,7 @@ function BrandModal({ isOpen, onClose, initialData }: { isOpen: boolean, onClose
                             {formData.logoUrl && (
                                 <button
                                     type="button"
+                                    title="Xoá Logo"
                                     onClick={() => setFormData(prev => ({ ...prev, logoUrl: '' }))}
                                     className="px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors block"
                                 >

@@ -147,7 +147,7 @@ export default function GioiThieuPage() {
                     <a href="tel:0932242026" className="px-6 py-3 bg-copper text-white font-semibold rounded-lg hover:bg-copper-dark transition-colors">
                         📞 Gọi: 0932.242.026
                     </a>
-                    <a href="https://zalo.me/0932242026" target="_blank" className="px-6 py-3 border border-gray-600 text-white font-semibold rounded-lg hover:border-copper hover:text-copper transition-colors">
+                    <a href="https://zalo.me/0932242026" target="_blank" rel="noopener noreferrer" className="px-6 py-3 border border-gray-600 text-white font-semibold rounded-lg hover:border-copper hover:text-copper transition-colors">
                         💬 Chat Zalo
                     </a>
                 </div>

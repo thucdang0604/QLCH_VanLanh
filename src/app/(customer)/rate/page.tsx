@@ -362,11 +362,10 @@ export default function RatePage() {
 
                     {/* Verification Badge */}
                     {canShowForm && verifyStatus !== 'disabled' && (
-                        <div className={`flex items-center justify-center gap-2 py-2 px-4 rounded-full text-xs font-semibold mx-auto w-fit ${
-                            verifyStatus === 'geoOk'
+                        <div className={`flex items-center justify-center gap-2 py-2 px-4 rounded-full text-xs font-semibold mx-auto w-fit ${verifyStatus === 'geoOk'
                                 ? 'bg-green-50 text-green-700 border border-green-200'
                                 : 'bg-blue-50 text-blue-700 border border-blue-200'
-                        }`}>
+                            }`}>
                             {verifyStatus === 'geoOk' ? (
                                 <><MapPin size={14} /> {geoMessage}</>
                             ) : (
@@ -414,6 +413,8 @@ export default function RatePage() {
                                     <button
                                         key={star}
                                         type="button"
+                                        aria-label={`${star} sao`}
+                                        title={`${star} sao`}
                                         className="focus:outline-none transition-transform hover:scale-110 active:scale-95"
                                         onClick={() => setRating(star)}
                                         onMouseEnter={() => setHoverRating(star)}
@@ -454,6 +455,8 @@ export default function RatePage() {
                                         <Image src={url} alt={`preview-${idx}`} fill className="object-cover" />
                                         <button
                                             type="button"
+                                            aria-label="Xóa ảnh"
+                                            title="Xóa ảnh"
                                             onClick={() => removeImage(idx)}
                                             className="absolute top-1 right-1 bg-black/50 text-white rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                                         >
@@ -479,6 +482,8 @@ export default function RatePage() {
                                 multiple
                                 ref={fileInputRef}
                                 onChange={handleImageChange}
+                                aria-label="Tải ảnh lên"
+                                title="Tải ảnh lên"
                             />
                         </div>
 

@@ -93,7 +93,7 @@ export default function ChatIntegrationsPage() {
         try {
             const token = await getToken();
             const res = await fetch('/api/admin/chat/integrations', {
-                headers: { Authorization: `Bearer ${token}` },
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
             });
             const data = await res.json();
             if (!res.ok || !data.success) throw new Error(data.error || 'Không tải được cấu hình.');
@@ -245,6 +245,7 @@ export default function ChatIntegrationsPage() {
                     </div>
                     <button
                         type="button"
+                        title="Bật/Tắt Facebook"
                         onClick={() => setForm(p => ({ ...p, facebook: { ...p.facebook, enabled: !p.facebook.enabled } }))}
                         className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm border ${form.facebook.enabled ? 'bg-green-50 text-green-700 border-green-200' : 'bg-gray-100 text-gray-600 border-gray-200'}`}
                     >
@@ -254,7 +255,7 @@ export default function ChatIntegrationsPage() {
                 </div>
                 <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-5">
                     <div className="space-y-2">
-                        <label className="text-sm font-medium text-gray-700">Webhook URL</label>
+                        <label title="Webhook URL" className="text-sm font-medium text-gray-700">Webhook URL</label>
                         <div className="flex gap-2">
                             <input value={webhookUrls.facebook} readOnly className="flex-1 px-3 py-2 border rounded-lg bg-gray-50 text-sm" />
                             <button onClick={() => copy(webhookUrls.facebook)} className="p-2 border rounded-lg hover:bg-gray-50" title="Copy">
@@ -263,7 +264,7 @@ export default function ChatIntegrationsPage() {
                         </div>
                     </div>
                     <div className="space-y-2">
-                        <label className="text-sm font-medium text-gray-700">Graph API version</label>
+                        <label title="Graph API version" className="text-sm font-medium text-gray-700">Graph API version</label>
                         <input
                             value={form.facebook.graphVersion}
                             onChange={e => setForm(p => ({ ...p, facebook: { ...p.facebook, graphVersion: e.target.value } }))}
@@ -272,7 +273,7 @@ export default function ChatIntegrationsPage() {
                         />
                     </div>
                     <div className="space-y-2">
-                        <label className="text-sm font-medium text-gray-700">Facebook Page ID</label>
+                        <label title="Facebook Page ID" className="text-sm font-medium text-gray-700">Facebook Page ID</label>
                         <input
                             value={form.facebook.pageId}
                             onChange={e => setForm(p => ({ ...p, facebook: { ...p.facebook, pageId: e.target.value } }))}
@@ -281,9 +282,10 @@ export default function ChatIntegrationsPage() {
                         />
                     </div>
                     <div className="space-y-2">
-                        <label className="text-sm font-medium text-gray-700">Page Access Token {status?.facebook.pageAccessTokenSet && <span className="text-green-600">(đã lưu)</span>}</label>
+                        <label title="Page Access Token" className="text-sm font-medium text-gray-700">Page Access Token {status?.facebook.pageAccessTokenSet && <span className="text-green-600">(đã lưu)</span>}</label>
                         <input
                             type="password"
+                            title="Page Access Token"
                             value={form.facebook.pageAccessToken}
                             onChange={e => setForm(p => ({ ...p, facebook: { ...p.facebook, pageAccessToken: e.target.value } }))}
                             className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20 focus:outline-none"
@@ -291,9 +293,10 @@ export default function ChatIntegrationsPage() {
                         />
                     </div>
                     <div className="space-y-2">
-                        <label className="text-sm font-medium text-gray-700">App Secret {status?.facebook.appSecretSet && <span className="text-green-600">(đã lưu)</span>}</label>
+                        <label title="App Secret" className="text-sm font-medium text-gray-700">App Secret {status?.facebook.appSecretSet && <span className="text-green-600">(đã lưu)</span>}</label>
                         <input
                             type="password"
+                            title="App Secret"
                             value={form.facebook.appSecret}
                             onChange={e => setForm(p => ({ ...p, facebook: { ...p.facebook, appSecret: e.target.value } }))}
                             className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20 focus:outline-none"
@@ -301,22 +304,23 @@ export default function ChatIntegrationsPage() {
                         />
                     </div>
                     <div className="space-y-2">
-                        <label className="text-sm font-medium text-gray-700">Webhook Verify Token {status?.facebook.verifyTokenSet && <span className="text-green-600">(đã lưu)</span>}</label>
+                        <label title="Webhook Verify Token" className="text-sm font-medium text-gray-700">Webhook Verify Token {status?.facebook.verifyTokenSet && <span className="text-green-600">(đã lưu)</span>}</label>
                         <div className="flex gap-2">
                             <input
                                 type="password"
+                                title="Webhook Verify Token"
                                 value={form.facebook.verifyToken}
                                 onChange={e => setForm(p => ({ ...p, facebook: { ...p.facebook, verifyToken: e.target.value } }))}
                                 className="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20 focus:outline-none"
                                 placeholder={status?.facebook.verifyTokenSet ? 'Để trống để giữ token hiện tại' : 'Tạo hoặc nhập verify token'}
                             />
-                            <button onClick={() => setForm(p => ({ ...p, facebook: { ...p.facebook, verifyToken: randomToken('fb_verify') } }))} className="px-3 py-2 border rounded-lg hover:bg-gray-50 text-sm">
+                            <button title="Tạo webhook verify token" onClick={() => setForm(p => ({ ...p, facebook: { ...p.facebook, verifyToken: randomToken('fb_verify') } }))} className="px-3 py-2 border rounded-lg hover:bg-gray-50 text-sm">
                                 Tạo
                             </button>
                         </div>
                     </div>
                     <div className="md:col-span-2 flex justify-end">
-                        <button onClick={() => testChannel('facebook')} disabled={testing === 'facebook'} className="flex items-center gap-2 px-4 py-2 border rounded-lg hover:bg-gray-50 text-sm">
+                        <button title="Kiểm tra Facebook" onClick={() => testChannel('facebook')} disabled={testing === 'facebook'} className="flex items-center gap-2 px-4 py-2 border rounded-lg hover:bg-gray-50 text-sm">
                             {testing === 'facebook' ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
                             Kiểm tra Facebook
                         </button>
@@ -332,6 +336,7 @@ export default function ChatIntegrationsPage() {
                     </div>
                     <button
                         type="button"
+                        title="Bật/Tắt Zalo"
                         onClick={() => setForm(p => ({ ...p, zalo: { ...p.zalo, enabled: !p.zalo.enabled } }))}
                         className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm border ${form.zalo.enabled ? 'bg-green-50 text-green-700 border-green-200' : 'bg-gray-100 text-gray-600 border-gray-200'}`}
                     >
@@ -341,17 +346,18 @@ export default function ChatIntegrationsPage() {
                 </div>
                 <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-5">
                     <div className="space-y-2">
-                        <label className="text-sm font-medium text-gray-700">Webhook URL</label>
+                        <label title="Webhook URL" className="text-sm font-medium text-gray-700">Webhook URL</label>
                         <div className="flex gap-2">
-                            <input value={webhookUrls.zalo} readOnly className="flex-1 px-3 py-2 border rounded-lg bg-gray-50 text-sm" />
-                            <button onClick={() => copy(webhookUrls.zalo)} className="p-2 border rounded-lg hover:bg-gray-50" title="Copy">
+                            <input title="Webhook URL" value={webhookUrls.zalo} readOnly className="flex-1 px-3 py-2 border rounded-lg bg-gray-50 text-sm" />
+                            <button title="Copy" onClick={() => copy(webhookUrls.zalo)} className="p-2 border rounded-lg hover:bg-gray-50">
                                 <Copy size={18} />
                             </button>
                         </div>
                     </div>
                     <div className="space-y-2">
-                        <label className="text-sm font-medium text-gray-700">Zalo OA ID</label>
+                        <label title="Zalo OA ID" className="text-sm font-medium text-gray-700">Zalo OA ID</label>
                         <input
+                            title="Zalo OA ID"
                             value={form.zalo.oaId}
                             onChange={e => setForm(p => ({ ...p, zalo: { ...p.zalo, oaId: e.target.value } }))}
                             className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20 focus:outline-none"
@@ -359,9 +365,10 @@ export default function ChatIntegrationsPage() {
                         />
                     </div>
                     <div className="space-y-2">
-                        <label className="text-sm font-medium text-gray-700">OA Access Token {status?.zalo.oaAccessTokenSet && <span className="text-green-600">(đã lưu)</span>}</label>
+                        <label title="OA Access Token" className="text-sm font-medium text-gray-700">OA Access Token {status?.zalo.oaAccessTokenSet && <span className="text-green-600">(đã lưu)</span>}</label>
                         <input
                             type="password"
+                            title="Zalo OA Access Token"
                             value={form.zalo.oaAccessToken}
                             onChange={e => setForm(p => ({ ...p, zalo: { ...p.zalo, oaAccessToken: e.target.value } }))}
                             className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20 focus:outline-none"
@@ -369,16 +376,17 @@ export default function ChatIntegrationsPage() {
                         />
                     </div>
                     <div className="space-y-2">
-                        <label className="text-sm font-medium text-gray-700">Webhook Secret {status?.zalo.webhookSecretSet && <span className="text-green-600">(đã lưu)</span>}</label>
+                        <label title="Webhook Secret" className="text-sm font-medium text-gray-700">Webhook Secret {status?.zalo.webhookSecretSet && <span className="text-green-600">(đã lưu)</span>}</label>
                         <div className="flex gap-2">
                             <input
                                 type="password"
+                                title="Zalo Webhook Secret"
                                 value={form.zalo.webhookSecret}
                                 onChange={e => setForm(p => ({ ...p, zalo: { ...p.zalo, webhookSecret: e.target.value } }))}
                                 className="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20 focus:outline-none"
                                 placeholder={status?.zalo.webhookSecretSet ? 'Để trống để giữ secret hiện tại' : 'Tạo hoặc nhập webhook secret'}
                             />
-                            <button onClick={() => setForm(p => ({ ...p, zalo: { ...p.zalo, webhookSecret: randomToken('zalo_hook') } }))} className="px-3 py-2 border rounded-lg hover:bg-gray-50 text-sm">
+                            <button title="Tạo webhook secret" onClick={() => setForm(p => ({ ...p, zalo: { ...p.zalo, webhookSecret: randomToken('zalo_hook') } }))} className="px-3 py-2 border rounded-lg hover:bg-gray-50 text-sm">
                                 Tạo
                             </button>
                         </div>
@@ -388,7 +396,7 @@ export default function ChatIntegrationsPage() {
                             <ShieldCheck size={14} />
                             Nếu Zalo không hỗ trợ header secret trong dashboard, dùng URL webhook kèm `?secret=...`.
                         </div>
-                        <button onClick={() => testChannel('zalo')} disabled={testing === 'zalo'} className="flex items-center gap-2 px-4 py-2 border rounded-lg hover:bg-gray-50 text-sm">
+                        <button title="Kiểm tra Zalo" onClick={() => testChannel('zalo')} disabled={testing === 'zalo'} className="flex items-center gap-2 px-4 py-2 border rounded-lg hover:bg-gray-50 text-sm">
                             {testing === 'zalo' ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
                             Kiểm tra Zalo
                         </button>
@@ -404,6 +412,7 @@ export default function ChatIntegrationsPage() {
                     </div>
                     <button
                         type="button"
+                        title="Thêm mẫu"
                         onClick={addQuickReply}
                         className="flex items-center gap-1.5 px-3 py-2 border rounded-lg hover:bg-white text-sm"
                     >
@@ -417,6 +426,7 @@ export default function ChatIntegrationsPage() {
                     ) : form.quickReplies.map((reply, index) => (
                         <div key={reply.id} className="grid gap-3 border-b pb-4 last:border-b-0 last:pb-0 md:grid-cols-[180px_150px_1fr_auto]">
                             <input
+                                title="Tên mẫu"
                                 value={reply.title}
                                 maxLength={60}
                                 onChange={event => updateQuickReply(index, { title: event.target.value })}
@@ -426,6 +436,7 @@ export default function ChatIntegrationsPage() {
                             <div className="relative">
                                 <span className="absolute left-3 top-2 text-gray-400">/</span>
                                 <input
+                                    title="Shortcut"
                                     value={reply.shortcut.replace(/^\//, '')}
                                     maxLength={24}
                                     onChange={event => updateQuickReply(index, { shortcut: event.target.value })}
@@ -434,6 +445,7 @@ export default function ChatIntegrationsPage() {
                                 />
                             </div>
                             <textarea
+                                title="Nội dung gửi cho khách"
                                 value={reply.text}
                                 maxLength={500}
                                 rows={2}
@@ -444,17 +456,17 @@ export default function ChatIntegrationsPage() {
                             <div className="flex items-start gap-2">
                                 <button
                                     type="button"
+                                    title={reply.enabled ? 'Đang sử dụng' : 'Đã tắt'}
                                     onClick={() => updateQuickReply(index, { enabled: !reply.enabled })}
                                     className={`p-2 rounded-lg border ${reply.enabled ? 'text-green-700 bg-green-50 border-green-200' : 'text-gray-500 bg-gray-50'}`}
-                                    title={reply.enabled ? 'Đang sử dụng' : 'Đã tắt'}
                                 >
                                     {reply.enabled ? <ToggleRight size={20} /> : <ToggleLeft size={20} />}
                                 </button>
                                 <button
                                     type="button"
+                                    title="Xóa mẫu"
                                     onClick={() => removeQuickReply(index)}
                                     className="p-2 rounded-lg border text-red-600 hover:bg-red-50"
-                                    title="Xóa mẫu"
                                 >
                                     <Trash2 size={18} />
                                 </button>

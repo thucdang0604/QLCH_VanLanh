@@ -117,6 +117,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
                 {/* Header */}
                 <div className="bg-gradient-to-r from-red-500 to-orange-500 p-6 relative">
                     <button
+                        title="Đóng"
                         onClick={onClose}
                         className="absolute top-4 right-4 p-1 text-white/80 hover:text-white transition-colors"
                     >
@@ -136,6 +137,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
                 {/* Tabs */}
                 <div className="flex border-b">
                     <button
+                        title="Đăng nhập"
                         onClick={() => handleTabChange('login')}
                         className={`flex-1 py-3 text-sm font-semibold transition-colors ${activeTab === 'login'
                             ? 'text-orange-600 border-b-2 border-orange-500'
@@ -145,6 +147,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
                         Đăng nhập
                     </button>
                     <button
+                        title="Đăng ký"
                         onClick={() => handleTabChange('register')}
                         className={`flex-1 py-3 text-sm font-semibold transition-colors ${activeTab === 'register'
                             ? 'text-orange-600 border-b-2 border-orange-500'

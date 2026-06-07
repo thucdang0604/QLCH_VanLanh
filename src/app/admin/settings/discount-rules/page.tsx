@@ -54,12 +54,12 @@ function AccessoryRuleModal({ rule, onClose, onSave }: {
             <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
                 <div className="flex items-center justify-between p-5 border-b">
                     <h2 className="text-lg font-bold">{rule ? 'Sửa rule' : 'Thêm rule giảm giá'}</h2>
-                    <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded-lg"><X size={20} /></button>
+                    <button title="Hủy" onClick={onClose} className="p-1 hover:bg-gray-100 rounded-lg"><X size={20} /></button>
                 </div>
                 <div className="p-5 space-y-4">
                     <div>
                         <label className="text-sm text-gray-600 mb-1 block">Tên rule *</label>
-                        <input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
+                        <input title="Tên rule" value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
                             placeholder="VD: Giảm 40% cường lực khi thay màn"
                             className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none" />
                     </div>
@@ -87,7 +87,7 @@ function AccessoryRuleModal({ rule, onClose, onSave }: {
                     <div className="flex gap-3">
                         <div className="flex-1">
                             <label className="text-sm text-gray-600 mb-1 block">Loại giảm</label>
-                            <select value={form.discountType} onChange={e => setForm(p => ({ ...p, discountType: e.target.value as 'percentage' | 'fixed' }))}
+                            <select title="Chọn loại giảm" value={form.discountType} onChange={e => setForm(p => ({ ...p, discountType: e.target.value as 'percentage' | 'fixed' }))}
                                 className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none">
                                 <option value="percentage">Phần trăm (%)</option>
                                 <option value="fixed">Số tiền cố định</option>
@@ -248,6 +248,7 @@ export default function DiscountRulesPage() {
                                         </td>
                                         <td className="px-4 py-3">
                                             <input
+                                                title="Mức chi tiêu tối thiểu"
                                                 type="number"
                                                 value={tier.minSpent}
                                                 onChange={e => handleTierChange(idx, 'minSpent', Number(e.target.value))}
@@ -257,6 +258,7 @@ export default function DiscountRulesPage() {
                                         <td className="px-4 py-3">
                                             <div className="flex items-center gap-2">
                                                 <input
+                                                    title="Mức giảm giá"
                                                     type="number"
                                                     value={tier.discountPercent}
                                                     onChange={e => handleTierChange(idx, 'discountPercent', Number(e.target.value))}
@@ -271,6 +273,7 @@ export default function DiscountRulesPage() {
                         </table>
                         <div className="p-4 bg-gray-50 border-t flex justify-end">
                             <button
+                                title="Lưu cấu hình hạng"
                                 onClick={handleSaveTiers}
                                 disabled={savingTiers}
                                 className="bg-orange-500 text-white px-5 py-2 rounded-lg font-medium hover:bg-orange-600 disabled:opacity-50"
@@ -286,7 +289,7 @@ export default function DiscountRulesPage() {
             {activeTab === 'accessories' && (
                 <div className="space-y-4">
                     <div className="flex justify-end">
-                        <button onClick={() => { setEditRule(null); setShowAccessoryModal(true); }}
+                        <button title="Thêm rule phụ kiện" onClick={() => { setEditRule(null); setShowAccessoryModal(true); }}
                             className="flex items-center gap-2 bg-orange-500 text-white px-4 py-2 rounded-xl hover:bg-orange-600 font-medium text-sm">
                             <Plus size={18} /> Thêm rule phụ kiện
                         </button>
@@ -314,11 +317,11 @@ export default function DiscountRulesPage() {
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-1 shrink-0">
-                                        <button onClick={() => toggleAccessoryActive(rule)} className="p-1.5 hover:bg-gray-100 rounded-lg" title={rule.isActive ? 'Tắt' : 'Bật'}>
+                                        <button title={rule.isActive ? 'Tắt' : 'Bật'} onClick={() => toggleAccessoryActive(rule)} className="p-1.5 hover:bg-gray-100 rounded-lg">
                                             {rule.isActive ? <ToggleRight size={20} className="text-green-500" /> : <ToggleLeft size={20} className="text-gray-400" />}
                                         </button>
-                                        <button onClick={() => { setEditRule(rule); setShowAccessoryModal(true); }} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400"><Edit2 size={14} /></button>
-                                        <button onClick={() => handleDeleteAccessoryRule(rule.id)} className="p-1.5 hover:bg-red-50 rounded-lg text-gray-400 hover:text-red-500"><Trash2 size={14} /></button>
+                                        <button title="Sửa rule phụ kiện" onClick={() => { setEditRule(rule); setShowAccessoryModal(true); }} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400"><Edit2 size={14} /></button>
+                                        <button title="Xóa rule phụ kiện" onClick={() => handleDeleteAccessoryRule(rule.id)} className="p-1.5 hover:bg-red-50 rounded-lg text-gray-400 hover:text-red-500"><Trash2 size={14} /></button>
                                     </div>
                                 </div>
                             </div>

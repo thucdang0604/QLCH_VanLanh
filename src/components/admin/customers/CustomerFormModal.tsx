@@ -102,7 +102,7 @@ export default function CustomerFormModal({ isOpen, onClose, onSave, initialData
             <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
                 <div className="flex items-center justify-between p-5 border-b sticky top-0 bg-white z-10">
                     <h2 className="text-lg font-bold text-gray-900">{isEditMode ? 'Cập nhật Khách hàng' : 'Thêm mới Khách hàng'}</h2>
-                    <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded-lg text-gray-500"><X size={20} /></button>
+                    <button title="Đóng" onClick={onClose} className="p-1 hover:bg-gray-100 rounded-lg text-gray-500"><X size={20} /></button>
                 </div>
                 
                 <div className="p-5 space-y-4">
@@ -110,6 +110,7 @@ export default function CustomerFormModal({ isOpen, onClose, onSave, initialData
                     <div>
                         <label className="text-sm font-medium text-gray-700 mb-1 block">Số điện thoại *</label>
                         <input 
+                            title="Số điện thoại"
                             value={form.phone} 
                             onChange={e => setForm(p => ({ ...p, phone: e.target.value.replace(/[^0-9]/g, '') }))}
                             disabled={isEditMode}
@@ -123,6 +124,7 @@ export default function CustomerFormModal({ isOpen, onClose, onSave, initialData
                     <div>
                         <label className="text-sm font-medium text-gray-700 mb-1 block">Họ và tên *</label>
                         <input 
+                            title="Họ và tên"
                             value={form.name} 
                             onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
                             placeholder="Tên khách hàng"
@@ -158,12 +160,13 @@ export default function CustomerFormModal({ isOpen, onClose, onSave, initialData
                             {(form.tags || []).map(tag => (
                                 <span key={tag} className="bg-blue-50 text-blue-700 border border-blue-200 text-xs px-2 py-1 rounded-md flex items-center gap-1 font-medium">
                                     {tag}
-                                    <button onClick={() => removeTag(tag)} className="hover:text-blue-900"><X size={12} /></button>
+                                    <button title="Xóa" onClick={() => removeTag(tag)} className="hover:text-blue-900"><X size={12} /></button>
                                 </span>
                             ))}
                         </div>
                         <div className="flex gap-2 relative group">
                             <input 
+                                title="Thẻ"
                                 value={tagInput} 
                                 onChange={e => setTagInput(e.target.value)}
                                 onKeyDown={e => {

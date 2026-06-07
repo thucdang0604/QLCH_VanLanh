@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
-import { Plus, Search, Edit, Trash2, Package, Loader2, FileSpreadsheet, QrCode, AlertTriangle } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, Package, Loader2, QrCode, AlertTriangle } from 'lucide-react';
 import { useFirestoreCollection, updateDocument } from '@/lib/useFirestore';
 
 import { orderBy } from 'firebase/firestore';
@@ -12,7 +12,6 @@ import PaginationBar from '@/components/admin/PaginationBar';
 import { triggerRevalidate } from '@/lib/revalidate';
 import UniversalProductModal from '@/components/admin/UniversalProductModal';
 import CategoryTaxonomySelector from '@/components/admin/CategoryTaxonomySelector';
-import ExcelImportModal from '@/components/admin/ExcelImportModal';
 import ProductSeriesManager from '@/components/admin/ProductSeriesManager';
 import ProductQrLabelModal from '@/components/admin/ProductQrLabelModal';
 import FixHiddenProductsModal from '@/components/admin/FixHiddenProductsModal';
@@ -42,7 +41,6 @@ export default function ProductsPage() {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingProduct, setEditingProduct] = useState<Product | null>(null);
     const [qrProduct, setQrProduct] = useState<(Product & { id: string }) | null>(null);
-    const [showExcelImport, setShowExcelImport] = useState(false);
     const [showFixHidden, setShowFixHidden] = useState(false);
 
     const handleDelete = async (product: Product) => {
@@ -117,13 +115,6 @@ export default function ProductsPage() {
                     >
                         <AlertTriangle size={18} />
                         Khắc phục SP bị ẩn
-                    </button>
-                    <button
-                        onClick={() => setShowExcelImport(true)}
-                        className="flex items-center gap-2 border-2 border-green-300 text-green-700 px-4 py-2.5 rounded-lg font-medium hover:bg-green-50 transition-colors text-sm"
-                    >
-                        <FileSpreadsheet size={18} />
-                        Import Excel
                     </button>
                     <button
                         onClick={() => { setEditingProduct(null); setIsModalOpen(true); }}
@@ -321,12 +312,14 @@ export default function ProductsPage() {
                                             <button
                                                 onClick={() => { setEditingProduct(product); setIsModalOpen(true); }}
                                                 className="p-2 hover:bg-blue-100 text-blue-600 rounded-lg"
+                                                title="Sửa sản phẩm"
                                             >
                                                 <Edit size={18} />
                                             </button>
                                             <button
                                                 onClick={() => handleDelete(product)}
                                                 className="p-2 hover:bg-red-100 text-red-600 rounded-lg"
+                                                title="Xóa sản phẩm"
                                             >
                                                 <Trash2 size={18} />
                                             </button>
@@ -446,8 +439,6 @@ export default function ProductsPage() {
                 onCreated={() => setIsModalOpen(false)}
                 onUpdated={() => setIsModalOpen(false)}
             />
-
-            {showExcelImport && <ExcelImportModal mode="product" onClose={() => setShowExcelImport(false)} />}
             <ProductQrLabelModal product={qrProduct} onClose={() => setQrProduct(null)} />
             <FixHiddenProductsModal isOpen={showFixHidden} onClose={() => setShowFixHidden(false)} products={products} />
         </div>

@@ -101,6 +101,11 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
             }
             : undefined,
     };
+    const categoryIds = Array.isArray(data.categoryIds)
+        ? data.categoryIds.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+        : [];
+    const categorySlug = categoryIds[categoryIds.length - 1] || normalizeSlug(String(data.category || ''));
+    const categoryHref = categorySlug ? `/category/${categorySlug}` : '/';
 
     return (
         <div className="min-h-screen max-w-[1200px] mx-auto px-2 md:px-4 py-2">
@@ -114,7 +119,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
                 <nav className="flex items-center gap-2 text-sm text-gray-500 mb-4">
                     <Link href="/" className="hover:text-orange-600">Trang chủ</Link>
                     <ChevronRight size={14} />
-                    <Link href={`/category/${normalizeSlug(String(data.category ?? 'san-pham'))}`} className="hover:text-orange-600">
+                    <Link href={categoryHref} className="hover:text-orange-600">
                         {String(data.category || 'Sản phẩm')}
                     </Link>
                     <ChevronRight size={14} />

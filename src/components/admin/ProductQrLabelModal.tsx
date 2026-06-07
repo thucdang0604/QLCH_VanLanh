@@ -180,6 +180,7 @@ export default function ProductQrLabelModal({ product, onClose }: ProductQrLabel
                     <div>
                         <label className="mb-1.5 block text-sm font-semibold text-gray-700">Khổ giấy in</label>
                         <select
+                            title="Khổ giấy in"
                             value={paperId}
                             onChange={(event) => setPaperId(event.target.value as PaperPresetId)}
                             className="h-11 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm focus:border-orange-500 focus:outline-none"
@@ -203,6 +204,7 @@ export default function ProductQrLabelModal({ product, onClose }: ProductQrLabel
                                     <button
                                         key={item.id}
                                         type="button"
+                                        title={item.label}
                                         onClick={() => setLabelMode(item.id)}
                                         className={`flex min-h-16 flex-col items-center justify-center gap-1 rounded-lg border px-2 py-2 text-xs font-semibold transition-colors ${
                                             labelMode === item.id ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'
@@ -219,6 +221,7 @@ export default function ProductQrLabelModal({ product, onClose }: ProductQrLabel
                     <div>
                         <label className="mb-1.5 block text-sm font-semibold text-gray-700">Số lượng tem</label>
                         <input
+                            title="Số lượng tem"
                             type="number"
                             min={1}
                             max={100}

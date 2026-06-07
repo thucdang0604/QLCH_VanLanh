@@ -169,9 +169,9 @@ export default function GlobalSearch() {
                     className="w-full h-10 pl-10 pr-10 bg-gray-100 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 transition-shadow"
                 />
                 <button 
+                    title="Quét mã QR"
                     onClick={() => setShowScanner(true)}
                     className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-gray-500 hover:text-orange-600 hover:bg-orange-50 rounded transition-colors"
-                    title="Quét mã QR"
                 >
                     <QrCode size={18} />
                 </button>
@@ -233,7 +233,7 @@ export default function GlobalSearch() {
                                 <QrCode size={20} className="text-orange-500"/>
                                 Quét mã QR
                             </h3>
-                            <button onClick={() => setShowScanner(false)} className="p-2 hover:bg-gray-200 rounded-xl transition-colors text-gray-500">
+                            <button title="Đóng" onClick={() => setShowScanner(false)} className="p-2 hover:bg-gray-200 rounded-xl transition-colors text-gray-500">
                                 <X size={20} />
                             </button>
                         </div>
@@ -253,6 +253,7 @@ export default function GlobalSearch() {
                             <div className="p-4 bg-gray-50 border-t">
                                 <label className="block text-xs font-medium text-gray-500 mb-1">Chọn Camera</label>
                                 <select 
+                                    title="Chọn camera"
                                     className="w-full p-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
                                     value={selectedDevice}
                                     onChange={e => setSelectedDevice(e.target.value)}

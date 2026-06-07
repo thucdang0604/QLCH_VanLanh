@@ -83,13 +83,13 @@ export function WarrantyConfigForm({ config, onChange }: WarrantyConfigFormProps
                 <legend className="text-sm font-bold text-gray-900 px-2">📋 Thông tin chung phiếu bảo hành</legend>
                 <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">Tiêu đề phiếu</label>
-                    <input type="text" value={config.title}
+                    <input title="Tiêu đề phiếu" type="text" value={config.title}
                         onChange={e => updateField('title', e.target.value)}
                         className="w-full px-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-orange-500/20 focus:outline-none font-black text-center uppercase tracking-wider" />
                 </div>
                 <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">Footer Note (Cuối phiếu)</label>
-                    <input type="text" value={config.footerNote || ''}
+                    <input title="Footer Note (Cuối phiếu)" type="text" value={config.footerNote || ''}
                         onChange={e => updateField('footerNote', e.target.value)}
                         className="w-full px-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-orange-500/20 focus:outline-none" />
                 </div>
@@ -99,7 +99,7 @@ export function WarrantyConfigForm({ config, onChange }: WarrantyConfigFormProps
                 <legend className="text-sm font-bold text-gray-900 px-2">⚠️ Lưu ý & Chính sách chung</legend>
                 <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">Tiêu đề phần lưu ý (tuỳ chọn)</label>
-                    <input type="text" value={config.notesTitle || ''} placeholder="Ví dụ: MIỄN PHÍ TRỌN ĐỜI:"
+                    <input title="Tiêu đề phần lưu ý (tuỳ chọn)" type="text" value={config.notesTitle || ''} placeholder="Ví dụ: MIỄN PHÍ TRỌN ĐỜI:"
                         onChange={e => updateField('notesTitle', e.target.value)}
                         className="w-full px-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-orange-500/20 focus:outline-none" />
                 </div>
@@ -109,13 +109,14 @@ export function WarrantyConfigForm({ config, onChange }: WarrantyConfigFormProps
                         <div key={i} className="flex items-start gap-2">
                             <span className="text-xs text-gray-400 font-bold mt-2.5 shrink-0 w-5 text-right">{i + 1}.</span>
                             <textarea
+                                title="Các dòng lưu ý chi tiết"
                                 rows={2}
                                 value={note}
                                 onChange={e => updateNote(i, e.target.value)}
                                 className="flex-1 px-3 py-2 border rounded-lg text-xs focus:ring-2 focus:ring-orange-500/20 focus:outline-none resize-none"
                             />
                             {config.notes.length > 1 && (
-                                <button onClick={() => removeNote(i)}
+                                <button title="Xóa dòng lưu ý" onClick={() => removeNote(i)}
                                     className="mt-1.5 p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
                                     <Trash2 size={14} />
                                 </button>
@@ -133,6 +134,7 @@ export function WarrantyConfigForm({ config, onChange }: WarrantyConfigFormProps
                 <div className="flex items-center justify-between mb-2">
                     <legend className="text-sm font-bold text-gray-900 px-2">📑 Bảng Quyền lợi bảo hành</legend>
                     <select
+                        title="Chọn mẫu bảng"
                         value={config.tableStyle}
                         onChange={e => {
                             const newStyle = e.target.value as '2col' | '3col';
@@ -167,16 +169,16 @@ export function WarrantyConfigForm({ config, onChange }: WarrantyConfigFormProps
                 <div className="space-y-4 mt-4">
                     {config.tableRows.map((row, i) => (
                         <div key={row.id} className="border border-gray-200 rounded-lg p-3 bg-gray-50 relative">
-                            <button onClick={() => removeRow(i)} className="absolute top-3 right-3 text-gray-400 hover:text-red-500">
+                            <button title="Xóa nhóm dịch vụ/quyền lợi" onClick={() => removeRow(i)} className="absolute top-3 right-3 text-gray-400 hover:text-red-500">
                                 <Trash2 size={16} />
                             </button>
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                 <div className="space-y-2">
                                     <label className="block text-[10px] font-semibold text-gray-500 uppercase">Cột 1 (Dịch vụ / Thời gian)</label>
-                                    <input type="text" value={row.col1} onChange={e => updateRow(i, { ...row, col1: e.target.value })}
+                                    <input title="Cột 1 (Dịch vụ / Thời gian)" type="text" value={row.col1} onChange={e => updateRow(i, { ...row, col1: e.target.value })}
                                         placeholder={config.tableStyle === '3col' ? 'THAY PIN' : '6 tháng'}
                                         className="w-full px-3 py-2 border rounded text-xs focus:outline-none font-bold uppercase" />
-                                    <input type="text" value={row.col1Sub || ''} onChange={e => updateRow(i, { ...row, col1Sub: e.target.value })}
+                                    <input title="Cột 1 (Dịch vụ / Thời gian)" type="text" value={row.col1Sub || ''} onChange={e => updateRow(i, { ...row, col1Sub: e.target.value })}
                                         placeholder={config.tableStyle === '3col' ? '3 - 12 tháng' : 'Bảo hành tiêu chuẩn'}
                                         className="w-full px-3 py-2 border rounded text-xs focus:outline-none" />
                                 </div>
@@ -184,10 +186,10 @@ export function WarrantyConfigForm({ config, onChange }: WarrantyConfigFormProps
                                     <label className="block text-[10px] font-semibold text-gray-500 uppercase">Danh sách quyền lợi</label>
                                     {row.benefits.map((benefit, bIndex) => (
                                         <div key={bIndex} className="flex gap-2">
-                                            <input type="text" value={benefit} onChange={e => updateRowBenefit(i, bIndex, e.target.value)}
+                                            <input title="Danh sách quyền lợi" type="text" value={benefit} onChange={e => updateRowBenefit(i, bIndex, e.target.value)}
                                                 className="flex-1 px-3 py-1.5 border rounded text-xs focus:outline-none" />
                                             {row.benefits.length > 1 && (
-                                                <button onClick={() => removeRowBenefit(i, bIndex)} className="text-gray-400 hover:text-red-500">
+                                                <button title="Xóa quyền lợi" onClick={() => removeRowBenefit(i, bIndex)} className="text-gray-400 hover:text-red-500">
                                                     <X size={14} />
                                                 </button>
                                             )}
@@ -201,7 +203,7 @@ export function WarrantyConfigForm({ config, onChange }: WarrantyConfigFormProps
                         </div>
                     ))}
                 </div>
-                <button onClick={addRow}
+                <button title="Thêm nhóm dịch vụ/quyền lợi mới" onClick={addRow}
                     className="w-full py-2 border-2 border-dashed border-gray-300 text-gray-500 font-semibold rounded-lg hover:bg-gray-50 hover:text-orange-500 hover:border-orange-300 transition-colors text-sm">
                     + Thêm nhóm dịch vụ/quyền lợi mới
                 </button>
@@ -222,13 +224,13 @@ interface WarrantyPreviewProps {
 
 export function WarrantyPreview({ globalConfig, warrantyConfig, type }: WarrantyPreviewProps) {
     return (
-        <div style={{ padding: '0px', fontSize: '10px', lineHeight: '1.4', color: '#000', fontFamily: 'sans-serif' }}>
+        <div title="Preview" style={{ padding: '0px', fontSize: '10px', lineHeight: '1.4', color: '#000', fontFamily: 'sans-serif' }}>
             {/* HEADER */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', borderBottom: '2px solid #000', paddingBottom: '8px' }}>
+            <div title="Header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', borderBottom: '2px solid #000', paddingBottom: '8px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     {globalConfig.logoUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={globalConfig.logoUrl} alt="Logo" style={{ width: 45, height: 45, objectFit: 'contain' }} />
+                        <img title="Logo" src={globalConfig.logoUrl} alt="Logo" style={{ width: 45, height: 45, objectFit: 'contain' }} />
                     ) : (
                         <div style={{ width: 45, height: 45, border: '2px solid #000', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 900, textAlign: 'center' }}>
                             VĂN<br />LÀNH
@@ -257,44 +259,44 @@ export function WarrantyPreview({ globalConfig, warrantyConfig, type }: Warranty
             </h1>
 
             {/* CUSTOMER INFO MOCKUP */}
-            <div style={{ border: '1px dotted #000', borderRadius: 4, padding: 6, marginBottom: 8, fontSize: 9 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 12px' }}>
-                    <div style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Họ & tên: <b style={{ float: 'right' }}>Nguyễn Văn Khách</b></div>
-                    <div style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Điện thoại: <b style={{ float: 'right' }}>0909 123 456</b></div>
-                    <div style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2, gridColumn: '1 / -1' }}>Địa chỉ: <b style={{ float: 'right' }}>123 Lê Lợi, Quận 1, HCM</b></div>
+            <div title="Thông tin khách hàng" style={{ border: '1px dotted #000', borderRadius: 4, padding: 6, marginBottom: 8, fontSize: 9 }}>
+                <div title="Thông tin thiết bị" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 12px' }}>
+                    <div title="Họ & tên" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Họ & tên: <b style={{ float: 'right' }}>Nguyễn Văn Khách</b></div>
+                    <div title="Điện thoại" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Điện thoại: <b style={{ float: 'right' }}>0909 123 456</b></div>
+                    <div title="Địa chỉ" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2, gridColumn: '1 / -1' }}>Địa chỉ: <b style={{ float: 'right' }}>123 Lê Lợi, Quận 1, HCM</b></div>
                     
                     {type === 'accessory' ? (
-                        <div style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2, gridColumn: '1 / -1' }}>Sản phẩm: <b style={{ float: 'right' }}>Cáp sạc Type-C</b></div>
+                        <div title="Sản phẩm" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2, gridColumn: '1 / -1' }}>Sản phẩm: <b style={{ float: 'right' }}>Cáp sạc Type-C</b></div>
                     ) : (
-                        <div style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2, gridColumn: '1 / -1' }}>Thiết bị: <b style={{ float: 'right' }}>iPhone 15 Pro Max</b></div>
+                        <div title="Thiết bị" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2, gridColumn: '1 / -1' }}>Thiết bị: <b style={{ float: 'right' }}>iPhone 15 Pro Max</b></div>
                     )}
                     
-                    <div style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Màu: <b style={{ float: 'right' }}>Titan Đen</b></div>
-                    <div style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Số IMEI/SERI: <b style={{ float: 'right' }}>3568...1234</b></div>
+                    <div title="Màu" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Màu: <b style={{ float: 'right' }}>Titan Đen</b></div>
+                    <div title="Số IMEI/SERI" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Số IMEI/SERI: <b style={{ float: 'right' }}>3568...1234</b></div>
                     
                     {type === 'device' && (
                         <>
-                            <div style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>RAM: <b style={{ float: 'right' }}>8GB</b></div>
-                            <div style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Bộ nhớ: <b style={{ float: 'right' }}>256GB</b></div>
-                            <div style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Giá bán: <b style={{ float: 'right' }}>25.000.000đ</b></div>
-                            <div style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Tình trạng: <b style={{ float: 'right' }}>99%</b></div>
-                            <div style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2, gridColumn: '1 / -1' }}>Phụ kiện: <b style={{ float: 'right' }}>Sạc cáp, ốp lưng</b></div>
-                            <div style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Ngày mua: <b style={{ float: 'right' }}>15/10/2026</b></div>
-                            <div style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Thời hạn BH: <b style={{ float: 'right' }}>6 Tháng</b></div>
+                            <div title="RAM" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>RAM: <b style={{ float: 'right' }}>8GB</b></div>
+                            <div title="Bộ nhớ" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Bộ nhớ: <b style={{ float: 'right' }}>256GB</b></div>
+                            <div title="Giá bán" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Giá bán: <b style={{ float: 'right' }}>25.000.000đ</b></div>
+                            <div title="Tình trạng" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Tình trạng: <b style={{ float: 'right' }}>99%</b></div>
+                            <div title="Phụ kiện" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2, gridColumn: '1 / -1' }}>Phụ kiện: <b style={{ float: 'right' }}>Sạc cáp, ốp lưng</b></div>
+                            <div title="Ngày mua" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Ngày mua: <b style={{ float: 'right' }}>15/10/2026</b></div>
+                            <div title="Thời hạn BH" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Thời hạn BH: <b style={{ float: 'right' }}>6 Tháng</b></div>
                         </>
                     )}
                     {type === 'repair' && (
                         <>
-                            <div style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2, gridColumn: '1 / -1' }}>Cấu hình/Pass: <b style={{ float: 'right' }}>123456</b></div>
-                            <div style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2, gridColumn: '1 / -1' }}>Dịch vụ: <b style={{ float: 'right' }}>Thay màn hình</b></div>
-                            <div style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Chi phí: <b style={{ float: 'right' }}>2.500.000đ</b></div>
-                            <div style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Bảo hành từ: <b style={{ float: 'right' }}>15/10/2026</b></div>
+                            <div title="Cấu hình/Pass" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2, gridColumn: '1 / -1' }}>Cấu hình/Pass: <b style={{ float: 'right' }}>123456</b></div>
+                            <div title="Dịch vụ" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2, gridColumn: '1 / -1' }}>Dịch vụ: <b style={{ float: 'right' }}>Thay màn hình</b></div>
+                            <div title="Chi phí" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Chi phí: <b style={{ float: 'right' }}>2.500.000đ</b></div>
+                            <div title="Bảo hành từ" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Bảo hành từ: <b style={{ float: 'right' }}>15/10/2026</b></div>
                         </>
                     )}
                     {type === 'accessory' && (
                         <>
-                            <div style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Giá bán: <b style={{ float: 'right' }}>250.000đ</b></div>
-                            <div style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Ngày mua: <b style={{ float: 'right' }}>15/10/2026</b></div>
+                            <div title="Giá bán" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Giá bán: <b style={{ float: 'right' }}>250.000đ</b></div>
+                            <div title="Ngày mua" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Ngày mua: <b style={{ float: 'right' }}>15/10/2026</b></div>
                         </>
                     )}
                 </div>
@@ -302,9 +304,9 @@ export function WarrantyPreview({ globalConfig, warrantyConfig, type }: Warranty
 
             {/* NOTES */}
             {warrantyConfig.notes.length > 0 && (
-                <div style={{ marginBottom: 10, fontSize: 8 }}>
+                <div title="Lưu ý" style={{ marginBottom: 10, fontSize: 8 }}>
                     {warrantyConfig.notesTitle && <div style={{ fontWeight: 800, textTransform: 'uppercase', marginBottom: 2 }}>{warrantyConfig.notesTitle}</div>}
-                    <ul style={{ paddingLeft: 12, margin: 0 }}>
+                    <ul title="Danh sách lưu ý" style={{ paddingLeft: 12, margin: 0 }}>
                         {warrantyConfig.notes.map((note, i) => (
                             <li key={i} style={{ marginBottom: 2 }}>{note}</li>
                         ))}
@@ -313,7 +315,7 @@ export function WarrantyPreview({ globalConfig, warrantyConfig, type }: Warranty
             )}
 
             {/* TABLE */}
-            <div style={{ border: '1px solid #000', borderRadius: 4, overflow: 'hidden', marginBottom: 10 }}>
+            <div title="Bảng quyền lợi" style={{ border: '1px solid #000', borderRadius: 4, overflow: 'hidden', marginBottom: 10 }}>
                 <div style={{ display: 'flex', background: '#e5e5e5', borderBottom: '1px solid #000', fontWeight: 800, textAlign: 'center', fontSize: 9 }}>
                     {warrantyConfig.tableHeaders.map((header, i) => {
                         const isLast = i === warrantyConfig.tableHeaders.length - 1;
@@ -333,7 +335,7 @@ export function WarrantyPreview({ globalConfig, warrantyConfig, type }: Warranty
                 {warrantyConfig.tableRows.map((row, i) => {
                     const isLastRow = i === warrantyConfig.tableRows.length - 1;
                     return (
-                        <div key={row.id} style={{ display: 'flex', borderBottom: isLastRow ? 'none' : '1px solid #000', fontSize: 8 }}>
+                        <div title="Nhóm dịch vụ/quyền lợi" key={row.id} style={{ display: 'flex', borderBottom: isLastRow ? 'none' : '1px solid #000', fontSize: 8 }}>
                             {warrantyConfig.tableStyle === '2col' ? (
                                 <>
                                     <div style={{ width: '30%', padding: '4px', borderRight: '1px solid #000', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
@@ -341,7 +343,7 @@ export function WarrantyPreview({ globalConfig, warrantyConfig, type }: Warranty
                                         {row.col1Sub && <div style={{ fontWeight: 600 }}>{row.col1Sub}</div>}
                                     </div>
                                     <div style={{ width: '70%', padding: '4px 6px' }}>
-                                        <ul style={{ paddingLeft: 12, margin: 0 }}>
+                                        <ul title="Danh sách quyền lợi" style={{ paddingLeft: 12, margin: 0 }}>
                                             {row.benefits.map((b, bi) => (
                                                 <li key={bi} style={{ marginBottom: 2 }}>{b}</li>
                                             ))}
@@ -357,7 +359,7 @@ export function WarrantyPreview({ globalConfig, warrantyConfig, type }: Warranty
                                         {row.col1Sub}
                                     </div>
                                     <div style={{ width: '50%', padding: '4px 6px' }}>
-                                        <ul style={{ paddingLeft: 12, margin: 0 }}>
+                                        <ul title="Danh sách quyền lợi" style={{ paddingLeft: 12, margin: 0 }}>
                                             {row.benefits.map((b, bi) => (
                                                 <li key={bi} style={{ marginBottom: 2 }}>{b}</li>
                                             ))}
@@ -372,7 +374,7 @@ export function WarrantyPreview({ globalConfig, warrantyConfig, type }: Warranty
 
             {/* FOOTER */}
             {warrantyConfig.footerNote && (
-                <div style={{ textAlign: 'center', fontSize: 8, fontWeight: 700, fontStyle: 'italic', marginBottom: 12 }}>
+                <div title="Lưu ý cuối trang" style={{ textAlign: 'center', fontSize: 8, fontWeight: 700, fontStyle: 'italic', marginBottom: 12 }}>
                     {warrantyConfig.footerNote}
                 </div>
             )}

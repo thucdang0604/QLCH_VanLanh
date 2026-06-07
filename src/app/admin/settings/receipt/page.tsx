@@ -252,6 +252,7 @@ export default function ReceiptSettingsPage() {
                                     {/* eslint-disable-next-line @next/next/no-img-element */}
                                     <img src={config.logoUrl} alt="Logo" className="w-full h-full object-contain bg-white" />
                                     <button
+                                        title="Xóa logo"
                                         onClick={() => setConfig(prev => ({ ...prev, logoUrl: '' }))}
                                         className="absolute inset-0 bg-black/50 text-white opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
                                     >
@@ -278,25 +279,25 @@ export default function ReceiptSettingsPage() {
                         <legend className="text-sm font-bold text-gray-900 px-2">🏪 Thông tin cửa hàng</legend>
                         <div>
                             <label className="block text-xs font-semibold text-gray-600 mb-1">Tên cửa hàng</label>
-                            <input type="text" value={config.shopName}
+                            <input title="Tên cửa hàng" type="text" value={config.shopName}
                                 onChange={e => setConfig(prev => ({ ...prev, shopName: e.target.value }))}
                                 className="w-full px-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-orange-500/20 focus:outline-none font-bold" />
                         </div>
                         <div>
                             <label className="block text-xs font-semibold text-gray-600 mb-1">Mô tả / Slogan</label>
-                            <input type="text" value={config.shopTitle}
+                            <input title="Mô tả / Slogan" type="text" value={config.shopTitle}
                                 onChange={e => setConfig(prev => ({ ...prev, shopTitle: e.target.value }))}
                                 className="w-full px-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-orange-500/20 focus:outline-none" />
                         </div>
                         <div>
                             <label className="block text-xs font-semibold text-gray-600 mb-1">Địa chỉ</label>
-                            <input type="text" value={config.address}
+                            <input title="Địa chỉ" type="text" value={config.address}
                                 onChange={e => setConfig(prev => ({ ...prev, address: e.target.value }))}
                                 className="w-full px-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-orange-500/20 focus:outline-none" />
                         </div>
                         <div>
                             <label className="block text-xs font-semibold text-gray-600 mb-1">Hotline</label>
-                            <input type="text" value={config.hotline}
+                            <input title="Hotline" type="text" value={config.hotline}
                                 onChange={e => setConfig(prev => ({ ...prev, hotline: e.target.value }))}
                                 className="w-full px-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-orange-500/20 focus:outline-none" />
                         </div>
@@ -307,7 +308,7 @@ export default function ReceiptSettingsPage() {
                             {/* Receipt Title */}
                             <fieldset className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
                         <legend className="text-sm font-bold text-gray-900 px-2">📋 Tiêu đề biên nhận</legend>
-                        <input type="text" value={config.receiptTitle}
+                        <input title="Tiêu đề biên nhận" type="text" value={config.receiptTitle}
                             onChange={e => setConfig(prev => ({ ...prev, receiptTitle: e.target.value }))}
                             className="w-full px-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-orange-500/20 focus:outline-none font-black text-center uppercase tracking-wider" />
                     </fieldset>
@@ -321,12 +322,13 @@ export default function ReceiptSettingsPage() {
                                     <span className="text-xs text-gray-400 font-bold mt-2.5 shrink-0 w-5 text-right">{i + 1}.</span>
                                     <textarea
                                         rows={2}
+                                        title="Lưu ý"
                                         value={note}
                                         onChange={e => updateNote(i, e.target.value)}
                                         className="flex-1 px-3 py-2 border rounded-lg text-xs focus:ring-2 focus:ring-orange-500/20 focus:outline-none resize-none"
                                     />
                                     {config.notes.length > 1 && (
-                                        <button onClick={() => removeNote(i)}
+                                        <button title="Xóa lưu ý" onClick={() => removeNote(i)}
                                             className="mt-1.5 p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
                                             <Trash2 size={14} />
                                         </button>
@@ -334,7 +336,7 @@ export default function ReceiptSettingsPage() {
                                 </div>
                             ))}
                         </div>
-                        <button onClick={addNote}
+                        <button title="Thêm lưu ý" onClick={addNote}
                             className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-gray-500 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors">
                             <Plus size={14} /> Thêm dòng lưu ý
                         </button>
@@ -345,13 +347,13 @@ export default function ReceiptSettingsPage() {
                         <legend className="text-sm font-bold text-gray-900 px-2">📝 Footer</legend>
                         <div>
                             <label className="block text-xs font-semibold text-gray-600 mb-1">Dòng cuối biên nhận</label>
-                            <input type="text" value={config.footerText}
+                            <input title="Dòng cuối biên nhận" type="text" value={config.footerText}
                                 onChange={e => setConfig(prev => ({ ...prev, footerText: e.target.value }))}
                                 className="w-full px-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-orange-500/20 focus:outline-none" />
                         </div>
                         <div>
                             <label className="block text-xs font-semibold text-gray-600 mb-1">Hotline khiếu nại</label>
-                            <input type="text" value={config.complaintHotline}
+                            <input title="Hotline khiếu nại" type="text" value={config.complaintHotline}
                                 onChange={e => setConfig(prev => ({ ...prev, complaintHotline: e.target.value }))}
                                 className="w-full px-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-orange-500/20 focus:outline-none" />
                         </div>
@@ -364,6 +366,7 @@ export default function ReceiptSettingsPage() {
                         <div>
                             <label className="block text-xs font-semibold text-gray-600 mb-1">Tiêu đề hóa đơn</label>
                             <input
+                                title="Tiêu đề hóa đơn"
                                 type="text"
                                 value={config.invoice?.title || ''}
                                 onChange={(e) =>
@@ -391,6 +394,7 @@ export default function ReceiptSettingsPage() {
                             ).map(([key, label]) => (
                                 <label key={key} className="flex items-center gap-2 text-sm text-gray-700">
                                     <input
+                                        title={label}
                                         type="checkbox"
                                         checked={Boolean(config.invoice?.[key])}
                                         onChange={(e) =>
@@ -410,6 +414,7 @@ export default function ReceiptSettingsPage() {
                             <div>
                                 <label className="block text-xs font-semibold text-gray-600 mb-1">Max width (px)</label>
                                 <input
+                                    title="Max width (px)"
                                     type="number"
                                     value={config.invoice?.maxWidthPx ?? 620}
                                     onChange={(e) =>
@@ -424,6 +429,7 @@ export default function ReceiptSettingsPage() {
                             <div>
                                 <label className="block text-xs font-semibold text-gray-600 mb-1">Cỡ chữ base (px)</label>
                                 <input
+                                    title="Cỡ chữ base (px)"
                                     type="number"
                                     value={config.invoice?.baseFontSizePx ?? 11}
                                     onChange={(e) =>
@@ -440,6 +446,7 @@ export default function ReceiptSettingsPage() {
                         <div>
                             <label className="block text-xs font-semibold text-gray-600 mb-1">Footer hóa đơn</label>
                             <input
+                                title="Footer hóa đơn"
                                 type="text"
                                 value={config.invoice?.footerText || ''}
                                 onChange={(e) =>
@@ -455,6 +462,7 @@ export default function ReceiptSettingsPage() {
                         <div>
                             <label className="block text-xs font-semibold text-gray-600 mb-1">Hotline khiếu nại (hóa đơn)</label>
                             <input
+                                title="Hotline khiếu nại (hóa đơn)"
                                 type="text"
                                 value={config.invoice?.complaintHotline || ''}
                                 onChange={(e) =>
@@ -527,12 +535,12 @@ export default function ReceiptSettingsPage() {
                             </div>
                         </div>
                         <div className="p-4 bg-gray-100">
-                            <div className="bg-white shadow-md mx-auto text-black" style={{ maxWidth: '400px', padding: '16px', fontSize: '10px', lineHeight: '1.6' }}>
+                            <div title="Xem trước" className="bg-white shadow-md mx-auto text-black" style={{ maxWidth: '400px', padding: '16px', fontSize: '10px', lineHeight: '1.6' }}>
 
                                 {previewTab === 'receipt' && (
                                     <>
                                         {/* HEADER */}
-                                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', marginBottom: '6px' }}>
+                                        <div title="Header" style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', marginBottom: '6px' }}>
                                             {config.logoUrl ? (
                                                 // eslint-disable-next-line @next/next/no-img-element
                                                 <img src={config.logoUrl} alt="Logo" style={{ width: 50, height: 50, objectFit: 'contain', borderRadius: 6, border: '1px solid #ddd' }} />
@@ -541,7 +549,7 @@ export default function ReceiptSettingsPage() {
                                                     VĂN<br />LÀNH
                                                 </div>
                                             )}
-                                            <div style={{ flex: 1, textAlign: 'right' }}>
+                                            <div title="Thông tin cửa hàng" style={{ flex: 1, textAlign: 'right' }}>
                                                 <p style={{ fontWeight: 900, fontSize: 9, textTransform: 'uppercase', lineHeight: 1.2 }}>
                                                     {config.shopTitle}
                                                 </p>
@@ -554,37 +562,37 @@ export default function ReceiptSettingsPage() {
                                         </div>
 
                                         {/* TITLE */}
-                                        <h1 style={{ textAlign: 'center', fontWeight: 900, fontSize: 14, textTransform: 'uppercase', letterSpacing: 2, margin: '8px 0', borderTop: '2px solid #333', borderBottom: '2px solid #333', padding: '4px 0' }}>
+                                        <h1 title="Title" style={{ textAlign: 'center', fontWeight: 900, fontSize: 14, textTransform: 'uppercase', letterSpacing: 2, margin: '8px 0', borderTop: '2px solid #333', borderBottom: '2px solid #333', padding: '4px 0' }}>
                                             {config.receiptTitle}
                                         </h1>
 
                                         {/* MOCK DATA */}
-                                        <div style={{ fontSize: 9, color: '#666', display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                                        <div title="Mock data" style={{ fontSize: 9, color: '#666', display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                                             <span>Mã phiếu: <b style={{ color: '#000' }}>#AB12CD</b></span>
                                             <span>Ngày: <b style={{ color: '#000' }}>{new Date().toLocaleDateString('vi-VN')}</b></span>
                                         </div>
 
-                                        <div style={{ borderBottom: '1px dotted #aaa', paddingBottom: 8, marginBottom: 8, fontSize: 9 }}>
-                                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                        <div title="Thông tin khách hàng" style={{ borderBottom: '1px dotted #aaa', paddingBottom: 8, marginBottom: 8, fontSize: 9 }}>
+                                            <div title="Thông tin khách hàng" style={{ display: 'flex', justifyContent: 'space-between' }}>
                                                 <span>Khách hàng: <b>Nguyễn Văn A</b></span>
                                                 <span>SĐT: <b>0912 345 678</b></span>
                                             </div>
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4 }}>
+                                            <div title="Thông tin thiết bị" style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4 }}>
                                                 <span>Thiết bị: <b>iPhone 15 Pro Max</b></span>
                                                 <span>Màu: <b>Titan Đen</b></span>
                                                 <span>IMEI: <b>3568****1234</b></span>
                                             </div>
                                             <div>Tình trạng: <b>Thay màn hình, ép kính</b></div>
-                                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                            <div title="Thông tin chuẩn bị" style={{ display: 'flex', justifyContent: 'space-between' }}>
                                                 <span>Chuẩn bệnh: <b>Nứt kính ngoài, LCD ok</b></span>
                                                 <span>Giá dự kiến: <b>1,500,000đ</b></span>
                                             </div>
                                         </div>
 
                                         {/* CHECKLIST */}
-                                        <div style={{ marginBottom: 8 }}>
+                                        <div title="Kiểm tra đầu vào" style={{ marginBottom: 8 }}>
                                             <h3 style={{ fontWeight: 700, fontSize: 9, textTransform: 'uppercase', borderBottom: '1px solid #ccc', paddingBottom: 2, marginBottom: 4 }}>Kiểm Tra Đầu Vào</h3>
-                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 12px', fontSize: 8 }}>
+                                            <div title="Kiểm tra đầu vào" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 12px', fontSize: 8 }}>
                                                 <div>
                                                     <span><b>VỎ MÁY:</b> ☑Trầy ☐Bể ☐BTH</span><br />
                                                     <span><b>CẢM ỨNG:</b> ☐Liệt ☐Chập ☑OK</span><br />
@@ -608,7 +616,7 @@ export default function ReceiptSettingsPage() {
                                         </div>
 
                                         {/* NOTES */}
-                                        <div style={{ border: '1px solid #bbb', borderRadius: 4, padding: 6, marginBottom: 8, background: '#fafafa' }}>
+                                        <div title="Lưu ý" style={{ border: '1px solid #bbb', borderRadius: 4, padding: 6, marginBottom: 8, background: '#fafafa' }}>
                                             <h3 style={{ fontWeight: 700, fontSize: 8, textTransform: 'uppercase', marginBottom: 3 }}>Lưu ý:</h3>
                                             <ol style={{ fontSize: 7, color: '#555', margin: 0, paddingLeft: 12, lineHeight: 1.4 }}>
                                                 {config.notes.map((note, i) => (
@@ -618,16 +626,16 @@ export default function ReceiptSettingsPage() {
                                         </div>
 
                                         {/* SIGNATURES */}
-                                        <div style={{ textAlign: 'center', fontSize: 8, color: '#888', marginBottom: 6 }}>
+                                        <div title="Ngày in" style={{ textAlign: 'center', fontSize: 8, color: '#888', marginBottom: 6 }}>
                                             Ngày {new Date().getDate()} tháng {new Date().getMonth() + 1} năm {new Date().getFullYear()}
                                         </div>
-                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
+                                        <div title="Khách hàng và Tiếp nhận" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
                                             <div style={{ textAlign: 'center', fontSize: 8 }}>
                                                 <p style={{ fontWeight: 700, marginBottom: 35 }}>Khách hàng</p>
                                                 <p style={{ color: '#999', fontStyle: 'italic', fontSize: 7 }}>(Ký và ghi rõ họ tên)</p>
                                                 <p style={{ fontWeight: 600, marginTop: 4 }}>Nguyễn Văn A</p>
                                             </div>
-                                            <div style={{ textAlign: 'center', fontSize: 8 }}>
+                                            <div title="Tiếp nhận" style={{ textAlign: 'center', fontSize: 8 }}>
                                                 <p style={{ fontWeight: 700, marginBottom: 35 }}>Tiếp nhận</p>
                                                 <p style={{ color: '#999', fontStyle: 'italic', fontSize: 7 }}>(Ký và ghi rõ họ tên)</p>
                                                 <p style={{ fontWeight: 600, marginTop: 4 }}>Admin</p>
@@ -635,7 +643,7 @@ export default function ReceiptSettingsPage() {
                                         </div>
 
                                         {/* FOOTER */}
-                                        <div style={{ textAlign: 'center', fontSize: 6, color: '#aaa', marginTop: 10, borderTop: '1px solid #eee', paddingTop: 4 }}>
+                                        <div title="Footer" style={{ textAlign: 'center', fontSize: 6, color: '#aaa', marginTop: 10, borderTop: '1px solid #eee', paddingTop: 4 }}>
                                             {config.footerText} Tiếp nhận khiếu nại: <b>{config.complaintHotline}</b>
                                         </div>
                                     </>
@@ -728,38 +736,38 @@ export default function ReceiptSettingsPage() {
                                             )}
 
                                             {showCostBreakdown && (
-                                                <div style={{ border: '1px solid #ddd', borderRadius: 6, overflow: 'hidden', marginBottom: 8, fontSize: 9 }}>
-                                                    <div style={{ background: '#f5f5f5', padding: '6px 8px', fontWeight: 800, display: 'flex' }}>
+                                                <div title="Bảng chi phí" style={{ border: '1px solid #ddd', borderRadius: 6, overflow: 'hidden', marginBottom: 8, fontSize: 9 }}>
+                                                    <div title="Header" style={{ background: '#f5f5f5', padding: '6px 8px', fontWeight: 800, display: 'flex' }}>
                                                         <span style={{ width: 28 }}>STT</span>
                                                         <span style={{ flex: 1 }}>Hạng mục</span>
                                                         <span style={{ width: 90, textAlign: 'right' }}>Thành tiền</span>
                                                     </div>
-                                                    <div style={{ padding: '6px 8px', display: 'flex', borderTop: '1px solid #eee' }}>
+                                                    <div title="Linh kiện / vật tư" style={{ padding: '6px 8px', display: 'flex', borderTop: '1px solid #eee' }}>
                                                         <span style={{ width: 28 }}>1</span>
                                                         <span style={{ flex: 1 }}>Linh kiện / vật tư</span>
                                                         <span style={{ width: 90, textAlign: 'right' }}><b>{partsCost.toLocaleString('vi-VN')}đ</b></span>
                                                     </div>
-                                                    <div style={{ padding: '6px 8px', display: 'flex', borderTop: '1px solid #eee' }}>
+                                                    <div title="Tiền công" style={{ padding: '6px 8px', display: 'flex', borderTop: '1px solid #eee' }}>
                                                         <span style={{ width: 28 }}>2</span>
                                                         <span style={{ flex: 1 }}>Tiền công</span>
                                                         <span style={{ width: 90, textAlign: 'right' }}><b>{laborCost.toLocaleString('vi-VN')}đ</b></span>
                                                     </div>
-                                                    <div style={{ padding: '6px 8px', display: 'flex', borderTop: '1px solid #eee' }}>
+                                                    <div title="Phát sinh" style={{ padding: '6px 8px', display: 'flex', borderTop: '1px solid #eee' }}>
                                                         <span style={{ width: 28 }}>3</span>
                                                         <span style={{ flex: 1 }}>Phát sinh</span>
                                                         <span style={{ width: 90, textAlign: 'right' }}><b>{additionalFees.toLocaleString('vi-VN')}đ</b></span>
                                                     </div>
-                                                    <div style={{ padding: '6px 8px', display: 'flex', borderTop: '1px solid #ddd', fontWeight: 900 }}>
+                                                    <div title="Tổng cộng" style={{ padding: '6px 8px', display: 'flex', borderTop: '1px solid #ddd', fontWeight: 900 }}>
                                                         <span style={{ flex: 1, textAlign: 'right' }}>TỔNG CỘNG:</span>
                                                         <span style={{ width: 90, textAlign: 'right' }}>{total.toLocaleString('vi-VN')}đ</span>
                                                     </div>
                                                     {deposit > 0 && (
-                                                        <div style={{ padding: '6px 8px', display: 'flex', borderTop: '1px solid #eee', color: '#a16207', fontWeight: 800 }}>
+                                                        <div title="Đã đặt cọc" style={{ padding: '6px 8px', display: 'flex', borderTop: '1px solid #eee', color: '#a16207', fontWeight: 800 }}>
                                                             <span style={{ flex: 1, textAlign: 'right' }}>Đã đặt cọc:</span>
                                                             <span style={{ width: 90, textAlign: 'right' }}>-{deposit.toLocaleString('vi-VN')}đ</span>
                                                         </div>
                                                     )}
-                                                    <div style={{ padding: '6px 8px', display: 'flex', borderTop: '1px solid #eee', fontWeight: 900 }}>
+                                                    <div title="Khách thanh toán" style={{ padding: '6px 8px', display: 'flex', borderTop: '1px solid #eee', fontWeight: 900 }}>
                                                         <span style={{ flex: 1, textAlign: 'right' }}>KHÁCH THANH TOÁN:</span>
                                                         <span style={{ width: 90, textAlign: 'right', color: '#dc2626' }}>{customerPay.toLocaleString('vi-VN')}đ</span>
                                                     </div>
@@ -767,19 +775,19 @@ export default function ReceiptSettingsPage() {
                                             )}
 
                                             {showPaymentNote && (
-                                                <div style={{ fontSize: 8, color: '#555', marginBottom: 8 }}>
+                                                <div title="Ghi chú thanh toán" style={{ fontSize: 8, color: '#555', marginBottom: 8 }}>
                                                     Ghi chú thanh toán: Khách thanh toán chuyển khoản.
                                                 </div>
                                             )}
 
                                             {showSignatures && (
-                                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginTop: 10 }}>
-                                                    <div style={{ textAlign: 'center', fontSize: 8 }}>
+                                                <div title="Chữ ký" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginTop: 10 }}>
+                                                    <div title="Khách hàng" style={{ textAlign: 'center', fontSize: 8 }}>
                                                         <div style={{ fontWeight: 800, marginBottom: 28 }}>KHÁCH HÀNG</div>
                                                         <div style={{ color: '#999', fontStyle: 'italic', fontSize: 7 }}>(Ký và ghi rõ họ tên)</div>
                                                         <div style={{ fontWeight: 700, marginTop: 4 }}>Nguyễn Văn A</div>
                                                     </div>
-                                                    <div style={{ textAlign: 'center', fontSize: 8 }}>
+                                                    <div title="Thu ngân / Kế toán" style={{ textAlign: 'center', fontSize: 8 }}>
                                                         <div style={{ fontWeight: 800, marginBottom: 28 }}>THU NGÂN / KẾ TOÁN</div>
                                                         <div style={{ color: '#999', fontStyle: 'italic', fontSize: 7 }}>(Ký và ghi rõ họ tên)</div>
                                                         <div style={{ fontWeight: 700, marginTop: 4 }}>KTV</div>
@@ -787,7 +795,7 @@ export default function ReceiptSettingsPage() {
                                                 </div>
                                             )}
 
-                                            <div style={{ textAlign: 'center', fontSize: 6, color: '#aaa', marginTop: 10, borderTop: '1px solid #eee', paddingTop: 4 }}>
+                                            <div title="Footer" style={{ textAlign: 'center', fontSize: 6, color: '#aaa', marginTop: 10, borderTop: '1px solid #eee', paddingTop: 4 }}>
                                                 {inv.footerText || 'Cảm ơn Quý khách đã sử dụng dịch vụ.'} Khiếu nại/Bảo hành xin liên hệ: <b>{inv.complaintHotline || config.complaintHotline}</b>
                                             </div>
                                         </>
@@ -811,13 +819,13 @@ export default function ReceiptSettingsPage() {
 
             {/* ── Media Manager Modal ── */}
             <MediaManager
+                title="Chọn Logo Biên Nhận"
                 isOpen={showMediaManager}
                 onClose={() => setShowMediaManager(false)}
                 onSelect={(url) => {
                     setConfig(prev => ({ ...prev, logoUrl: url }));
                     setShowMediaManager(false);
                 }}
-                title="Chọn Logo Biên Nhận"
             />
         </div>
     );

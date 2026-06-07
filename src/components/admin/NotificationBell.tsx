@@ -102,11 +102,11 @@ export default function NotificationBell({ badges, activities }: NotificationBel
                         <h3 className="font-semibold text-gray-800 text-sm">Thông báo</h3>
                         <div className="flex items-center gap-2">
                             {activities.length > 0 && (
-                                <button onClick={markAllRead} className="text-xs text-orange-600 hover:underline">
+                                <button title="Đọc tất cả" onClick={markAllRead} className="text-xs text-orange-600 hover:underline">
                                     Đọc tất cả
                                 </button>
                             )}
-                            <button onClick={() => setShowDropdown(false)} className="text-gray-400 hover:text-gray-600">
+                            <button title="Đóng" onClick={() => setShowDropdown(false)} className="text-gray-400 hover:text-gray-600">
                                 <X size={16} />
                             </button>
                         </div>
@@ -114,11 +114,11 @@ export default function NotificationBell({ badges, activities }: NotificationBel
 
                     {/* Tabs */}
                     <div className="flex border-b">
-                        <button onClick={() => setActiveTab('summary')}
+                        <button title="Tổng quan" onClick={() => setActiveTab('summary')}
                             className={`flex-1 py-2 text-xs font-medium transition-all ${activeTab === 'summary' ? 'text-orange-600 border-b-2 border-orange-500' : 'text-gray-500'}`}>
                             Tổng quan ({badges.orders + badges.appointments + badges.chats})
                         </button>
-                        <button onClick={() => setActiveTab('activities')}
+                        <button title="Hoạt động" onClick={() => setActiveTab('activities')}
                             className={`flex-1 py-2 text-xs font-medium transition-all ${activeTab === 'activities' ? 'text-orange-600 border-b-2 border-orange-500' : 'text-gray-500'}`}>
                             Hoạt động ({activities.length})
                         </button>
@@ -137,6 +137,7 @@ export default function NotificationBell({ badges, activities }: NotificationBel
                                         const Icon = item.icon;
                                         return (
                                             <Link key={item.type} href={item.href}
+                                                title={item.label}
                                                 onClick={() => setShowDropdown(false)}
                                                 className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors">
                                                 <div className={`w-10 h-10 rounded-full flex items-center justify-center ${item.color}`}>
@@ -183,8 +184,8 @@ export default function NotificationBell({ badges, activities }: NotificationBel
                                                         )}
                                                     </div>
                                                 </div>
-                                                <button onClick={() => markAsRead(act.id)}
-                                                    className="p-1 text-gray-300 hover:text-green-500 transition-colors flex-shrink-0" title="Đánh dấu đã đọc">
+                                                <button title="Đánh dấu đã đọc" onClick={() => markAsRead(act.id)}
+                                                    className="p-1 text-gray-300 hover:text-green-500 transition-colors flex-shrink-0">
                                                     <Check size={14} />
                                                 </button>
                                             </div>

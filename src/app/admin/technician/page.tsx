@@ -260,8 +260,8 @@ export default function TechnicianPage() {
                         barcode: productCode,
                         productCode,
                         name: exactName,
-                        category: 'component',
-                        categoryIds: ['component'],
+                        category: '',
+                        categoryIds: [],
                         price_original: 0,
                         price_promo: 0,
                         costPrice: 0,
@@ -552,16 +552,16 @@ export default function TechnicianPage() {
                 <div className="flex items-center gap-2">
                     <div className="relative flex-1 md:w-64">
                         <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                        <input type="text" placeholder="Tìm máy, khách..."
+                        <input title="Tìm máy, khách..." type="text" placeholder="Tìm máy, khách..."
                             value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
                             className="w-full pl-9 pr-3 py-2 text-sm border rounded-lg focus:border-orange-500 focus:outline-none" />
                     </div>
                     <div className="flex bg-gray-100 rounded-lg p-0.5">
-                        <button onClick={() => setViewMode('list')}
+                        <button title="Xem danh sách" onClick={() => setViewMode('list')}
                             className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${viewMode === 'list' ? 'bg-white shadow-sm text-orange-600' : 'text-gray-500'}`}>
                             Danh sách
                         </button>
-                        <button onClick={() => setViewMode('kanban')}
+                        <button title="Xem kanban" onClick={() => setViewMode('kanban')}
                             className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${viewMode === 'kanban' ? 'bg-white shadow-sm text-orange-600' : 'text-gray-500'}`}>
                             Kanban
                         </button>
@@ -587,6 +587,7 @@ export default function TechnicianPage() {
                             <div
                                 key={ticket.id}
                                 className={`bg-white rounded-xl border p-4 hover:shadow-md transition-shadow relative ${st.color}`}
+                                title="Xem chi tiết"
                                 onClick={() => setSelectedTicket(ticket)}
                             >
                                 {/* KTV Badge */}
@@ -603,20 +604,20 @@ export default function TechnicianPage() {
                                     {/* Info */}
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-2 flex-wrap">
-                                            <p className="font-bold text-gray-900">{ticket.deviceInfo?.model || 'Thiết bị'}</p>
+                                            <p title="Máy" className="font-bold text-gray-900">{ticket.deviceInfo?.model || 'Thiết bị'}</p>
                                             <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${st.color}`}>
                                                 {st.label}
                                             </span>
                                         </div>
                                         <div className="text-xs text-gray-500 mt-0.5 flex items-center gap-1">
-                                            <span>#{ticket.id.slice(-6).toUpperCase()}</span>
+                                            <span title="Mã phiếu">#{ticket.id.slice(-6).toUpperCase()}</span>
                                             {ticket.ticketType === 'warranty' && (
                                                 <span className="px-1.5 py-0.5 bg-purple-100 text-purple-700 text-[10px] rounded-full font-bold">BH</span>
                                             )}
-                                            <span>• {ticket.customer?.name}</span>
+                                            <span title="Khách hàng">• {ticket.customer?.name}</span>
                                         </div>
                                         {ticket.issues && ticket.issues.length > 0 ? (
-                                            <p className="text-sm text-gray-600 mt-1 line-clamp-1">{ticket.issues.map(i => i.label).join(', ')}</p>
+                                            <p title="Vấn đề" className="text-sm text-gray-600 mt-1 line-clamp-1">{ticket.issues.map(i => i.label).join(', ')}</p>
                                         ) : ticket.issue?.description && (
                                             <p className="text-sm text-gray-600 mt-1 line-clamp-1">{ticket.issue.description}</p>
                                         )}
