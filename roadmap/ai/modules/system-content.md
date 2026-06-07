@@ -54,6 +54,15 @@ graph TD
 - Admin can override the Place ID from `/admin/appearance`.
 - If Google Places is unavailable, the homepage falls back to an official Google Maps URL CTA without mock reviews.
 
+## BUG-HARDCODE-001: Hardcode cleanup cho secret, storefront fallback và business identity
+
+- **Status:** open
+- **Severity:** high
+- **Plan:** `roadmap/ui/data/ai_plans/plan_hardcode_cleanup_20260607.md`
+- **Task:** `roadmap/ui/data/ai_plans/task_hardcode_cleanup_20260607.md`
+- **Scope:** Google Maps Embed key trong trang giới thiệu, fallback demo ở homepage, brand/hotline/domain/address rải rác trong customer UI/SEO/AI prompt, workflow status string ở repair/POS/inventory và demo/template admin.
+- **Guardrail:** Storefront không hiển thị dữ liệu giả khi thiếu Firestore/config; secret/key không nằm thẳng trong page source; quyền admin không được suy luận bằng email string.
+
 ## BUG-CONFIG-SESSION-001: Lưu cấu hình giao diện làm admin bị văng đăng nhập
 
 - **Status:** fixed

@@ -1,4 +1,21 @@
 # 🐛 Bugs Khác
+
+## Lỗi thuộc Module: hardcode
+# 🐛 Bugs
+## BUG-HARDCODE-001: Hardcode còn rải rác trong secret, storefront fallback, business identity và workflow status
+- **Status:** open
+- **Severity:** high
+- **Module:** SystemContent
+- **Files:** src/app/(customer)/info/gioi-thieu/page.tsx, src/components/home/HeroSection.tsx, src/components/home/ServiceBlock.tsx, src/components/home/GoogleReviewsSection.tsx, src/lib/config-defaults.ts, src/lib/gemini.ts, src/app/admin/repairs/page.tsx, src/app/admin/technician/page.tsx, src/app/api/inventory/import/route.ts, src/components/admin/ExcelImportModal.tsx, src/app/admin/settings/receipt/WarrantyComponents.tsx
+### Symptom
+Audit ngày 2026-06-07 phát hiện các nhóm hardcode còn ảnh hưởng production hoặc dễ gây lệch cấu hình: Google Maps Embed API key nằm trực tiếp trong trang giới thiệu, storefront còn banner/dịch vụ/giá demo fallback, business identity như brand/hotline/domain/address bị lặp trong nhiều file UI/SEO/AI prompt, workflow status repair/POS còn so sánh string rải rác, và dữ liệu demo/template admin còn nằm trong component runtime.
+### Cause
+Các fallback được thêm qua nhiều giai đoạn để UI không trắng khi thiếu cấu hình hoặc thiếu dữ liệu Firestore. Sau khi dự án đã có `system_config`, admin appearance, workflow settings và source intelligence, các fallback này trở thành technical debt.
+### Solution
+Thực hiện theo `roadmap/ui/data/ai_plans/plan_hardcode_cleanup_20260607.md` và `roadmap/ui/data/ai_plans/task_hardcode_cleanup_20260607.md`: xử lý P0 Maps key, gỡ storefront fake fallback, gom business identity về helper/config trung tâm, chuẩn hóa workflow/status constants, bỏ bypass quyền bằng `email?.includes('admin')`, và tách demo/template thành fixture rõ ràng.
+### Verification
+Chưa fix. Gate dự kiến sau mỗi batch: `pnpm lint`, `pnpm typecheck`; batch ảnh hưởng storefront/SEO phải chạy `pnpm build` và browser QA.
+
 ## Lỗi thuộc Module: rules
 # 🐛 Bugs
 ## BUG-RULES-001: Missing Firestore Security Rules cho 4 collections mới (Phase 4/6/8)

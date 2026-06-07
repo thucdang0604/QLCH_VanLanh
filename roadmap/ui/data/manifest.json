@@ -4,12 +4,46 @@
   "stats": {
     "completionPercent": 98,
     "openP0": 0,
-    "openBugs": 1,
+    "openBugs": 2,
     "trackCount": 5,
     "activeTracks": 1
   },
   "constraints": [],
   "aiPlans": [
+    {
+      "id": "plan-hardcode-cleanup-20260607",
+      "title": "Hardcode Cleanup 2026-06-07: Secret, Storefront fallback, Business identity và Workflow constants",
+      "date": "07.06.2026",
+      "status": "planned",
+      "planFile": "data/ai_plans/plan_hardcode_cleanup_20260607.md",
+      "taskFile": "data/ai_plans/task_hardcode_cleanup_20260607.md",
+      "walkthroughFile": "",
+      "scope": [
+        "src/app/(customer)/info/gioi-thieu/page.tsx",
+        "src/components/home/HeroSection.tsx",
+        "src/components/home/ServiceBlock.tsx",
+        "src/components/home/GoogleReviewsSection.tsx",
+        "src/lib/config-defaults.ts",
+        "src/lib/constants.ts",
+        "src/lib/gemini.ts",
+        "src/components/ChatWidget.tsx",
+        "src/components/layout/MobileBottomNav.tsx",
+        "src/app/admin/repairs/page.tsx",
+        "src/app/admin/technician/page.tsx",
+        "src/app/api/repairs/transition/route.ts",
+        "src/app/api/inventory/import/route.ts",
+        "src/components/admin/ExcelImportModal.tsx",
+        "src/app/admin/settings/receipt/WarrantyComponents.tsx"
+      ],
+      "decisions": [
+        "Xu ly P0 truoc: Google Maps Embed API key khong duoc nam thang trong source customer page",
+        "Storefront khong duoc hien gia/dich vu/banner demo khi Firestore hoac config thieu du lieu",
+        "Business identity phai co source of truth de doi hotline/domain/brand/address dong bo UI, SEO, JSON-LD va AI prompt",
+        "Workflow/status string duoc gom vao typed constants/helper hoac resolve tu workflow config; khong bypass quyen bang email.includes('admin')",
+        "Du lieu demo/template cua Excel va receipt preview phai tach khoi runtime logic va khong bi ghi nham thanh du lieu that"
+      ],
+      "updatedAt": "2026-06-07T00:00:00.000Z"
+    },
     {
       "id": "plan-qr-barcode-label-print-fit",
       "title": "QR/Barcode Label Print Fit: Tối ưu in tem vừa khổ giấy thực tế",
@@ -359,6 +393,32 @@
     }
   ],
   "bugs": [
+    {
+      "id": "BUG-HARDCODE-001",
+      "module": "SystemContent",
+      "severity": "high",
+      "status": "open",
+      "title": "Hardcode còn rải rác trong secret, storefront fallback, business identity và workflow status",
+      "workflowId": "system-content",
+      "affectedFiles": [
+        "src/app/(customer)/info/gioi-thieu/page.tsx",
+        "src/components/home/HeroSection.tsx",
+        "src/components/home/ServiceBlock.tsx",
+        "src/components/home/GoogleReviewsSection.tsx",
+        "src/lib/config-defaults.ts",
+        "src/lib/gemini.ts",
+        "src/app/admin/repairs/page.tsx",
+        "src/app/admin/technician/page.tsx",
+        "src/app/api/inventory/import/route.ts",
+        "src/components/admin/ExcelImportModal.tsx",
+        "src/app/admin/settings/receipt/WarrantyComponents.tsx"
+      ],
+      "description": "Audit 2026-06-07 phát hiện Google Maps Embed API key nằm trong source, storefront còn fallback demo service/banner, brand/hotline/domain/address lặp ở nhiều file customer-facing/SEO, repair/POS workflow còn so sánh status string rải rác và có bypass quyền bằng email.includes('admin'), demo/template admin còn trộn dữ liệu mẫu trong component.",
+      "cause": "Nhiều giai đoạn triển khai trước dùng fallback nhanh để bảo đảm UI hoạt động khi chưa có system_config hoặc dữ liệu Firestore; sau khi admin config và workflow settings đã trưởng thành, các fallback này trở thành technical debt và có thể làm lệch dữ liệu production.",
+      "solution": "Theo plan-hardcode-cleanup-20260607: xử lý P0 Maps key, gỡ storefront fake fallback, gom business identity về helper/config trung tâm, typed workflow/status constants và tách demo/template thành fixture rõ ràng.",
+      "verificationNotes": "Chưa fix. Bắt đầu xử lý từ plan_hardcode_cleanup_20260607.md và task_hardcode_cleanup_20260607.md.",
+      "discoveredAt": "2026-06-07"
+    },
     {
       "id": "BUG-RULES-001",
       "module": "RULES",

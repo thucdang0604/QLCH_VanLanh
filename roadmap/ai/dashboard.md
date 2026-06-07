@@ -90,8 +90,18 @@ Dọn dẹp kỹ thuật dư thừa phát hiện trong audit.
 - [ ] <b>Firestore Rules:</b> Xóa rule <code>services</code> trùng lặp (line 37 vs line 62)
 - [ ] <b>LazyImage:</b> Quyết định: xóa component orphan hoặc document lý do giữ
 - [ ] <b>SEO Meta:</b> Kiểm tra <code>&lt;title&gt;</code> và <code>meta description</code> trên production domain
+- [ ] <b>Hardcode Cleanup:</b> Xử lý <code>BUG-HARDCODE-001</code> theo plan <code>plan_hardcode_cleanup_20260607.md</code>: Maps key, fake storefront fallback, business identity, workflow constants và demo fixtures.
 
 ## Changelog
+
+### 2026-06-07 - HARDCODE CLEANUP PLAN
+- **Color:** warning
+- **Summary:** Lập kế hoạch xử lý hardcode còn lại trước khi bắt đầu sửa source.
+
+- <b>Audit:</b> Ghi nhận <code>BUG-HARDCODE-001</code> cho các nhóm hardcode còn lại: Google Maps key trong page source, fallback demo homepage, brand/hotline/domain/address rải rác, workflow status string và demo/template admin.
+- <b>Plan:</b> Thêm <code>roadmap/ui/data/ai_plans/plan_hardcode_cleanup_20260607.md</code> và task checklist tương ứng.
+- <b>Registry:</b> Đăng ký plan vào <code>roadmap/ui/data/manifest.json</code> để Roadmap UI hiển thị.
+- <b>Guardrail:</b> Ưu tiên P0 Maps key trước; storefront không hiển thị dữ liệu giả; quyền admin không dùng <code>email?.includes('admin')</code>.
 
 ### 2026-06-07 - QR/BARCODE LABEL PRINT FIT
 - **Color:** accent-color
