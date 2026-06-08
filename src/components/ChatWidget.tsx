@@ -6,6 +6,7 @@ import type { ChatMessage } from '@/lib/realtimedb';
 import { useAuth } from '@/lib/AuthContext';
 import { useConfig } from '@/lib/ConfigContext';
 import { getAuthInstance } from '@/lib/firebase';
+import { getBusinessIdentity } from '@/lib/businessIdentity';
 
 export default function ChatWidget() {
     const [isOpen, setIsOpen] = useState(false);
@@ -30,6 +31,7 @@ export default function ChatWidget() {
 
     const { user, loading: authLoading } = useAuth();
     const { config } = useConfig();
+    const identity = getBusinessIdentity(config);
 
     // Check registration status on load
     useEffect(() => {
@@ -295,8 +297,8 @@ export default function ChatWidget() {
     }, []);
 
     if (!isOpen) {
-        const zaloLink = config.contact_info?.zalo_link || 'https://zalo.me/0932242026';
-        const fbLink = config.contact_info?.facebook_link || 'https://www.facebook.com/vanlanh.vn';
+        const zaloLink = identity.socials.zaloLink;
+        const fbLink = identity.socials.facebookLink;
 
         return (
             <div 
@@ -386,7 +388,7 @@ export default function ChatWidget() {
                     </div>
                     <div>
                         <h3 className="font-semibold">Hỗ trợ trực tuyến</h3>
-                        <p className="text-xs opacity-80">Văn Lành Service</p>
+                        <p className="text-xs opacity-80">{identity.siteName}</p>
                     </div>
                 </div>
                 <div className="flex items-center gap-1">

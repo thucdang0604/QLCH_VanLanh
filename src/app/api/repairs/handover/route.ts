@@ -4,8 +4,9 @@ import { requirePermission } from '@/lib/apiAuth';
 import { FieldValue } from 'firebase-admin/firestore';
 import type { RepairTicket } from '@/lib/types';
 import { calculateAndSaveCommissionsServer } from '@/lib/commissionCalcServer';
+import { REPAIR_STATUS, isSelectedRepairPart, isWarrantyEligibleRepairPart } from '@/lib/repairStatus';
 
-const LEGACY_TERMINAL_STATUSES = ['done', 'out', 'refund', 'bh_hoan_tat', 'bh_tu_choi', 'bh_refund'];
+const LEGACY_TERMINAL_STATUSES = [REPAIR_STATUS.DONE, REPAIR_STATUS.OUT, REPAIR_STATUS.REFUND, 'bh_hoan_tat', 'bh_tu_choi', 'bh_refund'];
 
 export async function POST(request: NextRequest) {
     try {
@@ -75,7 +76,7 @@ export async function POST(request: NextRequest) {
             }
 
             // Check if any selected part missing priceConfirmedAt
-            const selectedParts = (ticket.parts || []).filter(p => p.status === 'selected');
+            const selectedParts = (ticket.parts || []).filter(isSelectedRepairPart);
             const missingSnapshot = selectedParts.find(p => !p.priceConfirmedAt);
             if (missingSnapshot) {
                 throw new Error(`Linh kiá»‡n "${missingSnapshot.productName}" chÆ°a cĂ³ snapshot giĂ¡. YĂªu cáº§u quáº£n trá»‹ viĂªn Ä‘á»‘i soĂ¡t trÆ°á»›c khi bĂ n giao.`);
@@ -147,8 +148,7 @@ export async function POST(request: NextRequest) {
 
                     const nowMs = Date.now();
                     ticket.parts = ticket.parts.map(p => {
-                        const partStatus = String(p.status || '');
-                        if (partStatus === 'rejected' || partStatus === 'cancelled') return p;
+                        if (!isWarrantyEligibleRepairPart(p)) return p;
                         if (p.warrantyExpiresAt) return p;
 
                         const pData = p.productId ? productDocs.get(p.productId)?.data : null;

@@ -1,9 +1,13 @@
 'use client';
 import { SITE_URL } from "@/lib/constants";
+import { useConfig } from "@/lib/ConfigContext";
+import { getBusinessIdentity } from "@/lib/businessIdentity";
 
 export default function ChinhSachBaoHanhPage() {
-    const seoTitle = 'Chính sách bảo hành | Văn Lành Service';
-    const seoDescription = 'Chính sách bảo hành sửa chữa tại Văn Lành Service: điều kiện bảo hành, lưu ý quan trọng và hotline hỗ trợ. Cam kết hoàn tiền 100% trong 30 ngày nếu không hài lòng.';
+    const { config } = useConfig();
+    const identity = getBusinessIdentity(config);
+    const seoTitle = `Chính sách bảo hành | ${identity.siteName}`;
+    const seoDescription = `Chính sách bảo hành sửa chữa tại ${identity.siteName}: điều kiện bảo hành, lưu ý quan trọng và hotline hỗ trợ. Cam kết hoàn tiền 100% trong 30 ngày nếu không hài lòng.`;
     const canonicalUrl = `${SITE_URL}/info/chinh-sach-bao-hanh`;
     const articleSchema = {
         '@context': 'https://schema.org',
@@ -11,7 +15,7 @@ export default function ChinhSachBaoHanhPage() {
         headline: 'Chính sách bảo hành',
         description: seoDescription,
         url: canonicalUrl,
-        publisher: { '@type': 'Organization', name: 'Văn Lành Service' },
+        publisher: { '@type': 'Organization', name: identity.siteName },
         mainEntityOfPage: { '@type': 'WebPage', '@id': canonicalUrl },
     };
     const breadcrumbSchema = {
@@ -42,13 +46,13 @@ export default function ChinhSachBaoHanhPage() {
             <h1 className="text-2xl font-bold mb-6">Chính sách bảo hành</h1>
 
             <section className="mb-8">
-                <h2 className="text-lg font-bold text-gray-900 mb-3">1. Chính sách bảo hành sửa chữa tiêu chuẩn tại Văn Lành Service</h2>
+                <h2 className="text-lg font-bold text-gray-900 mb-3">1. Chính sách bảo hành sửa chữa tiêu chuẩn tại {identity.siteName}</h2>
                 <p className="text-sm text-gray-700 leading-relaxed">
-                    Với một dịch vụ sửa chữa/thay thế thì hệ thống Văn Lành Service sẽ áp dụng một chính sách Bảo hành cụ thể. Tùy theo thiết bị của quý khách mà thời gian bảo hành sửa chữa có thể khác nhau. Và nếu có bất kỳ thắc mắc nào, Quý khách hàng đừng ngần ngại gọi đến hotline <a href="tel:0932242026" className="text-copper font-bold hover:underline">0932.242.026</a> để được tư vấn thêm.
+                    Với một dịch vụ sửa chữa/thay thế thì hệ thống {identity.siteName} sẽ áp dụng một chính sách Bảo hành cụ thể. Tùy theo thiết bị của quý khách mà thời gian bảo hành sửa chữa có thể khác nhau. Và nếu có bất kỳ thắc mắc nào, Quý khách hàng đừng ngần ngại gọi đến hotline <a href={`tel:${identity.mainPhone}`} className="text-copper font-bold hover:underline">{identity.formattedPhone}</a> để được tư vấn thêm.
                 </p>
                 <div className="bg-green-50 border border-green-200 rounded-xl p-5 mt-4">
                     <p className="text-sm text-green-800 font-semibold">
-                        🎉 Đặc biệt: Văn Lành Service sẽ <strong>HOÀN TIỀN 100%</strong> trong vòng 30 ngày khi Khách hàng <strong>KHÔNG HÀI LÒNG</strong> về dịch vụ.
+                        🎉 Đặc biệt: {identity.siteName} sẽ <strong>HOÀN TIỀN 100%</strong> trong vòng 30 ngày khi Khách hàng <strong>KHÔNG HÀI LÒNG</strong> về dịch vụ.
                     </p>
                 </div>
             </section>
@@ -67,15 +71,15 @@ export default function ChinhSachBaoHanhPage() {
                 </ul>
                 <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mt-4">
                     <p className="text-sm text-yellow-800">
-                        <strong>⚠️ Lưu ý:</strong> Văn Lành Service chỉ bảo hành các phần đã sửa chữa hoặc những linh kiện đã thay thế. Đối với những lỗi phát sinh nằm ngoài phạm vi sửa chữa sẽ KHÔNG được bảo hành.
+                        <strong>⚠️ Lưu ý:</strong> {identity.siteName} chỉ bảo hành các phần đã sửa chữa hoặc những linh kiện đã thay thế. Đối với những lỗi phát sinh nằm ngoài phạm vi sửa chữa sẽ KHÔNG được bảo hành.
                     </p>
                 </div>
             </section>
 
             <div className="bg-gray-100 rounded-xl p-5 text-center">
                 <p className="text-sm text-gray-600">
-                    Mọi thắc mắc về bảo hành, vui lòng liên hệ: <a href="tel:0932242026" className="text-copper font-bold hover:underline">0932.242.026</a>
-                    {' '}hoặc truy cập <a href="https://vanlanhservice.com.vn" target="_blank" rel="noopener noreferrer" className="text-copper font-bold hover:underline">vanlanhservice.com.vn</a>
+                    Mọi thắc mắc về bảo hành, vui lòng liên hệ: <a href={`tel:${identity.mainPhone}`} className="text-copper font-bold hover:underline">{identity.formattedPhone}</a>
+                    {' '}hoặc truy cập <a href={identity.siteUrl} target="_blank" rel="noopener noreferrer" className="text-copper font-bold hover:underline">{identity.domain}</a>
                 </p>
             </div>
         </article>

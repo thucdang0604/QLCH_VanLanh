@@ -3,7 +3,7 @@
 ## Lỗi thuộc Module: hardcode
 # 🐛 Bugs
 ## BUG-HARDCODE-001: Hardcode còn rải rác trong secret, storefront fallback, business identity và workflow status
-- **Status:** open
+- **Status:** in_progress
 - **Severity:** high
 - **Module:** SystemContent
 - **Files:** src/app/(customer)/info/gioi-thieu/page.tsx, src/components/home/HeroSection.tsx, src/components/home/ServiceBlock.tsx, src/components/home/GoogleReviewsSection.tsx, src/lib/config-defaults.ts, src/lib/gemini.ts, src/app/admin/repairs/page.tsx, src/app/admin/technician/page.tsx, src/app/api/inventory/import/route.ts, src/components/admin/ExcelImportModal.tsx, src/app/admin/settings/receipt/WarrantyComponents.tsx
@@ -14,7 +14,7 @@ Các fallback được thêm qua nhiều giai đoạn để UI không trắng kh
 ### Solution
 Thực hiện theo `roadmap/ui/data/ai_plans/plan_hardcode_cleanup_20260607.md` và `roadmap/ui/data/ai_plans/task_hardcode_cleanup_20260607.md`: xử lý P0 Maps key, gỡ storefront fake fallback, gom business identity về helper/config trung tâm, chuẩn hóa workflow/status constants, bỏ bypass quyền bằng `email?.includes('admin')`, và tách demo/template thành fixture rõ ràng.
 ### Verification
-Chưa fix. Gate dự kiến sau mỗi batch: `pnpm lint`, `pnpm typecheck`; batch ảnh hưởng storefront/SEO phải chạy `pnpm build` và browser QA.
+2026-06-07: Đã triển khai tuần tự Batch 1-5 trên nhánh `codex/hardcode-cleanup-20260607`. Pass `pnpm lint`, `pnpm typecheck`, `pnpm build`; browser QA storefront pass cho trang chủ, trang giới thiệu, header/footer/chat/mobile nav và xác nhận trang giới thiệu không còn Google Maps API key/embed trong HTML. Còn cần smoke có dữ liệu admin thực tế cho luồng KTV, bàn giao, nhập linh kiện và POS checkout trước khi đóng bug.
 
 ## Lỗi thuộc Module: rules
 # 🐛 Bugs

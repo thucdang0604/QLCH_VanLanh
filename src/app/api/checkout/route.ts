@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { isRateLimited } from '@/lib/rateLimit';
+import { PRODUCT_STATUS, isProductArchived } from '@/lib/productLifecycle';
 
 const RATE_LIMIT_MAX = 3;
 const RATE_LIMIT_WINDOW_MS = 60_000; // 1 phút
@@ -147,6 +148,9 @@ export async function POST(request: NextRequest) {
             for (const [productId, totalQty] of preAggregated.entries()) {
                 const productSnap = productDocs.get(productId)!;
                 const d = productSnap.data()!;
+                if (isProductArchived({ status: String(d.status || '') as 'active' | 'hidden' | 'inactive' }) || d.status !== PRODUCT_STATUS.ACTIVE || d.isProposed === true) {
+                    throw new Error(`Sản phẩm "${d.name || productId}" hiện không còn được bán.`);
+                }
                 const available = (typeof d.stock === 'number' ? d.stock : 0) - (typeof d.held === 'number' ? d.held : 0);
                 if (available < totalQty) {
                     throw new Error(`Sản phẩm "${d.name}" chỉ còn ${available} khả dụng nhưng đơn yêu cầu ${totalQty}.`);

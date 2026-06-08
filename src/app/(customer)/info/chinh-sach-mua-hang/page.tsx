@@ -1,13 +1,15 @@
 'use client';
 import { SITE_URL } from "@/lib/constants";
 import { useConfig } from "@/lib/ConfigContext";
+import { getBusinessIdentity } from "@/lib/businessIdentity";
 
 export default function ChinhSachMuaHangPage() {
     const { config, formatHotline } = useConfig();
+    const identity = getBusinessIdentity(config);
     const branches = config.store_branches || [];
-    const mainPhone = config.contact_info?.main_phone || branches[0]?.phone || '';
-    const seoTitle = 'Chính sách mua hàng & giao nhận | Văn Lành Service';
-    const seoDescription = `Chính sách mua hàng từ xa, khu vực giao hàng toàn quốc, giá cả và hỗ trợ đặt hàng tại Văn Lành Service.${mainPhone ? ` Hotline: ${formatHotline(mainPhone)}.` : ''}`;
+    const mainPhone = identity.mainPhone;
+    const seoTitle = `Chính sách mua hàng & giao nhận | ${identity.siteName}`;
+    const seoDescription = `Chính sách mua hàng từ xa, khu vực giao hàng toàn quốc, giá cả và hỗ trợ đặt hàng tại ${identity.siteName}.${mainPhone ? ` Hotline: ${identity.formattedPhone}.` : ''}`;
     const canonicalUrl = `${SITE_URL}/info/chinh-sach-mua-hang`;
     const articleSchema = {
         '@context': 'https://schema.org',
@@ -15,7 +17,7 @@ export default function ChinhSachMuaHangPage() {
         headline: 'Chính sách mua hàng & giao nhận',
         description: seoDescription,
         url: canonicalUrl,
-        publisher: { '@type': 'Organization', name: 'Văn Lành Service' },
+        publisher: { '@type': 'Organization', name: identity.siteName },
         mainEntityOfPage: { '@type': 'WebPage', '@id': canonicalUrl },
     };
     const breadcrumbSchema = {
@@ -48,7 +50,7 @@ export default function ChinhSachMuaHangPage() {
             <section className="mb-8">
                 <h2 className="text-lg font-bold text-gray-900 mb-3">1. Mua hàng từ xa</h2>
                 <p className="text-sm text-gray-700 leading-relaxed mb-3">
-                    Không cần trực tiếp đến cửa hàng, khách hàng có thể lựa chọn cách mua hàng online. Gọi điện thoại đến tổng đài thời gian từ 7h30–21h00 (cả CN & ngày lễ) để đặt hàng, nhân viên Văn Lành Service luôn sẵn sàng phục vụ, tư vấn và hỗ trợ quý khách mua được sản phẩm ưng ý.
+                    Không cần trực tiếp đến cửa hàng, khách hàng có thể lựa chọn cách mua hàng online. Gọi điện thoại đến tổng đài thời gian từ 7h30–21h00 (cả CN & ngày lễ) để đặt hàng, nhân viên {identity.siteName} luôn sẵn sàng phục vụ, tư vấn và hỗ trợ quý khách mua được sản phẩm ưng ý.
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {branches.map((branch) => (
@@ -64,14 +66,14 @@ export default function ChinhSachMuaHangPage() {
             <section className="mb-8">
                 <h2 className="text-lg font-bold text-gray-900 mb-3">2. Khu vực giao hàng</h2>
                 <p className="text-sm text-gray-700 leading-relaxed">
-                    Văn Lành Service giao hàng <strong>toàn quốc</strong> đối với các sản phẩm do chính vanlanhservice.com.vn phân phối.
+                    {identity.siteName} giao hàng <strong>toàn quốc</strong> đối với các sản phẩm do chính {identity.domain} phân phối.
                 </p>
             </section>
 
             <section className="mb-8">
                 <h2 className="text-lg font-bold text-gray-900 mb-3">3. Giá cả</h2>
                 <ul className="space-y-2 text-sm text-gray-700">
-                    <li>• Giá cả sản phẩm được niêm yết tại Vanlanhservice.com.vn là giá bán cuối cùng đã bao gồm thuế GTGT (VAT).</li>
+                    <li>• Giá cả sản phẩm được niêm yết tại {identity.domain} là giá bán cuối cùng đã bao gồm thuế GTGT (VAT).</li>
                     <li>• Giá cả của sản phẩm có thể thay đổi tùy thời điểm và chương trình khuyến mãi kèm theo.</li>
                     <li>• Phí vận chuyển hoặc Phí thực hiện đơn hàng sẽ được áp dụng thêm nếu có, và sẽ được hiển thị rõ tại trang Thanh toán.</li>
                     <li>• Nếu phát hiện lỗi về giá, chúng tôi sẽ thông báo cho quý khách trong thời gian sớm nhất có thể và gửi lựa chọn xác nhận lại đơn hàng với giá chính xác hoặc hủy đơn hàng.</li>
@@ -80,7 +82,7 @@ export default function ChinhSachMuaHangPage() {
 
             <div className="bg-gray-100 rounded-xl p-5 text-center">
                 <p className="text-sm text-gray-600">
-                    Cần hỗ trợ mua hàng? Gọi ngay: {mainPhone ? <a href={`tel:${mainPhone}`} className="text-copper font-bold hover:underline">{formatHotline(mainPhone)}</a> : 'Đang cập nhật'}
+                    Cần hỗ trợ mua hàng? Gọi ngay: {mainPhone ? <a href={`tel:${mainPhone}`} className="text-copper font-bold hover:underline">{identity.formattedPhone || formatHotline(mainPhone)}</a> : 'Đang cập nhật'}
                 </p>
             </div>
         </article>

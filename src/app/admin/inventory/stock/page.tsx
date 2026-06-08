@@ -1,12 +1,13 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Package, Search, Loader2, ArrowUpDown, TrendingDown, TrendingUp } from 'lucide-react';
+import { Archive, Package, Search, Loader2, ArrowUpDown, TrendingDown, TrendingUp } from 'lucide-react';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Product } from '@/lib/types';
 import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
+import { isProductArchived } from '@/lib/productLifecycle';
 
 const formatPrice = (n: number) => n.toLocaleString('vi-VN') + 'đ';
 
@@ -23,6 +24,7 @@ export default function StockPage() {
     const [sortBy, setSortBy] = useState<'name' | 'stock' | 'costPrice'>('name');
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
     const [stockTab, setStockTab] = useState<'all' | 'retail' | 'component'>('all');
+    const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'archived'>('all');
 
     useEffect(() => {
         const load = async () => {
@@ -43,8 +45,13 @@ export default function StockPage() {
         if (stockTab === 'retail') return !isComponent(p);
         return true;
     });
+    const statusFiltered = tabFiltered.filter(p => {
+        if (statusFilter === 'archived') return isProductArchived(p);
+        if (statusFilter === 'active') return !isProductArchived(p);
+        return true;
+    });
 
-    const filtered = tabFiltered
+    const filtered = statusFiltered
         .filter(p => {
             if (!searchQuery) return true;
             const q = searchQuery.toLowerCase();
@@ -59,10 +66,11 @@ export default function StockPage() {
             return sortDir === 'asc' ? cmp : -cmp;
         });
 
-    const totalItems = tabFiltered.reduce((s, p) => s + (p.stock || 0), 0);
-    const totalValue = tabFiltered.reduce((s, p) => s + (p.stock || 0) * (p.costPrice || 0), 0);
-    const lowStock = tabFiltered.filter(p => (p.stock || 0) > 0 && (p.stock || 0) <= 3).length;
-    const outOfStock = tabFiltered.filter(p => (p.stock || 0) <= 0).length;
+    const totalItems = statusFiltered.reduce((s, p) => s + (p.stock || 0), 0);
+    const totalValue = statusFiltered.reduce((s, p) => s + (p.stock || 0) * (p.costPrice || 0), 0);
+    const lowStock = statusFiltered.filter(p => (p.stock || 0) > 0 && (p.stock || 0) <= 3).length;
+    const outOfStock = statusFiltered.filter(p => (p.stock || 0) <= 0).length;
+    const archivedCount = tabFiltered.filter(isProductArchived).length;
 
     const toggleSort = (col: typeof sortBy) => {
         if (sortBy === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -71,7 +79,7 @@ export default function StockPage() {
 
     const { paginatedData: paginatedFiltered, currentPage, totalPages, pageSize, totalFiltered: totalFilteredCount, setPage, setPageSize, resetPage } = useClientPagination(filtered, 20);
 
-    useEffect(() => { resetPage(); }, [searchQuery, stockTab, resetPage]);
+    useEffect(() => { resetPage(); }, [searchQuery, stockTab, statusFilter, resetPage]);
 
     if (loading) return (
         <div className="flex items-center justify-center h-[60vh]">
@@ -85,7 +93,7 @@ export default function StockPage() {
                 <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
                     <Package className="text-orange-500" /> Tổng Tồn Kho
                 </h1>
-                <p className="text-sm text-gray-500 mt-0.5">{tabFiltered.length} mặt hàng{stockTab !== 'all' ? ` (${stockTab === 'retail' ? 'bán lẻ' : 'linh kiện'})` : ''} trong hệ thống</p>
+                <p className="text-sm text-gray-500 mt-0.5">{statusFiltered.length} mặt hàng{stockTab !== 'all' ? ` (${stockTab === 'retail' ? 'bán lẻ' : 'linh kiện'})` : ''} trong hệ thống</p>
             </div>
 
             {/* Stock Tab Filter */}
@@ -97,6 +105,22 @@ export default function StockPage() {
                                 ? key === 'component' ? 'bg-orange-50 border-orange-300 text-orange-700 shadow-sm'
                                     : key === 'retail' ? 'bg-blue-50 border-blue-300 text-blue-700 shadow-sm'
                                     : 'bg-gray-800 border-gray-800 text-white shadow-sm'
+                                : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                        }`}>
+                        {label}
+                    </button>
+                ))}
+            </div>
+            <div className="flex gap-2">
+                {([
+                    ['all', 'Tất cả trạng thái'],
+                    ['active', 'Đang hoạt động'],
+                    ['archived', `Đã lưu trữ (${archivedCount})`],
+                ] as const).map(([key, label]) => (
+                    <button key={key} onClick={() => setStatusFilter(key)}
+                        className={`px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
+                            statusFilter === key
+                                ? 'bg-orange-50 border-orange-300 text-orange-700 shadow-sm'
                                 : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
                         }`}>
                         {label}
@@ -153,13 +177,14 @@ export default function StockPage() {
                                     onClick={() => toggleSort('costPrice')}>
                                     <span className="flex items-center justify-end gap-1">Giá vốn BQ <ArrowUpDown size={12} /></span>
                                 </th>
+                                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Trạng thái</th>
                                 <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Giá bán</th>
                                 <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Giá trị tồn</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
                             {filtered.length === 0 ? (
-                                <tr><td colSpan={7} className="text-center py-12 text-gray-400">Không có sản phẩm nào</td></tr>
+                                <tr><td colSpan={8} className="text-center py-12 text-gray-400">Không có sản phẩm nào</td></tr>
                             ) : paginatedFiltered.map(p => {
                                 const stock = p.stock || 0;
                                 const costPrice = p.costPrice || 0;
@@ -180,6 +205,15 @@ export default function StockPage() {
                                             </span>
                                         </td>
                                         <td className="px-4 py-3 text-right text-sm text-gray-600">{costPrice > 0 ? formatPrice(costPrice) : '—'}</td>
+                                        <td className="px-4 py-3 text-center">
+                                            {isProductArchived(p) ? (
+                                                <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-full bg-red-50 text-red-600">
+                                                    <Archive size={12} /> Đã lưu trữ
+                                                </span>
+                                            ) : (
+                                                <span className="inline-flex px-2 py-1 text-xs font-medium rounded-full bg-green-50 text-green-700">Hoạt động</span>
+                                            )}
+                                        </td>
                                         <td className="px-4 py-3 text-right text-sm font-medium text-gray-900">{formatPrice(p.price_promo || p.price_original)}</td>
                                         <td className="px-4 py-3 text-right text-sm font-medium text-orange-600">{stockValue > 0 ? formatPrice(stockValue) : '—'}</td>
                                     </tr>
@@ -227,6 +261,14 @@ export default function StockPage() {
                                                 <span className="text-[10px] text-gray-400">{p.category}</span>
                                                 <span className="text-gray-300">·</span>
                                                 <span className="font-mono text-[10px] text-gray-400">#{p.id.slice(-6).toUpperCase()}</span>
+                                                {isProductArchived(p) && (
+                                                    <>
+                                                        <span className="text-gray-300">·</span>
+                                                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-red-600">
+                                                            <Archive size={10} /> Đã lưu trữ
+                                                        </span>
+                                                    </>
+                                                )}
                                             </div>
                                         </div>
                                         <span className={`inline-flex items-center gap-1 font-bold text-sm shrink-0 ${stock <= 0 ? 'text-red-600' : stock <= 3 ? 'text-amber-600' : 'text-green-600'}`}>

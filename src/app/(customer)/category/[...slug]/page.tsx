@@ -4,6 +4,7 @@ import CategoryClient from './CategoryClient';
 import { SITE_URL } from "@/lib/constants";
 import { notFound } from 'next/navigation';
 import type { TaxonomyNode } from '@/lib/types';
+import { getBusinessIdentity } from '@/lib/businessIdentity';
 
 /* ── Resolve nav/taxonomy info for a given slug ── */
 type ResolvedInfo = {
@@ -110,16 +111,17 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
     const { slug } = await params;
     const fullSlug = slug.join('/');
     const info = await resolveSlug(slug);
+    const identity = getBusinessIdentity();
 
     if (!info) {
-        return { title: 'Không tìm thấy trang | Văn Lành Service' };
+        return { title: `Không tìm thấy trang | ${identity.siteName}` };
     }
 
     const isRepair = !!info.isRepair;
-    const title = `${info.label} | Văn Lành Service - Sửa chữa uy tín tại TP.HCM`;
+    const title = `${info.label} | ${identity.siteName} - Sửa chữa uy tín tại TP.HCM`;
     const description = isRepair
-        ? `Dịch vụ ${info.label} chính hãng tại Văn Lành Service. Linh kiện chính hãng, bảo hành trọn đời, xong trong 30 phút. Hotline: 0932.242.026`
-        : `Mua ${info.label} chính hãng giá tốt tại Văn Lành Service. Bảo hành uy tín, giao hàng nhanh.`;
+        ? `Dịch vụ ${info.label} chính hãng tại ${identity.siteName}. Linh kiện chính hãng, bảo hành trọn đời, xong trong 30 phút. Hotline: ${identity.formattedPhone}`
+        : `Mua ${info.label} chính hãng giá tốt tại ${identity.siteName}. Bảo hành uy tín, giao hàng nhanh.`;
 
     return {
         title,
@@ -133,6 +135,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 export default async function CategoryPage({ params }: { params: Promise<{ slug: string[] }> }) {
     const { slug } = await params;
     const info = await resolveSlug(slug);
+    const identity = getBusinessIdentity();
 
     if (!info) {
         notFound();
@@ -144,8 +147,8 @@ export default async function CategoryPage({ params }: { params: Promise<{ slug:
     const items = await fetchCategoryItems(isRepair);
 
     const seoDescription = isRepair
-        ? `Dịch vụ ${info.label} chính hãng tại Văn Lành Service. Linh kiện chính hãng, bảo hành trọn đời, xong trong 30 phút. Hotline: 0932.242.026`
-        : `Mua ${info.label} chính hãng giá tốt tại Văn Lành Service. Bảo hành uy tín, giao hàng nhanh.`;
+        ? `Dịch vụ ${info.label} chính hãng tại ${identity.siteName}. Linh kiện chính hãng, bảo hành trọn đời, xong trong 30 phút. Hotline: ${identity.formattedPhone}`
+        : `Mua ${info.label} chính hãng giá tốt tại ${identity.siteName}. Bảo hành uy tín, giao hàng nhanh.`;
         
     const schemaData = isRepair ? {
         '@context': 'https://schema.org',
@@ -154,8 +157,8 @@ export default async function CategoryPage({ params }: { params: Promise<{ slug:
         description: seoDescription,
         provider: {
             '@type': 'LocalBusiness',
-            name: 'Văn Lành Service',
-            telephone: '0932242026',
+            name: identity.siteName,
+            telephone: identity.mainPhone,
         },
         areaServed: { '@type': 'City', name: 'Hồ Chí Minh' },
     } : {

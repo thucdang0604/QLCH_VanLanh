@@ -4,6 +4,8 @@ import "./globals.css";
 import { AuthProvider } from "@/lib/AuthContext";
 import { getAdminDb, isAdminAvailable } from "@/lib/firebaseAdmin";
 import { SITE_URL } from "@/lib/constants";
+import { getBusinessIdentity } from "@/lib/businessIdentity";
+import type { SiteConfig } from "@/lib/config-defaults";
 
 const inter = Inter({
   subsets: ["latin", "vietnamese"],
@@ -11,7 +13,8 @@ const inter = Inter({
 });
 
 export async function generateMetadata(): Promise<Metadata> {
-  let title = "Văn Lành Service - Sửa chữa điện thoại, laptop uy tín";
+  const fallbackIdentity = getBusinessIdentity();
+  let title = `${fallbackIdentity.siteName} - Sửa chữa điện thoại, laptop uy tín`;
   const description = "Chuyên sửa chữa điện thoại, laptop, thay pin, ép kính chính hãng. Bảo hành trọn đời - Sửa chữa nhanh 30 phút.";
 
   if (isAdminAvailable()) {
@@ -30,8 +33,8 @@ export async function generateMetadata(): Promise<Metadata> {
       });
 
       if (Object.keys(data).length > 0) {
-        const siteName = data?.siteName || "Văn Lành Service";
-        title = `${siteName} - Sửa chữa điện thoại, Laptop uy tín`;
+        const identity = getBusinessIdentity(data as Partial<SiteConfig>);
+        title = `${identity.siteName} - Sửa chữa điện thoại, Laptop uy tín`;
       }
     } catch {
       // Firebase Admin SDK error — dùng giá trị mặc định
@@ -42,7 +45,7 @@ export async function generateMetadata(): Promise<Metadata> {
     metadataBase: new URL(SITE_URL),
     title,
     description,
-    keywords: ["sửa chữa điện thoại", "thay pin iPhone", "ép kính", "sửa laptop", "Văn Lành"],
+    keywords: ["sửa chữa điện thoại", "thay pin iPhone", "ép kính", "sửa laptop", fallbackIdentity.siteName],
     verification: {
       google: "njFEZRHzs2q-XWIRzyhDScytGVP8nfnY1anp0ZvHWKU",
     },

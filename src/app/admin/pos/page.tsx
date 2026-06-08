@@ -24,6 +24,7 @@ import { fetchActiveDiscountRules, calculateAccessoryDiscounts } from '@/lib/dis
 import CurrencyInput from '@/components/admin/CurrencyInput';
 import { consumeChatWorkflowHandoff } from '@/lib/chatWorkflowHandoff';
 import { extractProductCodeFromScan, getPrimaryProductCode, getProductScanCandidates, productCodeSearchText } from '@/lib/productCodes';
+import { isProductSellable } from '@/lib/productLifecycle';
 
 type BarcodeDetectionResult = { rawValue?: string };
 type BrowserBarcodeDetector = {
@@ -234,9 +235,7 @@ export default function POSPage() {
 
     const filterPosProducts = useCallback((data: (Product & { id: string })[]) => {
         return data.filter(p => {
-            if (((p.stock || 0) - (p.held || 0)) <= 0) return false;
-            if (p.status !== 'active') return false;
-            if (p.isProposed) return false;
+            if (!isProductSellable(p)) return false;
             if (isPartCategory(p.category, p.categoryIds)) return true;
             if (p.categoryIds && p.categoryIds.length > 0) {
                 return RETAIL_CATEGORY_IDS.includes(p.categoryIds[0]);
@@ -1370,5 +1369,4 @@ export default function POSPage() {
         </div>
     );
 }
-
 

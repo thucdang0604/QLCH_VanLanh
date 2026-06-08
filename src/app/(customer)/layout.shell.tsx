@@ -7,6 +7,7 @@ import { useConfig } from "@/lib/ConfigContext";
 import { usePresence } from "@/lib/usePresence";
 import { Megaphone, X } from "lucide-react";
 import { useState } from "react";
+import { getBusinessIdentity } from "@/lib/businessIdentity";
 
 const MobileBottomNav = dynamic(() => import("@/components/layout/MobileBottomNav"), { ssr: false });
 const Footer = dynamic(() => import("@/components/layout/Footer"), { ssr: true });
@@ -44,6 +45,7 @@ export default function CustomerLayoutShell({
     children: React.ReactNode;
 }>) {
     const { config } = useConfig();
+    const identity = getBusinessIdentity(config);
     const bg = config.background_config;
 
     // Track online presence and visitors
@@ -69,11 +71,11 @@ export default function CustomerLayoutShell({
     const localBusinessSchema = {
         '@context': 'https://schema.org',
         '@type': 'LocalBusiness',
-        name: config.siteName || 'Văn Lành Service',
-        description: 'Trung tâm sửa chữa điện thoại, laptop & thiết bị công nghệ uy tín tại TP.HCM. CÔNG TY TNHH VIỄN THÔNG VĂN LÀNH SERVICE. Linh kiện chính hãng, sửa chữa nhanh chóng.',
-        url: 'https://vanlanhservice.com.vn',
-        telephone: config.contact_info?.main_phone || '0932242026',
-        email: config.contact_info?.email || 'vanlanh.vn@gmail.com',
+        name: identity.siteName,
+        description: `${identity.siteName} sửa chữa điện thoại, laptop và thiết bị công nghệ tại TP.HCM. Linh kiện chính hãng, sửa chữa nhanh chóng.`,
+        url: identity.siteUrl,
+        telephone: identity.mainPhone,
+        email: identity.email,
         address: (config.store_branches || []).map(branch => ({
             '@type': 'PostalAddress',
             streetAddress: branch.address,
@@ -82,10 +84,10 @@ export default function CustomerLayoutShell({
         })),
         openingHours: 'Mo-Su 07:30-21:00',
         priceRange: '$$',
-        image: 'https://vanlanhservice.com.vn/logo.png',
+        image: identity.logoUrl || `${identity.siteUrl}/logo.png`,
         sameAs: [
-            config.contact_info?.facebook_link || '',
-            config.contact_info?.zalo_link || '',
+            identity.socials.facebookLink,
+            identity.socials.zaloLink,
         ].filter(Boolean),
     };
 

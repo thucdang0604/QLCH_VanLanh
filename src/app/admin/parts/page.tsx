@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import {
+    Archive,
     Plus,
     Search,
     Edit,
@@ -43,6 +44,7 @@ import CurrencyInput from '@/components/admin/CurrencyInput';
 import ProductQrLabelModal from '@/components/admin/ProductQrLabelModal';
 import FixHiddenProductsModal from '@/components/admin/FixHiddenProductsModal';
 import { buildProductCodeFromId } from '@/lib/productCodes';
+import { buildArchiveUpdate, getArchiveBlockReason, isProductArchived } from '@/lib/productLifecycle';
 import { createProductWithCodes } from '@/lib/productCodeRegistry';
 
 interface ImportReceiptItem {
@@ -194,24 +196,23 @@ export default function PartsPage() {
     const drafts = draftReceipts.filter(r => r.status === 'draft');
     const orderedReceipts = draftReceipts.filter(r => r.status === 'ordered');
 
-    const handleDelete = (part: Product) => {
-        // Pre-flight: block deletion if stock > 0
-        if (Number(part.stock) > 0) {
-            toastError(`Không thể xóa "${part.name}" — còn ${part.stock} trong kho. Hãy xuất kho trước.`);
+    const handleArchive = (part: Product) => {
+        const blockReason = getArchiveBlockReason(part);
+        if (blockReason) {
+            toastError(`Không thể lưu trữ "${part.name}" vì ${blockReason}.`);
             return;
         }
         setConfirmModal({
             isOpen: true,
-            title: 'Xóa linh kiện',
-            message: `Bạn có chắc muốn xóa linh kiện "${part.name}"? Sản phẩm sẽ bị ẩn khỏi danh sách nhưng vẫn giữ lịch sử.`,
-            confirmText: 'Xóa',
+            title: 'Lưu trữ linh kiện',
+            message: `Lưu trữ linh kiện "${part.name}"? Linh kiện sẽ ẩn khỏi danh sách bán/đặt linh kiện nhưng vẫn giữ lịch sử và mã hàng.`,
+            confirmText: 'Lưu trữ',
             dangerous: true,
             onConfirm: async () => {
                 try {
-                    // Soft Delete: mark inactive to preserve historical references
-                    await updateDocument('products', part.id, { status: 'inactive' });
+                    await updateDocument('products', part.id, buildArchiveUpdate(serverTimestamp()));
                 } catch {
-                    toastError('Lỗi khi xóa linh kiện!');
+                    toastError('Lỗi khi lưu trữ linh kiện!');
                 }
             }
         });
@@ -219,7 +220,7 @@ export default function PartsPage() {
 
     const filteredParts = parts.filter((p) => {
         // Hide soft-deleted and proposed products
-        if (p.status === 'inactive' || p.isProposed) return false;
+        if (isProductArchived(p) || p.isProposed) return false;
 
         const matchSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                             (p.description && p.description.toLowerCase().includes(searchQuery.toLowerCase()));
@@ -490,7 +491,7 @@ export default function PartsPage() {
                         className="flex items-center gap-2 border-2 border-amber-300 text-amber-700 px-4 py-2.5 rounded-lg font-medium hover:bg-amber-50 transition-colors text-sm"
                     >
                         <AlertTriangle size={18} />
-                        Khắc phục SP bị ẩn
+                        Khắc phục/Khôi phục
                     </button>
                     <button
                         onClick={() => setIsCreateReceiptOpen(true)}
@@ -664,7 +665,7 @@ export default function PartsPage() {
                                             </div>
                                             <div className="flex items-center gap-1">
                                                 <button onClick={() => { setEditingPart(part); setIsModalOpen(true); }} className="p-2 hover:bg-blue-100 text-blue-600 rounded-lg" title="Sửa"><Edit size={18} /></button>
-                                                <button onClick={() => handleDelete(part)} className="p-2 hover:bg-red-100 text-red-600 rounded-lg" title="Xóa"><Trash2 size={18} /></button>
+                                                <button onClick={() => handleArchive(part)} className="p-2 hover:bg-red-100 text-red-600 rounded-lg" title="Lưu trữ"><Archive size={18} /></button>
                                             </div>
                                         </div>
                                     </div>
@@ -766,11 +767,11 @@ export default function PartsPage() {
                                                         <Edit size={18} />
                                                     </button>
                                                     <button
-                                                        onClick={() => handleDelete(part)}
+                                                        onClick={() => handleArchive(part)}
                                                         className="p-2 hover:bg-red-100 text-red-600 rounded-lg transition-colors"
-                                                        title="Xóa"
+                                                        title="Lưu trữ"
                                                     >
-                                                        <Trash2 size={18} />
+                                                        <Archive size={18} />
                                                     </button>
                                                 </div>
                                             </td>

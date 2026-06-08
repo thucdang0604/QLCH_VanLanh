@@ -11,6 +11,7 @@ import {
 import { useConfig } from '@/lib/ConfigContext';
 import { useCart } from '@/lib/CartContext';
 import { getIcon } from '@/lib/icon-map';
+import { getBusinessIdentity } from '@/lib/businessIdentity';
 import TrackingModal from '@/components/TrackingModal';
 
 export default function Header() {
@@ -36,8 +37,9 @@ export default function Header() {
         return () => window.removeEventListener('scroll', onScroll);
     }, []);
 
-    const mainPhone = config.contact_info?.main_phone || config.store_branches?.[0]?.phone || '0932242026';
-    const storeName = config.siteName || 'Văn Lành Services';
+    const identity = getBusinessIdentity(config);
+    const mainPhone = identity.mainPhone;
+    const storeName = identity.siteName;
     const cartCount = cartItems.reduce((sum: number, item: { quantity?: number }) => sum + (item.quantity || 1), 0);
 
     const handleSearch = (e: React.FormEvent) => {
@@ -101,7 +103,7 @@ export default function Header() {
                     <div className="flex items-center gap-0.5 ml-auto text-xs">
                         <a href={`tel:${mainPhone}`} className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-copper/10 text-copper font-semibold hover:bg-copper/20 transition-colors">
                             <Phone size={13} />
-                            <span className="whitespace-nowrap">{formatHotline(mainPhone)}</span>
+                            <span className="whitespace-nowrap">{identity.formattedPhone || formatHotline(mainPhone)}</span>
                         </a>
                         <button onClick={() => setIsTrackingModalOpen(true)} className="hidden lg:flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-gray-600 hover:text-copper hover:bg-gray-50 transition-colors">
                             <ClipboardList size={15} />
@@ -209,7 +211,7 @@ export default function Header() {
                             </ul>
                             <div className="border-t px-4 py-2 flex items-center gap-4 text-xs text-gray-500">
                                 <a href={`tel:${mainPhone}`} className="flex items-center gap-1">
-                                    <Phone size={11} /> {formatHotline(mainPhone)}
+                                    <Phone size={11} /> {identity.formattedPhone || formatHotline(mainPhone)}
                                 </a>
                                 <button onClick={() => { setMobileMenuOpen(false); setIsTrackingModalOpen(true); }} className="flex items-center gap-1">
                                     <ClipboardList size={11} /> Tra cứu

@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { SITE_URL } from '@/lib/constants';
 import { fetchNavConfig, fetchTaxonomyConfig } from '../../_lib/server-queries';
 import type { TaxonomyNode } from '@/lib/types';
+import { getBusinessIdentity } from '@/lib/businessIdentity';
 
 type NavItem = { slug?: string; label?: string; name?: string; filterType?: string; taxonomyRef?: string };
 
@@ -28,6 +29,7 @@ function findTaxonomyNode(slugSegments: string[], trees: { type: string; nodes: 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string[] }> }): Promise<Metadata> {
     const { slug } = await params;
     const fullSlug = slug.join('/');
+    const identity = getBusinessIdentity();
     // 1. Try nav config (only for single-segment slugs)
     const nav = await fetchNavConfig();
     const navItem = slug.length === 1
@@ -70,10 +72,10 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 
     if (!pageLabel) pageLabel = 'Danh mục';
 
-    const seoTitle = `${pageLabel} | Văn Lành Service - Sửa chữa uy tín tại TP.HCM`;
+    const seoTitle = `${pageLabel} | ${identity.siteName} - Sửa chữa uy tín tại TP.HCM`;
     const seoDescription = isRepair
-        ? `Dịch vụ ${pageLabel} chính hãng tại Văn Lành Service. Linh kiện chính hãng, bảo hành trọn đời, xong trong 30 phút. Hotline: 0932.242.026`
-        : `Mua ${pageLabel} chính hãng giá tốt tại Văn Lành Service. Bảo hành uy tín, giao hàng nhanh.`;
+        ? `Dịch vụ ${pageLabel} chính hãng tại ${identity.siteName}. Linh kiện chính hãng, bảo hành trọn đời, xong trong 30 phút. Hotline: ${identity.formattedPhone}`
+        : `Mua ${pageLabel} chính hãng giá tốt tại ${identity.siteName}. Bảo hành uy tín, giao hàng nhanh.`;
 
     const canonicalUrl = `${SITE_URL}/category/${fullSlug}`;
     
@@ -88,7 +90,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
             description: seoDescription,
             url: canonicalUrl,
             type: 'website',
-            siteName: 'Văn Lành Service',
+            siteName: identity.siteName,
         },
         twitter: {
             card: 'summary_large_image',

@@ -4,6 +4,7 @@ import { requirePermission } from '@/lib/apiAuth';
 import { FieldValue, type DocumentReference } from 'firebase-admin/firestore';
 import type { FirestoreDateValue, RepairTicket } from '@/lib/types';
 import { loadRepairWorkflow, requireWorkflowNode } from '@/lib/repairWorkflowServer';
+import { REPAIR_PART_STATUS, isSelectedRepairPart } from '@/lib/repairStatus';
 import { randomUUID } from 'crypto';
 
 type RepairLine = NonNullable<RepairTicket['parts']>[number];
@@ -133,7 +134,7 @@ export async function POST(request: NextRequest) {
                     productId,
                     productName: String(pData.name || 'Unknown'),
                     quantity,
-                    status: 'selected',
+                    status: REPAIR_PART_STATUS.SELECTED,
                             quality: String(pData.quality || ''),
                     unitPriceAtUse: Number(pData.price_promo) || Number(pData.price_original) || 0,
                     unitCostAtUse: Number(pData.costPrice) || 0,
@@ -162,7 +163,7 @@ export async function POST(request: NextRequest) {
                     productName: pName || 'Linh kiện yêu cầu',
                     quantity,
                     quality,
-                    status: 'requested'
+                    status: REPAIR_PART_STATUS.REQUESTED
                 });
                 // Note: We don't hold stock for requested parts
 
@@ -172,7 +173,7 @@ export async function POST(request: NextRequest) {
                 if (lineIndex === -1) throw new Error('Part line not found');
                 
                 const line = parts[lineIndex];
-                if (line.status === 'selected' && line.productId) {
+                if (isSelectedRepairPart(line) && line.productId) {
                     await getProduct(line.productId); // fetch to update held
                     updateProductHeld(line.productId, -line.quantity);
                 }
@@ -188,7 +189,7 @@ export async function POST(request: NextRequest) {
                 
                 const line = parts[lineIndex];
                 
-                if (line.status === 'selected' && line.productId) {
+                if (isSelectedRepairPart(line) && line.productId) {
                     const pData: Record<string, unknown> = await getProduct(line.productId);
                     const stock = Number(pData.stock) || 0;
                     const held = Number(pData.held) || 0;
@@ -208,7 +209,7 @@ export async function POST(request: NextRequest) {
                             productId: line.productId,
                             productName: line.productName,
                             quantity: delta,
-                            status: 'selected',
+                            status: REPAIR_PART_STATUS.SELECTED,
                             quality: String(pData.quality || ''),
                             unitPriceAtUse: Number(pData.price_promo) || Number(pData.price_original) || 0,
                             unitCostAtUse: Number(pData.costPrice) || 0,
@@ -231,18 +232,18 @@ export async function POST(request: NextRequest) {
                 if (lineIndex === -1) throw new Error('Part line not found');
                 
                 const line = parts[lineIndex];
-                if (line.status === 'selected' && line.productId) {
+                if (isSelectedRepairPart(line) && line.productId) {
                     await getProduct(line.productId);
                     updateProductHeld(line.productId, -line.quantity);
                 }
                 
-                parts[lineIndex].status = 'rejected';
+                parts[lineIndex].status = REPAIR_PART_STATUS.REJECTED;
             } else {
                 throw new Error('Unknown command type');
             }
 
             // Server-compute payment
-            const selectedParts = parts.filter(p => p.status === 'selected');
+            const selectedParts = parts.filter(isSelectedRepairPart);
             const partsCost = selectedParts.reduce((sum, p) => sum + ((p.unitPriceAtUse || 0) * p.quantity), 0);
             
             const currentPayment = ticket.payment || {};

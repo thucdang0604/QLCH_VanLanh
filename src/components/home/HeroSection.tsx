@@ -8,15 +8,6 @@ import type { HeroBanner, StoreBranch } from '@/lib/ConfigContext';
 import { getIcon } from '@/lib/icon-map';
 import Link from 'next/link';
 
-
-// Fallback slides when no banners are configured
-const fallbackSlides = [
-    { title: 'Thay Pin iPhone', subtitle: 'Chính hãng - BH trọn đời', desc: 'Chỉ từ 390.000đ • Xong trong 30 phút', gradient: 'from-gray-900 via-gray-800 to-gray-900', accent: 'text-copper' },
-    { title: 'Ép Kính Điện Thoại', subtitle: 'Kính cường lực cao cấp', desc: 'Giá từ 290.000đ • Bảo hành 12 tháng', gradient: 'from-gray-900 via-stone-800 to-gray-900', accent: 'text-copper-light' },
-    { title: 'Sửa Chữa Laptop', subtitle: 'MacBook, Dell, HP, Lenovo', desc: 'Báo giá minh bạch • Linh kiện chính hãng', gradient: 'from-gray-900 via-neutral-800 to-gray-900', accent: 'text-copper' },
-    { title: 'Flash Sale Hàng Tuần', subtitle: 'Giảm đến 40% dịch vụ', desc: 'Ưu đãi có hạn • Đặt lịch ngay hôm nay', gradient: 'from-gray-900 via-zinc-800 to-gray-900', accent: 'text-accent' },
-];
-
 const trustBadges = [
     { icon: <Shield size={28} />, title: 'Bảo hành trọn đời', desc: 'Cho mọi dịch vụ' },
     { icon: <Clock size={28} />, title: 'Xong trong 30 phút', desc: 'Nhanh chóng, tiện lợi' },
@@ -121,7 +112,7 @@ interface HeroSectionProps {
     storeBranches?: StoreBranch[];
 }
 
-export default function HeroSection({ initialBanners, storeBranches }: HeroSectionProps) {
+export default function HeroSection({ initialBanners }: HeroSectionProps) {
     const { config, loading } = useConfig();
     const [current, setCurrent] = useState(0);
     const [imgError, setImgError] = useState<Record<string, boolean>>({});
@@ -133,14 +124,12 @@ export default function HeroSection({ initialBanners, storeBranches }: HeroSecti
         ? initialBanners
         : (config.hero_banners || []);
     const hasBanners = heroBanners.length > 0;
-    const totalSlides = hasBanners ? heroBanners.length : fallbackSlides.length;
-
-    // Lấy phone từ storeBranches SSR hoặc config client
-    const fallbackPhone = storeBranches?.[0]?.phone || config.store_branches?.[0]?.phone || '0932242026';
+    const totalSlides = heroBanners.length;
 
     useEffect(() => { setMounted(true); }, []);
 
     useEffect(() => {
+        if (totalSlides <= 1) return;
         // Delay auto-rotation 10s so Lighthouse sees a stable viewport (SI fix)
         let intervalId: ReturnType<typeof setInterval>;
         const delayId = setTimeout(() => {
@@ -159,6 +148,7 @@ export default function HeroSection({ initialBanners, storeBranches }: HeroSecti
 
     // Chỉ hiện skeleton nếu KHÔNG có initialBanners (SSR) VÀ client config đang loading
     if (!initialBanners?.length && loading) return <BannerSkeleton />;
+    if (!hasBanners) return null;
 
     return (
         <section className="py-2">
@@ -189,8 +179,7 @@ export default function HeroSection({ initialBanners, storeBranches }: HeroSecti
                         {/* ── Banner Slider (75%) ── */}
                         <div className="flex-1 min-w-0 relative bg-dark overflow-hidden rounded-tr-xl">
                             <div className="px-0">
-                                {hasBanners ? (
-                                    <div className="relative h-[280px] sm:h-[380px]">
+                                <div className="relative h-[280px] sm:h-[380px]">
                                         {heroBanners.map((banner, i) => {
                                             const isFirst = i === 0;
                                             // SSR: render first slide only.
@@ -291,38 +280,7 @@ export default function HeroSection({ initialBanners, storeBranches }: HeroSecti
                                                 ))}
                                             </div>
                                         )}
-                                    </div>
-                                ) : (
-                                    /* Fallback Text Slides */
-                                    <div className="relative h-[280px] sm:h-[380px] flex items-center px-6 sm:px-10">
-                                        <div className="relative z-10 max-w-xl">
-                                            <span className={`text-sm uppercase tracking-widest ${fallbackSlides[current].accent} font-medium`}>
-                                                {fallbackSlides[current].subtitle}
-                                            </span>
-                                            <h1 className="text-3xl sm:text-5xl font-black text-white mt-2 mb-3 leading-tight">
-                                                {fallbackSlides[current].title}
-                                            </h1>
-                                            <p className="text-gray-300 text-base sm:text-lg mb-6">
-                                                {fallbackSlides[current].desc}
-                                            </p>
-                                            <div className="flex gap-3">
-                                                <a href="#booking-section" className="px-6 py-3 bg-copper text-white font-semibold rounded-lg hover:bg-copper-dark transition-colors">Đặt lịch ngay</a>
-                                                <a href={`tel:${fallbackPhone}`} className="px-6 py-3 border border-gray-500 text-white font-semibold rounded-lg hover:border-copper hover:text-copper transition-colors">Gọi tư vấn</a>
-                                            </div>
-                                        </div>
-                                        <div className="absolute right-0 top-1/2 -translate-y-1/2 w-64 h-64 sm:w-96 sm:h-96 bg-copper/5 rounded-full blur-3xl" />
-                                        <button onClick={prev} aria-label="Ảnh trước" className="absolute left-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/10 hover:bg-white/20 text-white rounded-full flex items-center justify-center z-10"><ChevronLeft size={20} /></button>
-                                        <button onClick={next} aria-label="Ảnh tiếp theo" className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/10 hover:bg-white/20 text-white rounded-full flex items-center justify-center z-10"><ChevronRight size={20} /></button>
-                                    </div>
-                                )}
-                                {/* Dots for fallback */}
-                                {!hasBanners && (
-                                    <div className="flex justify-center gap-2 pb-4">
-                                        {fallbackSlides.map((_, i) => (
-                                            <button key={i} onClick={() => setCurrent(i)} aria-label={`Chuyển đến slide ${i + 1}`} className={`w-3 h-3 p-2 box-content rounded-full transition-[transform,opacity] duration-300 ${i === current ? 'scale-x-[2.5] opacity-100 bg-copper' : 'scale-100 opacity-50 bg-gray-600 hover:opacity-70'}`} />
-                                        ))}
-                                    </div>
-                                )}
+                                </div>
                             </div>
                         </div>
                     </div>{/* end 2-column flex */}

@@ -5,6 +5,7 @@ import { requirePermission } from '@/lib/apiAuth';
 import { FieldValue } from 'firebase-admin/firestore';
 import { calculateAndSaveCommissionsServer } from '@/lib/commissionCalcServer';
 import type { Order } from '@/lib/types';
+import { PRODUCT_STATUS, isProductArchived } from '@/lib/productLifecycle';
 
 export async function POST(request: NextRequest) {
     try {
@@ -89,6 +90,9 @@ export async function POST(request: NextRequest) {
             for (const [productId, totalQty] of preAggregated.entries()) {
                 const pSnap = productDocs.get(productId)!;
                 const d = pSnap.data;
+                if (isProductArchived({ status: String(d.status || '') as 'active' | 'hidden' | 'inactive' }) || d.status !== PRODUCT_STATUS.ACTIVE || d.isProposed === true) {
+                    throw new Error(`Sản phẩm "${d.name || productId}" hiện không còn được bán.`);
+                }
                 const available = (Number(d.stock) || 0) - (Number(d.held) || 0);
                 if (available < totalQty) {
                     throw new Error(`Sản phẩm "${d.name}" chỉ còn ${available} khả dụng nhưng yêu cầu ${totalQty}.`);
