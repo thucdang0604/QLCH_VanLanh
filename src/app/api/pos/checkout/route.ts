@@ -6,6 +6,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { calculateAndSaveCommissionsServer } from '@/lib/commissionCalcServer';
 import type { Order } from '@/lib/types';
 import { PRODUCT_STATUS, isProductArchived } from '@/lib/productLifecycle';
+import { normalizeVietnamPhone } from '@/lib/phone';
 
 export async function POST(request: NextRequest) {
     try {
@@ -243,16 +244,25 @@ export async function POST(request: NextRequest) {
 
             // Customer Aggregate
             if ((order as { customer_info: { phone: string, name?: string } }).customer_info.phone) {
-                const phone = (order as { customer_info: { phone: string, name?: string } }).customer_info.phone.replace(/[^0-9]/g, '');
-                if (phone.length >= 9) {
+                const rawPhone = (order as { customer_info: { phone: string, name?: string } }).customer_info.phone;
+                const normalized = normalizeVietnamPhone(rawPhone);
+                if (normalized) {
+                    const phone = normalized.local;
                     const custRef = db.collection('customers').doc(phone);
                     const custSnap = await tx.get(custRef);
+                    const incomingName = ((order as { customer_info: { phone: string, name?: string } }).customer_info.name || '').trim();
                     
                     if (custSnap.exists) {
+                        const currentData = custSnap.data()!;
                         const updateData: Record<string, unknown> = {
                             updatedAt: FieldValue.serverTimestamp(),
                             lastVisit: FieldValue.serverTimestamp()
                         };
+
+                        if (incomingName && incomingName !== 'Khách lẻ' && incomingName !== currentData.name) {
+                            updateData.name = incomingName;
+                        }
+
                         if (!isPending) {
                             updateData.totalSpent = FieldValue.increment(serverTotal);
                             updateData.totalOrders = FieldValue.increment(1);
@@ -261,7 +271,8 @@ export async function POST(request: NextRequest) {
                     } else {
                         tx.set(custRef, {
                             phone,
-                            name: (order as { customer_info: { phone: string, name?: string } }).customer_info.name,
+                            name: incomingName || 'Khách lẻ',
+                            type: 'retail',
                             totalSpent: isPending ? 0 : serverTotal,
                             totalOrders: isPending ? 0 : 1,
                             totalRepairs: 0,

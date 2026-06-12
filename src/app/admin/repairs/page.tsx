@@ -23,6 +23,7 @@ import { PART_CATEGORY_LABEL, isPartCategory } from '@/lib/constants';
 import { uploadMedia } from '@/lib/storage';
 import { isChecklistComplete, isYouTubeUrl, getYouTubeEmbedUrl, areAllPartsReady } from '@/lib/workflowFeatures';
 import { REPAIR_STATUS, isPendingRepairPart, isRejectedRepairPart, isRepairStatus, isWarrantyEligibleRepairPart } from '@/lib/repairStatus';
+import { normalizeVietnamPhone } from '@/lib/phone';
 import PrintableReceipt from '@/components/admin/PrintableReceipt';
 import PrintableRepairInvoice from '@/components/admin/PrintableRepairInvoice';
 import PrintableWarranty from '@/components/admin/PrintableWarranty';
@@ -525,7 +526,8 @@ export default function RepairPage() {
                 body: JSON.stringify({
                     ticketId: ticket.id,
                     targetStatus: nextStatus,
-                    operationKey: crypto.randomUUID()
+                    ticketVersion: ticket.version || 0,
+                    idempotencyKey: crypto.randomUUID()
                 })
             });
             const data = await res.json();
@@ -707,6 +709,16 @@ export default function RepairPage() {
     // ── Submit ──
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+
+        if (formData.customerPhone) {
+            const normalizedPhone = normalizeVietnamPhone(formData.customerPhone);
+            if (!normalizedPhone) {
+                alert('Số điện thoại không hợp lệ. Vui lòng nhập đúng định dạng số điện thoại Việt Nam.');
+                return;
+            }
+            formData.customerPhone = normalizedPhone.local; // store normalized
+        }
+
         const tech = staffs.find(s => s.uid === formData.technicianId);
         try {
             if (editingTicket) {
@@ -872,6 +884,20 @@ export default function RepairPage() {
                     });
                 }
             }
+
+            // --- Customer Sync ---
+            if (formData.customerPhone) {
+                fetch('/api/customers/sync', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: formData.customerName,
+                        phone: formData.customerPhone,
+                        forceUpdateName: true
+                    })
+                }).catch(err => console.error('Failed to sync customer', err));
+            }
+
             setShowModal(false);
             toastSuccess(editingTicket ? 'Cập nhật thành công!' : 'Tạo phiếu thành công!');
         } catch (err: unknown) {

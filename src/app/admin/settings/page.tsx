@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useConfig, DEFAULT_CONFIG, type ContactInfo, type GeofenceConfig } from '@/lib/ConfigContext';
 import { Save, RotateCcw, Loader2, Store, Phone, Mail, MapPin, Facebook, MessageCircle, CheckCircle2, AlertCircle, ShieldCheck, Navigation, KeyRound } from 'lucide-react';
 import { getAuthInstance } from '@/lib/firebase';
+
 import CategoriesTab from './CategoriesTab';
 import NavigationTab from './NavigationTab';
 

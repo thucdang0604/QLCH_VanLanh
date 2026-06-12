@@ -35,13 +35,14 @@ export interface ServiceData {
 }
 
 /* ── Inline Toast ── */
+
 function Toast({ message, type = 'success', onClose }: { message: string; type?: 'success' | 'error'; onClose: () => void }) {
     return (
         <div className="fixed top-6 right-6 z-[100] animate-[fadeIn_0.3s_ease-in-out]">
             <div className={`${type === 'success' ? 'bg-green-500' : 'bg-red-500'} text-white px-6 py-4 rounded-xl shadow-2xl flex items-center gap-3 max-w-sm`}>
                 <CheckCircle2 size={22} className="flex-shrink-0" />
                 <span className="text-sm font-medium">{message}</span>
-                <button onClick={onClose} className="ml-2 hover:bg-white/20 rounded p-0.5 transition-colors">
+                <button onClick={onClose} aria-label="Đóng" title="Đóng" className="ml-2 hover:bg-white/20 rounded p-0.5 transition-colors">
                     <X size={16} />
                 </button>
             </div>

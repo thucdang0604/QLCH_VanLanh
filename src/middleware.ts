@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyPayload, COOKIE_NAME } from '@/lib/sessionCookie';
-import { ROUTE_PERMISSION_MAP } from '@/lib/permissions';
+import { getMatchedAdminRoute } from '@/lib/permissions';
 
 /**
  * Next.js Edge Middleware — Server-side RBAC for /admin/* routes.
@@ -51,16 +51,11 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Staff: check route-level permission using the same map as client-side
-  const matchedRoute = Object.keys(ROUTE_PERMISSION_MAP)
-    .sort((a, b) => b.length - a.length)
-    .find((route) => pathname.startsWith(route));
-
-  if (matchedRoute) {
-    const required = ROUTE_PERMISSION_MAP[matchedRoute];
-    if (!permissions.includes(required)) {
-      return NextResponse.redirect(new URL('/admin/login', request.url));
-    }
+  // Staff: check route-level permission using the same registry as client-side.
+  // Unknown admin routes deny by default for staff.
+  const matchedRoute = getMatchedAdminRoute(pathname);
+  if (!matchedRoute || !permissions.includes(matchedRoute.permission)) {
+    return NextResponse.redirect(new URL('/admin/login', request.url));
   }
 
   return NextResponse.next();

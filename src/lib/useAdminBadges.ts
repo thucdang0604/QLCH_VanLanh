@@ -148,9 +148,9 @@ export function useAdminBadges(userUid?: string, userRole?: string, userPermissi
         return () => unsub();
     }, [hasPerm]);
 
-    // ── 5. Reviews: status == 'pending' (admin only) ──
+    // ── 5. Reviews: status == 'pending' ──
     useEffect(() => {
-        if (userRole !== 'admin') {
+        if (!hasPerm('manage_reviews')) {
             setPendingReviews(0);
             return;
         }
@@ -160,7 +160,7 @@ export function useAdminBadges(userUid?: string, userRole?: string, userPermissi
             (err) => console.error('[Badges] reviews error:', err)
         );
         return () => unsub();
-    }, [userRole]);
+    }, [hasPerm]);
 
     // ── 6. Activities (unread) — kept here to consolidate ──
     useEffect(() => {

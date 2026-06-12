@@ -10,7 +10,7 @@ import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/fire
 import { db } from '@/lib/firebase';
 import { AppUser } from '@/lib/AuthContext';
 import { toastError, toastSuccess } from '@/lib/toast';
-import { PERMISSIONS_REGISTRY as PERMISSIONS } from '@/lib/permissions';
+import { ADMIN_ROLE_PRESETS, PERMISSIONS_REGISTRY as PERMISSIONS } from '@/lib/permissions';
 
 // Using centralized PERMISSIONS from @/lib/permissions
 export default function StaffPage() {
@@ -91,6 +91,15 @@ export default function StaffPage() {
             return { ...prev, permissions: perms };
         });
     };
+
+    const applyPreset = (permissions: readonly string[]) => {
+        setFormData(prev => ({ ...prev, permissions: [...permissions] }));
+    };
+
+    const isPresetSelected = (permissions: readonly string[]) => (
+        formData.permissions.length === permissions.length &&
+        permissions.every(permission => formData.permissions.includes(permission))
+    );
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -457,6 +466,35 @@ export default function StaffPage() {
                             {formData.role === 'staff' && (
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-3">Phân quyền</label>
+                                    <div className="mb-4">
+                                        <div className="flex items-center justify-between gap-3 mb-2">
+                                            <p className="text-sm font-medium text-gray-700">Preset vai trò</p>
+                                            <p className="text-xs text-gray-400">Chọn preset sẽ thay thế quyền hiện tại</p>
+                                        </div>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                            {ADMIN_ROLE_PRESETS.map((preset) => {
+                                                const selected = isPresetSelected(preset.permissions);
+
+                                                return (
+                                                    <button
+                                                        key={preset.id}
+                                                        type="button"
+                                                        onClick={() => applyPreset(preset.permissions)}
+                                                        className={`text-left p-3 rounded-lg border transition-all ${selected
+                                                            ? 'bg-orange-50 border-orange-200 text-orange-700'
+                                                            : 'bg-white border-gray-200 hover:border-gray-300 text-gray-700'
+                                                            }`}
+                                                    >
+                                                        <div className="flex items-center justify-between gap-2">
+                                                            <span className="text-sm font-semibold">{preset.label}</span>
+                                                            {selected && <Check size={14} />}
+                                                        </div>
+                                                        <p className="text-xs text-gray-500 mt-1">{preset.description}</p>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                         {PERMISSIONS.map((perm) => (
                                             <label

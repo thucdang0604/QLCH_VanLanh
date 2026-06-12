@@ -186,3 +186,19 @@ if (item.sellingPrice < item.costPrice) {
   alert("Cảnh báo: Giá bán thấp hơn giá vốn!");
 }
 ```
+## BUG-POS-008: Camera QR scan không hoạt động trên mobile (Permissions-Policy conflict)
+- **Status:** fixed
+- **Severity:** high
+- **Module:** POS
+- **Date:** 2026-06-09
+- **Files:** `firebase.json`
+### Cause
+<b>Phân tích</b>: Hai nguồn header `Permissions-Policy` xung đột — `next.config.mjs` gửi `camera=(self)` (cho phép) nhưng `firebase.json` rule `**` gửi `camera=()` (chặn hoàn toàn). Khi browser nhận 2 headers cùng key, nó áp dụng cái restrictive nhất. Chrome desktop lỏng lẻo nên vẫn chạy, Chrome mobile enforce nghiêm ngặt nên camera bị chặn — không hiện popup xin quyền, không có mục cấp quyền trong site settings.
+### Solution
+<b>Giải pháp đã áp dụng</b>: Đổi `camera=()` thành `camera=(self)` trong rule `**` của `firebase.json`, và đưa rule `/admin/**` lên trước rule `**` để đảm bảo thứ tự ưu tiên. Trang customer không dùng camera nên không có rủi ro bảo mật.
+### Code
+```diff
+# firebase.json — rule "**"
+- { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=(self)" }
++ { "key": "Permissions-Policy", "value": "camera=(self), microphone=(), geolocation=(self)" }
+```

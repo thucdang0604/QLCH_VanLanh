@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { isRateLimited } from '@/lib/rateLimit';
+import { normalizeVietnamPhone } from '@/lib/phone';
 
 const RATE_LIMIT_MAX = 3;
 const RATE_LIMIT_WINDOW_MS = 60_000;
@@ -84,6 +85,41 @@ export async function POST(request: NextRequest) {
 
         const db = getAdminDb();
         const docRef = await db.collection('appointments').add(appointment);
+
+        // --- Customer Sync ---
+        const normalizedPhone = normalizeVietnamPhone(phone);
+        if (normalizedPhone) {
+            const customerRef = db.collection('customers').doc(normalizedPhone.local);
+            await db.runTransaction(async (transaction) => {
+                const customerSnap = await transaction.get(customerRef);
+
+                if (!customerSnap.exists) {
+                    transaction.set(customerRef, {
+                        phone: normalizedPhone.local,
+                        name: appointment.fullName || 'Khách lẻ',
+                        type: 'retail',
+                        totalSpent: 0,
+                        totalOrders: 0,
+                        totalRepairs: 0,
+                        totalAppointments: 0,
+                        createdAt: FieldValue.serverTimestamp(),
+                        updatedAt: FieldValue.serverTimestamp(),
+                        lastVisit: FieldValue.serverTimestamp(),
+                        tags: []
+                    });
+                } else {
+                    const currentData = customerSnap.data()!;
+                    const updateData: Record<string, unknown> = {
+                        updatedAt: FieldValue.serverTimestamp(),
+                        lastVisit: FieldValue.serverTimestamp(),
+                    };
+                    if (appointment.fullName && appointment.fullName !== 'Khách lẻ' && appointment.fullName !== currentData.name) {
+                        updateData.name = appointment.fullName;
+                    }
+                    transaction.update(customerRef, updateData);
+                }
+            }).catch(err => console.error('Failed to sync customer from appointment', err));
+        }
 
         return NextResponse.json({
             success: true,

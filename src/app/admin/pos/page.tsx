@@ -172,6 +172,19 @@ export default function POSPage() {
         }
         setRepairLoading(true);
         try {
+            const normalizedPhone = phone.replace(/[^0-9]/g, '');
+            // Fetch from customers collection
+            if (normalizedPhone) {
+                const { doc, getDoc } = await import('firebase/firestore');
+                const custSnap = await getDoc(doc(db, 'customers', normalizedPhone));
+                if (custSnap.exists()) {
+                    const cData = custSnap.data();
+                    if (!customerName && cData.name && cData.name !== 'Khách lẻ') {
+                        setCustomerName(cData.name);
+                    }
+                }
+            }
+
             const q = query(
                 collection(db, 'repairs'),
                 where('customerPhone', '==', phone.trim()),
@@ -195,15 +208,16 @@ export default function POSPage() {
                     paymentAmount: Number(data.payment?.amount || 0),
                     paymentStatus: String(data.payment?.status || 'unpaid')
                 });
-                // Auto-fill customer name if empty
+                // Auto-fill customer name if empty and not found in customers collection
                 if (!customerName && data.customerName) {
-                    setCustomerName(data.customerName);
+                    // Update state using functional update to ensure we don't overwrite if it was just set
+                    setCustomerName(prev => prev || data.customerName);
                 }
             } else {
                 setLinkedRepair(null);
             }
         } catch (err) {
-            console.error('Repair lookup failed:', err);
+            console.error('Repair/Customer lookup failed:', err);
         }
         setRepairLoading(false);
     };
@@ -914,7 +928,7 @@ export default function POSPage() {
     );
 
     return (
-        <div className="h-[calc(100vh-80px)] flex gap-4 p-4">
+        <div className="min-h-[calc(100vh-220px)] md:h-[calc(100vh-80px)] flex gap-4 p-4">
             {/* ═══ LEFT: Product Grid ═══ */}
             <div className="flex-1 flex flex-col min-w-0">
                 {/* Search + Category Filter + Quick Add */}
@@ -963,7 +977,7 @@ export default function POSPage() {
                 </div>
 
                 {/* Product Grid */}
-                <div className="flex-1 overflow-y-auto">
+                <div className="md:flex-1 md:overflow-y-auto">
                     <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                         {filtered.map(product => {
                             const available = (product.stock || 0) - (product.held || 0);
@@ -974,8 +988,8 @@ export default function POSPage() {
                                     onClick={() => !outOfStock && addToCart(product)}
                                     disabled={outOfStock}
                                     className={`bg-white rounded-xl border border-gray-100 p-3 text-left transition-all group relative ${outOfStock
-                                            ? 'opacity-50 cursor-not-allowed'
-                                            : 'hover:shadow-lg hover:border-orange-200 active:scale-[0.97]'
+                                        ? 'opacity-50 cursor-not-allowed'
+                                        : 'hover:shadow-lg hover:border-orange-200 active:scale-[0.97]'
                                         }`}
                                 >
                                     {/* Out-of-stock badge */}
@@ -1017,7 +1031,7 @@ export default function POSPage() {
 
             {/* ═══ Mobile: Sticky Bottom Bar ═══ */}
             {!showMobileCart && (
-                <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg px-4 py-3 z-40">
+                <div className="md:hidden fixed left-0 right-0 bottom-[calc(env(safe-area-inset-bottom)+76px)] bg-white border-t shadow-lg px-4 py-3 z-40">
                     <button onClick={() => setShowMobileCart(true)}
                         className="w-full py-3 rounded-xl font-bold text-white bg-gradient-to-r from-orange-500 to-orange-600 flex items-center justify-center gap-2 shadow-lg shadow-orange-200/50 active:scale-[0.98]">
                         <ShoppingCart size={18} />
@@ -1028,7 +1042,7 @@ export default function POSPage() {
 
             {/* ═══ Mobile: Full-screen Cart Sheet ═══ */}
             {showMobileCart && (
-                <div className="md:hidden fixed inset-0 bg-white z-50 flex flex-col">
+                <div className="md:hidden fixed inset-0 bg-white z-50 flex flex-col pb-[env(safe-area-inset-bottom)]">
                     {cartSection}
                 </div>
             )}
@@ -1119,7 +1133,7 @@ export default function POSPage() {
 
                         <div className="flex-1 overflow-y-auto">
                             {printTemplate === 'thermal' ? (
-                                <div id="pos-receipt-thermal" className="px-6 py-4 text-xs space-y-3" style={{ maxWidth: '302px', margin: '0 auto' }}>
+                                <div id="pos-receipt-thermal" className="px-6 py-4 text-xs space-y-3 max-w-[302px] mx-auto">
                                     <div className="text-center">
                                         <h3 className="font-bold text-sm uppercase">{config.siteName || 'Văn Lành Service'}</h3>
                                         <p className="text-gray-500 text-[10px]">Hotline: {config.contact_info?.main_phone || '0932.242.026'}</p>
@@ -1330,31 +1344,31 @@ export default function POSPage() {
 
             {/* Print-only receipt */}
             {lastOrder && (
-                <div className="fixed inset-0 bg-white z-[100] p-4 hidden print:block" style={{ maxWidth: '302px', margin: '0 auto', fontFamily: 'monospace', fontSize: '11px' }}>
+                <div className="fixed inset-0 bg-white z-[100] p-4 hidden print:block max-w-[302px] mx-auto font-mono text-[11px]">
                     <div className="text-center mb-2">
                         <p className="font-bold text-sm">{config.siteName || 'Văn Lành Service'}</p>
                         <p>HÓA ĐƠN BÁN HÀNG</p>
                         <p>{new Date().toLocaleString('vi-VN')} | #{lastOrder.id.slice(-6).toUpperCase()}</p>
                     </div>
-                    <hr style={{ borderTop: '1px dashed #000' }} />
+                    <hr className="border-t border-dashed border-black" />
                     <p>KH: {lastOrder.customer_info.name}</p>
                     {lastOrder.customer_info.phone && <p>SĐT: {lastOrder.customer_info.phone}</p>}
-                    <hr style={{ borderTop: '1px dashed #000' }} />
-                    <table style={{ width: '100%' }}>
+                    <hr className="border-t border-dashed border-black" />
+                    <table className="w-full">
                         <tbody>
                             {lastOrder.items.map((item: OrderLineItem, i: number) => (
                                 <tr key={i}>
                                     <td>{item.product_name}</td>
-                                    <td style={{ textAlign: 'center' }}>x{item.quantity}</td>
-                                    <td style={{ textAlign: 'right' }}>{formatPrice(item.price * item.quantity)}</td>
+                                    <td className="text-center">x{item.quantity}</td>
+                                    <td className="text-right">{formatPrice(item.price * item.quantity)}</td>
                                 </tr>
                             ))}
                         </tbody>
                     </table>
-                    <hr style={{ borderTop: '1px dashed #000' }} />
-                    <p style={{ textAlign: 'right', fontWeight: 'bold' }}>TỔNG: {formatPrice(lastOrder.total_amount)}</p>
-                    <hr style={{ borderTop: '1px dashed #000' }} />
-                    <p style={{ textAlign: 'center', marginTop: '8px' }}>Cảm ơn quý khách!</p>
+                    <hr className="border-t border-dashed border-black" />
+                    <p className="text-right font-bold">TỔNG: {formatPrice(lastOrder.total_amount)}</p>
+                    <hr className="border-t border-dashed border-black" />
+                    <p className="text-center mt-2">Cảm ơn quý khách!</p>
                 </div>
             )}
 
@@ -1369,4 +1383,3 @@ export default function POSPage() {
         </div>
     );
 }
-

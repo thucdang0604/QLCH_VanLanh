@@ -44,7 +44,7 @@ export default function AdminReviewsPage() {
     const [searchTerm, setSearchTerm] = useState('');
 
     useEffect(() => {
-        if (user?.role === 'staff' && !user?.permissions?.includes('admin_only')) {
+        if (user?.role === 'staff' && !user?.permissions?.includes('manage_reviews')) {
             router.replace('/admin');
             return;
         }

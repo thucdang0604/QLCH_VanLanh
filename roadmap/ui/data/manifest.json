@@ -1,15 +1,115 @@
 {
   "projectName": "QLCH_VanLanh",
-  "lastSync": "2026-06-01T00:00:00.000Z",
+  "lastSync": "2026-06-09T00:00:00.000Z",
   "stats": {
     "completionPercent": 98,
     "openP0": 0,
-    "openBugs": 2,
+    "openBugs": 3,
     "trackCount": 5,
     "activeTracks": 1
   },
   "constraints": [],
   "aiPlans": [
+    {
+      "id": "plan-customer-crm-sync-20260611",
+      "title": "Đồng bộ Customer CRM toàn diện từ đa kênh",
+      "date": "11.06.2026",
+      "status": "implemented-local",
+      "planFile": "data/ai_plans/plan_customer_crm_sync_20260611.md",
+      "taskFile": "data/ai_plans/task_customer_crm_sync_20260611.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_customer_crm_sync_20260611.md",
+      "scope": [
+        "src/app/api/customers/sync/route.ts",
+        "src/app/admin/repairs/page.tsx",
+        "src/app/api/appointments/route.ts",
+        "src/app/api/pos/checkout/route.ts",
+        "src/components/ChatWidget.tsx"
+      ],
+      "decisions": [
+        "Sử dụng API chung tại /api/customers/sync để tạo/update thông tin qua Admin SDK nhằm bypass client rules",
+        "Sử dụng normalizeVietnamPhone cho mọi đầu vào SĐT",
+        "Cập nhật cả Tên khi khác Khách lẻ",
+        "Lưu qua transactions để tránh race condition"
+      ],
+      "updatedAt": "2026-06-11T00:00:00.000Z"
+    },
+    {
+      "id": "plan-bug-otp-001-v2-idempotent-voucher-20260611",
+      "title": "BUG-OTP-001 Follow-up: reCAPTCHA v2, khách cũ và voucher idempotent",
+      "date": "11.06.2026",
+      "status": "implemented-local",
+      "planFile": "data/ai_plans/plan_bug_otp_001_v2_idempotent_voucher_20260611.md",
+      "taskFile": "data/ai_plans/task_bug_otp_001_v2_idempotent_voucher_20260611.md",
+      "walkthroughFile": "",
+      "scope": [
+        "src/components/MissionsWidget.tsx",
+        "src/app/api/bounty/request-otp/route.ts",
+        "src/app/api/bounty/claim/route.ts",
+        "src/app/api/vouchers/validate/route.ts",
+        "src/app/api/checkout/route.ts",
+        "src/lib/phone.ts",
+        "roadmap/ai/modules/system-content.md"
+      ],
+      "decisions": [
+        "Phan biet khach CRM cu voi SDT da tung nhan voucher bounty",
+        "Claim voucher phai idempotent: claim lai tra status ro rang hoac ma con hieu luc, khong tra HTTP 500",
+        "UI phai goi preflight server truoc khi gui Firebase OTP de dung progressive rate-limit va tranh gui OTP khong can thiet",
+        "Checkout server phai enforce ownerId cua personal voucher theo SDT da nhan voucher",
+        "Khong luu Firebase ID token hoac PII dai han trong localStorage"
+      ],
+      "updatedAt": "2026-06-11T00:00:00.000Z"
+    },
+    {
+      "id": "plan-social-missions",
+      "title": "Marketing & Growth: Social Missions (Bounty Program)",
+      "date": "09.06.2026",
+      "status": "planned",
+      "planFile": "data/ai_plans/plan_social_missions.md",
+      "taskFile": "data/ai_plans/task_social_missions.md",
+      "walkthroughFile": "",
+      "scope": [
+        "src/lib/types.ts",
+        "src/app/admin/vouchers/page.tsx",
+        "src/app/api/checkout/route.ts",
+        "src/app/api/vouchers/validate/route.ts",
+        "src/components/storefront/MissionsWidget.tsx",
+        "src/components/storefront/CheckoutCart.tsx"
+      ],
+      "decisions": [
+        "Sử dụng phương pháp 'Honor System' (Tracking Click) để xác thực nhiệm vụ nhằm tối ưu UX",
+        "Hỗ trợ cả Voucher loại giảm % và giảm tiền mặt cố định",
+        "Hỗ trợ mã Voucher chung và mã duy nhất cho khách hàng hoàn thành nhiệm vụ"
+      ],
+      "updatedAt": "2026-06-09T00:00:00.000Z"
+    },
+    {
+      "id": "plan-deploy-pipeline-cleanup-20260609",
+      "title": "Firebase Deploy Pipeline Cleanup: node-which, esbuild, next.config bundle, Node engine",
+      "date": "09.06.2026",
+      "status": "planned",
+      "planFile": "data/ai_plans/plan_deploy_pipeline_cleanup_20260609.md",
+      "taskFile": "data/ai_plans/task_deploy_pipeline_cleanup_20260609.md",
+      "walkthroughFile": "",
+      "scope": [
+        "package.json",
+        "pnpm-lock.yaml",
+        "next.config.mjs",
+        "firebase.json",
+        ".firebase/qlch-vanlanh/functions/package.json",
+        ".firebase/qlch-vanlanh/functions/package-lock.json",
+        "roadmap/ai/modules/other_bugs.md",
+        "roadmap/ai/modules/system-content.md",
+        "roadmap/ai/dashboard.md"
+      ],
+      "decisions": [
+        "Treat node-which/esbuild as Firebase CLI Windows deploy toolchain debt, not as UI/PWA code failure",
+        "Do not consider deploy clean while next.config.mjs bundle warning remains",
+        "Make esbuild availability deterministic through direct dependency or verified binary lookup instead of npm no-save fallback",
+        "Continue using pnpm and do not commit npm lockfiles or generated .firebase artifacts",
+        "Handle @zxing/library Node >=24 warning separately after verifying Firebase Functions runtime support"
+      ],
+      "updatedAt": "2026-06-09T00:00:00.000Z"
+    },
     {
       "id": "plan-hardcode-cleanup-20260607",
       "title": "Hardcode Cleanup 2026-06-07: Secret, Storefront fallback, Business identity và Workflow constants",
