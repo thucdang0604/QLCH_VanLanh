@@ -7,6 +7,11 @@ export interface User {
     membership_level: 'Smember' | 'Gold' | 'Silver' | 'Bronze';
     phone?: string;
     address?: string;
+    missions?: {
+        facebook_like?: boolean;
+        tiktok_follow?: boolean;
+        completedAt?: FirestoreDateValue | null;
+    };
     createdAt: Date;
 }
 
@@ -167,6 +172,9 @@ export interface Order {
     assignedSellerId?: string;
     assignedSellerName?: string;
     assignedSellerAt?: FirestoreDateValue;
+    voucherCode?: string;
+    voucherDiscount?: number;
+    discountSource?: 'voucher' | 'tier';
     createdAt: Date;
     updatedAt: Date;
     completedAt?: FirestoreDateValue;
@@ -712,6 +720,31 @@ export interface AccessoryDiscountRule {
     targetKeywords: string[];           // Keywords: ['cường lực', 'dán màn']
     maxDiscountAmount?: number;         // Giảm tối đa (VNĐ)
     isActive: boolean;
+    createdAt: FirestoreDateValue;
+    updatedAt: FirestoreDateValue;
+}
+
+// ── Voucher Stacking Rules ──
+export interface StackingRules {
+    isExclusive: boolean;       // Nếu true → không dùng chung với bất kỳ ưu đãi nào
+    stackWithPromo: boolean;    // Cho phép dùng chung với giá khuyến mãi (price_promo)
+    stackWithTier: boolean;     // Cho phép dùng chung với ưu đãi hạng VIP
+}
+
+// ── Voucher (Mã giảm giá) ──
+export interface Voucher {
+    id: string;
+    code: string;                       // Mã giảm giá (uppercase, unique)
+    type: 'fixed' | 'percentage';       // Loại giảm giá
+    value: number;                      // Giá trị giảm
+    maxDiscount?: number;               // Giảm tối đa (cho loại %)
+    minOrderValue?: number;             // Đơn tối thiểu để áp dụng
+    expiryDate?: FirestoreDateValue;    // Ngày hết hạn
+    usageLimit: number;                 // 0 = không giới hạn
+    usedCount: number;                  // Đã dùng
+    isActive: boolean;
+    ownerId?: string | null;            // UID cá nhân (Bounty Program)
+    stackingRules: StackingRules;
     createdAt: FirestoreDateValue;
     updatedAt: FirestoreDateValue;
 }

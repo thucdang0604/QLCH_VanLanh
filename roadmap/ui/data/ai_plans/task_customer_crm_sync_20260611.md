@@ -1,0 +1,7 @@
+- `[x]` Create shared customer sync API `src/app/api/customers/sync/route.ts`
+- `[x]` Integrate customer sync in Admin Repairs `src/app/admin/repairs/page.tsx`
+- `[x]` Integrate customer sync in Web Appointments `src/app/api/appointments/route.ts`
+- `[x]` Fix customer name update logic in POS Checkout `src/app/api/pos/checkout/route.ts`
+- `[x]` Integrate customer sync in Chat Widget `src/components/ChatWidget.tsx`
+- `[x]` Fix PERMISSION_DENIED bug by pushing AI Auto-reply from Server instead of Client `src/app/api/ai/route.ts` and `src/lib/realtimedb.ts`
+- `[x]` Improve POS customer lookup by checking `customers` collection `src/app/admin/pos/page.tsx`

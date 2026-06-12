@@ -2,6 +2,7 @@
 export interface HeroBanner {
     id: string;
     imageUrl: string;
+
     width?: number;
     height?: number;
     link?: string;
@@ -12,6 +13,12 @@ export interface BackgroundConfig {
     type: 'color' | 'image';
     value: string;
     is_active: boolean;
+}
+
+export interface BountyMission {
+    id: 'facebook' | 'tiktok' | 'youtube';
+    url: string;
+    isActive: boolean;
 }
 
 export interface StoreBranch {
@@ -164,6 +171,12 @@ export interface SiteConfig {
     // Geofence for reviews
     geofence: GeofenceConfig;
 
+    // Bounty Missions
+    bountyMissions: BountyMission[];
+    bountyRewardType: 'fixed' | 'percentage'; // Loại giảm: cố định hoặc %
+    bountyRewardValue: number;                 // Giá trị giảm (VNĐ hoặc %)
+    bountyRewardMaxDiscount?: number;           // Giới hạn tối đa (chỉ dùng khi type=percentage)
+
     // Navigation (Menu Builder)
     headerNav: NavItem[];
     sidebarMenu: SidebarMenuItem[];
@@ -273,6 +286,13 @@ export const DEFAULT_CONFIG: SiteConfig = {
         radiusMeters: 500,
         pin: '2026',
     },
+    bountyMissions: [
+        { id: 'facebook', url: 'https://www.facebook.com/vanlanh.vn', isActive: true },
+        { id: 'tiktok', url: 'https://www.tiktok.com/@vanlanh.vn', isActive: true },
+        { id: 'youtube', url: 'https://www.youtube.com/@vanlanh', isActive: false },
+    ],
+    bountyRewardType: 'fixed',
+    bountyRewardValue: 50000,
     disableImageProxy: false,
 
     // Navigation defaults (mirrors current hardcoded menus)

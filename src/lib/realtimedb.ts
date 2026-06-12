@@ -79,18 +79,28 @@ export async function subscribeToRooms(
     return () => off(roomsRef, 'value', listener);
 }
 
-export async function subscribeToRoomInfo(roomId: string, callback: (info: ChatRoomInfo | null) => void): Promise<() => void> {
+export async function subscribeToRoomInfo(
+    roomId: string,
+    callback: (info: ChatRoomInfo | null) => void,
+    onError?: (error: Error) => void
+): Promise<() => void> {
     const rtdb = await getRtdbInstance();
     const { ref, onValue, off } = await import('firebase/database');
 
     const infoRef = ref(rtdb, `chats/${roomId}/info`);
     const listener = onValue(infoRef, (snapshot) => {
         callback(snapshot.val() as ChatRoomInfo | null);
+    }, (error) => {
+        onError?.(error);
     });
     return () => off(infoRef, 'value', listener);
 }
 
-export async function subscribeToMessages(roomId: string, callback: (messages: ChatMessage[]) => void): Promise<() => void> {
+export async function subscribeToMessages(
+    roomId: string,
+    callback: (messages: ChatMessage[]) => void,
+    onError?: (error: Error) => void
+): Promise<() => void> {
     const rtdb = await getRtdbInstance();
     const { ref, onValue, off, query, orderByChild, limitToLast } = await import('firebase/database');
 
@@ -106,6 +116,8 @@ export async function subscribeToMessages(roomId: string, callback: (messages: C
             });
         });
         callback(messages);
+    }, (error) => {
+        onError?.(error);
     });
 
     return () => off(messagesRef, 'value', listener);
@@ -163,7 +175,7 @@ export async function updateRoomInfo(roomId: string, updates: Partial<ChatRoomIn
 export async function handleAIAutoReply(roomId: string, messages: ChatMessage[], newText: string): Promise<void> {
     try {
         const rtdb = await getRtdbInstance();
-        const { ref, get, push, set } = await import('firebase/database');
+        const { ref, get } = await import('firebase/database');
 
         const infoRef = ref(rtdb, `chats/${roomId}/info`);
         const botActiveSnap = await get(infoRef);
@@ -196,31 +208,16 @@ export async function handleAIAutoReply(roomId: string, messages: ChatMessage[],
                 prompt: newText,
                 history: recentHistory,
                 context: 'Hãy đóng vai nhân viên hỗ trợ khách hàng của Văn Lành Service. Trả lời ngắn gọn, thân thiện.',
+                roomId: roomId,
+                pushToRtdb: true
             }),
         });
-        const aiData = await aiRes.json();
         
-        if (aiData.success && aiData.content) {
-            const messagesRef = ref(rtdb, `chats/${roomId}/messages`);
-            await push(messagesRef, {
-                text: aiData.content,
-                senderId: 'bot',
-                senderType: 'admin',
-                timestamp: Date.now(),
-                channel: 'web',
-                source: 'web',
-                sourceLabel: getChatChannelLabel('web'),
-            });
-            
-            const updatedInfo = (await get(infoRef)).val() || {};
-            await set(infoRef, {
-                ...updatedInfo,
-                lastMessage: '[AI] ' + aiData.content.substring(0, 50),
-                lastMessageTime: Date.now(),
-                hasUnreadUser: true,
-            });
+        const aiData = await aiRes.json();
+        if (!aiData.success) {
+            console.error('AI API failed to process request');
         }
     } catch (error) {
-        console.error("Lỗi AI Auto Reply:", error);
+        console.error('Error handling AI auto reply:', error);
     }
 }

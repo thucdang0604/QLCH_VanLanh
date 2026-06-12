@@ -18,6 +18,8 @@ export default function ChatWidget() {
     const [roomId, setRoomId] = useState<string>('');
     const [unreadCount, setUnreadCount] = useState(0);
     const [identityError, setIdentityError] = useState('');
+    const [chatError, setChatError] = useState('');
+    const [isRegistering, setIsRegistering] = useState(false);
 
     // Registration State
     const [isRegistered, setIsRegistered] = useState(false);
@@ -32,6 +34,15 @@ export default function ChatWidget() {
     const { user, loading: authLoading } = useAuth();
     const { config } = useConfig();
     const identity = getBusinessIdentity(config);
+
+    const ensureChatIdentity = useCallback(async (): Promise<string> => {
+        const auth = await getAuthInstance();
+        const { signInAnonymously } = await import('firebase/auth');
+        const firebaseUser = auth.currentUser || (await signInAnonymously(auth)).user;
+        setRoomId(firebaseUser.uid);
+        setIdentityError('');
+        return firebaseUser.uid;
+    }, []);
 
     // Check registration status on load
     useEffect(() => {
@@ -60,16 +71,7 @@ export default function ChatWidget() {
 
         setIsRegistered(false);
         setRegForm({ name: '', phone: '' });
-        void (async () => {
-            const auth = await getAuthInstance();
-            const currentUser = auth.currentUser;
-            const { signInAnonymously } = await import('firebase/auth');
-            const firebaseUser = currentUser || (await signInAnonymously(auth)).user;
-            if (!cancelled) {
-                setRoomId(firebaseUser.uid);
-                setIdentityError('');
-            }
-        })().catch((error) => {
+        void ensureChatIdentity().catch((error) => {
             console.error('Anonymous chat identity failed:', error);
             if (!cancelled) {
                 setIdentityError('Khong the khoi tao phien chat an toan. Vui long thu lai.');
@@ -79,7 +81,7 @@ export default function ChatWidget() {
         return () => {
             cancelled = true;
         };
-    }, [user, authLoading]);
+    }, [user, authLoading, ensureChatIdentity]);
 
     // Listen to messages for this room — only when chat is OPEN
     useEffect(() => {
@@ -119,6 +121,9 @@ export default function ChatWidget() {
                     const unread = adminMessages.filter(m => m.timestamp > lastReadTime).length;
                     setUnreadCount(unread);
                 }
+            }, (error) => {
+                console.error('Error subscribing to chat messages:', error);
+                setChatError('Khong the tai tin nhan. Vui long thu lai.');
             }).then(unsub => { unsubscribe = unsub; });
         });
 
@@ -142,6 +147,9 @@ export default function ChatWidget() {
                     });
                     setIsRegistered(true);
                 }
+            }, (error) => {
+                console.error('Error subscribing to chat room:', error);
+                setChatError('Khong the ket noi phong chat. Vui long thu lai.');
             }).then(fn => { unsub = fn; });
         });
         return () => { if (unsub) unsub(); };
@@ -170,8 +178,8 @@ export default function ChatWidget() {
     }, [isOpen, roomId, isRegistered]);
 
     // Update room metadata (for admin to see user info)
-    const updateRoomMetadata = useCallback(async () => {
-        if (!roomId) return;
+    const updateRoomMetadata = useCallback(async (targetRoomId: string) => {
+        if (!targetRoomId) return;
 
         const metadata: {
             odId: string;
@@ -181,7 +189,7 @@ export default function ChatWidget() {
             isGuest: boolean;
             lastActivity: number;
         } = {
-            odId: roomId,
+            odId: targetRoomId,
             isGuest: !user,
             lastActivity: Date.now(),
         };
@@ -195,35 +203,47 @@ export default function ChatWidget() {
             metadata.phone = regForm.phone.replace(/[^0-9]/g, '').slice(0, 15);
         }
 
-        try {
-            const { updateRoomInfo } = await import('@/lib/realtimedb');
-            await updateRoomInfo(roomId, metadata);
-        } catch (error) {
-            console.error('Error updating room metadata:', error);
-        }
-    }, [regForm.name, regForm.phone, roomId, user]);
+        const { updateRoomInfo } = await import('@/lib/realtimedb');
+        await updateRoomInfo(targetRoomId, metadata);
+    }, [regForm.name, regForm.phone, user]);
 
     const handleRegister = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!regForm.name.trim() || !regForm.phone.trim()) return;
 
-        setIsRegistered(true);
+        setIsRegistering(true);
+        setChatError('');
 
-        // Update metadata immediately (full phone sent to server for admin support)
-        if (roomId) {
-            try {
-                const { updateRoomInfo } = await import('@/lib/realtimedb');
-                await updateRoomInfo(roomId, {
-                    odId: roomId,
-                    displayName: regForm.name.trim().slice(0, 50),
-                    phone: regForm.phone.replace(/[^0-9]/g, '').slice(0, 15),
-                    isGuest: true,
-                    lastActivity: Date.now(),
-                    startedAt: Date.now()
-                });
-            } catch (error) {
-                console.error('Error registering chat room:', error);
-            }
+        try {
+            const activeRoomId = await ensureChatIdentity();
+            const { updateRoomInfo } = await import('@/lib/realtimedb');
+            await updateRoomInfo(activeRoomId, {
+                odId: activeRoomId,
+                displayName: regForm.name.trim().slice(0, 50),
+                phone: regForm.phone.replace(/[^0-9]/g, '').slice(0, 15),
+                isGuest: true,
+                lastActivity: Date.now(),
+                startedAt: Date.now()
+            });
+            setIsRegistered(true);
+
+            void fetch('/api/customers/sync', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name: regForm.name.trim(),
+                    phone: regForm.phone.replace(/[^0-9]/g, '').slice(0, 15)
+                })
+            }).then((response) => {
+                if (!response.ok) {
+                    console.warn('Customer sync failed:', response.status);
+                }
+            }).catch(err => console.error('Failed to sync customer', err));
+        } catch (error) {
+            console.error('Error registering chat room:', error);
+            setChatError('Khong the bat dau chat. Vui long thu lai sau it phut.');
+        } finally {
+            setIsRegistering(false);
         }
     };
 
@@ -233,14 +253,17 @@ export default function ChatWidget() {
         const messageText = inputMessage.trim();
         setInputMessage('');
         setIsLoading(true);
+        setChatError('');
 
         try {
+            const activeRoomId = await ensureChatIdentity();
+
             // Update room metadata
-            await updateRoomMetadata();
+            await updateRoomMetadata(activeRoomId);
 
             // Send user message via realtimedb.ts
             const { sendMessage } = await import('@/lib/realtimedb');
-            await sendMessage(roomId, messageText, roomId, 'user');
+            await sendMessage(activeRoomId, messageText, activeRoomId, 'user');
 
             // ── User message sent successfully — unlock input immediately ──
             setIsLoading(false);
@@ -259,7 +282,7 @@ export default function ChatWidget() {
                 setIsAiTyping(true);
                 try {
                     const { handleAIAutoReply } = await import('@/lib/realtimedb');
-                    await handleAIAutoReply(roomId, messages, messageText);
+                    await handleAIAutoReply(activeRoomId, messages, messageText);
                 } catch (aiErr) {
                     console.error('AI auto-reply error:', aiErr);
                 } finally {
@@ -270,6 +293,8 @@ export default function ChatWidget() {
 
         } catch (error) {
             console.error('Error sending message:', error);
+            setInputMessage(messageText);
+            setChatError('Khong the gui tin nhan. Vui long thu lai.');
             setIsLoading(false);
         }
     };
@@ -419,8 +444,8 @@ export default function ChatWidget() {
                                 <p className="text-gray-500 text-sm">Vui lòng để lại thông tin để chúng tôi hỗ trợ bạn tốt nhất.</p>
                             </div>
                             <form onSubmit={handleRegister} className="space-y-4">
-                                {identityError && (
-                                    <p className="text-sm text-red-600">{identityError}</p>
+                                {(identityError || chatError) && (
+                                    <p className="text-sm text-red-600">{identityError || chatError}</p>
                                 )}
                                 <div>
                                     <input
@@ -444,7 +469,7 @@ export default function ChatWidget() {
                                 </div>
                                 <button
                                     type="submit"
-                                    disabled={!roomId || !!identityError}
+                                    disabled={!roomId || !!identityError || isRegistering}
                                     className="w-full py-3 bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold rounded-xl hover:shadow-lg hover:shadow-orange-500/30 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
                                 >
                                     Bắt đầu chat
@@ -525,8 +550,8 @@ export default function ChatWidget() {
 
                             {/* Input */}
                             <div className="p-4 border-t bg-white flex-shrink-0">
-                                {identityError && (
-                                    <p className="text-xs text-red-600 mb-2">{identityError}</p>
+                                {(identityError || chatError) && (
+                                    <p className="text-xs text-red-600 mb-2">{identityError || chatError}</p>
                                 )}
                                 <div className="flex gap-2">
                                     <input
