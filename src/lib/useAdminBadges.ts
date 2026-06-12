@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db, getRtdbInstance } from '@/lib/firebase';
 import type { FirestoreDateValue } from '@/lib/types';
+import { REPAIR_PART_STATUS, REPAIR_STATUS, isRepairPartStatus, isRepairStatus } from '@/lib/repairStatus';
 
 // ── Types ──
 
@@ -124,13 +125,13 @@ export function useAdminBadges(userUid?: string, userRole?: string, userPermissi
         };
     }, [hasPerm]);
 
-    // ── 4. Repairs: cho_tiep_nhan + da_dat_linh_kien (for badge and KTV logic) ──
+    // ── 4. Repairs: intake + parts-ordered (for badge and KTV logic) ──
     // Query repairs with status in the 2 relevant statuses only — keeps reads minimal
     useEffect(() => {
         if (!hasPerm('manage_repairs')) { setRepairDocs([]); return; }
         const q = query(
             collection(db, 'repairs'),
-            where('status', 'in', ['cho_tiep_nhan', 'da_dat_linh_kien'])
+            where('status', 'in', [REPAIR_STATUS.INTAKE, REPAIR_STATUS.PARTS_ORDERED])
         );
         const unsub = onSnapshot(q,
             (snap) => {
@@ -147,9 +148,9 @@ export function useAdminBadges(userUid?: string, userRole?: string, userPermissi
         return () => unsub();
     }, [hasPerm]);
 
-    // ── 5. Reviews: status == 'pending' (admin only) ──
+    // ── 5. Reviews: status == 'pending' ──
     useEffect(() => {
-        if (userRole !== 'admin') {
+        if (!hasPerm('manage_reviews')) {
             setPendingReviews(0);
             return;
         }
@@ -159,7 +160,7 @@ export function useAdminBadges(userUid?: string, userRole?: string, userPermissi
             (err) => console.error('[Badges] reviews error:', err)
         );
         return () => unsub();
-    }, [userRole]);
+    }, [hasPerm]);
 
     // ── 6. Activities (unread) — kept here to consolidate ──
     useEffect(() => {
@@ -201,12 +202,11 @@ export function useAdminBadges(userUid?: string, userRole?: string, userPermissi
 
     // ── Computed: repairs badge (all "Chờ tiếp nhận") ──
     const repairsBadge = useMemo(() => {
-        return repairDocs.filter(d => d.status === 'cho_tiep_nhan').length;
+        return repairDocs.filter(d => isRepairStatus(d.status, REPAIR_STATUS.INTAKE)).length;
     }, [repairDocs]);
 
     // ── Computed: technician badge ──
-    // For staff: only their assigned tickets in "cho_tiep_nhan"
-    //   + tickets in "da_dat_linh_kien" with at least 1 part status == 'in_stock'
+    // For staff: assigned intake tickets + tickets with parts ready in stock.
     // For admin: same logic but for ALL technicians  
     const technicianBadge = useMemo(() => {
         let count = 0;
@@ -215,11 +215,10 @@ export function useAdminBadges(userUid?: string, userRole?: string, userPermissi
             const isAssignedToMe = !userUid || userRole === 'admin' || d.staff?.assignedTechnician === userUid;
             if (!isAssignedToMe) continue;
 
-            if (d.status === 'cho_tiep_nhan') {
+            if (isRepairStatus(d.status, REPAIR_STATUS.INTAKE)) {
                 count++;
-            } else if (d.status === 'da_dat_linh_kien') {
-                // Check if any part has status 'in_stock' → linh kiện đã về
-                const hasPartsReady = d.parts?.some(p => p.status === 'in_stock');
+            } else if (isRepairStatus(d.status, REPAIR_STATUS.PARTS_ORDERED)) {
+                const hasPartsReady = d.parts?.some(p => isRepairPartStatus(p.status, REPAIR_PART_STATUS.IN_STOCK));
                 if (hasPartsReady) count++;
             }
         }

@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
 import { useConfig } from '@/lib/ConfigContext';
+import { getBusinessIdentity } from '@/lib/businessIdentity';
 import TrackingModal from '@/components/TrackingModal';
 
 // Zalo SVG icon - compact inline
@@ -31,7 +32,7 @@ const contactOptions = [
         bgColor: 'bg-blue-500',
         textColor: 'text-white',
         type: 'link' as const,
-        href: 'https://zalo.me/0932242026',
+        href: '',
     },
     {
         id: 'hotline',
@@ -40,7 +41,7 @@ const contactOptions = [
         bgColor: 'bg-red-500',
         textColor: 'text-white',
         type: 'link' as const,
-        href: 'tel:0932242026',
+        href: '',
     },
     {
         id: 'chat',
@@ -57,7 +58,7 @@ const contactOptions = [
         bgColor: 'bg-green-500',
         textColor: 'text-white',
         type: 'link' as const,
-        href: 'https://maps.app.goo.gl/oHjSM6ztw4ExyfwJA',
+        href: '',
     },
 ];
 
@@ -71,13 +72,13 @@ export default function MobileBottomNav() {
     const menuRef = useRef<HTMLDivElement>(null);
 
     // Update contact options dynamically from config
-    const contactInfo = config.contact_info;
-    const mainPhone = contactInfo?.main_phone || config.store_branches?.[0]?.phone || '0932242026';
-    const mapLink = contactInfo?.address ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(contactInfo.address)}` : (config.store_branches?.[0]?.mapLink || 'https://maps.app.goo.gl/681NguyenKiem');
+    const identity = getBusinessIdentity(config);
+    const mainPhone = identity.mainPhone;
+    const mapLink = identity.mapLink;
 
     const dynamicOptions = contactOptions.map((opt) => {
         if (opt.id === 'hotline') return { ...opt, href: `tel:${mainPhone}` };
-        if (opt.id === 'zalo') return { ...opt, href: contactInfo?.zalo_link || `https://zalo.me/${mainPhone}` };
+        if (opt.id === 'zalo') return { ...opt, href: identity.socials.zaloLink };
         if (opt.id === 'map') return { ...opt, href: mapLink };
         return opt;
     });

@@ -1,9 +1,13 @@
 'use client';
 import { SITE_URL } from "@/lib/constants";
+import { useConfig } from "@/lib/ConfigContext";
+import { getBusinessIdentity } from "@/lib/businessIdentity";
 
 export default function ChinhSachDoiTraPage() {
-    const seoTitle = 'Chính sách đổi trả | Văn Lành Service';
-    const seoDescription = 'Chính sách đổi trả hàng tại Văn Lành Service: điều kiện đổi trả máy/phụ kiện, lưu ý về dữ liệu và hotline hỗ trợ. Vui lòng đọc kỹ trước khi đổi trả.';
+    const { config } = useConfig();
+    const identity = getBusinessIdentity(config);
+    const seoTitle = `Chính sách đổi trả | ${identity.siteName}`;
+    const seoDescription = `Chính sách đổi trả hàng tại ${identity.siteName}: điều kiện đổi trả máy/phụ kiện, lưu ý về dữ liệu và hotline hỗ trợ. Vui lòng đọc kỹ trước khi đổi trả.`;
     const canonicalUrl = `${SITE_URL}/info/chinh-sach-doi-tra`;
     const articleSchema = {
         '@context': 'https://schema.org',
@@ -11,7 +15,7 @@ export default function ChinhSachDoiTraPage() {
         headline: 'Chính sách đổi trả hàng',
         description: seoDescription,
         url: canonicalUrl,
-        publisher: { '@type': 'Organization', name: 'Văn Lành Service' },
+        publisher: { '@type': 'Organization', name: identity.siteName },
         mainEntityOfPage: { '@type': 'WebPage', '@id': canonicalUrl },
     };
     const breadcrumbSchema = {
@@ -77,7 +81,7 @@ export default function ChinhSachDoiTraPage() {
 
             <div className="bg-gray-100 rounded-xl p-5 text-center">
                 <p className="text-sm text-gray-600">
-                    Hỗ trợ đổi trả: <a href="tel:0932242026" className="text-copper font-bold hover:underline">0932.242.026</a>
+                    Hỗ trợ đổi trả: <a href={`tel:${identity.mainPhone}`} className="text-copper font-bold hover:underline">{identity.formattedPhone}</a>
                 </p>
             </div>
         </article>

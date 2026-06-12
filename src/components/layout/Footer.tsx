@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { Phone, MapPin, Clock, Wrench, Shield, ChevronRight } from 'lucide-react';
 import { useConfig } from '@/lib/ConfigContext';
+import { getBusinessIdentity } from '@/lib/businessIdentity';
 
 const policies = [
     { name: 'Chính sách bảo hành', href: '/info/chinh-sach-bao-hanh' },
@@ -23,7 +24,8 @@ const aboutLinks = [
 export default function Footer() {
     const { config, formatHotline } = useConfig();
     const branches = config.store_branches || [];
-    const mainPhone = config.contact_info?.main_phone || branches[0]?.phone || '0932242026';
+    const identity = getBusinessIdentity(config);
+    const mainPhone = identity.mainPhone;
 
     return (
         <footer className="py-2 mb-16 md:mb-0">
@@ -110,7 +112,7 @@ export default function Footer() {
 
                             {/* Column 4: About */}
                             <div>
-                                <h3 className="text-white font-bold text-base mb-4">Về Văn Lành</h3>
+                                <h3 className="text-white font-bold text-base mb-4">Về {identity.siteName}</h3>
                                 <ul className="space-y-2.5 mb-6">
                                     {aboutLinks.map((link) => (
                                         <li key={link.name}>
@@ -125,8 +127,8 @@ export default function Footer() {
                                         <Wrench size={20} className="text-white" />
                                     </div>
                                     <div>
-                                        <span className="text-white font-bold block">VĂN LÀNH</span>
-                                        <span className="text-copper-light text-xs tracking-wider">SERVICE</span>
+                                        <span className="text-white font-bold block">{identity.siteName}</span>
+                                        <span className="text-copper-light text-xs tracking-wider">{identity.domain}</span>
                                     </div>
                                 </div>
                             </div>
@@ -136,8 +138,8 @@ export default function Footer() {
                     {/* Bottom Bar */}
                     <div className="border-t border-gray-800">
                         <div className="px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-gray-400">
-                            <span>© 2026 Văn Lành Service. All rights reserved.</span>
-                            <span>Hotline: <a href={`tel:${mainPhone}`} className="text-copper-light hover:text-white">{formatHotline(mainPhone)}</a></span>
+                            <span>© 2026 {identity.siteName}. All rights reserved.</span>
+                            <span>Hotline: <a href={`tel:${mainPhone}`} className="text-copper-light hover:text-white">{identity.formattedPhone || formatHotline(mainPhone)}</a></span>
                         </div>
                     </div>
                 </div>{/* end bg-gray-900 rounded */}

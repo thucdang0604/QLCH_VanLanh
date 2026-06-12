@@ -2,6 +2,7 @@
 
 import type { RepairTicket } from '@/lib/types';
 import type { ReceiptConfig } from './PrintableReceipt';
+import { REPAIR_STATUS, isRepairStatus, isSelectedRepairPart } from '@/lib/repairStatus';
 
 type RepairPart = NonNullable<RepairTicket['parts']>[number];
 
@@ -50,7 +51,7 @@ export default function PrintableRepairInvoice({ ticket, receiptConfig }: Printa
     const pay = ticket.payment || {};
     const computedPartsCost = (ticket.parts || [])
         // Only count parts that were actually used (selected) AND not warranty-covered
-        .filter((p: RepairPart) => String(p?.status || '') === 'selected' && !(p as { isWarrantyCovered?: boolean })?.isWarrantyCovered)
+        .filter((p: RepairPart) => isSelectedRepairPart(p) && !(p as { isWarrantyCovered?: boolean })?.isWarrantyCovered)
         .reduce((sum: number, p: RepairPart) => {
             const qty = Math.max(1, Number(p?.quantity) || 1);
             const unit = Number(p?.unitPriceAtUse ?? p?.price ?? 0) || 0;
@@ -69,11 +70,11 @@ export default function PrintableRepairInvoice({ ticket, receiptConfig }: Printa
     let customerPay = 0;
     let refundAmount = 0;
 
-    if (status === 'refund') {
+    if (isRepairStatus(status, REPAIR_STATUS.REFUND)) {
         // Hoàn phí: khách không phải trả, cửa hàng hoàn lại tiền cọc (hoặc toàn bộ số đã thu)
         refundAmount = deposit > 0 ? deposit : total > 0 ? total : 0;
         customerPay = 0;
-    } else if (status === 'out') {
+    } else if (isRepairStatus(status, REPAIR_STATUS.OUT)) {
         // Máy không sửa được:
         // - Nếu có tổng phí (total) và không có cọc → khách phải trả total
         // - Nếu có cọc và không có tổng phí → hoàn lại toàn bộ cọc
@@ -206,7 +207,7 @@ export default function PrintableRepairInvoice({ ticket, receiptConfig }: Printa
                         </p>
                         <div className="space-y-1">
                             {ticket.parts
-                                ?.filter((p) => p.status === 'selected')
+                                ?.filter(isSelectedRepairPart)
                                 .map((p, i) => {
                                     const name = p.name || p.partName || p.productName || '—';
                                     const qty = Number(p.quantity) || 1;
@@ -322,7 +323,7 @@ export default function PrintableRepairInvoice({ ticket, receiptConfig }: Printa
 
                 {/* [WARRANTY TH3] Bảng hoàn tiền linh kiện */}
                 {ticket.ticketType === 'warranty' &&
-                 ticket.status === 'refund' &&
+                 isRepairStatus(ticket.status, REPAIR_STATUS.REFUND) &&
                  (ticket.warrantyClaim as { refundedParts?: { productName: string; refundAmount: number }[] })?.refundedParts &&
                  ((ticket.warrantyClaim as { refundedParts?: { productName: string; refundAmount: number }[] }).refundedParts!.length > 0) && (
                     <div className="border border-red-200 rounded-md p-2 mb-2 text-[10px]">
@@ -351,7 +352,7 @@ export default function PrintableRepairInvoice({ ticket, receiptConfig }: Printa
                 {/* WARRANTY SECTION — chỉ hiện khi có linh kiện có BH */}
                 {(() => {
                     const warrantyParts = (ticket.parts || []).filter((p: RepairPart) =>
-                        String(p?.status || '') === 'selected' && Number(p?.warrantyMonths || 0) > 0
+                        isSelectedRepairPart(p) && Number(p?.warrantyMonths || 0) > 0
                     );
                     if (warrantyParts.length === 0) return null;
                     return (

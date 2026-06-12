@@ -16,6 +16,7 @@ import {
 import { ServiceCardSkeleton } from '../ui/Skeleton';
 import { collection, query, orderBy, limit, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { useConfig } from '@/lib/ConfigContext';
 
 interface Service {
     id: string;
@@ -39,18 +40,6 @@ const iconMap: Record<string, LucideIcon> = {
     Cpu,
 };
 
-// Demo fallback services
-const demoServices = [
-    { id: 'thay-pin', name: 'Thay Pin', description: 'Pin chính hãng, bảo hành 12 tháng', icon: 'Battery', price: 'Từ 350.000đ', color: 'from-green-500 to-emerald-600', bgColor: 'bg-green-50' },
-    { id: 'ep-kinh', name: 'Ép Kính', description: 'Kính cường lực cao cấp', icon: 'Smartphone', price: 'Từ 200.000đ', color: 'from-blue-500 to-cyan-600', bgColor: 'bg-blue-50' },
-    { id: 'thay-man-hinh', name: 'Thay Màn Hình', description: 'Màn hình zin, đổi trả 30 ngày', icon: 'Monitor', price: 'Từ 800.000đ', color: 'from-purple-500 to-violet-600', bgColor: 'bg-purple-50' },
-    { id: 'sua-macbook', name: 'Sửa MacBook', description: 'Chuyên sửa lỗi phần cứng, phần mềm', icon: 'Laptop', price: 'Báo giá', color: 'from-gray-600 to-gray-800', bgColor: 'bg-gray-100' },
-    { id: 'sua-chua-tong-quat', name: 'Sửa Chữa Tổng Quát', description: 'Khắc phục mọi lỗi điện thoại', icon: 'Wrench', price: 'Từ 100.000đ', color: 'from-orange-500 to-red-500', bgColor: 'bg-orange-50' },
-    { id: 'bao-hanh-mo-rong', name: 'Bảo Hành Mở Rộng', description: 'Gói bảo hành VIP lên đến 24 tháng', icon: 'Shield', price: 'Từ 500.000đ', color: 'from-indigo-500 to-blue-600', bgColor: 'bg-indigo-50' },
-    { id: 'trade-in', name: 'Thu Cũ Đổi Mới', description: 'Định giá cao, đổi nhanh trong 15 phút', icon: 'RefreshCw', price: 'Miễn phí', color: 'from-teal-500 to-green-500', bgColor: 'bg-teal-50' },
-    { id: 'nang-cap-cpu', name: 'Nâng Cấp Linh Kiện', description: 'RAM, SSD, CPU cho laptop', icon: 'Cpu', price: 'Báo giá', color: 'from-pink-500 to-rose-600', bgColor: 'bg-pink-50' },
-];
-
 // Color palette for services
 const colorPalette = [
     { color: 'from-green-500 to-emerald-600', bgColor: 'bg-green-50' },
@@ -64,8 +53,10 @@ const colorPalette = [
 ];
 
 export default function ServiceBlock() {
-    const [services, setServices] = useState<Array<Service & { color?: string; bgColor?: string }>>(demoServices);
-    const [isLoading, setIsLoading] = useState(false);
+    const { config, formatHotline } = useConfig();
+    const [services, setServices] = useState<Array<Service & { color?: string; bgColor?: string }>>([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const mainPhone = config.contact_info?.main_phone || config.store_branches?.[0]?.phone || '';
 
     useEffect(() => {
         // Query mới nhất - hiển thị dịch vụ mới nhất lên đầu (limit 12)
@@ -79,7 +70,7 @@ export default function ServiceBlock() {
             try {
                 const snapshot = await getDocs(q);
                 if (snapshot.empty) {
-                    setServices(demoServices);
+                    setServices([]);
                 } else {
                     const all = snapshot.docs.map((doc, index) => {
                         const data = doc.data() as Partial<Service>;
@@ -97,11 +88,11 @@ export default function ServiceBlock() {
                     });
                     // Client-side: lọc active nếu trường tồn tại
                     const active = all.filter(s => s.isActive !== false);
-                    setServices(active.length > 0 ? active : demoServices);
+                    setServices(active);
                 }
             } catch (error) {
                 console.error('Services fetch error:', error);
-                setServices(demoServices);
+                setServices([]);
             } finally {
                 setIsLoading(false);
             }
@@ -110,13 +101,15 @@ export default function ServiceBlock() {
         fetchServices();
     }, []);
 
+    if (!isLoading && services.length === 0) return null;
+
     return (
         <section className="container mx-auto px-4 py-8">
             {/* Section Header */}
             <div className="flex items-center justify-between mb-6">
                 <div>
                     <h2 className="text-2xl font-bold text-gray-800">
-                        Dịch Vụ Văn Lành
+                        Dịch vụ {config.siteName || 'Văn Lành Service'}
                     </h2>
                     <p className="text-gray-600 mt-1">
                         Sửa chữa uy tín - Bảo hành dài hạn
@@ -185,10 +178,11 @@ export default function ServiceBlock() {
                     </div>
                     <div className="flex items-center gap-3">
                         <a
-                            href="tel:18002097"
+                            href={mainPhone ? `tel:${mainPhone}` : '#'}
+                            aria-disabled={!mainPhone}
                             className="px-6 py-3 bg-white text-orange-600 font-bold rounded-xl hover:bg-orange-50 transition-colors"
                         >
-                            📞 1800 2097
+                            📞 {mainPhone ? formatHotline(mainPhone) : 'Liên hệ'}
                         </a>
                         <Link
                             href="/services/booking"

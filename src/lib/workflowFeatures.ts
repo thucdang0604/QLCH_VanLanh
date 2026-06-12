@@ -2,6 +2,7 @@
 // Centralized Workflow Feature Registry
 // ══════════════════════════════════════════════════════════════
 import type { WorkflowNode } from '@/lib/types';
+import { isPendingRepairPart } from '@/lib/repairStatus';
 
 /**
  * Mỗi feature đại diện cho 1 tính năng có thể bật/tắt trên từng trạng thái workflow.
@@ -142,6 +143,6 @@ export function getYouTubeEmbedUrl(url: string): string | null {
 export function areAllPartsReady(ticket: { parts?: { status?: string }[] }): boolean {
     const parts = ticket.parts || [];
     if (parts.length === 0) return true;
-    const pendingParts = parts.filter(p => p.status === 'requested' || p.status === 'ordered');
+    const pendingParts = parts.filter(isPendingRepairPart);
     return pendingParts.length === 0;
 }

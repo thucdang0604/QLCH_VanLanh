@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { collection, query, orderBy, onSnapshot, addDoc, updateDoc, doc, deleteDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { Percent, Plus, Edit2, Trash2, ToggleLeft, ToggleRight, X, Tag, Settings, Medal, Users } from 'lucide-react';
+import { Percent, Plus, Edit2, Trash2, ToggleLeft, ToggleRight, X, Tag, Medal, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import type { AccessoryDiscountRule } from '@/lib/types';
 import { TIER_CONFIGS, TierConfig } from '@/lib/customerTiers';
@@ -119,8 +119,8 @@ function AccessoryRuleModal({ rule, onClose, onSave }: {
     );
 }
 
-// ── Main Page ──
-export default function DiscountRulesPage() {
+// ── Main Content ──
+export default function DiscountRulesTab() {
     const [activeTab, setActiveTab] = useState<'tiers' | 'accessories'>('tiers');
 
     // Accessories State
@@ -129,8 +129,38 @@ export default function DiscountRulesPage() {
     const [editRule, setEditRule] = useState<AccessoryDiscountRule | null>(null);
 
     // Tiers State
-    const [tiers, setTiers] = useState<TierConfig[]>(TIER_CONFIGS); // default fallback
+    const [tiers, setTiers] = useState<TierConfig[]>(TIER_CONFIGS);
     const [savingTiers, setSavingTiers] = useState(false);
+    const [expandedTier, setExpandedTier] = useState<string | null>(null);
+
+    // Customers per tier
+    const [tierCustomers, setTierCustomers] = useState<Record<string, { name: string; phone: string; totalSpent: number }[]>>({});
+
+    // Format currency with commas
+    const fmtCurrency = (n: number) => n.toLocaleString('vi-VN');
+
+    useEffect(() => {
+        const unsubCustomers = onSnapshot(collection(db, 'customers'), snap => {
+            const grouped: Record<string, { name: string; phone: string; totalSpent: number }[]> = {};
+            for (const tier of tiers) grouped[tier.name] = [];
+
+            snap.docs.forEach(d => {
+                const data = d.data();
+                const spent = Number(data.totalSpent || 0);
+                let matched = 'Bronze';
+                for (const tier of tiers) {
+                    if (tier.minSpent > 0 && spent >= tier.minSpent) { matched = tier.name; break; }
+                }
+                if (!grouped[matched]) grouped[matched] = [];
+                grouped[matched].push({ name: data.name || data.phone || d.id, phone: d.id, totalSpent: spent });
+            });
+            for (const key of Object.keys(grouped)) {
+                grouped[key].sort((a, b) => b.totalSpent - a.totalSpent);
+            }
+            setTierCustomers(grouped);
+        });
+        return () => unsubCustomers();
+    }, [tiers]);
 
     useEffect(() => {
         // Fetch Accessory Rules
@@ -195,14 +225,6 @@ export default function DiscountRulesPage() {
 
     return (
         <div className="space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div>
-                    <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-                        <Settings className="text-orange-500" size={28} /> Cấu hình Giảm giá & Thành viên
-                    </h1>
-                    <p className="text-sm text-gray-500 mt-1">Quản lý hạng khách hàng và các rule giảm giá tự động</p>
-                </div>
-            </div>
 
             {/* Tabs */}
             <div className="flex border-b border-gray-200">
@@ -238,39 +260,82 @@ export default function DiscountRulesPage() {
                                     <th className="px-4 py-3 font-semibold text-gray-600">Tên Hạng</th>
                                     <th className="px-4 py-3 font-semibold text-gray-600">Mức chi tiêu tối thiểu (VNĐ)</th>
                                     <th className="px-4 py-3 font-semibold text-gray-600">Giảm giá (%)</th>
+                                    <th className="px-4 py-3 font-semibold text-gray-600 text-center">Khách hàng</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-100">
-                                {tiers.map((tier, idx) => (
-                                    <tr key={tier.name} className="hover:bg-gray-50 transition-colors">
-                                        <td className="px-4 py-3 font-bold text-gray-900">
-                                            {tier.name}
-                                        </td>
-                                        <td className="px-4 py-3">
-                                            <input
-                                                title="Mức chi tiêu tối thiểu"
-                                                type="number"
-                                                value={tier.minSpent}
-                                                onChange={e => handleTierChange(idx, 'minSpent', Number(e.target.value))}
-                                                className="w-full max-w-[200px] border rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-orange-500 focus:outline-none"
-                                            />
-                                        </td>
-                                        <td className="px-4 py-3">
-                                            <div className="flex items-center gap-2">
+                                {tiers.map((tier, idx) => {
+                                    const customers = tierCustomers[tier.name] || [];
+                                    const isExpanded = expandedTier === tier.name;
+                                    return (
+                                        <tr key={tier.name} className="hover:bg-gray-50 transition-colors align-top">
+                                            <td className="px-4 py-3 font-bold text-gray-900">
+                                                {tier.name}
+                                            </td>
+                                            <td className="px-4 py-3">
                                                 <input
-                                                    title="Mức giảm giá"
-                                                    type="number"
-                                                    value={tier.discountPercent}
-                                                    onChange={e => handleTierChange(idx, 'discountPercent', Number(e.target.value))}
-                                                    className="w-20 border rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                                                    title="Mức chi tiêu tối thiểu"
+                                                    type="text"
+                                                    value={fmtCurrency(tier.minSpent)}
+                                                    onChange={e => {
+                                                        const raw = e.target.value.replace(/[^0-9]/g, '');
+                                                        handleTierChange(idx, 'minSpent', Number(raw) || 0);
+                                                    }}
+                                                    className="w-full max-w-[200px] border rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-orange-500 focus:outline-none text-right"
                                                 />
-                                                <span className="text-gray-500">%</span>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))}
+                                            </td>
+                                            <td className="px-4 py-3">
+                                                <div className="flex items-center gap-2">
+                                                    <input
+                                                        title="Mức giảm giá"
+                                                        type="number"
+                                                        value={tier.discountPercent}
+                                                        onChange={e => handleTierChange(idx, 'discountPercent', Number(e.target.value))}
+                                                        className="w-20 border rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                                                    />
+                                                    <span className="text-gray-500">%</span>
+                                                </div>
+                                            </td>
+                                            <td className="px-4 py-3 text-center">
+                                                {customers.length > 0 ? (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setExpandedTier(isExpanded ? null : tier.name)}
+                                                        className="inline-flex items-center gap-1 px-2.5 py-1 bg-orange-50 text-orange-600 rounded-lg text-xs font-bold hover:bg-orange-100 transition-colors"
+                                                    >
+                                                        <Users size={14} /> {customers.length}
+                                                        <span className="text-[10px]">{isExpanded ? '▲' : '▼'}</span>
+                                                    </button>
+                                                ) : (
+                                                    <span className="text-xs text-gray-400">0</span>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
                             </tbody>
                         </table>
+
+                        {/* Expanded customer list */}
+                        {expandedTier && (tierCustomers[expandedTier] || []).length > 0 && (
+                            <div className="border-t bg-gray-50 p-4">
+                                <h4 className="text-sm font-bold text-gray-700 mb-3">
+                                    Khách hàng hạng {expandedTier} ({tierCustomers[expandedTier].length})
+                                </h4>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-[300px] overflow-y-auto">
+                                    {tierCustomers[expandedTier].map(c => (
+                                        <div key={c.phone} className="bg-white rounded-lg border px-3 py-2 flex items-center justify-between gap-2">
+                                            <div className="min-w-0">
+                                                <p className="text-sm font-medium text-gray-900 truncate">{c.name}</p>
+                                                <p className="text-xs text-gray-500">{c.phone}</p>
+                                            </div>
+                                            <span className="text-xs font-bold text-orange-600 whitespace-nowrap">{fmtCurrency(c.totalSpent)}đ</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
                         <div className="p-4 bg-gray-50 border-t flex justify-end">
                             <button
                                 title="Lưu cấu hình hạng"

@@ -1,9 +1,13 @@
 'use client';
 import { SITE_URL } from "@/lib/constants";
+import { useConfig } from "@/lib/ConfigContext";
+import { getBusinessIdentity } from "@/lib/businessIdentity";
 
 export default function TraGopPage() {
-    const seoTitle = 'Trả góp | Văn Lành Service';
-    const seoDescription = 'Hướng dẫn mua hàng trả góp tại Văn Lành Service: thủ tục, giấy tờ, điều kiện trả trước và các hình thức trả góp (công ty tài chính, ngân hàng, paylater).';
+    const { config } = useConfig();
+    const identity = getBusinessIdentity(config);
+    const seoTitle = `Trả góp | ${identity.siteName}`;
+    const seoDescription = `Hướng dẫn mua hàng trả góp tại ${identity.siteName}: thủ tục, giấy tờ, điều kiện trả trước và các hình thức trả góp (công ty tài chính, ngân hàng, paylater).`;
     const canonicalUrl = `${SITE_URL}/info/tra-gop`;
     const articleSchema = {
         '@context': 'https://schema.org',
@@ -11,7 +15,7 @@ export default function TraGopPage() {
         headline: 'Mua hàng trả góp',
         description: seoDescription,
         url: canonicalUrl,
-        publisher: { '@type': 'Organization', name: 'Văn Lành Service' },
+        publisher: { '@type': 'Organization', name: identity.siteName },
         mainEntityOfPage: { '@type': 'WebPage', '@id': canonicalUrl },
     };
     const breadcrumbSchema = {
@@ -68,7 +72,7 @@ export default function TraGopPage() {
                         <li>⏱️ Thời gian duyệt hồ sơ: <strong>10 – 30 phút</strong></li>
                         <li>📊 Lãi suất thấp nhất: <strong>0.96%/tháng</strong> (theo dư nợ giảm dần)</li>
                         <li>💳 Kỳ hạn: 6 – 9 – 12 tháng</li>
-                        <li>🏦 Thanh toán: Tại Văn Lành Service hoặc chi nhánh Đông Á, Sacombank, BIDV</li>
+                        <li>🏦 Thanh toán: Tại {identity.siteName} hoặc chi nhánh Đông Á, Sacombank, BIDV</li>
                     </ul>
                 </div>
             </section>
@@ -116,7 +120,7 @@ export default function TraGopPage() {
                 <h2 className="text-lg font-bold text-gray-900 mb-3">Câu hỏi thường gặp</h2>
                 <div className="space-y-3">
                     {[
-                        { q: 'Tôi không có hộ khẩu ở TP.HCM có thể mua trả góp được không?', a: 'Dịch vụ trả góp tại Văn Lành Service hỗ trợ khách hàng có hộ khẩu/KT3 ở 63 tỉnh thành trên cả nước.' },
+                        { q: 'Tôi không có hộ khẩu ở TP.HCM có thể mua trả góp được không?', a: `Dịch vụ trả góp tại ${identity.siteName} hỗ trợ khách hàng có hộ khẩu/KT3 ở 63 tỉnh thành trên cả nước.` },
                         { q: 'Bản sao Hộ khẩu có làm hồ sơ được không?', a: 'Bạn có thể dùng bản sao để làm hồ sơ, tuy nhiên khi có kết quả phải mang bản gốc để nhận máy.' },
                         { q: 'Mua trả góp có nhận được khuyến mãi không?', a: 'Mọi chương trình khuyến mãi đang áp dụng cho khách mua tại cửa hàng cũng áp dụng khi mua trả góp.' },
                     ].map((faq, i) => (
@@ -130,7 +134,7 @@ export default function TraGopPage() {
 
             <div className="bg-gray-100 rounded-xl p-5 text-center">
                 <p className="text-sm text-gray-600">
-                    Tư vấn trả góp: <a href="tel:0932242026" className="text-copper font-bold hover:underline">0932.242.026</a>
+                    Tư vấn trả góp: <a href={`tel:${identity.mainPhone}`} className="text-copper font-bold hover:underline">{identity.formattedPhone}</a>
                 </p>
             </div>
         </article>

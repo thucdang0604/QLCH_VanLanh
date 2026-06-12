@@ -15,6 +15,7 @@ import { isChecklistComplete, isYouTubeUrl, getYouTubeEmbedUrl, areAllPartsReady
 import type { RepairTicket, Product, WorkflowNode } from '@/lib/types';
 import { toastError, toastSuccess, toastWarning } from '@/lib/toast';
 import { PART_CATEGORY_LABEL, isPartCategory } from '@/lib/constants';
+import { REPAIR_PART_STATUS, REPAIR_STATUS, isPendingRepairPart, isRepairPartStatus, isRepairStatus } from '@/lib/repairStatus';
 import Modal from '@/components/admin/Modal';
 import { buildProductCodeFromId } from '@/lib/productCodes';
 import { createProductWithCodes } from '@/lib/productCodeRegistry';
@@ -377,7 +378,7 @@ export default function TechnicianPage() {
             }
 
             // Block KTV from changing status when ticket is waiting for handover (cashier's job)
-            if (ticket.status === 'cho_ban_giao_khach') {
+            if (isRepairStatus(ticket.status, REPAIR_STATUS.CUSTOMER_HANDOVER)) {
                 toastWarning('Phiếu đang chờ bàn giao cho khách. Vui lòng liên hệ thu ngân để xử lý.');
                 return;
             }
@@ -402,7 +403,7 @@ export default function TechnicianPage() {
             if (currentCfg?.allowedFeatures?.includes('requirePartsReady')) {
                 if (!areAllPartsReady(ticket)) {
                     const pendingCount = (ticket.parts || []).filter(
-                        p => p.status === 'requested' || p.status === 'ordered'
+                        isPendingRepairPart
                     ).length;
                     toastError(
                         `Còn ${pendingCount} linh kiện chưa về kho. Cần chờ hàng về trước khi chuyển sang sửa chữa.`
@@ -415,7 +416,7 @@ export default function TechnicianPage() {
             // (requirePaymentGate is handled by cashier in repairs/page.tsx)
 
             // --- INTERCEPT: If transitioning OUT of "dang_kiem_tra", require Tech Notes ---
-            if (ticket.status === 'dang_kiem_tra' && newStatus !== 'dang_kiem_tra') {
+            if (isRepairStatus(ticket.status, REPAIR_STATUS.INSPECTION) && newStatus !== REPAIR_STATUS.INSPECTION) {
                 setTechNoteText(ticket.issue?.notes || '');
                 setNoteModalPayload({ ticketId, newStatus, currentNote: ticket.issue?.notes || '' });
                 return;
@@ -546,7 +547,7 @@ export default function TechnicianPage() {
                     </h1>
                     <p className="text-sm text-gray-500 mt-0.5">
                         {tickets.filter(t => t.status === 'dang_sua_chua').length} máy đang sửa •
-                        {' '}{tickets.filter(t => t.status === 'done').length} máy chờ trả
+                        {' '}{tickets.filter(t => isRepairStatus(t.status, REPAIR_STATUS.DONE)).length} máy chờ trả
                     </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -581,7 +582,7 @@ export default function TechnicianPage() {
                         const workflow = getWorkflowForTicket(ticket);
                         const st = workflow.find(s => s.id === ticket.status) || { id: ticket.status, label: ticket.status, color: 'text-gray-700 bg-gray-50 border-gray-200', allowedNext: [] } as WorkflowNode;
                         const currentCfg = workflow.find(s => s.id === ticket.status);
-                        const isReadOnly = ticket.status === 'cho_ban_giao_khach' || !!currentCfg?.isTerminal;
+                        const isReadOnly = isRepairStatus(ticket.status, REPAIR_STATUS.CUSTOMER_HANDOVER) || !!currentCfg?.isTerminal;
 
                         return (
                             <div
@@ -641,9 +642,9 @@ export default function TechnicianPage() {
                                                                 <span
                                                                     key={idx}
                                                                     className={`text-[10px] px-2 py-0.5 rounded-full border ${
-                                                                        p.status === 'selected'
+                                                                        isRepairPartStatus(p.status, REPAIR_PART_STATUS.SELECTED)
                                                                             ? 'bg-green-50 text-green-700 border-green-200'
-                                                                            : p.status === 'in_stock'
+                                                                            : isRepairPartStatus(p.status, REPAIR_PART_STATUS.IN_STOCK)
                                                                                 ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                                                                                 : p.status === 'unavailable'
                                                                                     ? 'bg-red-50 text-red-600 border-red-200'
@@ -727,7 +728,7 @@ export default function TechnicianPage() {
 
                                         {/* Dynamic Transition Button for Báo Giá */}
                                         {!isReadOnly && st?.allowedFeatures?.includes('allowPartsSelection') ? (() => {
-                                            const hasRequestedParts = ticket.parts?.length === 0 || ticket.parts?.some(p => p.status === 'requested');
+                                            const hasRequestedParts = ticket.parts?.length === 0 || ticket.parts?.some(p => isRepairPartStatus(p.status, REPAIR_PART_STATUS.REQUESTED));
                                             const targetStatusId = hasRequestedParts ? 'dang_tim_linh_kien' : 'dang_sua_chua';
                                             const targetStatus = workflow.find(ds => ds.id === targetStatusId);
 
@@ -853,7 +854,7 @@ export default function TechnicianPage() {
 
                                                 {/* Dynamic Transition Button for Báo Giá */}
                                                 {st?.allowedFeatures?.includes('allowPartsSelection') ? (() => {
-                                                    const hasRequestedParts = ticket.parts?.length === 0 || ticket.parts?.some(p => p.status === 'requested');
+                                                    const hasRequestedParts = ticket.parts?.length === 0 || ticket.parts?.some(p => isRepairPartStatus(p.status, REPAIR_PART_STATUS.REQUESTED));
                                                     const targetStatusId = hasRequestedParts ? 'dang_tim_linh_kien' : 'dang_sua_chua';
                                                     const targetStatus = workflow.find(ds => ds.id === targetStatusId);
 
@@ -905,7 +906,7 @@ export default function TechnicianPage() {
                             {(() => {
                                 const workflow = getWorkflowForTicket(selectedTicket);
                                 const currentCfg = workflow.find(s => s.id === selectedTicket.status);
-                                const isReadOnly = selectedTicket.status === 'cho_ban_giao_khach' || !!currentCfg?.isTerminal;
+                                const isReadOnly = isRepairStatus(selectedTicket.status, REPAIR_STATUS.CUSTOMER_HANDOVER) || !!currentCfg?.isTerminal;
                                 return isReadOnly ? (
                                     <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-800 font-medium flex items-center gap-2">
                                         <AlertCircle size={16} /> Phiếu đã hoàn tất kỹ thuật — Chỉ xem, không thể chỉnh sửa.
@@ -992,7 +993,7 @@ export default function TechnicianPage() {
                                 const workflow = getWorkflowForTicket(selectedTicket);
                                 const st = workflow.find(s => s.id === selectedTicket.status);
                                 return st?.allowedFeatures?.includes('allowPartsSelection');
-                            })() && !(() => { const wf = getWorkflowForTicket(selectedTicket); const cfg = wf.find(s => s.id === selectedTicket.status); return selectedTicket.status === 'cho_ban_giao_khach' || !!cfg?.isTerminal; })() && (
+                            })() && !(() => { const wf = getWorkflowForTicket(selectedTicket); const cfg = wf.find(s => s.id === selectedTicket.status); return isRepairStatus(selectedTicket.status, REPAIR_STATUS.CUSTOMER_HANDOVER) || !!cfg?.isTerminal; })() && (
                                     <div className="mt-4 border-t pt-4">
                                         <p className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
                                             <Package size={16} className="text-orange-500" /> Linh kiện sử dụng
@@ -1015,24 +1016,24 @@ export default function TechnicianPage() {
                                                         <div className="flex items-center gap-2 mt-2 sm:mt-0">
                                                             <span
                                                                 className={`text-[10px] font-bold px-2 py-1 rounded-md border ${
-                                                                    p.status === 'selected'
+                                                                    isRepairPartStatus(p.status, REPAIR_PART_STATUS.SELECTED)
                                                                         ? 'bg-green-50 text-green-700 border-green-200'
-                                                                        : p.status === 'in_stock'
+                                                                        : isRepairPartStatus(p.status, REPAIR_PART_STATUS.IN_STOCK)
                                                                             ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                                                                             : p.status === 'unavailable'
                                                                                 ? 'bg-red-50 text-red-600 border-red-200'
                                                                                 : 'bg-yellow-50 text-yellow-700 border-yellow-200'
                                                                 }`}
                                                             >
-                                                                {p.status === 'selected'
+                                                                {isRepairPartStatus(p.status, REPAIR_PART_STATUS.SELECTED)
                                                                     ? 'Đã xuất'
-                                                                    : p.status === 'in_stock'
+                                                                    : isRepairPartStatus(p.status, REPAIR_PART_STATUS.IN_STOCK)
                                                                         ? 'Đã tìm được'
                                                                         : p.status === 'unavailable'
                                                                             ? 'Không có hàng'
                                                                             : 'Đang yêu cầu'}
                                                             </span>
-                                                            {!(() => { const wf = getWorkflowForTicket(selectedTicket); const cfg = wf.find(s => s.id === selectedTicket.status); return selectedTicket.status === 'cho_ban_giao_khach' || !!cfg?.isTerminal; })() && (
+                                                            {!(() => { const wf = getWorkflowForTicket(selectedTicket); const cfg = wf.find(s => s.id === selectedTicket.status); return isRepairStatus(selectedTicket.status, REPAIR_STATUS.CUSTOMER_HANDOVER) || !!cfg?.isTerminal; })() && (
                                                             <button
                                                                 onClick={() => handleRemovePart(selectedTicket, pIdx)}
                                                                 className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-white rounded-md transition-colors"
@@ -1107,7 +1108,7 @@ export default function TechnicianPage() {
                                                                         {(() => {
                                                                             const available = Math.max(0, (product.stock || 0) - (product.held || 0));
                                                                             const isAlreadyRequested = selectedTicket.parts?.some(
-                                                                                p => p.productId === product.id && p.status === 'requested'
+                                                                                p => p.productId === product.id && isRepairPartStatus(p.status, REPAIR_PART_STATUS.REQUESTED)
                                                                             );
                                                                             return (
                                                                                 <>
@@ -1235,10 +1236,10 @@ export default function TechnicianPage() {
                                 const workflow = getWorkflowForTicket(selectedTicket);
                                 const currentStatusCfg = workflow.find(s => s.id === selectedTicket.status);
                                 // Read-only guard: hide status change buttons entirely
-                                const isReadOnly = selectedTicket.status === 'cho_ban_giao_khach' || !!currentStatusCfg?.isTerminal;
+                                const isReadOnly = isRepairStatus(selectedTicket.status, REPAIR_STATUS.CUSTOMER_HANDOVER) || !!currentStatusCfg?.isTerminal;
                                 if (isReadOnly) return null;
                                 if (currentStatusCfg?.allowedFeatures?.includes('allowPartsSelection')) {
-                                    const hasRequestedParts = selectedTicket.parts?.length === 0 || selectedTicket.parts?.some(p => p.status === 'requested');
+                                    const hasRequestedParts = selectedTicket.parts?.length === 0 || selectedTicket.parts?.some(p => isRepairPartStatus(p.status, REPAIR_PART_STATUS.REQUESTED));
                                     const targetStatusId = hasRequestedParts ? 'dang_tim_linh_kien' : 'dang_sua_chua';
                                     const targetStatus = workflow.find(ds => ds.id === targetStatusId);
 

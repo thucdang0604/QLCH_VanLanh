@@ -1,6 +1,7 @@
 import { getAdminDb, isAdminAvailable } from '@/lib/firebaseAdmin';
 import { cache } from 'react';
 import { unstable_cache } from 'next/cache';
+import { PRODUCT_STATUS } from '@/lib/productLifecycle';
 
 /** Serialized Firestore document with guaranteed `id` field */
 export type SerializedDoc = { id: string } & Record<string, unknown>;
@@ -150,6 +151,9 @@ export const fetchDetailItem = cache(async (id: string, type: 'products' | 'serv
     }
 
     const data = doc.data() as Record<string, unknown>;
+    if (type === 'products' && data.status !== PRODUCT_STATUS.ACTIVE) {
+        return null;
+    }
     const serialized: SerializedDoc = { ...data, id: doc.id };
     if (serialized.createdAt && typeof (serialized.createdAt as { toDate?: unknown }).toDate === 'function') {
         serialized.createdAt = (serialized.createdAt as { toDate: () => Date }).toDate().getTime();

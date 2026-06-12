@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Search, Loader2, X, Smartphone, Wrench, ArrowRight } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import type { RepairTicket } from '@/lib/types';
+import { REPAIR_STATUS, isRepairStatus } from '@/lib/repairStatus';
 
 interface TrackingModalProps {
     isOpen: boolean;
@@ -70,17 +71,17 @@ export default function TrackingModal({ isOpen, onClose }: TrackingModalProps) {
     };
 
     const repairStatusConfig: Record<string, { label: string; color: string }> = {
-        cho_tiep_nhan: { label: 'Chờ tiếp nhận', color: 'text-yellow-600' },
-        dang_kiem_tra: { label: 'Đang kiểm tra', color: 'text-blue-600' },
+        [REPAIR_STATUS.INTAKE]: { label: 'Chờ tiếp nhận', color: 'text-yellow-600' },
+        [REPAIR_STATUS.INSPECTION]: { label: 'Đang kiểm tra', color: 'text-blue-600' },
         da_tinh_trang_va_gia: { label: 'Đã báo giá', color: 'text-purple-600' },
         doi_khach_phan_hoi: { label: 'Đợi phản hồi', color: 'text-amber-600' },
         tim_linh_kien: { label: 'Tìm linh kiện', color: 'text-cyan-600' },
-        da_dat_linh_kien: { label: 'Đã đặt linh kiện', color: 'text-indigo-600' },
+        [REPAIR_STATUS.PARTS_ORDERED]: { label: 'Đã đặt linh kiện', color: 'text-indigo-600' },
         dang_sua_chua: { label: 'Đang sửa', color: 'text-orange-600' },
-        cho_ban_giao_khach: { label: 'Chờ giao', color: 'text-green-600' },
-        done: { label: 'Hoàn tất', color: 'text-green-600' },
-        refund: { label: 'Hoàn phí', color: 'text-red-600' },
-        out: { label: 'Trả máy', color: 'text-gray-600' },
+        [REPAIR_STATUS.CUSTOMER_HANDOVER]: { label: 'Chờ giao', color: 'text-green-600' },
+        [REPAIR_STATUS.DONE]: { label: 'Hoàn tất', color: 'text-green-600' },
+        [REPAIR_STATUS.REFUND]: { label: 'Hoàn phí', color: 'text-red-600' },
+        [REPAIR_STATUS.OUT]: { label: 'Trả máy', color: 'text-gray-600' },
     };
 
     return (
@@ -151,7 +152,7 @@ export default function TrackingModal({ isOpen, onClose }: TrackingModalProps) {
                                                         </div>
                                                     </div>
                                                     <span className={`text-[10px] px-2 py-1 rounded-md font-bold uppercase ${
-                                                        ticket.status === 'done' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'
+                                                        isRepairStatus(ticket.status, REPAIR_STATUS.DONE) ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'
                                                     }`}>
                                                         {repairStatusConfig[ticket.status]?.label || ticket.status}
                                                     </span>

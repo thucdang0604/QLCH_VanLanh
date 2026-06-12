@@ -22,6 +22,8 @@ import type { RepairTicket, RepairStatus, PaymentStatus, DeviceChecklist, Workfl
 import { PART_CATEGORY_LABEL, isPartCategory } from '@/lib/constants';
 import { uploadMedia } from '@/lib/storage';
 import { isChecklistComplete, isYouTubeUrl, getYouTubeEmbedUrl, areAllPartsReady } from '@/lib/workflowFeatures';
+import { REPAIR_STATUS, isPendingRepairPart, isRejectedRepairPart, isRepairStatus, isWarrantyEligibleRepairPart } from '@/lib/repairStatus';
+import { normalizeVietnamPhone } from '@/lib/phone';
 import PrintableReceipt from '@/components/admin/PrintableReceipt';
 import PrintableRepairInvoice from '@/components/admin/PrintableRepairInvoice';
 import PrintableWarranty from '@/components/admin/PrintableWarranty';
@@ -68,9 +70,20 @@ interface ServiceModel {
     isActive?: boolean;
     [key: string]: unknown;
 }
+
+type RepairPermissionUser = {
+    role?: string | null;
+    permissions?: string[] | null;
+};
+
+function canOverrideRepairTerminalStatus(user: RepairPermissionUser | null | undefined) {
+    return user?.role?.toLowerCase() === 'admin' || user?.permissions?.includes('admin_only');
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 export default function RepairPage() {
     const { user } = useAuth();
+    const canOverrideTerminalStatus = canOverrideRepairTerminalStatus(user);
     const { config } = useConfig();
     const searchParams = useSearchParams();
     // Data
@@ -167,7 +180,7 @@ export default function RepairPage() {
         depositAmount: '' as string | number,
         paymentStatus: 'unpaid' as PaymentStatus,
         technicianId: '',
-        status: 'cho_tiep_nhan' as RepairStatus,
+        status: REPAIR_STATUS.INTAKE as RepairStatus,
         estimatedReturnDate: '',
         selectedServiceName: '',
         selectedCategoryPath: [] as string[],
@@ -455,7 +468,7 @@ export default function RepairPage() {
             return;
         }
         // Align with technician flow: require tech notes after inspection before moving forward.
-        if (ticket.status === 'dang_kiem_tra' && nextStatus !== 'dang_kiem_tra') {
+        if (isRepairStatus(ticket.status, REPAIR_STATUS.INSPECTION) && nextStatus !== REPAIR_STATUS.INSPECTION) {
             if (!ticket.issue?.notes || ticket.issue.notes.trim().length === 0) {
                 toastError('Vui lòng nhập ghi chú kỹ thuật (mục "Ghi chú kỹ thuật") trước khi chuyển trạng thái tiếp theo.');
                 return;
@@ -494,7 +507,7 @@ export default function RepairPage() {
         if (currentCfg?.allowedFeatures?.includes('requirePartsReady')) {
             if (!areAllPartsReady(ticket)) {
                 const pendingCount = (ticket.parts || []).filter(
-                    p => p.status === 'requested' || p.status === 'ordered'
+                    isPendingRepairPart
                 ).length;
                 toastError(
                     `Còn ${pendingCount} linh kiện chưa về kho. Vui lòng chờ hàng về và nhập kho trước khi chuyển sang bước tiếp theo.`
@@ -513,7 +526,8 @@ export default function RepairPage() {
                 body: JSON.stringify({
                     ticketId: ticket.id,
                     targetStatus: nextStatus,
-                    operationKey: crypto.randomUUID()
+                    ticketVersion: ticket.version || 0,
+                    idempotencyKey: crypto.randomUUID()
                 })
             });
             const data = await res.json();
@@ -695,6 +709,16 @@ export default function RepairPage() {
     // ── Submit ──
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+
+        if (formData.customerPhone) {
+            const normalizedPhone = normalizeVietnamPhone(formData.customerPhone);
+            if (!normalizedPhone) {
+                alert('Số điện thoại không hợp lệ. Vui lòng nhập đúng định dạng số điện thoại Việt Nam.');
+                return;
+            }
+            formData.customerPhone = normalizedPhone.local; // store normalized
+        }
+
         const tech = staffs.find(s => s.uid === formData.technicianId);
         try {
             if (editingTicket) {
@@ -860,6 +884,20 @@ export default function RepairPage() {
                     });
                 }
             }
+
+            // --- Customer Sync ---
+            if (formData.customerPhone) {
+                fetch('/api/customers/sync', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: formData.customerName,
+                        phone: formData.customerPhone,
+                        forceUpdateName: true
+                    })
+                }).catch(err => console.error('Failed to sync customer', err));
+            }
+
             setShowModal(false);
             toastSuccess(editingTicket ? 'Cập nhật thành công!' : 'Tạo phiếu thành công!');
         } catch (err: unknown) {
@@ -1039,7 +1077,7 @@ export default function RepairPage() {
                                             : ticket.issue?.description}
                                     </div>
                                     {(() => {
-                                        const pendingParts = (ticket.parts || []).filter(p => p.status === 'requested' || p.status === 'ordered');
+                                        const pendingParts = (ticket.parts || []).filter(isPendingRepairPart);
                                         if (pendingParts.length > 0) {
                                             return (
                                                 <div className="mt-1 col-span-2 inline-flex w-fit items-center gap-1 px-2 py-0.5 bg-orange-50 text-orange-600 rounded text-[10px] font-medium border border-orange-200">
@@ -1092,13 +1130,13 @@ export default function RepairPage() {
                                         <button onClick={() => setViewingTicket(ticket)} className="flex-1 py-2 bg-gray-50 text-gray-700 text-xs font-medium rounded-lg border border-gray-200 flex items-center justify-center gap-1 active:bg-gray-100">
                                             <Eye size={14} /> Chi tiết
                                         </button>
-                                        {(!(st?.isTerminal) || user?.role?.toLowerCase() === 'admin' || user?.permissions?.includes('admin_only') || user?.email?.includes('admin')) && (
+                                        {(!(st?.isTerminal) || canOverrideTerminalStatus) && (
                                             <button onClick={() => handleOpenModal(ticket)} className="flex-1 py-2 bg-orange-50 text-orange-600 text-xs font-medium rounded-lg border border-orange-200 flex items-center justify-center gap-1 active:bg-orange-100">
                                                 <Wrench size={14} /> Sửa
                                             </button>
                                         )}
                                         {/* Nút Kích hoạt Bảo hành */}
-                                        {ticket.status === 'done' && ticket.ticketType !== 'warranty' && (ticket.parts || []).some(p => !['rejected', 'cancelled'].includes(String(p.status || '')) && p.warrantyMonths && p.warrantyMonths > 0 && p.warrantyExpiresAt && (typeof p.warrantyExpiresAt === 'number' ? p.warrantyExpiresAt : (p.warrantyExpiresAt as { toDate?: () => Date })?.toDate?.()?.getTime() || 0) > Date.now()) && (
+                                        {isRepairStatus(ticket.status, REPAIR_STATUS.DONE) && ticket.ticketType !== 'warranty' && (ticket.parts || []).some(p => isWarrantyEligibleRepairPart(p) && p.warrantyMonths && p.warrantyMonths > 0 && p.warrantyExpiresAt && (typeof p.warrantyExpiresAt === 'number' ? p.warrantyExpiresAt : (p.warrantyExpiresAt as { toDate?: () => Date })?.toDate?.()?.getTime() || 0) > Date.now()) && (
                                             <button onClick={() => { setWarrantyModal(ticket); setWarrantySelectedIndexes([]); }} className="w-full py-2 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-semibold rounded-lg flex items-center justify-center gap-1 mt-1">
                                                 <AlertCircle size={14} /> Kích hoạt bảo hành
                                             </button>
@@ -1157,7 +1195,7 @@ export default function RepairPage() {
                                             </div>
                                             <p className="text-xs text-gray-500 truncate max-w-[180px]">{ticket.issues && ticket.issues.length > 0 ? ticket.issues.map(i => i.label).join(', ') : ticket.issue?.description}</p>
                                             {(() => {
-                                                const pendingParts = (ticket.parts || []).filter(p => p.status === 'requested' || p.status === 'ordered');
+                                                const pendingParts = (ticket.parts || []).filter(isPendingRepairPart);
                                                 if (pendingParts.length > 0) {
                                                     return (
                                                         <div className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 bg-orange-50 text-orange-600 rounded text-[10px] font-medium border border-orange-200">
@@ -1230,7 +1268,7 @@ export default function RepairPage() {
                                                     className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg" title="In phiếu tiếp nhận">
                                                     <Printer size={16} />
                                                 </button>
-                                                {ticket.status === 'done' && (
+                                                {isRepairStatus(ticket.status, REPAIR_STATUS.DONE) && (
                                                     <button onClick={() => openPrint(ticket, 'invoice')}
                                                         className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg" title="In hóa đơn">
                                                         <FileText size={16} />
@@ -1248,8 +1286,8 @@ export default function RepairPage() {
                                                     );
                                                 })()}
                                                 {/* Nút Kích hoạt Bảo hành — chỉ hiện khi phiếu done và có linh kiện còn hạn BH */}
-                                                {ticket.status === 'done' && ticket.ticketType !== 'warranty' && (ticket.parts || []).some(p =>
-                                                    !['rejected', 'cancelled'].includes(String(p.status || '')) && p.warrantyMonths && p.warrantyMonths > 0 &&
+                                                {isRepairStatus(ticket.status, REPAIR_STATUS.DONE) && ticket.ticketType !== 'warranty' && (ticket.parts || []).some(p =>
+                                                    isWarrantyEligibleRepairPart(p) && p.warrantyMonths && p.warrantyMonths > 0 &&
                                                     p.warrantyExpiresAt && (
                                                         typeof p.warrantyExpiresAt === 'number'
                                                             ? p.warrantyExpiresAt
@@ -1373,7 +1411,7 @@ export default function RepairPage() {
                                                     )
                                                 )}
                                                 {/* Edit — admin luôn sửa được; staff chỉ sửa phiếu chưa đóng */}
-                                                {(!(st?.isTerminal) || user?.role?.toLowerCase() === 'admin' || user?.permissions?.includes('admin_only') || user?.email?.includes('admin')) && (
+                                                {(!(st?.isTerminal) || canOverrideTerminalStatus) && (
                                                     <button onClick={() => handleOpenModal(ticket)}
                                                         className="p-1.5 text-gray-400 hover:text-orange-500 hover:bg-orange-50 rounded-lg" title="Sửa">
                                                         <Wrench size={16} />
@@ -1739,7 +1777,7 @@ export default function RepairPage() {
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Trạng thái phiếu</label>
                                         <select value={formData.status}
                                             onChange={e => setFormData(p => ({ ...p, status: e.target.value as RepairStatus }))}
-                                            disabled={!!editingTicket && !(user?.role?.toLowerCase() === 'admin' || user?.permissions?.includes('admin_only') || user?.email?.includes('admin'))}
+                                            disabled={!!editingTicket && !canOverrideTerminalStatus}
                                             aria-label="Trạng thái phiếu"
                                             title="Trạng thái phiếu"
                                             className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20 bg-white disabled:bg-gray-100 disabled:opacity-70 disabled:cursor-not-allowed">
@@ -1825,9 +1863,9 @@ export default function RepairPage() {
             {handoverModal && (() => {
                 const t = handoverModal.ticket;
                 const deposit = t.payment?.depositAmount || 0;
-                const hasValidParts = (t.parts || []).filter(p => p.status !== 'rejected').length > 0;
+                const hasValidParts = (t.parts || []).filter(p => !isRejectedRepairPart(p)).length > 0;
                 const computedPartsCost = (t.parts || [])
-                    .filter(p => p.status !== 'rejected' && !p.isWarrantyCovered)
+                    .filter(p => !isRejectedRepairPart(p) && !p.isWarrantyCovered)
                     .reduce((sum, p) => {
                         const qty = Math.max(1, Number(p?.quantity) || 1);
                         const unit = Number(p?.unitPriceAtUse ?? p?.price ?? 0) || 0;
@@ -1901,7 +1939,7 @@ export default function RepairPage() {
                                 <div className="bg-purple-50 rounded-xl p-4 border border-purple-100">
                                     <p className="text-xs font-bold text-purple-700 uppercase mb-2 flex items-center gap-1"><ClipboardList size={12} /> Linh kiện đã sử dụng</p>
                                     <div className="space-y-1.5">
-                                        {parts.filter((p: NonNullable<RepairTicket['parts']>[number]) => p.status !== 'rejected').map((p: NonNullable<RepairTicket['parts']>[number], i: number) => (
+                                        {parts.filter((p: NonNullable<RepairTicket['parts']>[number]) => !isRejectedRepairPart(p)).map((p: NonNullable<RepairTicket['parts']>[number], i: number) => (
                                             <div key={i} className="flex justify-between text-sm">
                                                 <span className="text-gray-700">
                                                     {p.productName || p.name || p.partName || PART_CATEGORY_LABEL} <span className="text-xs text-gray-400">×{p.quantity || 1}</span>
@@ -2324,7 +2362,7 @@ export default function RepairPage() {
                 const activeParts = (wt.parts || [])
                     .map((p, idx) => ({ ...p, _origIdx: idx }))
                     .filter(p =>
-                        !['rejected', 'cancelled'].includes(String(p.status || '')) &&
+                        isWarrantyEligibleRepairPart(p) &&
                         p.warrantyMonths && p.warrantyMonths > 0 &&
                         p.warrantyExpiresAt && (
                             typeof p.warrantyExpiresAt === 'number'

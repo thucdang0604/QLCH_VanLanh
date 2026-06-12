@@ -7,8 +7,8 @@
     "chats": {
       ".read": "auth != null && root.child('admin_roles').child(auth.uid).child('expiresAt').val() > now && (root.child('admin_roles').child(auth.uid).child('role').val() === 'admin' || root.child('admin_roles').child(auth.uid).child('permissions').child('chat_support').val() === true)",
       "$roomId": {
-        ".read": "auth != null && ((root.child('admin_roles').child(auth.uid).child('expiresAt').val() > now && (root.child('admin_roles').child(auth.uid).child('role').val() === 'admin' || root.child('admin_roles').child(auth.uid).child('permissions').child('chat_support').val() === true)) || auth.uid === $roomId)",
-        ".write": "auth != null && ((root.child('admin_roles').child(auth.uid).child('expiresAt').val() > now && (root.child('admin_roles').child(auth.uid).child('role').val() === 'admin' || root.child('admin_roles').child(auth.uid).child('permissions').child('chat_support').val() === true)) || auth.uid === $roomId)",
+        ".read": "auth != null && (auth.uid === $roomId || (root.child('admin_roles').child(auth.uid).child('expiresAt').val() > now && (root.child('admin_roles').child(auth.uid).child('role').val() === 'admin' || root.child('admin_roles').child(auth.uid).child('permissions').child('chat_support').val() === true)))",
+        ".write": "auth != null && (auth.uid === $roomId || (root.child('admin_roles').child(auth.uid).child('expiresAt').val() > now && (root.child('admin_roles').child(auth.uid).child('role').val() === 'admin' || root.child('admin_roles').child(auth.uid).child('permissions').child('chat_support').val() === true)))",
         "info": {
           ".validate": "newData.hasChildren(['displayName']) || newData.hasChildren(['lastMessage']) || newData.hasChildren(['botActive']) || newData.hasChildren(['hasUnread']) || newData.hasChildren(['channel'])",
           "odId": { ".validate": "newData.isString() && newData.val().length <= 220" },

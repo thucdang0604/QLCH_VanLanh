@@ -15,6 +15,7 @@ import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
 import type { ImportReceipt, Product } from '@/lib/types';
 import { toastError, toastSuccess } from '@/lib/toast';
+import { buildReactivateOnImportUpdate } from '@/lib/productLifecycle';
 
 // ── Status Config ──
 const statusConfig = {
@@ -113,10 +114,17 @@ export default function InventoryPage() {
                         ? ((oldStock * oldCostPrice) + group.totalCost) / (oldStock + group.totalQty)
                         : group.totalCost / group.totalQty;
 
+                    const newStock = (Number(pData.stock) || 0) + group.totalQty;
                     const updateData: Record<string, unknown> = {
-                        stock: (Number(pData.stock) || 0) + group.totalQty,
+                        stock: newStock,
                         costPrice: Math.round(newCostPrice),
                         updatedAt: serverTimestamp(),
+                        ...buildReactivateOnImportUpdate({
+                            status: String(pData.status || 'active') as Product['status'],
+                            stock: Number(pData.stock) || 0,
+                            held: Number(pData.held) || 0,
+                            isProposed: pData.isProposed === true,
+                        }, newStock),
                     };
 
                     // If product was proposed, activate it on first import

@@ -1,24 +1,26 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import type { Content } from '@google/generative-ai';
+import { getBusinessIdentity } from './businessIdentity';
 
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY || '');
 
 export const geminiModel = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+const businessIdentity = getBusinessIdentity();
 
-// ===== System prompt — Văn Lành Service AI Consultant =====
-const SYSTEM_PROMPT = `Bạn là AI tư vấn viên của Văn Lành Service — Trung tâm sửa chữa điện thoại, laptop & thiết bị công nghệ.
+// ===== System prompt — business AI consultant =====
+const SYSTEM_PROMPT = `Bạn là AI tư vấn viên của ${businessIdentity.siteName} — Trung tâm sửa chữa điện thoại, laptop & thiết bị công nghệ.
 
 ## Thông tin doanh nghiệp:
-- Tên đầy đủ: CÔNG TY TNHH VIỄN THÔNG VĂN LÀNH SERVICE
+- Tên đầy đủ: ${businessIdentity.siteName}
 - MST: 0317074184
-- Website: https://vanlanhservice.com.vn
+- Website: ${businessIdentity.siteUrl}
 
 ## Địa chỉ & Liên hệ:
-- Trụ sở chính: 117 Nguyên Hồng, Phường Bình Lợi Trung, Bình Thạnh, TP.HCM
-- Hotline chính: 0932 242026
-- Hotline bán hàng: 0975 242026 – 0981 242026
-- Hotline bảo hành, kỹ thuật: 0932 242026
-- Hotline hỗ trợ phần mềm: 0932 242026
+- Trụ sở chính: ${businessIdentity.address}
+- Hotline chính: ${businessIdentity.formattedPhone}
+- Hotline bán hàng: ${businessIdentity.formattedPhone}
+- Hotline bảo hành, kỹ thuật: ${businessIdentity.formattedPhone}
+- Hotline hỗ trợ phần mềm: ${businessIdentity.formattedPhone}
 - Giờ làm việc: 7h30 – 21h00 (Thứ 2 – Chủ Nhật, không nghỉ trưa)
 
 ## Cam kết dịch vụ:
@@ -44,9 +46,9 @@ const SYSTEM_PROMPT = `Bạn là AI tư vấn viên của Văn Lành Service —
 ## Quy tắc trả lời:
 1. Tư vấn nhẹ nhàng, thân thiện, chuyên nghiệp
 2. Nếu biết giá, hãy báo giá ước lượng
-3. Luôn khuyến khích khách hàng gọi Hotline 0932 242026 hoặc đến trực tiếp cửa hàng để được tư vấn chính xác nhất
+3. Luôn khuyến khích khách hàng gọi Hotline ${businessIdentity.formattedPhone} hoặc đến trực tiếp cửa hàng để được tư vấn chính xác nhất
 4. Trả lời bằng tiếng Việt, ngắn gọn, dễ hiểu
-5. Nếu không chắc về giá cụ thể, hãy nói "Giá có thể thay đổi tùy tình trạng máy, anh/chị vui lòng liên hệ Hotline 0932 242026 để được báo giá chính xác nhất"
+5. Nếu không chắc về giá cụ thể, hãy nói "Giá có thể thay đổi tùy tình trạng máy, anh/chị vui lòng liên hệ Hotline ${businessIdentity.formattedPhone} để được báo giá chính xác nhất"
 6. Không bịa đặt thông tin kỹ thuật không chắc chắn`;
 
 // Chat function for customer support
@@ -113,16 +115,16 @@ export async function chatWithGemini(message: string, context?: string, history?
         return response.text();
     } catch (error) {
         console.error('Gemini API Error:', error);
-        return 'Xin lỗi, tôi không thể xử lý yêu cầu này. Vui lòng gọi Hotline 0932 242026 để được hỗ trợ trực tiếp!';
+        return `Xin lỗi, tôi không thể xử lý yêu cầu này. Vui lòng gọi Hotline ${businessIdentity.formattedPhone} để được hỗ trợ trực tiếp!`;
     }
 }
 
 // Content generator for admin
 export async function generateContent(topic: string, type: 'review' | 'news' | 'tips') {
     const prompts = {
-        review: `Viết một bài review sản phẩm/dịch vụ về "${topic}" cho website Trung tâm sửa chữa Văn Lành Service. Bao gồm: Ưu điểm, Quy trình, Cam kết chất lượng. Khoảng 500 từ. Giọng văn chuyên nghiệp, tin cậy.`,
-        news: `Viết một bài tin tức về "${topic}" cho website Văn Lành Service (trung tâm sửa chữa điện thoại & laptop). Ngắn gọn, hấp dẫn. Khoảng 300 từ.`,
-        tips: `Viết một bài mẹo sử dụng/bảo quản thiết bị về "${topic}" cho khách hàng Văn Lành Service. Dễ hiểu, thực tế, hữu ích. Khoảng 400 từ.`
+        review: `Viết một bài review sản phẩm/dịch vụ về "${topic}" cho website Trung tâm sửa chữa ${businessIdentity.siteName}. Bao gồm: Ưu điểm, Quy trình, Cam kết chất lượng. Khoảng 500 từ. Giọng văn chuyên nghiệp, tin cậy.`,
+        news: `Viết một bài tin tức về "${topic}" cho website ${businessIdentity.siteName} (trung tâm sửa chữa điện thoại & laptop). Ngắn gọn, hấp dẫn. Khoảng 300 từ.`,
+        tips: `Viết một bài mẹo sử dụng/bảo quản thiết bị về "${topic}" cho khách hàng ${businessIdentity.siteName}. Dễ hiểu, thực tế, hữu ích. Khoảng 400 từ.`
     };
 
     try {

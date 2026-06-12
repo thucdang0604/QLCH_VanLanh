@@ -221,6 +221,13 @@ service cloud.firestore {
       allow read, write: if hasPermission('manage_settings');
     }
 
+    // Vouchers (Mã giảm giá) — public read để storefront validate mã
+    // usedCount chỉ được tăng qua Admin SDK (checkout API server-side)
+    match /vouchers/{voucherId} {
+      allow read: if true;
+      allow create, update, delete: if hasPermission('manage_discounts');
+    }
+
     // Customer Reviews — public create ép pending, whitelist fields, validate types
     match /reviews/{reviewId} {
       allow create: if true

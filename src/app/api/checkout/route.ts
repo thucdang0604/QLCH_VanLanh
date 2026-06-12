@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { isRateLimited } from '@/lib/rateLimit';
+import { PRODUCT_STATUS, isProductArchived } from '@/lib/productLifecycle';
+import { calculateCustomerTier, getTierDiscountPercent } from '@/lib/customerTiers';
+import { normalizeVietnamPhone } from '@/lib/phone';
 
 const RATE_LIMIT_MAX = 3;
 const RATE_LIMIT_WINDOW_MS = 60_000; // 1 phút
@@ -31,7 +34,7 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const { name, phone, note, items } = body;
+        const { name, phone, note, items, voucherCode } = body;
 
         // ── 3. Validate required fields ──
         if (!name || typeof name !== 'string' || name.trim().length < 2) {
@@ -48,13 +51,14 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Validate phone format (Vietnamese: 0xxxxxxxxx, 10-11 digits)
-        if (!/^0\d{9,10}$/.test(phone.trim())) {
+        const normalizedPhoneResult = normalizeVietnamPhone(phone);
+        if (!normalizedPhoneResult) {
             return NextResponse.json(
                 { error: 'Số điện thoại không hợp lệ (VD: 0901234567).' },
                 { status: 400 }
             );
         }
+        const normalizedPhone = normalizedPhoneResult.local;
 
         // Validate items
         if (!Array.isArray(items) || items.length === 0) {
@@ -99,7 +103,6 @@ export async function POST(request: NextRequest) {
             }
 
             // READ 2: Đọc thông tin khách hàng (nếu có SĐT)
-            const normalizedPhone = phone.trim().replace(/[^0-9]/g, '');
             let customerSnap: FirebaseFirestore.DocumentSnapshot | null = null;
             let customerRef: FirebaseFirestore.DocumentReference | null = null;
             if (normalizedPhone.length >= 9) {
@@ -147,6 +150,9 @@ export async function POST(request: NextRequest) {
             for (const [productId, totalQty] of preAggregated.entries()) {
                 const productSnap = productDocs.get(productId)!;
                 const d = productSnap.data()!;
+                if (isProductArchived({ status: String(d.status || '') as 'active' | 'hidden' | 'inactive' }) || d.status !== PRODUCT_STATUS.ACTIVE || d.isProposed === true) {
+                    throw new Error(`Sản phẩm "${d.name || productId}" hiện không còn được bán.`);
+                }
                 const available = (typeof d.stock === 'number' ? d.stock : 0) - (typeof d.held === 'number' ? d.held : 0);
                 if (available < totalQty) {
                     throw new Error(`Sản phẩm "${d.name}" chỉ còn ${available} khả dụng nhưng đơn yêu cầu ${totalQty}.`);
@@ -189,6 +195,119 @@ export async function POST(request: NextRequest) {
                 throw new Error('Tổng tiền đơn hàng không hợp lệ.');
             }
 
+            // READ 4: Voucher (nếu có voucherCode)
+            let voucherSnap: FirebaseFirestore.DocumentSnapshot | null = null;
+            let voucherRef: FirebaseFirestore.DocumentReference | null = null;
+            if (voucherCode && typeof voucherCode === 'string') {
+                const voucherQuery = await db.collection('vouchers')
+                    .where('code', '==', voucherCode.trim().toUpperCase())
+                    .where('isActive', '==', true)
+                    .limit(1)
+                    .get();
+                if (!voucherQuery.empty) {
+                    voucherRef = voucherQuery.docs[0].ref;
+                    voucherSnap = await transaction.get(voucherRef);
+                }
+            }
+
+            // READ 5: Tier settings (để tính tier discount)
+            const tierSettingsSnap = await transaction.get(db.collection('system_config').doc('tier_settings'));
+
+            // ── Tính Voucher Discount ──
+            let voucherDiscountAmount = 0;
+            let appliedVoucherCode: string | undefined;
+            let appliedPersonalVoucher = false;
+            const voucherData = voucherSnap?.data();
+            if (voucherData && voucherSnap?.exists) {
+                // Validate expiry
+                if (voucherData.expiryDate) {
+                    const exp = voucherData.expiryDate.toDate ? voucherData.expiryDate.toDate() : new Date(voucherData.expiryDate);
+                    if (exp.getTime() < Date.now()) {
+                        throw new Error('Mã Voucher đã hết hạn.');
+                    }
+                }
+                // Validate usage limit
+                if (voucherData.usageLimit > 0 && voucherData.usedCount >= voucherData.usageLimit) {
+                    throw new Error('Mã Voucher đã hết lượt sử dụng.');
+                }
+                // Validate min order value
+                if (voucherData.minOrderValue && subtotal_amount < voucherData.minOrderValue) {
+                    throw new Error(`Đơn hàng tối thiểu ${voucherData.minOrderValue.toLocaleString('vi-VN')}đ để sử dụng mã này.`);
+                }
+                // Validate personal bounty voucher owner on the server, not only in preview API.
+                if (voucherData.ownerId) {
+                    const voucherOwnerPhone = normalizeVietnamPhone(String(voucherData.ownerId));
+                    if (!voucherOwnerPhone || voucherOwnerPhone.local !== normalizedPhone) {
+                        throw new Error('Voucher này là phần thưởng cá nhân. Vui lòng nhập đúng Số điện thoại đã nhận voucher.');
+                    }
+                    appliedPersonalVoucher = true;
+                }
+
+                // Tính discount
+                if (voucherData.type === 'fixed') {
+                    voucherDiscountAmount = Math.min(voucherData.value, subtotal_amount);
+                } else {
+                    voucherDiscountAmount = Math.round(subtotal_amount * voucherData.value / 100);
+                    if (voucherData.maxDiscount && voucherDiscountAmount > voucherData.maxDiscount) {
+                        voucherDiscountAmount = voucherData.maxDiscount;
+                    }
+                }
+                appliedVoucherCode = voucherData.code;
+            }
+
+            // ── Tính Tier Discount ──
+            let tierDiscountAmount = 0;
+            const customerTotalSpent = customerSnap?.exists ? (customerSnap.data()?.totalSpent || 0) : 0;
+            const customerTier = calculateCustomerTier(customerTotalSpent);
+            // Đọc tier settings từ Firestore (ưu tiên) hoặc fallback code
+            let tierPercent = getTierDiscountPercent(customerTier);
+            if (tierSettingsSnap.exists && tierSettingsSnap.data()?.tiers) {
+                const tierConfig = tierSettingsSnap.data()!.tiers.find(
+                    (t: { name: string; discountPercent: number }) => t.name === customerTier
+                );
+                if (tierConfig) tierPercent = tierConfig.discountPercent;
+            }
+            if (tierPercent > 0) {
+                tierDiscountAmount = Math.round(subtotal_amount * tierPercent / 100);
+            }
+
+            // ── Stacking Engine ──
+            let discount_amount = 0;
+            let discountSource: 'voucher' | 'tier' | undefined;
+            const stackingRules = voucherData?.stackingRules || { isExclusive: false, stackWithPromo: true, stackWithTier: false };
+
+            if (appliedVoucherCode && stackingRules.isExclusive) {
+                // Exclusive voucher — chỉ dùng voucher, bỏ tier
+                discount_amount = voucherDiscountAmount;
+                discountSource = 'voucher';
+            } else if (appliedVoucherCode && tierDiscountAmount > 0) {
+                if (stackingRules.stackWithTier) {
+                    // Cộng dồn cả hai
+                    discount_amount = voucherDiscountAmount + tierDiscountAmount;
+                    discountSource = 'voucher'; // ghi nhận voucher là nguồn chính
+                } else {
+                    // Chọn cái lớn hơn
+                    if (voucherDiscountAmount >= tierDiscountAmount) {
+                        discount_amount = voucherDiscountAmount;
+                        discountSource = 'voucher';
+                    } else {
+                        discount_amount = tierDiscountAmount;
+                        discountSource = 'tier';
+                        appliedVoucherCode = undefined; // Không dùng voucher
+                    }
+                }
+            } else if (appliedVoucherCode) {
+                discount_amount = voucherDiscountAmount;
+                discountSource = 'voucher';
+            } else if (tierDiscountAmount > 0) {
+                discount_amount = tierDiscountAmount;
+                discountSource = 'tier';
+            }
+
+            // Đảm bảo discount không vượt quá subtotal
+            discount_amount = Math.min(discount_amount, subtotal_amount);
+            const total_amount = subtotal_amount - discount_amount;
+
             // ==========================================
             // TỪ ĐÂY TRỞ XUỐNG CHỈ CÓ WRITE (NO MORE READS)
             // ==========================================
@@ -207,8 +326,10 @@ export async function POST(request: NextRequest) {
                 },
                 items: normalizedItems,
                 subtotal_amount,
-                discount_amount: 0,
-                total_amount: subtotal_amount,
+                discount_amount,
+                total_amount,
+                ...(appliedVoucherCode ? { voucherCode: appliedVoucherCode, voucherDiscount: voucherDiscountAmount } : {}),
+                ...(discountSource ? { discountSource } : {}),
                 status: 'Pending',
                 source: 'web',
                 is_vat_exported: false,
@@ -243,6 +364,13 @@ export async function POST(request: NextRequest) {
                 });
             }
 
+            // Tăng usedCount cho Voucher (nếu đã áp dụng)
+            if (appliedVoucherCode && voucherRef) {
+                transaction.update(voucherRef, {
+                    usedCount: FieldValue.increment(1),
+                });
+            }
+
             // Đồng bộ Customer CRM
             if (customerRef && customerSnap) {
                 if (!customerSnap.exists) {
@@ -259,6 +387,14 @@ export async function POST(request: NextRequest) {
                         createdAt: FieldValue.serverTimestamp(),
                         updatedAt: FieldValue.serverTimestamp(),
                         tags: [],
+                        ...(appliedPersonalVoucher && appliedVoucherCode ? {
+                            missions: {
+                                bounty_redeemed: true,
+                                bountyVoucherCode: appliedVoucherCode,
+                                redeemedAt: FieldValue.serverTimestamp(),
+                                redeemedOrderId: orderRefId,
+                            },
+                        } : {}),
                     });
                 } else {
                     const currentData = customerSnap.data()!;
@@ -269,6 +405,13 @@ export async function POST(request: NextRequest) {
                     
                     if (name.trim() !== '' && name.trim() !== 'Khách lẻ' && name.trim() !== currentData.name) {
                         updateData.name = name.trim();
+                    }
+
+                    if (appliedPersonalVoucher && appliedVoucherCode) {
+                        updateData['missions.bounty_redeemed'] = true;
+                        updateData['missions.bountyVoucherCode'] = appliedVoucherCode;
+                        updateData['missions.redeemedAt'] = FieldValue.serverTimestamp();
+                        updateData['missions.redeemedOrderId'] = orderRefId;
                     }
                     
                     transaction.update(customerRef, updateData);
@@ -284,8 +427,8 @@ export async function POST(request: NextRequest) {
     } catch (error) {
         console.error('Checkout error:', error);
         return NextResponse.json(
-            { error: 'Lỗi hệ thống. Vui lòng thử lại sau.' },
-            { status: 500 }
+            { error: error instanceof Error ? error.message : 'Lỗi hệ thống. Vui lòng thử lại sau.' },
+            { status: 400 }
         );
     }
 }

@@ -4,24 +4,26 @@ import { ChevronRight, Wrench } from 'lucide-react';
 import { SITE_URL } from "@/lib/constants";
 import { fetchDetailItem } from '../../_lib/server-queries';
 import ServiceDetailClient, { type ServiceData } from './ServiceDetailClient';
+import { getBusinessIdentity } from '@/lib/businessIdentity';
 
 export const revalidate = 30;
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
     const { id } = await params;
     const data = await fetchDetailItem(id, 'services');
+    const identity = getBusinessIdentity();
 
     if (!data) {
         return { title: 'Không tìm thấy dịch vụ' };
     }
 
-    const shortDescription = String(data.seoDescription || data.description || `Dịch vụ ${data.name} chính hãng, sửa nhanh, bảo hành uy tín tại Văn Lành Service.`);
+    const shortDescription = String(data.seoDescription || data.description || `Dịch vụ ${data.name} chính hãng, sửa nhanh, bảo hành uy tín tại ${identity.siteName}.`);
 
     return {
-        title: `${data.name} | Dịch vụ sửa chữa tại Văn Lành Service`,
+        title: `${data.name} | Dịch vụ sửa chữa tại ${identity.siteName}`,
         description: shortDescription,
         openGraph: {
-            title: `${data.name} | Dịch vụ sửa chữa tại Văn Lành Service`,
+            title: `${data.name} | Dịch vụ sửa chữa tại ${identity.siteName}`,
             description: shortDescription,
             images: String((Array.isArray(data.images) ? data.images[0] : '') || data.imageUrl || data.image || ''),
         }
@@ -30,6 +32,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 
 export default async function ServiceDetailPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = await params;
+    const identity = getBusinessIdentity();
     
     // Fetch service
     const service = await fetchDetailItem(id, 'services');
@@ -49,7 +52,7 @@ export default async function ServiceDetailPage({ params }: { params: Promise<{ 
     }
 
     // SEO meta + JSON-LD
-    const shortDescription = String(service.seoDescription || service.description || `Dịch vụ ${service.name} chính hãng, sửa nhanh, bảo hành uy tín tại Văn Lành Service.`);
+    const shortDescription = String(service.seoDescription || service.description || `Dịch vụ ${service.name} chính hãng, sửa nhanh, bảo hành uy tín tại ${identity.siteName}.`);
     const url = `${SITE_URL}/service/${service.id}`;
 
     const structuredData = {
@@ -59,8 +62,8 @@ export default async function ServiceDetailPage({ params }: { params: Promise<{ 
         description: shortDescription,
         provider: {
             '@type': 'LocalBusiness',
-            name: 'Văn Lành Service',
-            telephone: '0932242026',
+            name: identity.siteName,
+            telephone: identity.mainPhone,
         },
         areaServed: { '@type': 'City', name: 'Hồ Chí Minh' },
         url,

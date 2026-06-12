@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { ChevronRight, Home, Info, Shield, Truck, CreditCard, Lock, RotateCcw, Menu, X, FileText } from 'lucide-react';
 import { useState } from 'react';
+import { useConfig } from '@/lib/ConfigContext';
+import { getBusinessIdentity } from '@/lib/businessIdentity';
 
 const infoPages = [
     { href: '/info/gioi-thieu', label: 'Giới thiệu', icon: <Info size={16} /> },
@@ -17,6 +19,8 @@ const infoPages = [
 
 export default function InfoLayout({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
+    const { config } = useConfig();
+    const identity = getBusinessIdentity(config);
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
     const activeLabel = infoPages.find(p => pathname === p.href)?.label || 'Thông tin';
@@ -73,7 +77,7 @@ export default function InfoLayout({ children }: { children: React.ReactNode }) 
                         <div className="bg-white rounded-xl border shadow-sm sticky top-24 overflow-hidden">
                             <div className="px-5 py-4 bg-gray-900 text-white">
                                 <h2 className="font-bold text-base">📋 Thông tin & Chính sách</h2>
-                                <p className="text-xs text-gray-400 mt-1">Văn Lành Service</p>
+                                <p className="text-xs text-gray-400 mt-1">{identity.siteName}</p>
                             </div>
                             <nav className="py-2">
                                 {infoPages.map((page) => (

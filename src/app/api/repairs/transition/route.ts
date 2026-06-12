@@ -5,6 +5,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 import type { RepairTicket } from '@/lib/types';
 import { loadRepairWorkflow, requireWorkflowNode, workflowNodeHasFeature } from '@/lib/repairWorkflowServer';
 import { isChecklistComplete } from '@/lib/workflowFeatures';
+import { REPAIR_PART_STATUS, REPAIR_STATUS, isRepairPartStatus, isRepairStatus } from '@/lib/repairStatus';
 
 interface RepairTransitionRequest {
     ticketId?: string;
@@ -76,7 +77,7 @@ export async function POST(request: NextRequest) {
             }
 
             // Tech note gate
-            if (ticket.status === 'dang_kiem_tra' && !technicianNote?.trim() && !ticket.issue?.notes?.trim()) {
+            if (isRepairStatus(ticket.status, REPAIR_STATUS.INSPECTION) && !technicianNote?.trim() && !ticket.issue?.notes?.trim()) {
                 throw new Error('Vui lòng nhập ghi chú kỹ thuật (kết quả kiểm tra) trước khi chuyển trạng thái.');
             }
 
@@ -90,7 +91,7 @@ export async function POST(request: NextRequest) {
 
             // Parts ready check
             if (requirePartsReady) {
-                const requestedParts = ticket.parts?.filter(p => p.status === 'requested') || [];
+                const requestedParts = ticket.parts?.filter(p => isRepairPartStatus(p.status, REPAIR_PART_STATUS.REQUESTED)) || [];
                 if (requestedParts.length > 0) {
                     throw new Error(`Có ${requestedParts.length} linh kiện đang yêu cầu nhập kho. Không thể bắt đầu sửa chữa khi chưa có linh kiện.`);
                 }
@@ -100,7 +101,7 @@ export async function POST(request: NextRequest) {
             let newDuration = ticket.durationInMinutes || 0;
             if (ticket.statusTimeline && ticket.statusTimeline.length > 0) {
                 const lastEvent = ticket.statusTimeline[ticket.statusTimeline.length - 1];
-                if (lastEvent && lastEvent.timestamp && ticket.status !== 'new' && ticket.status !== 'cho_ban_giao_khach') {
+                if (lastEvent && lastEvent.timestamp && ticket.status !== 'new' && !isRepairStatus(ticket.status, REPAIR_STATUS.CUSTOMER_HANDOVER)) {
                     const ts = lastEvent.timestamp as { toDate?: () => Date };
                     const lastDate = ts.toDate ? ts.toDate() : new Date(lastEvent.timestamp as string | number | Date);
                     const now = new Date();

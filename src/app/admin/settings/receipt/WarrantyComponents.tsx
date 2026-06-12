@@ -2,6 +2,7 @@ import React from 'react';
 import Image from 'next/image';
 import { Plus, Trash2, X } from 'lucide-react';
 import { ReceiptConfig } from './page';
+import { WARRANTY_RECEIPT_PREVIEW_FIXTURE } from './warrantyPreviewFixtures';
 
 export interface WarrantyTableRow {
     id: string;
@@ -223,6 +224,8 @@ interface WarrantyPreviewProps {
 }
 
 export function WarrantyPreview({ globalConfig, warrantyConfig, type }: WarrantyPreviewProps) {
+    const preview = WARRANTY_RECEIPT_PREVIEW_FIXTURE;
+
     return (
         <div title="Preview" style={{ padding: '0px', fontSize: '10px', lineHeight: '1.4', color: '#000', fontFamily: 'sans-serif' }}>
             {/* HEADER */}
@@ -244,7 +247,7 @@ export function WarrantyPreview({ globalConfig, warrantyConfig, type }: Warranty
                     </div>
                 </div>
                 <Image
-                    src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&margin=2&data=HD-123456" 
+                    src={preview.qrCodeUrl}
                     alt="QR Code" 
                     width={45}
                     height={45}
@@ -261,36 +264,36 @@ export function WarrantyPreview({ globalConfig, warrantyConfig, type }: Warranty
             {/* CUSTOMER INFO MOCKUP */}
             <div title="Thông tin khách hàng" style={{ border: '1px dotted #000', borderRadius: 4, padding: 6, marginBottom: 8, fontSize: 9 }}>
                 <div title="Thông tin thiết bị" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 12px' }}>
-                    <div title="Họ & tên" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Họ & tên: <b style={{ float: 'right' }}>Nguyễn Văn Khách</b></div>
-                    <div title="Điện thoại" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Điện thoại: <b style={{ float: 'right' }}>0909 123 456</b></div>
-                    <div title="Địa chỉ" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2, gridColumn: '1 / -1' }}>Địa chỉ: <b style={{ float: 'right' }}>123 Lê Lợi, Quận 1, HCM</b></div>
+                    <div title="Họ & tên" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Họ & tên: <b style={{ float: 'right' }}>{preview.customerName}</b></div>
+                    <div title="Điện thoại" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Điện thoại: <b style={{ float: 'right' }}>{preview.phone}</b></div>
+                    <div title="Địa chỉ" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2, gridColumn: '1 / -1' }}>Địa chỉ: <b style={{ float: 'right' }}>{preview.address}</b></div>
                     
                     {type === 'accessory' ? (
-                        <div title="Sản phẩm" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2, gridColumn: '1 / -1' }}>Sản phẩm: <b style={{ float: 'right' }}>Cáp sạc Type-C</b></div>
+                        <div title="Sản phẩm" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2, gridColumn: '1 / -1' }}>Sản phẩm: <b style={{ float: 'right' }}>{preview.accessoryProduct}</b></div>
                     ) : (
-                        <div title="Thiết bị" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2, gridColumn: '1 / -1' }}>Thiết bị: <b style={{ float: 'right' }}>iPhone 15 Pro Max</b></div>
+                        <div title="Thiết bị" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2, gridColumn: '1 / -1' }}>Thiết bị: <b style={{ float: 'right' }}>{preview.deviceModel}</b></div>
                     )}
                     
-                    <div title="Màu" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Màu: <b style={{ float: 'right' }}>Titan Đen</b></div>
-                    <div title="Số IMEI/SERI" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Số IMEI/SERI: <b style={{ float: 'right' }}>3568...1234</b></div>
+                    <div title="Màu" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Màu: <b style={{ float: 'right' }}>{preview.color}</b></div>
+                    <div title="Số IMEI/SERI" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Số IMEI/SERI: <b style={{ float: 'right' }}>{preview.imei}</b></div>
                     
                     {type === 'device' && (
                         <>
-                            <div title="RAM" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>RAM: <b style={{ float: 'right' }}>8GB</b></div>
-                            <div title="Bộ nhớ" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Bộ nhớ: <b style={{ float: 'right' }}>256GB</b></div>
-                            <div title="Giá bán" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Giá bán: <b style={{ float: 'right' }}>25.000.000đ</b></div>
-                            <div title="Tình trạng" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Tình trạng: <b style={{ float: 'right' }}>99%</b></div>
-                            <div title="Phụ kiện" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2, gridColumn: '1 / -1' }}>Phụ kiện: <b style={{ float: 'right' }}>Sạc cáp, ốp lưng</b></div>
-                            <div title="Ngày mua" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Ngày mua: <b style={{ float: 'right' }}>15/10/2026</b></div>
-                            <div title="Thời hạn BH" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Thời hạn BH: <b style={{ float: 'right' }}>6 Tháng</b></div>
+                            <div title="RAM" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>RAM: <b style={{ float: 'right' }}>{preview.ram}</b></div>
+                            <div title="Bộ nhớ" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Bộ nhớ: <b style={{ float: 'right' }}>{preview.storage}</b></div>
+                            <div title="Giá bán" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Giá bán: <b style={{ float: 'right' }}>{preview.devicePrice}</b></div>
+                            <div title="Tình trạng" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Tình trạng: <b style={{ float: 'right' }}>{preview.condition}</b></div>
+                            <div title="Phụ kiện" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2, gridColumn: '1 / -1' }}>Phụ kiện: <b style={{ float: 'right' }}>{preview.accessories}</b></div>
+                            <div title="Ngày mua" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Ngày mua: <b style={{ float: 'right' }}>{preview.purchaseDate}</b></div>
+                            <div title="Thời hạn BH" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Thời hạn BH: <b style={{ float: 'right' }}>{preview.warrantyTerm}</b></div>
                         </>
                     )}
                     {type === 'repair' && (
                         <>
-                            <div title="Cấu hình/Pass" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2, gridColumn: '1 / -1' }}>Cấu hình/Pass: <b style={{ float: 'right' }}>123456</b></div>
-                            <div title="Dịch vụ" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2, gridColumn: '1 / -1' }}>Dịch vụ: <b style={{ float: 'right' }}>Thay màn hình</b></div>
-                            <div title="Chi phí" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Chi phí: <b style={{ float: 'right' }}>2.500.000đ</b></div>
-                            <div title="Bảo hành từ" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Bảo hành từ: <b style={{ float: 'right' }}>15/10/2026</b></div>
+                            <div title="Cấu hình/Pass" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2, gridColumn: '1 / -1' }}>Cấu hình/Pass: <b style={{ float: 'right' }}>{preview.devicePasscode}</b></div>
+                            <div title="Dịch vụ" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2, gridColumn: '1 / -1' }}>Dịch vụ: <b style={{ float: 'right' }}>{preview.repairService}</b></div>
+                            <div title="Chi phí" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Chi phí: <b style={{ float: 'right' }}>{preview.repairCost}</b></div>
+                            <div title="Bảo hành từ" style={{ borderBottom: '1px dotted #ccc', paddingBottom: 2 }}>Bảo hành từ: <b style={{ float: 'right' }}>{preview.warrantyStartDate}</b></div>
                         </>
                     )}
                     {type === 'accessory' && (

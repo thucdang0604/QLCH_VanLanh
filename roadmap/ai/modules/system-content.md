@@ -54,6 +54,15 @@ graph TD
 - Admin can override the Place ID from `/admin/appearance`.
 - If Google Places is unavailable, the homepage falls back to an official Google Maps URL CTA without mock reviews.
 
+## BUG-HARDCODE-001: Hardcode cleanup cho secret, storefront fallback và business identity
+
+- **Status:** open
+- **Severity:** high
+- **Plan:** `roadmap/ui/data/ai_plans/plan_hardcode_cleanup_20260607.md`
+- **Task:** `roadmap/ui/data/ai_plans/task_hardcode_cleanup_20260607.md`
+- **Scope:** Google Maps Embed key trong trang giới thiệu, fallback demo ở homepage, brand/hotline/domain/address rải rác trong customer UI/SEO/AI prompt, workflow status string ở repair/POS/inventory và demo/template admin.
+- **Guardrail:** Storefront không hiển thị dữ liệu giả khi thiếu Firestore/config; secret/key không nằm thẳng trong page source; quyền admin không được suy luận bằng email string.
+
 ## BUG-CONFIG-SESSION-001: Lưu cấu hình giao diện làm admin bị văng đăng nhập
 
 - **Status:** fixed
@@ -102,9 +111,65 @@ graph TD
 - **Verification:** `pnpm list sharp next firebase-frameworks --depth 1` xác nhận root có `sharp@0.33.5` và `next@15.5.18` có nested `sharp@0.34.5`; `pnpm typecheck` pass; `pnpm build` pass. Sau khi clean `.firebase/`, `firebase deploy --only hosting` pass: function `firebase-frameworks-qlch-vanlanh:ssrqlchvanlanh(asia-southeast1)` update thành công và hosting release complete. Generated function `npm ci --dry-run` pass.
 - **AI Guardrail:** Khi deploy fail sau khi local build pass, đọc đúng stage trong log. Nếu lỗi nằm trong Cloud Build `npm ci`, ưu tiên kiểm tra package manager/lockfile/generated `.firebase` và peer conflict `firebase-frameworks`/`sharp` thay vì sửa source UI/TypeScript. Không commit `package-lock.json` hoặc artifact `.firebase/` vào repo pnpm. Warning hiện còn nhưng không chặn deploy: Firebase CLI trên Windows báo `node-which`/`esbuild` khi bundle `next.config.mjs`; chỉ xử lý nếu warning này chuyển thành lỗi runtime/deploy.
 
+## BUG-DEPLOY-007: Firebase CLI Windows warning node-which/esbuild khi bundle next.config
+
+- **Status:** in_progress
+- **Symptom:** Trong deploy Firebase Hosting/Frameworks ngày 2026-06-09, CLI báo `'node-which' is not recognized` khi tìm `esbuild` bằng `npx which esbuild`, fallback `npm install esbuild@^0.19.2 --no-save` fail, và tiếp tục với warning `Unable to bundle next.config.mjs for use in Cloud Functions`. Log cũng có `@zxing/library@0.22.0` yêu cầu Node `>=24` trong khi runtime hiện tại là Node 22.
+- **Root cause:** Đây là lỗi deploy toolchain/Firebase CLI trên Windows và dependency engine drift, khác với bug sharp/npm ci đã fixed. Rủi ro chính là `next.config.mjs` không được bundle đầy đủ vào SSR Cloud Function, ảnh hưởng headers/redirects/security config.
+- **Plan:** Theo `roadmap/ui/data/ai_plans/plan_deploy_pipeline_cleanup_20260609.md`: reproduce bằng debug deploy, thêm direct `esbuild`/lookup helper nếu cần, validate `.firebase/qlch-vanlanh/functions` bằng `npm ci --dry-run`, xử lý ZXing Node engine warning bằng pin/downgrade hoặc runtime upgrade sau khi verify Firebase hỗ trợ, rồi deploy + smoke production.
+- **AI Guardrail:** Không commit `.firebase/`, `.next/`, root `package-lock.json` hoặc npm cache. Không sửa UI/PWA để xử lý lỗi deploy toolchain. Không nâng Node runtime nếu chưa verify Firebase Functions/Hosting Frameworks hỗ trợ runtime đó.
+
 ## FEATURE-GLOBAL-SEARCH-001: Tìm kiếm toàn cục & Quét QR
 
 - **Status:** in-progress
 - **Branch:** `feature/global-search-qr`
 - **Description:** Xây dựng tính năng tìm kiếm toàn cục (Global Search) trên Admin Header, cho phép tìm kiếm xuyên suốt các collection: Sản phẩm, Dịch vụ, Đơn bán hàng (Orders) và Phiếu sửa chữa (Repair Tickets). Đặc biệt tích hợp tính năng Quét mã QR bằng Camera (sử dụng thư viện `@zxing/browser`) để tra cứu siêu tốc các mã đơn in trên hóa đơn/biên nhận khi khách hàng mang đến.
 - **Files:** `src/components/admin/GlobalSearch.tsx`, `src/app/admin/layout.tsx`, `src/app/api/search/route.ts`
+
+## BUG-OTP-001: Lỗi OTP SMS không gửi được cho số thật (MALFORMED / INVALID_APP_CREDENTIAL / -39)
+
+- **Status:** fixed
+- **Severity:** high
+- **Symptom:** Trên localhost: tất cả số thật gặp lỗi `Recaptcha verification failed - MALFORMED (auth/captcha-check-failed)`, chỉ số test hoạt động. Trên production (`fixphone.vn`): tương tự, số thật báo `INVALID_APP_CREDENTIAL` hoặc `Error code: 39`, không bao giờ nhận được SMS.
+- **Root cause (Chuẩn đoán):**
+  1. Code cũ phân nhánh localhost/production: trên localhost bật `appVerificationDisabledForTesting = true` rồi tạo `RecaptchaVerifier` mà **không gọi render()**, khiến token gửi lên Google bị MALFORMED. Cờ `appVerificationDisabledForTesting` chỉ bypass cho số test, không bypass cho số thật.
+  2. Trên production, lỗi `INVALID_APP_CREDENTIAL` / `-39` do Google Cloud **API Key bị giới hạn** (restriction) chưa bao gồm `Identity Toolkit API` hoặc HTTP referrer chưa có `fixphone.vn`.
+  3. Cơ chế SMS Toll Fraud Protection hoặc App Check Identity Toolkit ở trạng thái Enforce cũng có thể chặn số thật.
+- **Fix đã áp dụng trong code (11.06.2026):**
+  1. Xóa phân nhánh localhost/production trong `MissionsWidget.tsx`. Dùng luồng `RecaptchaVerifier` invisible **thống nhất** cho mọi môi trường, luôn gọi `render()` trước khi sử dụng.
+  2. Xử lý lỗi reCAPTCHA đúng cách: khi gặp `auth/captcha-check-failed` hoặc `auth/argument-error`, xóa verifier cũ để tạo lại ở lần thử tiếp theo (tránh lỗi `already rendered`).
+  3. Đã thêm `https://www.google.com` vào `connect-src`, `script-src` và `frame-src` trong cấu hình CSP của cả `next.config.mjs` (cho localhost) và `firebase.json` (cho production/deploy) để ngăn trình duyệt chặn kết nối API của reCAPTCHA.
+- **Hành động còn lại (cần làm thủ công trên Console):**
+  1. **Google Cloud Console → API Keys**: Mở API Key `AIzaSyAGTfTZ...`, kiểm tra tab **API restrictions** → đảm bảo `Identity Toolkit API` được phép. Kiểm tra tab **Application restrictions** → nếu có HTTP referrer, thêm `https://fixphone.vn/*` và `https://*.fixphone.vn/*`.
+  2. **Google Cloud Console → reCAPTCHA Enterprise**: Mở site key được tạo tự động bởi Firebase, kiểm tra danh sách **Allowed domains** → thêm `fixphone.vn` và `localhost`.
+  3. **Firebase Console → Authentication → Settings**: Đảm bảo SMS Toll Fraud Protection ở trạng thái **Audit** (không phải Enforce). Đảm bảo `fixphone.vn` nằm trong **Authorized domains**.
+  4. **Firebase Console → App Check**: Đảm bảo Identity Toolkit API ở trạng thái **Unenforced** hoặc **Audit**.
+- **Files:** `src/components/MissionsWidget.tsx`, `firebase.json`, `next.config.mjs`
+- **AI Guardrail:** Không bao giờ dùng `appVerificationDisabledForTesting` cho số thật. Luôn gọi `RecaptchaVerifier.render()` trước khi truyền vào `signInWithPhoneNumber`. Khi reCAPTCHA lỗi, phải `clear()` và tạo lại instance mới.
+
+### BUG-OTP-001 Follow-up 11.06.2026 - Khách cũ / voucher idempotent
+
+- **Status:** fixed
+- **Symptom:** Browser check xác nhận reCAPTCHA v2 render đúng trên local và `fixphone.vn`, nhưng nút “Nhận mã OTP” gọi thẳng Firebase `signInWithPhoneNumber`, không gọi `/api/bounty/request-otp`. Vì vậy server không kịp phát hiện SĐT đã nhận voucher và khách cũ/đã nhận voucher có thể thấy lỗi hoặc bị kẹt ở luồng OTP.
+- **Root cause:** `MissionsWidget.tsx` bypass API preflight; `/api/bounty/claim` ném exception khi `customers/{phone}.missions.bounty_claimed` đã tồn tại và catch trả HTTP 500; checkout server chưa enforce `vouchers.ownerId`.
+- **Fix:** Thêm `src/lib/phone.ts`; `MissionsWidget` gọi `/api/bounty/request-otp` trước Firebase OTP, xóa localStorage token/PII, xử lý `already_claimed_unused` và `already_claimed_used`; `/api/bounty/claim` idempotent với voucher doc deterministic `bounty_{phone}` và legacy `ownerId` fallback; `/api/checkout` enforce personal voucher owner và ghi `missions.bounty_redeemed`.
+- **Verification:** `pnpm typecheck`, `pnpm lint`, `pnpm build` pass. Helper normalize SĐT pass. Local `/api/bounty/request-otp` trả typed `eligible` response. Browser smoke xác nhận widget và reCAPTCHA v2 render đúng; thao tác nhập text bằng Browser runtime bị chặn bởi thiếu virtual clipboard nên final form submit được xác nhận qua API/log local. Còn cần production smoke với số thật sau khi kiểm tra cấu hình Firebase Console nếu vẫn gặp `-39`.
+- **Files:** `src/components/MissionsWidget.tsx`, `src/app/api/bounty/request-otp/route.ts`, `src/app/api/bounty/claim/route.ts`, `src/app/api/vouchers/validate/route.ts`, `src/app/api/checkout/route.ts`, `src/lib/phone.ts`.
+
+### BUG-OTP-001 Follow-up 11.06.2026 - Firebase fail khong duoc ghi rate-limit
+
+- **Status:** fixed
+- **Symptom:** Khi test OTP that nhieu lan, Chrome console ghi nhan dong thoi `auth/too-many-requests`, `auth/error-code:-39` va loi noi bo "Ban thao tac qua nhanh". Nguoi dung thay nhieu loi chong nhau sau moi lan submit.
+- **Root cause:** `/api/bounty/request-otp` ghi document `otp_progressive_limits` ngay trong buoc preflight, truoc khi Firebase `signInWithPhoneNumber` xac nhan da gui SMS thanh cong. Vi vay cac lan Firebase bi chan van tao khoa noi bo, lam lan test sau bi chan boi he thong cua minh thay vi chi phan anh trang thai Firebase.
+- **Fix:** Tach API thanh `action: "check"` va `action: "record"`. Preflight chi doc trang thai voucher/rate-limit, khong ghi khoa. `MissionsWidget` chi goi `record` sau khi Firebase tra `confirmationResult`. Rate-limit moi co marker `source: "firebase_success"` de bo qua cac khoa cu da ghi sai. Khi gui SMS fail, widget giu nguoi dung o buoc nhap SDT, render lai reCAPTCHA va hien ma loi Firebase ro hon.
+- **Verification:** `pnpm typecheck`, `pnpm lint`, `pnpm build` pass. Local `/api/bounty/request-otp` tiep tuc tra `eligible` cho SDT test, khong con bi khoa boi document cu khong co marker `firebase_success`.
+- **Files:** `src/components/MissionsWidget.tsx`, `src/app/api/bounty/request-otp/route.ts`.
+
+## BUG-CHAT-RTDB-001: Khach hang bi PERMISSION_DENIED khi bat dau chat
+
+- **Status:** fixed
+- **Symptom:** Khach nhap ten va so dien thoai, UI chuyen sang man hinh chat nhung RTDB bao `PERMISSION_DENIED` tai `chats/{uid}/info`; gui tin nhan tiep tuc that bai.
+- **Root cause:** Rule `chats/$roomId` danh gia nhanh quyen admin truoc nhanh so huu phong. Voi anonymous user khong co `admin_roles`, bieu thuc nay tu choi request du `auth.uid` trung `$roomId`. UI lai dat `isRegistered=true` truoc khi lenh ghi thanh cong, tao trang thai thanh cong gia.
+- **Fix:** Dua nhanh `auth.uid === $roomId` len truoc trong `.read/.write`, deploy RTDB rules; dong bo Firebase identity truoc moi lenh ghi; chi chuyen sang chat sau khi room metadata duoc luu; giu lai noi dung khi gui loi va hien thong bao tai form; listener RTDB co error callback thay vi nem loi khong duoc xu ly.
+- **Verification:** Token anonymous moi doc/ghi duoc room cua chinh UID qua REST va du lieu probe da duoc don; `firebase deploy --only database` thanh cong. `pnpm typecheck`, targeted ESLint va `pnpm build` pass. Browser localhost dang ky phong va gui tin nhan thanh cong, message doc lai qua listener, khong con `PERMISSION_DENIED`, console error moi hoac framework overlay.
+- **Files:** `database.rules.json`, `src/components/ChatWidget.tsx`, `src/lib/realtimedb.ts`.

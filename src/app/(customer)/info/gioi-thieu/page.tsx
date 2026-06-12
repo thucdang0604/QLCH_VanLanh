@@ -1,17 +1,27 @@
 'use client';
 import { SITE_URL } from "@/lib/constants";
+import { useConfig } from "@/lib/ConfigContext";
+import { getBusinessIdentity } from "@/lib/businessIdentity";
 
 export default function GioiThieuPage() {
-    const seoTitle = 'Giới thiệu | Văn Lành Service';
-    const seoDescription = 'Giới thiệu Văn Lành Service – trung tâm sửa chữa điện thoại, laptop và phụ kiện công nghệ uy tín tại TP.HCM. Thông tin hệ thống, dịch vụ, hotline và địa chỉ.';
+    const { config, formatHotline } = useConfig();
+    const identity = getBusinessIdentity(config);
+    const mainBranch = config.store_branches?.[0];
+    const branchName = mainBranch?.name || identity.primaryBranch.name;
+    const branchAddress = mainBranch?.address || identity.address;
+    const mainPhone = mainBranch?.phone || identity.mainPhone;
+    const mapHref = mainBranch?.mapLink || identity.mapLink;
+    const zaloHref = identity.socials.zaloLink;
+    const seoTitle = `Giới thiệu | ${identity.siteName}`;
+    const seoDescription = `Giới thiệu ${identity.siteName} – trung tâm sửa chữa điện thoại, laptop và phụ kiện công nghệ uy tín tại TP.HCM. Thông tin hệ thống, dịch vụ, hotline và địa chỉ.`;
     const canonicalUrl = `${SITE_URL}/info/gioi-thieu`;
     const articleSchema = {
         '@context': 'https://schema.org',
         '@type': 'Article',
-        headline: 'Giới thiệu Văn Lành Service',
+        headline: `Giới thiệu ${identity.siteName}`,
         description: seoDescription,
         url: canonicalUrl,
-        publisher: { '@type': 'Organization', name: 'Văn Lành Service' },
+        publisher: { '@type': 'Organization', name: identity.siteName },
         mainEntityOfPage: { '@type': 'WebPage', '@id': canonicalUrl },
     };
     const breadcrumbSchema = {
@@ -39,16 +49,16 @@ export default function GioiThieuPage() {
             <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(articleSchema) }} />
             <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbSchema) }} />
 
-            <h1 className="text-2xl font-bold mb-6">Giới Thiệu Văn Lành Service</h1>
+            <h1 className="text-2xl font-bold mb-6">Giới Thiệu {identity.siteName}</h1>
 
             {/* Lịch sử hình thành */}
             <section className="mb-8">
                 <h2 className="text-lg font-bold text-gray-900 mb-3">📜 Lịch sử hình thành</h2>
                 <p className="text-sm text-gray-700 leading-relaxed">
-                    Qua hơn 2 năm kinh nghiệm trong thị trường di động tại Việt Nam, chúng tôi nhận thấy nhu cầu tìm kiếm một cửa hàng đủ uy tín về các dịch vụ sửa chữa là rất lớn nhưng trên thị trường vẫn chưa thể đáp ứng được. <strong>Văn Lành Service</strong> ra đời với sự khởi đầu là cửa hàng hoạt động trên các quận trung tâm Thành phố Hồ Chí Minh.
+                    Qua hơn 2 năm kinh nghiệm trong thị trường di động tại Việt Nam, chúng tôi nhận thấy nhu cầu tìm kiếm một cửa hàng đủ uy tín về các dịch vụ sửa chữa là rất lớn nhưng trên thị trường vẫn chưa thể đáp ứng được. <strong>{identity.siteName}</strong> ra đời với sự khởi đầu là cửa hàng hoạt động trên các quận trung tâm Thành phố Hồ Chí Minh.
                 </p>
                 <p className="text-sm text-gray-700 leading-relaxed mt-2">
-                    Văn Lành Service luôn nỗ lực thể hiện sự chuyên nghiệp nhất có thể cùng sự <strong>Tận Tâm</strong> phục vụ khách hàng, lấy khách hàng làm trung tâm. Hệ thống mong muốn thực hiện những dịch vụ sửa chữa với trách nhiệm cao nhất, đi cùng sự cam kết và lòng trung thực tuyệt đối trong quá trình làm việc.
+                    {identity.siteName} luôn nỗ lực thể hiện sự chuyên nghiệp nhất có thể cùng sự <strong>Tận Tâm</strong> phục vụ khách hàng, lấy khách hàng làm trung tâm. Hệ thống mong muốn thực hiện những dịch vụ sửa chữa với trách nhiệm cao nhất, đi cùng sự cam kết và lòng trung thực tuyệt đối trong quá trình làm việc.
                 </p>
             </section>
 
@@ -111,28 +121,32 @@ export default function GioiThieuPage() {
             <section className="mb-8">
                 <h2 className="text-lg font-bold text-gray-900 mb-3">🏪 Hệ thống</h2>
                 <div className="bg-orange-50 border border-orange-200 rounded-xl p-5">
-                    <h3 className="font-bold text-gray-900 mb-2">Trụ sở chính</h3>
-                    <p className="text-sm text-gray-600 mb-1">📍 117 Nguyên Hồng, Phường Bình Lợi Trung, Bình Thạnh, TP.HCM</p>
-                    <p className="text-sm text-gray-600 mb-1">📞 Hotline: <a href="tel:0932242026" className="text-copper font-bold hover:underline">0932.242.026</a></p>
-                    <p className="text-sm text-gray-600 mb-1">📞 Bán hàng: <a href="tel:0975242026" className="text-copper font-bold hover:underline">0975.242.026</a> – <a href="tel:0981242026" className="text-copper font-bold hover:underline">0981.242.026</a></p>
+                    <h3 className="font-bold text-gray-900 mb-2">{branchName}</h3>
+                    {branchAddress && <p className="text-sm text-gray-600 mb-1">📍 {branchAddress}</p>}
+                    {mainPhone && (
+                        <p className="text-sm text-gray-600 mb-1">
+                            📞 Hotline: <a href={`tel:${mainPhone}`} className="text-copper font-bold hover:underline">{formatHotline(mainPhone)}</a>
+                        </p>
+                    )}
+                    {mainPhone && (
+                        <p className="text-sm text-gray-600 mb-1">
+                            📞 Bán hàng: <a href={`tel:${mainPhone}`} className="text-copper font-bold hover:underline">{formatHotline(mainPhone)}</a>
+                        </p>
+                    )}
                     <p className="text-sm text-gray-600">🕘 Giờ làm việc: 7h30 – 21h00 (Thứ 2 – Chủ Nhật)</p>
                 </div>
-                <div className="mt-4 rounded-xl overflow-hidden border border-gray-200">
-                    <iframe
-                        src="https://www.google.com/maps/embed/v1/place?key=AIzaSyBFw0Qbyq9zTFTd-tUY6dZWTgaQzuU17R8&q=117+Nguy%C3%AAn+H%E1%BB%93ng,+B%C3%ACnh+Th%E1%BA%A1nh,+TP.HCM&zoom=16"
-                        width="100%"
-                        height="300"
-                        style={{ border: 0 }}
-                        allowFullScreen
-                        loading="lazy"
-                        referrerPolicy="no-referrer-when-downgrade"
-                        title="Văn Lành Service - Google Maps"
-                    />
+                <div className="mt-4 rounded-xl overflow-hidden border border-gray-200 bg-white">
+                    <div className="p-5">
+                        <p className="text-sm font-semibold text-gray-900">Bản đồ & chỉ đường</p>
+                        <p className="text-sm text-gray-600 mt-1">
+                            Mở Google Maps để xem vị trí cửa hàng và chỉ đường theo dữ liệu chi nhánh đang cấu hình.
+                        </p>
+                    </div>
                     <a
-                        href="https://maps.app.goo.gl/oHjSM6ztw4ExyfwJA"
+                        href={mapHref || '#'}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center justify-center gap-2 py-3 bg-gray-50 text-copper font-semibold text-sm hover:bg-orange-50 transition-colors"
+                        className={`flex items-center justify-center gap-2 py-3 bg-gray-50 text-copper font-semibold text-sm hover:bg-orange-50 transition-colors ${!mapHref ? 'pointer-events-none opacity-60' : ''}`}
                     >
                         📍 Mở Google Maps — Chỉ đường
                     </a>
@@ -144,12 +158,14 @@ export default function GioiThieuPage() {
                 <h2 className="text-lg font-bold mb-2">Liên hệ ngay để được tư vấn!</h2>
                 <p className="text-gray-400 text-sm mb-4">Đội ngũ chăm sóc khách hàng luôn sẵn sàng hỗ trợ bạn</p>
                 <div className="flex flex-wrap justify-center gap-3">
-                    <a href="tel:0932242026" className="px-6 py-3 bg-copper text-white font-semibold rounded-lg hover:bg-copper-dark transition-colors">
-                        📞 Gọi: 0932.242.026
-                    </a>
-                    <a href="https://zalo.me/0932242026" target="_blank" rel="noopener noreferrer" className="px-6 py-3 border border-gray-600 text-white font-semibold rounded-lg hover:border-copper hover:text-copper transition-colors">
+                    {mainPhone && (
+                        <a href={`tel:${mainPhone}`} className="px-6 py-3 bg-copper text-white font-semibold rounded-lg hover:bg-copper-dark transition-colors">
+                            📞 Gọi: {formatHotline(mainPhone)}
+                        </a>
+                    )}
+                    {zaloHref && <a href={zaloHref} target="_blank" rel="noopener noreferrer" className="px-6 py-3 border border-gray-600 text-white font-semibold rounded-lg hover:border-copper hover:text-copper transition-colors">
                         💬 Chat Zalo
-                    </a>
+                    </a>}
                 </div>
             </div>
         </article>

@@ -1,4 +1,21 @@
 # 🐛 Bugs Khác
+
+## Lỗi thuộc Module: hardcode
+# 🐛 Bugs
+## BUG-HARDCODE-001: Hardcode còn rải rác trong secret, storefront fallback, business identity và workflow status
+- **Status:** in_progress
+- **Severity:** high
+- **Module:** SystemContent
+- **Files:** src/app/(customer)/info/gioi-thieu/page.tsx, src/components/home/HeroSection.tsx, src/components/home/ServiceBlock.tsx, src/components/home/GoogleReviewsSection.tsx, src/lib/config-defaults.ts, src/lib/gemini.ts, src/app/admin/repairs/page.tsx, src/app/admin/technician/page.tsx, src/app/api/inventory/import/route.ts, src/components/admin/ExcelImportModal.tsx, src/app/admin/settings/receipt/WarrantyComponents.tsx
+### Symptom
+Audit ngày 2026-06-07 phát hiện các nhóm hardcode còn ảnh hưởng production hoặc dễ gây lệch cấu hình: Google Maps Embed API key nằm trực tiếp trong trang giới thiệu, storefront còn banner/dịch vụ/giá demo fallback, business identity như brand/hotline/domain/address bị lặp trong nhiều file UI/SEO/AI prompt, workflow status repair/POS còn so sánh string rải rác, và dữ liệu demo/template admin còn nằm trong component runtime.
+### Cause
+Các fallback được thêm qua nhiều giai đoạn để UI không trắng khi thiếu cấu hình hoặc thiếu dữ liệu Firestore. Sau khi dự án đã có `system_config`, admin appearance, workflow settings và source intelligence, các fallback này trở thành technical debt.
+### Solution
+Thực hiện theo `roadmap/ui/data/ai_plans/plan_hardcode_cleanup_20260607.md` và `roadmap/ui/data/ai_plans/task_hardcode_cleanup_20260607.md`: xử lý P0 Maps key, gỡ storefront fake fallback, gom business identity về helper/config trung tâm, chuẩn hóa workflow/status constants, bỏ bypass quyền bằng `email?.includes('admin')`, và tách demo/template thành fixture rõ ràng.
+### Verification
+2026-06-07: Đã triển khai tuần tự Batch 1-5 trên nhánh `codex/hardcode-cleanup-20260607`. Pass `pnpm lint`, `pnpm typecheck`, `pnpm build`; browser QA storefront pass cho trang chủ, trang giới thiệu, header/footer/chat/mobile nav và xác nhận trang giới thiệu không còn Google Maps API key/embed trong HTML. Còn cần smoke có dữ liệu admin thực tế cho luồng KTV, bàn giao, nhập linh kiện và POS checkout trước khi đóng bug.
+
 ## Lỗi thuộc Module: rules
 # 🐛 Bugs
 ## BUG-RULES-001: Missing Firestore Security Rules cho 4 collections mới (Phase 4/6/8)
@@ -481,6 +498,21 @@ Giu du an dung pnpm: root <code>package.json</code> phai co <code>packageManager
 <code>pnpm list sharp next firebase-frameworks --depth 1</code> phai cho thay root co <code>sharp@0.33.5</code> va <code>next</code> co nested <code>sharp@0.34.x</code>. Da verify <code>pnpm typecheck</code> pass, <code>pnpm build</code> pass, generated function <code>npm ci --dry-run</code> pass, va <code>firebase deploy --only hosting</code> pass.
 ### Guardrail
 Khong commit <code>package-lock.json</code> hoac artifact <code>.firebase/</code> trong repo pnpm. Khi deploy fail sau build local pass, doc dung stage log: neu fail tai Cloud Build <code>npm ci</code>, kiem tra generated function lock, package manager, va peer conflict <code>firebase-frameworks</code>/<code>sharp</code> truoc khi sua source UI/TypeScript.
+## BUG-DEPLOY-007: Firebase CLI Windows deploy warning node-which/esbuild khi bundle next.config
+- **Status:** in_progress
+- **Severity:** medium
+- **Module:** Build
+- **Files:** package.json, pnpm-lock.yaml, next.config.mjs, firebase.json, .firebase/qlch-vanlanh/functions/package.json (generated), .firebase/qlch-vanlanh/functions/package-lock.json (generated)
+### Symptom
+Trong luc <code>firebase deploy --only hosting</code>, Firebase Frameworks tao SSR Cloud Function vi project co middleware va nhieu route revalidate/dynamic. Buoc bundle <code>next.config.mjs</code> bao <code>'node-which' is not recognized</code> khi chay <code>npx which esbuild</code>, sau do fallback <code>npm install esbuild@^0.19.2 --no-save</code> fail voi npm tarball <code>closure-net</code> va loi <code>Cannot read properties of null (reading 'matches')</code>. CLI tiep tuc deploy voi warning <code>Unable to bundle next.config.mjs for use in Cloud Functions</code>. Log cung co warning <code>@zxing/library@0.22.0</code> yeu cau Node <code>>=24</code> trong khi project dang dung Node 22.
+### Cause
+Day la nhom loi deploy toolchain tren Windows/Firebase CLI, khac voi <code>BUG-FIREBASE-DEPLOY-SHARP-001</code>. Firebase CLI dang phu thuoc vao binary lookup qua <code>npx</code> va cai goi tam thoi bang npm trong mot project pnpm-first. Khi lookup/cai tam thoi loi, CLI khong bundle duoc <code>next.config.mjs</code> nhung van tiep tuc deploy, tao rui ro cau hinh headers/redirects/SSR khong vao Cloud Function day du. Warning Node engine den tu dependency ZXing can duoc xu ly rieng, khong nen nang Node runtime neu chua verify Firebase Functions ho tro.
+### Solution
+Thuc hien theo <code>roadmap/ui/data/ai_plans/plan_deploy_pipeline_cleanup_20260609.md</code> va <code>roadmap/ui/data/ai_plans/task_deploy_pipeline_cleanup_20260609.md</code>: dong bang evidence deploy, reproduce voi <code>--debug</code>, them direct <code>esbuild</code> devDependency/lookup helper neu can de khong phu thuoc npm install tam thoi, validate generated functions bundle bang <code>npm ci --dry-run</code>, va xu ly warning <code>@zxing/library</code> bang pin/downgrade tuong thich Node 22 hoac nang runtime chi sau khi verify Firebase ho tro.
+### Verification
+Can pass <code>pnpm lint</code>, <code>pnpm typecheck</code>, <code>pnpm build</code>, generated function <code>npm ci --dry-run</code>, va <code>pnpm exec firebase deploy --only hosting</code>. Deploy log phai khong con <code>node-which</code>, <code>esbuild not found</code>, <code>Unable to bundle next.config.mjs</code>; production smoke phai pass <code>/</code>, <code>/admin</code>, <code>/sitemap.xml</code>, <code>/cart</code>, <code>/checkout</code>, <code>/search</code>, <code>/manifest.webmanifest</code> va mot redirect trong <code>next.config.mjs</code>.
+### Guardrail
+Khong commit <code>.firebase/</code>, <code>.next/</code>, npm cache hoac root <code>package-lock.json</code>. Khong sua UI/PWA de xu ly loi deploy toolchain. Khong nang Node runtime chi de xoa warning neu chua co bang chung Firebase Functions/Hosting Frameworks ho tro runtime do.
 ## BUG-MIGRATE-INVENTORY-SCRIPT-MISSING-001: package.json migrate:inventory dang tham chieu script bi thieu
 - **Status:** open
 - **Severity:** medium
@@ -521,3 +553,18 @@ Khoi phuc <code>scripts/migrate-active-orders.ts</code> neu can migration du lie
 // Line 418: 'Cập nhật trạng thái thành công.'
 // Line 424: 'Lỗi khi cập nhật trạng thái.'
 ```
+## Lỗi thuộc Module: rbac
+# 🐛 Bugs
+## BUG-RBAC-002: Admin layout và permission map phân tán gây rối UI/cấp quyền
+- **Status:** in_progress
+- **Severity:** medium
+- **Module:** RBAC
+- **Files:** src/lib/adminModules.ts, src/lib/permissions.ts, src/app/admin/layout.tsx, src/app/admin/staff/page.tsx, src/middleware.ts, src/app/admin/reviews/page.tsx
+### Symptom
+Admin sidebar có quá nhiều mục ngang cấp, các trang cấu hình phụ bị bày trực tiếp trong menu, và quyền route/menu nằm ở nhiều nơi nên dễ lệch khi thêm tính năng mới. Staff page chỉ có danh sách quyền lẻ, không có preset theo vai trò vận hành như Thu ngân, KTV, Kho, CSKH, Content.
+### Cause
+Menu admin được hardcode trong `src/app/admin/layout.tsx`, trong khi route guard dùng `src/lib/permissions.ts`. Một số route map chưa đúng nghiệp vụ như `/admin/customers` dùng `manage_orders`, và trang reviews còn kiểm tra quyền ngoài registry bằng `admin_only`.
+### Solution
+Triển khai theo `roadmap/ui/data/ai_plans/task_admin_ia_rbac_cleanup_20260608.md`: tạo registry admin module dùng chung, gom sidebar theo workflow, sửa mapping quyền lệch, thêm preset phân quyền trong staff page, và để staff route không map bị deny mặc định.
+### Verification
+2026-06-08: Đã triển khai registry admin module, refactor sidebar/RBAC map, thêm preset quyền staff, bỏ `admin_only` khỏi source. Pass `pnpm lint`, `pnpm typecheck`, `pnpm build`; còn cần browser smoke admin/RBAC với tài khoản thật trước khi đóng bug.

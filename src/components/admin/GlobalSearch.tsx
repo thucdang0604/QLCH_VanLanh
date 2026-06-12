@@ -109,7 +109,7 @@ export default function GlobalSearch() {
                 controlsRef.current = null;
             }
         }
-        
+
         return () => {
             if (controlsRef.current) {
                 controlsRef.current.stop();
@@ -139,7 +139,7 @@ export default function GlobalSearch() {
     const handleResultClick = (item: SearchResult) => {
         setShowResults(false);
         setQuery('');
-        switch(item._type) {
+        switch (item._type) {
             case 'product':
             case 'service':
                 router.push(`/admin/pos?search=${encodeURIComponent(item.name || item.title || '')}`);
@@ -168,7 +168,7 @@ export default function GlobalSearch() {
                     onFocus={() => { if (query) setShowResults(true); }}
                     className="w-full h-10 pl-10 pr-10 bg-gray-100 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 transition-shadow"
                 />
-                <button 
+                <button
                     title="Quét mã QR"
                     onClick={() => setShowScanner(true)}
                     className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-gray-500 hover:text-orange-600 hover:bg-orange-50 rounded transition-colors"
@@ -187,8 +187,8 @@ export default function GlobalSearch() {
                     ) : results.length > 0 ? (
                         <ul className="py-2">
                             {results.map((item, idx) => (
-                                <li 
-                                    key={item.id || idx} 
+                                <li
+                                    key={item.id || idx}
                                     className="px-4 py-3 border-b border-gray-50 last:border-0 hover:bg-orange-50 cursor-pointer flex items-center gap-3 transition-colors"
                                     onClick={() => handleResultClick(item)}
                                 >
@@ -204,7 +204,7 @@ export default function GlobalSearch() {
                                             {item.name || item.title || `Mã: ${item.id}`}
                                         </p>
                                         <p className="text-xs text-gray-500 truncate mt-0.5">
-                                            {item._type === 'order' || item._type === 'repair' 
+                                            {item._type === 'order' || item._type === 'repair'
                                                 ? `${item._type === 'order' ? 'Đơn hàng' : 'Phiếu SC'} • Khách: ${item.customer?.name || item.customer?.phone || 'Khách lẻ'}`
                                                 : `${item.category || ''} ${item.brand ? `• ${item.brand}` : ''}`
                                             }
@@ -230,7 +230,7 @@ export default function GlobalSearch() {
                     <div className="bg-white rounded-2xl overflow-hidden w-full max-w-md shadow-2xl animate-in zoom-in-95 duration-200">
                         <div className="p-4 border-b flex items-center justify-between bg-gray-50">
                             <h3 className="font-bold text-lg text-gray-900 flex items-center gap-2">
-                                <QrCode size={20} className="text-orange-500"/>
+                                <QrCode size={20} className="text-orange-500" />
                                 Quét mã QR
                             </h3>
                             <button title="Đóng" onClick={() => setShowScanner(false)} className="p-2 hover:bg-gray-200 rounded-xl transition-colors text-gray-500">
@@ -252,7 +252,7 @@ export default function GlobalSearch() {
                         {devices.length > 1 && (
                             <div className="p-4 bg-gray-50 border-t">
                                 <label className="block text-xs font-medium text-gray-500 mb-1">Chọn Camera</label>
-                                <select 
+                                <select
                                     title="Chọn camera"
                                     className="w-full p-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
                                     value={selectedDevice}
@@ -270,7 +270,7 @@ export default function GlobalSearch() {
                     </div>
                 </div>
             )}
-            
+
             <style jsx>{`
                 @keyframes scan {
                     0% { top: 0; }

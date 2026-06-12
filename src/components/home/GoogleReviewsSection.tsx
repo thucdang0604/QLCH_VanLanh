@@ -18,24 +18,23 @@ interface ReviewsData {
     reviews: GoogleApiReview[];
 }
 
-const DEFAULT_GOOGLE_PLACE_ID = 'ChIJmWqqJWcpdTERqc7cx-jP2E4';
-
-function getGoogleMapsUrl(placeId: string) {
+function getGoogleMapsUrl(placeId: string | undefined, siteName: string) {
     const params = new URLSearchParams({
         api: '1',
-        query: 'Văn Lành Service',
-        query_place_id: placeId || DEFAULT_GOOGLE_PLACE_ID,
+        query: siteName,
     });
+    if (placeId) params.set('query_place_id', placeId);
     return `https://www.google.com/maps/search/?${params.toString()}`;
 }
 
 export default function GoogleReviewsSection() {
     const { config } = useConfig();
     const reviewsConfig = config.homepageReviews;
+    const siteName = config.siteName || 'Văn Lành Service';
     const [data, setData] = useState<ReviewsData | null>(null);
     const [loading, setLoading] = useState(true);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
-    const googleMapsUrl = getGoogleMapsUrl(reviewsConfig.googlePlaceId);
+    const googleMapsUrl = getGoogleMapsUrl(reviewsConfig.googlePlaceId, siteName);
 
     useEffect(() => {
         let cancelled = false;
@@ -96,7 +95,7 @@ export default function GoogleReviewsSection() {
                             </div>
                             <h2 className="text-2xl md:text-3xl font-extrabold text-gray-900">{reviewsConfig.title}</h2>
                             <p className="text-gray-600 mt-3 max-w-2xl">
-                                Xem đánh giá thực tế của khách hàng về Văn Lành Service trực tiếp trên Google Maps.
+                                Xem đánh giá thực tế của khách hàng về {siteName} trực tiếp trên Google Maps.
                             </p>
                         </div>
                         <a

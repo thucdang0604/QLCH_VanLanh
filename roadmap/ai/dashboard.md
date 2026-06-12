@@ -23,6 +23,7 @@ Webhook phải được kiểm tra đến bước ghi/đọc <code>RTDB chats</c
 ### Package Manager
 Chỉ dùng <code>pnpm</code> (v10.30.3). <b>KHÔNG</b> dùng npm/yarn/bun. Lockfile: <code>pnpm-lock.yaml</code>. Cài package: <code>pnpm add</code>, dev: <code>pnpm dev</code>, build: <code>pnpm build</code>.
 Deploy Firebase Frameworks phải đọc từ root <code>packageManager: pnpm@10.30.3</code>. Nếu Cloud Build chạy <code>npm ci</code> hoặc báo lệch <code>package-lock.json</code>, kiểm tra artifact <code>.firebase/**/functions</code>, clean <code>.firebase/</code>, và giữ root <code>sharp@0.33.5</code> để thỏa peer của <code>firebase-frameworks</code>; Next vẫn dùng nested <code>sharp@0.34.x</code>. Không tạo/commit npm lockfile trong repo này.
+Open deploy debt: <code>BUG-DEPLOY-007</code> đang theo dõi warning Firebase CLI Windows <code>node-which</code>/<code>esbuild</code> khi bundle <code>next.config.mjs</code> và warning Node engine của ZXing. Không coi deploy sạch cho đến khi log không còn các warning này và production smoke pass.
 
 ### Firestore Transactions
 <b>Read-Before-Write Strict Rule:</b> Trong mọi Transaction của Firestore (Admin SDK lẫn Client SDK), BẮT BUỘC phải thực thi toàn bộ các lệnh đọc (`tx.get`) lên đầu tiên. Tuyệt đối không gọi `tx.get` sau khi đã gọi `tx.set`, `tx.update` hoặc `tx.delete`. Việc vi phạm sẽ khiến Firestore ném lỗi chặn ngay lập tức.
@@ -73,10 +74,17 @@ Hệ thống quản lý khách hàng tập trung, thay thế dữ liệu phân t
 - [ ] <b>Đã code slice:</b> Deep-link từ CRM/chat vào modal chi tiết order/repair sẵn có
 - [ ] <b>Admin UI v11 pending:</b> appointments, tags, tier và migration/ledger đầy đủ
 
-### k6 Load Testing
-- **Status:** PENDING
+### Marketing & Growth: Social Missions (Bounty Program)
+- **Status:** DONE
 - **Color:** #0ea5e9
-Stress test <code>fixphone.vn</code> trước chiến dịch marketing.
+Hệ thống Voucher + Discount Stacking Engine + Nhiệm vụ (Missions) để tăng traffic. Xác thực "Honor System" (Tracking Click).
+
+- [x] <b>Giai đoạn 1: Database & Types</b> - Interface `Voucher`, `StackingRules` trong `types.ts`. Thêm `missions` vào `User`, `voucherCode/voucherDiscount/discountSource` vào `Order`. Firestore rules cho `vouchers`.
+- [x] <b>Giai đoạn 2: Admin Voucher CRUD</b> - Trang `/admin/vouchers` với form Stacking Rules (isExclusive, stackWithPromo, stackWithTier). Route đã đăng ký trong `adminModules.ts`.
+- [x] <b>Giai đoạn 3: Missions Widget & Admin Consolidation</b> - Đã hoàn thiện Component `MissionsWidget.tsx` với logic OTP Firebase, tracking click và mã cá nhân. Tích hợp quản lý `discountRules` và `bountyMissions` vào trang `/admin/vouchers` để quy hoạch tập trung.
+- [x] <b>Giai đoạn 4: Stacking Engine & Checkout</b> - API `/api/vouchers/validate`, ô nhập mã Voucher trên checkout, Discount Stacking Engine trong `checkout/route.ts` (Voucher + Tier + Exclusive logic), tăng `usedCount` atomic.
+
+### k6 Load Testing
 
 - [ ] <b>Script:</b> Viết k6 test cho 4 endpoints chính: <code>/</code>, <code>/category/*</code>, <code>/product/*</code>, <code>/api/checkout</code>
 - [ ] <b>Scenarios:</b> Normal (500 VUs), Stress (1000 VUs), Spike (2000 VUs burst)
@@ -87,11 +95,31 @@ Stress test <code>fixphone.vn</code> trước chiến dịch marketing.
 - **Color:** var(--text-muted)
 Dọn dẹp kỹ thuật dư thừa phát hiện trong audit.
 
+- [x] <b>ESLint & TypeScript Build Fix:</b> Đã fix triệt để Type error (Next.js strict App Router constraint trên `page.tsx`) và gỡ bỏ code thừa, dọn dẹp các warning `any`, unused vars để `firebase deploy` (với `next build`) thành công 100%.
 - [ ] <b>Firestore Rules:</b> Xóa rule <code>services</code> trùng lặp (line 37 vs line 62)
 - [ ] <b>LazyImage:</b> Quyết định: xóa component orphan hoặc document lý do giữ
 - [ ] <b>SEO Meta:</b> Kiểm tra <code>&lt;title&gt;</code> và <code>meta description</code> trên production domain
+- [ ] <b>Hardcode Cleanup:</b> Xử lý <code>BUG-HARDCODE-001</code> theo plan <code>plan_hardcode_cleanup_20260607.md</code>: Maps key, fake storefront fallback, business identity, workflow constants và demo fixtures.
 
 ## Changelog
+
+### 2026-06-09 - FIREBASE DEPLOY PIPELINE CLEANUP PLAN
+- **Color:** warning
+- **Summary:** Ghi nhận và lập kế hoạch xử lý triệt để warning/lỗi deploy Firebase CLI trên Windows.
+
+- <b>Issue:</b> Thêm <code>BUG-DEPLOY-007</code> cho nhóm warning <code>node-which</code>/<code>esbuild</code> khi bundle <code>next.config.mjs</code> và warning Node engine của <code>@zxing/library</code>.
+- <b>Plan:</b> Thêm <code>roadmap/ui/data/ai_plans/plan_deploy_pipeline_cleanup_20260609.md</code> và task checklist tương ứng.
+- <b>Risk:</b> Nếu <code>next.config.mjs</code> không được bundle vào Cloud Function, headers/redirects/security config có thể không phản ánh đúng trên SSR deploy.
+- <b>Guardrail:</b> Không commit <code>.firebase/</code>, <code>.next/</code>, root <code>package-lock.json</code> hoặc npm cache; không nâng Node runtime nếu chưa verify Firebase hỗ trợ.
+
+### 2026-06-07 - HARDCODE CLEANUP PLAN
+- **Color:** warning
+- **Summary:** Lập kế hoạch xử lý hardcode còn lại trước khi bắt đầu sửa source.
+
+- <b>Audit:</b> Ghi nhận <code>BUG-HARDCODE-001</code> cho các nhóm hardcode còn lại: Google Maps key trong page source, fallback demo homepage, brand/hotline/domain/address rải rác, workflow status string và demo/template admin.
+- <b>Plan:</b> Thêm <code>roadmap/ui/data/ai_plans/plan_hardcode_cleanup_20260607.md</code> và task checklist tương ứng.
+- <b>Registry:</b> Đăng ký plan vào <code>roadmap/ui/data/manifest.json</code> để Roadmap UI hiển thị.
+- <b>Guardrail:</b> Ưu tiên P0 Maps key trước; storefront không hiển thị dữ liệu giả; quyền admin không dùng <code>email?.includes('admin')</code>.
 
 ### 2026-06-07 - QR/BARCODE LABEL PRINT FIT
 - **Color:** accent-color

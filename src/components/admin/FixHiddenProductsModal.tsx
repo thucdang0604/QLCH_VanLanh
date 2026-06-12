@@ -10,6 +10,7 @@ import type { Product, TaxonomyNode } from '@/lib/types';
 import { PART_CATEGORY_LABEL, isPartCategory } from '@/lib/constants';
 import { useConfig } from '@/lib/ConfigContext';
 import { generateSlug } from '@/lib/utils';
+import { isProductArchived, PRODUCT_STATUS } from '@/lib/productLifecycle';
 
 interface FixHiddenProductsModalProps {
     isOpen: boolean;
@@ -80,7 +81,7 @@ export default function FixHiddenProductsModal({ isOpen, onClose, products }: Fi
     );
     const validRootIds = useMemo(() => new Set(choices.map((choice) => choice.categoryIds[0])), [choices]);
     const hiddenProducts = useMemo(() => products.filter((product) => {
-        if (product.status === 'inactive') return false;
+        if (isProductArchived(product)) return true;
         const rootId = product.categoryIds?.[0];
         return !product.category || !rootId || !validRootIds.has(rootId);
     }), [products, validRootIds]);
@@ -117,11 +118,15 @@ export default function FixHiddenProductsModal({ isOpen, onClose, products }: Fi
                 batch.update(doc(db, 'products', product.id), {
                     category: choice.category,
                     categoryIds: choice.categoryIds,
+                    ...(isProductArchived(product) ? {
+                        status: PRODUCT_STATUS.ACTIVE,
+                        archivedAt: null,
+                    } : {}),
                     updatedAt: serverTimestamp(),
                 });
             });
             await batch.commit();
-            toastSuccess(`Đã khắc phục ${toFix.length} sản phẩm thành công!`);
+            toastSuccess(`Đã khắc phục/khôi phục ${toFix.length} sản phẩm thành công!`);
             setDone(true);
         } catch (error) {
             console.error(error);
@@ -132,7 +137,7 @@ export default function FixHiddenProductsModal({ isOpen, onClose, products }: Fi
     };
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title="Khắc phục sản phẩm bị ẩn" size="3xl">
+        <Modal isOpen={isOpen} onClose={onClose} title="Khắc phục/khôi phục sản phẩm bị ẩn" size="3xl">
             <div className="p-6 space-y-4">
                 {done ? (
                     <div className="text-center py-12">
@@ -145,14 +150,14 @@ export default function FixHiddenProductsModal({ isOpen, onClose, products }: Fi
                 ) : hiddenProducts.length === 0 ? (
                     <div className="text-center py-12">
                         <CheckCircle2 size={48} className="mx-auto text-green-400 mb-4" />
-                        <p className="text-gray-600 font-medium">Không tìm thấy sản phẩm lỗi danh mục.</p>
+                        <p className="text-gray-600 font-medium">Không tìm thấy sản phẩm cần khắc phục hoặc khôi phục.</p>
                     </div>
                 ) : (
                     <>
                         <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
                             <AlertTriangle size={18} className="text-amber-600 shrink-0" />
                             <p className="text-sm text-amber-800">
-                                Phát hiện <strong>{hiddenProducts.length}</strong> sản phẩm thiếu hoặc sai taxonomy. Kiểm tra gợi ý trước khi lưu.
+                                Phát hiện <strong>{hiddenProducts.length}</strong> sản phẩm bị lưu trữ hoặc thiếu/sai taxonomy. Kiểm tra gợi ý trước khi lưu.
                             </p>
                         </div>
                         <div className="overflow-x-auto">
@@ -170,6 +175,11 @@ export default function FixHiddenProductsModal({ isOpen, onClose, products }: Fi
                                             <td className="px-4 py-3">
                                                 <p className="text-sm font-medium text-gray-900 line-clamp-1">{product.name}</p>
                                                 <p className="text-xs text-gray-400 font-mono">{product.id}</p>
+                                                {isProductArchived(product) && (
+                                                    <span className="mt-1 inline-flex px-2 py-0.5 rounded-full bg-red-50 text-red-600 text-[10px] font-medium">
+                                                        Đã lưu trữ
+                                                    </span>
+                                                )}
                                             </td>
                                             <td className="px-4 py-3 text-xs text-red-500">{product.categoryIds?.[0] || product.category || 'Trống'}</td>
                                             <td className="px-4 py-3">

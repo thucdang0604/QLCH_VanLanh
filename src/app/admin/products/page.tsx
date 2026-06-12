@@ -2,10 +2,10 @@
 
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
-import { Plus, Search, Edit, Trash2, Package, Loader2, QrCode, AlertTriangle } from 'lucide-react';
+import { Archive, Plus, Search, Edit, Package, Loader2, QrCode, AlertTriangle } from 'lucide-react';
 import { useFirestoreCollection, updateDocument } from '@/lib/useFirestore';
 
-import { orderBy } from 'firebase/firestore';
+import { orderBy, serverTimestamp } from 'firebase/firestore';
 import { toastError } from '@/lib/toast';
 import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
@@ -20,6 +20,7 @@ import { useConfig } from '@/lib/ConfigContext';
 import { getCategoryPath, collectAllNodeIds } from '@/lib/utils';
 import { isPartCategory } from '@/lib/constants';
 import { productCodeSearchText } from '@/lib/productCodes';
+import { buildArchiveUpdate, getArchiveBlockReason, isProductArchived } from '@/lib/productLifecycle';
 
 // Product is now imported from @/lib/types
 
@@ -43,25 +44,25 @@ export default function ProductsPage() {
     const [qrProduct, setQrProduct] = useState<(Product & { id: string }) | null>(null);
     const [showFixHidden, setShowFixHidden] = useState(false);
 
-    const handleDelete = async (product: Product) => {
-        if (Number(product.stock) > 0) {
-            toastError('Không thể xóa sản phẩm đang còn tồn kho!');
+    const handleArchive = async (product: Product) => {
+        const blockReason = getArchiveBlockReason(product);
+        if (blockReason) {
+            toastError(`Không thể lưu trữ "${product.name}" vì ${blockReason}.`);
             return;
         }
-        if (confirm(`Bạn có chắc muốn xóa "${product.name}"?`)) {
+        if (confirm(`Lưu trữ "${product.name}"? Sản phẩm sẽ ẩn khỏi bán lẻ/POS nhưng vẫn giữ lịch sử và mã hàng.`)) {
             try {
-                // Soft delete by setting status to inactive
-                await updateDocument('products', product.id, { status: 'inactive' });
+                await updateDocument('products', product.id, buildArchiveUpdate(serverTimestamp()));
                 // Trigger revalidation
                 await triggerRevalidate(['/', `/product/${product.id}`, '/flash-sale', '/search', '/sitemap.xml'], ['products']);
             } catch {
-                toastError('Lỗi khi xóa sản phẩm!');
+                toastError('Lỗi khi lưu trữ sản phẩm!');
             }
         }
     };
 
     const filteredProducts = products.filter((p) => {
-        if (p.status === 'inactive') return false; // Hide soft-deleted products
+        if (isProductArchived(p)) return false; // Hide archived products
         if (isPartCategory(p.category, p.categoryIds)) return false; // Linh kiện managed separately in /admin/parts
         const normalizedQuery = searchQuery.toLowerCase();
         const matchSearch = p.name.toLowerCase().includes(normalizedQuery) || productCodeSearchText(p as Product & { id: string }).includes(normalizedQuery);
@@ -114,7 +115,7 @@ export default function ProductsPage() {
                         className="flex items-center gap-2 border-2 border-amber-300 text-amber-700 px-4 py-2.5 rounded-lg font-medium hover:bg-amber-50 transition-colors text-sm"
                     >
                         <AlertTriangle size={18} />
-                        Khắc phục SP bị ẩn
+                        Khắc phục/Khôi phục
                     </button>
                     <button
                         onClick={() => { setEditingProduct(null); setIsModalOpen(true); }}
@@ -317,11 +318,11 @@ export default function ProductsPage() {
                                                 <Edit size={18} />
                                             </button>
                                             <button
-                                                onClick={() => handleDelete(product)}
+                                                onClick={() => handleArchive(product)}
                                                 className="p-2 hover:bg-red-100 text-red-600 rounded-lg"
-                                                title="Xóa sản phẩm"
+                                                title="Lưu trữ sản phẩm"
                                             >
-                                                <Trash2 size={18} />
+                                                <Archive size={18} />
                                             </button>
                                         </div>
                                     </td>
@@ -402,11 +403,11 @@ export default function ProductsPage() {
                                             Sửa
                                         </button>
                                         <button
-                                            onClick={() => handleDelete(product)}
+                                            onClick={() => handleArchive(product)}
                                             className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
                                         >
-                                            <Trash2 size={14} />
-                                            Xóa
+                                            <Archive size={14} />
+                                            Lưu trữ
                                         </button>
                                     </div>
                                 </div>
@@ -444,4 +445,3 @@ export default function ProductsPage() {
         </div>
     );
 }
-

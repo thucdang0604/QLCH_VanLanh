@@ -1,6 +1,7 @@
 import type { Metadata, ResolvingMetadata } from 'next';
 import { getAdminDb, isAdminAvailable } from "@/lib/firebaseAdmin";
 import { SITE_URL } from "@/lib/constants";
+import { getBusinessIdentity } from '@/lib/businessIdentity';
 
 type ServiceData = {
     name?: string;
@@ -16,12 +17,13 @@ export async function generateMetadata(
     parent: ResolvingMetadata
 ): Promise<Metadata> {
     const { id } = await params;
+    const identity = getBusinessIdentity();
     
     let ogImage = `${SITE_URL}/logo.png`;
     const previousImages = (await parent).openGraph?.images || [];
 
     if (!isAdminAvailable() || !id) {
-        return { title: 'Dịch vụ | Văn Lành Service' };
+        return { title: `Dịch vụ | ${identity.siteName}` };
     }
 
     try {
@@ -34,14 +36,14 @@ export async function generateMetadata(
             data = snap.data() as ServiceData;
         }
 
-        if (!data) return { title: 'Dịch vụ sửa chữa không tìm thấy | Văn Lành Service' };
+        if (!data) return { title: `Dịch vụ sửa chữa không tìm thấy | ${identity.siteName}` };
 
-        const seoTitle = `${data.name} | Dịch vụ sửa chữa tại Văn Lành Service`;
+        const seoTitle = `${data.name} | Dịch vụ sửa chữa tại ${identity.siteName}`;
         
         const shortDescription =
             data.seoDescription ||
             data.description ||
-            `Dịch vụ ${data.name} chính hãng, sửa nhanh, bảo hành uy tín tại Văn Lành Service.`;
+            `Dịch vụ ${data.name} chính hãng, sửa nhanh, bảo hành uy tín tại ${identity.siteName}.`;
 
         const images = data.images || (data.imageUrl ? [data.imageUrl] : (data.image ? [data.image] : []));
         if (images && images.length > 0) {
@@ -68,7 +70,7 @@ export async function generateMetadata(
 
     } catch (error) {
         console.error('Error fetching metadata for service', error);
-        return { title: 'Dịch vụ sửa chữa | Văn Lành Service' };
+        return { title: `Dịch vụ sửa chữa | ${identity.siteName}` };
     }
 }
 

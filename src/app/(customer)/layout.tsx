@@ -79,14 +79,21 @@ async function getServerConfig(): Promise<SiteConfig> {
             footerServices: (data.footerServices as SiteConfig['footerServices']) || DEFAULT_CONFIG.footerServices,
             homeServiceCategories: (data.homeServiceCategories as SiteConfig['homeServiceCategories']) || DEFAULT_CONFIG.homeServiceCategories,
             taxonomy: (data.taxonomy as SiteConfig['taxonomy']) || DEFAULT_CONFIG.taxonomy,
+            bountyMissions: (data.bountyMissions as SiteConfig['bountyMissions']) || DEFAULT_CONFIG.bountyMissions,
+            bountyRewardType: (data.bountyRewardType as SiteConfig['bountyRewardType']) || DEFAULT_CONFIG.bountyRewardType,
+            bountyRewardValue: (data.bountyRewardValue as number) || DEFAULT_CONFIG.bountyRewardValue,
+            bountyRewardMaxDiscount: (data.bountyRewardMaxDiscount as number) || undefined,
         };
 
         return merged;
+
     } catch (error) {
         console.error('[Customer Layout] Failed to fetch config:', error);
         return DEFAULT_CONFIG;
     }
 }
+
+import MissionsWidget from "@/components/MissionsWidget";
 
 export default async function CustomerLayout({
     children,
@@ -100,6 +107,7 @@ export default async function CustomerLayout({
             <CustomerLayoutShell>
                 {children}
             </CustomerLayoutShell>
+            <MissionsWidget />
         </ServerConfigProvider>
     );
 }

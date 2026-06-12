@@ -6,25 +6,27 @@ import { sanitizeHtml } from '@/lib/sanitizeHtml';
 import { fetchDetailItem, fetchProductVariants, fetchProductReviews, fetchRelatedItems } from '../../_lib/server-queries';
 import ProductDetailClient, { ProductReviews, type ProductData } from './ProductDetailClient';
 import Image from 'next/image';
+import { getBusinessIdentity } from '@/lib/businessIdentity';
 
 export const revalidate = 30;
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
     const { id } = await params;
     const data = await fetchDetailItem(id, 'products');
+    const identity = getBusinessIdentity();
 
     if (!data) {
         return { title: 'Không tìm thấy sản phẩm' };
     }
 
-    const shortDescription = String(data.seoDescription || data.description || `Mua ${data.name} chính hãng, giá tốt, bảo hành uy tín tại Văn Lành Service.`);
+    const shortDescription = String(data.seoDescription || data.description || `Mua ${data.name} chính hãng, giá tốt, bảo hành uy tín tại ${identity.siteName}.`);
     const imageUrl = ((data.images as string[])?.[0] || data.imageUrl || data.image || '') as string;
 
     return {
-        title: `${data.name} | Sản phẩm tại Văn Lành Service`,
+        title: `${data.name} | Sản phẩm tại ${identity.siteName}`,
         description: shortDescription,
         openGraph: {
-            title: `${data.name} | Sản phẩm tại Văn Lành Service`,
+            title: `${data.name} | Sản phẩm tại ${identity.siteName}`,
             description: shortDescription,
             images: imageUrl,
         }
@@ -33,6 +35,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 
 export default async function ProductDetailPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = await params;
+    const identity = getBusinessIdentity();
     let data = await fetchDetailItem(id, 'products');
     
     // Fallback just in case they visit a service URL using the product route 
@@ -75,7 +78,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
     const promoPrice = Number(data.price_promo || 0);
     const displayPrice = promoPrice > 0 ? promoPrice : (originalPrice > 0 ? originalPrice : 0);
 
-    const shortDescription = String(data.seoDescription || data.description || `Mua ${data.name} chính hãng, giá tốt, bảo hành uy tín tại Văn Lành Service.`);
+    const shortDescription = String(data.seoDescription || data.description || `Mua ${data.name} chính hãng, giá tốt, bảo hành uy tín tại ${identity.siteName}.`);
     const url = `${SITE_URL}/product/${data.id}`;
 
     const structuredData = {

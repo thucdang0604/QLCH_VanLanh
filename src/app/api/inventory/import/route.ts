@@ -5,6 +5,8 @@ import { FieldValue } from 'firebase-admin/firestore';
 import type { ImportReceipt, ImportReceiptItem, RepairTicket } from '@/lib/types';
 import { buildProductCodeFromId, getProductCodeKind, normalizeProductCode } from '@/lib/productCodes';
 import { PART_CATEGORY_LABEL } from '@/lib/constants';
+import { REPAIR_PART_STATUS, isRepairPartStatus, isSelectedRepairPart } from '@/lib/repairStatus';
+import { buildReactivateOnImportUpdate } from '@/lib/productLifecycle';
 
 type RepairLine = NonNullable<RepairTicket['parts']>[number];
 type ReceiptItem = ImportReceiptItem & {
@@ -97,8 +99,8 @@ export async function POST(request: NextRequest) {
                     };
                     
                     // If we need to recompute payment (used in complete_import)
-                    if (ticketData.parts[lineIndex].status === 'selected') {
-                        const selectedParts = ticketData.parts.filter((p) => p.status === 'selected');
+                    if (isSelectedRepairPart(ticketData.parts[lineIndex])) {
+                        const selectedParts = ticketData.parts.filter(isSelectedRepairPart);
                         const partsCost = selectedParts.reduce((sum, p) => sum + ((p.unitPriceAtUse || 0) * p.quantity), 0);
                         
                         const currentPayment = (ticketData.payment || {}) as Partial<RepairTicket['payment']>;
@@ -143,8 +145,8 @@ export async function POST(request: NextRequest) {
                     for (const item of receipt.items) {
                         if (item.ticketId && item.partLineId) {
                             await updateRepairLine(item.ticketId, item.partLineId, (line) => {
-                                if (line.status === 'requested' || line.status === 'approved') {
-                                    line.status = 'ordered';
+                                if (isRepairPartStatus(line.status, REPAIR_PART_STATUS.REQUESTED) || isRepairPartStatus(line.status, REPAIR_PART_STATUS.APPROVED)) {
+                                    line.status = REPAIR_PART_STATUS.ORDERED;
                                 }
                             });
                         }
@@ -177,7 +179,7 @@ export async function POST(request: NextRequest) {
                 const targetItem = receipt.items?.find((i) => i.partLineId === partLineId);
                 if (targetItem?.ticketId) {
                     await updateRepairLine(targetItem.ticketId, partLineId, (line) => {
-                        if (line.status === 'ordered' || line.status === 'requested') {
+                        if (isRepairPartStatus(line.status, REPAIR_PART_STATUS.ORDERED) || isRepairPartStatus(line.status, REPAIR_PART_STATUS.REQUESTED)) {
                             line.status = availability;
                         }
                     });
@@ -236,7 +238,13 @@ export async function POST(request: NextRequest) {
                             stock: newStock,
                             costPrice: newCostPrice,
                             held: FieldValue.increment(additionalHeld),
-                            updatedAt: FieldValue.serverTimestamp()
+                            updatedAt: FieldValue.serverTimestamp(),
+                            ...buildReactivateOnImportUpdate({
+                                status: String(pData.status || 'active') as 'active' | 'hidden' | 'inactive',
+                                stock: Number(pData.stock) || 0,
+                                held: Number(pData.held) || 0,
+                                isProposed: pData.isProposed === true,
+                            }, newStock),
                         };
                         const productCode = normalizeProductCode(pData.sku || pData.barcode || pData.productCode)
                             || buildProductCodeFromId(item.productId, getProductCodeKind(pData));
@@ -293,8 +301,12 @@ export async function POST(request: NextRequest) {
                         // Update Repair Line to 'selected', snapshot prices
                         if (item.ticketId && item.partLineId) {
                             await updateRepairLine(item.ticketId, item.partLineId, (line) => {
-                                if (line.status === 'in_stock' || line.status === 'ordered' || line.status === 'requested') {
-                                    line.status = 'selected';
+                                if (
+                                    isRepairPartStatus(line.status, REPAIR_PART_STATUS.IN_STOCK) ||
+                                    isRepairPartStatus(line.status, REPAIR_PART_STATUS.ORDERED) ||
+                                    isRepairPartStatus(line.status, REPAIR_PART_STATUS.REQUESTED)
+                                ) {
+                                    line.status = REPAIR_PART_STATUS.SELECTED;
                                     line.unitPriceAtUse = Number(pData.price) || 0; // Snapshot catalog price
                                     line.unitCostAtUse = newCostPrice; // Snapshot new cost
                                     line.priceConfirmedAt = new Date() as unknown as RepairLine['priceConfirmedAt'];
