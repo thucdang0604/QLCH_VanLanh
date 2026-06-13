@@ -11,9 +11,9 @@ import { normalizeVietnamPhone } from '@/lib/phone';
 export async function POST(request: NextRequest) {
     try {
         const caller = await requirePermission(request, 'manage_orders');
-        
+
         const body = await request.json();
-        const { idempotencyKey, repairTicketId, customer_info, items, discount_amount, total_amount, deposit_amount, payment_method } = body;
+        const { idempotencyKey, repairTicketId, customer_info, items, discount_amount, total_amount, deposit_amount, payment_method, voucherCode } = body;
 
         if (!items || items.length === 0) {
             return NextResponse.json({ error: 'Giỏ hàng trống' }, { status: 400 });
@@ -108,7 +108,7 @@ export async function POST(request: NextRequest) {
                 const pid = String(item.productId);
                 const qty = Math.max(1, Math.floor(Number(item.quantity) || 1));
                 const price = Number(item.price) || 0;
-                
+
                 if (item.isRepairTicket) {
                     normalizedItems.push({
                         id: pid,
@@ -125,7 +125,7 @@ export async function POST(request: NextRequest) {
 
                 const pSnap = productDocs.get(pid)!;
                 const d = pSnap.data;
-                
+
                 const warrantyInfo = resolveWarranty(d);
                 const warrantyType = warrantyInfo?.warrantyType || 'none';
                 const warrantyMonths = warrantyInfo?.warrantyMonths || 0;
@@ -143,7 +143,7 @@ export async function POST(request: NextRequest) {
                         throw new Error(`Sản phẩm "${d.name}" chỉ mua ${qty} nhưng cung cấp ${imeis.length} IMEI.`);
                     }
                 }
-                
+
                 normalizedItems.push({
                     id: String(item.id || item.productId),
                     productId: pid,
@@ -160,7 +160,51 @@ export async function POST(request: NextRequest) {
             }
 
             const serverTotal = serverSubtotal - (Number(discount_amount) || 0);
-            
+
+            // ── Voucher Validation for POS ──
+            let voucherRef: FirebaseFirestore.DocumentReference | null = null;
+            let appliedVoucherCode: string | undefined;
+            let appliedPersonalVoucher = false;
+
+            if (voucherCode && typeof voucherCode === 'string') {
+                const voucherQuery = await db.collection('vouchers')
+                    .where('code', '==', voucherCode.trim().toUpperCase())
+                    .where('isActive', '==', true)
+                    .limit(1)
+                    .get();
+                if (!voucherQuery.empty) {
+                    voucherRef = voucherQuery.docs[0].ref;
+                    const voucherSnap = await tx.get(voucherRef);
+                    const voucherData = voucherSnap.data();
+
+                    if (voucherData) {
+                        if (voucherData.expiryDate) {
+                            const exp = voucherData.expiryDate.toDate ? voucherData.expiryDate.toDate() : new Date(voucherData.expiryDate);
+                            if (exp.getTime() < Date.now()) {
+                                throw new Error('Mã Voucher đã hết hạn.');
+                            }
+                        }
+                        if (voucherData.usageLimit > 0 && voucherData.usedCount >= voucherData.usageLimit) {
+                            throw new Error('Mã Voucher đã hết lượt sử dụng.');
+                        }
+                        if (voucherData.minOrderValue && serverSubtotal < voucherData.minOrderValue) {
+                            throw new Error(`Đơn hàng tối thiểu ${voucherData.minOrderValue.toLocaleString('vi-VN')}đ để sử dụng mã này.`);
+                        }
+                        if (voucherData.ownerId) {
+                            const normalizedPhone = normalizeVietnamPhone(customer_info?.phone || '');
+                            const voucherOwnerPhone = normalizeVietnamPhone(String(voucherData.ownerId));
+                            if (!normalizedPhone || !voucherOwnerPhone || normalizedPhone.local !== voucherOwnerPhone.local) {
+                                throw new Error('Voucher này là phần thưởng cá nhân. Vui lòng nhập đúng Số điện thoại khách hàng.');
+                            }
+                            appliedPersonalVoucher = true;
+                        }
+                        appliedVoucherCode = voucherData.code;
+                    }
+                } else {
+                    throw new Error('Mã Voucher không tồn tại hoặc đã bị vô hiệu.');
+                }
+            }
+
             // Total cost guard
             if (Math.abs(serverTotal - Number(total_amount)) > 1) {
                 console.warn(`POS Checkout mismatch: Client total ${total_amount}, Server total ${serverTotal}`);
@@ -169,13 +213,81 @@ export async function POST(request: NextRequest) {
 
             const isPending = Number(deposit_amount) > 0 && Number(deposit_amount) < serverTotal;
 
+            // ── Pre-fetch for Transaction Reads ──
+            const orderRef = db.collection('orders').doc();
+            const orderId = orderRef.id;
+
+            const staffSnap = await tx.get(db.collection('users').doc(caller.uid));
+            const sData = staffSnap.data();
+            const createdByName = sData?.displayName || sData?.name || (caller as { email?: string }).email || caller.uid;
+
+            let custRef: FirebaseFirestore.DocumentReference | null = null;
+            let custSnap: FirebaseFirestore.DocumentSnapshot | null = null;
+            let incomingName = '';
+            const rawPhone = customer_info?.phone;
+            const normalizedPhoneResult = rawPhone ? normalizeVietnamPhone(rawPhone) : null;
+
+            if (normalizedPhoneResult) {
+                custRef = db.collection('customers').doc(normalizedPhoneResult.local);
+                custSnap = await tx.get(custRef);
+                incomingName = (customer_info?.name || '').trim();
+            }
+
+            let repairRef: FirebaseFirestore.DocumentReference | null = null;
+            let repairSnap: FirebaseFirestore.DocumentSnapshot | null = null;
+            if (repairTicketId) {
+                repairRef = db.collection('repairs').doc(repairTicketId);
+                repairSnap = await tx.get(repairRef);
+            }
+
+            // ── Construct Order Object ──
+            const order: Record<string, unknown> = {
+                customer_info: {
+                    name: customer_info?.name || 'Khách lẻ',
+                    phone: customer_info?.phone || '',
+                    email: customer_info?.email || '',
+                    address: customer_info?.address || '',
+                    note: customer_info?.note || '',
+                },
+                items: normalizedItems,
+                subtotal_amount: serverSubtotal,
+                discount_amount: Number(discount_amount) || 0,
+                deposit_amount: Number(deposit_amount) || 0,
+                total_amount: serverTotal,
+                ...(appliedVoucherCode ? { voucherCode: appliedVoucherCode, discountSource: 'voucher' } : {}),
+                status: isPending ? 'Pending' : 'Completed',
+                source: 'pos',
+                is_vat_exported: false,
+                payment_method: payment_method || 'CASH',
+                createdAt: FieldValue.serverTimestamp(),
+                updatedAt: FieldValue.serverTimestamp(),
+                completedAt: isPending ? null : FieldValue.serverTimestamp(),
+                paymentHistory: [{
+                    type: isPending ? 'deposit' : 'full',
+                    amount: isPending ? Number(deposit_amount) || 0 : serverTotal,
+                    timestamp: Date.now(),
+                    note: isPending ? `Đặt cọc POS — ${payment_method}` : `Thanh toán POS — ${payment_method}`
+                }],
+                createdBy: caller.uid,
+                createdByName
+            };
+
+            // ── Commission Server-Side Calculation (Reads inside) ──
+            if (!isPending) {
+                await calculateAndSaveCommissionsServer(tx, { uid: caller.uid, displayName: createdByName as string }, 'order', { id: orderId, ...order } as Order);
+            }
+
+            // ==========================================
+            // ── ALL WRITES START HERE ──
+            // ==========================================
+
             // Stock Deduction
             for (const [productId, totalQty] of preAggregated.entries()) {
                 const pSnap = productDocs.get(productId)!;
                 const d = pSnap.data;
                 const currentStock = Number(d.stock) || 0;
                 const currentHeld = Number(d.held) || 0;
-                
+
                 if (isPending) {
                     tx.update(pSnap.ref, {
                         held: currentHeld + totalQty
@@ -199,126 +311,99 @@ export async function POST(request: NextRequest) {
                 }
             }
 
-            // Create Order
-            const orderRef = db.collection('orders').doc();
-            const orderId = orderRef.id;
-
-            const order: Record<string, unknown> = {
-                customer_info: {
-                    name: customer_info?.name || 'Khách lẻ',
-                    phone: customer_info?.phone || '',
-                    email: customer_info?.email || '',
-                    address: customer_info?.address || '',
-                    note: customer_info?.note || '',
-                },
-                items: normalizedItems,
-                subtotal_amount: serverSubtotal,
-                discount_amount: Number(discount_amount) || 0,
-                deposit_amount: Number(deposit_amount) || 0,
-                total_amount: serverTotal,
-                status: isPending ? 'Pending' : 'Completed',
-                source: 'pos',
-                is_vat_exported: false,
-                payment_method: payment_method || 'CASH',
-                createdAt: FieldValue.serverTimestamp(),
-                updatedAt: FieldValue.serverTimestamp(),
-                completedAt: isPending ? null : FieldValue.serverTimestamp(),
-                paymentHistory: [{
-                    type: isPending ? 'deposit' : 'full',
-                    amount: isPending ? Number(deposit_amount) || 0 : serverTotal,
-                    timestamp: Date.now(),
-                    note: isPending ? `Đặt cọc POS — ${payment_method}` : `Thanh toán POS — ${payment_method}`
-                }],
-                createdBy: caller.uid,
-                createdByName: (caller as { email?: string }).email || caller.uid // will be updated with true name if possible
-            };
-
-            // Fetch true staff name
-            const staffSnap = await tx.get(db.collection('users').doc(caller.uid));
-            if (staffSnap.exists) {
-                const sData = staffSnap.data();
-                order.createdByName = sData?.displayName || sData?.name || order.createdByName;
-            }
-
             tx.set(orderRef, order);
 
-            // Customer Aggregate
-            if ((order as { customer_info: { phone: string, name?: string } }).customer_info.phone) {
-                const rawPhone = (order as { customer_info: { phone: string, name?: string } }).customer_info.phone;
-                const normalized = normalizeVietnamPhone(rawPhone);
-                if (normalized) {
-                    const phone = normalized.local;
-                    const custRef = db.collection('customers').doc(phone);
-                    const custSnap = await tx.get(custRef);
-                    const incomingName = ((order as { customer_info: { phone: string, name?: string } }).customer_info.name || '').trim();
-                    
-                    if (custSnap.exists) {
-                        const currentData = custSnap.data()!;
-                        const updateData: Record<string, unknown> = {
-                            updatedAt: FieldValue.serverTimestamp(),
-                            lastVisit: FieldValue.serverTimestamp()
-                        };
-
-                        if (incomingName && incomingName !== 'Khách lẻ' && incomingName !== currentData.name) {
-                            updateData.name = incomingName;
-                        }
-
-                        if (!isPending) {
-                            updateData.totalSpent = FieldValue.increment(serverTotal);
-                            updateData.totalOrders = FieldValue.increment(1);
-                        }
-                        tx.update(custRef, updateData);
-                    } else {
-                        tx.set(custRef, {
-                            phone,
-                            name: incomingName || 'Khách lẻ',
-                            type: 'retail',
-                            totalSpent: isPending ? 0 : serverTotal,
-                            totalOrders: isPending ? 0 : 1,
-                            totalRepairs: 0,
-                            totalAppointments: 0,
-                            createdAt: FieldValue.serverTimestamp(),
-                            updatedAt: FieldValue.serverTimestamp(),
-                            lastVisit: FieldValue.serverTimestamp(),
-                            tags: []
-                        });
-                    }
-
-                    // Ledger
-                    tx.set(db.collection('customer_ledger').doc(), {
-                        customerId: phone,
-                        type: isPending ? 'deposit_order' : 'purchase_order',
-                        amount: isPending ? (Number(deposit_amount) || 0) : serverTotal,
-                        referenceId: orderId,
-                        date: FieldValue.serverTimestamp()
-                    });
-                }
+            // ── Increment Voucher Usage ──
+            if (appliedVoucherCode && voucherRef && !isPending) {
+                tx.update(voucherRef, {
+                    usedCount: FieldValue.increment(1),
+                });
             }
 
-            // Commission Server-Side Calculation (only for completed orders)
-            if (!isPending) {
-                await calculateAndSaveCommissionsServer(tx, { uid: caller.uid, displayName: order.createdByName as string }, 'order', { id: orderId, ...order } as Order);
-                
-                if (repairTicketId) {
-                    const repairRef = db.collection('repairs').doc(repairTicketId);
-                    const repairSnap = await tx.get(repairRef);
-                    if (repairSnap.exists) {
-                        const repairPrice = items.find((i: Record<string, unknown>) => i.isRepairTicket)?.price || 0;
-                        tx.update(repairRef, {
-                            'payment.status': 'paid',
-                            status: 'out',
-                            completedAt: FieldValue.serverTimestamp(),
-                            'timing.completedAt': FieldValue.serverTimestamp(),
-                            updatedAt: FieldValue.serverTimestamp(),
-                            paymentHistory: FieldValue.arrayUnion({
-                                type: 'full',
-                                amount: repairPrice,
-                                method: payment_method || 'CASH',
-                                timestamp: Date.now(),
-                                note: `Thanh toán gộp hóa đơn POS #${orderId.slice(-6)}`
-                            })
-                        });
+            // Customer Aggregate
+            if (custRef && custSnap) {
+                if (custSnap.exists) {
+                    const currentData = custSnap.data()!;
+                    const updateData: Record<string, unknown> = {
+                        updatedAt: FieldValue.serverTimestamp(),
+                        lastVisit: FieldValue.serverTimestamp()
+                    };
+
+                    if (incomingName && incomingName !== 'Khách lẻ' && incomingName !== currentData.name) {
+                        updateData.name = incomingName;
                     }
+
+                    if (!isPending) {
+                        updateData.totalSpent = FieldValue.increment(serverTotal);
+                        updateData.totalOrders = FieldValue.increment(1);
+                    }
+
+                    if (appliedPersonalVoucher && appliedVoucherCode && !isPending) {
+                        updateData['missions.bounty_redeemed'] = true;
+                        updateData['missions.bountyVoucherCode'] = appliedVoucherCode;
+                        updateData['missions.redeemedAt'] = FieldValue.serverTimestamp();
+                        updateData['missions.redeemedOrderId'] = orderId;
+                    }
+
+                    tx.update(custRef, updateData);
+                } else {
+                    const newCust: Record<string, unknown> = {
+                        phone: normalizedPhoneResult!.local,
+                        name: incomingName || 'Khách lẻ',
+                        type: 'retail',
+                        totalSpent: isPending ? 0 : serverTotal,
+                        totalOrders: isPending ? 0 : 1,
+                        totalRepairs: 0,
+                        totalAppointments: 0,
+                        createdAt: FieldValue.serverTimestamp(),
+                        updatedAt: FieldValue.serverTimestamp(),
+                        lastVisit: FieldValue.serverTimestamp(),
+                        tags: []
+                    };
+
+                    if (appliedPersonalVoucher && appliedVoucherCode && !isPending) {
+                        newCust.missions = {
+                            bounty_redeemed: true,
+                            bountyVoucherCode: appliedVoucherCode,
+                            redeemedAt: FieldValue.serverTimestamp(),
+                            redeemedOrderId: orderId,
+                        };
+                    }
+
+                    tx.set(custRef, newCust);
+                }
+
+                // Ledger
+                tx.set(db.collection('customer_ledger').doc(), {
+                    customerId: normalizedPhoneResult!.local,
+                    type: isPending ? 'deposit_order' : 'purchase_order',
+                    amount: isPending ? (Number(deposit_amount) || 0) : serverTotal,
+                    referenceId: orderId,
+                    date: FieldValue.serverTimestamp()
+                });
+            }
+
+            // Repair Ticket Link
+            if (!isPending) {
+                if (repairTicketId && repairRef && repairSnap && repairSnap.exists) {
+                    const repairPrice = items.find((i: Record<string, unknown>) => i.isRepairTicket)?.price || 0;
+                    tx.update(repairRef, {
+                        'payment.status': 'paid',
+                        status: 'out',
+                        'payment.method': payment_method || 'CASH',
+                        'payment.amount': repairPrice,
+                        'payment.paidAt': FieldValue.serverTimestamp(),
+                        completedAt: FieldValue.serverTimestamp(),
+                        'timing.completedAt': FieldValue.serverTimestamp(),
+                        updatedAt: FieldValue.serverTimestamp(),
+                        paymentHistory: FieldValue.arrayUnion({
+                            type: 'full',
+                            amount: repairPrice,
+                            method: payment_method || 'CASH',
+                            timestamp: Date.now(),
+                            note: `Thanh toán gộp hóa đơn POS #${orderId.slice(-6)}`
+                        })
+                    });
                 }
             }
 

@@ -22,7 +22,8 @@
       "v16: Google homepage reviews migrated from Places API Legacy to Place Details (New); the server uses a field mask and normalizes the response for the storefront.",
       "v17: Config revalidation sentinel layout now targets /(customer) layout instead of root / layout, preventing admin auth Router Cache purge after appearance saves.",
       "v18: Admin config saves request background /api/revalidate instead of invoking a Server Action from the browser; the route accepts a signed admin session cookie or the internal secret.",
-      "v19: QR/Barcode label print fit optimization — ProductQrLabelModal now supports smaller paper presets, custom mm size, two-labels-per-row stock, column gap tuning, configured shop-name branding, compact barcode aliases, text density, content scale, and safe margins without changing product code schema or checkout behavior."
+      "v19: QR/Barcode label print fit optimization — ProductQrLabelModal now supports smaller paper presets, custom mm size, two-labels-per-row stock, column gap tuning, configured shop-name branding, compact barcode aliases, text density, content scale, and safe margins without changing product code schema or checkout behavior.",
+      "v20: Repair workflow Firestore v2 — repairStatuses is the only repair runtime source, require* features use exit-gate semantics, config validation is shared, and legacy statuses remains preserved but unused."
     ]
   },
   "collections": {
@@ -107,7 +108,7 @@
       ]
     },
     "repairs": {
-      "description": "Phiếu sửa chữa. customerPhone dùng để lookup từ POS. payment.status: pending|partial|paid.",
+      "description": "Phiếu sửa chữa. Phân công KTV và chuyển giao được xử lý qua API server; KTV mới chỉ nhận trách nhiệm sau khi chấp nhận yêu cầu.",
       "keyFields": [
         "customerName",
         "customerPhone",
@@ -115,14 +116,18 @@
         "payment.status",
         "payment.amount",
         "parts[]",
-        "deviceModel"
+        "deviceModel",
+        "staff.assignedTechnician",
+        "pendingTechnicianTransfer",
+        "statusTimeline[]"
       ],
       "usedIn": [
         "pos/page.tsx (phone lookup)",
         "parts/page.tsx (link from import_receipt)"
       ],
       "changeLog": [
-        "v2: POS now queries repairs by customerPhone onBlur to auto-link repair tickets."
+        "v2: POS now queries repairs by customerPhone onBlur to auto-link repair tickets.",
+        "v3: Assignment/transfer dùng transaction, version, idempotency và audit log; client bị chặn đổi trực tiếp staff assignment."
       ]
     },
     "reviews": {
@@ -427,16 +432,25 @@
       ]
     },
     "system_config.repairs": {
-      "description": "Cấu hình danh sách trạng thái (statuses) của luồng sửa chữa.",
+      "description": "Cấu hình workflow sửa chữa/bảo hành. Runtime dùng repairStatuses và warrantyStatuses; statuses là bản legacy được bảo toàn nhưng không còn được đọc.",
       "keyFields": [
-        "statuses[]",
+        "repairStatuses[]",
+        "warrantyStatuses[]",
+        "trackingGroups[]",
+        "warrantyRules[]",
+        "workflowSchemaVersion",
+        "workflowFeatureSemantics",
+        "statuses[] (legacy, preserved)",
         "updatedAt"
       ],
       "usedIn": [
         "repairs/page.tsx",
         "technician/page.tsx",
         "settings/repairs/page.tsx",
-        "useCustomerActivity.ts"
+        "useCustomerActivity.ts",
+        "repairWorkflowConfig.ts",
+        "repairWorkflowServer.ts",
+        "migrate-repair-workflow-v2.ts"
       ]
     },
     "system_config.receipt": {
@@ -1320,9 +1334,12 @@
     },
     "repairs": {
       "/api/repairs/confirm-parts": "POST: Chốt linh kiện dùng cho ca sửa chữa. Snap giá linh kiện và chuyển trạng thái linh kiện sang in_stock/selected.",
+      "/api/repairs/create": "POST: Tạo phiếu sửa chữa qua Admin SDK, ép entry status từ workflow Firebase và xác minh KTV được gán.",
       "/api/repairs/handover": "POST: Bàn giao máy cho khách. Trừ kho vật lý các linh kiện đã dùng, ghi log Inventory, tính hoa hồng.",
       "/api/repairs/payment-edit": "POST: Cập nhật thông tin thanh toán (deposit, discount, final amount) cho phiếu sửa chữa.",
-      "/api/repairs/transition": "POST: Chuyển đổi trạng thái quy trình sửa chữa (Nhận máy -> Đang sửa -> Xong)."
+      "/api/repairs/technician/assign": "POST: Quản lý Sale/Admin gán KTV lần đầu; xác minh user đích và ghi audit log.",
+      "/api/repairs/technician/transfer": "POST: Tạo, chấp nhận, từ chối hoặc hủy yêu cầu chuyển KTV. Chỉ KTV nhận mới được chấp nhận.",
+      "/api/repairs/transition": "POST: Chuyển trạng thái theo repairStatuses/warrantyStatuses; requireChecklist, requirePartsReady và requireTechnicianNote là exit gates của trạng thái hiện tại; bắt buộc KTV khi rời tiếp nhận và ghi manager override/audit log."
     },
     "revalidate": {
       "/api/revalidate": "POST: Revalidate Next.js App Router Cache (ISR). Chấp nhận secret nội bộ hoặc signed admin session cookie; sentinel layout chỉ invalidates /(customer) storefront layout."

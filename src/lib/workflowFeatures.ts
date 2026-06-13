@@ -61,6 +61,18 @@ export const WORKFLOW_FEATURES: WorkflowFeature[] = [
         description: 'Khi chuyển sang trạng thái này, nếu có doanh thu sẽ tính hoa hồng cho KTV được phân công',
         scope: ['admin', 'technician'],
     },
+    {
+        id: 'requireAssignedTechnician',
+        label: 'Yêu cầu phân công KTV',
+        description: 'Chặn chuyển sang trạng thái này nếu phiếu chưa có KTV phụ trách',
+        scope: ['admin', 'technician'],
+    },
+    {
+        id: 'requireTechnicianNote',
+        label: 'Yêu cầu Ghi chú kỹ thuật',
+        description: 'Bắt buộc nhập Ghi chú kỹ thuật khi chuyển sang hoặc lưu tại trạng thái này',
+        scope: ['admin', 'technician'],
+    },
 ];
 
 // ── Helper: kiểm tra feature có được bật cho status hiện tại ──

@@ -5,6 +5,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 import type { RepairTicket } from '@/lib/types';
 import { calculateAndSaveCommissionsServer } from '@/lib/commissionCalcServer';
 import { REPAIR_STATUS, isSelectedRepairPart, isWarrantyEligibleRepairPart } from '@/lib/repairStatus';
+import { getConfiguredWorkflow } from '@/lib/repairWorkflowConfig';
 
 const LEGACY_TERMINAL_STATUSES = [REPAIR_STATUS.DONE, REPAIR_STATUS.OUT, REPAIR_STATUS.REFUND, 'bh_hoan_tat', 'bh_tu_choi', 'bh_refund'];
 
@@ -55,9 +56,7 @@ export async function POST(request: NextRequest) {
             if (configSnap.exists) {
                 const configData = configSnap.data();
                 warrantyRules = configData?.warrantyRules || [];
-                const workflow = ticket.ticketType === 'warranty'
-                    ? configData?.warrantyStatuses
-                    : configData?.repairStatuses ?? configData?.statuses;
+                const workflow = getConfiguredWorkflow(configData ?? {}, ticket.ticketType);
 
                 if (Array.isArray(workflow)) {
                     const targetNode = workflow.find((n: { id?: string; isTerminal?: boolean }) => n.id === targetStatus);

@@ -1,22 +1,24 @@
 import type { Firestore, Transaction } from 'firebase-admin/firestore';
 import type { RepairTicket, WorkflowNode } from '@/lib/types';
+import {
+    getConfiguredWorkflow,
+    type RepairWorkflowSettings,
+    validateWorkflow,
+} from '@/lib/repairWorkflowConfig';
 
-type RepairWorkflowSettings = {
-    repairStatuses?: WorkflowNode[];
-    statuses?: WorkflowNode[];
-    warrantyStatuses?: WorkflowNode[];
-};
-
-function getWorkflowFromSettings(
+export function getWorkflowFromSettings(
     settings: RepairWorkflowSettings,
     ticket: Pick<RepairTicket, 'ticketType'>
 ): WorkflowNode[] {
-    const workflow = ticket.ticketType === 'warranty'
-        ? settings.warrantyStatuses
-        : settings.repairStatuses ?? settings.statuses;
+    const workflow = getConfiguredWorkflow(settings, ticket.ticketType);
 
     if (!Array.isArray(workflow) || workflow.length === 0) {
         throw new Error('Chưa cấu hình workflow sửa chữa trong Cài đặt > Repairs.');
+    }
+
+    const errors = validateWorkflow(workflow, ticket.ticketType === 'warranty' ? 'Workflow bảo hành' : 'Workflow sửa chữa');
+    if (errors.length > 0) {
+        throw new Error(`Cấu hình workflow không hợp lệ: ${errors.join(' ')}`);
     }
 
     return workflow;

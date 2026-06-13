@@ -150,11 +150,19 @@ service cloud.firestore {
 
     // Repairs
     match /repairs/{repairId} {
+      function canModifyRepairTicket() {
+        let hasAssignedKTV = 'staff' in resource.data && 'assignedTechnician' in resource.data.staff && resource.data.staff.assignedTechnician != null;
+        let isAssignedKTV = hasAssignedKTV && resource.data.staff.assignedTechnician == request.auth.uid;
+        let isUnassigned = !hasAssignedKTV;
+        let isManager = isAdmin() || (hasPermission('manage_repairs') && hasPermission('manage_orders'));
+        return isAssignedKTV || isUnassigned || isManager;
+      }
+
       allow read: if hasPermission('manage_repairs');
-      allow create: if hasPermission('manage_repairs')
-        && !('parts' in request.resource.data);
+      allow create: if false; // Tắt hoàn toàn tạo từ client, bắt buộc qua Server API
       allow update: if hasPermission('manage_repairs')
-        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['parts', 'payment', 'status', 'statusTimeline', 'partsLockedAt']);
+        && canModifyRepairTicket()
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['parts', 'payment', 'status', 'statusTimeline', 'partsLockedAt', 'pendingTechnicianTransfer', 'staff']);
       allow delete: if isAdmin();
     }
 

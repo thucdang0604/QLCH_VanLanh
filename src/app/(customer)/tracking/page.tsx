@@ -16,6 +16,7 @@ import type { RepairTicket, TrackingGroup, FirestoreDateValue, WorkflowNode } fr
 import { isYouTubeUrl, getYouTubeEmbedUrl } from '@/lib/workflowFeatures';
 import type { LucideIcon } from 'lucide-react';
 import { SITE_URL } from "@/lib/constants";
+import { normalizeRepairWorkflow, normalizeWarrantyWorkflow } from '@/lib/repairWorkflowConfig';
 
 /* ─── Appointment ─── */
 interface Appointment {
@@ -139,8 +140,8 @@ export default function TrackingPage() {
                         groups.sort((a, b) => a.order - b.order);
                         setTrackingGroups(groups);
                     }
-                    setDynamicStatuses(data.repairStatuses ?? data.statuses ?? []);
-                    setWarrantyStatuses(data.warrantyStatuses ?? []);
+                    setDynamicStatuses(normalizeRepairWorkflow(data.repairStatuses));
+                    setWarrantyStatuses(normalizeWarrantyWorkflow(data.warrantyStatuses));
                 }
             } catch (err) {
                 console.error("Config fetch error:", err);
