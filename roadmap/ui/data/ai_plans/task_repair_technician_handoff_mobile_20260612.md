@@ -1,0 +1,30 @@
+# Task: Workflow sửa chữa và chuyển giao KTV mobile-first
+
+- `[x]` Xác nhận role/permission chính thức của nhân viên quản lý Sale và KTV.
+- `[x]` Bổ sung type cho assignment, pending transfer và repair audit event.
+- `[x]` Bổ sung workflow feature/guard yêu cầu gán KTV trước khi rời Chờ tiếp nhận.
+- `[x]` Ép trạng thái phiếu mới về entry node của workflow tại server.
+- `[x]` Tạo API gán KTV lần đầu bằng transaction, version và idempotency.
+- `[x]` Tạo API đề nghị chuyển KTV cho KTV hiện tại và quản lý/Sale.
+- `[x]` Tạo API chấp nhận/từ chối chỉ dành cho KTV được đề nghị.
+- `[x]` Tạo API hủy yêu cầu pending cho người tạo hoặc quản lý/Sale.
+- `[x]` Siết API transition: kiểm tra KTV được gán, manager override, lý do và workflow `allowedNext`.
+- `[x]` Bổ sung audit log append-only cho assignment, transfer, transition và manager override.
+- `[x]` Cập nhật Firestore rules/API boundary để KTV không thể sửa phiếu của người khác.
+- `[x]` Cập nhật thẻ phiếu trang Sửa chữa để hiển thị trực tiếp KTV, blocker và yêu cầu chuyển.
+- `[x]` Thêm thao tác Gán KTV/Đề nghị chuyển KTV trực tiếp trên thẻ phiếu.
+- `[x]` Thêm bottom sheet xác nhận transition của quản lý với lý do bắt buộc.
+- `[x]` Cập nhật trang KTV để ghim yêu cầu chuyển đến với nút Chấp nhận/Từ chối.
+- `[x]` Khóa UI realtime khi phiếu đang mở được chuyển sang KTV khác.
+- `[x]` Chuẩn hóa layout mobile một cột, touch target 44px và chống double-submit.
+- `[x]` Giữ tương thích phiếu chưa gán KTV và timeline legacy.
+- `[x]` Viết unit test cho policy quyền quản lý sửa chữa và nhận diện KTV.
+- `[ ]` Viết integration test bằng Firebase Emulator cho transition, transfer acceptance, stale version và idempotency.
+- `[x]` Browser QA hai trang bằng tài khoản staff đã đăng nhập trên viewport mobile; không thực hiện thao tác ghi dữ liệu.
+- `[ ]` Browser QA bổ sung bằng tài khoản Admin và KTV nhận để kiểm tra đầy đủ ma trận quyền.
+- `[x]` Chuẩn hóa `repairStatuses` thành nguồn workflow sửa chữa duy nhất trong runtime.
+- `[x]` Đồng bộ semantics checklist, ghi chú kỹ thuật và linh kiện theo trạng thái hiện tại.
+- `[x]` Thêm validator cấu hình workflow và tracking group trước khi lưu.
+- `[x]` Chạy migration Firestore v2 có backup; giữ nguyên trường legacy `statuses` và `next`.
+- `[x]` Viết unit test normalizer/validator workflow; tổng unit test liên quan đạt 6/6.
+- `[x]` Cập nhật walkthrough, source intelligence và roadmap sau khi code hoàn tất.

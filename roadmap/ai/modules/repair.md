@@ -58,7 +58,70 @@ graph TD
             click BUG_REP_006 call handleBugClick("BUG-REP-006") "Mở chi tiết"
             click BUG_REP_007 call handleBugClick("BUG-REP-007") "Mở chi tiết"
 ```
+# 🚧 Kế hoạch nâng cấp workflow KTV và UI mobile
+
+- **Status:** planned
+- **Plan:** [Workflow sửa chữa, phân công KTV và chuyển giao có xác nhận](../../ui/data/ai_plans/plan_repair_technician_handoff_mobile_20260612.md)
+- **Tasks:** [Danh sách triển khai](../../ui/data/ai_plans/task_repair_technician_handoff_mobile_20260612.md)
+
+## Quy tắc nghiệp vụ đã chốt
+
+1. Phiếu mới luôn ở **Chờ tiếp nhận**; có thể gán KTV ngay hoặc sau bước kiểm tra lần đầu.
+2. Không được chuyển sang bước tiếp theo nếu chưa có KTV phụ trách.
+3. KTV chỉ thao tác phiếu được giao; nhân viên quản lý/Sale có thể can thiệp nhưng phải xác nhận, nhập lý do và được ghi log.
+4. KTV hiện tại hoặc nhân viên quản lý/Sale có thể đề nghị chuyển sang KTV mới.
+5. KTV mới phải bấm **Chấp nhận** thì assignment và trách nhiệm mới chính thức thay đổi. Từ chối hoặc hủy yêu cầu không làm đổi KTV hiện tại.
+6. Trong thời gian chờ phản hồi, KTV cũ tiếp tục phụ trách và thao tác phiếu.
+7. UI phải mobile-first; KTV, blocker, yêu cầu chuyển và hành động bắt buộc hiển thị trực tiếp trên thẻ phiếu, không cần mở chi tiết mới thấy.
+
+```mermaid
+flowchart TD
+    A["Tạo phiếu: Chờ tiếp nhận"] --> B{"Đã gán KTV?"}
+    B -->|"Chưa"| C["Hiển thị Cần gán KTV"]
+    C --> D["Nhân viên quản lý/Sale gán KTV"]
+    B -->|"Rồi"| E["Cho phép chuyển bước theo workflow Firebase"]
+    D --> E
+    E --> F["KTV hiện tại xử lý phiếu"]
+    F --> G{"Có yêu cầu chuyển KTV?"}
+    G -->|"Không"| F
+    G -->|"Có"| H["KTV mới phản hồi"]
+    H -->|"Chấp nhận"| I["Đổi KTV bằng transaction và ghi log"]
+    H -->|"Từ chối"| F
+    H -->|"Yêu cầu bị hủy"| F
+    I --> J["KTV mới tiếp tục xử lý"]
+```
+
 # 🐛 Bugs
+## BUG-REP-011: Thiếu chuyển KTV và audit log chống gian lận
+- **Status:** open
+- **Severity:** high
+- **Module:** REP
+- **Files:** src/app/admin/technician/page.tsx, src/app/api/repairs/technician/transfer/route.ts, src/lib/types.ts
+### Cause
+Trang KTV chỉ có nút phản hồi yêu cầu đến, không có thao tác tạo/hủy yêu cầu chuyển. API tin dữ liệu KTV từ client và log thiếu actor, lý do, KTV cũ/mới cùng mã đối soát.
+### Solution
+Đã triển khai local luồng request/accept/reject/cancel bằng transaction; chỉ KTV hiện tại hoặc quản lý Sale được đề nghị và chỉ KTV nhận được chấp nhận. Chờ browser QA ba vai trò trước khi đổi trạng thái sang fixed.
+
+## BUG-REP-010: UI KTV khó thao tác trên mobile
+- **Status:** open
+- **Severity:** high
+- **Module:** REP
+- **Files:** src/app/admin/technician/page.tsx
+### Cause
+Thẻ phiếu dồn nhiều thông tin vào bố cục desktop, checklist bốn cột và các nút thao tác nhỏ; blocker theo workflow bị giấu trong chi tiết.
+### Solution
+Đã triển khai local thẻ một cột trên mobile, blocker theo `allowedFeatures`, checklist hai cột, touch target 44px và nút chuyển KTV trực tiếp. Chờ browser QA mobile trước khi đóng bug.
+
+## BUG-REP-009: Staff nhìn thấy nút xóa phiếu
+- **Status:** fixed
+- **Severity:** high
+- **Module:** REP
+- **Files:** src/app/admin/repairs/page.tsx, firestore.rules
+### Cause
+UI hiển thị nút xóa cho mọi người có thể mở modal dù Firestore rules chỉ cho Admin xóa.
+### Solution
+Chỉ render nút xóa cho role admin, thêm guard trong handler và giữ rule delete admin-only.
+
 ## BUG-REP-003: Sản phẩm ma (Custom ID Mapping) — By-Design
 - **Status:** fixed
 - **Severity:** high
@@ -200,3 +263,14 @@ transaction.update(ticketRef, {
   statusTimeline: FieldValue.arrayUnion(newTimelineEntry)
 });
 ```
+
+## BUG-REP-012: Syntax Error cuối file repairs/page.tsx
+- **Status:** fixed
+- **Severity:** high
+- **Module:** REP
+- **Date:** 2026-06-13
+- **Files:** `src/app/admin/repairs/page.tsx`
+### Cause
+<b>Phân tích</b>: Quá trình copy-paste logic trước đó tạo ra các dòng code thừa (props của component `Modal` và thẻ đóng bị lặp) nằm bên dưới thẻ đóng của Component gốc khiến Next.js ném lỗi `Syntax Error: Unexpected token`.
+### Solution
+<b>Giải pháp đã áp dụng</b>: Xóa bỏ toàn bộ phần rác (dangling JSX) sau dòng đóng `}` của component cuối cùng. Đảm bảo cấu trúc file hợp lệ.

@@ -132,6 +132,12 @@ export default function RepairPage() {
     const [warrantyHistory, setWarrantyHistory] = useState<RepairTicket[]>([]);
     const [warrantySelectedIndexes, setWarrantySelectedIndexes] = useState<number[]>([]);
     const [warrantyCreating, setWarrantyCreating] = useState(false);
+    // Technician Assignment / Transfer Modal
+    const [assignModal, setAssignModal] = useState<{ ticket: RepairTicket } | null>(null);
+    const [assignTechnicianId, setAssignTechnicianId] = useState('');
+    // Manager Override Modal
+    const [managerOverrideModal, setManagerOverrideModal] = useState<{ ticket: RepairTicket; targetStatus: string } | null>(null);
+    const [managerOverrideNote, setManagerOverrideNote] = useState('');
 
     useEffect(() => {
         if (warrantyModal) {
@@ -515,6 +521,31 @@ export default function RepairPage() {
                 return;
             }
         }
+        // ── Check requireAssignedTechnician ──
+        const nextCfg = workflow.find(s => s.id === nextStatus);
+        if (nextCfg?.allowedFeatures?.includes('requireAssignedTechnician') && !ticket.staff?.assignedTechnician) {
+            toastError('Cần phân công Kỹ thuật viên trước khi thực hiện bước này!');
+            setAssignModal({ ticket });
+            return;
+        }
+
+        // ── KTV & Manager Override Check ──
+        if (ticket.staff?.assignedTechnician) {
+            const isAssignedKTV = ticket.staff.assignedTechnician === user?.uid;
+            const isManager = user?.role === 'admin' || user?.permissions?.includes('manage_staff') || user?.permissions?.includes('manage_settings');
+
+            if (!isAssignedKTV) {
+                if (isManager) {
+                    // Open Manager Override Bottom Sheet
+                    setManagerOverrideModal({ ticket, targetStatus: nextStatus });
+                    return;
+                } else {
+                    toastError('Chỉ KTV được phân công hoặc Quản lý mới có thể chuyển trạng thái phiếu này.');
+                    return;
+                }
+            }
+        }
+
         try {
             const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
             const res = await fetch('/api/repairs/transition', {
@@ -541,6 +572,79 @@ export default function RepairPage() {
             toastError(e instanceof Error ? e.message : 'Lỗi cập nhật trạng thái!');
         }
     };
+    const submitManagerOverride = async () => {
+        if (!managerOverrideModal || !managerOverrideNote.trim()) {
+            toastWarning('Vui lòng nhập lý do (Ghi chú kỹ thuật) để ghi đè trạng thái.');
+            return;
+        }
+        try {
+            const { ticket, targetStatus } = managerOverrideModal;
+            const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
+            const res = await fetch('/api/repairs/transition', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${idToken}`
+                },
+                body: JSON.stringify({
+                    ticketId: ticket.id,
+                    targetStatus,
+                    technicianNote: managerOverrideNote.trim(),
+                    ticketVersion: ticket.version || 0,
+                    idempotencyKey: crypto.randomUUID()
+                })
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                toastError(data.error || 'Lỗi cập nhật trạng thái');
+                return;
+            }
+            toastSuccess('Ghi đè trạng thái thành công');
+            setManagerOverrideModal(null);
+            setManagerOverrideNote('');
+        } catch (e: unknown) {
+            console.error(e);
+            toastError(e instanceof Error ? e.message : 'Lỗi cập nhật trạng thái!');
+        }
+    };
+
+    const submitAssignTechnician = async () => {
+        if (!assignModal || !assignTechnicianId) {
+            toastWarning('Vui lòng chọn Kỹ thuật viên');
+            return;
+        }
+        try {
+            const { ticket } = assignModal;
+            const isTransfer = !!ticket.staff?.assignedTechnician && ticket.staff.assignedTechnician !== assignTechnicianId;
+            const endpoint = isTransfer ? '/api/repairs/technician/transfer' : '/api/repairs/technician/assign';
+            const techName = staffs.find(s => s.uid === assignTechnicianId)?.displayName || '';
+            const payload = isTransfer
+                ? { action: 'request', ticketId: ticket.id, ticketVersion: ticket.version || 0, toTechnicianId: assignTechnicianId, toTechnicianName: techName, reason: 'Yêu cầu chuyển từ UI Quản lý/KTV', source: 'admin' }
+                : { ticketId: ticket.id, ticketVersion: ticket.version || 0, technicianId: assignTechnicianId, technicianName: techName };
+
+            const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
+            const res = await fetch(endpoint, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${idToken}`
+                },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                toastError(data.error || (isTransfer ? 'Lỗi đề nghị chuyển KTV' : 'Lỗi phân công KTV'));
+                return;
+            }
+            toastSuccess(isTransfer ? 'Đã gửi đề nghị chuyển KTV' : 'Phân công KTV thành công');
+            setAssignModal(null);
+            setAssignTechnicianId('');
+        } catch (e: unknown) {
+            console.error(e);
+            toastError(e instanceof Error ? e.message : 'Lỗi phân công KTV!');
+        }
+    };
+
     // ── Handover handler (Any status → terminal action) ──
     const handleHandover = async () => {
         if (!handoverModal) return;
@@ -645,7 +749,22 @@ export default function RepairPage() {
                 createdAt: serverTimestamp(),
                 updatedAt: serverTimestamp(),
             };
-            await addDoc(collection(db, 'repairs'), warrantyTicketData);
+            const { getAuthInstance } = await import('@/lib/firebase');
+            const auth = await getAuthInstance();
+            const token = await auth.currentUser?.getIdToken();
+
+            const res = await fetch('/api/repairs/create', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify(warrantyTicketData)
+            });
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.error || 'Lỗi khi tạo phiếu bảo hành');
+            }
             toastSuccess('Đã tạo phiếu bảo hành thành công!');
             setWarrantyModal(null);
             setWarrantySelectedIndexes([]);
@@ -875,7 +994,25 @@ export default function RepairPage() {
                             : 'Đặt cọc khi tạo phiếu',
                     }];
                 }
-                await addDoc(collection(db, 'repairs'), ticketData);
+                const { getAuthInstance } = await import('@/lib/firebase');
+                const auth = await getAuthInstance();
+                const token = await auth.currentUser?.getIdToken();
+
+                const res = await fetch('/api/repairs/create', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify(ticketData)
+                });
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.error || 'Lỗi khi tạo phiếu sửa chữa');
+                }
+                const data = await res.json();
+                const newTicketId = data.id;
 
                 if (formData.appointmentId) {
                     await updateDoc(doc(db, 'appointments', formData.appointmentId), {
@@ -1094,9 +1231,14 @@ export default function RepairPage() {
                                             {pay.label}
                                         </span>
                                     </div>
-                                    <div className="text-right">
+                                    <div className="text-right flex flex-col items-end justify-center">
                                         <p className="text-[10px] text-gray-500 uppercase font-medium">KTV</p>
                                         <p className="text-xs font-medium text-gray-700 mt-0.5 truncate">{ticket.staff?.assignedTechnicianName || '—'}</p>
+                                        {ticket.pendingTechnicianTransfer?.status === 'pending' && (
+                                            <span className="text-[9px] text-orange-600 bg-orange-50 px-1 py-0.5 mt-1 rounded border border-orange-100 flex items-center gap-1 w-max">
+                                                <AlertCircle size={8} /> Đang chuyển KTV
+                                            </span>
+                                        )}
                                     </div>
                                 </div>
                                 {/* Actions Area */}
@@ -1135,6 +1277,9 @@ export default function RepairPage() {
                                                 <Wrench size={14} /> Sửa
                                             </button>
                                         )}
+                                        <button onClick={() => setAssignModal({ ticket })} className="flex-1 py-2 bg-blue-50 text-blue-600 text-xs font-medium rounded-lg border border-blue-200 flex items-center justify-center gap-1 active:bg-blue-100">
+                                            <User size={14} /> KTV
+                                        </button>
                                         {/* Nút Kích hoạt Bảo hành */}
                                         {isRepairStatus(ticket.status, REPAIR_STATUS.DONE) && ticket.ticketType !== 'warranty' && (ticket.parts || []).some(p => isWarrantyEligibleRepairPart(p) && p.warrantyMonths && p.warrantyMonths > 0 && p.warrantyExpiresAt && (typeof p.warrantyExpiresAt === 'number' ? p.warrantyExpiresAt : (p.warrantyExpiresAt as { toDate?: () => Date })?.toDate?.()?.getTime() || 0) > Date.now()) && (
                                             <button onClick={() => { setWarrantyModal(ticket); setWarrantySelectedIndexes([]); }} className="w-full py-2 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-semibold rounded-lg flex items-center justify-center gap-1 mt-1">
@@ -1222,6 +1367,11 @@ export default function RepairPage() {
                                         </td>
                                         <td className="px-4 py-3">
                                             <p className="text-sm text-gray-700">{ticket.staff?.assignedTechnicianName || '—'}</p>
+                                            {ticket.pendingTechnicianTransfer?.status === 'pending' && (
+                                                <span className="text-[9px] text-orange-600 bg-orange-50 px-1 py-0.5 mt-1 rounded border border-orange-100 flex items-center gap-1 w-max">
+                                                    <AlertCircle size={8} /> Đang đề nghị chuyển
+                                                </span>
+                                            )}
                                         </td>
                                         <td className="px-4 py-3 text-right">
                                             <div className="flex items-center justify-end gap-1 flex-wrap">
@@ -1262,6 +1412,11 @@ export default function RepairPage() {
                                                 <button onClick={() => setViewingTicket(ticket)}
                                                     className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg" title="Xem chi tiết">
                                                     <Eye size={16} />
+                                                </button>
+                                                {/* Assign Tech */}
+                                                <button onClick={() => setAssignModal({ ticket })}
+                                                    className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg" title="Gán/Chuyển KTV">
+                                                    <User size={16} />
                                                 </button>
                                                 {/* ═══ ALWAYS VISIBLE: Print / Video / Edit ═══ */}
                                                 <button onClick={() => openPrint(ticket, 'receipt')}
@@ -2343,7 +2498,7 @@ export default function RepairPage() {
                                                 {dynamicStatuses.find(s => s.id === entry.status)?.label || entry.status}
                                             </span>
                                             <span className="text-gray-400">
-                                                {new Date(entry.timestamp).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                                                {new Date(entry.timestamp || Date.now()).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
                                             </span>
                                             {entry.durationInMinutes && (
                                                 <span className="text-gray-300">({entry.durationInMinutes} phút)</span>
@@ -2456,6 +2611,68 @@ export default function RepairPage() {
                     setPostMediaFiles(prev => [...prev, ...urls]);
                 }}
             />
+            {/* ═══ KTV ASSIGN MODAL ═══ */}
+            {assignModal && (
+                <Modal
+                    isOpen={true}
+                    onClose={() => { setAssignModal(null); setAssignTechnicianId(''); }}
+                    title={`Phân công KTV — #${assignModal.ticket.id.slice(-6).toUpperCase()}`}
+                    size="sm"
+                    mobileSheet={true}
+                >
+                    <div className="p-4 space-y-4">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Chọn Kỹ thuật viên</label>
+                            <select
+                                title="Chọn KTV"
+                                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:outline-none"
+                                value={assignTechnicianId}
+                                onChange={e => setAssignTechnicianId(e.target.value)}
+                            >
+                                <option value="">-- Chọn KTV --</option>
+                                {staffs.map(tech => (
+                                    <option key={tech.uid} value={tech.uid}>{tech.displayName}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div className="flex gap-2 justify-end pt-2">
+                            <button onClick={() => { setAssignModal(null); setAssignTechnicianId(''); }} className="px-4 py-2 text-sm bg-gray-100 rounded-lg">Hủy</button>
+                            <button onClick={submitAssignTechnician} disabled={!assignTechnicianId} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg disabled:opacity-50">Lưu phân công</button>
+                        </div>
+                    </div>
+                </Modal>
+            )}
+            {/* ═══ MANAGER OVERRIDE MODAL ═══ */}
+            {managerOverrideModal && (
+                <Modal
+                    isOpen={true}
+                    onClose={() => { setManagerOverrideModal(null); setManagerOverrideNote(''); }}
+                    title={`Quản lý Ghi đè — #${managerOverrideModal.ticket.id.slice(-6).toUpperCase()}`}
+                    size="sm"
+                    mobileSheet={true}
+                >
+                    <div className="p-4 space-y-4">
+                        <div className="bg-orange-50 border border-orange-200 text-orange-800 p-3 rounded-lg text-sm">
+                            <p className="font-semibold mb-1 flex items-center gap-1"><AlertCircle size={14} /> Chuyển trạng thái bắt buộc</p>
+                            <p className="text-xs">Bạn đang thực hiện ghi đè chuyển trạng thái của phiếu do KTV khác phụ trách. Vui lòng nhập lý do cụ thể.</p>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Lý do (Ghi chú kỹ thuật) <span className="text-red-500">*</span></label>
+                            <textarea
+                                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20 focus:outline-none"
+                                rows={3}
+                                value={managerOverrideNote}
+                                onChange={e => setManagerOverrideNote(e.target.value)}
+                                placeholder="Nhập lý do chuyển trạng thái..."
+                            />
+                        </div>
+                        <div className="flex gap-2 justify-end pt-2">
+                            <button onClick={() => { setManagerOverrideModal(null); setManagerOverrideNote(''); }} className="px-4 py-2 text-sm bg-gray-100 rounded-lg">Hủy</button>
+                            <button onClick={submitManagerOverride} disabled={!managerOverrideNote.trim()} className="px-4 py-2 text-sm bg-orange-600 text-white rounded-lg disabled:opacity-50">Xác nhận chuyển</button>
+                        </div>
+                    </div>
+                </Modal>
+            )}
         </div >
     );
 }

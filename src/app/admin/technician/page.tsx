@@ -6,7 +6,7 @@ import { useState, useEffect } from 'react';
 import {
     Wrench, Smartphone, Search, Eye, ChevronRight, Clock,
     CheckCircle2, Loader2, Image as ImageIcon, Video, AlertCircle, X, Package, Trash2,
-    User as UserIcon
+    User as UserIcon, ArrowRightLeft, ShieldAlert
 } from 'lucide-react';
 import { collection, query, onSnapshot, doc, updateDoc, serverTimestamp, getDocs, where, orderBy, limit } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
@@ -19,6 +19,8 @@ import { REPAIR_PART_STATUS, REPAIR_STATUS, isPendingRepairPart, isRepairPartSta
 import Modal from '@/components/admin/Modal';
 import { buildProductCodeFromId } from '@/lib/productCodes';
 import { createProductWithCodes } from '@/lib/productCodeRegistry';
+import { isRepairManager } from '@/lib/repairAccess';
+import { normalizeRepairWorkflow, normalizeWarrantyWorkflow } from '@/lib/repairWorkflowConfig';
 
 
 const checklistLabels: Record<string, string> = {
@@ -26,6 +28,35 @@ const checklistLabels: Record<string, string> = {
     speaker: 'Loa/Mic', connectivity: 'Kết nối', battery: 'Pin', biometric: 'FaceID/Vân tay',
 };
 const CHECKLIST_VALUES = ['OK', 'Trầy', 'Nứt', 'Móp', 'Lỗi', 'Không có'];
+
+type RepairTimelineEntry = NonNullable<RepairTicket['statusTimeline']>[number];
+
+function getTimelineTimestamp(entry: RepairTimelineEntry): Date {
+    const value = entry.timestamp ?? entry.at;
+    if (value && typeof value === 'object' && 'toDate' in value && typeof value.toDate === 'function') {
+        return value.toDate();
+    }
+    return value ? new Date(value as string | number | Date) : new Date(0);
+}
+
+function getTimelineTitle(entry: RepairTimelineEntry, workflow: WorkflowNode[]): string {
+    switch (entry.eventType) {
+        case 'technician_assigned':
+            return `Đã gán cho ${entry.toTechnicianName || 'KTV'}`;
+        case 'transfer_requested':
+            return `Đề nghị chuyển ${entry.fromTechnicianName || 'KTV hiện tại'} → ${entry.toTechnicianName || 'KTV mới'}`;
+        case 'transfer_accepted':
+            return `${entry.toTechnicianName || 'KTV mới'} đã nhận phiếu`;
+        case 'transfer_rejected':
+            return `${entry.toTechnicianName || 'KTV mới'} đã từ chối`;
+        case 'transfer_cancelled':
+            return 'Đã hủy yêu cầu chuyển KTV';
+        case 'manager_override':
+            return `Quản lý chuyển ${entry.fromStatus || 'trạng thái'} → ${entry.toStatus || entry.status}`;
+        default:
+            return workflow.find(status => status.id === entry.status)?.label || entry.status;
+    }
+}
 
 type PartSearchProduct = Product & {
     code?: string;
@@ -89,6 +120,12 @@ export default function TechnicianPage() {
 
     const [dynamicStatuses, setDynamicStatuses] = useState<WorkflowNode[]>([]);
     const [warrantyStatuses, setWarrantyStatuses] = useState<WorkflowNode[]>([]);
+    const [technicians, setTechnicians] = useState<{ uid: string; displayName: string }[]>([]);
+    const [userNamesMap, setUserNamesMap] = useState<Record<string, string>>({});
+    const [transferModal, setTransferModal] = useState<{ ticket: RepairTicket } | null>(null);
+    const [transferTechnicianId, setTransferTechnicianId] = useState('');
+    const [transferReason, setTransferReason] = useState('');
+    const [isTransferSubmitting, setIsTransferSubmitting] = useState(false);
 
     const getWorkflowForTicket = (ticket: RepairTicket): WorkflowNode[] => {
         return ticket.ticketType === 'warranty' ? warrantyStatuses : dynamicStatuses;
@@ -353,8 +390,8 @@ export default function TechnicianPage() {
         const unsubStatuses = onSnapshot(doc(db, 'system_config', 'repairs'), (docSnap) => {
             if (docSnap.exists()) {
                 const data = docSnap.data();
-                setDynamicStatuses(data.repairStatuses ?? data.statuses ?? []);
-                setWarrantyStatuses(data.warrantyStatuses ?? []);
+                setDynamicStatuses(normalizeRepairWorkflow(data.repairStatuses));
+                setWarrantyStatuses(normalizeWarrantyWorkflow(data.warrantyStatuses));
             }
         });
 
@@ -363,6 +400,25 @@ export default function TechnicianPage() {
             unsubStatuses();
         };
     }, [user?.uid, user?.role]);
+
+    useEffect(() => {
+        getDocs(query(collection(db, 'users'), where('role', '==', 'staff')))
+            .then(snap => setTechnicians(snap.docs
+                .filter(item => Array.isArray(item.data().permissions) && item.data().permissions.includes('manage_repairs'))
+                .map(item => ({ uid: item.id, displayName: item.data().displayName || 'Kỹ thuật viên' }))))
+            .catch(error => console.error('Load technicians error:', error));
+
+        // Fetch user names map to resolve IDs in Timeline
+        getDocs(collection(db, 'users'))
+            .then(snap => {
+                const map: Record<string, string> = {};
+                snap.docs.forEach(doc => {
+                    if (doc.data().displayName) map[doc.id] = doc.data().displayName;
+                });
+                setUserNamesMap(map);
+            })
+            .catch(error => console.error('Load users map error:', error));
+    }, []);
 
     const executeStatusChange = async (ticketId: string, newStatus: string) => {
         try {
@@ -415,6 +471,17 @@ export default function TechnicianPage() {
             // ── Payment gate: KTV không xử lý bàn giao, chỉ chuyển trạng thái bình thường ──
             // (requirePaymentGate is handled by cashier in repairs/page.tsx)
 
+            // --- INTERCEPT: Manager Override ---
+            const isAssignedKTV = ticket.staff?.assignedTechnician === user?.uid;
+            const isManager = isRepairManager(user);
+
+            if (ticket.staff?.assignedTechnician && !isAssignedKTV && isManager) {
+                // If it's a manager override, force them to enter a note/reason if they haven't already
+                setTechNoteText(ticket.issue?.notes || '');
+                setNoteModalPayload({ ticketId, newStatus, currentNote: ticket.issue?.notes || '' });
+                return;
+            }
+
             // --- INTERCEPT: If transitioning OUT of "dang_kiem_tra", require Tech Notes ---
             if (isRepairStatus(ticket.status, REPAIR_STATUS.INSPECTION) && newStatus !== REPAIR_STATUS.INSPECTION) {
                 setTechNoteText(ticket.issue?.notes || '');
@@ -457,7 +524,8 @@ export default function TechnicianPage() {
                     ticketVersion: ticket.version || 0,
                     idempotencyKey: crypto.randomUUID(),
                     targetStatus: newStatus,
-                    technicianNote: newTechNote || ''
+                    technicianNote: newTechNote || '',
+                    source: 'technician'
                 })
             });
 
@@ -479,11 +547,97 @@ export default function TechnicianPage() {
 
         const ticket = tickets.find(t => t.id === noteModalPayload.ticketId);
         if (ticket) {
+            const isAssignedKTV = ticket.staff?.assignedTechnician === user?.uid;
+            const isManager = isRepairManager(user);
+
+            if (ticket.staff?.assignedTechnician && !isAssignedKTV && isManager && !techNoteText.trim()) {
+                toastError('Quản lý ghi đè trạng thái (Manager Override) yêu cầu phải nhập lý do!');
+                return;
+            }
+
             await finalizeStatusChange(ticket, noteModalPayload.newStatus, techNoteText);
         }
 
         setNoteModalPayload(null);
         setTechNoteText('');
+    };
+
+    const handleTransferResponse = async (ticket: RepairTicket, responseStatus: 'accepted' | 'rejected') => {
+        try {
+            const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
+            const res = await fetch('/api/repairs/technician/transfer', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
+                body: JSON.stringify({
+                    action: 'respond',
+                    ticketId: ticket.id,
+                    ticketVersion: ticket.version || 0,
+                    responseStatus,
+                    idempotencyKey: crypto.randomUUID()
+                })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Lỗi xử lý yêu cầu');
+            toastSuccess(responseStatus === 'accepted' ? 'Đã nhận phiếu!' : 'Đã từ chối phiếu.');
+        } catch (e: unknown) {
+            toastError(e instanceof Error ? e.message : 'Lỗi xử lý yêu cầu');
+        }
+    };
+
+    const handleTransferRequest = async () => {
+        if (!transferModal || !transferTechnicianId || !transferReason.trim()) {
+            toastWarning('Vui lòng chọn KTV nhận và nhập lý do chuyển.');
+            return;
+        }
+        setIsTransferSubmitting(true);
+        try {
+            const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
+            const res = await fetch('/api/repairs/technician/transfer', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
+                body: JSON.stringify({
+                    action: 'request',
+                    ticketId: transferModal.ticket.id,
+                    ticketVersion: transferModal.ticket.version || 0,
+                    toTechnicianId: transferTechnicianId,
+                    reason: transferReason.trim(),
+                    source: 'technician',
+                    idempotencyKey: crypto.randomUUID(),
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Không thể gửi yêu cầu chuyển KTV.');
+            toastSuccess('Đã gửi yêu cầu. KTV mới phải chấp nhận trước khi nhận trách nhiệm.');
+            setTransferModal(null);
+            setTransferTechnicianId('');
+            setTransferReason('');
+        } catch (error: unknown) {
+            toastError(error instanceof Error ? error.message : 'Không thể gửi yêu cầu chuyển KTV.');
+        } finally {
+            setIsTransferSubmitting(false);
+        }
+    };
+
+    const handleTransferCancel = async (ticket: RepairTicket) => {
+        if (!ticket.pendingTechnicianTransfer || !confirm('Hủy yêu cầu chuyển KTV đang chờ?')) return;
+        try {
+            const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
+            const res = await fetch('/api/repairs/technician/transfer', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
+                body: JSON.stringify({
+                    action: 'cancel',
+                    ticketId: ticket.id,
+                    ticketVersion: ticket.version || 0,
+                    idempotencyKey: crypto.randomUUID(),
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Không thể hủy yêu cầu chuyển KTV.');
+            toastSuccess('Đã hủy yêu cầu chuyển KTV.');
+        } catch (error: unknown) {
+            toastError(error instanceof Error ? error.message : 'Không thể hủy yêu cầu chuyển KTV.');
+        }
     };
 
     // (handleTechHandover removed — handover is managed by cashier in repairs/page.tsx)
@@ -521,7 +675,9 @@ export default function TechnicianPage() {
         if (st?.isTerminal) return false;
         
         if (user?.role && user.role !== 'admin' && user?.uid) {
-            if (t.staff?.assignedTechnician !== user.uid) return false;
+            const isAssigned = t.staff?.assignedTechnician === user.uid;
+            const isPendingIncoming = t.pendingTechnicianTransfer?.toTechnicianId === user.uid && t.pendingTechnicianTransfer?.status === 'pending';
+            if (!isAssigned && !isPendingIncoming) return false;
         }
 
         if (!searchQuery) return true;
@@ -538,11 +694,11 @@ export default function TechnicianPage() {
     );
 
     return (
-        <div className="p-4 md:p-6 space-y-4">
+        <div className="p-3 sm:p-4 md:p-6 space-y-4">
             {/* Header */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                    <h1 className="text-xl sm:text-2xl font-bold text-gray-900 flex items-center gap-2">
                         <Wrench className="text-orange-500" /> Khu vực Kỹ thuật viên
                     </h1>
                     <p className="text-sm text-gray-500 mt-0.5">
@@ -557,7 +713,7 @@ export default function TechnicianPage() {
                             value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
                             className="w-full pl-9 pr-3 py-2 text-sm border rounded-lg focus:border-orange-500 focus:outline-none" />
                     </div>
-                    <div className="flex bg-gray-100 rounded-lg p-0.5">
+                    <div className="hidden sm:flex bg-gray-100 rounded-lg p-0.5">
                         <button title="Xem danh sách" onClick={() => setViewMode('list')}
                             className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${viewMode === 'list' ? 'bg-white shadow-sm text-orange-600' : 'text-gray-500'}`}>
                             Danh sách
@@ -582,12 +738,30 @@ export default function TechnicianPage() {
                         const workflow = getWorkflowForTicket(ticket);
                         const st = workflow.find(s => s.id === ticket.status) || { id: ticket.status, label: ticket.status, color: 'text-gray-700 bg-gray-50 border-gray-200', allowedNext: [] } as WorkflowNode;
                         const currentCfg = workflow.find(s => s.id === ticket.status);
-                        const isReadOnly = isRepairStatus(ticket.status, REPAIR_STATUS.CUSTOMER_HANDOVER) || !!currentCfg?.isTerminal;
+                        const isTerminal = isRepairStatus(ticket.status, REPAIR_STATUS.CUSTOMER_HANDOVER) || !!currentCfg?.isTerminal;
+                        const isAssignedToMe = ticket.staff?.assignedTechnician === user?.uid;
+                        const isIncomingTransferToMe = ticket.pendingTechnicianTransfer?.toTechnicianId === user?.uid && ticket.pendingTechnicianTransfer?.status === 'pending';
+                        const isKtvLocked = user?.role !== 'admin' && (!isAssignedToMe || isIncomingTransferToMe);
+                        const isReadOnly = isTerminal || isKtvLocked;
+                        const pendingTransfer = ticket.pendingTechnicianTransfer?.status === 'pending'
+                            ? ticket.pendingTechnicianTransfer
+                            : null;
+                        const actionWarnings = [
+                            currentCfg?.allowedFeatures?.includes('requireChecklist') && !isChecklistComplete(ticket.deviceInfo?.checklist as Record<string, unknown> | undefined)
+                                ? 'Hoàn thành checklist kiểm tra' : null,
+                            currentCfg?.allowedFeatures?.includes('requireTechnicianNote') && !ticket.issue?.notes?.trim()
+                                ? 'Nhập kết quả kiểm tra kỹ thuật' : null,
+                            currentCfg?.allowedFeatures?.includes('allowPartsSelection') && (!ticket.parts || ticket.parts.length === 0)
+                                ? 'Xác nhận ca sửa có cần linh kiện' : null,
+                            currentCfg?.allowedFeatures?.includes('requirePartsReady') && !areAllPartsReady(ticket)
+                                ? 'Chờ linh kiện sẵn sàng' : null,
+                        ].filter((item): item is string => Boolean(item));
+                        const canRequestTransfer = !isTerminal && !pendingTransfer && (isAssignedToMe || isRepairManager(user));
 
                         return (
                             <div
                                 key={ticket.id}
-                                className={`bg-white rounded-xl border p-4 hover:shadow-md transition-shadow relative ${st.color}`}
+                                className="bg-white rounded-lg border p-3 sm:p-4 hover:shadow-md transition-shadow relative"
                                 title="Xem chi tiết"
                                 onClick={() => setSelectedTicket(ticket)}
                             >
@@ -596,7 +770,7 @@ export default function TechnicianPage() {
                                     <UserIcon size={10} className="flex-shrink-0" />
                                     <span className="truncate">{ticket.staff?.assignedTechnicianName || 'Chưa phân công'}</span>
                                 </div>
-                                <div className="flex items-start gap-3 mt-4">
+                                <div className="flex flex-col sm:flex-row items-stretch sm:items-start gap-3 mt-4">
                                     {/* Device Icon */}
                                     <div className="w-10 h-10 rounded-lg bg-white border flex items-center justify-center flex-shrink-0">
                                         <Smartphone size={20} className="text-gray-600" />
@@ -621,6 +795,26 @@ export default function TechnicianPage() {
                                             <p title="Vấn đề" className="text-sm text-gray-600 mt-1 line-clamp-1">{ticket.issues.map(i => i.label).join(', ')}</p>
                                         ) : ticket.issue?.description && (
                                             <p className="text-sm text-gray-600 mt-1 line-clamp-1">{ticket.issue.description}</p>
+                                        )}
+
+                                        {(pendingTransfer || actionWarnings.length > 0) && (
+                                            <div className="mt-3 space-y-2">
+                                                {pendingTransfer && (
+                                                    <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+                                                        <p className="font-semibold flex items-center gap-2"><ArrowRightLeft size={16} /> Chờ {pendingTransfer.toTechnicianName} tiếp nhận</p>
+                                                        <p className="mt-1 text-xs">Lý do: {pendingTransfer.reason || 'Không có lý do'}</p>
+                                                        <p className="mt-1 text-xs text-blue-700">Người đề nghị: {pendingTransfer.requestedByName || pendingTransfer.requestedBy}</p>
+                                                    </div>
+                                                )}
+                                                {actionWarnings.length > 0 && (
+                                                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                                                        <p className="text-xs font-bold uppercase text-amber-800 flex items-center gap-1"><ShieldAlert size={14} /> Cần xử lý ở bước này</p>
+                                                        <ul className="mt-1 space-y-1 text-sm text-amber-900">
+                                                            {actionWarnings.map(item => <li key={item}>• {item}</li>)}
+                                                        </ul>
+                                                    </div>
+                                                )}
+                                            </div>
                                         )}
 
                                         {/* Parts summary badge row */}
@@ -669,7 +863,7 @@ export default function TechnicianPage() {
                                         {st?.allowedFeatures?.includes('requireChecklist') && (
                                         <div className="mt-3 border-t pt-2">
                                             <p className="text-[10px] font-bold text-gray-400 uppercase mb-1.5 flex items-center gap-1"><CheckCircle2 size={10} /> Checklist kiểm tra</p>
-                                            <div className="grid grid-cols-4 gap-1">
+                                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                                                 {Object.keys(checklistLabels).map(key => {
                                                     const val = (ticket.deviceInfo?.checklist as Record<string, string> | undefined)?.[key] || '';
                                                     return (
@@ -682,7 +876,7 @@ export default function TechnicianPage() {
                                                                 disabled={isReadOnly}
                                                                 aria-label={`Checklist: ${checklistLabels[key]}`}
                                                                 title={`Checklist: ${checklistLabels[key]}`}
-                                                                className={`text-[20px] px-1 py-1 rounded-md border cursor-pointer transition-all appearance-none text-center font-medium ${
+                                                                className={`min-h-11 text-sm px-2 py-2 rounded-md border cursor-pointer transition-all appearance-none text-center font-medium ${
                                                                     val === 'OK' ? 'bg-green-50 border-green-300 text-green-700' :
                                                                     val === 'Lỗi' ? 'bg-red-50 border-red-300 text-red-600' :
                                                                     val ? 'bg-orange-50 border-orange-200 text-orange-700' :
@@ -705,7 +899,7 @@ export default function TechnicianPage() {
                                                     return (
                                                         <button key={key} onClick={(e) => { e.stopPropagation(); if (!isReadOnly) handleHistoryToggle(ticket.id, key, val); }}
                                                             disabled={isReadOnly}
-                                                            className={`text-[15px] px-1.5 py-0.5 rounded-md border transition-all ${isReadOnly ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'} ${val ? 'bg-orange-50 border-orange-200 text-orange-700 font-medium' : 'bg-gray-50 border-gray-200 text-gray-400'
+                                                            className={`text-xs px-1.5 py-0.5 rounded-md border transition-all ${isReadOnly ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'} ${val ? 'bg-orange-50 border-orange-200 text-orange-700 font-medium' : 'bg-gray-50 border-gray-200 text-gray-400'
                                                                 }`}
                                                             title={`${labels[key]}: ${val ? 'Có' : 'Không'} (Bấm để đổi)`}>
                                                             {val ? '☑' : '☐'} {labels[key]}
@@ -718,42 +912,79 @@ export default function TechnicianPage() {
                                     </div>
 
                                     {/* Actions */}
-                                    <div className="flex flex-col gap-1.5 flex-shrink-0">
+                                    <div className="grid grid-cols-2 gap-2 w-full sm:w-40 sm:flex sm:flex-col flex-shrink-0">
                                         <button
                                             onClick={(e) => { e.stopPropagation(); setSelectedTicket(ticket); }}
-                                            className="p-2 hover:bg-white/50 rounded-lg transition-colors" title="Xem chi tiết"
+                                            className="min-h-11 px-3 py-2 border bg-gray-50 rounded-lg transition-colors flex items-center justify-center gap-2 text-sm font-medium" title="Xem chi tiết"
                                         >
-                                            <Eye size={16} className="text-gray-500" />
+                                            <Eye size={16} className="text-gray-500" /> Chi tiết
                                         </button>
 
-                                        {/* Dynamic Transition Button for Báo Giá */}
-                                        {!isReadOnly && st?.allowedFeatures?.includes('allowPartsSelection') ? (() => {
-                                            const hasRequestedParts = ticket.parts?.length === 0 || ticket.parts?.some(p => isRepairPartStatus(p.status, REPAIR_PART_STATUS.REQUESTED));
-                                            const targetStatusId = hasRequestedParts ? 'dang_tim_linh_kien' : 'dang_sua_chua';
-                                            const targetStatus = workflow.find(ds => ds.id === targetStatusId);
+                                        {canRequestTransfer && (
+                                            <button
+                                                onClick={(event) => { event.stopPropagation(); setTransferModal({ ticket }); setTransferTechnicianId(''); setTransferReason(''); }}
+                                                className="min-h-11 px-3 py-2 border border-blue-200 bg-blue-50 text-blue-700 rounded-lg flex items-center justify-center gap-2 text-sm font-semibold"
+                                            >
+                                                <ArrowRightLeft size={16} /> Chuyển KTV
+                                            </button>
+                                        )}
 
-                                            // Fallback if the targetStatus is not found, or maybe just check if targetStatusId is actually in allowedNext
-                                            // Actually, the original logic forces 'dang_tim_linh_kien' or 'dang_sua_chua'. 
-                                            // We should adapt it to just use allowedNext if the hardcoded logic isn't perfect, but let's keep it close to original for now since the prompt just asked to replace the status ID check.
-                                            if (!targetStatus) return null;
+                                        {pendingTransfer && (pendingTransfer.requestedBy === user?.uid || isRepairManager(user)) && (
+                                            <button
+                                                onClick={(event) => { event.stopPropagation(); handleTransferCancel(ticket); }}
+                                                className="min-h-11 px-3 py-2 border border-red-200 bg-red-50 text-red-700 rounded-lg flex items-center justify-center gap-2 text-sm font-semibold"
+                                            >
+                                                <X size={16} /> Hủy chuyển
+                                            </button>
+                                        )}
+
+                                        {(() => {
+                                            const isIncomingTransfer = ticket.pendingTechnicianTransfer?.toTechnicianId === user?.uid && ticket.pendingTechnicianTransfer?.status === 'pending';
+                                            if (isIncomingTransfer) {
+                                                return (
+                                                    <>
+                                                        <button onClick={(e) => { e.stopPropagation(); handleTransferResponse(ticket, 'accepted'); }}
+                                                            className="min-h-11 text-sm px-3 py-2 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg font-semibold transition-all flex items-center justify-center gap-2 w-full hover:bg-emerald-100">
+                                                            <CheckCircle2 size={12} /> Nhận phiếu
+                                                        </button>
+                                                        <button onClick={(e) => { e.stopPropagation(); handleTransferResponse(ticket, 'rejected'); }}
+                                                            className="min-h-11 text-sm px-3 py-2 bg-red-50 border border-red-200 text-red-600 rounded-lg font-semibold transition-all flex items-center justify-center gap-2 w-full hover:bg-red-100">
+                                                            <X size={12} /> Từ chối
+                                                        </button>
+                                                    </>
+                                                );
+                                            }
+
                                             return (
-                                                <button onClick={(e) => { e.stopPropagation(); handleStatusChange(ticket.id, targetStatus.id); }}
-                                                    className={`text-[10px] px-2 py-1 bg-white border rounded-lg font-medium transition-all flex items-center gap-1 w-full justify-between hover:bg-orange-50 hover:border-orange-300 hover:text-orange-600`}>
-                                                    {hasRequestedParts ? 'Tìm linh kiện' : targetStatus.label}
-                                                    <ChevronRight size={10} />
-                                                </button>
+                                                <>
+                                                    {/* Dynamic Transition Button for Báo Giá */}
+                                                    {!isReadOnly && st?.allowedFeatures?.includes('allowPartsSelection') ? (() => {
+                                                        const hasRequestedParts = ticket.parts?.length === 0 || ticket.parts?.some(p => isRepairPartStatus(p.status, REPAIR_PART_STATUS.REQUESTED));
+                                                        const targetStatusId = hasRequestedParts ? 'dang_tim_linh_kien' : 'dang_sua_chua';
+                                                        const targetStatus = workflow.find(ds => ds.id === targetStatusId);
+
+                                                        if (!targetStatus) return null;
+                                                        return (
+                                                            <button onClick={(e) => { e.stopPropagation(); handleStatusChange(ticket.id, targetStatus.id); }}
+                                                                className={`text-[10px] px-2 py-1 bg-white border rounded-lg font-medium transition-all flex items-center gap-1 w-full justify-between hover:bg-orange-50 hover:border-orange-300 hover:text-orange-600`}>
+                                                                {hasRequestedParts ? 'Tìm linh kiện' : targetStatus.label}
+                                                                <ChevronRight size={10} />
+                                                            </button>
+                                                        );
+                                                    })() : !isReadOnly && st.allowedNext?.map((nextId: string) => {
+                                                        const nextCfg = workflow.find(ds => ds.id === nextId);
+                                                        if (!nextCfg) return null;
+                                                        return (
+                                                            <button key={nextId} onClick={(e) => { e.stopPropagation(); handleStatusChange(ticket.id, nextId); }}
+                                                                className={`text-[10px] px-2 py-1 bg-white border rounded-lg font-medium transition-all flex items-center gap-1 w-full justify-between ${nextId === 'refund' ? 'hover:bg-red-50 hover:border-red-300 hover:text-red-600' : nextId === 'out' ? 'hover:bg-gray-50 hover:border-gray-300 hover:text-gray-600' : 'hover:bg-orange-50 hover:border-orange-300 hover:text-orange-600'}`}>
+                                                                {nextCfg.label}
+                                                                {nextId === 'refund' ? <X size={10} /> : <ChevronRight size={10} />}
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </>
                                             );
-                                        })() : !isReadOnly && st.allowedNext?.map((nextId: string) => {
-                                            const nextCfg = workflow.find(ds => ds.id === nextId);
-                                            if (!nextCfg) return null;
-                                            return (
-                                                <button key={nextId} onClick={(e) => { e.stopPropagation(); handleStatusChange(ticket.id, nextId); }}
-                                                    className={`text-[10px] px-2 py-1 bg-white border rounded-lg font-medium transition-all flex items-center gap-1 w-full justify-between ${nextId === 'refund' ? 'hover:bg-red-50 hover:border-red-300 hover:text-red-600' : nextId === 'out' ? 'hover:bg-gray-50 hover:border-gray-300 hover:text-gray-600' : 'hover:bg-orange-50 hover:border-orange-300 hover:text-orange-600'}`}>
-                                                    {nextCfg.label}
-                                                    {nextId === 'refund' ? <X size={10} /> : <ChevronRight size={10} />}
-                                                </button>
-                                            );
-                                        })}
+                                        })()}
                                     </div>
                                 </div>
                             </div>
@@ -788,6 +1019,12 @@ export default function TechnicianPage() {
                                     ) : colTickets.map(ticket => {
                                         const workflow = getWorkflowForTicket(ticket);
                                         const st = workflow.find(s => s.id === ticket.status) as WorkflowNode | undefined;
+                                        const isTerminal = isRepairStatus(ticket.status, REPAIR_STATUS.CUSTOMER_HANDOVER) || !!st?.isTerminal;
+                                        const isAssignedToMe = ticket.staff?.assignedTechnician === user?.uid;
+                                        const isIncomingTransferToMe = ticket.pendingTechnicianTransfer?.toTechnicianId === user?.uid && ticket.pendingTechnicianTransfer?.status === 'pending';
+                                        const isKtvLocked = user?.role !== 'admin' && (!isAssignedToMe || isIncomingTransferToMe);
+                                        const isReadOnly = isTerminal || isKtvLocked;
+
                                         return (
                                             <div key={ticket.id} className="bg-white rounded-lg border p-3 shadow-sm hover:shadow-md transition-shadow relative group">
                                                 {/* KTV Badge */}
@@ -832,6 +1069,7 @@ export default function TechnicianPage() {
                                                                         value={val}
                                                                         onClick={e => e.stopPropagation()}
                                                                         onChange={e => handleChecklistUpdate(ticket.id, key, e.target.value)}
+                                                                        disabled={isReadOnly}
                                                                         aria-label={`Checklist (kanban): ${checklistLabels[key]}`}
                                                                         title={`Checklist (kanban): ${checklistLabels[key]}`}
                                                                         className={`text-[8px] flex-1 px-0.5 py-px rounded border cursor-pointer appearance-none ${
@@ -852,37 +1090,60 @@ export default function TechnicianPage() {
                                                 </div>
                                                 )}
 
-                                                {/* Dynamic Transition Button for Báo Giá */}
-                                                {st?.allowedFeatures?.includes('allowPartsSelection') ? (() => {
-                                                    const hasRequestedParts = ticket.parts?.length === 0 || ticket.parts?.some(p => isRepairPartStatus(p.status, REPAIR_PART_STATUS.REQUESTED));
-                                                    const targetStatusId = hasRequestedParts ? 'dang_tim_linh_kien' : 'dang_sua_chua';
-                                                    const targetStatus = workflow.find(ds => ds.id === targetStatusId);
-
-                                                    if (!targetStatus) return null;
-                                                    return (
-                                                        <div className="mt-3 pt-3 border-t flex flex-col gap-1.5">
-                                                            <button onClick={(e) => { e.stopPropagation(); handleStatusChange(ticket.id, targetStatus.id); }}
-                                                                className={`w-full justify-between flex items-center gap-1 text-[11px] px-2 py-1.5 border rounded-md font-medium transition-all bg-orange-50 text-orange-600 border-orange-200 hover:bg-orange-500 hover:text-white`}>
-                                                                Chuyển sang {hasRequestedParts ? 'Tìm linh kiện' : targetStatus.label}
-                                                                <ChevronRight size={12} />
-                                                            </button>
-                                                        </div>
-                                                    );
-                                                })() : (st?.allowedNext && st.allowedNext.length > 0) && (
-                                                    <div className="mt-3 pt-3 border-t flex flex-col gap-1.5">
-                                                        {st?.allowedNext?.map((nextId: string) => {
-                                                            const nextCfg = workflow.find(ds => ds.id === nextId);
-                                                            if (!nextCfg) return null;
-                                                            return (
-                                                                <button key={nextId} onClick={(e) => { e.stopPropagation(); handleStatusChange(ticket.id, nextId); }}
-                                                                    className={`w-full justify-between flex items-center gap-1 text-[11px] px-2 py-1.5 border rounded-md font-medium transition-all ${nextId === 'refund' ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-500 hover:text-white' : nextId === 'out' ? 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-500 hover:text-white' : 'bg-orange-50 text-orange-600 border-orange-200 hover:bg-orange-500 hover:text-white'}`}>
-                                                                    Chuyển sang {nextCfg.label}
-                                                                    {nextId === 'refund' ? <X size={12} /> : <ChevronRight size={12} />}
+                                                {/* Actions */}
+                                                {(() => {
+                                                    const isIncomingTransfer = ticket.pendingTechnicianTransfer?.toTechnicianId === user?.uid && ticket.pendingTechnicianTransfer?.status === 'pending';
+                                                    if (isIncomingTransfer) {
+                                                        return (
+                                                            <div className="mt-3 pt-3 border-t flex flex-col gap-1.5">
+                                                                <button onClick={(e) => { e.stopPropagation(); handleTransferResponse(ticket, 'accepted'); }}
+                                                                    className="text-[11px] px-2 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-md font-medium transition-all flex items-center justify-center gap-1 w-full hover:bg-emerald-500 hover:text-white">
+                                                                    <CheckCircle2 size={12} /> Nhận phiếu
                                                                 </button>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                )}
+                                                                <button onClick={(e) => { e.stopPropagation(); handleTransferResponse(ticket, 'rejected'); }}
+                                                                    className="text-[11px] px-2 py-1.5 bg-red-50 border border-red-200 text-red-600 rounded-md font-medium transition-all flex items-center justify-center gap-1 w-full hover:bg-red-500 hover:text-white">
+                                                                    <X size={12} /> Từ chối
+                                                                </button>
+                                                            </div>
+                                                        );
+                                                    }
+
+                                                    return (
+                                                        <>
+                                                            {/* Dynamic Transition Button for Báo Giá */}
+                                                            {st?.allowedFeatures?.includes('allowPartsSelection') ? (() => {
+                                                                const hasRequestedParts = ticket.parts?.length === 0 || ticket.parts?.some(p => isRepairPartStatus(p.status, REPAIR_PART_STATUS.REQUESTED));
+                                                                const targetStatusId = hasRequestedParts ? 'dang_tim_linh_kien' : 'dang_sua_chua';
+                                                                const targetStatus = workflow.find(ds => ds.id === targetStatusId);
+
+                                                                if (!targetStatus) return null;
+                                                                return (
+                                                                    <div className="mt-3 pt-3 border-t flex flex-col gap-1.5">
+                                                                        <button onClick={(e) => { e.stopPropagation(); handleStatusChange(ticket.id, targetStatus.id); }}
+                                                                            className={`w-full justify-between flex items-center gap-1 text-[11px] px-2 py-1.5 border rounded-md font-medium transition-all bg-orange-50 text-orange-600 border-orange-200 hover:bg-orange-500 hover:text-white`}>
+                                                                            Chuyển sang {hasRequestedParts ? 'Tìm linh kiện' : targetStatus.label}
+                                                                            <ChevronRight size={12} />
+                                                                        </button>
+                                                                    </div>
+                                                                );
+                                                            })() : (st?.allowedNext && st.allowedNext.length > 0) && (
+                                                                <div className="mt-3 pt-3 border-t flex flex-col gap-1.5">
+                                                                    {st?.allowedNext?.map((nextId: string) => {
+                                                                        const nextCfg = workflow.find(ds => ds.id === nextId);
+                                                                        if (!nextCfg) return null;
+                                                                        return (
+                                                                            <button key={nextId} onClick={(e) => { e.stopPropagation(); handleStatusChange(ticket.id, nextId); }}
+                                                                                className={`w-full justify-between flex items-center gap-1 text-[11px] px-2 py-1.5 border rounded-md font-medium transition-all ${nextId === 'refund' ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-500 hover:text-white' : nextId === 'out' ? 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-500 hover:text-white' : 'bg-orange-50 text-orange-600 border-orange-200 hover:bg-orange-500 hover:text-white'}`}>
+                                                                                Chuyển sang {nextCfg.label}
+                                                                                {nextId === 'refund' ? <X size={12} /> : <ChevronRight size={12} />}
+                                                                            </button>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                            )}
+                                                        </>
+                                                    );
+                                                })()}
                                             </div>
                                         );
                                     })}
@@ -902,16 +1163,47 @@ export default function TechnicianPage() {
                     size="lg"
                 >
                     <div className="p-5 space-y-4">
-                            {/* Read-Only Guard */}
+                            {/* Read-Only Guard / Transfer Lock Guard */}
                             {(() => {
                                 const workflow = getWorkflowForTicket(selectedTicket);
                                 const currentCfg = workflow.find(s => s.id === selectedTicket.status);
-                                const isReadOnly = isRepairStatus(selectedTicket.status, REPAIR_STATUS.CUSTOMER_HANDOVER) || !!currentCfg?.isTerminal;
-                                return isReadOnly ? (
-                                    <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-800 font-medium flex items-center gap-2">
-                                        <AlertCircle size={16} /> Phiếu đã hoàn tất kỹ thuật — Chỉ xem, không thể chỉnh sửa.
-                                    </div>
-                                ) : null;
+                                const isTerminalReadOnly = isRepairStatus(selectedTicket.status, REPAIR_STATUS.CUSTOMER_HANDOVER) || !!currentCfg?.isTerminal;
+
+                                const isAssignedToMe = selectedTicket.staff?.assignedTechnician === user?.uid;
+                                const isIncomingTransferToMe = selectedTicket.pendingTechnicianTransfer?.toTechnicianId === user?.uid && selectedTicket.pendingTechnicianTransfer?.status === 'pending';
+                                const isKtvLocked = user?.role !== 'admin' && !isAssignedToMe;
+
+                                if (isTerminalReadOnly) {
+                                    return (
+                                        <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-800 font-medium flex items-center gap-2">
+                                            <AlertCircle size={16} /> Phiếu đã hoàn tất kỹ thuật — Chỉ xem, không thể chỉnh sửa.
+                                        </div>
+                                    );
+                                }
+
+                                if (isIncomingTransferToMe) {
+                                    return (
+                                        <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3">
+                                            <p className="text-sm text-emerald-800 font-medium flex items-center gap-2 mb-2">
+                                                <AlertCircle size={16} /> Phiếu đang chờ bạn tiếp nhận. Bạn không thể chỉnh sửa cho đến khi bấm &quot;Nhận phiếu&quot;.
+                                            </p>
+                                            <div className="flex gap-2">
+                                                <button onClick={() => handleTransferResponse(selectedTicket, 'accepted')} className="px-3 py-1.5 bg-emerald-600 text-white rounded text-sm font-medium hover:bg-emerald-700">Nhận phiếu</button>
+                                                <button onClick={() => handleTransferResponse(selectedTicket, 'rejected')} className="px-3 py-1.5 bg-red-100 text-red-700 rounded text-sm font-medium hover:bg-red-200">Từ chối</button>
+                                            </div>
+                                        </div>
+                                    );
+                                }
+
+                                if (isKtvLocked) {
+                                    return (
+                                        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2.5 text-sm text-red-800 font-medium flex items-center gap-2">
+                                            <AlertCircle size={16} /> Bạn không có quyền chỉnh sửa. Phiếu này đã được chuyển giao cho người khác.
+                                        </div>
+                                    );
+                                }
+
+                                return null;
                             })()}
                             {/* Status */}
                             {(() => {
@@ -993,7 +1285,15 @@ export default function TechnicianPage() {
                                 const workflow = getWorkflowForTicket(selectedTicket);
                                 const st = workflow.find(s => s.id === selectedTicket.status);
                                 return st?.allowedFeatures?.includes('allowPartsSelection');
-                            })() && !(() => { const wf = getWorkflowForTicket(selectedTicket); const cfg = wf.find(s => s.id === selectedTicket.status); return isRepairStatus(selectedTicket.status, REPAIR_STATUS.CUSTOMER_HANDOVER) || !!cfg?.isTerminal; })() && (
+                            })() && !(() => {
+                                const wf = getWorkflowForTicket(selectedTicket);
+                                const cfg = wf.find(s => s.id === selectedTicket.status);
+                                const isTerminal = isRepairStatus(selectedTicket.status, REPAIR_STATUS.CUSTOMER_HANDOVER) || !!cfg?.isTerminal;
+                                const isAssignedToMe = selectedTicket.staff?.assignedTechnician === user?.uid;
+                                const isIncomingTransferToMe = selectedTicket.pendingTechnicianTransfer?.toTechnicianId === user?.uid && selectedTicket.pendingTechnicianTransfer?.status === 'pending';
+                                const isKtvLocked = user?.role !== 'admin' && (!isAssignedToMe || isIncomingTransferToMe);
+                                return isTerminal || isKtvLocked;
+                            })() && (
                                     <div className="mt-4 border-t pt-4">
                                         <p className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
                                             <Package size={16} className="text-orange-500" /> Linh kiện sử dụng
@@ -1033,7 +1333,15 @@ export default function TechnicianPage() {
                                                                             ? 'Không có hàng'
                                                                             : 'Đang yêu cầu'}
                                                             </span>
-                                                            {!(() => { const wf = getWorkflowForTicket(selectedTicket); const cfg = wf.find(s => s.id === selectedTicket.status); return isRepairStatus(selectedTicket.status, REPAIR_STATUS.CUSTOMER_HANDOVER) || !!cfg?.isTerminal; })() && (
+                                                            {!(() => {
+                                                                const wf = getWorkflowForTicket(selectedTicket);
+                                                                const cfg = wf.find(s => s.id === selectedTicket.status);
+                                                                const isTerminal = isRepairStatus(selectedTicket.status, REPAIR_STATUS.CUSTOMER_HANDOVER) || !!cfg?.isTerminal;
+                                                                const isAssignedToMe = selectedTicket.staff?.assignedTechnician === user?.uid;
+                                                                const isIncomingTransferToMe = selectedTicket.pendingTechnicianTransfer?.toTechnicianId === user?.uid && selectedTicket.pendingTechnicianTransfer?.status === 'pending';
+                                                                const isKtvLocked = user?.role !== 'admin' && (!isAssignedToMe || isIncomingTransferToMe);
+                                                                return isTerminal || isKtvLocked;
+                                                            })() && (
                                                             <button
                                                                 onClick={() => handleRemovePart(selectedTicket, pIdx)}
                                                                 className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-white rounded-md transition-colors"
@@ -1211,20 +1519,21 @@ export default function TechnicianPage() {
                             {/* Timeline */}
                             {selectedTicket.statusTimeline?.length > 0 && (
                                 <div>
-                                    <p className="text-xs font-semibold text-gray-500 mb-2 flex items-center gap-1"><Clock size={12} /> Lịch sử trạng thái</p>
-                                    <div className="space-y-1">
-                                        {selectedTicket.statusTimeline.map((entry, i) => (
-                                            <div key={i} className="flex items-center gap-2 text-xs">
-                                                <div className="w-1.5 h-1.5 rounded-full bg-orange-400" />
-                                                <span className="font-medium text-gray-700">
-                                                    {(getWorkflowForTicket(selectedTicket)).find(s => s.id === entry.status)?.label || entry.status}
-                                                </span>
-                                                <span className="text-gray-400">
-                                                    {new Date(entry.timestamp).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                                                </span>
-                                                {entry.durationInMinutes && (
-                                                    <span className="text-gray-300">({entry.durationInMinutes} phút)</span>
+                                    <p className="text-xs font-semibold text-gray-500 mb-2 flex items-center gap-1"><Clock size={12} /> Nhật ký phiếu</p>
+                                    <div className="space-y-2">
+                                        {[...selectedTicket.statusTimeline].reverse().map((entry, i) => (
+                                            <div key={`${entry.requestId || entry.timestamp || i}-${i}`} className="rounded-lg border bg-gray-50 p-3 text-xs">
+                                                <div className="flex items-start justify-between gap-3">
+                                                    <span className="font-semibold text-gray-800">{getTimelineTitle(entry, getWorkflowForTicket(selectedTicket))}</span>
+                                                    <span className="shrink-0 text-gray-400">
+                                                        {getTimelineTimestamp(entry).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                                                    </span>
+                                                </div>
+                                                {(entry.actorName || entry.actorId || entry.by) && (
+                                                    <p className="mt-1 text-gray-600">Thực hiện: {entry.actorName || userNamesMap[(entry.actorId || entry.by) as string] || entry.actorId || entry.by} {entry.actorRole ? `(${entry.actorRole})` : ''}</p>
                                                 )}
+                                                {(entry.reason || entry.note) && <p className="mt-1 text-gray-700">Lý do: {entry.reason || entry.note}</p>}
+                                                {entry.requestId && <p className="mt-1 break-all text-[10px] text-gray-400">Mã đối soát: {entry.requestId}</p>}
                                             </div>
                                         ))}
                                     </div>
@@ -1236,7 +1545,11 @@ export default function TechnicianPage() {
                                 const workflow = getWorkflowForTicket(selectedTicket);
                                 const currentStatusCfg = workflow.find(s => s.id === selectedTicket.status);
                                 // Read-only guard: hide status change buttons entirely
-                                const isReadOnly = isRepairStatus(selectedTicket.status, REPAIR_STATUS.CUSTOMER_HANDOVER) || !!currentStatusCfg?.isTerminal;
+                                const isTerminal = isRepairStatus(selectedTicket.status, REPAIR_STATUS.CUSTOMER_HANDOVER) || !!currentStatusCfg?.isTerminal;
+                                const isAssignedToMe = selectedTicket.staff?.assignedTechnician === user?.uid;
+                                const isIncomingTransferToMe = selectedTicket.pendingTechnicianTransfer?.toTechnicianId === user?.uid && selectedTicket.pendingTechnicianTransfer?.status === 'pending';
+                                const isKtvLocked = user?.role !== 'admin' && (!isAssignedToMe || isIncomingTransferToMe);
+                                const isReadOnly = isTerminal || isKtvLocked;
                                 if (isReadOnly) return null;
                                 if (currentStatusCfg?.allowedFeatures?.includes('allowPartsSelection')) {
                                     const hasRequestedParts = selectedTicket.parts?.length === 0 || selectedTicket.parts?.some(p => isRepairPartStatus(p.status, REPAIR_PART_STATUS.REQUESTED));
@@ -1271,6 +1584,57 @@ export default function TechnicianPage() {
             )}
 
             {/* ══════════  Status Change Confirm Modal  ══════════ */}
+            {transferModal && (
+                <Modal
+                    isOpen={true}
+                    onClose={() => { setTransferModal(null); setTransferTechnicianId(''); setTransferReason(''); }}
+                    title={`Chuyển KTV — #${transferModal.ticket.id.slice(-6).toUpperCase()}`}
+                    size="sm"
+                    mobileSheet={true}
+                >
+                    <div className="p-4 space-y-4">
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                            KTV hiện tại vẫn chịu trách nhiệm cho đến khi KTV mới bấm chấp nhận.
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">KTV nhận mới</label>
+                            <select
+                                title="Chọn KTV nhận mới"
+                                value={transferTechnicianId}
+                                onChange={event => setTransferTechnicianId(event.target.value)}
+                                className="w-full min-h-11 px-3 py-2 border rounded-lg bg-white"
+                            >
+                                <option value="">-- Chọn KTV --</option>
+                                {technicians.filter(technician => technician.uid !== transferModal.ticket.staff?.assignedTechnician).map(technician => (
+                                    <option key={technician.uid} value={technician.uid}>{technician.displayName}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Lý do chuyển <span className="text-red-500">*</span></label>
+                            <textarea
+                                value={transferReason}
+                                onChange={event => setTransferReason(event.target.value)}
+                                rows={4}
+                                placeholder="Mô tả rõ nguyên nhân chuyển để lưu nhật ký chống gian lận"
+                                className="w-full min-h-28 px-3 py-2 border rounded-lg"
+                            />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                            <button onClick={() => { setTransferModal(null); setTransferTechnicianId(''); setTransferReason(''); }} className="min-h-11 rounded-lg bg-gray-100 text-sm font-medium">Hủy</button>
+                            <button
+                                onClick={handleTransferRequest}
+                                disabled={isTransferSubmitting || !transferTechnicianId || !transferReason.trim()}
+                                className="min-h-11 rounded-lg bg-blue-600 text-white text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
+                            >
+                                {isTransferSubmitting ? <Loader2 size={16} className="animate-spin" /> : <ArrowRightLeft size={16} />}
+                                Gửi yêu cầu
+                            </button>
+                        </div>
+                    </div>
+                </Modal>
+            )}
+
             {statusConfirmModal && (() => {
                 const ticket = tickets.find(t => t.id === statusConfirmModal.ticketId);
                 if (!ticket) return null;
@@ -1346,16 +1710,16 @@ export default function TechnicianPage() {
 
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">
-                                Ghi chú (tùy chọn)
+                                Ghi chú / Lý do ghi đè (Bắt buộc nếu bạn là Quản lý)
                             </label>
                             <textarea
                                 rows={4}
                                 value={techNoteText}
                                 onChange={e => setTechNoteText(e.target.value)}
-                                placeholder="Nhập ghi chú kỹ thuật trước khi chuyển trạng thái..."
+                                placeholder="Nhập ghi chú kỹ thuật hoặc lý do ghi đè trước khi chuyển trạng thái..."
                                 className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20"
                             />
-                            <p className="text-xs text-gray-400 mt-1">Ghi chú này sẽ được lưu cùng với phiếu sửa chữa và admin có thể xem.</p>
+                            <p className="text-xs text-gray-400 mt-1">Lý do này sẽ được lưu cùng với phiếu sửa chữa và admin có thể xem trong lịch sử trạng thái.</p>
                         </div>
 
                         <div className="flex justify-end gap-3 pt-2">

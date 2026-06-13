@@ -11,6 +11,88 @@
   "constraints": [],
   "aiPlans": [
     {
+      "id": "plan-pos-centralization-20260613",
+      "title": "Tập trung Thanh toán POS, Công nợ & Mã QR",
+      "date": "13.06.2026",
+      "status": "planned",
+      "planFile": "data/ai_plans/plan_pos_centralization.md",
+      "taskFile": "data/ai_plans/task_pos_centralization.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_pos_centralization.md",
+      "scope": [
+        "src/lib/types.ts",
+        "src/app/admin/repairs/page.tsx",
+        "src/app/admin/pos/page.tsx",
+        "src/app/admin/customers/page.tsx",
+        "src/app/admin/settings/integrations/page.tsx"
+      ],
+      "decisions": [
+        "Tích hợp phiếu sửa chữa vào giỏ hàng POS",
+        "Chuyển toàn bộ luồng thanh toán về POS",
+        "Thêm phí vận chuyển và cảnh báo công nợ khách hàng",
+        "Hiển thị QR VietQR dựa trên ngân hàng thụ hưởng"
+      ],
+      "updatedAt": "2026-06-13T00:00:00.000Z"
+    },
+    {
+      "id": "plan-customer-web-qa-otp-chat-20260613",
+      "title": "Customer Web QA: OTP Voucher, AI Chat, Navigation va Mobile UX",
+      "date": "13.06.2026",
+      "status": "qa-findings-open",
+      "planFile": "data/ai_plans/plan_customer_web_qa_otp_chat_20260613.md",
+      "taskFile": "data/ai_plans/task_customer_web_qa_otp_chat_20260613.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_customer_web_qa_otp_chat_20260613.md",
+      "scope": [
+        "src/components/ChatWidget.tsx",
+        "src/lib/gemini.ts",
+        "src/app/api/ai/route.ts",
+        "src/app/api/reviews/google/route.ts",
+        "src/components/layout/MobileBottomNav.tsx",
+        "src/components/layout/Footer.tsx",
+        "src/app/(customer)/category/[...slug]/page.tsx",
+        "src/app/(customer)/service/[id]/ServiceDetailClient.tsx",
+        "src/components/MissionsWidget.tsx"
+      ],
+      "decisions": [
+        "Tach loi provider 403 khoi fallback nghiep vu de UI va log phan biet duoc",
+        "Uu tien sua link 404 va taxonomy truoc polish UI",
+        "Dung production build va mobile viewport 390x844 lam baseline QA",
+        "Khong tu dong vuot reCAPTCHA; voucher E2E cho nguoi dung xac nhan checkbox"
+      ],
+      "updatedAt": "2026-06-13T00:00:00.000Z"
+    },
+    {
+      "id": "plan-repair-technician-handoff-mobile-20260612",
+      "title": "Workflow sửa chữa, chuyển giao KTV có xác nhận và UI mobile-first",
+      "date": "12.06.2026",
+      "status": "implemented-local-firestore-v2",
+      "planFile": "data/ai_plans/plan_repair_technician_handoff_mobile_20260612.md",
+      "taskFile": "data/ai_plans/task_repair_technician_handoff_mobile_20260612.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_repair_technician_handoff_mobile_20260612.md",
+      "scope": [
+        "src/app/admin/repairs/page.tsx",
+        "src/app/admin/technician/page.tsx",
+        "src/app/api/repairs/transition/route.ts",
+        "src/lib/repairWorkflowConfig.ts",
+        "src/lib/repairWorkflowConfig.test.ts",
+        "scripts/migrate-repair-workflow-v2.ts",
+        "src/lib/repairWorkflowServer.ts",
+        "src/lib/workflowFeatures.ts",
+        "src/lib/types.ts",
+        "src/lib/repairAccess.ts",
+        "src/lib/repairAccess.test.ts",
+        "firestore.rules"
+      ],
+      "decisions": [
+        "Phiếu mới luôn bắt đầu ở Chờ tiếp nhận và chỉ được chuyển tiếp sau khi có KTV",
+        "KTV hiện tại hoặc quản lý/Sale có thể đề nghị chuyển KTV nhưng assignment chỉ đổi khi KTV mới chấp nhận",
+        "Trong thời gian chờ phản hồi KTV cũ tiếp tục chịu trách nhiệm và có quyền thao tác",
+        "Quản lý/Sale can thiệp trạng thái phải xác nhận, nhập lý do và được ghi audit log",
+        "UI mobile-first phải hiển thị trực tiếp blocker, KTV phụ trách và yêu cầu chuyển trên thẻ phiếu",
+        "Quyền sở hữu phiếu phải được kiểm tra server-side, không dựa vào lọc client"
+      ],
+      "updatedAt": "2026-06-12T00:00:00.000Z"
+    },
+    {
       "id": "plan-customer-crm-sync-20260611",
       "title": "Đồng bộ Customer CRM toàn diện từ đa kênh",
       "date": "11.06.2026",

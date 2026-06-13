@@ -23,6 +23,13 @@
 - **Guardrail:** Chỉ tối ưu rendering/print và scan alias. QR vẫn dùng mã hàng chính; barcode có thể dùng alias ngắn. Không đổi schema sản phẩm, `product_code_registry` hoặc `/api/pos/checkout`.
 - **Manual check còn lại:** In thử trên đúng máy/giấy của cửa hàng và scan lại bằng máy quét/camera POS.
 
+### ✅ Feature POS-VOU-001: Áp dụng Voucher (Bounty/Discount) tại quầy POS
+- **Status:** implemented-local
+- **Date:** 2026-06-13
+- **Files:** `src/app/admin/pos/page.tsx`, `src/app/api/pos/checkout/route.ts`
+- **Summary:** Cho phép thu ngân nhập mã giảm giá (voucher) hoặc mã thưởng (bounty) tại màn hình POS. Hệ thống gọi `/api/vouchers/validate` để kiểm tra độ hợp lệ. Backend checkout (`pos/checkout`) tiếp nhận `voucherCode`, kiểm tra lại trong Transaction, trừ số lượng lượt dùng (`usedCount`), lưu vết voucher vào đơn hàng và cập nhật nhiệm vụ nhận thưởng (bounty) cho hồ sơ khách hàng.
+- **Guardrail:** Logic tính hoa hồng và xử lý giảm giá được tách bạch rành mạch giữa giảm giá thủ công của nhân viên và giảm từ voucher.
+
 ```mermaid
 graph TD
             subgraph POS [Bán Hàng Tại Quầy - POS]
@@ -202,3 +209,14 @@ if (item.sellingPrice < item.costPrice) {
 - { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=(self)" }
 + { "key": "Permissions-Policy", "value": "camera=(self), microphone=(), geolocation=(self)" }
 ```
+
+## BUG-POS-009: Lỗi Firestore "Read before Write" trong POS Checkout API
+- **Status:** fixed
+- **Severity:** critical
+- **Module:** POS
+- **Date:** 2026-06-13
+- **Files:** `src/app/api/pos/checkout/route.ts`
+### Cause
+<b>Phân tích</b>: Firestore Transactions yêu cầu toàn bộ lệnh Read (`tx.get`) phải chạy trước các lệnh Write (`tx.set`/`tx.update`). Trong `pos/checkout`, hệ thống đã thực hiện Write tồn kho (`stock`), sau đó lại gọi Read để lấy dữ liệu User, Customer, RepairTicket và tính hoa hồng, vi phạm rule của Firebase Admin SDK dẫn đến crash lúc checkout POS.
+### Solution
+<b>Giải pháp đã áp dụng</b>: Refactor lại thứ tự lệnh trong Transaction. Di chuyển toàn bộ các lệnh Read (kéo Customer, User, RepairTicket, và thực hiện tính toán Hoa hồng) lên block trên cùng (Pre-fetch for Transaction Reads), và đưa toàn bộ lệnh Write xuống block cuối (All Writes Start Here).

@@ -5,7 +5,8 @@ import { FieldValue } from 'firebase-admin/firestore';
 import type { RepairTicket } from '@/lib/types';
 import { loadRepairWorkflow, requireWorkflowNode, workflowNodeHasFeature } from '@/lib/repairWorkflowServer';
 import { isChecklistComplete } from '@/lib/workflowFeatures';
-import { REPAIR_PART_STATUS, REPAIR_STATUS, isRepairPartStatus, isRepairStatus } from '@/lib/repairStatus';
+import { isPendingRepairPart } from '@/lib/repairStatus';
+import { isRepairManager } from '@/lib/repairAccess';
 
 interface RepairTransitionRequest {
     ticketId?: string;
@@ -13,6 +14,7 @@ interface RepairTransitionRequest {
     technicianNote?: string;
     ticketVersion?: number;
     idempotencyKey?: string;
+    source?: 'repairs' | 'technician';
 }
 
 export async function POST(request: NextRequest) {
@@ -20,7 +22,7 @@ export async function POST(request: NextRequest) {
         const caller = await requirePermission(request, 'manage_repairs');
         
         const body = await request.json() as RepairTransitionRequest;
-        const { ticketId, targetStatus, technicianNote, ticketVersion, idempotencyKey } = body;
+        const { ticketId, targetStatus, technicianNote, ticketVersion, idempotencyKey, source } = body;
 
         if (!ticketId || !targetStatus) {
             return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
@@ -35,6 +37,9 @@ export async function POST(request: NextRequest) {
                 if (opSnap.exists) {
                     const data = opSnap.data();
                     if (data?.status === 'completed') {
+                        if (data.type !== 'repair_transition' || data.referenceId !== ticketId || data.actorId !== caller.uid) {
+                            throw new Error('Mã chống gửi trùng đã được dùng cho thao tác khác.');
+                        }
                         return { success: true, fromCache: true };
                     }
                 }
@@ -48,6 +53,9 @@ export async function POST(request: NextRequest) {
             }
 
             const ticket = ticketSnap.data() as RepairTicket;
+            const callerSnap = await tx.get(db.collection('users').doc(caller.uid));
+            const callerData = callerSnap.data() as Record<string, unknown> | undefined;
+            const callerName = typeof callerData?.displayName === 'string' ? callerData.displayName : caller.uid;
 
             if (ticket.version !== undefined && ticket.version !== ticketVersion) {
                 throw new Error('Dữ liệu đã bị thay đổi bởi người khác. Vui lòng tải lại trang.');
@@ -61,8 +69,14 @@ export async function POST(request: NextRequest) {
             const isCurrentTerminal = !!currentNode.isTerminal;
             const isTargetTerminal = !!targetNode.isTerminal;
             const isAllowed = currentNode.allowedNext?.includes(targetStatus) ?? false;
-            const requireChecklist = workflowNodeHasFeature(targetNode, 'requireChecklist');
-            const requirePartsReady = workflowNodeHasFeature(targetNode, 'requirePartsReady');
+            const requireChecklist = workflowNodeHasFeature(currentNode, 'requireChecklist');
+            const requirePartsReady = workflowNodeHasFeature(currentNode, 'requirePartsReady');
+            const entryNode = workflow[0];
+            const leavingIntakeForWork = currentNode.id === entryNode?.id && !targetNode.isTerminal;
+            const requireAssignedTechnician = leavingIntakeForWork
+                || workflowNodeHasFeature(targetNode, 'requireAssignedTechnician')
+                || workflowNodeHasFeature(currentNode, 'requireAssignedTechnician');
+            const requireTechnicianNote = workflowNodeHasFeature(currentNode, 'requireTechnicianNote');
 
             if (isCurrentTerminal) {
                 throw new Error(`Phiếu đã ở trạng thái kết thúc (${ticket.status}), không thể thay đổi.`);
@@ -76,8 +90,8 @@ export async function POST(request: NextRequest) {
                 throw new Error(`Không cho phép chuyển từ ${ticket.status} sang ${targetStatus} theo quy trình.`);
             }
 
-            // Tech note gate
-            if (isRepairStatus(ticket.status, REPAIR_STATUS.INSPECTION) && !technicianNote?.trim() && !ticket.issue?.notes?.trim()) {
+            // Tech note gate based on CURRENT node feature
+            if (requireTechnicianNote && !technicianNote?.trim() && !ticket.issue?.notes?.trim()) {
                 throw new Error('Vui lòng nhập ghi chú kỹ thuật (kết quả kiểm tra) trước khi chuyển trạng thái.');
             }
 
@@ -91,34 +105,68 @@ export async function POST(request: NextRequest) {
 
             // Parts ready check
             if (requirePartsReady) {
-                const requestedParts = ticket.parts?.filter(p => isRepairPartStatus(p.status, REPAIR_PART_STATUS.REQUESTED)) || [];
-                if (requestedParts.length > 0) {
-                    throw new Error(`Có ${requestedParts.length} linh kiện đang yêu cầu nhập kho. Không thể bắt đầu sửa chữa khi chưa có linh kiện.`);
+                const pendingParts = ticket.parts?.filter(isPendingRepairPart) || [];
+                if (pendingParts.length > 0) {
+                    throw new Error(`Có ${pendingParts.length} linh kiện chưa sẵn sàng. Không thể bắt đầu sửa chữa khi linh kiện còn đang yêu cầu hoặc đặt hàng.`);
                 }
+            }
+
+            // Assigned technician and Manager Override check
+            if (ticket.staff?.assignedTechnician) {
+                const isAssignedKTV = caller.uid === ticket.staff.assignedTechnician;
+                const isManager = isRepairManager(caller);
+
+                if (!isAssignedKTV && !isManager) {
+                    throw new Error('Chỉ KTV được phân công hoặc Quản lý mới có thể chuyển trạng thái phiếu này.');
+                }
+                if (!isAssignedKTV && isManager && !technicianNote?.trim()) {
+                    throw new Error('Quản lý ghi đè trạng thái (Manager Override) yêu cầu phải nhập lý do vào Ghi chú kỹ thuật.');
+                }
+            }
+
+            if (requireAssignedTechnician && !ticket.staff?.assignedTechnician) {
+                throw new Error('Trạng thái này yêu cầu phải phân công Kỹ thuật viên phụ trách. Vui lòng gán KTV trước khi chuyển trạng thái.');
             }
 
             // Calculate duration
             let newDuration = ticket.durationInMinutes || 0;
             if (ticket.statusTimeline && ticket.statusTimeline.length > 0) {
-                const lastEvent = ticket.statusTimeline[ticket.statusTimeline.length - 1];
-                if (lastEvent && lastEvent.timestamp && ticket.status !== 'new' && !isRepairStatus(ticket.status, REPAIR_STATUS.CUSTOMER_HANDOVER)) {
-                    const ts = lastEvent.timestamp as { toDate?: () => Date };
-                    const lastDate = ts.toDate ? ts.toDate() : new Date(lastEvent.timestamp as string | number | Date);
+                const lastEvent = [...ticket.statusTimeline].reverse().find(event => event.eventType === 'status_transition' || (!event.eventType && (event.timestamp || event.at)));
+                // Chỉ cộng dồn thời gian nếu node hiện tại không phải là node cuối (isTerminal)
+                const timelineTime = lastEvent?.timestamp ?? lastEvent?.at;
+                if (timelineTime && ticket.status !== 'new' && !isCurrentTerminal) {
+                    const ts = timelineTime as { toDate?: () => Date };
+                    const lastDate = ts.toDate ? ts.toDate() : new Date(timelineTime as string | number | Date);
                     const now = new Date();
                     const diffMs = now.getTime() - lastDate.getTime();
-                    if (diffMs > 0) {
+                    if (!isNaN(diffMs) && diffMs > 0) {
                         newDuration += Math.round(diffMs / 60000);
                     }
                 }
             }
 
+            let isOverride = false;
+            if (ticket.staff?.assignedTechnician && caller.uid !== ticket.staff.assignedTechnician) {
+                isOverride = true;
+            }
+
             const updateData: Record<string, unknown> = {
                 status: targetStatus,
                 statusTimeline: FieldValue.arrayUnion({
+                    eventType: isOverride ? 'manager_override' : 'status_transition',
                     status: targetStatus,
-                    at: new Date(),
+                    timestamp: Date.now(),
                     by: caller.uid,
-                    note: technicianNote || null
+                    actorId: caller.uid,
+                    actorName: callerName,
+                    actorRole: caller.role,
+                    fromStatus: ticket.status,
+                    toStatus: targetStatus,
+                    source: source === 'repairs' ? 'repairs' : 'technician',
+                    reason: technicianNote?.trim() || null,
+                    requestId: idempotencyKey || null,
+                    note: technicianNote || null,
+                    isOverride
                 }),
                 durationInMinutes: newDuration,
                 version: (ticket.version || 0) + 1,
@@ -143,7 +191,8 @@ export async function POST(request: NextRequest) {
                     status: 'completed',
                     completedAt: FieldValue.serverTimestamp(),
                     type: 'repair_transition',
-                    referenceId: ticketId
+                    referenceId: ticketId,
+                    actorId: caller.uid
                 });
             }
 

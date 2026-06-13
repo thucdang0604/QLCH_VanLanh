@@ -251,6 +251,8 @@ export interface WorkflowNode {
     allowedNext: string[];
     allowedFeatures?: string[];
     isTerminal?: boolean;
+    /** Legacy field retained for lossless migration; runtime uses allowedNext only. */
+    next?: string;
 }
 
 export interface TrackingGroup {
@@ -261,10 +263,46 @@ export interface TrackingGroup {
     isTerminal?: boolean;
 }
 
+export interface PendingTechnicianTransfer {
+    id: string;
+    fromTechnicianId: string;
+    fromTechnicianName: string;
+    toTechnicianId: string;
+    toTechnicianName: string;
+    requestedBy: string;
+    requestedByName: string;
+    requestedByRole: string;
+    reason: string;
+    source: string;
+    status: 'pending' | 'accepted' | 'rejected' | 'cancelled' | 'superseded';
+    requestedAt: FirestoreDateValue;
+    respondedAt?: FirestoreDateValue;
+    respondedBy?: string;
+    ticketVersion?: number;
+}
+
 export interface StatusTimelineEntry {
     status: string;
-    timestamp: number;
+    timestamp?: number;
+    at?: FirestoreDateValue;
     durationInMinutes?: number;
+    // Audit fields for tracking transition and assignments
+    eventType?: 'status_transition' | 'technician_assigned' | 'transfer_requested' | 'transfer_accepted' | 'transfer_rejected' | 'transfer_cancelled' | 'manager_override';
+    fromStatus?: string;
+    toStatus?: string;
+    actorId?: string;
+    actorName?: string;
+    actorRole?: string;
+    source?: string;
+    reason?: string;
+    requestId?: string;
+    fromTechnicianId?: string;
+    fromTechnicianName?: string;
+    toTechnicianId?: string;
+    toTechnicianName?: string;
+    by?: string;
+    note?: string | null;
+    isOverride?: boolean;
 }
 
 // Checklist kiểm tra đầu vào
@@ -380,9 +418,10 @@ export interface RepairTicket {
     staff: {
         createdBy: string;
         createdByName: string;
-        assignedTechnician: string;
-        assignedTechnicianName: string;
+        assignedTechnician?: string;
+        assignedTechnicianName?: string;
     };
+    pendingTechnicianTransfer?: PendingTechnicianTransfer;
     status: RepairStatus;
     deliveryNote?: string;
     // [WARRANTY] Phân loại phiếu — undefined = 'repair' (backward-compatible)

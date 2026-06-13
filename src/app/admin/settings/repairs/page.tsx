@@ -2,12 +2,18 @@
 
 import { useState, useEffect } from 'react';
 import {
-    Settings, Plus, Trash2, GripVertical, Save, Loader2, ArrowRight, Eye, Shield
+    Settings, Plus, Trash2, GripVertical, Save, Loader2, ArrowRight, Eye, Shield, AlertTriangle
 } from 'lucide-react';
 import Modal from '@/components/admin/Modal';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { WORKFLOW_FEATURES } from '@/lib/workflowFeatures';
+import {
+    normalizeRepairWorkflow,
+    normalizeWarrantyWorkflow,
+    validateTrackingGroups,
+    validateWorkflow,
+} from '@/lib/repairWorkflowConfig';
 
 import type { WorkflowNode, TrackingGroup, WarrantyRule } from '@/lib/types';
 
@@ -25,7 +31,7 @@ import { toastError, toastSuccess } from '@/lib/toast';
 
 const defaultStatuses: WorkflowNode[] = [
     { id: 'cho_tiep_nhan', label: 'Chờ Tiếp nhận', color: 'bg-yellow-100 text-yellow-800', allowedNext: ['dang_kiem_tra', 'out'] },
-    { id: 'dang_kiem_tra', label: 'Đang Kiểm Tra', color: 'bg-blue-100 text-blue-800', allowedNext: ['bao_tinh_trang_va_gia', 'dang_sua_chua', 'done', 'out'] },
+    { id: 'dang_kiem_tra', label: 'Đang Kiểm Tra', color: 'bg-blue-100 text-blue-800', allowedNext: ['bao_tinh_trang_va_gia', 'dang_sua_chua', 'done', 'out'], allowedFeatures: ['requireAssignedTechnician'] },
     { id: 'bao_tinh_trang_va_gia', label: 'Báo Tình Trạng & Giá', color: 'bg-indigo-100 text-indigo-800', allowedNext: ['doi_khach_phan_hoi', 'out'] },
     { id: 'doi_khach_phan_hoi', label: 'Đợi Khách Phản Hồi', color: 'bg-purple-100 text-purple-800', allowedNext: ['tim_linh_kien', 'dang_sua_chua', 'refund', 'out'] },
     { id: 'tim_linh_kien', label: 'Tìm Linh Kiện', color: 'bg-cyan-100 text-cyan-800', allowedNext: ['da_dat_linh_kien', 'refund', 'out'] },
@@ -38,7 +44,7 @@ const defaultStatuses: WorkflowNode[] = [
 
 const defaultWarrantyStatuses: WorkflowNode[] = [
     { id: 'bh_tiep_nhan', label: 'Tiếp nhận BH', color: 'bg-yellow-100 text-yellow-800', allowedNext: ['bh_dang_kiem_tra'], allowedFeatures: ['allowAssignTech'], isTerminal: false },
-    { id: 'bh_dang_kiem_tra', label: 'Đang kiểm tra BH', color: 'bg-blue-100 text-blue-800', allowedNext: ['bh_dang_sua', 'bh_tu_choi'], allowedFeatures: ['requireChecklist'], isTerminal: false },
+    { id: 'bh_dang_kiem_tra', label: 'Đang kiểm tra BH', color: 'bg-blue-100 text-blue-800', allowedNext: ['bh_dang_sua', 'bh_tu_choi'], allowedFeatures: ['requireAssignedTechnician', 'requireChecklist'], isTerminal: false },
     { id: 'bh_dang_sua', label: 'Đang sửa BH', color: 'bg-orange-100 text-orange-800', allowedNext: ['bh_hoan_tat', 'bh_refund'], allowedFeatures: ['allowPartsSelection'], isTerminal: false },
     { id: 'bh_hoan_tat', label: 'Hoàn tất BH', color: 'bg-green-100 text-green-800', allowedNext: [], allowedFeatures: [], isTerminal: true },
     { id: 'bh_tu_choi', label: 'Từ chối BH', color: 'bg-gray-100 text-gray-800', allowedNext: [], allowedFeatures: [], isTerminal: true },
@@ -67,6 +73,7 @@ export default function RepairStatusSettingsPage() {
     // UI states
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [hasLegacyStatuses, setHasLegacyStatuses] = useState(false);
 
     // Status Modal
     const [showAddModal, setShowAddModal] = useState(false);
@@ -88,8 +95,9 @@ export default function RepairStatusSettingsPage() {
                     const d = snap.data();
                     const rs = d.repairStatuses ?? d.statuses ?? defaultStatuses;
                     const ws = d.warrantyStatuses ?? defaultWarrantyStatuses;
-                    setRepairStatuses(rs);
-                    setWarrantyStatuses(ws);
+                    setRepairStatuses(normalizeRepairWorkflow(rs));
+                    setWarrantyStatuses(normalizeWarrantyWorkflow(ws));
+                    setHasLegacyStatuses(Array.isArray(d.statuses));
                     // Legacy migration: sort generic arrays to trackingGroups ensuring order
                     if (d.trackingGroups) {
                         setTrackingGroups(d.trackingGroups.sort((a: TrackingGroup, b: TrackingGroup) => a.order - b.order));
@@ -111,18 +119,34 @@ export default function RepairStatusSettingsPage() {
         try {
             // Guarantee order is fixed on save
             const orderedGroups = trackingGroups.map((g, i) => ({ ...g, order: i }));
+            const normalizedRepairStatuses = normalizeRepairWorkflow(repairStatuses);
+            const normalizedWarrantyStatuses = normalizeWarrantyWorkflow(warrantyStatuses);
+            const validationErrors = [
+                ...validateWorkflow(normalizedRepairStatuses, 'Workflow sửa chữa'),
+                ...validateWorkflow(normalizedWarrantyStatuses, 'Workflow bảo hành'),
+                ...validateTrackingGroups(orderedGroups, normalizedRepairStatuses),
+            ];
+
+            if (validationErrors.length > 0) {
+                toastError(validationErrors[0]);
+                return;
+            }
 
             await setDoc(doc(db, 'system_config', 'repairs'), {
-                repairStatuses,
-                warrantyStatuses,
+                repairStatuses: normalizedRepairStatuses,
+                warrantyStatuses: normalizedWarrantyStatuses,
                 trackingGroups: orderedGroups,
                 warrantyRules,
                 warrantyNote,
+                workflowSchemaVersion: 2,
+                workflowFeatureSemantics: 'exit-gates-v1',
                 updatedAt: serverTimestamp(),
             }, { merge: true });
 
+            setRepairStatuses(normalizedRepairStatuses);
+            setWarrantyStatuses(normalizedWarrantyStatuses);
             setTrackingGroups(orderedGroups);
-            toastSuccess('Đã lưu cấu hình trạng thái & theo dõi!');
+            toastSuccess('Đã chuẩn hóa và lưu cấu hình workflow!');
         } catch (err) {
             console.error(err);
             toastError('Lỗi khi lưu!');
@@ -283,6 +307,16 @@ export default function RepairStatusSettingsPage() {
                     Lưu toàn bộ thay đổi
                 </button>
             </div>
+
+            {hasLegacyStatuses && (
+                <div className="flex items-start gap-3 border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    <AlertTriangle size={18} className="mt-0.5 shrink-0" />
+                    <div>
+                        <p className="font-semibold">Phát hiện trường legacy `statuses` trong Firestore.</p>
+                        <p className="mt-0.5 text-xs">Ứng dụng chỉ sử dụng `repairStatuses`. Dữ liệu legacy vẫn được giữ nguyên và không bị xóa khi lưu.</p>
+                    </div>
+                </div>
+            )}
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
 

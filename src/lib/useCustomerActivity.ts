@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { FirestoreDateValue, Order, RepairTicket, WorkflowNode } from '@/lib/types';
+import { normalizeRepairWorkflow, normalizeWarrantyWorkflow } from '@/lib/repairWorkflowConfig';
 
 export interface CustomerOrderActivity {
     id: string;
@@ -166,8 +167,8 @@ export function useCustomerActivity({
         const unsubStatuses = onSnapshot(doc(db, 'system_config', 'repairs'), snapshot => {
             statusesLoaded = true;
             const data = snapshot.data();
-            setRepairStatuses((data?.repairStatuses || data?.statuses || []) as WorkflowNode[]);
-            setWarrantyStatuses((data?.warrantyStatuses || []) as WorkflowNode[]);
+            setRepairStatuses(normalizeRepairWorkflow(data?.repairStatuses as WorkflowNode[] | undefined));
+            setWarrantyStatuses(normalizeWarrantyWorkflow(data?.warrantyStatuses as WorkflowNode[] | undefined));
             markLoaded();
         }, () => {
             statusesLoaded = true;

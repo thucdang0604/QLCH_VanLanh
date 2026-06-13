@@ -128,6 +128,9 @@ export default function POSPage() {
     const [paymentMethod, setPaymentMethod] = useState('cash');
     const [discount, setDiscount] = useState(0);
     const [deposit, setDeposit] = useState(0);
+    const [voucherCode, setVoucherCode] = useState('');
+    const [voucherStatus, setVoucherStatus] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
+    const [appliedVoucher, setAppliedVoucher] = useState<{ code: string; type: string; value: number; maxDiscount?: number | null } | null>(null);
     const chatPrefillApplied = useRef(false);
 
     // Checkout
@@ -556,9 +559,43 @@ export default function POSPage() {
     };
 
     const subtotal = cart.reduce((sum, c) => sum + c.sellingPrice * c.quantity, 0);
-    const total = Math.max(0, subtotal - discount);
+
+    // Calculate voucher discount automatically based on subtotal
+    const voucherDiscountAmount = appliedVoucher ? (
+        appliedVoucher.type === 'fixed'
+            ? Math.min(appliedVoucher.value, subtotal)
+            : Math.min(Math.round(subtotal * appliedVoucher.value / 100), appliedVoucher.maxDiscount || Infinity)
+    ) : 0;
+
+    const total = Math.max(0, subtotal - discount - voucherDiscountAmount);
 
     const formatPrice = (n: number) => n.toLocaleString('vi-VN') + 'đ';
+
+    const handleApplyVoucher = async () => {
+        if (!voucherCode.trim()) {
+            setVoucherStatus({ message: 'Vui lòng nhập mã Voucher', type: 'error' });
+            return;
+        }
+        setVoucherStatus({ message: 'Đang kiểm tra...', type: 'success' });
+        try {
+            const res = await fetch('/api/vouchers/validate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code: voucherCode.trim(), subtotal, phone: customerPhone }),
+            });
+            const data = await res.json();
+            if (data.valid) {
+                setAppliedVoucher(data);
+                setVoucherStatus({ message: `Đã áp dụng giảm ${data.type === 'fixed' ? data.value.toLocaleString('vi-VN') + 'đ' : data.value + '%'}`, type: 'success' });
+            } else {
+                setAppliedVoucher(null);
+                setVoucherStatus({ message: data.error || 'Voucher không hợp lệ', type: 'error' });
+            }
+        } catch (error) {
+            console.error(error);
+            setVoucherStatus({ message: 'Lỗi kiểm tra voucher', type: 'error' });
+        }
+    };
 
     // ── Checkout ──
     const handleCheckout = async () => {
@@ -616,10 +653,11 @@ export default function POSPage() {
                     imeis: c.imeis
                 })),
                 total_amount: total,
-                discount_amount: discount,
+                discount_amount: discount + voucherDiscountAmount,
                 subtotal_amount: subtotal,
                 deposit_amount: deposit,
                 payment_method: paymentMethod === 'cash' ? 'CASH' : paymentMethod === 'bank' ? 'BANK' : paymentMethod === 'installment' ? 'INSTALLMENT' : 'MOMO',
+                ...(appliedVoucher ? { voucherCode: appliedVoucher.code } : {}),
             };
 
             const auth = await getAuthInstance();
@@ -647,6 +685,9 @@ export default function POSPage() {
             setCustomerPhone('');
             setDiscount(0);
             setDeposit(0);
+            setVoucherCode('');
+            setAppliedVoucher(null);
+            setVoucherStatus(null);
         } catch (err: unknown) {
             console.error(err);
             toastError(err instanceof Error ? err.message : 'Lỗi khi tạo đơn hàng!');
@@ -882,6 +923,41 @@ export default function POSPage() {
                     <CurrencyInput value={discount || ''} onChange={v => setDiscount(v)}
                         placeholder="0" className="flex-1 px-3 py-1.5 border rounded-lg text-right text-sm" />
                 </div>
+
+                {/* Voucher section */}
+                <div className="space-y-1">
+                    <div className="flex items-center gap-2 text-sm">
+                        <span className="text-gray-500">Voucher:</span>
+                        <div className="flex-1 relative flex gap-1">
+                            <input
+                                type="text"
+                                placeholder="Nhập mã giảm giá"
+                                value={voucherCode}
+                                onChange={e => setVoucherCode(e.target.value.toUpperCase())}
+                                className="w-full px-3 py-1.5 border rounded-lg text-sm uppercase"
+                            />
+                            <button
+                                onClick={handleApplyVoucher}
+                                className="px-3 py-1.5 bg-blue-50 text-blue-600 font-semibold rounded-lg hover:bg-blue-100 text-sm whitespace-nowrap"
+                            >
+                                Áp dụng
+                            </button>
+                        </div>
+                    </div>
+                    {voucherStatus && (
+                        <div className={`text-xs text-right pr-1 ${voucherStatus.type === 'success' ? 'text-green-600' : 'text-red-500'}`}>
+                            {voucherStatus.message}
+                            {appliedVoucher && (
+                                <button
+                                    onClick={() => { setAppliedVoucher(null); setVoucherCode(''); setVoucherStatus(null); }}
+                                    className="ml-2 text-red-500 underline"
+                                >
+                                    Bỏ
+                                </button>
+                            )}
+                        </div>
+                    )}
+                </div>
                 <div className="flex items-center gap-2 text-sm">
                     <span className="text-gray-500">Khách cọc:</span>
                     <CurrencyInput value={deposit || ''} onChange={v => setDeposit(v)}
@@ -894,8 +970,14 @@ export default function POSPage() {
                     </div>
                     {discount > 0 && (
                         <div className="flex justify-between text-green-600">
-                            <span>Giảm giá</span>
+                            <span>Giảm giá NV</span>
                             <span>-{formatPrice(discount)}</span>
+                        </div>
+                    )}
+                    {voucherDiscountAmount > 0 && (
+                        <div className="flex justify-between text-blue-600 font-medium">
+                            <span>Voucher giảm giá</span>
+                            <span>-{formatPrice(voucherDiscountAmount)}</span>
                         </div>
                     )}
                     <div className="flex justify-between font-bold text-lg text-orange-600 pt-1 border-t">
