@@ -6,7 +6,7 @@ import type { RepairTicket } from '@/lib/types';
 import { calculateAndSaveCommissionsServer } from '@/lib/commissionCalcServer';
 import { REPAIR_STATUS, isSelectedRepairPart, isWarrantyEligibleRepairPart } from '@/lib/repairStatus';
 import { getConfiguredWorkflow } from '@/lib/repairWorkflowConfig';
-import { fetchFifoLogsForDeduction, executeFifoDeductionsWrites } from '@/lib/inventoryFifo';
+import { fetchFifoLogsForDeduction, executeFifoDeductionsWrites, type FifoDeductionResult } from '@/lib/inventoryFifo';
 
 const LEGACY_TERMINAL_STATUSES = [REPAIR_STATUS.DONE, REPAIR_STATUS.OUT, REPAIR_STATUS.REFUND, 'bh_hoan_tat', 'bh_tu_choi', 'bh_refund'];
 
@@ -110,8 +110,8 @@ export async function POST(request: NextRequest) {
 
             const isWarranty = targetStatus.startsWith('bh_');
 
-            let fifoResultsMap = new Map<string, any[]>();
-            let fifoLogsDataMap = new Map<string, any[]>();
+            let fifoResultsMap = new Map<string, FifoDeductionResult[]>();
+            let fifoLogsDataMap: Awaited<ReturnType<typeof fetchFifoLogsForDeduction>> = new Map();
             let fifoDeductors: { productId: string, quantityToDeduct: number }[] = [];
             
             // --- READ PHASE ---

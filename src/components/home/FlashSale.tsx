@@ -5,6 +5,7 @@ import { Zap } from 'lucide-react';
 import { collection, query, where, orderBy, limit, getDocs, type QueryConstraint, type DocumentData } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import ServiceCard from './ServiceCard';
+import { filterFlashSaleProducts } from '@/lib/flashSale';
 
 // Tab cấu hình: label hiển thị vs giá trị brand trong DB
 const brandTabs = [
@@ -36,29 +37,9 @@ function SkeletonCard() {
 export default function FlashSale({ ssrLatestProducts = [] }: { ssrLatestProducts?: Record<string, unknown>[] }) {
     const [activeBrand, setActiveBrand] = useState<string>('Tất cả');
     
-    // Helper function to filter flash sale items
-    const filterFlashSaleItems = useCallback((items: Record<string, unknown>[]) => {
-        return items.filter((p) => {
-            const item = p as Partial<{
-                isFlashSale: boolean;
-                price_promo: number;
-                price_original: number;
-                price: number;
-            }>;
-            if (item.isFlashSale) return true;
-            if (item.price_promo && item.price_original) {
-                return ((item.price_original - item.price_promo) / item.price_original) * 100 >= 10;
-            }
-            if (item.price_promo && item.price) {
-                return ((item.price - item.price_promo) / item.price) * 100 >= 10;
-            }
-            return true;
-        });
-    }, []);
-
     // Initialize with SSR data if available
     const [products, setProducts] = useState<(DocumentData & { id: string })[]>(
-        ssrLatestProducts.length > 0 ? filterFlashSaleItems(ssrLatestProducts) as (DocumentData & { id: string })[] : []
+        ssrLatestProducts.length > 0 ? filterFlashSaleProducts(ssrLatestProducts) as (DocumentData & { id: string })[] : []
     );
     const [loading, setLoading] = useState(ssrLatestProducts.length === 0);
 
@@ -66,7 +47,7 @@ export default function FlashSale({ ssrLatestProducts = [] }: { ssrLatestProduct
     const fetchProducts = useCallback(async (brand: string) => {
         // Use SSR data for 'Tất cả' on initial load or subsequent clicks if it exists
         if (brand === 'Tất cả' && ssrLatestProducts.length > 0) {
-            setProducts(filterFlashSaleItems(ssrLatestProducts) as (DocumentData & { id: string })[]);
+            setProducts(filterFlashSaleProducts(ssrLatestProducts) as (DocumentData & { id: string })[]);
             setLoading(false);
             return;
         }
@@ -87,13 +68,13 @@ export default function FlashSale({ ssrLatestProducts = [] }: { ssrLatestProduct
             const snapshot = await getDocs(q);
             
             const items = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-            setProducts(filterFlashSaleItems(items) as (DocumentData & { id: string })[]);
+            setProducts(filterFlashSaleProducts(items) as (DocumentData & { id: string })[]);
         } catch (err) {
             console.error('FlashSale fetch error:', err);
         } finally {
             setLoading(false);
         }
-    }, [ssrLatestProducts, filterFlashSaleItems]);
+    }, [ssrLatestProducts]);
 
     useEffect(() => {
         let isMounted = true;
@@ -172,9 +153,9 @@ export default function FlashSale({ ssrLatestProducts = [] }: { ssrLatestProduct
 
                     {/* View All */}
                     <div className="text-center mt-6">
-                        <button className="px-8 py-2.5 border-2 border-dark text-dark font-semibold rounded-lg hover:bg-dark hover:text-white transition-all">
+                        <a href="/flash-sale" className="inline-flex px-8 py-2.5 border-2 border-dark text-dark font-semibold rounded-lg hover:bg-dark hover:text-white transition-all">
                             Xem tất cả Flash Sale
-                        </button>
+                        </a>
                     </div>
                 </div>
             </div>

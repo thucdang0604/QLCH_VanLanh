@@ -26,6 +26,6 @@
 
 - [x] Chạy ESLint cho các file đã sửa.
 - [x] Vá `next.config.mjs`: CSP `img-src` thêm `api.qrserver.com` + `Permissions-Policy` đổi `camera=(self)`.
-- [ ] Chạy Next build.
-- [ ] Typecheck toàn repo đang bị chặn bởi lỗi hiện hữu ngoài phạm vi POS: `page.client.tsx`, product/service detail, reviews page, `PricingSection`.
+- [x] Chạy Next build. (Đã pass lại trên code `master` ngày 13.06.2026.)
+- [x] Typecheck toàn repo. (Đã pass lại trên code `master` ngày 13.06.2026; các blocker cũ không còn.)
 - [ ] Kiểm thử thật trên Chrome/Edge HTTPS với camera điện thoại hoặc máy quét QR dạng keyboard.

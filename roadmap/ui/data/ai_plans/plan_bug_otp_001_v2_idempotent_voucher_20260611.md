@@ -2,7 +2,7 @@
 
 **ID:** `plan-bug-otp-001-v2-idempotent-voucher-20260611`
 **Date:** 11.06.2026
-**Status:** implemented-local
+**Status:** implemented-awaiting-e2e
 **Scope:** `src/components/MissionsWidget.tsx`, `src/app/api/bounty/*`, `src/app/api/vouchers/validate/route.ts`, `src/app/api/checkout/route.ts`, `customers/{phone}`, `vouchers`
 
 ## Tình trạng hiện tại

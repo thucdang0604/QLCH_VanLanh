@@ -56,12 +56,13 @@ graph TD
 
 ## BUG-HARDCODE-001: Hardcode cleanup cho secret, storefront fallback và business identity
 
-- **Status:** open
+- **Status:** fixed
 - **Severity:** high
 - **Plan:** `roadmap/ui/data/ai_plans/plan_hardcode_cleanup_20260607.md`
 - **Task:** `roadmap/ui/data/ai_plans/task_hardcode_cleanup_20260607.md`
 - **Scope:** Google Maps Embed key trong trang giới thiệu, fallback demo ở homepage, brand/hotline/domain/address rải rác trong customer UI/SEO/AI prompt, workflow status string ở repair/POS/inventory và demo/template admin.
 - **Guardrail:** Storefront không hiển thị dữ liệu giả khi thiếu Firestore/config; secret/key không nằm thẳng trong page source; quyền admin không được suy luận bằng email string.
+- **Verification:** Đã merge vào `master` qua PR #8; `pnpm lint`, `pnpm typecheck`, `pnpm build` và storefront browser QA pass. Smoke admin có dữ liệu thật được giữ thành residual verification, không còn là blocker của bản sửa code.
 
 ## BUG-CONFIG-SESSION-001: Lưu cấu hình giao diện làm admin bị văng đăng nhập
 
@@ -121,10 +122,11 @@ graph TD
 
 ## FEATURE-GLOBAL-SEARCH-001: Tìm kiếm toàn cục & Quét QR
 
-- **Status:** in-progress
+- **Status:** completed
 - **Branch:** `feature/global-search-qr`
 - **Description:** Xây dựng tính năng tìm kiếm toàn cục (Global Search) trên Admin Header, cho phép tìm kiếm xuyên suốt các collection: Sản phẩm, Dịch vụ, Đơn bán hàng (Orders) và Phiếu sửa chữa (Repair Tickets). Đặc biệt tích hợp tính năng Quét mã QR bằng Camera (sử dụng thư viện `@zxing/browser`) để tra cứu siêu tốc các mã đơn in trên hóa đơn/biên nhận khi khách hàng mang đến.
 - **Files:** `src/components/admin/GlobalSearch.tsx`, `src/app/admin/layout.tsx`, `src/app/api/search/route.ts`
+- **Verification:** Commit tính năng đã nằm trong `master`; build/typecheck pass. Kiểm thử camera/thiết bị thật tiếp tục được theo dõi trong nhóm QR hardware validation.
 
 ## BUG-OTP-001: Lỗi OTP SMS không gửi được cho số thật (MALFORMED / INVALID_APP_CREDENTIAL / -39)
 

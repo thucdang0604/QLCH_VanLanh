@@ -1,7 +1,7 @@
 # Customer Web QA
 
 ## BUG-WEB-CHAT-001: Bot tre 30 giay va che giau loi Gemini 403
-- **Status:** open
+- **Status:** fixed
 - **Severity:** high
 - **Module:** CustomerWeb
 - **Files:** `src/components/ChatWidget.tsx`, `src/lib/realtimedb.ts`, `src/app/api/ai/route.ts`, `src/lib/gemini.ts`
@@ -15,8 +15,11 @@ Kiem thu production local ngay 2026-06-13 cho thay tin nhan duoc gui thanh cong 
 ### Solution
 Bo khoang cho hardcode hoac chuyen thanh cau hinh ngan; hien typing indicator ngay sau khi gui; de tang AI service tra ket qua co cau truc (`ok`, `providerStatus`, `retryable`, `message`); log correlation ID phia server; UI hien thong bao minh bach va chuyen sang nhan vien khi provider loi.
 
+### Verification
+2026-06-13: Da bo delay 30 giay, typing indicator bat ngay, API tra `503` kem `providerStatus=forbidden`, `retryable=false` va correlation ID khi Gemini bi chan. Tin nhan van duoc luu, UI hien fallback chuyen nhan vien. Quyen truy cap Gemini project van la cau hinh nha cung cap, khong con bi che giau thanh ket qua thanh cong.
+
 ## BUG-WEB-REVIEWS-001: Google Reviews bi chan va link danh gia dan den 404
-- **Status:** open
+- **Status:** in_progress
 - **Severity:** high
 - **Module:** CustomerWeb
 - **Files:** `src/app/api/reviews/google/route.ts`, `src/components/home/GoogleReviewsSection.tsx`, `src/components/home/FloatingReviews.tsx`
@@ -27,8 +30,11 @@ Google Places API tra `403 PERMISSION_DENIED: Requests from referer <empty> are 
 ### Solution
 Tach API key server-side cho Places API, gioi han theo API thay vi HTTP referrer; sua routing `/reviews`; loai du lieu test khoi production va them empty/error state ro rang.
 
+### Verification
+2026-06-13: `/reviews` tra 200; bo redirect sai va them route tuong thich `/info/reviews` cho browser da cache redirect 308 cu. Review test duoc loc khoi storefront; API tra `503` kem `providerStatus=provider_error` thay vi gia thanh cong. Con blocker ngoai code: key hien tai van bi Google Places tu choi `403 Requests from referer <empty> are blocked`; can tao `GOOGLE_PLACES_API_KEY` server-side va gioi han theo Places API.
+
 ## BUG-WEB-NAV-001: Dieu huong customer co link 404 va taxonomy khong nhat quan
-- **Status:** open
+- **Status:** fixed
 - **Severity:** high
 - **Module:** CustomerWeb
 - **Files:** `src/components/layout/MobileBottomNav.tsx`, `src/components/layout/Footer.tsx`, `src/components/home/SuggestedSection.tsx`, `src/app/(customer)/category/[...slug]/page.tsx`
@@ -42,8 +48,11 @@ Tach API key server-side cho Places API, gioi han theo API thay vi HTTP referrer
 ### Solution
 Chon mot route canonical cho moi taxonomy node, tao redirect tu alias cu, bo `/category/all` neu khong duoc resolver ho tro hoac them resolver ro rang, va them route/contact page thuc su cho `/lien-he`.
 
+### Verification
+2026-06-13: Browser production local pass `/category/all`, `/lien-he`; `/category/sua-iphone` chuyen ve `/category/sua-chua-dien-thoai/sua-iphone`. Resolver alias khong con tra cung mot tap du lieu cho cac danh muc khac nhau.
+
 ## BUG-WEB-CATALOG-001: Du lieu homepage va trang danh sach mau thuan
-- **Status:** open
+- **Status:** fixed
 - **Severity:** medium
 - **Module:** CustomerWeb
 - **Files:** `src/components/home/FlashSaleSection.tsx`, `src/app/(customer)/flash-sale/page.tsx`, `src/components/home/CategorySection.tsx`
@@ -54,8 +63,11 @@ Homepage hien 2 san pham Flash Sale nhung `/flash-sale` bao chua co san pham. Nh
 ### Solution
 Dung chung mot query/selector cho homepage va trang Flash Sale; chuan hoa count label theo loai entity de khong noi chuoi `dich vu` hai lan.
 
+### Verification
+2026-06-13: Homepage va `/flash-sale` dung chung `filterFlashSaleProducts`; test selector pass. Count label khong con tu dong noi them `dich vu` vao chuoi da cau hinh.
+
 ## BUG-WEB-MOBILE-001: Trang chi tiet dich vu bi tran ngang mobile
-- **Status:** open
+- **Status:** fixed
 - **Severity:** medium
 - **Module:** CustomerWeb
 - **Files:** `src/app/(customer)/service/[id]/ServiceDetailClient.tsx`
@@ -66,8 +78,11 @@ Tai viewport 390 px, `/service/thay-main` co `scrollWidth=430`. Badge `Tiet kiem
 ### Solution
 Cho cum gia/badge wrap, gioi han max-width, va kiem thu lai o 320/375/390/430 px.
 
+### Verification
+2026-06-13: Browser mobile `/service/thay-main` co `scrollWidth=375`, `clientWidth=375`; cum gia va badge wrap, khong con cuon ngang.
+
 ## BUG-WEB-OTP-TEST-001: So test +1 khong hop le truoc khi den buoc SMS region
-- **Status:** open
+- **Status:** fixed
 - **Severity:** low
 - **Module:** CustomerWeb
 - **Files:** Firebase Authentication test phone configuration, `src/lib/phone.ts`, `src/components/MissionsWidget.tsx`
@@ -90,9 +105,13 @@ Console canh bao Next Image quality 80 chua khai bao, logo thay doi mot chieu kh
 ### Solution
 Chuan hoa image config/dimensions/LCP priority; render shell/skeleton cho contact widgets ngay lap tuc va lazy-load chi phan nang.
 
+### Verification
+2026-06-13: `images.qualities` da khai bao 60/75/80; Footer, ChatWidget va MobileBottomNav duoc render trong customer shell thay vi cho dynamic mount. Browser snapshot mobile co navigation va nut lien he ngay trong DOM ban dau; production build pass.
+
 ## QA-20260613: Trang va luong da kiem tra
 - Viewport mobile: 390 x 844.
 - Pass render, khong tran ngang: `/`, `/cart`, `/checkout`, `/dao-tao-hoc-vien`, cac trang `/info/*`, `/rate`, `/search`, `/tin-tuc`, bai viet chi tiet, `/tracking`, product detail.
-- Fail/chua dung nghiep vu: `/reviews`, `/lien-he`, `/category/all`, category canonical/alias, `/flash-sale`, `/service/thay-main`, AI chat, Google Reviews.
+- Da sua va Browser QA pass: `/reviews`, `/info/reviews` legacy, `/lien-he`, `/category/all`, category canonical/alias, `/flash-sale`, `/service/thay-main`, AI chat error handling.
+- Con blocker ngoai code: Gemini project bi deny access; Google Places key bi chan do referrer restriction; fixture OTP +1 sai cu phap va voucher E2E can nguoi dung hoan thanh reCAPTCHA.
 - Chat test da tao voi ten `Khach Test Bot`, so `+84 366 666 667`; tin nhan da gui va nhan fallback sau 30 giay.
 - Voucher valid da dien san nhung con cho nguoi dung hoan thanh reCAPTCHA v2 truoc khi gui OTP `123456`.

@@ -1,5 +1,7 @@
 # Workflow sửa chữa, phân công KTV và chuyển giao có xác nhận
 
+**Status:** merged-master-awaiting-role-qa (PR #9)
+
 ## 1. Mục tiêu
 
 Chuẩn hóa ranh giới nghiệp vụ giữa trang **Sửa chữa** của nhân viên quản lý/Sale và trang **KTV**, đồng thời tối ưu toàn bộ thao tác theo hướng mobile-first.

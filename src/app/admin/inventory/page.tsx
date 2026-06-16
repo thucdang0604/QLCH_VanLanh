@@ -292,6 +292,7 @@ export default function InventoryPage() {
                                 {isExpanded ? <ChevronDown size={18} className="text-gray-400" /> : <ChevronRight size={18} className="text-gray-400" />}
                                 <div className="flex-1 min-w-0">
                                     <p className="font-semibold text-gray-800 truncate">
+                                        {receipt.lotCode ? <span className="text-orange-600 font-bold mr-2">[{receipt.lotCode}]</span> : null}
                                         {receipt.supplier || 'Không có NCC'} — {receipt.items.length} SP
                                     </p>
                                     <p className="text-xs text-gray-500">

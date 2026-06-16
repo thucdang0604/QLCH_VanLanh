@@ -1,5 +1,7 @@
 # Social Missions (Bounty Program) & Voucher System
 
+**Status:** completed; OTP/idempotency production E2E được theo dõi trong plan follow-up riêng ngày 11.06.2026.
+
 Tính năng tăng cường tương tác (Growth Hacking) bằng cách tặng Voucher cho khách hàng khi họ hoàn thành các nhiệm vụ mạng xã hội (VD: Follow Fanpage, Tiktok, v.v). Hệ thống xác thực bằng phương pháp "Honor System" (Click Tracking).
 
 ---

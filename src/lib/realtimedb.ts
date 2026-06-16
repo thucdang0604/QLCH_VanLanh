@@ -172,7 +172,15 @@ export async function updateRoomInfo(roomId: string, updates: Partial<ChatRoomIn
     await update(infoRef, updates);
 }
 
-export async function handleAIAutoReply(roomId: string, messages: ChatMessage[], newText: string): Promise<void> {
+export type AIAutoReplyResult = {
+    success: boolean;
+    content?: string;
+    providerStatus?: string;
+    retryable?: boolean;
+    correlationId?: string;
+};
+
+export async function handleAIAutoReply(roomId: string, messages: ChatMessage[], newText: string): Promise<AIAutoReplyResult> {
     try {
         const rtdb = await getRtdbInstance();
         const { ref, get } = await import('firebase/database');
@@ -180,7 +188,7 @@ export async function handleAIAutoReply(roomId: string, messages: ChatMessage[],
         const infoRef = ref(rtdb, `chats/${roomId}/info`);
         const botActiveSnap = await get(infoRef);
         if (botActiveSnap.exists() && botActiveSnap.val().botActive === false) {
-            return; // Bot is explicitly disabled
+            return { success: true }; // Bot is explicitly disabled
         }
 
         const rawHistory: GeminiHistoryItem[] = messages.slice(-5).map((m) => ({
@@ -213,11 +221,13 @@ export async function handleAIAutoReply(roomId: string, messages: ChatMessage[],
             }),
         });
         
-        const aiData = await aiRes.json();
+        const aiData = await aiRes.json() as AIAutoReplyResult;
         if (!aiData.success) {
-            console.error('AI API failed to process request');
+            console.error('AI API failed to process request', aiData.correlationId || 'no-correlation-id');
         }
+        return aiData;
     } catch (error) {
         console.error('Error handling AI auto reply:', error);
+        return { success: false, providerStatus: 'network_error', retryable: true };
     }
 }

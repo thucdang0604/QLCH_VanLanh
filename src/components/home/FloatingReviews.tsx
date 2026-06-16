@@ -6,6 +6,7 @@ import { Star, MessageSquareQuote, X } from 'lucide-react';
 import { collection, query, where, getDocs, limit } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Review } from '@/lib/types';
+import { isPublicReview } from '@/lib/reviewVisibility';
 
 export default function FloatingReviews() {
     const [reviews, setReviews] = useState<Review[]>([]);
@@ -31,7 +32,8 @@ export default function FloatingReviews() {
                 const snapshot = await getDocs(q);
                 const data: Review[] = [];
                 snapshot.forEach(doc => {
-                    data.push({ id: doc.id, ...doc.data() } as Review);
+                    const review = { id: doc.id, ...doc.data() } as Review;
+                    if (isPublicReview(review)) data.push(review);
                 });
 
                 // Sort by date manually if we don't have composite index for rating + createdAt

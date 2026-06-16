@@ -8,14 +8,14 @@
 - src/components/admin/POSCart.tsx (Giỏ hàng POS)
 
 ### ✅ Feature POS-QR-001: Quét QR/mã sản phẩm tại POS
-- **Status:** implemented-local
+- **Status:** implemented-awaiting-device-validation
 - **Date:** 2026-05-30
 - **Files:** `src/app/admin/pos/page.tsx`, `src/app/admin/products/page.tsx`, `src/app/admin/parts/page.tsx`, `src/components/admin/ProductQrLabelModal.tsx`, `src/lib/productCodes.ts`
 - **Summary:** Sản phẩm/phụ kiện/linh kiện dùng chung mã `sku`/`barcode`/`productCode`; admin in tem QR; POS thêm vào giỏ bằng máy quét dạng bàn phím, camera `BarcodeDetector`, hoặc nhập mã tay.
 - **Guardrail:** Quét QR chỉ thay thao tác chọn hàng. Checkout vẫn chạy `/api/pos/checkout` để validate stock/held và ghi đơn.
 
 ### ✅ Feature POS-QR-002: Tối ưu in tem QR/barcode vừa giấy thực tế
-- **Status:** implemented-local
+- **Status:** implemented-awaiting-hardware-validation
 - **Date:** 2026-06-07
 - **Branch:** `codex/optimize-qr-barcode-label-printing`
 - **Files:** `src/components/admin/ProductQrLabelModal.tsx`, `roadmap/ui/data/ai_plans/plan_qr_barcode_label_print_fit.md`, `roadmap/ui/data/ai_plans/task_qr_barcode_label_print_fit.md`, `roadmap/ui/data/ai_plans/walkthrough_qr_barcode_label_print_fit.md`
@@ -24,7 +24,7 @@
 - **Manual check còn lại:** In thử trên đúng máy/giấy của cửa hàng và scan lại bằng máy quét/camera POS.
 
 ### ✅ Feature POS-VOU-001: Áp dụng Voucher (Bounty/Discount) tại quầy POS
-- **Status:** implemented-local
+- **Status:** merged-master-awaiting-e2e
 - **Date:** 2026-06-13
 - **Files:** `src/app/admin/pos/page.tsx`, `src/app/api/pos/checkout/route.ts`
 - **Summary:** Cho phép thu ngân nhập mã giảm giá (voucher) hoặc mã thưởng (bounty) tại màn hình POS. Hệ thống gọi `/api/vouchers/validate` để kiểm tra độ hợp lệ. Backend checkout (`pos/checkout`) tiếp nhận `voucherCode`, kiểm tra lại trong Transaction, trừ số lượng lượt dùng (`usedCount`), lưu vết voucher vào đơn hàng và cập nhật nhiệm vụ nhận thưởng (bounty) cho hồ sơ khách hàng.

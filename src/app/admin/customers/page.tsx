@@ -6,29 +6,12 @@ import PaginationBar from '@/components/admin/PaginationBar';
 import { Search, Users, Loader2, Star, TrendingUp, Plus, Download, Filter } from 'lucide-react';
 import { collection, query, orderBy, onSnapshot, limit, startAfter, getDocs, DocumentSnapshot, getDoc, doc, setDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import CustomerDetailDrawer, { type CustomerDetailRecord } from '@/components/admin/customers/CustomerDetailDrawer';
+import CustomerDetailDrawer from '@/components/admin/customers/CustomerDetailDrawer';
 import CustomerFormModal, { CustomerFormData } from '@/components/admin/customers/CustomerFormModal';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 import { TierConfig } from '@/lib/customerTiers';
-
-interface Customer extends CustomerDetailRecord {
-    id: string; // phone
-    phone: string;
-    name: string;
-    type?: 'retail' | 'wholesale';
-    totalSpent?: number;
-    totalOrders?: number;
-    totalRepairs?: number;
-    lastOrderDate?: unknown;
-    lastVisit?: unknown;
-    createdAt?: unknown;
-    updatedAt?: unknown;
-    tags?: string[];
-    email?: string;
-    address?: string;
-    note?: string;
-}
+import type { Customer } from '@/lib/types';
 
 const formatPrice = (price: number) => new Intl.NumberFormat('vi-VN').format(price) + 'đ';
 const formatDate = (ts: unknown) => {
@@ -43,6 +26,7 @@ export default function CustomersPage() {
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
     const [typeFilter, setTypeFilter] = useState('');
+    const [hasDebtFilter, setHasDebtFilter] = useState(false);
     const [isSearchingDB, setIsSearchingDB] = useState(false);
     
     // Drawers & Modals
@@ -144,7 +128,8 @@ export default function CustomersPage() {
             (c.name || '').toLowerCase().includes(q) ||
             (c.tags || []).some(t => t.toLowerCase().includes(q));
         const matchesType = !typeFilter || c.type === typeFilter;
-        return matchesSearch && matchesType;
+        const matchesDebt = !hasDebtFilter || (c.totalDebt && c.totalDebt > 0);
+        return matchesSearch && matchesType && matchesDebt;
     });
 
     const { paginatedData, currentPage, totalPages, pageSize, totalFiltered, setPage, setPageSize, resetPage } = useClientPagination(filteredCustomers, 20);
@@ -345,6 +330,12 @@ export default function CustomersPage() {
                     <option value="retail">Khách lẻ</option>
                     <option value="wholesale">Khách sỉ</option>
                 </select>
+                <button
+                    onClick={() => setHasDebtFilter(!hasDebtFilter)}
+                    className={`h-11 px-4 rounded-lg font-medium transition-colors border whitespace-nowrap flex items-center justify-center ${hasDebtFilter ? 'bg-red-50 text-red-600 border-red-200' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                >
+                    Khách có nợ {hasDebtFilter ? '✅' : ''}
+                </button>
             </div>
 
             {/* Customers Table */}
@@ -357,6 +348,7 @@ export default function CustomersPage() {
                                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Loại & Hạng</th>
                                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Thông tin mở rộng</th>
                                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Giao dịch</th>
+                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Công nợ</th>
                                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Hành động</th>
                             </tr>
                         </thead>
@@ -418,6 +410,15 @@ export default function CustomersPage() {
                                             <span>{customer.totalRepairs || 0} Sửa chữa</span>
                                         </div>
                                         <p className="text-[10px] text-gray-400 mt-1">Gần nhất: {formatDate(customer.lastOrderDate || customer.lastVisit)}</p>
+                                    </td>
+                                    <td className="px-6 py-4 align-top">
+                                        {customer.totalDebt && customer.totalDebt > 0 ? (
+                                            <div className="flex flex-col gap-1">
+                                                <span className="text-sm font-bold text-red-600">{formatPrice(customer.totalDebt)}</span>
+                                            </div>
+                                        ) : (
+                                            <span className="text-sm text-gray-400 font-medium">Không có nợ</span>
+                                        )}
                                     </td>
                                     <td className="px-6 py-4 align-top">
                                         <button 

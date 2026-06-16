@@ -1,5 +1,7 @@
 # Kế hoạch cấu hình nội dung Homepage từ Admin Appearance
 
+**Status:** completed (merged `master`)
+
 ## Mục tiêu
 
 Loại bỏ dữ liệu hiển thị hardcode của hai section `Bảng giá sửa chữa` và `Đánh giá khách hàng` trên homepage. Admin chỉnh cách hiển thị tại `/admin/appearance`; dữ liệu nghiệp vụ vẫn lấy từ nguồn gốc.

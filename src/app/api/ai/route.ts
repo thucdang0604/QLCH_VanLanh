@@ -14,6 +14,7 @@ type RAGProduct = {
 };
 
 export async function POST(request: NextRequest) {
+    const correlationId = request.headers.get('x-request-id') || crypto.randomUUID();
     try {
         const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
             || request.headers.get('x-real-ip')
@@ -105,7 +106,7 @@ export async function POST(request: NextRequest) {
                 if (infoData.botActive !== false) {
                     const messagesRef = rtdb.ref(`chats/${roomId}/messages`);
                     await messagesRef.push({
-                        text: result,
+                        text: result.content,
                         senderId: 'bot',
                         senderType: 'admin',
                         timestamp: Date.now(),
@@ -115,7 +116,7 @@ export async function POST(request: NextRequest) {
                     });
 
                     await infoRef.update({
-                        lastMessage: `[AI] ${result.substring(0, 50)}`,
+                        lastMessage: `[AI] ${result.content.substring(0, 50)}`,
                         lastMessageTime: Date.now(),
                         hasUnreadUser: true,
                     });
@@ -126,13 +127,16 @@ export async function POST(request: NextRequest) {
         }
 
         return NextResponse.json({
-            success: true,
-            content: result,
-        });
+            success: result.ok,
+            content: result.content,
+            providerStatus: result.providerStatus,
+            retryable: result.retryable,
+            correlationId,
+        }, { status: result.ok ? 200 : 503 });
     } catch (error) {
-        console.error('AI API error:', error);
+        console.error(`AI API error [${correlationId}]:`, error);
         return NextResponse.json(
-            { error: 'AI generation failed' },
+            { error: 'AI generation failed', correlationId },
             { status: 500 }
         );
     }

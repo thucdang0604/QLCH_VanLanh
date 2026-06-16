@@ -1,5 +1,7 @@
 ﻿# Mục Tiêu
 
+**Status:** completed
+
 Chuyển đổi toàn bộ tài liệu tĩnh trong thư mục `roadmap/` hiện tại sang cấu trúc Single Page Application (SPA) Data-driven trong thư mục mới `roadmap_v2/`.
 Cấu trúc mới sẽ lưu trữ toàn bộ dữ liệu (Bugs, sơ đồ Mermaid) dưới dạng file JSON. `index.html` sẽ là trang duy nhất chịu trách nhiệm `fetch()` dữ liệu và render động.
 

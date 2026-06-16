@@ -2,7 +2,7 @@
 
 **ID**: `plan-crm-customers-v2`  
 **Ngày**: 27.05.2026  
-**Trạng thái**: ready-for-implementation-review (v12 + 4 blockers + 3 decisions + 38 hardening fixes)
+**Trạng thái**: completed (implementation, migration, rules deploy và verification checklist đã hoàn tất)
 
 ## Thay đổi v11 → v12 (fix 9 gaps + 4 blockers + 3 decisions + 38 hardening fixes)
 

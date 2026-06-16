@@ -21,6 +21,7 @@ import { buildProductCodeFromId } from '@/lib/productCodes';
 import { createProductWithCodes } from '@/lib/productCodeRegistry';
 import { isRepairManager } from '@/lib/repairAccess';
 import { normalizeRepairWorkflow, normalizeWarrantyWorkflow } from '@/lib/repairWorkflowConfig';
+import { isSelectedRepairPart } from '@/lib/repairStatus';
 
 
 const checklistLabels: Record<string, string> = {
@@ -110,6 +111,11 @@ export default function TechnicianPage() {
     // Tech Note Modal State
     const [noteModalPayload, setNoteModalPayload] = useState<{ ticketId: string, newStatus: string, currentNote: string } | null>(null);
     const [techNoteText, setTechNoteText] = useState('');
+
+    // Parts Verification Modal State
+    const [partsVerificationModalPayload, setPartsVerificationModalPayload] = useState<{ ticketId: string; newStatus: string } | null>(null);
+    const [partsVerificationSelections, setPartsVerificationSelections] = useState<Record<string, 'use' | 'return'>>({});
+    const [isPartsVerifying, setIsPartsVerifying] = useState(false);
 
     // Part Selection State
     const [partSearchQuery, setPartSearchQuery] = useState('');
@@ -268,48 +274,6 @@ export default function TechnicianPage() {
 
         try {
             const exactName = customPartName.trim();
-            
-            // Find existing proposed product with this name
-            const productsRef = collection(db, 'products');
-            const q = query(productsRef, where('name', '==', exactName), where('isProposed', '==', true));
-            const querySnapshot = await getDocs(q);
-
-            let productIdToUse = '';
-            let productNameToUse = exactName;
-
-            if (!querySnapshot.empty) {
-                const existingDoc = querySnapshot.docs[0];
-                productIdToUse = existingDoc.id;
-                productNameToUse = existingDoc.data().name;
-            } else {
-                // If no proposed product, check if admin already imported it into inventory
-                const qExist = query(productsRef, where('name', '==', exactName));
-                const existSnap = await getDocs(qExist);
-                if (!existSnap.empty) {
-                    const existingDoc = existSnap.docs[0];
-                    productIdToUse = existingDoc.id;
-                    productNameToUse = existingDoc.data().name;
-                } else {
-                    // Create new proposed product
-                    const newProdRef = doc(productsRef);
-                    const productCode = buildProductCodeFromId(newProdRef.id, 'component');
-                    await createProductWithCodes(newProdRef.id, {
-                        sku: productCode,
-                        barcode: productCode,
-                        productCode,
-                        name: exactName,
-                        category: '',
-                        categoryIds: [],
-                        price_original: 0,
-                        price_promo: 0,
-                        costPrice: 0,
-                        stock: 0,
-                        status: 'hidden',
-                        isProposed: true,
-                    }, [productCode]);
-                    productIdToUse = newProdRef.id;
-                }
-            }
 
             const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
             const res = await fetch('/api/repairs/confirm-parts', {
@@ -324,8 +288,9 @@ export default function TechnicianPage() {
                     operationKey: crypto.randomUUID(),
                     command: {
                         type: 'request_part',
-                        productId: productIdToUse,
-                        customName: productNameToUse,
+                        productId: '',
+                        customName: exactName,
+                        quality: selectedPartQuality,
                         quantity: 1
                     }
                 })
@@ -482,6 +447,18 @@ export default function TechnicianPage() {
                 return;
             }
 
+            // --- INTERCEPT: If transitioning INTO "cho_ban_giao_khach", require Parts Verification ---
+            if (isRepairStatus(newStatus, REPAIR_STATUS.CUSTOMER_HANDOVER)) {
+                const selectedParts = (ticket.parts || []).filter(p => isSelectedRepairPart(p));
+                if (selectedParts.length > 0) {
+                    setPartsVerificationModalPayload({ ticketId, newStatus });
+                    const initSelections: Record<string, 'use' | 'return'> = {};
+                    selectedParts.forEach(p => initSelections[p.partLineId!] = 'use');
+                    setPartsVerificationSelections(initSelections);
+                    return;
+                }
+            }
+
             // --- INTERCEPT: If transitioning OUT of "dang_kiem_tra", require Tech Notes ---
             if (isRepairStatus(ticket.status, REPAIR_STATUS.INSPECTION) && newStatus !== REPAIR_STATUS.INSPECTION) {
                 setTechNoteText(ticket.issue?.notes || '');
@@ -494,6 +471,55 @@ export default function TechnicianPage() {
 
         } catch (err) {
             console.error('Status check error:', err);
+        }
+    };
+
+    const handlePartsVerificationSubmit = async () => {
+        if (!partsVerificationModalPayload) return;
+        setIsPartsVerifying(true);
+        try {
+            const ticket = tickets.find(t => t.id === partsVerificationModalPayload.ticketId);
+            if (!ticket) throw new Error('Phiếu không tồn tại');
+
+            const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
+
+            // Build commands for returned parts
+            const rejectCommands = Object.entries(partsVerificationSelections)
+                .filter(([_, action]) => action === 'return')
+                .map(([partLineId, _]) => ({
+                    type: 'reject_request',
+                    partLineId
+                }));
+
+            if (rejectCommands.length > 0) {
+                const res = await fetch('/api/repairs/confirm-parts', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${idToken}`
+                    },
+                    body: JSON.stringify({
+                        ticketId: ticket.id,
+                        ticketVersion: ticket.version || 0,
+                        operationKey: crypto.randomUUID(),
+                        commands: rejectCommands
+                    })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Lỗi trả linh kiện Test');
+
+                // Update local version so transition won't fail with version mismatch
+                ticket.version = (ticket.version || 0) + 1;
+            }
+
+            // Now proceed with normal status change
+            await finalizeStatusChange(ticket, partsVerificationModalPayload.newStatus, ticket.issue?.notes);
+            setPartsVerificationModalPayload(null);
+            setPartsVerificationSelections({});
+        } catch (err: unknown) {
+            toastError((err as Error)?.message || 'Lỗi xử lý xác nhận linh kiện');
+        } finally {
+            setIsPartsVerifying(false);
         }
     };
 
@@ -779,22 +805,22 @@ export default function TechnicianPage() {
                                     {/* Info */}
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-2 flex-wrap">
-                                            <p title="Máy" className="font-bold text-gray-900">{ticket.deviceInfo?.model || 'Thiết bị'}</p>
-                                            <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${st.color}`}>
+                                            <p title="Máy" className="font-bold text-gray-900 text-lg sm:text-xl">{ticket.deviceInfo?.model || 'Thiết bị'}</p>
+                                            <span className={`text-sm font-medium px-2.5 py-1 rounded-full border ${st.color}`}>
                                                 {st.label}
                                             </span>
                                         </div>
-                                        <div className="text-xs text-gray-500 mt-0.5 flex items-center gap-1">
+                                        <div className="text-sm text-gray-500 mt-1.5 flex items-center gap-1">
                                             <span title="Mã phiếu">#{ticket.id.slice(-6).toUpperCase()}</span>
                                             {ticket.ticketType === 'warranty' && (
-                                                <span className="px-1.5 py-0.5 bg-purple-100 text-purple-700 text-[10px] rounded-full font-bold">BH</span>
+                                                <span className="px-1.5 py-0.5 bg-purple-100 text-purple-700 text-xs rounded-full font-bold">BH</span>
                                             )}
                                             <span title="Khách hàng">• {ticket.customer?.name}</span>
                                         </div>
                                         {ticket.issues && ticket.issues.length > 0 ? (
-                                            <p title="Vấn đề" className="text-sm text-gray-600 mt-1 line-clamp-1">{ticket.issues.map(i => i.label).join(', ')}</p>
+                                            <p title="Vấn đề" className="text-base sm:text-lg text-gray-700 mt-2 line-clamp-2">{ticket.issues.map(i => i.label).join(', ')}</p>
                                         ) : ticket.issue?.description && (
-                                            <p className="text-sm text-gray-600 mt-1 line-clamp-1">{ticket.issue.description}</p>
+                                            <p className="text-base sm:text-lg text-gray-700 mt-2 line-clamp-2">{ticket.issue.description}</p>
                                         )}
 
                                         {(pendingTransfer || actionWarnings.length > 0) && (
@@ -861,14 +887,14 @@ export default function TechnicianPage() {
 
                                         {/* Inline Checklist (editable dropdowns) - only when feature enabled */}
                                         {st?.allowedFeatures?.includes('requireChecklist') && (
-                                        <div className="mt-3 border-t pt-2">
-                                            <p className="text-[10px] font-bold text-gray-400 uppercase mb-1.5 flex items-center gap-1"><CheckCircle2 size={10} /> Checklist kiểm tra</p>
-                                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                                        <div className="mt-3 border-t pt-3">
+                                            <p className="text-xs font-bold text-gray-400 uppercase mb-2 flex items-center gap-1"><CheckCircle2 size={14} /> Checklist kiểm tra</p>
+                                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                                                 {Object.keys(checklistLabels).map(key => {
                                                     const val = (ticket.deviceInfo?.checklist as Record<string, string> | undefined)?.[key] || '';
                                                     return (
                                                         <div key={key} className="flex flex-col">
-                                                            <label className="text-[12px] text-gray-500 mb-0.5 truncate">{checklistLabels[key]}</label>
+                                                            <label className="text-base text-gray-600 mb-1 truncate">{checklistLabels[key]}</label>
                                                             <select
                                                                 value={val}
                                                                 onClick={e => e.stopPropagation()}
@@ -876,7 +902,7 @@ export default function TechnicianPage() {
                                                                 disabled={isReadOnly}
                                                                 aria-label={`Checklist: ${checklistLabels[key]}`}
                                                                 title={`Checklist: ${checklistLabels[key]}`}
-                                                                className={`min-h-11 text-sm px-2 py-2 rounded-md border cursor-pointer transition-all appearance-none text-center font-medium ${
+                                                                className={`min-h-[56px] text-xl sm:text-2xl px-3 py-3 rounded-xl border cursor-pointer transition-all appearance-none text-center font-bold ${
                                                                     val === 'OK' ? 'bg-green-50 border-green-300 text-green-700' :
                                                                     val === 'Lỗi' ? 'bg-red-50 border-red-300 text-red-600' :
                                                                     val ? 'bg-orange-50 border-orange-200 text-orange-700' :
@@ -892,14 +918,14 @@ export default function TechnicianPage() {
                                                 })}
                                             </div>
                                             {/* Device history flags */}
-                                            <div className="flex flex-wrap gap-1 mt-1.5">
+                                            <div className="flex flex-wrap gap-2 mt-2">
                                                 {(['hasPriorRepair', 'hasWaterDamage', 'hasNonGenuineParts'] as const).map(key => {
                                                     const labels: Record<string, string> = { hasPriorRepair: 'Đã từng sửa', hasWaterDamage: 'Vào nước', hasNonGenuineParts: 'Kém/Lô' };
                                                     const val = !!(ticket.deviceInfo?.checklist as Record<string, boolean> | undefined)?.[key];
                                                     return (
                                                         <button key={key} onClick={(e) => { e.stopPropagation(); if (!isReadOnly) handleHistoryToggle(ticket.id, key, val); }}
                                                             disabled={isReadOnly}
-                                                            className={`text-xs px-1.5 py-0.5 rounded-md border transition-all ${isReadOnly ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'} ${val ? 'bg-orange-50 border-orange-200 text-orange-700 font-medium' : 'bg-gray-50 border-gray-200 text-gray-400'
+                                                            className={`text-sm px-3 py-1.5 rounded-lg border transition-all ${isReadOnly ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'} ${val ? 'bg-orange-50 border-orange-200 text-orange-700 font-bold' : 'bg-gray-50 border-gray-200 text-gray-500'
                                                                 }`}
                                                             title={`${labels[key]}: ${val ? 'Có' : 'Không'} (Bấm để đổi)`}>
                                                             {val ? '☑' : '☐'} {labels[key]}
@@ -912,29 +938,29 @@ export default function TechnicianPage() {
                                     </div>
 
                                     {/* Actions */}
-                                    <div className="grid grid-cols-2 gap-2 w-full sm:w-40 sm:flex sm:flex-col flex-shrink-0">
+                                    <div className="grid grid-cols-2 gap-2 w-full sm:w-56 sm:flex sm:flex-col flex-shrink-0 mt-3 sm:mt-0">
                                         <button
                                             onClick={(e) => { e.stopPropagation(); setSelectedTicket(ticket); }}
-                                            className="min-h-11 px-3 py-2 border bg-gray-50 rounded-lg transition-colors flex items-center justify-center gap-2 text-sm font-medium" title="Xem chi tiết"
+                                            className="min-h-12 px-3 py-2 border border-gray-200 bg-white rounded-xl transition-colors flex items-center justify-center gap-2 text-base font-bold hover:bg-gray-50" title="Xem chi tiết"
                                         >
-                                            <Eye size={16} className="text-gray-500" /> Chi tiết
+                                            <Eye size={20} className="text-gray-500" /> Chi tiết
                                         </button>
 
                                         {canRequestTransfer && (
                                             <button
                                                 onClick={(event) => { event.stopPropagation(); setTransferModal({ ticket }); setTransferTechnicianId(''); setTransferReason(''); }}
-                                                className="min-h-11 px-3 py-2 border border-blue-200 bg-blue-50 text-blue-700 rounded-lg flex items-center justify-center gap-2 text-sm font-semibold"
+                                                className="min-h-12 px-3 py-2 border border-blue-200 bg-blue-50 text-blue-700 rounded-xl flex items-center justify-center gap-2 text-base font-bold hover:bg-blue-100"
                                             >
-                                                <ArrowRightLeft size={16} /> Chuyển KTV
+                                                <ArrowRightLeft size={20} /> Chuyển KTV
                                             </button>
                                         )}
 
                                         {pendingTransfer && (pendingTransfer.requestedBy === user?.uid || isRepairManager(user)) && (
                                             <button
                                                 onClick={(event) => { event.stopPropagation(); handleTransferCancel(ticket); }}
-                                                className="min-h-11 px-3 py-2 border border-red-200 bg-red-50 text-red-700 rounded-lg flex items-center justify-center gap-2 text-sm font-semibold"
+                                                className="min-h-12 px-3 py-2 border border-red-200 bg-red-50 text-red-700 rounded-xl flex items-center justify-center gap-2 text-base font-bold hover:bg-red-100"
                                             >
-                                                <X size={16} /> Hủy chuyển
+                                                <X size={20} /> Hủy chuyển
                                             </button>
                                         )}
 
@@ -958,30 +984,40 @@ export default function TechnicianPage() {
                                             return (
                                                 <>
                                                     {/* Dynamic Transition Button for Báo Giá */}
-                                                    {!isReadOnly && st?.allowedFeatures?.includes('allowPartsSelection') ? (() => {
-                                                        const hasRequestedParts = ticket.parts?.length === 0 || ticket.parts?.some(p => isRepairPartStatus(p.status, REPAIR_PART_STATUS.REQUESTED));
-                                                        const targetStatusId = hasRequestedParts ? 'dang_tim_linh_kien' : 'dang_sua_chua';
-                                                        const targetStatus = workflow.find(ds => ds.id === targetStatusId);
+                                                    {(() => {
+                                                        if (isReadOnly) return null;
 
-                                                        if (!targetStatus) return null;
-                                                        return (
-                                                            <button onClick={(e) => { e.stopPropagation(); handleStatusChange(ticket.id, targetStatus.id); }}
-                                                                className={`text-[10px] px-2 py-1 bg-white border rounded-lg font-medium transition-all flex items-center gap-1 w-full justify-between hover:bg-orange-50 hover:border-orange-300 hover:text-orange-600`}>
-                                                                {hasRequestedParts ? 'Tìm linh kiện' : targetStatus.label}
-                                                                <ChevronRight size={10} />
-                                                            </button>
-                                                        );
-                                                    })() : !isReadOnly && st.allowedNext?.map((nextId: string) => {
-                                                        const nextCfg = workflow.find(ds => ds.id === nextId);
-                                                        if (!nextCfg) return null;
-                                                        return (
-                                                            <button key={nextId} onClick={(e) => { e.stopPropagation(); handleStatusChange(ticket.id, nextId); }}
-                                                                className={`text-[10px] px-2 py-1 bg-white border rounded-lg font-medium transition-all flex items-center gap-1 w-full justify-between ${nextId === 'refund' ? 'hover:bg-red-50 hover:border-red-300 hover:text-red-600' : nextId === 'out' ? 'hover:bg-gray-50 hover:border-gray-300 hover:text-gray-600' : 'hover:bg-orange-50 hover:border-orange-300 hover:text-orange-600'}`}>
-                                                                {nextCfg.label}
-                                                                {nextId === 'refund' ? <X size={10} /> : <ChevronRight size={10} />}
-                                                            </button>
-                                                        );
-                                                    })}
+                                                        const hasRequestedParts = ticket.parts?.some(p => isRepairPartStatus(p.status, REPAIR_PART_STATUS.REQUESTED) || isRepairPartStatus(p.status, REPAIR_PART_STATUS.ORDERED));
+                                                        const targetStatusId = hasRequestedParts ? 'dang_tim_linh_kien' : 'dang_sua_chua';
+
+                                                        const useDynamic = st?.allowedFeatures?.includes('allowPartsSelection') && ticket.status !== targetStatusId;
+
+                                                        if (useDynamic) {
+                                                            const targetStatus = workflow.find(ds => ds.id === targetStatusId);
+                                                            if (!targetStatus) return null;
+                                                            return (
+                                                                <button onClick={(e) => { e.stopPropagation(); handleStatusChange(ticket.id, targetStatus.id); }}
+                                                                    className={`col-span-2 min-h-12 w-full py-3 bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-xl font-bold text-base shadow-md hover:shadow-orange-500/25 active:scale-[0.98] transition-all flex items-center gap-2 justify-center`}>
+                                                                    Chuyển → {hasRequestedParts ? 'Tìm linh kiện' : targetStatus.label}
+                                                                </button>
+                                                            );
+                                                        }
+
+                                                        if (st?.allowedNext && st.allowedNext.length > 0) {
+                                                            return st.allowedNext.map((nextId: string) => {
+                                                                const nextCfg = workflow.find(ds => ds.id === nextId);
+                                                                if (!nextCfg) return null;
+                                                                return (
+                                                                    <button key={nextId} onClick={(e) => { e.stopPropagation(); handleStatusChange(ticket.id, nextId); }}
+                                                                        className={`col-span-2 min-h-12 w-full py-3 text-white rounded-xl font-bold text-base shadow-md active:scale-[0.98] transition-all flex items-center gap-2 justify-center ${nextId === 'refund' ? 'bg-red-500 hover:bg-red-600' : nextId === 'out' ? 'bg-gray-700 hover:bg-gray-800' : 'bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700'}`}>
+                                                                        Chuyển → {nextCfg.label}
+                                                                    </button>
+                                                                );
+                                                            });
+                                                        }
+
+                                                        return null;
+                                                    })()}
                                                 </>
                                             );
                                         })()}
@@ -1028,12 +1064,12 @@ export default function TechnicianPage() {
                                         return (
                                             <div key={ticket.id} className="bg-white rounded-lg border p-3 shadow-sm hover:shadow-md transition-shadow relative group">
                                                 {/* KTV Badge */}
-                                                <div className="flex items-center gap-1 text-[9px] font-medium text-orange-600 bg-orange-50 border border-orange-100 rounded-full px-1.5 py-px mb-1.5 w-fit max-w-full">
-                                                    <UserIcon size={9} className="flex-shrink-0" />
+                                                <div className="flex items-center gap-1 text-[10px] font-medium text-orange-600 bg-orange-50 border border-orange-100 rounded-full px-2 py-0.5 mb-1.5 w-fit max-w-full">
+                                                    <UserIcon size={10} className="flex-shrink-0" />
                                                     <span className="truncate">{ticket.staff?.assignedTechnicianName || 'Chưa phân công'}</span>
                                                 </div>
                                                 <div className="flex items-start justify-between mb-1">
-                                                    <p className="font-semibold text-sm text-gray-900 group-hover:text-orange-600 transition-colors line-clamp-1 pr-6">{ticket.deviceInfo?.model || 'Thiết bị'}</p>
+                                                    <p className="font-semibold text-base text-gray-900 group-hover:text-orange-600 transition-colors line-clamp-1 pr-6">{ticket.deviceInfo?.model || 'Thiết bị'}</p>
                                                     <button
                                                         onClick={() => setSelectedTicket(ticket)}
                                                         className="text-gray-400 hover:text-orange-500 absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity bg-white"
@@ -1044,16 +1080,16 @@ export default function TechnicianPage() {
                                                     </button>
                                                 </div>
                                                 <div className="flex items-center gap-1">
-                                                    <p className="text-[10px] text-gray-500 font-mono">#{ticket.id.slice(-6).toUpperCase()}</p>
+                                                    <p className="text-xs text-gray-500 font-mono">#{ticket.id.slice(-6).toUpperCase()}</p>
                                                     {ticket.ticketType === 'warranty' && (
-                                                        <span className="px-1.5 py-0.5 bg-purple-100 text-purple-700 text-[9px] rounded-full font-bold">BH</span>
+                                                        <span className="px-1.5 py-0.5 bg-purple-100 text-purple-700 text-[10px] rounded-full font-bold">BH</span>
                                                     )}
                                                 </div>
-                                                <p className="text-[11px] text-gray-600 mt-0.5 max-w-full truncate">{ticket.customer?.name}</p>
+                                                <p className="text-sm text-gray-600 mt-0.5 max-w-full truncate">{ticket.customer?.name}</p>
                                                 {ticket.issues && ticket.issues.length > 0 ? (
-                                                    <p className="text-[11px] text-gray-500 mt-2 line-clamp-2 bg-gray-50 p-1.5 rounded">{ticket.issues.map(i => i.label).join(', ')}</p>
+                                                    <p className="text-sm text-gray-500 mt-2 line-clamp-2 bg-gray-50 p-2 rounded">{ticket.issues.map(i => i.label).join(', ')}</p>
                                                 ) : ticket.issue?.description && (
-                                                    <p className="text-[11px] text-gray-500 mt-2 line-clamp-2 bg-gray-50 p-1.5 rounded">{ticket.issue.description}</p>
+                                                    <p className="text-sm text-gray-500 mt-2 line-clamp-2 bg-gray-50 p-2 rounded">{ticket.issue.description}</p>
                                                 )}
 
                                                 {/* Inline Checklist (compact dropdown for kanban) - only when feature enabled */}
@@ -1063,8 +1099,8 @@ export default function TechnicianPage() {
                                                         {Object.keys(checklistLabels).map(key => {
                                                             const val = (ticket.deviceInfo?.checklist as Record<string, string> | undefined)?.[key] || '';
                                                             return (
-                                                                <div key={key} className="flex items-center gap-0.5">
-                                                                    <span className="text-[7px] text-gray-500 w-[38px] truncate">{checklistLabels[key]}</span>
+                                                                <div key={key} className="flex items-center gap-1">
+                                                                    <span className="text-xs font-medium text-gray-600 w-[55px] truncate">{checklistLabels[key]}</span>
                                                                     <select
                                                                         value={val}
                                                                         onClick={e => e.stopPropagation()}
@@ -1072,11 +1108,11 @@ export default function TechnicianPage() {
                                                                         disabled={isReadOnly}
                                                                         aria-label={`Checklist (kanban): ${checklistLabels[key]}`}
                                                                         title={`Checklist (kanban): ${checklistLabels[key]}`}
-                                                                        className={`text-[8px] flex-1 px-0.5 py-px rounded border cursor-pointer appearance-none ${
+                                                                        className={`text-sm font-semibold flex-1 px-2 py-1 rounded border cursor-pointer appearance-none ${
                                                                             val === 'OK' ? 'bg-green-50 border-green-200 text-green-700' :
                                                                             val === 'Lỗi' ? 'bg-red-50 border-red-200 text-red-600' :
                                                                             val ? 'bg-orange-50 border-orange-200 text-orange-600' :
-                                                                            'bg-gray-50 border-gray-200 text-gray-400'
+                                                                            'bg-gray-50 border-gray-200 text-gray-600'
                                                                         }`}>
                                                                         <option value="">--</option>
                                                                         {CHECKLIST_VALUES.map(v => (
@@ -1111,36 +1147,44 @@ export default function TechnicianPage() {
                                                     return (
                                                         <>
                                                             {/* Dynamic Transition Button for Báo Giá */}
-                                                            {st?.allowedFeatures?.includes('allowPartsSelection') ? (() => {
-                                                                const hasRequestedParts = ticket.parts?.length === 0 || ticket.parts?.some(p => isRepairPartStatus(p.status, REPAIR_PART_STATUS.REQUESTED));
+                                                            {(() => {
+                                                                const hasRequestedParts = ticket.parts && ticket.parts.length > 0 && ticket.parts.some(p => isRepairPartStatus(p.status, REPAIR_PART_STATUS.REQUESTED));
                                                                 const targetStatusId = hasRequestedParts ? 'dang_tim_linh_kien' : 'dang_sua_chua';
-                                                                const targetStatus = workflow.find(ds => ds.id === targetStatusId);
 
-                                                                if (!targetStatus) return null;
-                                                                return (
-                                                                    <div className="mt-3 pt-3 border-t flex flex-col gap-1.5">
-                                                                        <button onClick={(e) => { e.stopPropagation(); handleStatusChange(ticket.id, targetStatus.id); }}
-                                                                            className={`w-full justify-between flex items-center gap-1 text-[11px] px-2 py-1.5 border rounded-md font-medium transition-all bg-orange-50 text-orange-600 border-orange-200 hover:bg-orange-500 hover:text-white`}>
-                                                                            Chuyển sang {hasRequestedParts ? 'Tìm linh kiện' : targetStatus.label}
-                                                                            <ChevronRight size={12} />
-                                                                        </button>
-                                                                    </div>
-                                                                );
-                                                            })() : (st?.allowedNext && st.allowedNext.length > 0) && (
-                                                                <div className="mt-3 pt-3 border-t flex flex-col gap-1.5">
-                                                                    {st?.allowedNext?.map((nextId: string) => {
-                                                                        const nextCfg = workflow.find(ds => ds.id === nextId);
-                                                                        if (!nextCfg) return null;
-                                                                        return (
-                                                                            <button key={nextId} onClick={(e) => { e.stopPropagation(); handleStatusChange(ticket.id, nextId); }}
-                                                                                className={`w-full justify-between flex items-center gap-1 text-[11px] px-2 py-1.5 border rounded-md font-medium transition-all ${nextId === 'refund' ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-500 hover:text-white' : nextId === 'out' ? 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-500 hover:text-white' : 'bg-orange-50 text-orange-600 border-orange-200 hover:bg-orange-500 hover:text-white'}`}>
-                                                                                Chuyển sang {nextCfg.label}
-                                                                                {nextId === 'refund' ? <X size={12} /> : <ChevronRight size={12} />}
+                                                                const useDynamic = st?.allowedFeatures?.includes('allowPartsSelection') && ticket.status !== targetStatusId;
+
+                                                                if (useDynamic) {
+                                                                    const targetStatus = workflow.find(ds => ds.id === targetStatusId);
+                                                                    if (!targetStatus) return null;
+                                                                    return (
+                                                                        <div className="mt-3 pt-3 border-t flex flex-col gap-1.5">
+                                                                            <button onClick={(e) => { e.stopPropagation(); handleStatusChange(ticket.id, targetStatus.id); }}
+                                                                                className={`w-full justify-center flex items-center gap-2 text-sm px-4 py-3 rounded-xl font-bold transition-all bg-orange-500 text-white hover:bg-orange-600 shadow-md`}>
+                                                                                Chuyển → {hasRequestedParts ? 'Tìm linh kiện' : targetStatus.label}
                                                                             </button>
-                                                                        );
-                                                                    })}
-                                                                </div>
-                                                            )}
+                                                                        </div>
+                                                                    );
+                                                                }
+
+                                                                if (st?.allowedNext && st.allowedNext.length > 0) {
+                                                                    return (
+                                                                        <div className="mt-3 pt-3 border-t flex flex-col gap-1.5">
+                                                                            {st?.allowedNext?.map((nextId: string) => {
+                                                                                const nextCfg = workflow.find(ds => ds.id === nextId);
+                                                                                if (!nextCfg) return null;
+                                                                                return (
+                                                                                    <button key={nextId} onClick={(e) => { e.stopPropagation(); handleStatusChange(ticket.id, nextId); }}
+                                                                                        className={`w-full justify-center flex items-center gap-2 text-sm px-4 py-3 rounded-xl font-bold transition-all shadow-md ${nextId === 'refund' ? 'bg-red-500 text-white hover:bg-red-600' : nextId === 'out' ? 'bg-gray-700 text-white hover:bg-gray-800' : 'bg-orange-500 text-white hover:bg-orange-600'}`}>
+                                                                                        Chuyển → {nextCfg.label}
+                                                                                    </button>
+                                                                                );
+                                                                            })}
+                                                                        </div>
+                                                                    );
+                                                                }
+
+                                                                return null;
+                                                            })()}
                                                         </>
                                                     );
                                                 })()}
@@ -1552,7 +1596,7 @@ export default function TechnicianPage() {
                                 const isReadOnly = isTerminal || isKtvLocked;
                                 if (isReadOnly) return null;
                                 if (currentStatusCfg?.allowedFeatures?.includes('allowPartsSelection')) {
-                                    const hasRequestedParts = selectedTicket.parts?.length === 0 || selectedTicket.parts?.some(p => isRepairPartStatus(p.status, REPAIR_PART_STATUS.REQUESTED));
+                                    const hasRequestedParts = selectedTicket.parts?.some(p => isRepairPartStatus(p.status, REPAIR_PART_STATUS.REQUESTED) || isRepairPartStatus(p.status, REPAIR_PART_STATUS.ORDERED));
                                     const targetStatusId = hasRequestedParts ? 'dang_tim_linh_kien' : 'dang_sua_chua';
                                     const targetStatus = workflow.find(ds => ds.id === targetStatusId);
 
@@ -1688,6 +1732,73 @@ export default function TechnicianPage() {
                                     className="px-4 py-2 text-sm font-semibold text-white bg-orange-500 rounded-lg hover:bg-orange-600 transition-colors disabled:opacity-50"
                                 >
                                     Xác nhận
+                                </button>
+                            </div>
+                        </div>
+                    </Modal>
+                );
+            })()}
+
+            {/* ══════════  Parts Verification Modal  ══════════ */}
+            {partsVerificationModalPayload && (() => {
+                const ticket = tickets.find(t => t.id === partsVerificationModalPayload.ticketId);
+                if (!ticket) return null;
+                const selectedParts = (ticket.parts || []).filter(p => isSelectedRepairPart(p));
+
+                return (
+                    <Modal
+                        isOpen={true}
+                        onClose={() => { if (!isPartsVerifying) setPartsVerificationModalPayload(null); }}
+                        title="Xác nhận sử dụng linh kiện"
+                    >
+                        <div className="p-6">
+                            <div className="flex gap-3 text-amber-800 bg-amber-50 p-4 rounded-xl border border-amber-200 mb-6">
+                                <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+                                <div className="text-sm">
+                                    <p className="font-semibold mb-1">Phiếu đã hoàn tất sửa chữa!</p>
+                                    <p>Vui lòng xác nhận các linh kiện đã thêm vào phiếu. Linh kiện <b>Hoàn kho (Test)</b> sẽ được trả về kho ngay lập tức. Linh kiện <b>Đã dùng</b> sẽ được trừ kho khi thanh toán.</p>
+                                </div>
+                            </div>
+
+                            <div className="space-y-4 max-h-[60vh] overflow-y-auto">
+                                {selectedParts.map((part) => (
+                                    <div key={part.partLineId} className="border rounded-lg p-4 bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                                        <div>
+                                            <p className="font-medium text-gray-900">{part.productName}</p>
+                                            <p className="text-sm text-gray-500 mt-1">SL: {part.quantity} • {part.quality || 'N/A'}</p>
+                                        </div>
+                                        <div className="flex bg-gray-100 p-1 rounded-lg shrink-0">
+                                            <button
+                                                onClick={() => setPartsVerificationSelections(prev => ({ ...prev, [part.partLineId!]: 'use' }))}
+                                                className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${partsVerificationSelections[part.partLineId!] === 'use' ? 'bg-white text-green-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                                            >
+                                                Đã dùng
+                                            </button>
+                                            <button
+                                                onClick={() => setPartsVerificationSelections(prev => ({ ...prev, [part.partLineId!]: 'return' }))}
+                                                className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${partsVerificationSelections[part.partLineId!] === 'return' ? 'bg-white text-amber-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                                            >
+                                                Hoàn kho (Test)
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div className="mt-8 flex justify-end gap-3">
+                                <button
+                                    onClick={() => setPartsVerificationModalPayload(null)}
+                                    disabled={isPartsVerifying}
+                                    className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50"
+                                >
+                                    Huỷ
+                                </button>
+                                <button
+                                    onClick={handlePartsVerificationSubmit}
+                                    disabled={isPartsVerifying}
+                                    className="px-4 py-2 text-sm font-semibold text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+                                >
+                                    {isPartsVerifying ? <Loader2 size={16} className="animate-spin" /> : 'Xác nhận & Chuyển bước'}
                                 </button>
                             </div>
                         </div>

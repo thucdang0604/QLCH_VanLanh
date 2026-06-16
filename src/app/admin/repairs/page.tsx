@@ -22,7 +22,7 @@ import type { RepairTicket, RepairStatus, PaymentStatus, DeviceChecklist, Workfl
 import { PART_CATEGORY_LABEL, isPartCategory } from '@/lib/constants';
 import { uploadMedia } from '@/lib/storage';
 import { isChecklistComplete, isYouTubeUrl, getYouTubeEmbedUrl, areAllPartsReady } from '@/lib/workflowFeatures';
-import { REPAIR_STATUS, isPendingRepairPart, isRejectedRepairPart, isRepairStatus, isWarrantyEligibleRepairPart } from '@/lib/repairStatus';
+import { REPAIR_STATUS, REPAIR_PART_STATUS, isPendingRepairPart, isRejectedRepairPart, isRepairStatus, isWarrantyEligibleRepairPart, isRepairPartStatus } from '@/lib/repairStatus';
 import { normalizeVietnamPhone } from '@/lib/phone';
 import PrintableReceipt from '@/components/admin/PrintableReceipt';
 import PrintableRepairInvoice from '@/components/admin/PrintableRepairInvoice';
@@ -57,6 +57,9 @@ interface Appointment {
     status: string;
     serviceName?: string;
     serviceId?: string;
+    appService?: {
+        name?: string;
+    };
 }
 // ── Service type (local) ──
 interface ServiceModel {
@@ -112,19 +115,18 @@ export default function RepairPage() {
     const [editingTicket, setEditingTicket] = useState<RepairTicket | null>(null);
     const [printMode, setPrintMode] = useState<'receipt' | 'invoice' | 'warranty' | null>(null);
     const [printTicket, setPrintTicket] = useState<RepairTicket | null>(null);
+
     // Delivery / Cancel note modal
     const [noteModal, setNoteModal] = useState<{ ticket: RepairTicket; targetStatus: RepairStatus } | null>(null);
     const [deliveryNote, setDeliveryNote] = useState('');
     // Handover modal (Payment Gate)
-    const [handoverModal, setHandoverModal] = useState<{ ticket: RepairTicket; action: 'done' | 'out' | 'refund', targetStatus?: string } | null>(null);
+    // POS Redirect Modal
+    const [posRedirectModal, setPosRedirectModal] = useState<{ ticket: RepairTicket } | null>(null);
+    const [handoverModal, setHandoverModal] = useState<{ ticket: RepairTicket; action: 'out' | 'refund', targetStatus?: string } | null>(null);
     const [handoverNote, setHandoverNote] = useState('');
     const [paymentConfirmed, setPaymentConfirmed] = useState(false);
     const [handoverAdditionalFees, setHandoverAdditionalFees] = useState<string>('');
-    const [handoverDiscountAmount, setHandoverDiscountAmount] = useState<string>('');
-    // Gift product selection (replaces old handoverGiftDiscount text input)
-    const [handoverGiftItems, setHandoverGiftItems] = useState<GiftItem[]>([]);
-    const [giftProducts, setGiftProducts] = useState<Product[] | null>(null);
-    const [giftSearchTerm, setGiftSearchTerm] = useState('');
+    const [handoverLaborCost, setHandoverLaborCost] = useState<string>('');
     // Detail Modal (Eye Icon)
     const [viewingTicket, setViewingTicket] = useState<RepairTicket | null>(null);
     // Warranty Modal
@@ -183,6 +185,7 @@ export default function RepairPage() {
         issues: [] as RepairIssue[],
         // Payment split
         partsCost: '' as string | number,
+        laborCost: '' as string | number,
         depositAmount: '' as string | number,
         paymentStatus: 'unpaid' as PaymentStatus,
         technicianId: '',
@@ -371,19 +374,6 @@ export default function RepairPage() {
             } catch (e) { console.error(e); }
         })();
     }, []);
-    // ── Lazy load gift products (retail/accessories only, cached across modal opens) ──
-    useEffect(() => {
-        if (handoverModal && giftProducts === null) {
-            getDocs(query(
-                collection(db, 'products'),
-                where('status', '==', 'active'),
-                limit(200)
-            )).then(snap => {
-                const all = snap.docs.map(d => ({ id: d.id, ...d.data() } as Product));
-                setGiftProducts(all.filter(p => !isPartCategory(p.category, p.categoryIds)));
-            }).catch(console.error);
-        }
-    }, [handoverModal, giftProducts]);
     // Fetch Appointments removed according to cost-saving dev feedback
     // ── Fetch Services for auto-fill ──
     useEffect(() => {
@@ -422,7 +412,7 @@ export default function RepairPage() {
                             updated.partsCost = price || updated.partsCost;
                             updated.selectedServiceName = svc.name || app.serviceName || '';
                         } else {
-                            updated.selectedServiceName = app.serviceName || '';
+                            updated.selectedServiceName = app.appService?.name || app.serviceName || '';
                         }
                     }
                     return updated;
@@ -496,16 +486,19 @@ export default function RepairPage() {
         }
         // ── Payment requirement check (Intercept before normal transition) ──
         if (currentCfg?.allowedFeatures?.includes('requirePaymentGate')) {
-            setHandoverAdditionalFees(ticket.payment?.additionalFees?.toString() || '');
-            setHandoverDiscountAmount(ticket.payment?.discountAmount?.toString() || '');
+            const defaultLaborCost = ticket.payment?.laborCost !== undefined
+                ? ticket.payment.laborCost
+                : Math.max(0, (ticket.issues || []).reduce((sum, i) => sum + (Number(i.estimatedPrice) || 0), 0) - (Number(ticket.payment?.partsCost) || 0));
             if (nextStatus === 'refund') {
+                setHandoverLaborCost(defaultLaborCost.toString() || '');
                 setHandoverModal({ ticket, action: 'refund', targetStatus: nextStatus });
                 return;
             } else if (nextStatus === 'out') {
+                setHandoverLaborCost(defaultLaborCost.toString() || '');
                 setHandoverModal({ ticket, action: 'out', targetStatus: nextStatus });
                 return;
             } else {
-                setHandoverModal({ ticket, action: 'done', targetStatus: nextStatus });
+                setPosRedirectModal({ ticket });
                 return;
             }
         }
@@ -649,9 +642,8 @@ export default function RepairPage() {
     const handleHandover = async () => {
         if (!handoverModal) return;
         const { ticket, action, targetStatus } = handoverModal;
-        const targetStatusId = action === 'done' ? (targetStatus || 'done') : action;
+        const targetStatusId = targetStatus || action;
         const parsedAdditionalFees = Number(handoverAdditionalFees.replace(/[^0-9-]/g, '')) || 0;
-        const parsedDiscountAmount = Number(handoverDiscountAmount.replace(/[^0-9-]/g, '')) || 0;
         try {
             const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
             const res = await fetch('/api/repairs/handover', {
@@ -667,8 +659,9 @@ export default function RepairPage() {
                     handoverNote: handoverNote.trim(),
                     paymentConfirmed,
                     additionalFees: parsedAdditionalFees,
-                    discountAmount: parsedDiscountAmount,
-                    giftItems: handoverGiftItems,
+                    laborCost: handoverLaborCost ? Number(handoverLaborCost.replace(/[^0-9-]/g, '')) : undefined,
+                    discountAmount: 0,
+                    giftItems: [],
                     operationKey: crypto.randomUUID(),
                     ticketVersion: ticket.version
                 })
@@ -682,8 +675,7 @@ export default function RepairPage() {
             setHandoverNote('');
             setPaymentConfirmed(false);
             setHandoverAdditionalFees('');
-            setHandoverDiscountAmount('');
-            setHandoverGiftItems([]);
+            setHandoverLaborCost('');
             toastSuccess('Bàn giao thành công!');
         } catch (e: unknown) {
             console.error(e);
@@ -806,6 +798,7 @@ export default function RepairPage() {
                         ? [{ id: crypto.randomUUID(), label: ticket.issue.description, estimatedPrice: 0, status: 'pending' as const }]
                         : [],
                 partsCost: ticket.payment?.partsCost || ticket.payment?.amount || '',
+                laborCost: ticket.payment?.laborCost !== undefined ? ticket.payment.laborCost : Math.max(0, (ticket.issues || []).reduce((sum, i) => sum + (Number(i.estimatedPrice) || 0), 0) - (Number(ticket.payment?.partsCost) || 0)),
                 depositAmount: ticket.payment?.depositAmount || '',
                 paymentStatus: ticket.payment?.status || 'unpaid',
                 technicianId: ticket.staff?.assignedTechnician || '',
@@ -855,6 +848,7 @@ export default function RepairPage() {
                         idempotencyKey: crypto.randomUUID(),
                         paymentData: {
                             deposit: Number(formData.depositAmount) || 0,
+                            laborCost: Number(formData.laborCost) || 0,
                         }
                     })
                 });
@@ -969,7 +963,8 @@ export default function RepairPage() {
                     payment: {
                         status: formData.paymentStatus,
                         partsCost: Number(formData.partsCost) || 0,
-                        amount: Number(formData.partsCost) || 0,
+                        laborCost: Number(formData.laborCost) || 0,
+                        amount: Number(formData.partsCost) + Number(formData.laborCost) || 0,
                         depositAmount: Number(formData.depositAmount) || 0,
                     },
                     staff: {
@@ -1732,13 +1727,18 @@ export default function RepairPage() {
                                             <CurrencyInput
                                                 placeholder="Giá dự kiến"
                                                 value={issue.estimatedPrice || ''}
-                                                onChange={v => setFormData(p => ({
-                                                    ...p,
-                                                    issues: p.issues.map(i => i.id === issue.id ? { ...i, estimatedPrice: v } : i)
-                                                }))}
+                                                onChange={v => setFormData(p => {
+                                                    const newIssues = p.issues.map(i => i.id === issue.id ? { ...i, estimatedPrice: v } : i);
+                                                    const newSum = newIssues.reduce((sum, i) => sum + (Number(i.estimatedPrice) || 0), 0);
+                                                    return { ...p, issues: newIssues, laborCost: newSum || p.laborCost };
+                                                })}
                                                 className="w-28 px-3 py-1.5 border rounded-lg text-sm text-right focus:ring-2 focus:ring-orange-500/20"
                                             />
-                                            <button type="button" onClick={() => setFormData(p => ({ ...p, issues: p.issues.filter(i => i.id !== issue.id) }))}
+                                            <button type="button" onClick={() => setFormData(p => {
+                                                const newIssues = p.issues.filter(i => i.id !== issue.id);
+                                                const newSum = newIssues.reduce((sum, i) => sum + (Number(i.estimatedPrice) || 0), 0);
+                                                return { ...p, issues: newIssues, laborCost: newSum || (newIssues.length === 0 ? '' : p.laborCost) };
+                                            })}
                                                 className="p-1 text-red-400 hover:text-red-600" title="Xóa">
                                                 <Trash2 size={14} />
                                             </button>
@@ -1903,7 +1903,16 @@ export default function RepairPage() {
                             <fieldset className="space-y-3">
                                 <legend className="flex items-center gap-2 font-semibold text-gray-900"><DollarSign size={18} className="text-orange-500" /> Thanh toán & Phân công</legend>
                                 <div className="grid md:grid-cols-3 gap-4">
-
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Chi phí SC (VNĐ)</label>
+                                        <input type="text" value={formData.laborCost ? Number(formData.laborCost).toLocaleString('vi-VN') : ''}
+                                            onChange={e => {
+                                                const val = Number(e.target.value.replace(/\D/g, '')) || 0;
+                                                setFormData(p => ({ ...p, laborCost: val || '' }));
+                                            }}
+                                            placeholder="0"
+                                            className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20" />
+                                    </div>
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Đặt cọc (VNĐ)</label>
                                         <input type="text" value={formData.depositAmount ? Number(formData.depositAmount).toLocaleString('vi-VN') : ''}
@@ -2018,50 +2027,30 @@ export default function RepairPage() {
             {handoverModal && (() => {
                 const t = handoverModal.ticket;
                 const deposit = t.payment?.depositAmount || 0;
-                const hasValidParts = (t.parts || []).filter(p => !isRejectedRepairPart(p)).length > 0;
-                const computedPartsCost = (t.parts || [])
-                    .filter(p => !isRejectedRepairPart(p) && !p.isWarrantyCovered)
-                    .reduce((sum, p) => {
-                        const qty = Math.max(1, Number(p?.quantity) || 1);
-                        const unit = Number(p?.unitPriceAtUse ?? p?.price ?? 0) || 0;
-                        return sum + unit * qty;
-                    }, 0);
-                const partsCost = hasValidParts ? computedPartsCost : (Number(t.payment?.partsCost) || 0);
-                const laborCost = Number(t.payment?.laborCost) || 0;
                 const additionalFees = Number(handoverAdditionalFees.replace(/[^0-9-]/g, '')) || 0;
-                const discountAmount = Number(handoverDiscountAmount.replace(/[^0-9-]/g, '')) || 0;
-                const giftDiscount = handoverGiftItems.reduce((sum, g) => sum + g.price * g.quantity, 0);
-                const total = partsCost + laborCost + additionalFees - discountAmount;
-                const remaining = total - deposit;
+                const laborCost = Number(handoverLaborCost.replace(/[^0-9-]/g, '')) || 0;
                 const action = handoverModal.action;
-                const parts = t.parts || [];
-                const filteredGiftProducts = (giftProducts || []).filter(p =>
-                    p.name.toLowerCase().includes(giftSearchTerm.toLowerCase())
-                );
                 const titles: Record<string, string> = {
-                    done: '✅ Hoàn Tất Đơn — Xác nhận Thanh Toán',
                     out: '↩️ Trả Máy — Xác nhận Hoàn/Thu phí',
                     refund: '🔴 Hoàn Phí — Xác nhận Hoàn tiền',
                 };
                 const colors: Record<string, string> = {
-                    done: 'bg-emerald-500 hover:bg-emerald-600',
                     out: 'bg-gray-500 hover:bg-gray-600',
                     refund: 'bg-red-500 hover:bg-red-600',
                 };
                 // For "out" action: calculate refund or charge
                 const outRefundAmount = action === 'out' && deposit > 0 ? deposit : 0;
-                const outChargeAmount = action === 'out' && additionalFees > 0 ? (additionalFees - deposit > 0 ? additionalFees - deposit - discountAmount : 0) : 0; // Simplified
+                const outChargeAmount = action === 'out' && (additionalFees + laborCost - deposit > 0) ? (additionalFees + laborCost - deposit) : 0;
                 return (
                     <Modal
                         isOpen={true}
-                        onClose={() => { setHandoverModal(null); setHandoverNote(''); setPaymentConfirmed(false); setHandoverAdditionalFees(''); setHandoverDiscountAmount(''); setHandoverGiftItems([]); setGiftSearchTerm(''); }}
-                        size="lg"
+                        onClose={() => { setHandoverModal(null); setHandoverNote(''); setPaymentConfirmed(false); setHandoverAdditionalFees(''); setHandoverLaborCost(''); }}
+                        size="md"
                         priority="high"
                     >
-                        {/* Custom colored header */}
-                        <div className={`px-6 py-4 text-white sticky top-0 z-10 ${action === 'done' ? 'bg-emerald-600' : action === 'refund' ? 'bg-red-600' : 'bg-gray-600'}`}>
+                        <div className={`px-6 py-4 text-white sticky top-0 z-10 ${action === 'refund' ? 'bg-red-600' : 'bg-gray-600'}`}>
                             <h2 className="text-lg font-bold flex items-center gap-2">
-                                {action === 'done' ? <CheckCircle2 size={20} /> : action === 'refund' ? <RotateCcw size={20} /> : <Ban size={20} />}
+                                {action === 'refund' ? <RotateCcw size={20} /> : <Ban size={20} />}
                                 {titles[action]}
                             </h2>
                             <p className="text-sm opacity-80 mt-0.5">
@@ -2069,59 +2058,17 @@ export default function RepairPage() {
                             </p>
                         </div>
                         <div className="px-6 py-5 space-y-4">
-                            {/* ── Service Info ── */}
-                            <div className="bg-blue-50 rounded-xl p-4 border border-blue-100">
-                                <p className="text-xs font-bold text-blue-700 uppercase mb-2 flex items-center gap-1"><Wrench size={12} /> Thông tin dịch vụ</p>
-                                <div className="space-y-1 text-sm">
-                                    <div className="flex justify-between">
-                                        <span className="text-gray-600">Dịch vụ:</span>
-                                        <span className="font-medium">{t.issues && t.issues.length > 0 ? t.issues.map(i => i.label).join(' | ') : typeof t.issue === 'string' ? t.issue : t.issue?.description || t.deviceInfo?.model || '—'}</span>
-                                    </div>
-                                    <div className="flex justify-between">
-                                        <span className="text-gray-600">Thiết bị:</span>
-                                        <span className="font-medium">{t.deviceInfo?.model || '—'}</span>
-                                    </div>
-                                    {t.staff?.assignedTechnicianName && (
-                                        <div className="flex justify-between">
-                                            <span className="text-gray-600">KTV phụ trách:</span>
-                                            <span className="font-medium text-orange-600">{t.staff.assignedTechnicianName}</span>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                            {/* ── Parts Used ── */}
-                            {parts.length > 0 && (
-                                <div className="bg-purple-50 rounded-xl p-4 border border-purple-100">
-                                    <p className="text-xs font-bold text-purple-700 uppercase mb-2 flex items-center gap-1"><ClipboardList size={12} /> Linh kiện đã sử dụng</p>
-                                    <div className="space-y-1.5">
-                                        {parts.filter((p: NonNullable<RepairTicket['parts']>[number]) => !isRejectedRepairPart(p)).map((p: NonNullable<RepairTicket['parts']>[number], i: number) => (
-                                            <div key={i} className="flex justify-between text-sm">
-                                                <span className="text-gray-700">
-                                                    {p.productName || p.name || p.partName || PART_CATEGORY_LABEL} <span className="text-xs text-gray-400">×{p.quantity || 1}</span>
-                                                    {p.quality && <span className="text-xs ml-1 px-1 bg-blue-100 text-blue-600 rounded">{p.quality}</span>}
-                                                </span>
-                                                <span className="font-medium">{formatPrice((Number(p.unitPriceAtUse ?? p.price ?? 0) || 0) * (p.quantity || 1))}</span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-                            {/* ── Financial Breakdown ── */}
                             <div className="bg-gray-50 rounded-xl p-4 space-y-2 border border-gray-200">
-                                <p className="text-xs font-bold text-gray-500 uppercase mb-2 flex items-center gap-1"><DollarSign size={12} /> Chi tiết thanh toán</p>
-
-                                {partsCost > 0 && (
-                                    <div className="flex justify-between text-sm">
-                                        <span className="text-gray-500">Chi phí linh kiện:</span>
-                                        <span className="font-medium">{formatPrice(partsCost)}</span>
-                                    </div>
-                                )}
-                                {laborCost > 0 && (
-                                    <div className="flex justify-between text-sm items-center">
-                                        <span className="text-gray-500">Tiền công sửa chữa:</span>
-                                        <span className="font-medium">{formatPrice(laborCost)}</span>
-                                    </div>
-                                )}
+                                <div className="flex justify-between text-sm items-center py-1">
+                                    <span className="text-gray-500">Chi phí SC:</span>
+                                    <input
+                                        type="text"
+                                        value={handoverLaborCost ? Number(handoverLaborCost.replace(/[^0-9-]/g, '')).toLocaleString('vi-VN') : ''}
+                                        onChange={e => setHandoverLaborCost(e.target.value)}
+                                        placeholder="0"
+                                        className="w-32 px-3 py-1 text-right border rounded-lg focus:ring-1 focus:ring-orange-500 text-gray-900 font-medium bg-white"
+                                    />
+                                </div>
                                 <div className="flex justify-between text-sm items-center py-1">
                                     <span className="text-gray-500">Phụ phí (nếu có):</span>
                                     <input
@@ -2132,118 +2079,10 @@ export default function RepairPage() {
                                         className="w-32 px-3 py-1 text-right border rounded-lg focus:ring-1 focus:ring-orange-500 text-gray-900 font-medium bg-white"
                                     />
                                 </div>
-                                <div className="flex justify-between text-sm items-center py-1">
-                                    <span className="text-gray-500">Giảm giá:</span>
-                                    <input
-                                        type="text"
-                                        value={handoverDiscountAmount ? Number(handoverDiscountAmount.replace(/[^0-9-]/g, '')).toLocaleString('vi-VN') : ''}
-                                        onChange={e => setHandoverDiscountAmount(e.target.value)}
-                                        placeholder="0"
-                                        className="w-32 px-3 py-1 text-right border rounded-lg focus:ring-1 focus:ring-green-500 text-green-600 font-medium bg-white"
-                                    />
-                                </div>
-                                {/* ── Gift Product Selector ── */}
-                                <div className="py-2">
-                                    <div className="flex items-center justify-between mb-2">
-                                        <span className="text-gray-500 text-sm">🎁 Quà tặng (khấu trừ):</span>
-                                        {giftDiscount > 0 && <span className="text-pink-600 font-medium text-sm">-{giftDiscount.toLocaleString('vi-VN')}đ</span>}
-                                    </div>
-                                    {/* Search input */}
-                                    <div className="relative">
-                                        <input
-                                            type="text"
-                                            value={giftSearchTerm}
-                                            onChange={e => setGiftSearchTerm(e.target.value)}
-                                            placeholder="Tìm sản phẩm tặng kèm..."
-                                            className="w-full px-3 py-1.5 text-sm border rounded-lg focus:ring-1 focus:ring-pink-500 bg-white pr-8"
-                                        />
-                                        <Search size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                                        {/* Dropdown results */}
-                                        {giftSearchTerm.trim() && filteredGiftProducts.length > 0 && (
-                                            <div className="absolute z-20 left-0 right-0 top-full mt-1 bg-white border rounded-lg shadow-lg max-h-40 overflow-y-auto">
-                                                {filteredGiftProducts.slice(0, 8).map(p => (
-                                                    <button
-                                                        key={p.id}
-                                                        type="button"
-                                                        onClick={() => {
-                                                            const existing = handoverGiftItems.find(g => g.productId === p.id);
-                                                            if (existing) {
-                                                                setHandoverGiftItems(prev => prev.map(g => g.productId === p.id ? { ...g, quantity: g.quantity + 1 } : g));
-                                                            } else {
-                                                                setHandoverGiftItems(prev => [...prev, {
-                                                                    productId: p.id,
-                                                                    productName: p.name,
-                                                                    price: p.price_promo || p.price_original,
-                                                                    quantity: 1
-                                                                }]);
-                                                            }
-                                                            setGiftSearchTerm('');
-                                                        }}
-                                                        className="w-full text-left px-3 py-2 hover:bg-pink-50 text-sm flex justify-between items-center transition-colors"
-                                                    >
-                                                        <span className="truncate mr-2">{p.name}</span>
-                                                        <span className="text-pink-600 font-medium whitespace-nowrap">{(p.price_promo || p.price_original).toLocaleString('vi-VN')}đ</span>
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        )}
-                                        {giftSearchTerm.trim() && filteredGiftProducts.length === 0 && giftProducts !== null && (
-                                            <div className="absolute z-20 left-0 right-0 top-full mt-1 bg-white border rounded-lg shadow-lg p-3 text-sm text-gray-400 text-center">
-                                                Không tìm thấy sản phẩm
-                                            </div>
-                                        )}
-                                    </div>
-                                    {/* Selected gift items list */}
-                                    {handoverGiftItems.length > 0 && (
-                                        <div className="mt-2 space-y-1">
-                                            {handoverGiftItems.map((g, i) => (
-                                                <div key={g.productId} className="flex items-center justify-between bg-pink-50 rounded-lg px-3 py-1.5 text-sm">
-                                                    <span className="truncate mr-2 text-gray-700">
-                                                        {g.productName} <span className="text-xs text-gray-400">×{g.quantity}</span>
-                                                    </span>
-                                                    <div className="flex items-center gap-2 shrink-0">
-                                                        <span className="text-pink-600 font-medium">{(g.price * g.quantity).toLocaleString('vi-VN')}đ</span>
-                                                        <button
-                                                            type="button"
-                                                            title="Xóa sản phẩm tặng kèm"
-                                                            onClick={() => setHandoverGiftItems(prev => prev.filter((_, idx) => idx !== i))}
-                                                            className="text-gray-400 hover:text-red-500 transition-colors"
-                                                        >
-                                                            <Ban size={14} />
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                                <div className="flex justify-between text-sm border-t pt-2">
-                                    <span className="text-gray-700 font-semibold">Tổng cộng:</span>
-                                    <span className="font-bold text-lg">{formatPrice(total)}</span>
-                                </div>
                                 {deposit > 0 && (
                                     <div className="flex justify-between text-sm">
                                         <span className="text-gray-500">Đã đặt cọc:</span>
                                         <span className="font-semibold text-yellow-600">-{formatPrice(deposit)}</span>
-                                    </div>
-                                )}
-                                {/* ── Action-specific bottom section ── */}
-                                {action === 'done' && remaining > 0 && (
-                                    <div className="flex justify-between items-center text-sm border-t border-emerald-200 pt-3 mt-2 font-bold bg-emerald-50 -mx-4 -mb-4 px-4 py-3 rounded-b-xl">
-                                        <span className="text-gray-700">💰 SỐ TIỀN KHÁCH CẦN THANH TOÁN:</span>
-                                        <span className="text-red-600 text-xl">{formatPrice(remaining)}</span>
-                                    </div>
-                                )}
-                                {action === 'done' && remaining === 0 && (
-                                    <div className="flex justify-between items-center text-sm border-t border-emerald-200 pt-3 mt-2 font-bold bg-emerald-50 -mx-4 -mb-4 px-4 py-3 rounded-b-xl">
-                                        <span className="text-gray-700">✅ Cần thu khách:</span>
-                                        <span className="text-emerald-600 text-xl">{formatPrice(0)}</span>
-                                    </div>
-                                )}
-                                {action === 'done' && remaining < 0 && (
-                                    <div className="flex justify-between items-center text-sm border-t border-orange-200 pt-3 mt-2 font-bold bg-orange-50 -mx-4 -mb-4 px-4 py-3 rounded-b-xl">
-                                        <span className="text-orange-700">🔄 Cọc dư — Cần hoàn khách:</span>
-                                        <span className="text-orange-600 text-xl">{formatPrice(Math.abs(remaining))}</span>
                                     </div>
                                 )}
                                 {action === 'out' && deposit > 0 && (
@@ -2252,13 +2091,13 @@ export default function RepairPage() {
                                         <span className="text-orange-600 text-xl">{formatPrice(outRefundAmount)}</span>
                                     </div>
                                 )}
-                                {action === 'out' && additionalFees > 0 && deposit === 0 && (
+                                {action === 'out' && outChargeAmount > 0 && (
                                     <div className="flex justify-between items-center text-sm border-t border-yellow-200 pt-3 mt-2 font-bold bg-yellow-50 -mx-4 -mb-4 px-4 py-3 rounded-b-xl">
                                         <span className="text-yellow-700">⚠️ KHÁCH CẦN THANH TOÁN PHÍ PHÁT SINH:</span>
                                         <span className="text-yellow-600 text-xl">{formatPrice(outChargeAmount)}</span>
                                     </div>
                                 )}
-                                {action === 'out' && deposit === 0 && additionalFees === 0 && (
+                                {action === 'out' && deposit === 0 && additionalFees === 0 && laborCost === 0 && (
                                     <div className="text-sm text-gray-500 border-t pt-2 mt-2 italic flex items-center justify-center gap-2">
                                         <Ban size={16} />
                                         Trả lại máy, không thu/hoàn phí.
@@ -2271,19 +2110,6 @@ export default function RepairPage() {
                                     </div>
                                 )}
                             </div>
-                            {/* Financial Checkbox for tra_may */}
-                            {action === 'done' && remaining > 0 && (
-                                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-                                    <label className="flex items-start gap-3 cursor-pointer">
-                                        <div className="mt-0.5 bg-white border rounded">
-                                            <input type="checkbox" checked={paymentConfirmed} onChange={e => setPaymentConfirmed(e.target.checked)} className="w-5 h-5 text-emerald-600 rounded border-gray-300 focus:ring-emerald-500" />
-                                        </div>
-                                        <span className="text-sm font-semibold text-yellow-800 leading-snug">
-                                            Tôi xác nhận đã thu đủ số tiền <span className="text-red-600 underline decoration-2 underline-offset-2">{formatPrice(remaining)}</span> còn lại từ khách hàng.
-                                        </span>
-                                    </label>
-                                </div>
-                            )}
                             {/* Financial Checkbox for out with refund */}
                             {action === 'out' && outRefundAmount > 0 && (
                                 <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
@@ -2313,31 +2139,59 @@ export default function RepairPage() {
                             {/* Note */}
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                                    {action === 'refund' ? 'Lý do hoàn phí *' : action === 'out' ? 'Lý do trả máy *' : 'Ghi chú bàn giao'}
+                                    {action === 'refund' ? 'Lý do hoàn phí *' : 'Lý do trả máy *'}
                                 </label>
                                 <textarea value={handoverNote} onChange={e => setHandoverNote(e.target.value)}
-                                    rows={2} placeholder={action === 'refund' ? 'Máy bảo hành, không tìm được linh kiện...' : action === 'out' ? 'Không sửa được, trả máy cho khách...' : 'VD: Máy đã sửa xong, giao cho khách lúc 15h...'}
+                                    rows={2} placeholder={action === 'refund' ? 'Máy bảo hành, không tìm được linh kiện...' : 'Không sửa được, trả máy cho khách...'}
                                     className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20 text-sm" />
                             </div>
                         </div>
                         <div className="flex justify-end gap-3 px-6 py-4 border-t sticky bottom-0 bg-white">
-                            <button onClick={() => { setHandoverModal(null); setHandoverNote(''); setPaymentConfirmed(false); setHandoverAdditionalFees(''); setHandoverDiscountAmount(''); }}
+                            <button onClick={() => { setHandoverModal(null); setHandoverNote(''); setPaymentConfirmed(false); setHandoverAdditionalFees(''); setHandoverLaborCost(''); }}
                                 className="px-4 py-2 text-sm bg-gray-100 rounded-lg hover:bg-gray-200">Hủy</button>
-                            <button title="Xác nhận bàn giao" onClick={handleHandover}
+                            <button title="Xác nhận" onClick={handleHandover}
                                 disabled={
-                                    (action === 'done' && remaining > 0 && !paymentConfirmed) ||
                                     (action === 'out' && outRefundAmount > 0 && !paymentConfirmed) ||
                                     (action === 'refund' && deposit > 0 && !paymentConfirmed) ||
                                     ((action === 'refund' || action === 'out') && !handoverNote.trim())
                                 }
                                 className={`px-5 py-2 text-sm font-semibold text-white rounded-lg flex items-center gap-2 ${colors[action]} disabled:opacity-50 disabled:cursor-not-allowed`}>
                                 <CheckCircle2 size={16} />
-                                {action === 'done' ? 'Xác nhận Hoàn Tất Đơn' : action === 'refund' ? 'Xác nhận Hoàn Phí' : 'Xác nhận Trả Máy'}
+                                {action === 'refund' ? 'Xác nhận Hoàn Phí' : 'Xác nhận Trả Máy'}
                             </button>
                         </div>
                     </Modal>
                 );
             })()}
+            {/* ═══ POS Redirect Modal ═══ */}
+            {posRedirectModal && (
+                <Modal
+                    isOpen={true}
+                    onClose={() => setPosRedirectModal(null)}
+                    size="md"
+                >
+                    <div className="p-6 text-center space-y-4">
+                        <div className="mx-auto w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mb-4">
+                            <DollarSign size={32} />
+                        </div>
+                        <h2 className="text-xl font-bold text-gray-900">Thanh Toán Tại Quầy POS</h2>
+                        <p className="text-gray-600">
+                            Phiếu sửa chữa <b>#{posRedirectModal.ticket.id.slice(-6).toUpperCase()}</b> đã hoàn tất sửa chữa.
+                            Để giao máy cho khách và xuất hóa đơn, vui lòng chuyển qua màn hình POS để thanh toán.
+                        </p>
+                        <div className="pt-4 flex gap-3 justify-center">
+                            <button onClick={() => setPosRedirectModal(null)} className="px-5 py-2.5 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-xl font-medium">Đóng</button>
+                            <a
+                                href={`/admin/pos?phone=${encodeURIComponent(posRedirectModal.ticket.customer.phone)}&repairId=${posRedirectModal.ticket.id}`}
+                                className="px-5 py-2.5 text-white bg-blue-600 hover:bg-blue-700 rounded-xl font-medium"
+                            >
+                                Tới màn hình Thu Ngân
+                            </a>
+                        </div>
+                    </div>
+                </Modal>
+            )}
+
             {/* ══════════  Detail View Modal (Eye Icon)  ══════════ */}
             {viewingTicket && (
                 <Modal

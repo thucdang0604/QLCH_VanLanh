@@ -45,11 +45,11 @@ interface GoogleApiError {
 
 export async function GET() {
     try {
-        const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+        const apiKey = process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_MAPS_API_KEY;
         const placeId = await getConfiguredPlaceId();
 
         if (!apiKey || !placeId) {
-            return NextResponse.json({ configured: false, reviews: [] });
+            return NextResponse.json({ configured: false, reviews: [], providerStatus: 'unconfigured' });
         }
 
         const url = new URL(`https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}`);
@@ -86,6 +86,9 @@ export async function GET() {
 
     } catch (error: unknown) {
         console.error('Google Reviews Error:', (error as Error).message);
-        return NextResponse.json({ configured: false, reviews: [] });
+        return NextResponse.json(
+            { configured: true, reviews: [], providerStatus: 'provider_error' },
+            { status: 503 }
+        );
     }
 }

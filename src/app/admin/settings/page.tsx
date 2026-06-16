@@ -7,10 +7,13 @@ import { getAuthInstance } from '@/lib/firebase';
 
 import CategoriesTab from './CategoriesTab';
 import NavigationTab from './NavigationTab';
+import BankIntegrationConfig from '@/components/admin/settings/BankIntegrationConfig';
+import ChatIntegrationsTab from '@/components/admin/settings/ChatIntegrationsTab';
+import RepairsConfigTab from '@/components/admin/settings/RepairsConfigTab';
 
 export default function SettingsPage() {
     const { config, updateConfig, loading } = useConfig();
-    const [activeTab, setActiveTab] = useState<'general' | 'categories' | 'navigation'>('general');
+    const [activeTab, setActiveTab] = useState<'general' | 'categories' | 'navigation' | 'payment' | 'chat' | 'repairs'>('general');
     const [formData, setFormData] = useState<ContactInfo>(DEFAULT_CONFIG.contact_info);
     const [shopName, setShopName] = useState('');
     const [topBarText, setTopBarText] = useState('');
@@ -136,6 +139,36 @@ export default function SettingsPage() {
                     }`}
                 >
                     Quản lý Menu
+                </button>
+                <button
+                    onClick={() => setActiveTab('payment')}
+                    className={`pb-3 text-sm font-medium transition-colors border-b-2 ${
+                        activeTab === 'payment'
+                            ? 'border-orange-500 text-orange-600'
+                            : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    }`}
+                >
+                    Thanh toán & Ngân hàng
+                </button>
+                <button
+                    onClick={() => setActiveTab('chat')}
+                    className={`pb-3 text-sm font-medium transition-colors border-b-2 ${
+                        activeTab === 'chat'
+                            ? 'border-orange-500 text-orange-600'
+                            : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    }`}
+                >
+                    Tích hợp Live Chat
+                </button>
+                <button
+                    onClick={() => setActiveTab('repairs')}
+                    className={`pb-3 text-sm font-medium transition-colors border-b-2 ${
+                        activeTab === 'repairs'
+                            ? 'border-orange-500 text-orange-600'
+                            : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    }`}
+                >
+                    Workflow Sửa chữa
                 </button>
             </div>
 
@@ -444,8 +477,16 @@ export default function SettingsPage() {
                 </div>
             ) : activeTab === 'categories' ? (
                 <CategoriesTab />
-            ) : (
+            ) : activeTab === 'navigation' ? (
                 <NavigationTab />
+            ) : activeTab === 'payment' ? (
+                <div className="space-y-6">
+                    <BankIntegrationConfig />
+                </div>
+            ) : activeTab === 'chat' ? (
+                <ChatIntegrationsTab />
+            ) : (
+                <RepairsConfigTab />
             )}
         </div>
     );

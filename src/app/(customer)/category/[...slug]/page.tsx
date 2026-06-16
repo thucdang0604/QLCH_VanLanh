@@ -2,7 +2,7 @@ import { Metadata } from 'next';
 import { fetchCategoryItems, fetchNavConfig, fetchTaxonomyConfig } from '../../_lib/server-queries';
 import CategoryClient from './CategoryClient';
 import { SITE_URL } from "@/lib/constants";
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import type { TaxonomyNode } from '@/lib/types';
 import { getBusinessIdentity } from '@/lib/businessIdentity';
 
@@ -12,10 +12,17 @@ type ResolvedInfo = {
     condition?: string;
     isRepair?: boolean;
     isAccessory?: boolean;
+    canonicalSegments?: string[];
     categoryConfig?: { id: string; slug: string; name: string; type: 'retail' | 'service' | 'component'; keywords: string[]; isActive: boolean };
 };
 
 type NavItem = { slug?: string; label?: string; name?: string; filterType?: string; taxonomyRef?: string };
+
+const CATEGORY_ALIASES: Record<string, string[]> = {
+    'sua-laptop': ['sua-chua-laptop'],
+    'sua-tablet': ['sua-chua-may-tinh-bang'],
+    'thay-mat-kinh': ['dich-vu-pho-bien', 'ep-kinh'],
+};
 
 function mapFilterType(ft?: string): Partial<ResolvedInfo> {
     switch (ft) {
@@ -50,6 +57,12 @@ function findTaxonomyNode(slugSegments: string[], trees: { type: string; nodes: 
 }
 
 async function resolveSlug(slugSegments: string[]): Promise<ResolvedInfo | null> {
+    if (slugSegments.length === 1 && slugSegments[0] === 'all') {
+        return { label: 'Tất cả sản phẩm', canonicalSegments: ['all'] };
+    }
+
+    const resolvedSegments = CATEGORY_ALIASES[slugSegments.join('/')] || slugSegments;
+
     // 1. Check nav config first — match by single-segment slug (nav items use single slugs)
     const nav = await fetchNavConfig();
     const navItem = [...nav.headerNav, ...nav.sidebarMenu, ...nav.footerServices]
@@ -72,11 +85,15 @@ async function resolveSlug(slugSegments: string[]): Promise<ResolvedInfo | null>
             if (found) {
                 const keywords = [found.node.name, found.node.slug, ...(found.node.seoKeywords?.split(',').map((k: string) => k.trim()) || [])];
                 info.categoryConfig = { id: found.node.id, slug: found.node.slug, name: found.node.name, type: found.type as 'retail' | 'service' | 'component', keywords, isActive: true };
+                info.canonicalSegments = found.node.id.split('/');
                 if (!info.isRepair && found.type === 'service') info.isRepair = true;
+                return info;
             }
         }
 
-        return info;
+        // Generic nav aliases must continue into the taxonomy resolver. Returning
+        // here would show an unrelated unfiltered product list.
+        if (navItem.filterType) return { ...info, canonicalSegments: slugSegments };
     }
 
     // 2. Search taxonomy tree directly by the deepest slug segment
@@ -86,7 +103,7 @@ async function resolveSlug(slugSegments: string[]): Promise<ResolvedInfo | null>
         { type: 'retail', nodes: taxonomy.retail || [] },
         { type: 'component', nodes: taxonomy.component || [] },
     ];
-    const found = findTaxonomyNode(slugSegments, trees);
+    const found = findTaxonomyNode(resolvedSegments, trees);
     if (found) {
         const keywords = [found.node.name, found.node.slug, ...(found.node.seoKeywords?.split(',').map((k: string) => k.trim()) || [])];
 
@@ -100,6 +117,7 @@ async function resolveSlug(slugSegments: string[]): Promise<ResolvedInfo | null>
             label: found.node.name,
             isRepair: found.type === 'service',
             ...parentFilterType,
+            canonicalSegments: found.node.id.split('/'),
             categoryConfig: { id: found.node.id, slug: found.node.slug, name: found.node.name, type: found.type as 'retail' | 'service' | 'component', keywords, isActive: true },
         };
     }
@@ -127,7 +145,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
         title,
         description,
         alternates: {
-            canonical: `${SITE_URL}/category/${fullSlug}`
+            canonical: `${SITE_URL}/category/${info.canonicalSegments?.join('/') || fullSlug}`
         }
     };
 }
@@ -139,6 +157,11 @@ export default async function CategoryPage({ params }: { params: Promise<{ slug:
 
     if (!info) {
         notFound();
+    }
+
+    const canonicalPath = info.canonicalSegments?.join('/');
+    if (canonicalPath && canonicalPath !== slug.join('/')) {
+        redirect(`/category/${canonicalPath}`);
     }
 
     const isRepair = !!info.isRepair;

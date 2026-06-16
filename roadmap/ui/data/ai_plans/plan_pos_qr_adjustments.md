@@ -2,7 +2,7 @@
 
 **ID**: `plan-pos-qr-adjustments`
 **Date**: 31.05.2026
-**Status**: implemented-local
+**Status**: implemented-awaiting-hardware-validation (merged `master`)
 
 ## Goal
 

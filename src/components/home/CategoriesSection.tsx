@@ -54,7 +54,7 @@ export default function CategoriesSection({ ssrHomeServiceCategories }: { ssrHom
                 </span>
                 
                 <span className="text-[10px] sm:text-xs text-gray-600 mt-2 font-medium bg-gray-100 group-hover:bg-copper/5 group-hover:text-copper px-2.5 py-1 rounded-full transition-colors">
-                  {cat.count || 0} dịch vụ
+                  {cat.count || 'Đang cập nhật'}
                 </span>
               </Link>
             ))}

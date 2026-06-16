@@ -2,6 +2,7 @@ import { getAdminDb, isAdminAvailable } from '@/lib/firebaseAdmin';
 import { cache } from 'react';
 import { unstable_cache } from 'next/cache';
 import { PRODUCT_STATUS } from '@/lib/productLifecycle';
+import { filterFlashSaleProducts } from '@/lib/flashSale';
 
 /** Serialized Firestore document with guaranteed `id` field */
 export type SerializedDoc = { id: string } & Record<string, unknown>;
@@ -224,14 +225,7 @@ export const fetchFlashSaleProducts = unstable_cache(
             return serialized;
         });
 
-        // Filter flash sale items: isFlashSale=true OR discount >= 10%
-        return items.filter((p) => {
-            if (p.isFlashSale) return true;
-            if (p.price_promo && p.price_original) {
-                return ((p.price_original as number) - (p.price_promo as number)) / (p.price_original as number) * 100 >= 10;
-            }
-            return false;
-        });
+        return filterFlashSaleProducts(items);
     },
     ['flash-sale-products'],
     { tags: ['products'], revalidate: 30 }

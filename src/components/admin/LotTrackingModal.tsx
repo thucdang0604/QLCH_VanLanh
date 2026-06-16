@@ -3,7 +3,7 @@ import Modal from './Modal';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Search, Loader2, Package, Building2, Calendar, FileText, ArrowDownRight, Tag } from 'lucide-react';
-import { FirestoreDateValue } from '@/lib/types';
+import type { FirestoreDateValue } from '@/lib/types';
 
 interface LotTrackingModalProps {
     isOpen: boolean;
@@ -32,6 +32,25 @@ interface LotUsageLog {
     createdBy?: string;
     deductedQty: number; // Specific to this lot
 }
+
+interface DeductedLotEntry {
+    lotCode?: string | null;
+    qty?: number;
+    quantity?: number;
+}
+
+const dateValueToMillis = (value?: FirestoreDateValue): number => {
+    if (!value) return 0;
+    if (typeof value === 'number') return value;
+    if (value instanceof Date) return value.getTime();
+    if (typeof value === 'object' && 'toMillis' in value && typeof value.toMillis === 'function') {
+        return value.toMillis();
+    }
+    if (typeof value === 'object' && 'toDate' in value && typeof value.toDate === 'function') {
+        return value.toDate().getTime();
+    }
+    return 0;
+};
 
 export default function LotTrackingModal({ isOpen, onClose }: LotTrackingModalProps) {
     const [searchCode, setSearchCode] = useState('');
@@ -81,13 +100,13 @@ export default function LotTrackingModal({ isOpen, onClose }: LotTrackingModalPr
             usageSnap.forEach(doc => {
                 const data = doc.data();
                 if (data.lotsDeducted && Array.isArray(data.lotsDeducted)) {
-                    const usage = data.lotsDeducted.find((l: any) => l.lotCode === code);
+                    const usage = (data.lotsDeducted as DeductedLotEntry[]).find((lot) => lot.lotCode === code);
                     if (usage) {
                         logs.push({
                             id: doc.id,
                             type: data.type,
                             quantity: data.quantity,
-                            deductedQty: usage.qty,
+                            deductedQty: Number(usage.qty ?? usage.quantity ?? 0),
                             referenceType: data.referenceType,
                             referenceId: data.referenceId,
                             createdAt: data.createdAt,
@@ -99,14 +118,14 @@ export default function LotTrackingModal({ isOpen, onClose }: LotTrackingModalPr
 
             // Sort logs by date descending locally
             logs.sort((a, b) => {
-                const da = a.createdAt && 'toMillis' in a.createdAt ? a.createdAt.toMillis() : Date.now();
-                const dbTime = b.createdAt && 'toMillis' in b.createdAt ? b.createdAt.toMillis() : Date.now();
+                const da = dateValueToMillis(a.createdAt);
+                const dbTime = dateValueToMillis(b.createdAt);
                 return dbTime - da;
             });
 
             setUsageLogs(logs);
 
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error('Error tracking lot:', err);
             setError('Đã xảy ra lỗi khi truy vấn dữ liệu.');
         } finally {
@@ -114,9 +133,10 @@ export default function LotTrackingModal({ isOpen, onClose }: LotTrackingModalPr
         }
     };
 
-    const formatDate = (ts: any) => {
+    const formatDate = (ts?: FirestoreDateValue) => {
         if (!ts) return '—';
-        const d = typeof ts === 'object' && 'toDate' in ts && typeof ts.toDate === 'function' ? ts.toDate() : new Date(ts);
+        const millis = dateValueToMillis(ts);
+        const d = millis > 0 ? new Date(millis) : new Date();
         return d.toLocaleDateString('vi-VN') + ' ' + d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
     };
 

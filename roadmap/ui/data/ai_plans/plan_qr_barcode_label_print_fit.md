@@ -2,7 +2,7 @@
 
 **ID**: `plan-qr-barcode-label-print-fit`
 **Date**: 07.06.2026
-**Status**: implemented-local
+**Status**: implemented-awaiting-hardware-validation (merged `master`)
 
 ## Goal
 

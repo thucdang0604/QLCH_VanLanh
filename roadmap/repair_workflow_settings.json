@@ -1,0 +1,392 @@
+{
+  "warrantyRules": [
+    {
+      "partType": "Màn hình",
+      "warrantyMonths": 6
+    },
+    {
+      "partType": "Pin",
+      "warrantyMonths": 12
+    },
+    {
+      "partType": "Camera",
+      "warrantyMonths": 3
+    },
+    {
+      "partType": "Mainboard",
+      "warrantyMonths": 6
+    },
+    {
+      "partType": "Loa / Mic",
+      "warrantyMonths": 3
+    },
+    {
+      "partType": "Cáp / Dây nguồn",
+      "warrantyMonths": 1
+    },
+    {
+      "partType": "Vỏ / Khung",
+      "warrantyMonths": 0
+    },
+    {
+      "partType": "Khác",
+      "warrantyMonths": 0
+    }
+  ],
+  "warrantyNote": "",
+  "statuses": [
+    {
+      "allowedFeatures": [
+        "allowAssignTech",
+        "requireChecklist"
+      ],
+      "allowedNext": [
+        "dang_kiem_tra"
+      ],
+      "id": "cho_tiep_nhan",
+      "next": "bao_tinh_trang_va_gia",
+      "color": "bg-yellow-100 text-yellow-800",
+      "label": "Chờ Tiếp nhận",
+      "isTerminal": false
+    },
+    {
+      "label": "Đang Kiểm Tra",
+      "color": "bg-blue-100 text-blue-800",
+      "allowedFeatures": [
+        "requireChecklist"
+      ],
+      "next": "da_bao_gia",
+      "allowedNext": [
+        "bao_tinh_trang_va_gia"
+      ],
+      "id": "dang_kiem_tra"
+    },
+    {
+      "allowedFeatures": [
+        "allowPartsSelection"
+      ],
+      "next": "doi_khach_phan_hoi",
+      "id": "bao_tinh_trang_va_gia",
+      "allowedNext": [
+        "dang_tim_linh_kien",
+        "dang_sua_chua",
+        "out"
+      ],
+      "label": "báo tình trạng và giá sau kiểm tra",
+      "color": "bg-yellow-100 text-yellow-800",
+      "isTerminal": false
+    },
+    {
+      "color": "bg-orange-100 text-orange-800",
+      "label": "Đang Tìm Linh Kiện",
+      "isTerminal": false,
+      "allowedFeatures": [
+        "allowPartsSelection"
+      ],
+      "id": "dang_tim_linh_kien",
+      "allowedNext": [
+        "da_dat_linh_kien",
+        "cho_ban_giao_khach"
+      ]
+    },
+    {
+      "isTerminal": false,
+      "color": "bg-cyan-100 text-cyan-800",
+      "label": "Đã Đăt Linh Kiện",
+      "allowedNext": [
+        "dang_sua_chua"
+      ],
+      "id": "da_dat_linh_kien"
+    },
+    {
+      "color": "bg-orange-100 text-orange-800",
+      "label": "Đang Sửa Chữa",
+      "next": "done",
+      "allowedNext": [
+        "cho_ban_giao_khach"
+      ],
+      "id": "dang_sua_chua",
+      "allowedFeatures": []
+    },
+    {
+      "allowedFeatures": [
+        "requirePaymentGate"
+      ],
+      "allowedNext": [
+        "out",
+        "done"
+      ],
+      "id": "cho_ban_giao_khach",
+      "color": "bg-teal-100 text-teal-800",
+      "label": "chờ bàn giao khách",
+      "isTerminal": false
+    },
+    {
+      "id": "done",
+      "allowedNext": [
+        "refund"
+      ],
+      "next": "out",
+      "allowedFeatures": [
+        "enableTechnicianCommission",
+        "enableSellerCommission",
+        "requirePaymentGate"
+      ],
+      "isTerminal": false,
+      "label": "Hoàn Tất Đơn",
+      "color": "bg-green-100 text-green-800"
+    },
+    {
+      "color": "bg-red-100 text-red-800",
+      "label": "hoàn phí",
+      "isTerminal": true,
+      "allowedFeatures": [
+        "enableTechnicianCommission"
+      ],
+      "allowedNext": [],
+      "id": "refund"
+    },
+    {
+      "allowedFeatures": [],
+      "next": "done",
+      "allowedNext": [],
+      "id": "out",
+      "color": "bg-gray-100 text-gray-800",
+      "label": "Trả Máy",
+      "isTerminal": true
+    }
+  ],
+  "workflowFeatureSemantics": "exit-gates-v1",
+  "workflowMigratedAt": {
+    "_seconds": 1781265724,
+    "_nanoseconds": 759000000
+  },
+  "warrantyStatuses": [
+    {
+      "id": "bh_tiep_nhan",
+      "label": "Tiếp nhận BH",
+      "color": "bg-yellow-100 text-yellow-800",
+      "allowedNext": [
+        "bh_dang_kiem_tra"
+      ],
+      "allowedFeatures": [
+        "allowAssignTech",
+        "requireAssignedTechnician"
+      ],
+      "isTerminal": false
+    },
+    {
+      "id": "bh_dang_kiem_tra",
+      "label": "Đang kiểm tra BH",
+      "color": "bg-blue-100 text-blue-800",
+      "allowedNext": [
+        "bh_dang_sua",
+        "bh_tu_choi"
+      ],
+      "allowedFeatures": [
+        "requireChecklist",
+        "requireTechnicianNote"
+      ],
+      "isTerminal": false
+    },
+    {
+      "id": "bh_dang_sua",
+      "label": "Đang sửa BH",
+      "color": "bg-orange-100 text-orange-800",
+      "allowedNext": [
+        "bh_hoan_tat",
+        "bh_refund"
+      ],
+      "allowedFeatures": [
+        "allowPartsSelection"
+      ],
+      "isTerminal": false
+    },
+    {
+      "id": "bh_hoan_tat",
+      "label": "Hoàn tất BH",
+      "color": "bg-green-100 text-green-800",
+      "allowedNext": [],
+      "allowedFeatures": [],
+      "isTerminal": true
+    },
+    {
+      "id": "bh_tu_choi",
+      "label": "Từ chối BH",
+      "color": "bg-gray-100 text-gray-800",
+      "allowedNext": [],
+      "allowedFeatures": [],
+      "isTerminal": true
+    },
+    {
+      "id": "bh_refund",
+      "label": "Hoàn phí BH",
+      "color": "bg-red-100 text-red-800",
+      "allowedNext": [],
+      "allowedFeatures": [
+        "enableTechnicianCommission"
+      ],
+      "isTerminal": true
+    }
+  ],
+  "workflowSchemaVersion": 2,
+  "trackingGroups": [
+    {
+      "name": "Tiếp Nhận",
+      "id": "idx_1772779139621",
+      "order": 0,
+      "mappedStatuses": [
+        "cho_tiep_nhan"
+      ]
+    },
+    {
+      "name": "Đang Kiểm Tra",
+      "id": "idx_1772779159918",
+      "order": 1,
+      "mappedStatuses": [
+        "dang_kiem_tra",
+        "bao_tinh_trang_va_gia",
+        "dang_tim_linh_kien"
+      ]
+    },
+    {
+      "name": "Đang Sửa Chữa",
+      "id": "idx_1772779181087",
+      "order": 2,
+      "mappedStatuses": [
+        "dang_sua_chua"
+      ]
+    },
+    {
+      "name": "Chờ Bàn Giao",
+      "id": "idx_1772779197131",
+      "order": 3,
+      "mappedStatuses": [
+        "cho_ban_giao_khach"
+      ]
+    },
+    {
+      "id": "idx_1772779232473",
+      "name": "Đã Hoàn Tất Phiếu",
+      "isTerminal": true,
+      "mappedStatuses": [
+        "done",
+        "out"
+      ],
+      "order": 4
+    }
+  ],
+  "repairStatuses": [
+    {
+      "id": "cho_tiep_nhan",
+      "label": "Chờ Tiếp nhận",
+      "color": "bg-yellow-100 text-yellow-800",
+      "allowedNext": [
+        "dang_kiem_tra"
+      ],
+      "allowedFeatures": [
+        "allowAssignTech",
+        "requireChecklist",
+        "requireAssignedTechnician"
+      ],
+      "isTerminal": false,
+      "next": "bao_tinh_trang_va_gia"
+    },
+    {
+      "id": "dang_kiem_tra",
+      "label": "Đang Kiểm Tra",
+      "color": "bg-blue-100 text-blue-800",
+      "allowedNext": [
+        "bao_tinh_trang_va_gia"
+      ],
+      "allowedFeatures": [
+        "requireChecklist",
+        "requireTechnicianNote"
+      ],
+      "isTerminal": false,
+      "next": "da_bao_gia"
+    },
+    {
+      "id": "bao_tinh_trang_va_gia",
+      "label": "báo tình trạng và giá sau kiểm tra",
+      "color": "bg-yellow-100 text-yellow-800",
+      "allowedNext": [
+        "dang_tim_linh_kien",
+        "dang_sua_chua",
+        "out"
+      ],
+      "allowedFeatures": [
+        "allowPartsSelection",
+        "requireTechnicianNote"
+      ],
+      "isTerminal": false,
+      "next": "doi_khach_phan_hoi"
+    },
+    {
+      "id": "dang_tim_linh_kien",
+      "label": "Đang Tìm Linh Kiện",
+      "color": "bg-orange-100 text-orange-800",
+      "allowedNext": [
+        "dang_sua_chua"
+      ],
+      "allowedFeatures": [
+        "allowPartsSelection",
+        "requirePartsReady"
+      ],
+      "isTerminal": false
+    },
+    {
+      "id": "dang_sua_chua",
+      "label": "Đang Sửa Chữa",
+      "color": "bg-orange-100 text-orange-800",
+      "allowedNext": [
+        "cho_ban_giao_khach"
+      ],
+      "allowedFeatures": [
+        "requirePartsReady",
+        "requireTechnicianNote",
+        "allowPartsSelection"
+      ],
+      "isTerminal": false,
+      "next": "done"
+    },
+    {
+      "id": "cho_ban_giao_khach",
+      "label": "chờ bàn giao khách",
+      "color": "bg-teal-100 text-teal-800",
+      "allowedNext": [
+        "out",
+        "done"
+      ],
+      "allowedFeatures": [
+        "requirePaymentGate"
+      ],
+      "isTerminal": false
+    },
+    {
+      "id": "done",
+      "label": "Hoàn Tất Đơn",
+      "color": "bg-green-100 text-green-800",
+      "allowedNext": [],
+      "allowedFeatures": [
+        "enableTechnicianCommission",
+        "enableSellerCommission"
+      ],
+      "isTerminal": true,
+      "next": "out"
+    },
+    {
+      "id": "out",
+      "label": "Trả Máy",
+      "color": "bg-gray-100 text-gray-800",
+      "allowedNext": [],
+      "allowedFeatures": [],
+      "isTerminal": true,
+      "next": "done"
+    }
+  ],
+  "updatedAt": {
+    "_seconds": 1781413623,
+    "_nanoseconds": 116000000
+  }
+}

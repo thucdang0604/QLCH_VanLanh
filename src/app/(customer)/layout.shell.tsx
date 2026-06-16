@@ -2,6 +2,9 @@
 
 import Header from "@/components/layout/Header";
 import dynamic from 'next/dynamic';
+import MobileBottomNav from "@/components/layout/MobileBottomNav";
+import Footer from "@/components/layout/Footer";
+import ChatWidget from "@/components/ChatWidget";
 import { CartProvider } from "@/lib/CartContext";
 import { useConfig } from "@/lib/ConfigContext";
 import { usePresence } from "@/lib/usePresence";
@@ -9,13 +12,9 @@ import { Megaphone, X } from "lucide-react";
 import { useState } from "react";
 import { getBusinessIdentity } from "@/lib/businessIdentity";
 
-const MobileBottomNav = dynamic(() => import("@/components/layout/MobileBottomNav"), { ssr: false });
-const Footer = dynamic(() => import("@/components/layout/Footer"), { ssr: true });
 const CartDrawer = dynamic(() => import("@/components/CartDrawer"), { ssr: false });
 
-// Lazy load: ChatWidget & FloatingReviews không cần hiện ngay lúc trang mở
-// => giảm initial JS bundle đáng kể trên mobile
-const ChatWidget = dynamic(() => import("@/components/ChatWidget"), { ssr: false });
+// Floating reviews are non-essential; contact controls render in the first response.
 const FloatingReviews = dynamic(() => import("@/components/home/FloatingReviews"), { ssr: false });
 
 function TopBar() {

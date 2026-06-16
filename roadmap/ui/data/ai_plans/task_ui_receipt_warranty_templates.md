@@ -2,7 +2,7 @@
 
 - ID: plan-ui-receipt-warranty-templates
 - Date: 03.06.2026
-- Status: in-progress
+- Status: completed
 
 ## Scope
 - `src/app/admin/settings/receipt/page.tsx`

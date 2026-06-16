@@ -34,6 +34,7 @@ const eslintConfig = [
       "firestore-debug.log",
       "next-env.d.ts",
       "roadmap_v2/**",
+      "temp_git_page.tsx",
     ],
   }
 ];

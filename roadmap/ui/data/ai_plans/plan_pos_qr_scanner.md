@@ -2,7 +2,7 @@
 
 **ID**: `plan-pos-qr-scanner`
 **Ngày**: 30.05.2026
-**Trạng thái**: implemented-local
+**Trạng thái**: implemented-awaiting-device-validation (merged `master`)
 
 ## Mục tiêu
 

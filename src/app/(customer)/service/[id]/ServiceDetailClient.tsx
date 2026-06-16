@@ -227,13 +227,13 @@ export default function ServiceDetailClient({ service }: { service: ServiceData 
                     {/* Price */}
                     <div className="mb-6">
                         {promoPrice && promoPrice > 0 ? (
-                            <div className="flex items-baseline gap-3">
-                                <span className="text-3xl font-bold text-accent">{formatPrice(promoPrice)}</span>
+                            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-2 min-w-0">
+                                <span className="text-3xl font-bold text-accent break-words">{formatPrice(promoPrice)}</span>
                                 {originalPrice > 0 && (
                                     <span className="text-lg text-gray-400 line-through">{formatPrice(originalPrice)}</span>
                                 )}
                                 {discount > 0 && (
-                                    <span className="text-sm bg-red-50 text-red-600 font-semibold px-2 py-0.5 rounded">
+                                    <span className="max-w-full text-sm bg-red-50 text-red-600 font-semibold px-2 py-0.5 rounded whitespace-normal break-words">
                                         Tiết kiệm {formatPrice(originalPrice - promoPrice)}
                                     </span>
                                 )}

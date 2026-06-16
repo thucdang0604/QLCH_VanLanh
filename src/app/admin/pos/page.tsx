@@ -62,6 +62,7 @@ interface LastOrderData {
     total_amount: number;
     discount_amount: number;
     subtotal_amount: number;
+    shipping_fee: number;
     deposit_amount: number;
     payment_method: string;
     createdByName?: string;
@@ -82,11 +83,27 @@ interface CartItem {
     imeis?: string[];
 }
 
+interface BankAccountConfig {
+    id?: string;
+    bankId: string;
+    accountNo: string;
+    accountName: string;
+    isDefault?: boolean;
+}
+
+interface BankConfig {
+    accounts?: BankAccountConfig[];
+    bankId?: string;
+    accountNo?: string;
+    accountName?: string;
+}
+
 const paymentMethods = [
     { key: 'cash', label: 'Tiền mặt', icon: Banknote },
     { key: 'bank', label: 'Chuyển khoản', icon: CreditCard },
     { key: 'momo', label: 'MoMo', icon: QrCode },
     { key: 'installment', label: 'Trả góp', icon: CreditCard },
+    { key: 'debt', label: 'Ghi nợ', icon: AlertTriangle },
 ];
 
 export default function POSPage() {
@@ -125,9 +142,12 @@ export default function POSPage() {
     const [cart, setCart] = useState<CartItem[]>([]);
     const [customerName, setCustomerName] = useState('');
     const [customerPhone, setCustomerPhone] = useState('');
+    const [customerDebt, setCustomerDebt] = useState<number>(0);
     const [paymentMethod, setPaymentMethod] = useState('cash');
     const [discount, setDiscount] = useState(0);
     const [deposit, setDeposit] = useState(0);
+    const [shippingFee, setShippingFee] = useState(0);
+    const [useSurplusToPayDebt, setUseSurplusToPayDebt] = useState(false);
     const [voucherCode, setVoucherCode] = useState('');
     const [voucherStatus, setVoucherStatus] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
     const [appliedVoucher, setAppliedVoucher] = useState<{ code: string; type: string; value: number; maxDiscount?: number | null } | null>(null);
@@ -139,6 +159,22 @@ export default function POSPage() {
     const [printTemplate, setPrintTemplate] = useState<'thermal' | 'a5'>('a5');
     const [lastOrder, setLastOrder] = useState<LastOrderData | null>(null);
     const [showProductModal, setShowProductModal] = useState(false);
+    const [bankConfig, setBankConfig] = useState<BankConfig | null>(null);
+
+    useEffect(() => {
+        async function fetchBankConfig() {
+            try {
+                const res = await fetch('/api/admin/bank-config');
+                const data = await res.json();
+                if (data.success && data.config) {
+                    setBankConfig(data.config);
+                }
+            } catch (err) {
+                console.error('Lỗi tải cấu hình ngân hàng:', err);
+            }
+        }
+        fetchBankConfig();
+    }, []);
 
     // Repair lookup
     interface RepairTicketInfo {
@@ -147,11 +183,14 @@ export default function POSPage() {
         customerPhone: string;
         deviceModel: string;
         status: string;
-        parts: { productName: string; partType?: string; unitPriceAtUse?: number }[];
+        parts: { productName: string; partType?: string; unitPriceAtUse?: number, status?: string, quantity?: number }[];
         paymentAmount: number;
+        paymentLaborCost: number;
         paymentStatus: string;
+        gifts?: string[];
+        issues?: { estimatedPrice?: number }[];
     }
-    const [linkedRepair, setLinkedRepair] = useState<RepairTicketInfo | null>(null);
+    const [linkedRepairs, setLinkedRepairs] = useState<RepairTicketInfo[]>([]);
     const [repairLoading, setRepairLoading] = useState(false);
     const [autoDiscountAmount, setAutoDiscountAmount] = useState(0);
     const [discountDetails, setDiscountDetails] = useState<{ productName: string; discountAmount: number; ruleName: string }[]>([]);
@@ -165,12 +204,93 @@ export default function POSPage() {
         chatPrefillApplied.current = true;
     }, [searchParams]);
 
+    // Load a repair handed off from the repair screen.
+    useEffect(() => {
+        const repairId = searchParams.get('repairId');
+        if (!repairId || linkedRepairs.some(repair => repair.id === repairId)) return;
+
+        let cancelled = false;
+        const fetchRepair = async () => {
+            setRepairLoading(true);
+            try {
+                const { doc, getDoc } = await import('firebase/firestore');
+                const snapshot = await getDoc(doc(db, 'repairs', repairId));
+                if (!snapshot.exists() || cancelled) return;
+
+                const data = snapshot.data();
+                const repair: RepairTicketInfo = {
+                    id: snapshot.id,
+                    customerName: String(data.customerName || ''),
+                    customerPhone: String(data.customerPhone || ''),
+                    deviceModel: String(data.deviceModel || ''),
+                    status: String(data.status || ''),
+                    parts: (data.parts || []).map((part: Record<string, unknown>) => ({
+                        productName: String(part.productName || ''),
+                        partType: String(part.partType || ''),
+                        unitPriceAtUse: Number(part.unitPriceAtUse || 0),
+                        status: String(part.status || ''),
+                        quantity: Number(part.quantity || 1),
+                    })),
+                    gifts: Array.isArray(data.gifts) ? data.gifts.map(String) : [],
+                    paymentAmount: Number(data.payment?.amount || 0),
+                    paymentLaborCost: Number(data.payment?.laborCost || 0),
+                    paymentStatus: String(data.payment?.status || 'unpaid'),
+                    issues: data.issues || [],
+                };
+
+                setLinkedRepairs(previous => [...previous, repair]);
+                setCustomerName(previous => previous || repair.customerName);
+                setCustomerPhone(previous => previous || repair.customerPhone);
+            } catch (error) {
+                console.error('Failed to load repair by ID:', error);
+            } finally {
+                if (!cancelled) setRepairLoading(false);
+            }
+        };
+
+        fetchRepair();
+        return () => {
+            cancelled = true;
+        };
+    }, [searchParams, linkedRepairs]);
+
+    // Add a repair handoff to the cart once its data is available.
+    useEffect(() => {
+        const repairId = searchParams.get('repairId');
+        if (!repairId || cart.some(item => item.productId === repairId)) return;
+        if (cart.some(item => item.isRepairTicket && item.productId !== repairId)) return;
+        const repair = linkedRepairs.find(item => item.id === repairId);
+        if (!repair || repair.paymentStatus === 'paid' || repair.paymentStatus === 'refunded') return;
+
+        const newItems: CartItem[] = [{
+            productId: repair.id,
+            name: `[Phiếu sửa chữa] ${repair.deviceModel}`,
+            originalPrice: repair.paymentAmount,
+            sellingPrice: repair.paymentAmount,
+            costPrice: 0,
+            quantity: 1,
+            isRepairTicket: true,
+        }];
+        repair.gifts?.forEach(giftId => {
+            newItems.push({
+                productId: `gift_${repair.id}_${giftId}`,
+                name: `[Quà tặng] Mã SP: ${giftId}`,
+                originalPrice: 0,
+                sellingPrice: 0,
+                costPrice: 0,
+                quantity: 1,
+            });
+        });
+        setCart(previous => [...newItems, ...previous]);
+    }, [cart, linkedRepairs, searchParams]);
+
     // Lookup repair by phone
     const lookupRepairByPhone = async (phone: string) => {
         if (!phone || phone.length < 8) {
-            setLinkedRepair(null);
+            setLinkedRepairs([]);
             setAutoDiscountAmount(0);
             setDiscountDetails([]);
+            setCustomerDebt(0);
             return;
         }
         setRepairLoading(true);
@@ -185,39 +305,92 @@ export default function POSPage() {
                     if (!customerName && cData.name && cData.name !== 'Khách lẻ') {
                         setCustomerName(cData.name);
                     }
+                    setCustomerDebt(cData.totalDebt || 0);
+                } else {
+                    setCustomerDebt(0);
                 }
+            } else {
+                setCustomerDebt(0);
             }
 
             const q = query(
                 collection(db, 'repairs'),
                 where('customerPhone', '==', phone.trim()),
+                where('payment.status', 'in', ['unpaid', 'partial']),
                 fbOrderBy('createdAt', 'desc')
             );
             const snap = await getDocs(q);
             if (!snap.empty) {
-                const d = snap.docs[0];
-                const data = d.data();
-                setLinkedRepair({
-                    id: d.id,
-                    customerName: data.customerName || '',
-                    customerPhone: data.customerPhone || phone,
-                    deviceModel: data.deviceModel || '',
-                    status: data.status || '',
-                    parts: (data.parts || []).map((p: Record<string, unknown>) => ({
-                        productName: String(p.productName || ''),
-                        partType: String(p.partType || ''),
-                        unitPriceAtUse: Number(p.unitPriceAtUse || 0)
-                    })),
-                    paymentAmount: Number(data.payment?.amount || 0),
-                    paymentStatus: String(data.payment?.status || 'unpaid')
+                const repairs = snap.docs.map(d => {
+                    const data = d.data();
+                    // Auto-fill customer name if empty
+                    if (!customerName && data.customerName) {
+                        setCustomerName(prev => prev || data.customerName);
+                    }
+                    return {
+                        id: d.id,
+                        customerName: data.customerName || '',
+                        customerPhone: data.customerPhone || phone,
+                        deviceModel: data.deviceModel || '',
+                        status: data.status || '',
+                        parts: (data.parts || []).map((p: Record<string, unknown>) => ({
+                            productName: String(p.productName || ''),
+                            partType: String(p.partType || ''),
+                            unitPriceAtUse: Number(p.unitPriceAtUse || 0),
+                            status: String(p.status || ''),
+                            quantity: Number(p.quantity || 1),
+                        })),
+                        paymentAmount: Number(data.payment?.amount || 0),
+                        paymentLaborCost: Number(data.payment?.laborCost || 0),
+                        paymentStatus: String(data.payment?.status || 'unpaid'),
+                        gifts: data.gifts || [],
+                        issues: data.issues || []
+                    };
                 });
-                // Auto-fill customer name if empty and not found in customers collection
-                if (!customerName && data.customerName) {
-                    // Update state using functional update to ensure we don't overwrite if it was just set
-                    setCustomerName(prev => prev || data.customerName);
+                setLinkedRepairs(repairs);
+
+                // Auto inject gifts if coming from repair checkout link
+                const urlSource = new URLSearchParams(window.location.search).get('source');
+                if (urlSource === 'repair' && new URLSearchParams(window.location.search).get('phone')) {
+                    const newItems: CartItem[] = [];
+                    repairs.forEach(repair => {
+                        // Prevent adding if already in cart
+                        if (cart.some(c => c.productId === repair.id)) return;
+                        if (repair.paymentStatus === 'paid' || repair.paymentStatus === 'refunded') return;
+
+                        newItems.push({
+                            productId: repair.id,
+                            name: `[Phiếu sửa chữa] ${repair.deviceModel}`,
+                            originalPrice: repair.paymentAmount,
+                            sellingPrice: repair.paymentAmount,
+                            costPrice: 0,
+                            quantity: 1,
+                            isRepairTicket: true
+                        });
+
+                        if (repair.gifts && repair.gifts.length > 0) {
+                            repair.gifts.forEach((giftId: string) => {
+                                const cartGiftId = `gift_${repair.id}_${giftId}`;
+                                if (!cart.some(c => c.productId === cartGiftId) && !newItems.some(i => i.productId === cartGiftId)) {
+                                    newItems.push({
+                                        productId: cartGiftId,
+                                        name: `[Quà tặng] Mã SP: ${giftId}`,
+                                        originalPrice: 0,
+                                        sellingPrice: 0,
+                                        costPrice: 0,
+                                        quantity: 1,
+                                        isRepairTicket: false
+                                    });
+                                }
+                            });
+                        }
+                    });
+                    if (newItems.length > 0) {
+                        setCart(prev => [...newItems, ...prev]);
+                    }
                 }
             } else {
-                setLinkedRepair(null);
+                setLinkedRepairs([]);
             }
         } catch (err) {
             console.error('Repair/Customer lookup failed:', err);
@@ -227,7 +400,7 @@ export default function POSPage() {
 
     // Auto-calculate discount when cart or linked repair changes
     useEffect(() => {
-        if (!linkedRepair || linkedRepair.parts.length === 0 || cart.length === 0) {
+        if (linkedRepairs.length === 0 || cart.length === 0) {
             setAutoDiscountAmount(0);
             setDiscountDetails([]);
             return;
@@ -236,8 +409,16 @@ export default function POSPage() {
             try {
                 const rules = await fetchActiveDiscountRules();
                 if (rules.length === 0) return;
+
+                let allParts: { productName: string; partType?: string; unitPriceAtUse?: number }[] = [];
+                linkedRepairs.forEach(r => {
+                    allParts = [...allParts, ...r.parts];
+                });
+
+                if (allParts.length === 0) return;
+
                 const results = calculateAccessoryDiscounts(
-                    linkedRepair.parts,
+                    allParts,
                     cart.map(c => ({ productId: c.productId, productName: c.name, price: c.sellingPrice })),
                     rules
                 );
@@ -246,7 +427,7 @@ export default function POSPage() {
                 setDiscountDetails(results);
             } catch { /* rules not configured yet */ }
         })();
-    }, [linkedRepair, cart]);
+    }, [linkedRepairs, cart]);
 
     const searchRef = useRef<HTMLInputElement>(null);
 
@@ -500,29 +681,72 @@ export default function POSPage() {
         };
     }, [showScanner, stopCameraScanner]);
 
-    const addRepairToCart = () => {
-        if (!linkedRepair) return;
-
+    const addRepairToCart = (repair: RepairTicketInfo) => {
         // Prevent adding if already in cart
-        if (cart.some(c => c.productId === linkedRepair.id)) {
+        if (cart.some(c => c.productId === repair.id)) {
             toastError('Phiếu sửa chữa đã có trong hóa đơn!');
             return;
         }
 
-        if (linkedRepair.paymentStatus === 'paid' || linkedRepair.paymentStatus === 'refunded') {
+        if (repair.paymentStatus === 'paid' || repair.paymentStatus === 'refunded') {
             toastError('Phiếu này đã được thanh toán hoặc hoàn tiền!');
             return;
         }
 
-        setCart(prev => [{
-            productId: linkedRepair.id,
-            name: `[Phiếu sửa chữa] ${linkedRepair.deviceModel}`,
-            originalPrice: linkedRepair.paymentAmount,
-            sellingPrice: linkedRepair.paymentAmount,
-            costPrice: 0,
-            quantity: 1,
-            isRepairTicket: true
-        }, ...prev]);
+        const newItems: CartItem[] = [];
+        let usedPartsCount = 0;
+
+        repair.parts?.forEach((part, index) => {
+            if (part.status === 'selected') {
+                usedPartsCount++;
+                newItems.push({
+                    productId: `${repair.id}_part_${index}`,
+                    name: `[LK Sửa] ${part.productName}`,
+                    originalPrice: part.unitPriceAtUse || 0,
+                    sellingPrice: part.unitPriceAtUse || 0,
+                    costPrice: 0,
+                    quantity: part.quantity || 1,
+                    isRepairTicket: true
+                });
+            }
+        });
+
+        const laborCost = repair.paymentLaborCost > 0
+            ? repair.paymentLaborCost
+            : Math.max(0, (repair.issues || []).reduce((sum, i) => sum + (Number(i.estimatedPrice) || 0), 0));
+
+        if (laborCost > 0 || (usedPartsCount === 0 && repair.paymentAmount > 0)) {
+            const finalLaborCost = laborCost > 0 ? laborCost : repair.paymentAmount;
+            newItems.push({
+                productId: `${repair.id}_labor`,
+                name: `[Công SC] ${repair.deviceModel}`,
+                originalPrice: finalLaborCost,
+                sellingPrice: finalLaborCost,
+                costPrice: 0,
+                quantity: 1,
+                isRepairTicket: true
+            });
+        }
+
+        // Add gifts if they exist and are not already in cart
+        if (repair.gifts && repair.gifts.length > 0) {
+            repair.gifts.forEach(giftId => {
+                const cartGiftId = `gift_${repair.id}_${giftId}`;
+                if (!cart.some(c => c.productId === cartGiftId)) {
+                    newItems.push({
+                        productId: cartGiftId,
+                        name: `[Quà tặng] Mã SP: ${giftId}`,
+                        originalPrice: 0,
+                        sellingPrice: 0,
+                        costPrice: 0, // Gift logic cost
+                        quantity: 1,
+                        isRepairTicket: false
+                    });
+                }
+            });
+        }
+
+        setCart(prev => [...newItems, ...prev]);
     };
 
     const updateQuantity = (productId: string, delta: number) => {
@@ -567,7 +791,7 @@ export default function POSPage() {
             : Math.min(Math.round(subtotal * appliedVoucher.value / 100), appliedVoucher.maxDiscount || Infinity)
     ) : 0;
 
-    const total = Math.max(0, subtotal - discount - voucherDiscountAmount);
+    const total = Math.max(0, subtotal - discount - voucherDiscountAmount + (shippingFee || 0));
 
     const formatPrice = (n: number) => n.toLocaleString('vi-VN') + 'đ';
 
@@ -634,12 +858,12 @@ export default function POSPage() {
 
             const operationKey = crypto.randomUUID();
 
-            const repairItem = cart.find(c => c.isRepairTicket);
-            const repairTicketId = repairItem ? repairItem.productId : undefined;
+            const repairItems = cart.filter(c => c.isRepairTicket);
+            const repairTicketIds = repairItems.map(item => item.productId);
 
             const orderData = {
                 idempotencyKey: operationKey,
-                repairTicketId,
+                repairTicketIds: repairTicketIds.length > 0 ? repairTicketIds : undefined,
                 customer_info: {
                     name: customerName.trim() || 'Khách lẻ',
                     phone: customerPhone.trim(),
@@ -655,8 +879,10 @@ export default function POSPage() {
                 total_amount: total,
                 discount_amount: discount + voucherDiscountAmount,
                 subtotal_amount: subtotal,
+                shipping_fee: shippingFee,
                 deposit_amount: deposit,
-                payment_method: paymentMethod === 'cash' ? 'CASH' : paymentMethod === 'bank' ? 'BANK' : paymentMethod === 'installment' ? 'INSTALLMENT' : 'MOMO',
+                use_surplus_to_pay_debt: useSurplusToPayDebt,
+                payment_method: paymentMethod === 'cash' ? 'CASH' : paymentMethod === 'bank' ? 'BANK' : paymentMethod === 'installment' ? 'INSTALLMENT' : paymentMethod === 'debt' ? 'DEBT' : 'MOMO',
                 ...(appliedVoucher ? { voucherCode: appliedVoucher.code } : {}),
             };
 
@@ -683,8 +909,11 @@ export default function POSPage() {
             setCart([]);
             setCustomerName('');
             setCustomerPhone('');
+            setCustomerDebt(0);
+            setLinkedRepairs([]);
             setDiscount(0);
             setDeposit(0);
+            setShippingFee(0);
             setVoucherCode('');
             setAppliedVoucher(null);
             setVoucherStatus(null);
@@ -855,45 +1084,55 @@ export default function POSPage() {
                             className="w-full pl-8 pr-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-orange-500/20" />
                     </div>
                 </div>
+                {customerDebt > 0 && (
+                    <div className="bg-red-50 border border-red-200 text-red-600 rounded-lg p-2 text-xs flex items-center justify-between">
+                        <span className="font-semibold flex items-center gap-1.5">
+                            <AlertTriangle size={14} /> Khách đang nợ: {formatPrice(customerDebt)}
+                        </span>
+                    </div>
+                )}
                 {/* Repair ticket link */}
                 {repairLoading && <p className="text-xs text-gray-400 animate-pulse">Đang tra cứu phiếu sửa...</p>}
-                {linkedRepair && (
-                    <div className="bg-blue-50 rounded-lg p-2.5 text-xs space-y-1 border border-blue-100">
-                        <div className="flex items-center gap-1.5 font-semibold text-blue-700">
-                            <Wrench size={13} /> Phiếu sửa #{linkedRepair.id.slice(-6)}
-                        </div>
-                        <p className="text-blue-600">Máy: {linkedRepair.deviceModel} — {linkedRepair.status}</p>
-                        {linkedRepair.parts.length > 0 && (
-                            <p className="text-blue-500">LK: {linkedRepair.parts.map(p => p.productName).join(', ')}</p>
-                        )}
-
-                        {linkedRepair.paymentAmount > 0 && (
-                            <div className="mt-2 pt-2 border-t border-blue-200 flex items-center justify-between">
-                                <span className="font-semibold text-blue-800">
-                                    Chi phí sửa chữa: {formatPrice(linkedRepair.paymentAmount)}
-                                </span>
-                                {(linkedRepair.paymentStatus === 'paid' || linkedRepair.paymentStatus === 'refunded') ? (
-                                    <span className="text-green-600 font-bold bg-green-100 px-2 py-1 rounded-md">
-                                        Đã thanh toán
-                                    </span>
-                                ) : (
-                                    <button
-                                        type="button"
-                                        onClick={addRepairToCart}
-                                        className="py-1 px-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors"
-                                    >
-                                        Thêm vào HĐ
-                                    </button>
+                {linkedRepairs.length > 0 && (
+                    <div className="space-y-2">
+                        {linkedRepairs.map(repair => (
+                            <div key={repair.id} className="bg-blue-50 rounded-lg p-2.5 text-xs space-y-1 border border-blue-100">
+                                <div className="flex items-center gap-1.5 font-semibold text-blue-700">
+                                    <Wrench size={13} /> Phiếu sửa #{repair.id.slice(-6)}
+                                </div>
+                                <p className="text-blue-600">Máy: {repair.deviceModel} — {repair.status}</p>
+                                {repair.parts.length > 0 && (
+                                    <p className="text-blue-500">LK: {repair.parts.map(part => part.productName).join(', ')}</p>
+                                )}
+                                {repair.paymentAmount > 0 && (
+                                    <div className="mt-2 pt-2 border-t border-blue-200 flex items-center justify-between gap-2">
+                                        <span className="font-semibold text-blue-800">
+                                            Chi phí sửa chữa: {formatPrice(repair.paymentAmount)}
+                                        </span>
+                                        {(repair.paymentStatus === 'paid' || repair.paymentStatus === 'refunded') ? (
+                                            <span className="text-green-600 font-bold bg-green-100 px-2 py-1 rounded-md whitespace-nowrap">
+                                                Đã thanh toán
+                                            </span>
+                                        ) : (
+                                            <button
+                                                type="button"
+                                                onClick={() => addRepairToCart(repair)}
+                                                className="py-1 px-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors whitespace-nowrap"
+                                            >
+                                                Thêm vào HĐ
+                                            </button>
+                                        )}
+                                    </div>
                                 )}
                             </div>
-                        )}
+                        ))}
 
                         {discountDetails.length > 0 && (
-                            <div className="mt-1 pt-1 border-t border-blue-200">
+                            <div className="bg-green-50 rounded-lg p-2.5 text-xs border border-green-200">
                                 <p className="font-semibold text-green-700">🎁 Giảm PK tự động:</p>
-                                {discountDetails.map((d, i) => (
-                                    <p key={i} className="text-green-600">
-                                        {d.productName}: -{d.discountAmount.toLocaleString('vi-VN')}đ ({d.ruleName})
+                                {discountDetails.map((detail, index) => (
+                                    <p key={`${detail.productName}-${index}`} className="text-green-600">
+                                        {detail.productName}: -{detail.discountAmount.toLocaleString('vi-VN')}đ ({detail.ruleName})
                                     </p>
                                 ))}
                                 <button
@@ -908,23 +1147,22 @@ export default function POSPage() {
                     </div>
                 )}
                 <div className="flex gap-1.5">
-                    {paymentMethods.map(m => (
-                        <button key={m.key} onClick={() => setPaymentMethod(m.key)}
-                            className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium transition-all ${paymentMethod === m.key
+                    {paymentMethods.map(method => (
+                        <button key={method.key} onClick={() => setPaymentMethod(method.key)}
+                            className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium transition-all ${paymentMethod === method.key
                                 ? 'bg-orange-500 text-white shadow-md shadow-orange-200'
                                 : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
-                            <m.icon size={14} />
-                            {m.label}
+                            <method.icon size={14} />
+                            {method.label}
                         </button>
                     ))}
                 </div>
                 <div className="flex items-center gap-2 text-sm">
                     <span className="text-gray-500">Giảm giá:</span>
-                    <CurrencyInput value={discount || ''} onChange={v => setDiscount(v)}
+                    <CurrencyInput value={discount || ''} onChange={value => setDiscount(value)}
                         placeholder="0" className="flex-1 px-3 py-1.5 border rounded-lg text-right text-sm" />
                 </div>
 
-                {/* Voucher section */}
                 <div className="space-y-1">
                     <div className="flex items-center gap-2 text-sm">
                         <span className="text-gray-500">Voucher:</span>
@@ -933,7 +1171,7 @@ export default function POSPage() {
                                 type="text"
                                 placeholder="Nhập mã giảm giá"
                                 value={voucherCode}
-                                onChange={e => setVoucherCode(e.target.value.toUpperCase())}
+                                onChange={event => setVoucherCode(event.target.value.toUpperCase())}
                                 className="w-full px-3 py-1.5 border rounded-lg text-sm uppercase"
                             />
                             <button
@@ -959,13 +1197,28 @@ export default function POSPage() {
                     )}
                 </div>
                 <div className="flex items-center gap-2 text-sm">
-                    <span className="text-gray-500">Khách cọc:</span>
-                    <CurrencyInput value={deposit || ''} onChange={v => setDeposit(v)}
+                    <span className="text-gray-500">Khách trả / Cọc:</span>
+                    <CurrencyInput value={deposit || ''} onChange={value => setDeposit(value)}
                         placeholder="0" className="flex-1 px-3 py-1.5 border rounded-lg text-right text-sm" />
                 </div>
+                {customerDebt > 0 && deposit > total && (
+                    <div className="flex items-start gap-2 bg-blue-50 p-2 rounded-lg mt-2 border border-blue-200">
+                        <input
+                            type="checkbox"
+                            id="useSurplusDebt"
+                            className="mt-0.5 w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+                            checked={useSurplusToPayDebt}
+                            onChange={(e) => setUseSurplusToPayDebt(e.target.checked)}
+                        />
+                        <label htmlFor="useSurplusDebt" className="text-xs text-blue-800 flex-1 cursor-pointer leading-tight">
+                            <b>Khách có nợ cũ: {formatPrice(customerDebt)}</b><br/>
+                            Dùng số tiền thừa <b>{formatPrice(deposit - total)}</b> để cấn trừ nợ
+                        </label>
+                    </div>
+                )}
                 <div className="space-y-1 text-sm">
                     <div className="flex justify-between text-gray-500">
-                        <span>Tạm tính ({cart.reduce((s, c) => s + c.quantity, 0)} SP)</span>
+                        <span>Tạm tính ({cart.reduce((sum, item) => sum + item.quantity, 0)} SP)</span>
                         <span>{formatPrice(subtotal)}</span>
                     </div>
                     {discount > 0 && (
@@ -1267,10 +1520,39 @@ export default function POSPage() {
                                         )}
                                         <div className="flex justify-between text-gray-500 pt-1">
                                             <span>HTTT</span>
-                                            <span>{lastOrder.payment_method === 'COD' ? 'Tiền mặt' : lastOrder.payment_method === 'Installment' ? 'Trả góp' : 'Chuyển khoản/MoMo'}</span>
+                                            <span>{lastOrder.payment_method === 'CASH' ? 'Tiền mặt' : lastOrder.payment_method === 'INSTALLMENT' ? 'Trả góp' : lastOrder.payment_method === 'DEBT' ? 'Ghi nợ' : 'Chuyển khoản/MoMo'}</span>
                                         </div>
                                     </div>
-                                    <hr className="border-dashed" />
+                                    {lastOrder.payment_method === 'BANK' && bankConfig && (
+                                        (() => {
+                                            const defaultAccs: BankAccountConfig[] = bankConfig.accounts?.filter((account) => account.isDefault) || [];
+                                            if (defaultAccs.length === 0 && bankConfig.bankId && bankConfig.accountNo) {
+                                                defaultAccs.push({
+                                                    bankId: bankConfig.bankId,
+                                                    accountNo: bankConfig.accountNo,
+                                                    accountName: bankConfig.accountName || '',
+                                                });
+                                            }
+                                            if (defaultAccs.length === 0) return null;
+                                            return (
+                                                <div className="flex flex-col items-center mt-2 pb-2 border-t border-dashed pt-2">
+                                                    <p className="font-bold text-center mb-1">QUÉT MÃ CHUYỂN KHOẢN</p>
+                                                    <div className="flex flex-wrap justify-center gap-2">
+                                                        {defaultAccs.map((acc, idx) => (
+                                                            <div key={idx} className="flex flex-col items-center">
+                                                                <img
+                                                                    src={`https://img.vietqr.io/image/${acc.bankId}-${acc.accountNo}-compact2.png?amount=${Math.max(0, lastOrder.total_amount - lastOrder.deposit_amount)}&addInfo=${lastOrder.id.slice(-6)}&accountName=${encodeURIComponent(acc.accountName || '')}`}
+                                                                    alt="VietQR"
+                                                                    className="w-32 h-32 object-contain mx-auto"
+                                                                />
+                                                                <span className="text-[9px] mt-1 text-gray-600">{acc.bankId}</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })()
+                                    )}
                                     <p className="text-center text-gray-400 text-[10px]">Cảm ơn quý khách! Hẹn gặp lại.</p>
                                 </div>
                             ) : (
@@ -1394,15 +1676,39 @@ export default function POSPage() {
                                                 <div class="summary-row bold" style="color: red; font-size: 16px;"><span>CÒN LẠI:</span><span>${Math.max(0, lastOrder.total_amount - lastOrder.deposit_amount).toLocaleString('vi-VN')} đ</span></div>` : ''}
                                             </div>
 
-                                            <p style="text-align: right; font-style: italic; margin-top: 10px;">Hành thức TT: ${lastOrder.payment_method === 'COD' ? 'Tiền mặt' : lastOrder.payment_method === 'Installment' ? 'Trả góp' : 'Chuyển khoản / Momo'}</p>
+                                            <p style="text-align: right; font-style: italic; margin-top: 10px;">Hình thức TT: ${lastOrder.payment_method === 'CASH' ? 'Tiền mặt' : lastOrder.payment_method === 'INSTALLMENT' ? 'Trả góp' : lastOrder.payment_method === 'DEBT' ? 'Ghi nợ' : 'Chuyển khoản / Momo'}</p>
 
-                                            <div class="signatures">
-                                                <div>
-                                                    <p class="title">Khách hàng</p>
+                                            <div class="signatures" style="display: flex; justify-content: space-between; margin-top: 30px;">
+                                                <div style="flex: 1; text-align: center;">
+                                                    ${lastOrder.payment_method === 'BANK' && bankConfig ? (() => {
+                                                        const defaultAccs: BankAccountConfig[] = bankConfig.accounts?.filter((account) => account.isDefault) || [];
+                                                        if (defaultAccs.length === 0 && bankConfig.bankId && bankConfig.accountNo) {
+                                                            defaultAccs.push({
+                                                                bankId: bankConfig.bankId,
+                                                                accountNo: bankConfig.accountNo,
+                                                                accountName: bankConfig.accountName || '',
+                                                            });
+                                                        }
+                                                        if (defaultAccs.length === 0) return '';
+                                                        return `
+                                                            <p style="font-weight: bold; margin-bottom: 5px;">QUÉT MÃ CHUYỂN KHOẢN</p>
+                                                            <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+                                                                ${defaultAccs.map((acc) => `
+                                                                    <div style="text-align: center;">
+                                                                        <img src="https://img.vietqr.io/image/${acc.bankId}-${acc.accountNo}-compact2.png?amount=${Math.max(0, lastOrder.total_amount - lastOrder.deposit_amount)}&addInfo=${lastOrder.id.slice(-6)}&accountName=${encodeURIComponent(acc.accountName || '')}" style="width: 140px; height: 140px; object-fit: contain; border: 1px solid #ccc; border-radius: 8px; padding: 5px;" />
+                                                                        <div style="font-size: 11px; color: #555; margin-top: 2px;">${acc.bankId}</div>
+                                                                    </div>
+                                                                `).join('')}
+                                                            </div>
+                                                        `;
+                                                    })() : ''}
+                                                </div>
+                                                <div style="flex: 1; text-align: center;">
+                                                    <p class="title" style="margin: 0 0 70px 0; font-weight: bold;">Khách hàng</p>
                                                     <p style="color: #666; font-style: italic;">(Ký, ghi rõ họ tên)</p>
                                                 </div>
-                                                <div>
-                                                    <p class="title">Người lập phiếu</p>
+                                                <div style="flex: 1; text-align: center;">
+                                                    <p class="title" style="margin: 0 0 70px 0; font-weight: bold;">Người lập phiếu</p>
                                                     <p style="color: #666; font-style: italic;">(Ký, ghi rõ họ tên)</p>
                                                 </div>
                                             </div>

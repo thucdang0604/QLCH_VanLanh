@@ -27,7 +27,6 @@ export default function ChatWidget() {
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
-    const aiTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [botActive, setBotActive] = useState(true);
     const [isSpeedDialOpen, setIsSpeedDialOpen] = useState(false);
 
@@ -101,10 +100,6 @@ export default function ChatWidget() {
                 const lastMsg = messageList[messageList.length - 1];
                 if (lastMsg && lastMsg.senderType === 'admin' && lastMsg.senderId !== 'bot') {
                     // Staff replied — cancel pending AI and set botActive=false
-                    if (aiTimeoutRef.current) {
-                        clearTimeout(aiTimeoutRef.current);
-                        aiTimeoutRef.current = null;
-                    }
                     setBotActive(false);
                     // Update Firebase
                     import('@/lib/realtimedb').then(({ updateRoomInfo }) =>
@@ -154,15 +149,6 @@ export default function ChatWidget() {
         });
         return () => { if (unsub) unsub(); };
     }, [roomId, isOpen, user]);
-
-    // Cleanup timeout on unmount
-    useEffect(() => {
-        return () => {
-            if (aiTimeoutRef.current) {
-                clearTimeout(aiTimeoutRef.current);
-            }
-        };
-    }, []);
 
     // Auto-scroll to bottom
     useEffect(() => {
@@ -269,27 +255,21 @@ export default function ChatWidget() {
             setIsLoading(false);
             inputRef.current?.focus();
 
-            // ── AI Auto-reply via Gemini (30s delay) ──
-            if (aiTimeoutRef.current) {
-                clearTimeout(aiTimeoutRef.current);
-                aiTimeoutRef.current = null;
-            }
+            if (!botActive) return;
 
-            // Show AI typing indicator after a short delay
-            aiTimeoutRef.current = setTimeout(async () => {
-                if (!botActive) return;
-
-                setIsAiTyping(true);
-                try {
-                    const { handleAIAutoReply } = await import('@/lib/realtimedb');
-                    await handleAIAutoReply(activeRoomId, messages, messageText);
-                } catch (aiErr) {
-                    console.error('AI auto-reply error:', aiErr);
-                } finally {
-                    setIsAiTyping(false);
-                    aiTimeoutRef.current = null;
+            setIsAiTyping(true);
+            try {
+                const { handleAIAutoReply } = await import('@/lib/realtimedb');
+                const aiResult = await handleAIAutoReply(activeRoomId, messages, messageText);
+                if (!aiResult.success) {
+                    setChatError('Trợ lý AI đang tạm gián đoạn. Tin nhắn đã được lưu để nhân viên hỗ trợ.');
                 }
-            }, 30000); // 30 second delay
+            } catch (aiErr) {
+                console.error('AI auto-reply error:', aiErr);
+                setChatError('Không thể kết nối trợ lý AI. Tin nhắn đã được lưu để nhân viên hỗ trợ.');
+            } finally {
+                setIsAiTyping(false);
+            }
 
         } catch (error) {
             console.error('Error sending message:', error);

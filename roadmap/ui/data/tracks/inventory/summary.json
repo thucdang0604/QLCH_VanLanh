@@ -1,16 +1,13 @@
 {
   "id": "inventory",
   "title": "Kho hàng",
-  "status": "active",
+  "status": "stable",
   "summaryPath": "inventory/summary.json",
-  "updatedAt": "2026-05-28T03:23:16.930Z",
+  "updatedAt": "2026-06-13T00:00:00.000Z",
   "coreFiles": [
-    "package.json",
-    "scripts/migrate-active-orders.ts"
+    "package.json"
   ],
-  "openEventIds": [
-    "BUG-MIGRATE-INVENTORY-SCRIPT-MISSING-001"
-  ],
+  "openEventIds": [],
   "decisionIds": [],
   "dependsOn": [],
   "affectedBy": []

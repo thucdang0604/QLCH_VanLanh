@@ -16,6 +16,7 @@ export const REPAIR_PART_STATUS = {
     ORDERED: 'ordered',
     SELECTED: 'selected',
     IN_STOCK: 'in_stock',
+    UNAVAILABLE: 'unavailable',
     REJECTED: 'rejected',
     CANCELLED: 'cancelled',
 } as const;
