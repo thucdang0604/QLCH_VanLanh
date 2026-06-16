@@ -1,15 +1,85 @@
 {
   "projectName": "QLCH_VanLanh",
-  "lastSync": "2026-06-09T00:00:00.000Z",
+  "lastSync": "2026-06-13T00:00:00.000Z",
   "stats": {
     "completionPercent": 98,
     "openP0": 0,
-    "openBugs": 3,
+    "openBugs": 6,
     "trackCount": 5,
-    "activeTracks": 1
+    "activeTracks": 0
   },
   "constraints": [],
   "aiPlans": [
+    {
+      "id": "plan-batch-tracking-fifo",
+      "title": "Quản lý tồn kho theo Lô (Batch Tracking) kết hợp FIFO sổ sách",
+      "date": "15.06.2026",
+      "status": "planned",
+      "planFile": "data/ai_plans/plan_batch_tracking_fifo.md",
+      "taskFile": "",
+      "walkthroughFile": "",
+      "scope": [
+        "src/app/admin/inventory/page.tsx",
+        "src/app/admin/parts/page.tsx",
+        "src/app/api/inventory/import/route.ts",
+        "src/app/api/repairs/handover/route.ts",
+        "src/app/api/pos/checkout/route.ts"
+      ],
+      "decisions": [
+        "Lưu thông tin Lô (inventory_lots) khi hoàn tất nhập kho",
+        "Trừ tồn kho theo Lô bằng phương pháp FIFO (Nhập trước - Xuất trước) ở Backend",
+        "Không thay đổi thao tác của KTV khi xuất kho",
+        "Bổ sung thanh tra cứu nguồn gốc bằng Mã Lô để dễ dàng bảo hành/đổi trả"
+      ],
+      "updatedAt": "2026-06-15T00:00:00.000Z"
+    },
+    {
+      "id": "plan-repair-pricing-workflow-20260614",
+      "title": "Cập nhật Workflow Sửa chữa & Logic Tính Giá (Tránh lỗi Bill 0đ)",
+      "date": "14.06.2026",
+      "status": "planned",
+      "planFile": "data/ai_plans/plan_repair_pricing_workflow_20260614.md",
+      "taskFile": "data/ai_plans/task_repair_pricing_workflow_20260614.md",
+      "walkthroughFile": "",
+      "scope": [
+        "src/lib/types.ts",
+        "src/app/api/repairs/handover/route.ts",
+        "src/app/api/repairs/payment-edit/route.ts",
+        "src/app/admin/repairs/page.tsx",
+        "src/lib/repairWorkflowConfig.ts"
+      ],
+      "decisions": [
+        "Tiền Công (Labor Cost) mặc định bằng tổng giá dự kiến của các bệnh.",
+        "Tiền Linh Kiện (Parts Cost) tính riêng biệt.",
+        "Cho phép KTV linh hoạt mượn linh kiện hoặc thêm bệnh trong lúc Đang sửa chữa.",
+        "Quản lý tính năng tự động bằng Config Flags."
+      ],
+      "updatedAt": "2026-06-14T00:00:00.000Z"
+    },
+    {
+      "id": "plan-pos-centralization-v2-audit",
+      "title": "Bổ sung POS Centralization: TOTP Bank Config & Component Workflow",
+      "date": "13.06.2026",
+      "status": "planned",
+      "planFile": "data/ai_plans/plan_pos_centralization_v2_audit.md",
+      "taskFile": "data/ai_plans/task_pos_centralization_v2_audit.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_pos_centralization_v2_audit.md",
+      "scope": [
+        "src/components/admin/settings/BankIntegrationConfig.tsx",
+        "src/app/api/admin/bank-config/totp/setup/route.ts",
+        "src/app/api/admin/bank-config/totp/verify/route.ts",
+        "src/app/admin/repairs/page.tsx",
+        "src/app/api/repairs/transition/route.ts",
+        "src/app/admin/pos/page.tsx",
+        "src/app/api/pos/checkout/route.ts"
+      ],
+      "decisions": [
+        "Sử dụng TOTP (Authenticator) thay vì SMS OTP",
+        "KTV xác nhận linh kiện X(Test)/Y(Dùng) trước khi giao khách để quản lý tồn kho chính xác",
+        "Tự động cấn trừ nợ cũ cho khách hàng nếu trả dư tiền ở POS"
+      ],
+      "updatedAt": "2026-06-13T00:00:00.000Z"
+    },
     {
       "id": "plan-pos-centralization-20260613",
       "title": "Tập trung Thanh toán POS, Công nợ & Mã QR",
@@ -37,7 +107,7 @@
       "id": "plan-customer-web-qa-otp-chat-20260613",
       "title": "Customer Web QA: OTP Voucher, AI Chat, Navigation va Mobile UX",
       "date": "13.06.2026",
-      "status": "qa-findings-open",
+      "status": "implemented-with-external-blockers",
       "planFile": "data/ai_plans/plan_customer_web_qa_otp_chat_20260613.md",
       "taskFile": "data/ai_plans/task_customer_web_qa_otp_chat_20260613.md",
       "walkthroughFile": "data/ai_plans/walkthrough_customer_web_qa_otp_chat_20260613.md",
@@ -64,7 +134,7 @@
       "id": "plan-repair-technician-handoff-mobile-20260612",
       "title": "Workflow sửa chữa, chuyển giao KTV có xác nhận và UI mobile-first",
       "date": "12.06.2026",
-      "status": "implemented-local-firestore-v2",
+      "status": "merged-master-awaiting-role-qa",
       "planFile": "data/ai_plans/plan_repair_technician_handoff_mobile_20260612.md",
       "taskFile": "data/ai_plans/task_repair_technician_handoff_mobile_20260612.md",
       "walkthroughFile": "data/ai_plans/walkthrough_repair_technician_handoff_mobile_20260612.md",
@@ -90,13 +160,14 @@
         "UI mobile-first phải hiển thị trực tiếp blocker, KTV phụ trách và yêu cầu chuyển trên thẻ phiếu",
         "Quyền sở hữu phiếu phải được kiểm tra server-side, không dựa vào lọc client"
       ],
-      "updatedAt": "2026-06-12T00:00:00.000Z"
+      "updatedAt": "2026-06-13T21:50:00.000+07:00"
     },
     {
       "id": "plan-customer-crm-sync-20260611",
       "title": "Đồng bộ Customer CRM toàn diện từ đa kênh",
       "date": "11.06.2026",
-      "status": "implemented-local",
+      "status": "completed",
+      "completedAt": "13.06.2026",
       "planFile": "data/ai_plans/plan_customer_crm_sync_20260611.md",
       "taskFile": "data/ai_plans/task_customer_crm_sync_20260611.md",
       "walkthroughFile": "data/ai_plans/walkthrough_customer_crm_sync_20260611.md",
@@ -113,13 +184,13 @@
         "Cập nhật cả Tên khi khác Khách lẻ",
         "Lưu qua transactions để tránh race condition"
       ],
-      "updatedAt": "2026-06-11T00:00:00.000Z"
+      "updatedAt": "2026-06-13T00:00:00.000Z"
     },
     {
       "id": "plan-bug-otp-001-v2-idempotent-voucher-20260611",
       "title": "BUG-OTP-001 Follow-up: reCAPTCHA v2, khách cũ và voucher idempotent",
       "date": "11.06.2026",
-      "status": "implemented-local",
+      "status": "implemented-awaiting-e2e",
       "planFile": "data/ai_plans/plan_bug_otp_001_v2_idempotent_voucher_20260611.md",
       "taskFile": "data/ai_plans/task_bug_otp_001_v2_idempotent_voucher_20260611.md",
       "walkthroughFile": "",
@@ -139,13 +210,14 @@
         "Checkout server phai enforce ownerId cua personal voucher theo SDT da nhan voucher",
         "Khong luu Firebase ID token hoac PII dai han trong localStorage"
       ],
-      "updatedAt": "2026-06-11T00:00:00.000Z"
+      "updatedAt": "2026-06-13T00:00:00.000Z"
     },
     {
       "id": "plan-social-missions",
       "title": "Marketing & Growth: Social Missions (Bounty Program)",
       "date": "09.06.2026",
-      "status": "planned",
+      "status": "completed",
+      "completedAt": "13.06.2026",
       "planFile": "data/ai_plans/plan_social_missions.md",
       "taskFile": "data/ai_plans/task_social_missions.md",
       "walkthroughFile": "",
@@ -162,7 +234,7 @@
         "Hỗ trợ cả Voucher loại giảm % và giảm tiền mặt cố định",
         "Hỗ trợ mã Voucher chung và mã duy nhất cho khách hàng hoàn thành nhiệm vụ"
       ],
-      "updatedAt": "2026-06-09T00:00:00.000Z"
+      "updatedAt": "2026-06-13T00:00:00.000Z"
     },
     {
       "id": "plan-deploy-pipeline-cleanup-20260609",
@@ -196,7 +268,7 @@
       "id": "plan-hardcode-cleanup-20260607",
       "title": "Hardcode Cleanup 2026-06-07: Secret, Storefront fallback, Business identity và Workflow constants",
       "date": "07.06.2026",
-      "status": "planned",
+      "status": "implemented-awaiting-admin-smoke",
       "planFile": "data/ai_plans/plan_hardcode_cleanup_20260607.md",
       "taskFile": "data/ai_plans/task_hardcode_cleanup_20260607.md",
       "walkthroughFile": "",
@@ -224,13 +296,13 @@
         "Workflow/status string duoc gom vao typed constants/helper hoac resolve tu workflow config; khong bypass quyen bang email.includes('admin')",
         "Du lieu demo/template cua Excel va receipt preview phai tach khoi runtime logic va khong bi ghi nham thanh du lieu that"
       ],
-      "updatedAt": "2026-06-07T00:00:00.000Z"
+      "updatedAt": "2026-06-13T00:00:00.000Z"
     },
     {
       "id": "plan-qr-barcode-label-print-fit",
       "title": "QR/Barcode Label Print Fit: Tối ưu in tem vừa khổ giấy thực tế",
       "date": "07.06.2026",
-      "status": "implemented-local",
+      "status": "implemented-awaiting-hardware-validation",
       "planFile": "data/ai_plans/plan_qr_barcode_label_print_fit.md",
       "taskFile": "data/ai_plans/task_qr_barcode_label_print_fit.md",
       "walkthroughFile": "data/ai_plans/walkthrough_qr_barcode_label_print_fit.md",
@@ -255,13 +327,14 @@
         "Them co noi dung 70-100% va le an toan 0-3mm de bu sai so printer/driver",
         "Giu nguyen payload QR va CODE128 tren cung mot generated product code; khong doi schema hay registry"
       ],
-      "updatedAt": "2026-06-07T00:00:00.000Z"
+      "updatedAt": "2026-06-13T00:00:00.000Z"
     },
     {
       "id": "plan-initial-excel-bootstrap",
       "title": "Initial Excel Bootstrap: Khởi tạo sản phẩm, phụ kiện, linh kiện và dịch vụ",
       "date": "05.06.2026",
-      "status": "pushed-github",
+      "status": "completed",
+      "completedAt": "13.06.2026",
       "planFile": "data/ai_plans/plan_initial_excel_bootstrap.md",
       "taskFile": "data/ai_plans/task_initial_excel_bootstrap.md",
       "walkthroughFile": "",
@@ -298,7 +371,8 @@
       "id": "plan-ui-receipt-warranty-templates",
       "title": "Cấu hình Mẫu Biên Nhận Bảo Hành (Thiết bị, Sửa chữa, Phụ kiện)",
       "date": "03.06.2026",
-      "status": "in-progress",
+      "status": "completed",
+      "completedAt": "13.06.2026",
       "planFile": "data/ai_plans/plan_ui_receipt_warranty_templates.md",
       "taskFile": "data/ai_plans/task_ui_receipt_warranty_templates.md",
       "walkthroughFile": "",
@@ -315,7 +389,8 @@
       "id": "plan-homepage-content-appearance",
       "title": "Homepage Content Appearance: Admin cấu hình bảng giá và đánh giá khách hàng",
       "date": "01.06.2026",
-      "status": "implemented-local",
+      "status": "completed",
+      "completedAt": "13.06.2026",
       "planFile": "data/ai_plans/plan_homepage_content_appearance.md",
       "taskFile": "data/ai_plans/task_homepage_content_appearance.md",
       "walkthroughFile": "data/ai_plans/walkthrough_homepage_content_appearance.md",
@@ -342,7 +417,7 @@
       "id": "plan-pos-qr-adjustments",
       "title": "POS QR & Đồng bộ danh mục: Chuẩn hóa ID khi tạo mới, Thêm/Sửa nhiều mã QR, Khắc phục sản phẩm ẩn",
       "date": "31.05.2026",
-      "status": "implemented-local",
+      "status": "implemented-awaiting-hardware-validation",
       "planFile": "data/ai_plans/plan_pos_qr_adjustments.md",
       "taskFile": "data/ai_plans/task_pos_qr_adjustments.md",
       "walkthroughFile": "data/ai_plans/walkthrough_pos_qr_adjustments.md",
@@ -363,13 +438,13 @@
         "Ghi nhật ký thay đổi mã QR (qrCodeHistory) Tiếng Việt thuần túy",
         "Nút Khắc phục sản phẩm bị ẩn giúp tự động quét và đồng bộ lại danh mục lỗi"
       ],
-      "updatedAt": "2026-05-31T07:30:00.000Z"
+      "updatedAt": "2026-06-13T00:00:00.000Z"
     },
     {
       "id": "plan-pos-qr-scanner",
       "title": "POS QR Scanner: Mã SP, Tem QR, Quét Camera và Máy Quét Bàn Phím",
       "date": "30.05.2026",
-      "status": "implemented-local",
+      "status": "implemented-awaiting-device-validation",
       "planFile": "data/ai_plans/plan_pos_qr_scanner.md",
       "taskFile": "data/ai_plans/task_pos_qr_scanner.md",
       "walkthroughFile": "data/ai_plans/walkthrough_pos_qr_scanner.md",
@@ -388,7 +463,7 @@
         "Camera scanner dùng BarcodeDetector, có fallback nhập mã tay",
         "CSP mở img-src cho api.qrserver.com để hiển thị tem QR"
       ],
-      "updatedAt": "2026-05-30T00:00:00.000Z"
+      "updatedAt": "2026-06-13T00:00:00.000Z"
     },
     {
       "id": "plan-customer-ux-optimization",
@@ -419,6 +494,8 @@
       "id": "plan-roadmap-v2",
       "title": "Roadmap v2 & SPA Migration",
       "date": "18.05.2026",
+      "status": "completed",
+      "completedAt": "29.05.2026",
       "planFile": "data/ai_plans/roadmap_v2_plan.md",
       "taskFile": "data/ai_plans/roadmap_v2_task.md",
       "walkthroughFile": "data/ai_plans/roadmap_v2_walkthrough.md",
@@ -428,6 +505,8 @@
       "id": "plan-master-hub",
       "title": "Tích hợp Master Hub Workflow & Tối Ưu Hiển Thị",
       "date": "18.05.2026",
+      "status": "completed",
+      "completedAt": "29.05.2026",
       "planFile": "data/ai_plans/plan_master_hub.md",
       "taskFile": "data/ai_plans/task_master_hub.md",
       "walkthroughFile": "data/ai_plans/walkthrough_master_hub.md",
@@ -469,7 +548,8 @@
       "id": "plan-crm-customers-v2",
       "title": "CRM Khách hàng Mở rộng: CRUD, Lịch sử, Tags, Tier theo năm, Excel Export",
       "date": "26.05.2026",
-      "status": "in-progress",
+      "status": "completed",
+      "completedAt": "13.06.2026",
       "planFile": "data/ai_plans/plan_crm_customers_v2.md",
       "taskFile": "data/ai_plans/task_crm_customers_v2.md",
       "scope": [
@@ -491,7 +571,7 @@
       "id": "plan-live-chat-omnichannel-v2",
       "title": "Live Chat Omnichannel: Facebook/Zalo, Media, CRM và Tạo đơn từ hội thoại",
       "date": "25.05.2026",
-      "status": "in-progress",
+      "status": "implemented-awaiting-production-validation",
       "planFile": "data/ai_plans/plan_live_chat_omnichannel_v2.md",
       "taskFile": "data/ai_plans/task_live_chat_omnichannel_v2.md",
       "walkthroughFile": "data/ai_plans/walkthrough_live_chat_omnichannel_v2.md",
@@ -579,7 +659,7 @@
       "id": "BUG-HARDCODE-001",
       "module": "SystemContent",
       "severity": "high",
-      "status": "open",
+      "status": "fixed",
       "title": "Hardcode còn rải rác trong secret, storefront fallback, business identity và workflow status",
       "workflowId": "system-content",
       "affectedFiles": [
@@ -597,9 +677,10 @@
       ],
       "description": "Audit 2026-06-07 phát hiện Google Maps Embed API key nằm trong source, storefront còn fallback demo service/banner, brand/hotline/domain/address lặp ở nhiều file customer-facing/SEO, repair/POS workflow còn so sánh status string rải rác và có bypass quyền bằng email.includes('admin'), demo/template admin còn trộn dữ liệu mẫu trong component.",
       "cause": "Nhiều giai đoạn triển khai trước dùng fallback nhanh để bảo đảm UI hoạt động khi chưa có system_config hoặc dữ liệu Firestore; sau khi admin config và workflow settings đã trưởng thành, các fallback này trở thành technical debt và có thể làm lệch dữ liệu production.",
-      "solution": "Theo plan-hardcode-cleanup-20260607: xử lý P0 Maps key, gỡ storefront fake fallback, gom business identity về helper/config trung tâm, typed workflow/status constants và tách demo/template thành fixture rõ ràng.",
-      "verificationNotes": "Chưa fix. Bắt đầu xử lý từ plan_hardcode_cleanup_20260607.md và task_hardcode_cleanup_20260607.md.",
-      "discoveredAt": "2026-06-07"
+      "solution": "Đã xử lý P0 Maps key, gỡ storefront fake fallback, gom business identity về helper/config trung tâm, typed workflow/status constants và tách demo/template thành fixture rõ ràng.",
+      "verificationNotes": "Merged master qua PR #8; lint, typecheck, build và storefront browser QA pass. Residual admin smoke không còn là blocker code.",
+      "discoveredAt": "2026-06-07",
+      "fixedAt": "2026-06-13"
     },
     {
       "id": "BUG-RULES-001",
@@ -1387,7 +1468,7 @@
       "id": "BUG-MIGRATE-INVENTORY-SCRIPT-MISSING-001",
       "module": "Build",
       "severity": "medium",
-      "status": "open",
+      "status": "fixed",
       "workflowId": "inventory",
       "title": "package.json migrate:inventory dang tham chieu script bi thieu",
       "affectedFiles": [
@@ -1395,11 +1476,12 @@
         "scripts/migrate-active-orders.ts"
       ],
       "symptom": "Sau clean code, <code>scripts/migrate-active-orders.ts</code> khong ton tai nhung <code>package.json</code> van co script <code>migrate:inventory</code>.",
-      "description": "Current working tree bi mat migration CLI bat buoc cua inventory refactor. Chay <code>npm run migrate:inventory</code> se fail do thieu file.",
+      "description": "Package script từng trỏ tới migration CLI không tồn tại và không có caller/runtime dependency.",
       "cause": "Cleanup da xoa script nhung chua xoa/cap nhat package script va roadmap.",
-      "solution": "Khoi phuc <code>scripts/migrate-active-orders.ts</code> neu can migration du lieu cu, hoac xoa script <code>migrate:inventory</code> sau khi xac nhan migration da chay va khong can nua.",
-      "verificationNotes": "Source verified 2026-05-23: scripts/migrate-active-orders.ts MISSING; package.json still defines migrate:inventory.",
-      "discoveredAt": "2026-05-23"
+      "solution": "Đã xóa command chết <code>migrate:inventory</code> khỏi package.json; migration hiện hành dùng các script có version và mục tiêu rõ ràng.",
+      "verificationNotes": "Source verified 2026-06-13: package.json không còn tham chiếu file thiếu; JSON parse hợp lệ.",
+      "discoveredAt": "2026-05-23",
+      "fixedAt": "2026-06-13"
     },
     {
       "id": "BUG-ENCODING-001",
@@ -1649,16 +1731,13 @@
     {
       "id": "inventory",
       "title": "Kho hàng",
-      "status": "active",
+      "status": "stable",
       "summaryPath": "inventory/summary.json",
-      "updatedAt": "2026-05-28T03:23:16.930Z",
+      "updatedAt": "2026-06-13T00:00:00.000Z",
       "coreFiles": [
-        "package.json",
-        "scripts/migrate-active-orders.ts"
+        "package.json"
       ],
-      "openEventIds": [
-        "BUG-MIGRATE-INVENTORY-SCRIPT-MISSING-001"
-      ],
+      "openEventIds": [],
       "decisionIds": [],
       "dependsOn": [],
       "affectedBy": []

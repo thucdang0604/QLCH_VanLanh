@@ -1,5 +1,7 @@
 # Plan: Cấu hình Mẫu Biên Nhận Bảo Hành
 
+**Status:** completed
+
 Dựa trên yêu cầu và các hình ảnh được cung cấp, bổ sung 3 mẫu biên nhận bảo hành vào trang cài đặt:
 1. Phiếu Bảo Hành Thiết Bị
 2. Phiếu Bảo Hành Sửa Chữa

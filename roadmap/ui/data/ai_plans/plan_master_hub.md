@@ -1,5 +1,7 @@
 ﻿# Tích hợp Master Hub Workflow & Tối Ưu Hiển Thị
 
+**Status:** completed
+
 ## Mục tiêu
 1. **Sửa lỗi hiển thị**: Xử lý tình trạng sơ đồ (workflow) bị nhỏ, che lấp và không hiển thị full màn hình.
 2. **Xây dựng Sơ đồ Master Hub**: Tạo một siêu sơ đồ (Unified Master Diagram) bao gồm toàn bộ các luồng (Kho, POS, Sửa chữa, Tài chính, Hệ thống) và các điểm giao nhau (cross-links) giữa chúng.

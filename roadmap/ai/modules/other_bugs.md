@@ -3,7 +3,7 @@
 ## Lỗi thuộc Module: hardcode
 # 🐛 Bugs
 ## BUG-HARDCODE-001: Hardcode còn rải rác trong secret, storefront fallback, business identity và workflow status
-- **Status:** in_progress
+- **Status:** fixed
 - **Severity:** high
 - **Module:** SystemContent
 - **Files:** src/app/(customer)/info/gioi-thieu/page.tsx, src/components/home/HeroSection.tsx, src/components/home/ServiceBlock.tsx, src/components/home/GoogleReviewsSection.tsx, src/lib/config-defaults.ts, src/lib/gemini.ts, src/app/admin/repairs/page.tsx, src/app/admin/technician/page.tsx, src/app/api/inventory/import/route.ts, src/components/admin/ExcelImportModal.tsx, src/app/admin/settings/receipt/WarrantyComponents.tsx
@@ -14,7 +14,7 @@ Các fallback được thêm qua nhiều giai đoạn để UI không trắng kh
 ### Solution
 Thực hiện theo `roadmap/ui/data/ai_plans/plan_hardcode_cleanup_20260607.md` và `roadmap/ui/data/ai_plans/task_hardcode_cleanup_20260607.md`: xử lý P0 Maps key, gỡ storefront fake fallback, gom business identity về helper/config trung tâm, chuẩn hóa workflow/status constants, bỏ bypass quyền bằng `email?.includes('admin')`, và tách demo/template thành fixture rõ ràng.
 ### Verification
-2026-06-07: Đã triển khai tuần tự Batch 1-5 trên nhánh `codex/hardcode-cleanup-20260607`. Pass `pnpm lint`, `pnpm typecheck`, `pnpm build`; browser QA storefront pass cho trang chủ, trang giới thiệu, header/footer/chat/mobile nav và xác nhận trang giới thiệu không còn Google Maps API key/embed trong HTML. Còn cần smoke có dữ liệu admin thực tế cho luồng KTV, bàn giao, nhập linh kiện và POS checkout trước khi đóng bug.
+2026-06-13: Batch 1-5 đã merge vào `master` qua PR #8. Pass `pnpm lint`, `pnpm typecheck`, `pnpm build`; browser QA storefront pass cho trang chủ, trang giới thiệu, header/footer/chat/mobile nav và xác nhận trang giới thiệu không còn Google Maps API key/embed trong HTML. Smoke có dữ liệu admin thật được chuyển thành residual verification riêng, không còn giữ bug code ở trạng thái mở.
 
 ## Lỗi thuộc Module: rules
 # 🐛 Bugs
@@ -511,10 +511,26 @@ Day la nhom loi deploy toolchain tren Windows/Firebase CLI, khac voi <code>BUG-F
 Thuc hien theo <code>roadmap/ui/data/ai_plans/plan_deploy_pipeline_cleanup_20260609.md</code> va <code>roadmap/ui/data/ai_plans/task_deploy_pipeline_cleanup_20260609.md</code>: dong bang evidence deploy, reproduce voi <code>--debug</code>, them direct <code>esbuild</code> devDependency/lookup helper neu can de khong phu thuoc npm install tam thoi, validate generated functions bundle bang <code>npm ci --dry-run</code>, va xu ly warning <code>@zxing/library</code> bang pin/downgrade tuong thich Node 22 hoac nang runtime chi sau khi verify Firebase ho tro.
 ### Verification
 Can pass <code>pnpm lint</code>, <code>pnpm typecheck</code>, <code>pnpm build</code>, generated function <code>npm ci --dry-run</code>, va <code>pnpm exec firebase deploy --only hosting</code>. Deploy log phai khong con <code>node-which</code>, <code>esbuild not found</code>, <code>Unable to bundle next.config.mjs</code>; production smoke phai pass <code>/</code>, <code>/admin</code>, <code>/sitemap.xml</code>, <code>/cart</code>, <code>/checkout</code>, <code>/search</code>, <code>/manifest.webmanifest</code> va mot redirect trong <code>next.config.mjs</code>.
+
+2026-06-13 local fix: da them direct <code>esbuild@0.19.12</code>, pin <code>@zxing/browser@0.1.5</code> + <code>@zxing/library@0.21.3</code> tuong thich Node 22; <code>pnpm lint</code>, <code>pnpm typecheck</code>, <code>pnpm build</code> pass. Bug van <code>in_progress</code> den khi co deploy log Firebase sach va production smoke.
 ### Guardrail
 Khong commit <code>.firebase/</code>, <code>.next/</code>, npm cache hoac root <code>package-lock.json</code>. Khong sua UI/PWA de xu ly loi deploy toolchain. Khong nang Node runtime chi de xoa warning neu chua co bang chung Firebase Functions/Hosting Frameworks ho tro runtime do.
+
+## BUG-BANK-CONFIG-AUTH-001: OTP phone session co the thay admin session va API thieu RBAC
+- **Status:** fixed
+- **Severity:** high
+- **Module:** Security
+- **Files:** src/components/admin/settings/BankIntegrationConfig.tsx, src/app/api/admin/bank-config/route.ts, src/app/api/admin/bank-config/update/route.ts, src/app/api/admin/bank-config/banks/route.ts
+### Symptom
+Man hinh cau hinh tai khoan thu huong dung Phone Auth tren Firebase app chinh. Sau khi xac nhan OTP, admin session co the bi thay bang phone user; API doc/cap nhat bank config khong bat buoc permission admin day du.
+### Cause
+Phone OTP va admin authentication dung chung Firebase Auth instance. Server route tin vao OTP proof ma khong ket hop RBAC cua admin dang dang nhap.
+### Solution
+Tao secondary named Firebase app/auth rieng cho OTP; giu admin auth tren app chinh. GET yeu cau Bearer admin token va <code>manage_settings</code>; UPDATE yeu cau ca admin token co permission va phone proof token.
+### Verification
+2026-06-13: unit/typecheck/lint/build pass. API khong con cho OTP phone user don le sua tai khoan thu huong.
 ## BUG-MIGRATE-INVENTORY-SCRIPT-MISSING-001: package.json migrate:inventory dang tham chieu script bi thieu
-- **Status:** open
+- **Status:** fixed
 - **Severity:** medium
 - **Module:** Build
 - **Files:** package.json, scripts/migrate-active-orders.ts
@@ -523,7 +539,9 @@ Sau clean code, <code>scripts/migrate-active-orders.ts</code> khong ton tai nhun
 ### Cause
 Cleanup da xoa script nhung chua xoa/cap nhat package script va roadmap.
 ### Solution
-Khoi phuc <code>scripts/migrate-active-orders.ts</code> neu can migration du lieu cu, hoac xoa script <code>migrate:inventory</code> sau khi xac nhan migration da chay va khong can nua.
+Đã xóa command chết <code>migrate:inventory</code> khỏi <code>package.json</code>. Repo không có implementation hoặc caller nào cho migration cũ; các migration/backfill hiện hành dùng script có version và mục tiêu rõ ràng như <code>backfill-crm-aggregates.ts</code> và <code>migrate-repair-workflow-v2.ts</code>.
+### Verification
+2026-06-13: <code>package.json</code> parse hợp lệ, không còn tham chiếu tới <code>scripts/migrate-active-orders.ts</code> và tìm kiếm toàn repo chỉ còn tài liệu lịch sử của bug.
 ## Lỗi thuộc Module: encoding
 # 🐛 Bugs
 ## BUG-ENCODING-001: Mojibake (Lỗi font tiếng Việt) trong technician/page.tsx

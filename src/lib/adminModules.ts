@@ -159,8 +159,6 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
 ];
 
 export const ADMIN_HIDDEN_ROUTE_ITEMS: AdminRouteItem[] = [
-    { label: 'Cấu hình sửa chữa', href: '/admin/settings/repairs', iconKey: 'settings', permission: 'manage_appearance' },
-    { label: 'Tích hợp chat', href: '/admin/settings/integrations', iconKey: 'settings', permission: 'manage_settings' },
     { label: 'Mẫu biên nhận', href: '/admin/settings/receipt', iconKey: 'settings', permission: 'manage_appearance' },
 ];
 

@@ -1,5 +1,7 @@
 # Đồng bộ Customer CRM toàn diện từ đa kênh
 
+**Status:** completed (merged `master`)
+
 Cơ sở dữ liệu khách hàng (`customers`) sẽ được cấu trúc làm Single Source of Truth cho toàn bộ vòng đời khách hàng. Để tránh lỗi quyền truy cập Firestore do Client Rule chặn write, toàn bộ luồng đồng bộ sẽ đi qua API Server.
 
 ## 1. Khai báo API đồng bộ chung

@@ -22,6 +22,8 @@ graph TD
             I6 --> I7("Duyệt Phiếu Nhập")
             I7 -.->|Đã vá| BUG_INV_001["✅ ĐÃ VÁ: Race Condition cộng kho phiếu nhập"]
             I7 -.->|Đã vá| BUG_INV_008["✅ ĐÃ VÁ: Negative stock guard"]
+            I7 -.->|Đã vá| BUG_INV_011["✅ ĐÃ VÁ: Giữ dư và liên kết mồ côi khi nhập LK"]
+            I7 -.->|Đã vá| BUG_INV_012["✅ ĐÃ VÁ: Không thể loại linh kiện hết hàng khỏi phiếu gộp"]
             I7 -.->|Đã vá| BUG_PAR_001["✅ ĐÃ VÁ: Cập nhật bất đồng bộ Receipt & Ticket"]
             I7 -.->|Đã vá| BUG_PAR_002["✅ ĐÃ VÁ: Race Condition & Thiếu Log (Regression)"]
             I7 --> I7_TRANS("🛡️ Firestore Transaction (Atomic)")
@@ -79,6 +81,8 @@ graph TD
             click BUG_PAR_002 call handleBugClick("BUG-PAR-002") "Mở chi tiết"
             click BUG_INV_009 call handleBugClick("BUG-INV-009") "Mở chi tiết"
             click BUG_INV_010 call handleBugClick("BUG-INV-010") "Mở chi tiết"
+            click BUG_INV_011 call handleBugClick("BUG-INV-011") "Mở chi tiết"
+            click BUG_INV_012 call handleBugClick("BUG-INV-012") "Mở chi tiết"
 ```
 # 🐛 Bugs
 ## BUG-INV-001: Race Condition cộng kho phiếu nhập
@@ -242,3 +246,105 @@ if (available < quantity) {
   alert("Không đủ hàng khả dụng!");
 }
 ```
+
+## BUG-INV-011: Phiếu nhập giữ dư và giữ liên kết linh kiện mồ côi
+- **Status:** fixed
+- **Severity:** critical
+- **Module:** INV
+- **Files:** `src/app/api/inventory/import/route.ts`, `src/app/api/repairs/confirm-parts/route.ts`, `src/lib/inventoryImportAllocation.ts`, `src/lib/types.ts`
+
+### Cause
+- Phiếu nhập giữ toàn bộ số lượng kế toán nhập thay vì chỉ giữ phần KTV còn yêu cầu.
+- Khi KTV xoá hoặc từ chối dòng linh kiện, liên kết trong phiếu nhập nháp không được gỡ; lúc hoàn tất nhập, số lượng vẫn có thể bị giữ cho một dòng không còn tồn tại.
+- Hệ thống chưa theo dõi số lượng đã giữ theo từng dòng, nên nhập nhiều đợt có thể giữ lặp hoặc chuyển trạng thái quá sớm.
+
+### Solution
+- Phân bổ theo `min(số lượng nhập, số lượng yêu cầu còn thiếu)`; phần dư luôn vào tồn khả dụng.
+- Thêm `reservedQuantity` cho từng dòng sửa chữa để hỗ trợ nhập thiếu và nhập nhiều đợt; chỉ chuyển sang `selected` khi giữ đủ.
+- Gỡ ngay dòng liên kết khỏi phiếu nhập nháp khi KTV xoá/từ chối; khi hoàn tất nhập vẫn kiểm tra lại và tự unlink liên kết mồ côi.
+- Lưu `allocatedHeldQuantity`, `surplusQuantity`, `unlinkedReason` và liên kết gốc trong `inventory_logs` để truy vết.
+- API rebuild `held` chuyển sang POST có quyền `manage_inventory`, tính lại theo `reservedQuantity` và tương thích dữ liệu cũ.
+
+### Verification
+- Unit test: 6/6 trường hợp phân bổ nhập dư, mồ côi, nhập nhiều đợt, đã giữ đủ và cộng dồn giá vốn.
+- Targeted ESLint: pass.
+- TypeScript toàn dự án: pass.
+
+## BUG-INV-012: Không thể loại riêng linh kiện hết hàng khỏi phiếu đề xuất gộp
+- **Status:** fixed
+- **Severity:** high
+- **Module:** INV
+- **Files:** `src/app/admin/parts/page.tsx`, `src/app/api/inventory/import/route.ts`, `src/lib/importReceiptAvailability.ts`, `src/lib/repairStatus.ts`, `src/lib/types.ts`
+
+### Cause
+- UI chỉ hiện nút tình trạng khi phiếu có `repairTicketId` cấp phiếu, nhưng phiếu gộp lưu `ticketId`/`partLineId` trên từng dòng.
+- API lưu tình trạng vào `item.status`, còn UI đọc trường legacy `item.availability`, nên lựa chọn không được phản ánh lại.
+- Tổng tiền, kiểm tra nhà cung cấp và modal nhập kho vẫn tính cả dòng đã đánh dấu `unavailable`.
+
+### Solution
+- Cho phép đánh dấu từng dòng bằng `partLineId`, có fallback `itemIndex` cho dòng chưa có liên kết sửa chữa.
+- Dùng một nguồn trạng thái thống nhất, ưu tiên `status` và tương thích `availability` cũ.
+- Dòng `unavailable` được khóa chỉnh sửa, hiển thị rõ là đã loại, không cần nhà cung cấp và không tính vào tổng tiền/đặt hàng/nhập kho.
+- Cho phép đổi lại từ `unavailable` sang `in_stock` ở cả tab đề xuất và tab đã đặt hàng.
+- Chốt đặt hàng qua API transaction thay vì cập nhật Firestore trực tiếp; trạng thái dòng sửa chữa được cập nhật đồng bộ.
+
+### Verification
+- Unit test tình trạng và tổng tiền nhập: pass.
+- TypeScript và targeted ESLint: pass.
+
+## BUG-INV-013: Ảo tồn kho khi tích Có Hàng ở Đề xuất nhập
+- **Status:** fixed
+- **Severity:** high
+- **Module:** INV
+- **Files:** `src/app/admin/parts/page.tsx`, `src/app/api/inventory/import/route.ts`, `src/lib/importReceiptAvailability.ts`
+
+### Cause
+- Khi nhân viên tích "Có hàng" ở tab "Đề xuất nhập hàng" (draft receipt), hệ thống gọi API `mark_availability` truyền lên `in_stock`.
+- `in_stock` làm hệ thống cập nhật thẳng trạng thái của linh kiện trong ticket thành có sẵn trong kho, khiến giao diện KTV và luồng sửa chữa tưởng hàng đã nhập kho, nhưng thực chất mới chỉ gọi điện hỏi giá nhà cung cấp.
+
+### Solution
+- Thêm trạng thái `approved` vào `ImportReceiptAvailability` (thể hiện "Nhà cung cấp đã báo có nguồn hàng").
+- Frontend kiểm tra: nếu phiếu đang ở trạng thái `draft`, thay vì báo `in_stock` (có sẵn trong kho), sẽ truyền lên API là `approved`. Tại các phiếu nhập đã `ordered`, vẫn truyền `in_stock`.
+- Frontend xử lý render UI "Có hàng" cho cả `in_stock` và `approved` để UI không đổi, nhưng luồng backend không bị nhảy vọt trạng thái.
+
+### Verification
+- TypeScript typecheck: pass.
+- Thử duyệt phiếu `draft` chỉ nhảy sang `approved` trong DB mà UI vẫn báo có hàng. Màn hình KTV không bị ảo `in_stock` tồn kho khả dụng.
+
+# 🚀 Planned Features
+
+## FEAT-INV-001: Quản lý tồn kho theo Lô (Batch Tracking) kết hợp FIFO sổ sách
+- **Status:** planned
+- **Priority:** high
+- **Module:** INV
+
+### Mục tiêu
+Theo dõi chính xác nguồn gốc, nhà cung cấp (NCC) và lịch sử nhập của từng linh kiện xuất kho phục vụ cho việc bảo hành/đổi trả, đồng thời không làm thay đổi thao tác của KTV trên app.
+
+### Quy trình nghiệp vụ
+1. **Lúc nhập kho:** Quản lý kho dán mã lô (hoặc mã phiếu nhập) lên từng linh kiện vật lý.
+2. **Lúc xuất kho:** KTV chọn linh kiện như bình thường. Hệ thống tự động trừ FIFO ngầm định (trừ lô nhập trước) cho hệ thống sổ sách.
+3. **Lúc bảo hành/lỗi:** KTV trả linh kiện vật lý. Quản lý kho tìm kiếm mã lô in trên tem dán để ra được lịch sử (NCC, ngày nhập, giá, phiếu nhập tương ứng).
+
+### Kế hoạch Triển khai (Implementation Plan)
+
+#### 1. Lưu trữ Lô hàng (Backend / DB Schema)
+- Khởi tạo sub-collection hoặc collection mới: `inventory_lots`.
+- Khi `complete_import` thành công, lưu thông tin lô: `receiptId`, `productId`, `supplierId`, `importPrice`, `initialQuantity`, `remainingQuantity`.
+
+#### 2. Mở rộng UI Quản lý phiếu nhập (Admin/Inventory)
+- Chi tiết phiếu nhập hoàn tất: Hiển thị rõ **Mã Lô (Lot ID)** hoặc **Mã phiếu nhập** dưới dạng ID ngắn dễ nhìn để quản lý kho dễ ghi tay / in lên tem dán vật lý.
+
+#### 3. Backend: Cập nhật thuật toán trừ kho FIFO (API)
+- Các api liên quan đến sử dụng linh kiện: Thay vì chỉ `stock -= qty` thì:
+  - Query các `inventory_lots` của `productId` có `remainingQuantity > 0`, sort theo ngày tạo (cũ nhất xuất trước - FIFO).
+  - Trừ dần `remainingQuantity` trên các lô này cho đến khi trừ đủ số lượng xuất kho.
+  - Vẫn giữ nguyên logic trừ `stock` tổng để UI KTV và bán lẻ không bị ảnh hưởng.
+  - Ghi nhận vào `inventory_logs` thông tin số lượng được trừ tương ứng với các mã lô nào.
+
+#### 4. Tính năng Tra cứu Nguồn gốc linh kiện (Admin/Parts)
+- Xây dựng một popup hoặc trang con "Tra cứu Mã Lô".
+- Admin nhập mã Lô được ghi trên linh kiện lỗi hỏng trả về. Hệ thống truy vấn `inventory_lots` để hiển thị đầy đủ: Ngày nhập, phiếu nhập, thông tin NCC, lô này đã nhập bao nhiêu, giá bao nhiêu.
+
+#### 5. Danh sách Lô trong chi tiết linh kiện (Tùy chọn)
+- Trong trang chi tiết kho của sản phẩm, bổ sung tab "Tồn kho theo Lô" cho phép Admin xem sản phẩm này đang rải rác tồn ở những lô nào (NCC nào).

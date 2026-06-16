@@ -1,5 +1,7 @@
 # Initial Excel Bootstrap: Khởi tạo sản phẩm, phụ kiện, linh kiện và dịch vụ
 
+**Status:** completed (merged `master`)
+
 ## Mục tiêu
 
 Tách công cụ import dữ liệu ban đầu khỏi các màn quản trị thường ngày, gom vào một route riêng để admin dùng trong giai đoạn setup.

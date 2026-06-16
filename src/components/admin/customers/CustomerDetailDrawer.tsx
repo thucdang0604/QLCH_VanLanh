@@ -5,8 +5,11 @@ import { useRouter } from 'next/navigation';
 import { ExternalLink, Loader2, ShoppingBag, Wrench, X, Calendar } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
 import { useCustomerActivity } from '@/lib/useCustomerActivity';
-import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, orderBy, onSnapshot, limit } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { getAuthInstance } from '@/lib/firebase';
+import { toast } from 'sonner';
+import type { CustomerTransaction } from '@/lib/types';
 
 export interface CustomerDetailRecord {
     id: string;
@@ -16,6 +19,7 @@ export interface CustomerDetailRecord {
     totalSpent?: number;
     totalOrders?: number;
     totalRepairs?: number;
+    totalDebt?: number;
 }
 
 interface Props {
@@ -48,7 +52,7 @@ function formatDate(value: unknown): string {
 export default function CustomerDetailDrawer({ customer, isOpen, onClose }: Props) {
     const router = useRouter();
     const { user } = useAuth();
-    const [activeTab, setActiveTab] = useState<'orders' | 'repairs' | 'appointments'>('orders');
+    const [activeTab, setActiveTab] = useState<'orders' | 'repairs' | 'appointments' | 'debt'>('orders');
     const [appointments, setAppointments] = useState<Array<{
         id: string;
         serviceName?: string;
@@ -60,6 +64,14 @@ export default function CustomerDetailDrawer({ customer, isOpen, onClose }: Prop
         createdAt?: Date | string | number | { _seconds: number; _nanoseconds: number };
     }>>([]);
     const [loadingAppointments, setLoadingAppointments] = useState(false);
+
+    // Debt states
+    const [transactions, setTransactions] = useState<CustomerTransaction[]>([]);
+    const [loadingTransactions, setLoadingTransactions] = useState(false);
+    const [collectAmount, setCollectAmount] = useState<string>('');
+    const [collectMethod, setCollectMethod] = useState<string>('CASH');
+    const [isCollecting, setIsCollecting] = useState(false);
+
     const canViewOrders = user?.role === 'admin' || !!user?.permissions?.includes('manage_orders');
     const canViewRepairs = user?.role === 'admin' || !!user?.permissions?.includes('manage_repairs');
     const activity = useCustomerActivity({
@@ -89,6 +101,66 @@ export default function CustomerDetailDrawer({ customer, isOpen, onClose }: Prop
             return () => unsub();
         }
     }, [isOpen, activeTab, customer?.phone]);
+
+    useEffect(() => {
+        if (isOpen && activeTab === 'debt' && customer?.phone) {
+            setLoadingTransactions(true);
+            const q = query(
+                collection(db, 'customer_transactions'),
+                where('customerId', '==', customer.phone),
+                orderBy('createdAt', 'desc'),
+                limit(20)
+            );
+            const unsub = onSnapshot(q, (snap) => {
+                setTransactions(snap.docs.map(d => ({ id: d.id, ...d.data() } as CustomerTransaction)));
+                setLoadingTransactions(false);
+            }, () => {
+                setLoadingTransactions(false);
+            });
+            return () => unsub();
+        }
+    }, [isOpen, activeTab, customer?.phone]);
+
+    const handleCollectDebt = async () => {
+        if (!customer || !collectAmount) return;
+        const amount = Number(collectAmount.replace(/[^0-9]/g, ''));
+        if (amount <= 0) {
+            toast.error('Số tiền không hợp lệ');
+            return;
+        }
+
+        setIsCollecting(true);
+        try {
+            const auth = await getAuthInstance();
+            const idToken = await auth.currentUser?.getIdToken();
+            const res = await fetch('/api/admin/customers/collect-debt', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${idToken}`
+                },
+                body: JSON.stringify({
+                    customerId: customer.phone,
+                    amount,
+                    paymentMethod: collectMethod,
+                    note: `Thu nợ khách hàng ${customer.name || customer.phone}`
+                })
+            });
+
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Failed to collect debt');
+
+            toast.success('Đã thu nợ thành công');
+            setCollectAmount('');
+            // Optional: The UI should automatically reflect the new totalDebt if the customers list updates real-time
+            // but we might need to locally patch it if we want immediate drawer update:
+            customer.totalDebt = Math.max(0, (customer.totalDebt || 0) - amount);
+        } catch (error: unknown) {
+            toast.error(error instanceof Error ? error.message : 'Không thể thu nợ khách hàng');
+        } finally {
+            setIsCollecting(false);
+        }
+    };
 
     if (!isOpen || !customer) return null;
 
@@ -162,6 +234,16 @@ export default function CustomerDetailDrawer({ customer, isOpen, onClose }: Prop
                         >
                             <Calendar size={16} />
                             Lịch hẹn
+                        </button>
+                        <button
+                            title="Công nợ"
+                            type="button"
+                            role="tab"
+                            onClick={() => setActiveTab('debt')}
+                            className={`flex flex-1 items-center justify-center gap-2 border-b-2 px-3 py-3 text-sm font-medium ${activeTab === 'debt' ? 'border-orange-500 text-orange-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+                        >
+                            <span className="font-bold">đ</span>
+                            Công nợ
                         </button>
                     </div>
 
@@ -261,6 +343,80 @@ export default function CustomerDetailDrawer({ customer, isOpen, onClose }: Prop
                                     <p className="mt-2 text-[10px] text-gray-400 text-right">Tạo lúc: {formatDate(apt.createdAt)}</p>
                                 </div>
                             ))}
+                        </section>
+                    )}
+
+                    {activeTab === 'debt' && (
+                        <section className="space-y-4">
+                            <div className="bg-red-50 p-4 rounded-xl border border-red-100 flex flex-col items-center justify-center">
+                                <p className="text-gray-600 text-sm mb-1">Dư nợ hiện tại</p>
+                                <p className="text-2xl font-bold text-red-600">{formatPrice(customer.totalDebt || 0)}</p>
+                            </div>
+
+                            {(customer.totalDebt || 0) > 0 && (
+                                <div className="bg-white p-4 rounded-xl border border-gray-200">
+                                    <h3 className="text-sm font-bold text-gray-800 mb-3">Thu nợ</h3>
+                                    <div className="flex gap-2 mb-3">
+                                        <input
+                                            type="text"
+                                            value={collectAmount}
+                                            onChange={(e) => {
+                                                const val = e.target.value.replace(/[^0-9]/g, '');
+                                                setCollectAmount(val ? new Intl.NumberFormat('vi-VN').format(Number(val)) : '');
+                                            }}
+                                            placeholder="Nhập số tiền..."
+                                            className="flex-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                                        />
+                                        <select
+                                            title="Phương thức thanh toán"
+                                            value={collectMethod}
+                                            onChange={(e) => setCollectMethod(e.target.value)}
+                                            className="px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white"
+                                        >
+                                            <option value="CASH">Tiền mặt</option>
+                                            <option value="BANK">Chuyển khoản</option>
+                                            <option value="MOMO">MoMo</option>
+                                        </select>
+                                    </div>
+                                    <button
+                                        onClick={handleCollectDebt}
+                                        disabled={isCollecting || !collectAmount}
+                                        className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 text-white font-bold py-2 rounded-lg transition-colors flex justify-center items-center gap-2"
+                                    >
+                                        {isCollecting ? <Loader2 className="animate-spin" size={18} /> : null}
+                                        Xác nhận thu nợ
+                                    </button>
+                                </div>
+                            )}
+
+                            <div className="mt-4">
+                                <h3 className="text-sm font-bold text-gray-800 mb-2">Lịch sử giao dịch công nợ</h3>
+                                {loadingTransactions ? (
+                                    <div className="flex justify-center py-4"><Loader2 className="animate-spin text-gray-400" size={20} /></div>
+                                ) : transactions.length === 0 ? (
+                                    <p className="text-sm text-gray-500 text-center py-4">Chưa có giao dịch nào.</p>
+                                ) : (
+                                    <div className="space-y-2">
+                                        {transactions.map(tx => (
+                                            <div key={tx.id} className="flex justify-between items-center p-3 border rounded-lg bg-white">
+                                                <div>
+                                                    <p className="text-sm font-semibold text-gray-800">
+                                                        {tx.type === 'DEBT' ? 'Ghi nợ' : 'Trả nợ'}
+                                                    </p>
+                                                    <p className="text-[10px] text-gray-500 mt-0.5">{formatDate(tx.createdAt)}</p>
+                                                    {tx.note && <p className="text-xs text-gray-500 mt-1 max-w-[200px] truncate">{tx.note}</p>}
+                                                </div>
+                                                <div className="text-right">
+                                                    <p className={`text-sm font-bold ${tx.type === 'DEBT' ? 'text-red-600' : 'text-green-600'}`}>
+                                                        {tx.type === 'DEBT' ? '+' : '-'}{formatPrice(tx.amount)}
+                                                    </p>
+                                                    {tx.createdByName && <p className="text-[10px] text-gray-400 mt-0.5">Bởi: {tx.createdByName}</p>}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
                         </section>
                     )}
                 </div>

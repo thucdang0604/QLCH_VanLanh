@@ -7,7 +7,7 @@ import { calculateAndSaveCommissionsServer } from '@/lib/commissionCalcServer';
 import type { Order } from '@/lib/types';
 import { PRODUCT_STATUS, isProductArchived } from '@/lib/productLifecycle';
 import { normalizeVietnamPhone } from '@/lib/phone';
-import { fetchFifoLogsForDeduction, executeFifoDeductionsWrites } from '@/lib/inventoryFifo';
+import { fetchFifoLogsForDeduction, executeFifoDeductionsWrites, type FifoDeductionResult } from '@/lib/inventoryFifo';
 
 export async function POST(request: NextRequest) {
     try {
@@ -43,8 +43,8 @@ export async function POST(request: NextRequest) {
                 preAggregated.set(pid, (preAggregated.get(pid) || 0) + qty);
             }
 
-            let fifoResultsMap = new Map<string, any[]>();
-            let fifoLogsDataMap = new Map<string, any[]>();
+            let fifoResultsMap = new Map<string, FifoDeductionResult[]>();
+            let fifoLogsDataMap: Awaited<ReturnType<typeof fetchFifoLogsForDeduction>> = new Map();
             const fifoDeductors = Array.from(preAggregated.entries()).map(([productId, quantityToDeduct]) => ({ productId, quantityToDeduct }));
             if (fifoDeductors.length > 0) {
                 fifoLogsDataMap = await fetchFifoLogsForDeduction(tx, db, fifoDeductors);

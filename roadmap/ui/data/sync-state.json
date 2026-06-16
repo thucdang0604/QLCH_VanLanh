@@ -1,9 +1,14 @@
 {
-  "generatedAt": "2026-05-26T00:00:00.000Z",
+  "generatedAt": "2026-06-13T00:00:00.000Z",
   "mode": "spa-data",
   "preservedIndex": true,
-  "lastAction": "add-chat-security-scan-catalog-and-hardened-release-roadmap",
+  "lastAction": "fix-customer-web-bugs-and-verify-production-build",
   "openBugs": [
-    "BUG-MIGRATE-INVENTORY-SCRIPT-MISSING-001"
+    "BUG-DEPLOY-007",
+    "BUG-RBAC-002",
+    "BUG-REP-010",
+    "BUG-REP-011",
+    "BUG-WEB-REVIEWS-001",
+    "BUG-WEB-OTP-TEST-001"
   ]
 }

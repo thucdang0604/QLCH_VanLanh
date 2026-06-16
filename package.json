@@ -16,8 +16,7 @@
     "lint": "eslint",
     "clean": "npx rimraf .next .firebase tsconfig.tsbuildinfo",
     "graph": "node scripts/generate-graph.js",
-    "graph:serve": "node dev-tools/file-graph/serve.js",
-    "migrate:inventory": "tsx scripts/migrate-active-orders.ts"
+    "graph:serve": "node dev-tools/file-graph/serve.js"
   },
   "dependencies": {
     "@ffmpeg/ffmpeg": "^0.12.15",
@@ -25,7 +24,8 @@
     "@google/generative-ai": "^0.24.1",
     "@tailwindcss/typography": "^0.5.19",
     "@types/svg-pan-zoom": "^3.4.0",
-    "@zxing/browser": "^0.2.0",
+    "@zxing/browser": "^0.1.5",
+    "@zxing/library": "0.21.3",
     "browser-image-compression": "^2.0.2",
     "critters": "^0.0.23",
     "firebase": "^12.9.0",
@@ -44,7 +44,9 @@
     "sonner": "^2.0.7",
     "svg-pan-zoom": "^3.6.2",
     "swiper": "^12.1.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "otplib": "^12.0.1",
+    "qrcode": "^1.5.3"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.5",
@@ -53,13 +55,15 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "esbuild": "0.19.12",
     "eslint": "^9",
     "eslint-config-next": "^15.5.14",
     "eslint-plugin-react-hooks": "5.2.0",
     "puppeteer-core": "^25.0.4",
     "tailwindcss": "^4",
     "tsx": "^4.19.2",
-    "typescript": "^5"
+    "typescript": "^5",
+    "@types/qrcode": "^1.5.5"
   },
   "browserslist": [
     "chrome >= 90",

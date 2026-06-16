@@ -44,12 +44,12 @@ export async function POST(
 
             const item = items[itemIndex];
             if (item.warrantyType !== 'warrantyDevice') {
-                return NextResponse.json({ error: 'Sáº£n pháº©m khĂ´ng thuá»™c loáº¡i thiáº¿t bá»‹ báº£o hĂ nh' }, { status: 400 });
+                return NextResponse.json({ error: 'Sản phẩm không thuộc loại thiết bị bảo hành' }, { status: 400 });
             }
 
             const validImeis = imeis.map((i: string) => i.trim()).filter(Boolean);
             if (validImeis.length !== item.quantity) {
-                return NextResponse.json({ error: `Vui lĂ²ng cung cáº¥p Ä‘á»§ ${item.quantity} IMEI/Serial.` }, { status: 400 });
+                return NextResponse.json({ error: `Vui lòng cung cấp đủ ${item.quantity} IMEI/Serial.` }, { status: 400 });
             }
 
             item.imeis = validImeis;

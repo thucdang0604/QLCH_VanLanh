@@ -153,6 +153,38 @@ export interface CustomerInfo {
     note?: string;
 }
 
+export interface Customer {
+    id: string; // phone
+    phone: string;
+    name: string;
+    type?: 'retail' | 'wholesale';
+    totalSpent?: number;
+    totalOrders?: number;
+    totalRepairs?: number;
+    totalDebt?: number;
+    lastOrderDate?: FirestoreDateValue;
+    lastVisit?: FirestoreDateValue;
+    createdAt?: FirestoreDateValue;
+    updatedAt?: FirestoreDateValue;
+    tags?: string[];
+    email?: string;
+    address?: string;
+    note?: string;
+}
+
+export interface CustomerTransaction {
+    id: string;
+    customerId: string; // phone
+    customerName: string;
+    type: 'DEBT' | 'PAYMENT';
+    amount: number;
+    orderIds?: string[]; // Orders this transaction links to or clears
+    note?: string;
+    createdBy: string;
+    createdByName: string;
+    createdAt: FirestoreDateValue;
+}
+
 export interface Order {
     id: string;
     customer_info?: CustomerInfo;
@@ -163,7 +195,10 @@ export interface Order {
     total_amount: number;
     status: 'Pending' | 'Confirmed' | 'Shipping' | 'Completed' | 'Cancelled';
     is_vat_exported: boolean;
-    payment_method?: 'COD' | 'Bank' | 'Momo' | 'Card' | 'Installment';
+    payment_method?: 'COD' | 'Bank' | 'Momo' | 'Card' | 'Installment' | 'Debt' | 'QR';
+    paymentStatus?: 'paid' | 'unpaid' | 'debt';
+    shippingFee?: number;
+    linkedRepairIds?: string[];
     deposit_amount?: number;
     paymentHistory?: PaymentHistoryEntry[];
     source?: 'web' | 'pos';
@@ -374,6 +409,7 @@ export interface RepairTicket {
         partName?: string;
         quality: string;
         quantity: number;
+        reservedQuantity?: number; // Số lượng đã giữ trong kho cho dòng sửa chữa
         partType?: string;  // Loại linh kiện: Màn hình, Pin, Camera, Mainboard…
         // Legacy unit price (backward-compat)
         price?: number;
@@ -406,7 +442,7 @@ export interface RepairTicket {
     payment: {
         status: PaymentStatus;
         partsCost: number;    // Tiền linh kiện
-        laborCost: number;    // Tiền công thợ
+        laborCost: number;    // Chi phí sửa chữa (Tiền công / Phí dịch vụ)
         additionalFees?: number; // Chi phí phát sinh
         discountAmount?: number; // Giảm giá
         giftDiscount?: number;   // Giá trị quà tặng (trừ khi tính hoa hồng)
@@ -438,6 +474,7 @@ export interface RepairTicket {
             refundAmount: number;
         }[];
     };
+    serviceWarrantyExpiresAt?: FirestoreDateValue;
     createdAt: FirestoreDateValue;
     updatedAt: FirestoreDateValue;
 }
@@ -450,6 +487,15 @@ export interface ImportReceiptItem {
     importPrice: number; // Giá nhập đợt này
     oldCostPrice?: number; // Giá vốn cũ để tính dự báo
     quality?: string;    // Phân loại: Zin, Loại 1, Loại 2, Bóc máy
+    status?: 'requested' | 'approved' | 'ordered' | 'in_stock' | 'unavailable' | 'selected';
+    availability?: 'in_stock' | 'unavailable';
+    supplier?: string;
+    supplierId?: string;
+    ticketId?: string;
+    partLineId?: string;
+    allocatedHeldQuantity?: number;
+    surplusQuantity?: number;
+    unlinkedReason?: 'missing_line' | 'inactive_line' | 'already_allocated';
 }
 
 // ── Customer Reviews ──
@@ -468,6 +514,7 @@ export interface Review {
 
 export interface ImportReceipt {
     id: string;
+    lotCode?: string;
     supplier: string;
     supplierId?: string;         // Link tới collection suppliers
     items: ImportReceiptItem[];
@@ -535,7 +582,7 @@ export interface InventoryLog {
     quantity: number;           // Dương = nhập/trả, Âm = xuất/bán
     costPriceAtLog: number;     // Giá vốn tại thời điểm thao tác
     type: 'IMPORT' | 'SALE' | 'WEB_ORDER'
-        | 'REPAIR_USE' | 'REPAIR_REFUND' | 'REPAIR_RELEASE'
+        | 'REPAIR_USE' | 'REPAIR_REFUND' | 'REPAIR_RELEASE' | 'REPAIR_RETURN'
         | 'TECH_ISSUE' | 'TECH_RETURN'
         | 'ORDER_CANCEL' | 'ORDER_COMPLETE' | 'ORDER_REACTIVATE';
     referenceId: string;
@@ -609,158 +656,6 @@ export interface ProductReview {
         createdAt: FirestoreDateValue;
     };
     createdAt: FirestoreDateValue;
-}
-
-// ── Import Receipt (Phiếu nhập hàng) ──
-export interface ImportReceiptItem {
-    productId: string;
-    productName: string;
-    quantity: number;
-    importPrice: number; // Giá nhập đợt này
-    oldCostPrice?: number; // Giá vốn cũ để tính dự báo
-    quality?: string;    // Phân loại: Zin, Loại 1, Loại 2, Bóc máy
-}
-
-// ── Customer Reviews ──
-export interface Review {
-    id: string;
-    referenceId: string; // ID của đơn hàng hoặc phiếu sửa chữa
-    type: 'repair' | 'order';
-    customerName: string;
-    phone: string; // Chỉ lưu/hiển thị dạng: 098****123
-    rating: number; // 1-5 sao
-    content: string;
-    images: string[];
-    status: 'pending' | 'approved';
-    createdAt: FirestoreDateValue;
-}
-
-export interface ImportReceipt {
-    id: string;
-    supplier: string;
-    supplierId?: string;         // Link tới collection suppliers
-    items: ImportReceiptItem[];
-    totalAmount: number;
-    note?: string;
-    receiptType?: 'component' | 'retail';
-    status: 'draft' | 'ordered' | 'completed';
-    paymentStatus?: 'paid' | 'partial' | 'unpaid'; // Trạng thái thanh toán NCC
-    paidAmount?: number;         // Số tiền đã trả NCC
-    createdBy: string;
-    createdByName: string;
-    createdAt: FirestoreDateValue;
-    completedAt?: FirestoreDateValue;
-}
-
-// ── Commission (Hoa hồng) ──
-export interface CommissionRule {
-    id: string;
-    name: string;
-    type: 'repair' | 'order' | 'all';
-    percentage: number; // % hoa hồng
-    fixedAmount?: number; // Số tiền cố định (nếu có)
-    hierarchyLevel: 1 | 2 | 3; // 1=Chung, 2=Danh mục, 3=SP cụ thể
-    targetType: 'general' | 'category' | 'specific'; // Loại target
-    targetValue?: string; // Tên danh mục hoặc productId
-    isActive: boolean;
-    applyAfterDiscount?: boolean; // Nếu true: tính hoa hồng sau khi trừ đi các phụ kiện khuyến mãi
-    createdAt: FirestoreDateValue;
-}
-
-export interface Commission {
-    id: string;
-    staffId: string;
-    staffName: string;
-    ruleId: string;
-    sourceType: 'repair' | 'order';
-    sourceId: string;    // repair/order ID
-    amount: number;      // Tiền hoa hồng
-    baseAmount: number;  // Tiền gốc (doanh thu)
-    createdAt: FirestoreDateValue;
-}
-
-// ── Warranty Configuration (Cấu hình bảo hành) ──
-export interface WarrantyRule {
-    partType: string;        // Loại linh kiện: "Màn hình", "Pin", "Camera"…
-    warrantyMonths: number;  // Số tháng bảo hành
-}
-
-export interface Expense {
-    id: string;
-    category: 'rent' | 'utilities' | 'supplies' | 'salary' | 'other';
-    description: string;
-    amount: number;
-    date: FirestoreDateValue;
-    createdBy: string;
-    createdByName: string;
-    createdAt: FirestoreDateValue;
-}
-
-// ── Inventory Audit Log (Nhật ký kho) ──
-export interface InventoryLog {
-    id: string;
-    productId: string;
-    productName: string;
-    quantity: number;           // Dương = nhập/trả, Âm = xuất/bán
-    costPriceAtLog: number;     // Giá vốn tại thời điểm thao tác
-    type: 'IMPORT' | 'SALE' | 'WEB_ORDER'
-        | 'REPAIR_USE' | 'REPAIR_REFUND' | 'REPAIR_RELEASE'
-        | 'TECH_ISSUE' | 'TECH_RETURN'
-        | 'ORDER_CANCEL' | 'ORDER_COMPLETE' | 'ORDER_REACTIVATE';
-    referenceId: string;
-    referenceType: 'import_receipt' | 'order' | 'repair';
-    createdBy: string;
-    createdByName: string;
-    createdAt: FirestoreDateValue;
-}
-
-// ── Supplier (Nhà cung cấp) ──
-export interface Supplier {
-    id: string;
-    name: string;
-    phone?: string;
-    email?: string;
-    address?: string;
-    taxCode?: string;           // Mã số thuế
-    bankAccount?: string;       // Số tài khoản
-    bankName?: string;
-    contactPerson?: string;     // Người liên hệ
-    totalDebt: number;          // Tổng công nợ hiện tại
-    note?: string;
-    isActive: boolean;
-    createdAt: FirestoreDateValue;
-    updatedAt: FirestoreDateValue;
-}
-
-// ── Supplier Transaction (Lịch sử giao dịch NCC) ──
-export interface SupplierTransaction {
-    id: string;
-    supplierId: string;
-    supplierName: string;
-    type: 'IMPORT' | 'PAYMENT';       // Nhập hàng tạo nợ | Thanh toán giảm nợ
-    amount: number;                     // Số tiền giao dịch
-    importReceiptId?: string;           // Link tới phiếu nhập hàng (khi type=IMPORT)
-    paymentMethod?: string;             // Phương thức thanh toán (khi type=PAYMENT)
-    note?: string;
-    createdBy: string;
-    createdByName: string;
-    createdAt: FirestoreDateValue;
-}
-
-// ── Accessory Discount Rule (Cấu hình giảm giá phụ kiện) ──
-export interface AccessoryDiscountRule {
-    id: string;
-    name: string;                       // VD: "Giảm 40% cường lực khi thay màn"
-    triggerServiceCategory: string;     // Danh mục DV kích hoạt (e.g., 'thay-man-hinh')
-    triggerKeywords: string[];          // Keywords: ['thay màn', 'màn hình']
-    discountType: 'percentage' | 'fixed';
-    discountValue: number;              // 40 = giảm 40% | 50000 = giảm 50k
-    targetProductCategory: string;      // Danh mục SP được giảm (e.g., 'cuong-luc')
-    targetKeywords: string[];           // Keywords: ['cường lực', 'dán màn']
-    maxDiscountAmount?: number;         // Giảm tối đa (VNĐ)
-    isActive: boolean;
-    createdAt: FirestoreDateValue;
-    updatedAt: FirestoreDateValue;
 }
 
 // ── Voucher Stacking Rules ──
@@ -786,23 +681,6 @@ export interface Voucher {
     stackingRules: StackingRules;
     createdAt: FirestoreDateValue;
     updatedAt: FirestoreDateValue;
-}
-
-// ── Product Review (Đánh giá sản phẩm) ──
-export interface ProductReview {
-    id: string;
-    productId: string;
-    customerName: string;
-    phone?: string;              // Lưu dạng ẩn: 098****123
-    rating: number;              // 1-5 sao
-    content: string;
-    images?: string[];
-    status: 'pending' | 'approved';
-    reply?: {
-        content: string;
-        createdAt: FirestoreDateValue;
-    };
-    createdAt: FirestoreDateValue;
 }
 
 // ── Master Hub Workflow (Repair Workflow) ──

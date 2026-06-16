@@ -1,5 +1,7 @@
 # Hardcode Cleanup 2026-06-07
 
+**Status:** implemented-awaiting-admin-smoke (merged `master` via PR #8)
+
 ## Mục tiêu
 
 Loại bỏ các hardcode còn ảnh hưởng runtime/production sau đợt rà soát codebase ngày 2026-06-07. Trọng tâm là đưa thông tin nhạy cảm, thông tin nhận diện doanh nghiệp, dữ liệu storefront, workflow status và dữ liệu demo về đúng nguồn cấu hình thay vì nằm rải rác trong source.

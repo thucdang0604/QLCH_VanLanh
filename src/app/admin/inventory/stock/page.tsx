@@ -41,6 +41,7 @@ export default function StockPage() {
     }, []);
 
     const tabFiltered = products.filter(p => {
+        if (p.isProposed) return false;
         if (stockTab === 'component') return isComponent(p);
         if (stockTab === 'retail') return !isComponent(p);
         return true;

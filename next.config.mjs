@@ -535,7 +535,6 @@ const nextConfig = {
       { source: '/my-account', destination: '/info/my-account', permanent: true },
       { source: '/shop', destination: '/info/shop', permanent: true },
       { source: '/contact', destination: '/info/contact', permanent: true },
-      { source: '/reviews', destination: '/info/reviews', permanent: true },
       { source: '/about', destination: '/info/about', permanent: true },
       { source: '/sample-page', destination: '/info/sample-page', permanent: true }
     ];
@@ -547,6 +546,7 @@ const nextConfig = {
   },
   images: {
     unoptimized: true,
+    qualities: [60, 75, 80],
     remotePatterns: [
       {
         protocol: 'https',

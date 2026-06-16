@@ -65,14 +65,16 @@ export async function POST(request: NextRequest) {
             if ('quote' in paymentData) (updatedPayment as Record<string, unknown>).quote = Number(paymentData.quote) || 0;
             if ('giftDiscount' in paymentData) updatedPayment.giftDiscount = Number(paymentData.giftDiscount) || 0;
             if ('additionalFees' in paymentData) updatedPayment.additionalFees = Number(paymentData.additionalFees) || 0;
+            if ('laborCost' in paymentData) updatedPayment.laborCost = Number(paymentData.laborCost) || 0;
             if ('paymentMethod' in paymentData) (updatedPayment as Record<string, unknown>).paymentMethod = paymentData.paymentMethod;
 
             // Compute amount
             const partsCost = updatedPayment.partsCost || 0;
             const additionalFees = updatedPayment.additionalFees || 0;
             const discountAmount = updatedPayment.discountAmount || 0; // POS discount if any
+            const laborCost = updatedPayment.laborCost || 0;
             
-            updatedPayment.amount = partsCost + additionalFees - discountAmount;
+            updatedPayment.amount = partsCost + laborCost + additionalFees - discountAmount;
 
             tx.update(ticketRef, {
                 payment: updatedPayment,

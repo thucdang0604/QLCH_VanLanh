@@ -4,7 +4,7 @@
 **Cập nhật**: 26.05.2026  
 **Nhánh**: `codex/chat-enhancements`  
 **Checkpoint nền**: `4d3c6fbd feat: add unified external chat integrations`  
-**Trạng thái**: in-progress - tính năng và hardening đã build qua, chờ deploy đồng bộ code/rules và kiểm thử production
+**Trạng thái**: implemented-awaiting-production-validation - code/hardening hoàn tất, còn kiểm thử provider thật và deploy đồng bộ rules
 
 ## Mục tiêu
 

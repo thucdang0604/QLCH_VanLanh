@@ -7,6 +7,24 @@ const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY || '');
 export const geminiModel = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 const businessIdentity = getBusinessIdentity();
 
+export type GeminiProviderStatus = 'ok' | 'unconfigured' | 'forbidden' | 'rate_limited' | 'provider_error';
+
+export type GeminiChatResult = {
+    ok: boolean;
+    content: string;
+    providerStatus: GeminiProviderStatus;
+    retryable: boolean;
+};
+
+const providerFallback = `Trợ lý AI đang tạm gián đoạn. Tin nhắn của anh/chị đã được lưu; vui lòng chờ nhân viên hỗ trợ hoặc gọi Hotline ${businessIdentity.formattedPhone}.`;
+
+export function classifyGeminiError(error: unknown): Exclude<GeminiProviderStatus, 'ok'> {
+    const details = String(error instanceof Error ? `${error.name} ${error.message}` : error).toLowerCase();
+    if (details.includes('403') || details.includes('forbidden') || details.includes('denied access')) return 'forbidden';
+    if (details.includes('429') || details.includes('resource_exhausted') || details.includes('rate limit')) return 'rate_limited';
+    return 'provider_error';
+}
+
 // ===== System prompt — business AI consultant =====
 const SYSTEM_PROMPT = `Bạn là AI tư vấn viên của ${businessIdentity.siteName} — Trung tâm sửa chữa điện thoại, laptop & thiết bị công nghệ.
 
@@ -52,7 +70,10 @@ const SYSTEM_PROMPT = `Bạn là AI tư vấn viên của ${businessIdentity.sit
 6. Không bịa đặt thông tin kỹ thuật không chắc chắn`;
 
 // Chat function for customer support
-export async function chatWithGemini(message: string, context?: string, history?: Content[]) {
+export async function chatWithGemini(message: string, context?: string, history?: Content[]): Promise<GeminiChatResult> {
+    if (!process.env.GOOGLE_GEMINI_API_KEY) {
+        return { ok: false, content: providerFallback, providerStatus: 'unconfigured', retryable: false };
+    }
     // Tinh chỉnh behavior của AI
     const enhancedPrompt = context
         ? `${SYSTEM_PROMPT}\n\n[HƯỚNG DẪN BỔ SUNG YÊU CẦU CHO TIN NHẮN NÀY]: ${context}`
@@ -112,10 +133,16 @@ export async function chatWithGemini(message: string, context?: string, history?
         // Gửi tin nhắn mới nhất
         const result = await chat.sendMessage(message);
         const response = await result.response;
-        return response.text();
+        return { ok: true, content: response.text(), providerStatus: 'ok', retryable: false };
     } catch (error) {
         console.error('Gemini API Error:', error);
-        return `Xin lỗi, tôi không thể xử lý yêu cầu này. Vui lòng gọi Hotline ${businessIdentity.formattedPhone} để được hỗ trợ trực tiếp!`;
+        const providerStatus = classifyGeminiError(error);
+        return {
+            ok: false,
+            content: providerFallback,
+            providerStatus,
+            retryable: providerStatus === 'rate_limited' || providerStatus === 'provider_error',
+        };
     }
 }
 

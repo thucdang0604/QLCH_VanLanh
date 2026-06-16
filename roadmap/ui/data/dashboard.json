@@ -37,10 +37,10 @@
         "color": "accent-color",
         "status": "NEEDS ACTION",
         "items": [
-          "<b>Open bugs</b>: 1",
+          "<b>Open bugs</b>: 6 (Google Reviews provider key, OTP test fixture, 2 Repair role/mobile QA, Deploy pipeline, RBAC smoke)",
           "<b>Completion</b>: 98%",
           "<b>roadmap_v2</b>: SPA shell preserved, JSON data rebuilt.",
-          "<b>Warning</b>: migrate:inventory script target is missing."
+          "<b>Roadmap sync 13.06.2026</b>: 5 Customer Web bugs fixed and verified; provider/OTP blockers remain explicit; obsolete migrate:inventory command removed."
         ]
       },
       {
@@ -77,7 +77,7 @@
         "items": [
           "<b>BUG-INVENTORY-HELD-001</b>: fixed - pending orders reserve held only.",
           "<b>BUG-REPAIR-STOCK-001</b>: fixed - repair selected parts reserve held; done consumes stock.",
-          "<b>BUG-MIGRATE-INVENTORY-SCRIPT-MISSING-001</b>: open - restore/remove migrate:inventory script before commit."
+          "<b>BUG-MIGRATE-INVENTORY-SCRIPT-MISSING-001</b>: fixed - removed obsolete package command that referenced a missing script."
         ]
       },
       {
@@ -521,7 +521,7 @@
         {
           "id": "BUG-MIGRATE-INVENTORY-SCRIPT-MISSING-001",
           "title": "package.json migrate:inventory dang tham chieu script bi thieu",
-          "status": "open"
+          "status": "fixed"
         }
       ]
     }

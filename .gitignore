@@ -48,6 +48,7 @@ repomix-output.xml
 ts_errors.txt
 eslint_output.json
 compile.log
+temp_git_page.tsx
 
 # Firebase & Agents
 .firebase/

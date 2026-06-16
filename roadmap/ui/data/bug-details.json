@@ -784,7 +784,7 @@
       "id": "BUG-MIGRATE-INVENTORY-SCRIPT-MISSING-001",
       "module": "Build",
       "severity": "medium",
-      "status": "open",
+      "status": "fixed",
       "workflowId": "inventory",
       "title": "package.json migrate:inventory dang tham chieu script bi thieu",
       "affectedFiles": [
@@ -792,11 +792,12 @@
         "scripts/migrate-active-orders.ts"
       ],
       "symptom": "Sau clean code, <code>scripts/migrate-active-orders.ts</code> khong ton tai nhung <code>package.json</code> van co script <code>migrate:inventory</code>.",
-      "description": "Current working tree bi mat migration CLI bat buoc cua inventory refactor. Chay <code>npm run migrate:inventory</code> se fail do thieu file.",
+      "description": "Package script từng trỏ tới migration CLI không tồn tại và không có caller/runtime dependency.",
       "cause": "Cleanup da xoa script nhung chua xoa/cap nhat package script va roadmap.",
-      "solution": "Khoi phuc <code>scripts/migrate-active-orders.ts</code> neu can migration du lieu cu, hoac xoa script <code>migrate:inventory</code> sau khi xac nhan migration da chay va khong can nua.",
-      "verificationNotes": "Source verified 2026-05-23: scripts/migrate-active-orders.ts MISSING; package.json still defines migrate:inventory.",
-      "discoveredAt": "2026-05-23"
+      "solution": "Đã xóa command chết <code>migrate:inventory</code> khỏi package.json; migration hiện hành dùng script có version và mục tiêu rõ ràng.",
+      "verificationNotes": "Source verified 2026-06-13: package.json không còn tham chiếu file thiếu; JSON parse hợp lệ.",
+      "discoveredAt": "2026-05-23",
+      "fixedAt": "2026-06-13"
     }
   ]
 }

@@ -39,40 +39,40 @@ Open deploy debt: <code>BUG-DEPLOY-007</code> đang theo dõi warning Firebase C
 - **Color:** success
 Tối ưu hóa giao diện khách hàng (Mobile-first), tăng trải nghiệm và độ tin cậy.
 
-- [ ] <b>Tracking Modal:</b> Đã code popup tra cứu đơn hàng dạng Bottom Sheet trên Mobile / Desktop
-- [ ] <b>Speed Dial Chat:</b> Đã code gộp Zalo, Messenger, AI Chatbot thành 1 nút FAB duy nhất gọn gàng
-- [ ] <b>Pricing Table:</b> Đã code bảng giá sửa chữa thiết bị có Tab vuốt ngang mượt mà tại trang chủ
-- [ ] <b>Google Reviews:</b> Đã code API lấy đánh giá tự động từ Google Maps và hiển thị kiểu Slider
-- [ ] <b>Mobile Header:</b> Đã chuyển thanh tìm kiếm ra ngoài giao diện chính giúp dễ sử dụng hơn
+- [x] <b>Tracking Modal:</b> Đã code popup tra cứu đơn hàng dạng Bottom Sheet trên Mobile / Desktop
+- [x] <b>Speed Dial Chat:</b> Đã code gộp Zalo, Messenger, AI Chatbot thành 1 nút FAB duy nhất gọn gàng
+- [x] <b>Pricing Table:</b> Đã code bảng giá sửa chữa thiết bị có Tab vuốt ngang mượt mà tại trang chủ
+- [x] <b>Google Reviews:</b> Đã code API lấy đánh giá tự động từ Google Maps và hiển thị kiểu Slider; lỗi key/provider production được theo dõi riêng trong Customer Web QA
+- [x] <b>Mobile Header:</b> Đã chuyển thanh tìm kiếm ra ngoài giao diện chính giúp dễ sử dụng hơn
 
 ### Live Chat Omnichannel
-- **Status:** DONE
+- **Status:** IMPLEMENTED - AWAITING PRODUCTION VALIDATION
 - **Color:** success
 Hộp thư Web/Facebook/Zalo có profile, media, CRM và điều hướng tạo đơn nghiệp vụ.
 
-- [ ] <b>Đã code:</b> Facebook Graph profile refresh và hiển thị avatar/tên thật
-- [ ] <b>Đã code:</b> Sticker/ảnh/audio/video/file với RTDB schema và CSP Facebook CDN
-- [ ] <b>Đã code:</b> Modal CRM và handoff Repair/POS không đưa tên/SDT vào URL
-- [ ] <b>Đã harden:</b> Anonymous Auth cho web chat, chat_support API, CRM rules và token header
-- [ ] <b>Đã sửa 26.05:</b> Lưu CRM/liên kết room qua API server; lỗi RTDB tạm thời được báo riêng sau khi lưu hồ sơ
-- [ ] <b>Đã code 26.05:</b> Panel tác vụ realtime theo SDT và deep-link modal Order/Repair, có gate theo quyền module
-- [ ] <b>Đã code 27.05:</b> Anh Facebook cache private + Storage deny rules + media API, nut Meta Inbox fallback va tra loi mau /shortcut
+- [x] <b>Đã code:</b> Facebook Graph profile refresh và hiển thị avatar/tên thật
+- [x] <b>Đã code:</b> Sticker/ảnh/audio/video/file với RTDB schema và CSP Facebook CDN
+- [x] <b>Đã code:</b> Modal CRM và handoff Repair/POS không đưa tên/SDT vào URL
+- [x] <b>Đã harden:</b> Anonymous Auth cho web chat, chat_support API, CRM rules và token header
+- [x] <b>Đã sửa 26.05:</b> Lưu CRM/liên kết room qua API server; lỗi RTDB tạm thời được báo riêng sau khi lưu hồ sơ
+- [x] <b>Đã code 26.05:</b> Panel tác vụ realtime theo SDT và deep-link modal Order/Repair, có gate theo quyền module
+- [x] <b>Đã code 27.05:</b> Ảnh Facebook cache private + Storage deny rules + media API, nút Meta Inbox fallback và trả lời mẫu /shortcut
 - [ ] <b>Chờ deploy:</b> Bật Anonymous Auth rồi deploy code + Firestore/RTDB Rules cùng bản
 - [ ] <b>Chờ xác minh:</b> Test tin thật Facebook/Zalo và chat web ẩn danh trên <code>fixphone.vn</code>
-- [ ] <b>Guardrail:</b> Không mở RTDB public, không dùng PSID làm URL profile, không ghi tắt giao dịch từ chat
+- [x] <b>Guardrail:</b> Không mở RTDB public, không dùng PSID làm URL profile, không ghi tắt giao dịch từ chat
 
 ### Customer CRM
 - **Status:** DONE
 - **Color:** success
 Hệ thống quản lý khách hàng tập trung, thay thế dữ liệu phân tán trong orders/repairs/pos.
 
-- [ ] <b>Schema:</b> Tạo collection <code>customers/{phone}</code> với profile + sub-collections
-- [ ] <b>Sync Logic:</b> Server-side write vào <code>customers/</code> khi tạo order/repair/appointment
-- [ ] <b>Security stage 1 đã code:</b> Không còn mở <code>customers</code> cho mọi staff; yêu cầu quyền nghiệp vụ CRM/chat
-- [ ] <b>Security stage 2 pending:</b> CRM v6 field-level write với <code>manage_customers</code> và aggregate increment-only
-- [ ] <b>Đã code slice:</b> Drawer tra cứu lịch sử mua hàng/sửa chữa theo SĐT, có RBAC từng module
-- [ ] <b>Đã code slice:</b> Deep-link từ CRM/chat vào modal chi tiết order/repair sẵn có
-- [ ] <b>Admin UI v11 pending:</b> appointments, tags, tier và migration/ledger đầy đủ
+- [x] <b>Schema:</b> Tạo collection <code>customers/{phone}</code> với profile + sub-collections
+- [x] <b>Sync Logic:</b> Server-side write vào <code>customers/</code> khi tạo order/repair/appointment
+- [x] <b>Security stage 1:</b> Không còn mở <code>customers</code> cho mọi staff; yêu cầu quyền nghiệp vụ CRM/chat
+- [x] <b>Security stage 2:</b> Field-level write dùng <code>manage_customers</code>, aggregate được cập nhật qua server API/transaction
+- [x] <b>CRM Drawer:</b> Tra cứu lịch sử mua hàng/sửa chữa theo SĐT, có RBAC từng module
+- [x] <b>Deep-link:</b> Từ CRM/chat vào modal chi tiết order/repair sẵn có
+- [x] <b>Admin UI:</b> Appointments, tags, tier và migration/ledger đã hoàn tất theo checklist CRM v2
 
 ### Marketing & Growth: Social Missions (Bounty Program)
 - **Status:** DONE
@@ -99,9 +99,39 @@ Dọn dẹp kỹ thuật dư thừa phát hiện trong audit.
 - [ ] <b>Firestore Rules:</b> Xóa rule <code>services</code> trùng lặp (line 37 vs line 62)
 - [ ] <b>LazyImage:</b> Quyết định: xóa component orphan hoặc document lý do giữ
 - [ ] <b>SEO Meta:</b> Kiểm tra <code>&lt;title&gt;</code> và <code>meta description</code> trên production domain
-- [ ] <b>Hardcode Cleanup:</b> Xử lý <code>BUG-HARDCODE-001</code> theo plan <code>plan_hardcode_cleanup_20260607.md</code>: Maps key, fake storefront fallback, business identity, workflow constants và demo fixtures.
+- [x] <b>Hardcode Cleanup:</b> <code>BUG-HARDCODE-001</code> đã merge qua PR #8; còn residual smoke admin có dữ liệu thật, không còn blocker code.
 
 ## Changelog
+
+### 2026-06-14 - FIX ISSUES & LINT ERRORS
+- **Color:** success
+- **Summary:** Fix các lỗi liên quan đến POS, TypeScript, Accessibility và Syntax.
+
+- <b>[POS]</b> Fix lỗi `Firestore transactions require all reads to be executed before all writes` trong `pos/checkout/route.ts` bằng cách cấu trúc lại giao dịch (Read before Write).
+- <b>[POS]</b> Fix lỗi thiếu type `string` cho `giftId` trong `pos/page.tsx`.
+- <b>[Voucher]</b> Thêm tính năng áp dụng Voucher cho trang POS.
+- <b>[Revenue]</b> Fix typo `'DEBT'` thành `'Debt'` để giải quyết lỗi không tương thích type trong `revenue/page.tsx`.
+- <b>[Technician]</b> Fix lỗi thiếu import `isSelectedRepairPart` và các truy xuất index undefined trong `technician/page.tsx`.
+- <b>[Settings]</b> Fix cú pháp thiếu React Fragment `<>...</>` và check optional chaining cho dữ liệu TOTP trong `BankIntegrationConfig.tsx`.
+- <b>[Customers]</b> Fix lỗi Accessibility thiếu thuộc tính `title` cho thẻ `<select>` phương thức thu nợ trong `CustomerDetailDrawer.tsx`.
+- <b>[System]</b> Update UI cho trạng thái "Hoàn tất" của KTV (ẩn phần gán CTV/KTV), bổ sung title/aria-label cho mobile, và chuyển ID sang Tên nhân viên trong nhật ký phiếu.
+
+### 2026-06-13 - ROADMAP STATUS RECONCILIATION
+- **Color:** success
+- **Summary:** Đồng bộ trạng thái roadmap với code đã merge vào `master`, không thay đổi hai kế hoạch lớn Customer Web QA và POS Centralization.
+
+- Đánh dấu hoàn tất cho Social Missions, Customer CRM, Customer CRM Sync, Homepage Appearance, Warranty Templates, Initial Excel Bootstrap, Roadmap v2 và Master Hub.
+- Chuyển QR/barcode, Live Chat, OTP follow-up, Hardcode và workflow KTV sang trạng thái đã triển khai nhưng còn xác minh production/thiết bị/vai trò phù hợp.
+- Đóng bug command migration kho bị treo bằng cách xóa script package không tồn tại; giữ nguyên các migration hiện hành có file/version rõ ràng.
+- Giữ `BUG-DEPLOY-007`, RBAC role smoke, KTV role matrix, QR hardware test, OTP E2E và k6 load test ở trạng thái chưa hoàn tất.
+
+### 2026-06-13 - RECORD ISSUES & ROADMAP PROGRESS
+- **Color:** warning
+- **Summary:** Ghi nhận lỗi Firebase OTP và cập nhật trạng thái các Giai đoạn.
+
+- <b>Issue Firebase OTP:</b> Lỗi `auth/invalid-app-credential` khi dùng Firebase Phone Auth & reCAPTCHA để gửi SMS cấu hình ngân hàng. Nguyên nhân: Không hỗ trợ reCaptcha v2 thông thường hoặc môi trường dev bị xung đột. Giải pháp: Đã loại bỏ OTP khỏi trang quản lý cấu hình ngân hàng vì Admin đã được bảo vệ bằng JWT phân quyền.
+- <b>Phase 7 (Hoàn tất):</b> Đã phát triển Quản lý Công nợ Khách sỉ & Thu nợ theo nguyên tắc FIFO.
+- <b>Kế hoạch tiếp theo:</b> Chuyển sang Giai đoạn 4 (Hệ thống Bảo hành).
 
 ### 2026-06-09 - FIREBASE DEPLOY PIPELINE CLEANUP PLAN
 - **Color:** warning
@@ -265,7 +295,7 @@ Dọn dẹp kỹ thuật dư thừa phát hiện trong audit.
 
 - Preserved existing SPA shell files: index.html, app.js, styles.css.
 - Updated manifest/dashboard/bug-details from current source verification.
-- Detected open regression: scripts/migrate-active-orders.ts missing while package.json still exposes migrate:inventory.
+- Regression migration command đã đóng ngày 13.06.2026: xóa `migrate:inventory` khỏi package scripts vì target không tồn tại và không còn caller/runtime dependency.
 
 ### 2026-05-19 - PNPM MIGRATION & DEPENDENCY AUDIT
 - **Color:** accent-color

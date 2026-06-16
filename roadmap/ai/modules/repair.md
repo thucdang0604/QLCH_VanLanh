@@ -60,7 +60,7 @@ graph TD
 ```
 # 🚧 Kế hoạch nâng cấp workflow KTV và UI mobile
 
-- **Status:** planned
+- **Status:** implemented-awaiting-role-qa
 - **Plan:** [Workflow sửa chữa, phân công KTV và chuyển giao có xác nhận](../../ui/data/ai_plans/plan_repair_technician_handoff_mobile_20260612.md)
 - **Tasks:** [Danh sách triển khai](../../ui/data/ai_plans/task_repair_technician_handoff_mobile_20260612.md)
 
@@ -93,24 +93,24 @@ flowchart TD
 
 # 🐛 Bugs
 ## BUG-REP-011: Thiếu chuyển KTV và audit log chống gian lận
-- **Status:** open
+- **Status:** in_progress
 - **Severity:** high
 - **Module:** REP
 - **Files:** src/app/admin/technician/page.tsx, src/app/api/repairs/technician/transfer/route.ts, src/lib/types.ts
 ### Cause
 Trang KTV chỉ có nút phản hồi yêu cầu đến, không có thao tác tạo/hủy yêu cầu chuyển. API tin dữ liệu KTV từ client và log thiếu actor, lý do, KTV cũ/mới cùng mã đối soát.
 ### Solution
-Đã triển khai local luồng request/accept/reject/cancel bằng transaction; chỉ KTV hiện tại hoặc quản lý Sale được đề nghị và chỉ KTV nhận được chấp nhận. Chờ browser QA ba vai trò trước khi đổi trạng thái sang fixed.
+Đã merge vào `master` qua PR #9 luồng request/accept/reject/cancel bằng transaction; chỉ KTV hiện tại hoặc quản lý Sale được đề nghị và chỉ KTV nhận được chấp nhận. Còn chờ browser QA đủ ba vai trò trước khi đổi trạng thái sang fixed.
 
 ## BUG-REP-010: UI KTV khó thao tác trên mobile
-- **Status:** open
+- **Status:** in_progress
 - **Severity:** high
 - **Module:** REP
 - **Files:** src/app/admin/technician/page.tsx
 ### Cause
 Thẻ phiếu dồn nhiều thông tin vào bố cục desktop, checklist bốn cột và các nút thao tác nhỏ; blocker theo workflow bị giấu trong chi tiết.
 ### Solution
-Đã triển khai local thẻ một cột trên mobile, blocker theo `allowedFeatures`, checklist hai cột, touch target 44px và nút chuyển KTV trực tiếp. Chờ browser QA mobile trước khi đóng bug.
+Đã merge vào `master` qua PR #9 thẻ một cột trên mobile, blocker theo `allowedFeatures`, checklist hai cột, touch target 44px và nút chuyển KTV trực tiếp. Còn chờ QA bằng tài khoản KTV nhận và ma trận quyền trước khi đóng bug.
 
 ## BUG-REP-009: Staff nhìn thấy nút xóa phiếu
 - **Status:** fixed

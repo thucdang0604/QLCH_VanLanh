@@ -132,10 +132,30 @@ export default function RevenuePage() {
 
     // ── Revenue calculations ──
     const calculations = useMemo(() => {
-        // REVENUE (THU)
-        const orderRevenue = orders
-            .filter(o => (o.status === 'Completed' || o.status === 'Shipping') && inRange(o.completedAt || o.updatedAt || o.createdAt))
-            .reduce((s, o) => s + (o.total_amount || 0), 0);
+        // REVENUE (THU THỰC TẾ)
+        let orderRevenue = 0;
+        let debtRevenue = 0; // TỔNG GHI NỢ
+
+        orders.forEach(o => {
+            if (inRange(o.completedAt || o.updatedAt || o.createdAt)) {
+                if (o.paymentHistory && o.paymentHistory.length > 0) {
+                    // Có lịch sử thanh toán (từ POS hoặc Thu nợ)
+                    const paidSoFar = o.paymentHistory.reduce((s, p) => s + (p.amount || 0), 0);
+                    orderRevenue += paidSoFar;
+
+                    if (o.paymentStatus === 'debt') {
+                        debtRevenue += Math.max(0, (o.total_amount || 0) - paidSoFar);
+                    }
+                } else if (o.status === 'Completed' || o.status === 'Shipping') {
+                    // Đơn web cũ hoặc không có POS history, nhưng đã hoàn thành
+                    if (o.paymentStatus === 'debt' || o.payment_method === 'Debt') {
+                        debtRevenue += (o.total_amount || 0);
+                    } else {
+                        orderRevenue += (o.total_amount || 0);
+                    }
+                }
+            }
+        });
 
         const repairRevenue = repairs
             .filter(r => r.ticketType !== 'warranty')
@@ -190,7 +210,7 @@ export default function RevenuePage() {
         const posOrders = orders.filter(o => o.source === 'pos' && (o.status === 'Completed' || o.status === 'Shipping') && inRange(o.completedAt || o.updatedAt || o.createdAt));
 
         return {
-            orderRevenue, repairRevenue, totalRevenue, totalGiftDiscount,
+            orderRevenue, repairRevenue, debtRevenue, totalRevenue, totalGiftDiscount,
             importCost, commissionCost, manualExpenses, totalExpenses,
             netProfit,
             webOrderCount: webOrders.length,
@@ -242,8 +262,17 @@ export default function RevenuePage() {
                     }
                 }, 0);
 
-            const rev = orders.filter(o => (o.status === 'Completed' || o.status === 'Shipping') && isInDay(o.completedAt || o.updatedAt || o.createdAt)).reduce((s, o) => s + (o.total_amount || 0), 0)
-                + repairRev;
+            let rev = 0;
+            orders.forEach(o => {
+                if (isInDay(o.completedAt || o.updatedAt || o.createdAt)) {
+                    if (o.paymentHistory && o.paymentHistory.length > 0) {
+                        rev += o.paymentHistory.reduce((s, p) => s + (p.amount || 0), 0);
+                    } else if ((o.status === 'Completed' || o.status === 'Shipping') && o.paymentStatus !== 'debt' && o.payment_method !== 'Debt') {
+                        rev += (o.total_amount || 0);
+                    }
+                }
+            });
+            rev += repairRev;
 
             const exp = importReceipts.filter(i => i.status === 'completed' && isInDay(i.completedAt || i.createdAt)).reduce((s, i) => s + (i.totalAmount || 0), 0)
                 + commissions.filter(c => isInDay(c.createdAt)).reduce((s, c) => s + (c.amount || 0), 0)
@@ -342,11 +371,18 @@ export default function RevenuePage() {
             {/* ═══ Main KPI Cards ═══ */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {/* TỔNG THU */}
-                <div className="bg-gradient-to-br from-green-500 to-emerald-600 rounded-2xl p-5 text-white shadow-lg shadow-green-200/50">
-                    <div className="flex items-center gap-2 text-green-100 text-sm mb-1">
-                        <ArrowUpRight size={18} /> TỔNG THU
+                <div className="bg-gradient-to-br from-green-500 to-emerald-600 rounded-2xl p-5 text-white shadow-lg shadow-green-200/50 flex flex-col justify-between">
+                    <div>
+                        <div className="flex items-center gap-2 text-green-100 text-sm mb-1">
+                            <ArrowUpRight size={18} /> THỰC THU
+                        </div>
+                        <p className="text-3xl font-bold">{formatPrice(calculations.totalRevenue)}</p>
+                        {calculations.debtRevenue > 0 && (
+                            <p className="text-sm text-orange-200 mt-1 font-medium border-t border-white/20 pt-1">
+                                + Ghi nợ: {formatPrice(calculations.debtRevenue)}
+                            </p>
+                        )}
                     </div>
-                    <p className="text-3xl font-bold">{formatPrice(calculations.totalRevenue)}</p>
                     <div className="mt-3 space-y-1 text-xs text-green-100">
                         <div className="flex justify-between"><span>🌐 Web ({calculations.webOrderCount})</span><span>{formatPrice(calculations.webOrderRevenue)}</span></div>
                         <div className="flex justify-between"><span>🏪 POS ({calculations.posOrderCount})</span><span>{formatPrice(calculations.posOrderRevenue)}</span></div>
