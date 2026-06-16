@@ -16,6 +16,8 @@ import { useAuth } from '@/lib/AuthContext';
 import type { ImportReceipt, Product } from '@/lib/types';
 import { toastError, toastSuccess } from '@/lib/toast';
 import { buildReactivateOnImportUpdate } from '@/lib/productLifecycle';
+import LotTrackingModal from '@/components/admin/LotTrackingModal';
+import ProductQrLabelModal, { PrintBatchItem } from '@/components/admin/ProductQrLabelModal';
 
 // ── Status Config ──
 const statusConfig = {
@@ -35,6 +37,26 @@ export default function InventoryPage() {
 
     // Expanded receipt
     const [expandedId, setExpandedId] = useState<string | null>(null);
+    const [trackingLotCode, setTrackingLotCode] = useState<string | null>(null);
+    const [printBatchLots, setPrintBatchLots] = useState<PrintBatchItem[] | null>(null);
+
+    const handlePrintLot = (receipt: ImportReceipt & { id: string }) => {
+        const batchItems: PrintBatchItem[] = receipt.items.map(item => {
+            const prod = products.find(p => p.id === item.productId);
+            if (!prod) return null;
+            return {
+                product: prod,
+                lotCode: receipt.lotCode || undefined,
+                copies: item.quantity
+            };
+        }).filter(Boolean) as PrintBatchItem[];
+        
+        if (batchItems.length === 0) {
+            toastError('Không thể tạo tem in vì không tìm thấy dữ liệu sản phẩm tương ứng.');
+            return;
+        }
+        setPrintBatchLots(batchItems);
+    };
 
     // ── Load data ──
     useEffect(() => {
@@ -292,7 +314,17 @@ export default function InventoryPage() {
                                 {isExpanded ? <ChevronDown size={18} className="text-gray-400" /> : <ChevronRight size={18} className="text-gray-400" />}
                                 <div className="flex-1 min-w-0">
                                     <p className="font-semibold text-gray-800 truncate">
-                                        {receipt.lotCode ? <span className="text-orange-600 font-bold mr-2">[{receipt.lotCode}]</span> : null}
+                                        {receipt.lotCode ? (
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setTrackingLotCode(receipt.lotCode || null);
+                                                }}
+                                                className="text-orange-600 font-bold mr-2 hover:underline hover:text-orange-700"
+                                            >
+                                                [{receipt.lotCode}]
+                                            </button>
+                                        ) : null}
                                         {receipt.supplier || 'Không có NCC'} — {receipt.items.length} SP
                                     </p>
                                     <p className="text-xs text-gray-500">
@@ -319,26 +351,26 @@ export default function InventoryPage() {
                                                     <th className="text-right whitespace-nowrap">Thành tiền</th>
                                                 </tr>
                                             </thead>
-                                        <tbody>
-                                            {receipt.items.map((item, i) => (
-                                                <tr key={i} className="border-b border-gray-100">
-                                                    <td className="py-2">{item.productName}</td>
-                                                    <td className="text-center">
-                                                        <span className="px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded text-xs">{item.quality || '—'}</span>
-                                                    </td>
-                                                    <td className="text-center">{item.quantity}</td>
-                                                    <td className="text-right">{formatPrice(item.importPrice)}</td>
-                                                    <td className="text-right font-medium">{formatPrice(item.quantity * item.importPrice)}</td>
+                                            <tbody>
+                                                {receipt.items.map((item, i) => (
+                                                    <tr key={i} className="border-b border-gray-100">
+                                                        <td className="py-2">{item.productName}</td>
+                                                        <td className="text-center">
+                                                            <span className="px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded text-xs">{item.quality || '—'}</span>
+                                                        </td>
+                                                        <td className="text-center">{item.quantity}</td>
+                                                        <td className="text-right">{formatPrice(item.importPrice)}</td>
+                                                        <td className="text-right font-medium">{formatPrice(item.quantity * item.importPrice)}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                            <tfoot>
+                                                <tr className="font-bold">
+                                                    <td colSpan={3} className="py-2 text-right">Tổng cộng:</td>
+                                                    <td className="text-right text-orange-600">{formatPrice(receipt.totalAmount || 0)}</td>
                                                 </tr>
-                                            ))}
-                                        </tbody>
-                                        <tfoot>
-                                            <tr className="font-bold">
-                                                <td colSpan={3} className="py-2 text-right">Tổng cộng:</td>
-                                                <td className="text-right text-orange-600">{formatPrice(receipt.totalAmount || 0)}</td>
-                                            </tr>
-                                        </tfoot>
-                                    </table>
+                                            </tfoot>
+                                        </table>
                                     </div>
                                     {receipt.note && <p className="text-xs text-gray-500 mt-2">📝 {receipt.note}</p>}
 
@@ -359,6 +391,14 @@ export default function InventoryPage() {
                                                 <CheckCircle2 size={12} /> Đã nhập kho {receipt.completedAt ? `lúc ${formatDate(receipt.completedAt)}` : ''}
                                             </span>
                                         )}
+                                        {receipt.lotCode && (
+                                            <button 
+                                                onClick={() => handlePrintLot(receipt)}
+                                                className="px-3 py-1.5 text-xs bg-orange-100 text-orange-700 hover:bg-orange-200 rounded-lg flex items-center gap-1 font-semibold ml-auto transition-colors"
+                                            >
+                                                🖨️ In tem lô hàng
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
                             )}
@@ -372,6 +412,21 @@ export default function InventoryPage() {
                     </div>
                 )}
             </div>
+
+            {/* Lot Tracking Modal */}
+            <LotTrackingModal 
+                isOpen={!!trackingLotCode} 
+                onClose={() => setTrackingLotCode(null)} 
+                initialSearchCode={trackingLotCode || ''}
+            />
+
+            {/* Print Batch Modal */}
+            {printBatchLots && printBatchLots.length > 0 && (
+                <ProductQrLabelModal 
+                    batchItems={printBatchLots} 
+                    onClose={() => setPrintBatchLots(null)} 
+                />
+            )}
         </div>
     );
 }

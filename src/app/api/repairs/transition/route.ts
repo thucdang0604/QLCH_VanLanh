@@ -20,7 +20,7 @@ interface RepairTransitionRequest {
 export async function POST(request: NextRequest) {
     try {
         const caller = await requirePermission(request, 'manage_repairs');
-        
+
         const body = await request.json() as RepairTransitionRequest;
         const { ticketId, targetStatus, technicianNote, ticketVersion, idempotencyKey, source } = body;
 
@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
 
             const ticketRef = db.collection('repairs').doc(ticketId);
             const ticketSnap = await tx.get(ticketRef);
-            
+
             if (!ticketSnap.exists) {
                 throw new Error('Phiếu sửa chữa không tồn tại.');
             }
@@ -178,8 +178,8 @@ export async function POST(request: NextRequest) {
                 const currentIssue = ticket.issue || {};
                 updateData.issue = {
                     ...currentIssue,
-                    notes: currentIssue.notes 
-                        ? `${currentIssue.notes}\n[${new Date().toLocaleDateString('vi-VN')}]: ${technicianNote}` 
+                    notes: currentIssue.notes
+                        ? `${currentIssue.notes}\n[${new Date().toLocaleDateString('vi-VN')}]: ${technicianNote}`
                         : technicianNote
                 };
             }

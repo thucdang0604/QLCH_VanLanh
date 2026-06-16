@@ -36,7 +36,7 @@ import { toastError, toastSuccess } from '@/lib/toast';
 import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
 import CurrencyInput from '@/components/admin/CurrencyInput';
-import ProductQrLabelModal from '@/components/admin/ProductQrLabelModal';
+import ProductQrLabelModal, { PrintBatchItem } from '@/components/admin/ProductQrLabelModal';
 import FixHiddenProductsModal from '@/components/admin/FixHiddenProductsModal';
 import LotTrackingModal from '@/components/admin/LotTrackingModal';
 import { buildProductCodeFromId } from '@/lib/productCodes';
@@ -129,6 +129,8 @@ export default function PartsPage() {
     // Filters and Modals
     const [statusFilter, setStatusFilter] = useState<'all' | 'out_of_stock' | 'bestseller'>('all');
     const [importPreviewModal, setImportPreviewModal] = useState<ImportPreviewState>({ isOpen: false, receipt: null, newParts: {} });
+    const [importSuccessLots, setImportSuccessLots] = useState<PrintBatchItem[] | null>(null);
+    const [lastImportLots, setLastImportLots] = useState<PrintBatchItem[] | null>(null);
     const [forecastCostPrices, setForecastCostPrices] = useState<Map<string, number>>(new Map());
     // Confirm Modal State
     const [confirmModal, setConfirmModal] = useState<{
@@ -412,6 +414,9 @@ export default function PartsPage() {
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || 'Lỗi nhập kho!');
             toastSuccess('Nhập kho thành công!');
+            if (data.generatedLots && data.generatedLots.length > 0) {
+                setImportSuccessLots(data.generatedLots);
+            }
             setImportPreviewModal({ isOpen: false, receipt: null, newParts: {} });
             await fetchDrafts();
         } catch (error) {
@@ -506,13 +511,28 @@ export default function PartsPage() {
                     </button>
                 </div>
             </div>
+            {/* Last Import Reprint Banner */}
+            {lastImportLots && lastImportLots.length > 0 && (
+                <div className="mb-4 bg-orange-50 border border-orange-200 rounded-lg p-3 flex items-center justify-between shadow-sm">
+                    <div className="flex items-center gap-2">
+                        <PackagePlus size={18} className="text-orange-600" />
+                        <span className="text-sm text-orange-800 font-medium">Bạn vừa nhập kho thành công {lastImportLots.length} loại sản phẩm.</span>
+                    </div>
+                    <button 
+                        onClick={() => setImportSuccessLots(lastImportLots)}
+                        className="text-xs font-bold bg-white text-orange-600 border border-orange-200 px-3 py-1.5 rounded shadow-sm hover:bg-orange-50 transition-colors"
+                    >
+                        In lại tem lô hàng
+                    </button>
+                </div>
+            )}
             {/* Tabs */}
             <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
                 <button
                     onClick={() => setActiveTab('parts')}
                     className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium text-sm transition-all ${activeTab === 'parts'
-                            ? 'bg-white text-orange-600 shadow-sm'
-                            : 'text-gray-500 hover:text-gray-700'
+                        ? 'bg-white text-orange-600 shadow-sm'
+                        : 'text-gray-500 hover:text-gray-700'
                         }`}
                 >
                     <Settings size={16} />
@@ -521,8 +541,8 @@ export default function PartsPage() {
                 <button
                     onClick={() => setActiveTab('proposals')}
                     className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium text-sm transition-all ${activeTab === 'proposals'
-                            ? 'bg-white text-orange-600 shadow-sm'
-                            : 'text-gray-500 hover:text-gray-700'
+                        ? 'bg-white text-orange-600 shadow-sm'
+                        : 'text-gray-500 hover:text-gray-700'
                         }`}
                 >
                     <PackagePlus size={16} />
@@ -534,8 +554,8 @@ export default function PartsPage() {
                 <button
                     onClick={() => setActiveTab('ordered')}
                     className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium text-sm transition-all ${activeTab === 'ordered'
-                            ? 'bg-white text-orange-600 shadow-sm'
-                            : 'text-gray-500 hover:text-gray-700'
+                        ? 'bg-white text-orange-600 shadow-sm'
+                        : 'text-gray-500 hover:text-gray-700'
                         }`}
                 >
                     <CheckCircle2 size={16} />
@@ -964,8 +984,8 @@ export default function PartsPage() {
                                                                                 onClick={() => handleMarkAvailability(receipt, item, idx, true)}
                                                                                 disabled={isProcessing}
                                                                                 className={`px-2 py-1 rounded-full text-[11px] font-semibold transition-colors disabled:opacity-50 ${(itemAvailability === 'in_stock' || itemAvailability === 'approved')
-                                                                                        ? 'bg-emerald-500 text-white border-transparent shadow-sm'
-                                                                                        : 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
+                                                                                    ? 'bg-emerald-500 text-white border-transparent shadow-sm'
+                                                                                    : 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
                                                                                     }`}
                                                                             >
                                                                                 {(itemAvailability === 'in_stock' || itemAvailability === 'approved') ? '✓ Có hàng' : 'Có hàng'}
@@ -975,8 +995,8 @@ export default function PartsPage() {
                                                                                 onClick={() => handleMarkAvailability(receipt, item, idx, false)}
                                                                                 disabled={isProcessing}
                                                                                 className={`px-2 py-1 rounded-full text-[11px] font-semibold transition-colors disabled:opacity-50 ${itemAvailability === 'unavailable'
-                                                                                        ? 'bg-red-500 text-white border-transparent shadow-sm'
-                                                                                        : 'bg-red-50 text-red-600 border border-red-200 hover:bg-red-100'
+                                                                                    ? 'bg-red-500 text-white border-transparent shadow-sm'
+                                                                                    : 'bg-red-50 text-red-600 border border-red-200 hover:bg-red-100'
                                                                                     }`}
                                                                             >
                                                                                 {itemAvailability === 'unavailable' ? '✓ Không có' : 'Không có'}
@@ -1019,8 +1039,8 @@ export default function PartsPage() {
                                                         onClick={() => handleOrderReceipt(receipt)}
                                                         disabled={isProcessing || importableItems.length === 0 || missingSupplierCount > 0}
                                                         className={`flex items-center gap-1.5 px-5 py-2 text-sm font-bold rounded-lg transition-colors disabled:opacity-50 shadow-sm ${importableItems.length === 0 || missingSupplierCount > 0
-                                                                ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                                                                : 'text-white bg-blue-600 hover:bg-blue-700'
+                                                            ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                                            : 'text-white bg-blue-600 hover:bg-blue-700'
                                                             }`}
                                                         title={importableItems.length === 0 ? 'Không còn linh kiện có thể đặt' : missingSupplierCount > 0 ? 'Cần gán NCC cho các linh kiện sẽ đặt' : ''}
                                                     >
@@ -1129,8 +1149,8 @@ export default function PartsPage() {
                                                                                 onClick={() => handleMarkAvailability(receipt, item, idx, true)}
                                                                                 disabled={isProcessing}
                                                                                 className={`px-2 py-1 rounded-full text-[11px] font-semibold transition-colors disabled:opacity-50 ${(itemAvailability === 'in_stock' || itemAvailability === 'approved')
-                                                                                        ? 'bg-emerald-500 text-white'
-                                                                                        : 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
+                                                                                    ? 'bg-emerald-500 text-white'
+                                                                                    : 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
                                                                                     }`}
                                                                             >
                                                                                 {(itemAvailability === 'in_stock' || itemAvailability === 'approved') ? '✓ Có hàng' : 'Có hàng'}
@@ -1140,8 +1160,8 @@ export default function PartsPage() {
                                                                                 onClick={() => handleMarkAvailability(receipt, item, idx, false)}
                                                                                 disabled={isProcessing}
                                                                                 className={`px-2 py-1 rounded-full text-[11px] font-semibold transition-colors disabled:opacity-50 ${itemAvailability === 'unavailable'
-                                                                                        ? 'bg-red-500 text-white'
-                                                                                        : 'bg-red-50 text-red-600 border border-red-200 hover:bg-red-100'
+                                                                                    ? 'bg-red-500 text-white'
+                                                                                    : 'bg-red-50 text-red-600 border border-red-200 hover:bg-red-100'
                                                                                     }`}
                                                                             >
                                                                                 {itemAvailability === 'unavailable' ? '✓ Không có' : 'Không có'}
@@ -1252,6 +1272,12 @@ export default function PartsPage() {
                     onCreated={() => fetchDrafts()}
                 />
             )}
+            {importSuccessLots && importSuccessLots.length > 0 && (
+                <ProductQrLabelModal 
+                    batchItems={importSuccessLots} 
+                    onClose={() => setImportSuccessLots(null)} 
+                />
+            )}
             <ProductQrLabelModal product={qrPart} onClose={() => setQrPart(null)} />
             <FixHiddenProductsModal isOpen={showFixHidden} onClose={() => setShowFixHidden(false)} products={products} />
             <LotTrackingModal isOpen={isLotTrackingOpen} onClose={() => setIsLotTrackingOpen(false)} />
@@ -1340,8 +1366,8 @@ function ImportPreviewModal({
                             type="button"
                             onClick={() => setPaymentMethod('debt')}
                             className={`flex-1 py-2.5 px-4 rounded-xl text-sm font-medium border-2 transition-all ${paymentMethod === 'debt'
-                                    ? 'border-red-500 bg-red-50 text-red-700'
-                                    : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
+                                ? 'border-red-500 bg-red-50 text-red-700'
+                                : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
                                 }`}
                         >
                             📋 Ghi công nợ
@@ -1350,8 +1376,8 @@ function ImportPreviewModal({
                             type="button"
                             onClick={() => setPaymentMethod('paid')}
                             className={`flex-1 py-2.5 px-4 rounded-xl text-sm font-medium border-2 transition-all ${paymentMethod === 'paid'
-                                    ? 'border-green-500 bg-green-50 text-green-700'
-                                    : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
+                                ? 'border-green-500 bg-green-50 text-green-700'
+                                : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
                                 }`}
                         >
                             💰 Thanh toán ngay
@@ -1700,8 +1726,8 @@ function CreateReceiptModal({ isOpen, onClose, parts, retailProducts, onCreated,
                             type="button"
                             onClick={() => { setReceiptType('component'); setItems([]); setSearch(''); }}
                             className={`px-4 py-2 text-sm font-medium rounded-xl border transition-all ${receiptType === 'component'
-                                    ? 'bg-orange-50 border-orange-300 text-orange-700 shadow-sm'
-                                    : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                                ? 'bg-orange-50 border-orange-300 text-orange-700 shadow-sm'
+                                : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
                                 }`}
                         >
                             🔧 Linh kiện
@@ -1710,8 +1736,8 @@ function CreateReceiptModal({ isOpen, onClose, parts, retailProducts, onCreated,
                             type="button"
                             onClick={() => { setReceiptType('retail'); setItems([]); setSearch(''); }}
                             className={`px-4 py-2 text-sm font-medium rounded-xl border transition-all ${receiptType === 'retail'
-                                    ? 'bg-blue-50 border-blue-300 text-blue-700 shadow-sm'
-                                    : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                                ? 'bg-blue-50 border-blue-300 text-blue-700 shadow-sm'
+                                : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
                                 }`}
                         >
                             📦 Sản phẩm bán lẻ

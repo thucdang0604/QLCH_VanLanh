@@ -671,6 +671,13 @@ export default function RepairPage() {
                 toastError(data.error || 'Lỗi xử lý bàn giao');
                 return;
             }
+
+            if (data.warnings && data.warnings.length > 0) {
+                for (const warning of data.warnings) {
+                    toastWarning(warning);
+                }
+            }
+
             setHandoverModal(null);
             setHandoverNote('');
             setPaymentConfirmed(false);

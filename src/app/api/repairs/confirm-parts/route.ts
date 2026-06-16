@@ -52,7 +52,7 @@ function errorMessage(error: unknown): string {
 export async function POST(request: NextRequest) {
     try {
         const caller = await requirePermission(request, 'manage_repairs');
-        
+
         const body = await request.json();
         // command có thể là 1 object hoặc mảng các object (batch processing)
         const { ticketId, ticketVersion, operationKey, command, commands } = body;
@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
             }
 
             const ticket = ticketSnap.data() as RepairTicket;
-            
+
             if (ticket.version !== undefined && ticket.version !== ticketVersion) {
                 throw new Error('Dữ liệu đã bị thay đổi bởi người khác (Version mismatch). Vui lòng tải lại trang.');
             }
@@ -237,7 +237,7 @@ export async function POST(request: NextRequest) {
                     const { partLineId } = cmd;
                     const lineIndex = parts.findIndex(p => p.partLineId === partLineId);
                     if (lineIndex === -1) throw new Error('Part line not found');
-                    
+
                     const line = parts[lineIndex];
                     const reservedQuantity = getReservedQuantity(line);
                     if (line.productId && reservedQuantity > 0) {
@@ -325,12 +325,12 @@ export async function POST(request: NextRequest) {
             // Server-compute payment
             const selectedParts = parts.filter(isSelectedRepairPart);
             const partsCost = selectedParts.reduce((sum, p) => sum + ((p.unitPriceAtUse || 0) * p.quantity), 0);
-            
+
             const currentPayment = ticket.payment || {};
             const laborCost = currentPayment.laborCost || 0;
             const additionalFees = currentPayment.additionalFees || 0;
             const discountAmount = currentPayment.discountAmount || 0;
-            
+
             const amount = laborCost + partsCost + additionalFees - discountAmount;
 
             const paymentUpdate = {

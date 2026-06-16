@@ -1,41 +1,47 @@
 # Kế hoạch Triển khai: Quản lý tồn kho theo Lô (Batch Tracking) kết hợp FIFO sổ sách
 
-Mục tiêu là theo dõi chính xác nguồn gốc, nhà cung cấp (NCC) và lịch sử nhập của từng linh kiện xuất kho phục vụ cho việc bảo hành/đổi trả, đồng thời không làm thay đổi hay tăng thao tác của KTV trên app.
+Mục tiêu là theo dõi chính xác nguồn gốc, nhà cung cấp (NCC) và lịch sử nhập của từng linh kiện xuất kho phục vụ cho việc bảo hành/đổi trả, đồng thời không làm thay đổi hay tăng thao tác của KTV trên app. Hệ thống sử dụng phương pháp FIFO ngầm định (Nhập trước - Xuất trước).
 
-> [!NOTE]
-> Kế hoạch này áp dụng chiến lược **Tái sử dụng tối đa cấu trúc dữ liệu hiện tại**, không tạo thêm database collection mới, giúp tiết kiệm công sức maintain và không làm hỏng các báo cáo cũ.
+> [!IMPORTANT]
+> **Thay đổi Kiến trúc cốt lõi**: Tạo thêm collection `inventory_lots` để lưu trữ Trạng thái (State) của từng lô hàng, đảm bảo `inventory_logs` chỉ đóng vai trò là một Immutable Audit Log (chỉ ghi nhận sự kiện). Các thay đổi tồn kho bắt buộc thực hiện trong một Firestore Transaction.
 
 ## Proposed Changes
 
-### 1. Sinh Mã Lô Ngắn khi Nhập Kho (Backend `inventory/import`)
-- Khi người dùng `complete_import`, tạo 1 mã phiếu nhập ngắn (VD: `PN-2310-001`). 
-- Hiển thị mã ngắn này trên UI phiếu nhập hoàn tất (Admin/Inventory) thay vì ID ngẫu nhiên của Firebase để thủ kho ghi dễ dàng lên tem dán vật lý.
-
-### 2. Tái sử dụng `inventory_logs` thành Lô Hàng (Backend DB)
-- Không tạo collection `inventory_lots`.
-- Sửa lại lúc ghi log `inventory_logs` (type `IMPORT`): Bổ sung 3 trường mới:
-  - `remainingQuantity`: số lượng tồn kho chưa sử dụng của lô này (ban đầu bằng `quantity`).
+### 1. Tạo Collection Mới: `inventory_lots` (Backend DB)
+- Tạo collection `inventory_lots` đại diện cho các lô hàng thực tế.
+- Schema: 
+  - `lotCode`: Mã phiếu nhập / Mã lô ngắn (VD: `PN-2310-001`).
+  - `productId`: ID sản phẩm.
   - `supplierId`: Mã nhà cung cấp.
-  - `lotCode`: Mã phiếu nhập ngắn.
-- Các logs `IMPORT` có `remainingQuantity > 0` sẽ đóng vai trò như các "Lô Hàng".
+  - `importPrice`: Giá nhập của lô này.
+  - `initialQuantity`: Số lượng ban đầu.
+  - `remainingQuantity`: Số lượng còn tồn trong kho của lô này.
+  - `status`: `'active'` (còn hàng) | `'empty'` (hết hàng).
+  - `createdAt`: Ngày nhập (để phục vụ sắp xếp FIFO).
+
+### 2. Xử lý lúc Nhập kho (Backend `inventory/import`)
+- Khi `complete_import`, tạo 1 mã phiếu nhập/lô ngắn gọn.
+- Tạo các document mới trong `inventory_lots` tương ứng với các mặt hàng được nhập.
+- Hiển thị mã lô ngắn này trên UI phiếu nhập hoàn tất (Admin/Inventory) để thủ kho ghi/in tem dán vật lý.
 
 ### 3. Cập nhật thuật toán trừ kho FIFO (Backend `repairs` & `pos`)
-- Các API trừ kho sẽ thay đổi quy trình xử lý:
-  - Vẫn giữ nguyên logic trừ tồn kho tổng `stock: increment(-qty)` trên file sản phẩm để UI KTV / POS không bị thay đổi.
-  - Sau đó, truy vấn các `inventory_logs` (type `IMPORT`, cùng `productId`, `remainingQuantity > 0`), sắp xếp theo `createdAt ASC` (nhập trước lấy trước).
-  - Trừ dần `remainingQuantity` trên các logs lô hàng này cho đến khi đủ số lượng.
-- Việc ghi log xuất (`EXPORT` hoặc `REPAIR_USE`) vẫn gom lại thành 1 record như cũ để bảo toàn báo cáo doanh thu/hao hụt, nhưng bổ sung thêm mảng `lotsDeducted: [{ lotCode: '...', qty: ... }]`.
+- Mọi thao tác trừ kho (POS, Repair, Điều chỉnh) đều phải bọc trong `runTransaction`.
+- **Logic bên trong Transaction**:
+  1. Trừ tồn kho tổng `stock: increment(-qty)` trên bảng `products` để UI KTV/POS không thay đổi.
+  2. Query các `inventory_lots` của `productId` với điều kiện `status == 'active'`, sắp xếp theo `createdAt ASC` (nhập trước xuất trước).
+  3. Duyệt qua các lô và trừ dần `remainingQuantity`. Nếu lô nào về 0, chuyển `status` thành `'empty'`.
+  4. Gom thông tin các lô bị trừ (gồm `lotCode`, `qty`) và thêm vào trường `lotsDeducted` của payload trước khi ghi `inventory_logs` (thể loại `EXPORT` hoặc `REPAIR_USE`).
 
 ### 4. Tính năng Tra cứu Nguồn gốc linh kiện (Admin/Parts)
-- Thêm một thanh tìm kiếm hoặc nút "Tra cứu bảo hành theo Mã Lô" tại trang quản lý kho.
-- Nhập mã Lô (VD: `PN-2310-001`) -> Hệ thống truy vấn `inventory_logs` (type `IMPORT`) để hiển thị thông tin NCC, Giá nhập, Ngày nhập, và lịch sử sử dụng của lô đó.
+- Thêm thanh tìm kiếm hoặc nút "Tra cứu bảo hành theo Mã Lô" tại trang quản lý kho/linh kiện.
+- Nhập mã Lô (VD: `PN-2310-001`) -> Truy vấn `inventory_lots` để hiển thị: NCC, Giá nhập, Ngày nhập, Tổng số lượng nhập ban đầu và Tồn kho hiện tại.
 
 ## Verification Plan
 
 ### Automated Tests
-- Bổ sung unit test cho luồng trừ kho FIFO: xuất 1 số lượng lớn hơn tồn kho của lô cũ nhất, kiểm tra xem mảng `lotsDeducted` có ghi đúng 2 lô hàng không, và `remainingQuantity` của 2 lô đó có giảm đúng không.
+- Cần viết unit test cho hàm trừ FIFO: Giả lập xuất số lượng lớn hơn tồn của lô cũ nhất, kiểm tra `remainingQuantity` trên nhiều lô, và mảng `lotsDeducted` trong `inventory_logs` xem có khớp số lượng phân bổ không.
 
 ### Manual Verification
-- Thực hiện 1 phiếu nhập hàng mới và xem hệ thống có trả về mã ngắn không.
-- Làm thủ tục thanh toán/giao máy trên app KTV.
-- Dùng mã lô để tra cứu lại xem số lượng đã tiêu hao có khớp với đơn sửa chữa không.
+- Test Nhập hàng: Xem `inventory_lots` có sinh ra document với `lotCode` ngắn không.
+- Test Xuất hàng (KTV): Xem tổng `stock` ở `products` có khớp với tổng `remainingQuantity` của các lô `active` không. Kiểm tra log có chứa mảng `lotsDeducted`.
+- Dùng mã lô để tra cứu lại xem thông tin NCC có hiện ra chuẩn xác không.

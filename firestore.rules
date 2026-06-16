@@ -192,6 +192,9 @@ service cloud.firestore {
     match /inventory_logs/{logId} {
       allow read, write: if hasPermission('manage_inventory');
     }
+    match /inventory_lots/{lotId} {
+      allow read, write: if hasPermission('manage_inventory');
+    }
 
     // Commissions
     match /commission_rules/{ruleId} {

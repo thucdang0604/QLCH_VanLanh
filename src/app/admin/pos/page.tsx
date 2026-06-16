@@ -17,7 +17,7 @@ import Image from 'next/image';
 import { db, getAuthInstance } from '@/lib/firebase';
 import type { Product, TaxonomyNode } from '@/lib/types';
 
-import { toastError } from '@/lib/toast';
+import { toastError, toastSuccess, toastWarning } from '@/lib/toast';
 import { DEFAULT_CONFIG } from '@/lib/config-defaults';
 import { PART_CATEGORY, isPartCategory } from '@/lib/constants';
 import { fetchActiveDiscountRules, calculateAccessoryDiscounts } from '@/lib/discountRuleUtils';
@@ -71,6 +71,7 @@ interface LastOrderData {
 
 // ── Cart Item ──
 interface CartItem {
+    cartItemId: string;
     productId: string;
     name: string;
     image?: string;
@@ -81,6 +82,7 @@ interface CartItem {
     isRepairTicket?: boolean;
     warrantyType?: string;
     imeis?: string[];
+    lotCode?: string;
 }
 
 interface BankAccountConfig {
@@ -263,6 +265,7 @@ export default function POSPage() {
         if (!repair || repair.paymentStatus === 'paid' || repair.paymentStatus === 'refunded') return;
 
         const newItems: CartItem[] = [{
+            cartItemId: repair.id,
             productId: repair.id,
             name: `[Phiếu sửa chữa] ${repair.deviceModel}`,
             originalPrice: repair.paymentAmount,
@@ -273,6 +276,7 @@ export default function POSPage() {
         }];
         repair.gifts?.forEach(giftId => {
             newItems.push({
+                cartItemId: `gift_${repair.id}_${giftId}`,
                 productId: `gift_${repair.id}_${giftId}`,
                 name: `[Quà tặng] Mã SP: ${giftId}`,
                 originalPrice: 0,
@@ -492,14 +496,17 @@ export default function POSPage() {
     });
 
     // ── Cart helpers ──
-    const addToCart = useCallback((product: Product & { id: string }) => {
+    const addToCart = useCallback((product: Product & { id: string }, preferredLotCode?: string) => {
         const available = (product.stock || 0) - (product.held || 0);
         if (available <= 0) {
             toastError('Sản phẩm đã hết hàng!');
             return;
         }
+        
+        const targetCartItemId = preferredLotCode ? `${product.id}_${preferredLotCode}` : product.id;
+        
         setCart(prev => {
-            const existing = prev.find(c => c.productId === product.id);
+            const existing = prev.find(c => c.cartItemId === targetCartItemId);
             if (existing) {
                 // Prevent exceeding available stock
                 if (existing.quantity >= available) {
@@ -507,11 +514,12 @@ export default function POSPage() {
                     return prev;
                 }
                 return prev.map(c =>
-                    c.productId === product.id ? { ...c, quantity: c.quantity + 1 } : c
+                    c.cartItemId === targetCartItemId ? { ...c, quantity: c.quantity + 1 } : c
                 );
             }
             const wType = resolveWarranty(product);
             return [...prev, {
+                cartItemId: targetCartItemId,
                 productId: product.id,
                 name: product.name,
                 image: (product as unknown as { imageUrl?: string }).imageUrl || product.images?.[0],
@@ -521,6 +529,7 @@ export default function POSPage() {
                 quantity: 1,
                 warrantyType: wType,
                 imeis: [],
+                lotCode: preferredLotCode,
             }];
         });
     }, [resolveWarranty]);
@@ -533,6 +542,9 @@ export default function POSPage() {
 
     const handleProductScan = useCallback((rawCode: string, source: 'keyboard' | 'camera' | 'manual') => {
         const code = extractProductCodeFromScan(rawCode);
+        const parts = rawCode.trim().split('#');
+        const lotCode = parts.length > 1 ? parts[1] : undefined;
+        
         const found = findProductByScanCode(rawCode);
         if (!found) {
             const label = code || rawCode.trim();
@@ -540,8 +552,8 @@ export default function POSPage() {
             toastError(`Không tìm thấy sản phẩm với mã ${label}`);
             return false;
         }
-        addToCart(found);
-        setScanStatus(`Đã thêm ${found.name}`);
+        addToCart(found, lotCode);
+        setScanStatus(`Đã thêm ${found.name}${lotCode ? ` (Lô: ${lotCode})` : ''}`);
         if (source === 'camera') setShowScanner(false);
         return true;
     }, [addToCart, findProductByScanCode]);
@@ -749,13 +761,13 @@ export default function POSPage() {
         setCart(prev => [...newItems, ...prev]);
     };
 
-    const updateQuantity = (productId: string, delta: number) => {
+    const updateQuantity = (cartItemId: string, delta: number) => {
         setCart(prev =>
             prev.map(c => {
-                if (c.productId !== productId) return c;
+                if (c.cartItemId !== cartItemId) return c;
                 const newQty = Math.max(1, c.quantity + delta);
                 // Validate against stock
-                const product = products.find(p => p.id === productId);
+                const product = products.find(p => p.id === c.productId);
                 const maxAvailable = (product?.stock || 0) - (product?.held || 0);
                 if (newQty > maxAvailable) {
                     toastError(`Khả dụng chỉ còn ${maxAvailable}.`);
@@ -766,20 +778,20 @@ export default function POSPage() {
         );
     };
 
-    const updatePrice = (productId: string, newPrice: number) => {
-        const item = cart.find(c => c.productId === productId);
+    const updatePrice = (cartItemId: string, newPrice: number) => {
+        const item = cart.find(c => c.cartItemId === cartItemId);
         if (item && (item.costPrice || 0) > 0 && newPrice < (item.costPrice || 0) && newPrice > 0) {
             if (!confirm(`Giá bán (${newPrice.toLocaleString('vi-VN')}đ) thấp hơn giá vốn (${(item.costPrice || 0).toLocaleString('vi-VN')}đ). Bạn sẽ lỗ ${((item.costPrice || 0) - newPrice).toLocaleString('vi-VN')}đ/sp. Tiếp tục?`)) {
                 return;
             }
         }
         setCart(prev =>
-            prev.map(c => c.productId === productId ? { ...c, sellingPrice: newPrice } : c)
+            prev.map(c => c.cartItemId === cartItemId ? { ...c, sellingPrice: newPrice } : c)
         );
     };
 
-    const removeFromCart = (productId: string) => {
-        setCart(prev => prev.filter(c => c.productId !== productId));
+    const removeFromCart = (cartItemId: string) => {
+        setCart(prev => prev.filter(c => c.cartItemId !== cartItemId));
     };
 
     const subtotal = cart.reduce((sum, c) => sum + c.sellingPrice * c.quantity, 0);
@@ -874,7 +886,8 @@ export default function POSPage() {
                     quantity: c.quantity,
                     price: c.sellingPrice,
                     isRepairTicket: c.isRepairTicket,
-                    imeis: c.imeis
+                    imeis: c.imeis,
+                    lotCode: c.lotCode
                 })),
                 total_amount: total,
                 discount_amount: discount + voucherDiscountAmount,
@@ -902,7 +915,14 @@ export default function POSPage() {
                 throw new Error(data.error || 'Lỗi khi thanh toán qua API');
             }
 
+            if (data.warnings && data.warnings.length > 0) {
+                for (const warning of data.warnings) {
+                    toastWarning(warning);
+                }
+            }
+
             setLastOrder({ id: data.orderId, ...orderData, createdAt: new Date() });
+            toastSuccess('Thanh toán thành công!');
             setShowReceipt(true);
 
             // Reset cart
@@ -981,7 +1001,7 @@ export default function POSPage() {
                 {cart.map(item => {
                     const product = products.find(p => p.id === item.productId);
                     return (
-                        <div key={item.productId} className="bg-gray-50 rounded-xl p-3 space-y-2">
+                        <div key={item.cartItemId} className="bg-gray-50 rounded-xl p-3 space-y-2">
                             <div className="flex items-start gap-2">
                                 {/* Product image in cart */}
                                 <div className="w-12 h-12 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0 flex items-center justify-center">
@@ -991,9 +1011,16 @@ export default function POSPage() {
                                         <Package className="text-gray-300" size={18} />
                                     )}
                                 </div>
-                                <p className="flex-1 text-sm font-medium text-gray-800 line-clamp-2">{item.name}</p>
+                                <div className="flex-1">
+                                    <p className="text-sm font-medium text-gray-800 line-clamp-2">{item.name}</p>
+                                    {item.lotCode && (
+                                        <span className="inline-block mt-1 bg-orange-100 text-orange-700 text-[10px] font-bold px-1.5 py-0.5 rounded">
+                                            Lô: {item.lotCode}
+                                        </span>
+                                    )}
+                                </div>
                                 <button
-                                    onClick={() => removeFromCart(item.productId)}
+                                    onClick={() => removeFromCart(item.cartItemId)}
                                     className="text-red-400 hover:text-red-600 p-0.5"
                                     aria-label="Xóa khỏi giỏ"
                                     title="Xóa khỏi giỏ"
@@ -1004,7 +1031,7 @@ export default function POSPage() {
                             <div className="flex items-center gap-2">
                                 <div className="flex items-center gap-1 bg-white rounded-lg border">
                                     <button
-                                        onClick={() => updateQuantity(item.productId, -1)}
+                                        onClick={() => updateQuantity(item.cartItemId, -1)}
                                         className="p-1 hover:bg-gray-100 rounded-l-lg disabled:opacity-50 disabled:cursor-not-allowed"
                                         aria-label="Giảm số lượng"
                                         title="Giảm số lượng"
@@ -1014,7 +1041,7 @@ export default function POSPage() {
                                     </button>
                                     <span className="px-2 text-sm font-bold min-w-[24px] text-center">{item.quantity}</span>
                                     <button
-                                        onClick={() => updateQuantity(item.productId, 1)}
+                                        onClick={() => updateQuantity(item.cartItemId, 1)}
                                         className="p-1 hover:bg-gray-100 rounded-r-lg disabled:opacity-50 disabled:cursor-not-allowed"
                                         aria-label="Tăng số lượng"
                                         title="Tăng số lượng"
@@ -1026,7 +1053,7 @@ export default function POSPage() {
                                 <div className="flex-1 relative">
                                     <Tag size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" />
                                     <CurrencyInput value={item.sellingPrice}
-                                        onChange={v => updatePrice(item.productId, v)}
+                                        onChange={v => updatePrice(item.cartItemId, v)}
                                         disabled={item.isRepairTicket}
                                         className={`w-full pl-7 pr-2 py-1 text-sm border rounded-lg text-right font-semibold ${item.sellingPrice !== item.originalPrice ? 'border-orange-300 text-orange-600 bg-orange-50' : ''} ${item.isRepairTicket ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`}
                                     />
@@ -1211,7 +1238,7 @@ export default function POSPage() {
                             onChange={(e) => setUseSurplusToPayDebt(e.target.checked)}
                         />
                         <label htmlFor="useSurplusDebt" className="text-xs text-blue-800 flex-1 cursor-pointer leading-tight">
-                            <b>Khách có nợ cũ: {formatPrice(customerDebt)}</b><br/>
+                            <b>Khách có nợ cũ: {formatPrice(customerDebt)}</b><br />
                             Dùng số tiền thừa <b>{formatPrice(deposit - total)}</b> để cấn trừ nợ
                         </label>
                     </div>
@@ -1681,16 +1708,16 @@ export default function POSPage() {
                                             <div class="signatures" style="display: flex; justify-content: space-between; margin-top: 30px;">
                                                 <div style="flex: 1; text-align: center;">
                                                     ${lastOrder.payment_method === 'BANK' && bankConfig ? (() => {
-                                                        const defaultAccs: BankAccountConfig[] = bankConfig.accounts?.filter((account) => account.isDefault) || [];
-                                                        if (defaultAccs.length === 0 && bankConfig.bankId && bankConfig.accountNo) {
-                                                            defaultAccs.push({
-                                                                bankId: bankConfig.bankId,
-                                                                accountNo: bankConfig.accountNo,
-                                                                accountName: bankConfig.accountName || '',
-                                                            });
-                                                        }
-                                                        if (defaultAccs.length === 0) return '';
-                                                        return `
+                                            const defaultAccs: BankAccountConfig[] = bankConfig.accounts?.filter((account) => account.isDefault) || [];
+                                            if (defaultAccs.length === 0 && bankConfig.bankId && bankConfig.accountNo) {
+                                                defaultAccs.push({
+                                                    bankId: bankConfig.bankId,
+                                                    accountNo: bankConfig.accountNo,
+                                                    accountName: bankConfig.accountName || '',
+                                                });
+                                            }
+                                            if (defaultAccs.length === 0) return '';
+                                            return `
                                                             <p style="font-weight: bold; margin-bottom: 5px;">QUÉT MÃ CHUYỂN KHOẢN</p>
                                                             <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
                                                                 ${defaultAccs.map((acc) => `
@@ -1701,7 +1728,7 @@ export default function POSPage() {
                                                                 `).join('')}
                                                             </div>
                                                         `;
-                                                    })() : ''}
+                                        })() : ''}
                                                 </div>
                                                 <div style="flex: 1; text-align: center;">
                                                     <p class="title" style="margin: 0 0 70px 0; font-weight: bold;">Khách hàng</p>

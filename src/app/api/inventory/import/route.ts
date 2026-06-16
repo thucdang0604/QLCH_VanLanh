@@ -153,6 +153,8 @@ export async function POST(request: NextRequest) {
                     pendingTicketUpdates.set(ticketId, updateData);
                 }
             };
+            
+            let generatedLotsToReturn: { productId: string, productName: string, lotCode: string, quantity: number }[] | null = null;
 
             if (action === 'order_receipt') {
                 if (receipt.status !== 'draft') {
@@ -260,6 +262,7 @@ export async function POST(request: NextRequest) {
                 const lotCode = 'PN-' + new Date().toISOString().slice(2, 7).replace('-', '') + '-' + Math.floor(1000 + Math.random() * 9000);
 
                 const workingProducts = new Map<string, WorkingProduct>();
+                const generatedLots = [];
 
                 // Calculate all product mutations first. Each product is written once after aggregation.
                 for (const item of importedItems) {
@@ -388,14 +391,36 @@ export async function POST(request: NextRequest) {
                         workingProduct.updateData.createdAt = FieldValue.serverTimestamp();
                     }
 
-                    // Write Inventory Log
+                    // Create Inventory Lot
+                    const lotRef = db.collection('inventory_lots').doc();
+                    tx.set(lotRef, {
+                        lotCode: lotCode,
+                        productId: targetProductId,
+                        supplierId: item.supplierId || receipt.supplierId || null,
+                        importPrice: item.importPrice,
+                        initialQuantity: importedQuantity,
+                        remainingQuantity: importedQuantity,
+                        status: 'active',
+                        createdAt: FieldValue.serverTimestamp(),
+                        updatedAt: FieldValue.serverTimestamp()
+                    });
+                    
+                    generatedLots.push({
+                        product: {
+                            ...pData,
+                            ...workingProduct.updateData,
+                            id: targetProductId
+                        },
+                        lotCode: lotCode,
+                        copies: importedQuantity
+                    });
+
+                    // Write Inventory Log (Audit Trail)
                     const logRef = db.collection('inventory_logs').doc();
                     tx.set(logRef, {
                         productId: targetProductId,
                         productName: item.productName || pData.name || 'Sản phẩm mới',
                         quantity: importedQuantity,
-                        remainingQuantity: importedQuantity,
-                        isDepleted: false,
                         supplierId: item.supplierId || receipt.supplierId || item.supplier || null,
                         lotCode: lotCode,
                         heldQuantity: allocation.heldQuantity,
@@ -502,6 +527,8 @@ export async function POST(request: NextRequest) {
                         createdBy: caller.uid
                     });
                 }
+                
+                generatedLotsToReturn = generatedLots;
             } else {
                 throw new Error('Action không hợp lệ.');
             }
@@ -520,7 +547,7 @@ export async function POST(request: NextRequest) {
                 });
             }
 
-            return { success: true };
+            return generatedLotsToReturn ? { success: true, generatedLots: generatedLotsToReturn } : { success: true };
         });
 
         return NextResponse.json(result);

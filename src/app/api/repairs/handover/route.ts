@@ -113,7 +113,7 @@ export async function POST(request: NextRequest) {
             let fifoResultsMap = new Map<string, FifoDeductionResult[]>();
             let fifoLogsDataMap: Awaited<ReturnType<typeof fetchFifoLogsForDeduction>> = new Map();
             let fifoDeductors: { productId: string, quantityToDeduct: number }[] = [];
-            
+
             // --- READ PHASE ---
             let custSnap: FirebaseFirestore.DocumentSnapshot | null = null;
             let custRef: FirebaseFirestore.DocumentReference | null = null;
@@ -140,21 +140,30 @@ export async function POST(request: NextRequest) {
                             }
                         }
                         if (p.productId) {
-                            deductions.push({ productId: p.productId, quantityToDeduct: p.quantity });
+                            deductions.push({ productId: p.productId, quantityToDeduct: p.quantity, lotCode: p.lotCode });
                         }
                     }
 
                     if (deductions.length > 0) {
-                        const aggregated = deductions.reduce((acc, curr) => {
-                            const existing = acc.find(a => a.productId === curr.productId);
-                            if (existing) {
-                                existing.quantityToDeduct += curr.quantityToDeduct;
-                            } else {
-                                acc.push({ ...curr });
+                        const fifoMap = new Map<string, { productId: string; quantity: number; preferredLotCodes: Map<string, number> }>();
+                        for (const curr of deductions) {
+                            let fifoItem = fifoMap.get(curr.productId);
+                            if (!fifoItem) {
+                                fifoItem = { productId: curr.productId, quantity: 0, preferredLotCodes: new Map<string, number>() };
+                                fifoMap.set(curr.productId, fifoItem);
                             }
-                            return acc;
-                        }, [] as { productId: string, quantityToDeduct: number }[]);
-                        
+                            fifoItem.quantity += curr.quantityToDeduct;
+                            if ((curr as any).lotCode) {
+                                fifoItem.preferredLotCodes.set((curr as any).lotCode, (fifoItem.preferredLotCodes.get((curr as any).lotCode) || 0) + curr.quantityToDeduct);
+                            }
+                        }
+
+                        const aggregated = Array.from(fifoMap.values()).map(x => ({
+                            productId: x.productId,
+                            quantityToDeduct: x.quantity,
+                            preferredLotCodes: Array.from(x.preferredLotCodes.entries()).map(([lotCode, quantity]) => ({ lotCode, quantity }))
+                        }));
+
                         fifoLogsDataMap = await fetchFifoLogsForDeduction(tx, db, aggregated);
                         fifoDeductors = aggregated;
                     }
@@ -162,10 +171,27 @@ export async function POST(request: NextRequest) {
             }
             // --- END READ PHASE ---
 
+            let checkoutWarnings: string[] = [];
+
             if (!isWarranty) {
                 // Execute FIFO Writes
                 if (fifoDeductors.length > 0) {
                     fifoResultsMap = executeFifoDeductionsWrites(tx, fifoDeductors, fifoLogsDataMap);
+                    
+                    // Analyze if preferred lots were fully satisfied
+                    for (const req of fifoDeductors) {
+                        const results = fifoResultsMap.get(req.productId) || [];
+                        for (const pref of req.preferredLotCodes || []) {
+                            const fulfilledQty = results
+                                .filter(r => r.lotCode === pref.lotCode)
+                                .reduce((sum, r) => sum + r.quantity, 0);
+                            
+                            if (fulfilledQty < pref.quantity) {
+                                const pData = productDocs.get(req.productId)?.data;
+                                checkoutWarnings.push(`Sản phẩm "${pData?.name || req.productId}" yêu cầu lô ${pref.lotCode} (SL: ${pref.quantity}) nhưng chỉ có ${fulfilledQty}, phần còn lại lấy từ lô khác theo cấu hình (FIFO).`);
+                            }
+                        }
+                    }
                 }
 
                 // Stamp Warranty
@@ -202,7 +228,7 @@ export async function POST(request: NextRequest) {
                         }
                         // Fallback to "KhĂ¡c"
                         if (months === 0 && partType !== '') {
-                             for (const [key, val] of ruleMap.entries()) {
+                            for (const [key, val] of ruleMap.entries()) {
                                 if (key.trim().toLowerCase() === 'khĂ¡c') {
                                     months = val;
                                     break;
@@ -319,7 +345,7 @@ export async function POST(request: NextRequest) {
                 });
             }
 
-            return { success: true };
+            return { success: true, warnings: checkoutWarnings };
         });
 
         return NextResponse.json(result);

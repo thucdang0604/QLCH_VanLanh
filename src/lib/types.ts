@@ -139,6 +139,7 @@ export interface OrderItem {
     price: number;
     image?: string;
     imeis?: string[];
+    lotCode?: string;
     warrantyMonths?: number;
     warrantyStartedAt?: number;
     warrantyExpiresAt?: number;
@@ -432,6 +433,7 @@ export interface RepairTicket {
         replacesPartIndex?: number;
         // [D4] Supplier traceability — snapshot from Product at handover
         supplierName?: string;
+        lotCode?: string;
         status: 'selected' | 'requested' | 'approved' | 'in_stock' | 'unavailable' | 'ordered' | 'rejected';
     }[];
     timing: {
@@ -582,14 +584,29 @@ export interface InventoryLog {
     quantity: number;           // Dương = nhập/trả, Âm = xuất/bán
     costPriceAtLog: number;     // Giá vốn tại thời điểm thao tác
     type: 'IMPORT' | 'SALE' | 'WEB_ORDER'
-        | 'REPAIR_USE' | 'REPAIR_REFUND' | 'REPAIR_RELEASE' | 'REPAIR_RETURN'
-        | 'TECH_ISSUE' | 'TECH_RETURN'
-        | 'ORDER_CANCEL' | 'ORDER_COMPLETE' | 'ORDER_REACTIVATE';
+    | 'REPAIR_USE' | 'REPAIR_REFUND' | 'REPAIR_RELEASE' | 'REPAIR_RETURN'
+    | 'TECH_ISSUE' | 'TECH_RETURN'
+    | 'ORDER_CANCEL' | 'ORDER_COMPLETE' | 'ORDER_REACTIVATE';
     referenceId: string;
     referenceType: 'import_receipt' | 'order' | 'repair';
+    lotsDeducted?: { lotCode: string | null; supplierId: string | null; qty: number }[];
     createdBy: string;
     createdByName: string;
     createdAt: FirestoreDateValue;
+}
+
+// ── Inventory Lot (Trạng thái lô hàng) ──
+export interface InventoryLot {
+    id: string;
+    lotCode: string;             // PN-YYMM-XXXX
+    productId: string;
+    supplierId: string | null;
+    importPrice: number;
+    initialQuantity: number;
+    remainingQuantity: number;
+    status: 'active' | 'empty';
+    createdAt: FirestoreDateValue;
+    updatedAt: FirestoreDateValue;
 }
 
 // ── Supplier (Nhà cung cấp) ──

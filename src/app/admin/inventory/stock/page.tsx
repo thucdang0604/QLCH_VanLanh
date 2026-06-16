@@ -101,13 +101,12 @@ export default function StockPage() {
             <div className="flex gap-2">
                 {([['all', '📋 Tất cả'], ['retail', '📦 Bán lẻ & Phụ kiện'], ['component', '🔧 Linh kiện']] as const).map(([key, label]) => (
                     <button key={key} onClick={() => setStockTab(key)}
-                        className={`px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
-                            stockTab === key
+                        className={`px-4 py-2 rounded-xl text-sm font-medium transition-all border ${stockTab === key
                                 ? key === 'component' ? 'bg-orange-50 border-orange-300 text-orange-700 shadow-sm'
                                     : key === 'retail' ? 'bg-blue-50 border-blue-300 text-blue-700 shadow-sm'
-                                    : 'bg-gray-800 border-gray-800 text-white shadow-sm'
+                                        : 'bg-gray-800 border-gray-800 text-white shadow-sm'
                                 : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-                        }`}>
+                            }`}>
                         {label}
                     </button>
                 ))}
@@ -119,11 +118,10 @@ export default function StockPage() {
                     ['archived', `Đã lưu trữ (${archivedCount})`],
                 ] as const).map(([key, label]) => (
                     <button key={key} onClick={() => setStatusFilter(key)}
-                        className={`px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
-                            statusFilter === key
+                        className={`px-4 py-2 rounded-xl text-sm font-medium transition-all border ${statusFilter === key
                                 ? 'bg-orange-50 border-orange-300 text-orange-700 shadow-sm'
                                 : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-                        }`}>
+                            }`}>
                         {label}
                     </button>
                 ))}

@@ -34,18 +34,37 @@ export async function POST(request: NextRequest) {
                 }
             }
 
-            // Pre-aggregate
-            const preAggregated = new Map<string, number>();
+            // Pre-aggregate for overall stock check
+            const preAggregatedForStock = new Map<string, number>();
+            // Pre-aggregate for FIFO deduction
+            const fifoMap = new Map<string, { productId: string; quantity: number; preferredLotCodes: Map<string, number> }>();
+
             for (const item of items) {
                 if (item.isRepairTicket) continue; // Bỏ qua check kho cho phiếu sửa chữa
                 const pid = String(item.productId || '');
                 const qty = Math.max(1, Math.floor(Number(item.quantity) || 1));
-                preAggregated.set(pid, (preAggregated.get(pid) || 0) + qty);
+                const lot = item.lotCode ? String(item.lotCode) : undefined;
+                
+                preAggregatedForStock.set(pid, (preAggregatedForStock.get(pid) || 0) + qty);
+
+                let fifoItem = fifoMap.get(pid);
+                if (!fifoItem) {
+                    fifoItem = { productId: pid, quantity: 0, preferredLotCodes: new Map<string, number>() };
+                    fifoMap.set(pid, fifoItem);
+                }
+                fifoItem.quantity += qty;
+                if (lot) {
+                    fifoItem.preferredLotCodes.set(lot, (fifoItem.preferredLotCodes.get(lot) || 0) + qty);
+                }
             }
 
             let fifoResultsMap = new Map<string, FifoDeductionResult[]>();
             let fifoLogsDataMap: Awaited<ReturnType<typeof fetchFifoLogsForDeduction>> = new Map();
-            const fifoDeductors = Array.from(preAggregated.entries()).map(([productId, quantityToDeduct]) => ({ productId, quantityToDeduct }));
+            const fifoDeductors = Array.from(fifoMap.values()).map(x => ({ 
+                productId: x.productId, 
+                quantityToDeduct: x.quantity,
+                preferredLotCodes: Array.from(x.preferredLotCodes.entries()).map(([lotCode, quantity]) => ({ lotCode, quantity }))
+            }));
             if (fifoDeductors.length > 0) {
                 fifoLogsDataMap = await fetchFifoLogsForDeduction(tx, db, fifoDeductors);
             }
@@ -289,8 +308,25 @@ export async function POST(request: NextRequest) {
             // ── ALL WRITES START HERE ──
             // ==========================================
 
+            let checkoutWarnings: string[] = [];
+
             if (!isPending && fifoDeductors.length > 0) {
                 fifoResultsMap = executeFifoDeductionsWrites(tx, fifoDeductors, fifoLogsDataMap);
+                
+                // Analyze if preferred lots were fully satisfied
+                for (const req of fifoDeductors) {
+                    const results = fifoResultsMap.get(req.productId) || [];
+                    for (const pref of req.preferredLotCodes || []) {
+                        const fulfilledQty = results
+                            .filter(r => r.lotCode === pref.lotCode)
+                            .reduce((sum, r) => sum + r.quantity, 0);
+                        
+                        if (fulfilledQty < pref.quantity) {
+                            const pData = productDocs.get(req.productId)?.data;
+                            checkoutWarnings.push(`Sản phẩm "${pData?.name || req.productId}" yêu cầu lô ${pref.lotCode} (SL: ${pref.quantity}) nhưng chỉ có ${fulfilledQty}, phần còn lại lấy từ lô khác theo cấu hình (FIFO).`);
+                        }
+                    }
+                }
             }
 
             // Stock Deduction
@@ -430,7 +466,7 @@ export async function POST(request: NextRequest) {
                 });
             }
 
-            return { success: true, orderId };
+            return { success: true, orderId: orderId, warnings: checkoutWarnings };
         });
 
         return NextResponse.json(result);

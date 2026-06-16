@@ -23,13 +23,13 @@ export async function POST(request: NextRequest) {
     try {
         const caller = await requirePermission(request, 'manage_repairs');
         const body = await request.json() as CreateRepairBody;
-        
+
         const db = getAdminDb();
-        
+
         const result = await db.runTransaction(async (tx) => {
             const workflow = await loadRepairWorkflow(tx, db, { ticketType: body.ticketType });
             const entryNode = workflow[0];
-            
+
             if (!entryNode) {
                 throw new Error('Không tìm thấy entry node trong workflow');
             }
@@ -95,10 +95,10 @@ export async function POST(request: NextRequest) {
 
             const newTicketRef = db.collection('repairs').doc();
             tx.set(newTicketRef, finalData);
-            
+
             return { id: newTicketRef.id, status: entryNode.id };
         });
-        
+
         return NextResponse.json(result);
     } catch (error: unknown) {
         console.error('Create ticket API error:', error);

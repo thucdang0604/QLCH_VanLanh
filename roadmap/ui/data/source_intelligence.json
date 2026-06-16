@@ -184,6 +184,24 @@
         "v2: Fully integrated into POS. useEffect auto-calculates discounts when repair is linked."
       ]
     },
+    "inventory_lots": {
+      "description": "Trạng thái lô hàng. Dùng cho Batch Tracking & FIFO.",
+      "keyFields": [
+        "lotCode",
+        "productId",
+        "supplierId",
+        "importPrice",
+        "initialQuantity",
+        "remainingQuantity",
+        "status",
+        "createdAt"
+      ],
+      "usedIn": [
+        "parts/page.tsx",
+        "pos/page.tsx",
+        "repairs/page.tsx"
+      ]
+    },
     "inventory_logs": {
       "description": "Audit trail tồn kho. Mọi thay đổi stock đều ghi log.",
       "keyFields": [

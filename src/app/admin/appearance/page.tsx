@@ -75,11 +75,11 @@ export default function AdminAppearancePage() {
 
     const save = async (partial: Partial<SiteConfig>, msg: string) => {
         setSaving(true);
-        try { 
+        try {
             // Strip undefined values to prevent Firebase "Unsupported field value: undefined" errors
             const cleanPartial = JSON.parse(JSON.stringify(partial));
-            await updateConfig(cleanPartial); 
-            showToast(msg); 
+            await updateConfig(cleanPartial);
+            showToast(msg);
         }
         catch (e) { console.error(e); }
         setSaving(false);
@@ -491,7 +491,7 @@ export default function AdminAppearancePage() {
                 <SaveBtn onClick={() => save({ homepageReviews: local.homepageReviews }, 'Đã lưu đánh giá trang chủ!')} saving={saving} label="Lưu đánh giá" />
             </SectionCard>
 
-        {/* 8. Homepage Section Layout */}
+            {/* 8. Homepage Section Layout */}
             <SectionCard title="Sắp xếp & Giao diện trang chủ" icon={<LayoutDashboard size={20} />}>
                 <p className="text-sm text-gray-500 mb-4">Sắp xếp thứ tự, bật/tắt và tuỳ chỉnh nền cho từng khối.</p>
                 <div className="space-y-3">
