@@ -7,6 +7,7 @@ import { calculateAndSaveCommissionsServer } from '@/lib/commissionCalcServer';
 import type { Order } from '@/lib/types';
 import { PRODUCT_STATUS, isProductArchived } from '@/lib/productLifecycle';
 import { normalizeVietnamPhone } from '@/lib/phone';
+import { fetchFifoLogsForDeduction, executeFifoDeductionsWrites } from '@/lib/inventoryFifo';
 
 export async function POST(request: NextRequest) {
     try {
@@ -42,6 +43,13 @@ export async function POST(request: NextRequest) {
                 preAggregated.set(pid, (preAggregated.get(pid) || 0) + qty);
             }
 
+            let fifoResultsMap = new Map<string, any[]>();
+            let fifoLogsDataMap = new Map<string, any[]>();
+            const fifoDeductors = Array.from(preAggregated.entries()).map(([productId, quantityToDeduct]) => ({ productId, quantityToDeduct }));
+            if (fifoDeductors.length > 0) {
+                fifoLogsDataMap = await fetchFifoLogsForDeduction(tx, db, fifoDeductors);
+            }
+
             // Fetch products
             const productDocs = new Map<string, { ref: FirebaseFirestore.DocumentReference; data: FirebaseFirestore.DocumentData }>();
             for (const productId of preAggregated.keys()) {
@@ -57,7 +65,7 @@ export async function POST(request: NextRequest) {
             const taxonomySnap = await tx.get(db.collection('system_config').doc('taxonomy_settings'));
             const retailTrees = taxonomySnap.data()?.taxonomy?.retail || [];
 
-            function resolveWarranty(productData: { warrantyType?: string; warrantyMonths?: string | number; category?: string; [key: string]: unknown }): { warrantyType: string, warrantyMonths: number } | null {
+            function resolveWarranty(productData: { warrantyType?: string; warrantyMonths?: string | number; category?: string;[key: string]: unknown }): { warrantyType: string, warrantyMonths: number } | null {
                 if (productData.warrantyType && productData.warrantyType !== 'none') {
                     return { warrantyType: productData.warrantyType, warrantyMonths: Number(productData.warrantyMonths) || 0 };
                 }
@@ -281,6 +289,10 @@ export async function POST(request: NextRequest) {
             // ── ALL WRITES START HERE ──
             // ==========================================
 
+            if (!isPending && fifoDeductors.length > 0) {
+                fifoResultsMap = executeFifoDeductionsWrites(tx, fifoDeductors, fifoLogsDataMap);
+            }
+
             // Stock Deduction
             for (const [productId, totalQty] of preAggregated.entries()) {
                 const pSnap = productDocs.get(productId)!;
@@ -305,6 +317,8 @@ export async function POST(request: NextRequest) {
                         costPriceAtLog: Number(d.costPrice) || 0,
                         type: 'POS_SALE',
                         referenceType: 'order',
+                        referenceId: orderId,
+                        lotsDeducted: fifoResultsMap.get(productId) || [],
                         createdBy: caller.uid,
                         createdAt: FieldValue.serverTimestamp()
                     });

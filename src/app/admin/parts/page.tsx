@@ -1,5 +1,4 @@
 'use client';
-
 import { useState, useEffect } from 'react';
 import {
     Archive,
@@ -7,7 +6,6 @@ import {
     Search,
     Edit,
     Trash2,
-
     Loader2,
     Settings,
     Wrench,
@@ -22,18 +20,15 @@ import {
     AlertTriangle
 } from 'lucide-react';
 import { useFirestoreCollection, updateDocument } from '@/lib/useFirestore';
-import { PART_CATEGORY_LABEL, isPartCategory } from '@/lib/constants';
-
+import { isPartCategory } from '@/lib/constants';
 import CategoryTaxonomySelector from '@/components/admin/CategoryTaxonomySelector';
 import Modal from '@/components/admin/Modal';
 import UniversalProductModal from '@/components/admin/UniversalProductModal';
 import type { Product, FirestoreDateValue } from '@/lib/types';
-
 import { orderBy } from 'firebase/firestore';
 import {
     collection, getDocs, updateDoc, deleteDoc,
     doc, serverTimestamp, query, orderBy as fbOrderBy, addDoc, onSnapshot, where,
-
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
@@ -43,10 +38,15 @@ import PaginationBar from '@/components/admin/PaginationBar';
 import CurrencyInput from '@/components/admin/CurrencyInput';
 import ProductQrLabelModal from '@/components/admin/ProductQrLabelModal';
 import FixHiddenProductsModal from '@/components/admin/FixHiddenProductsModal';
+import LotTrackingModal from '@/components/admin/LotTrackingModal';
 import { buildProductCodeFromId } from '@/lib/productCodes';
 import { buildArchiveUpdate, getArchiveBlockReason, isProductArchived } from '@/lib/productLifecycle';
 import { createProductWithCodes } from '@/lib/productCodeRegistry';
-
+import {
+    calculateImportableTotal,
+    getReceiptItemAvailability,
+    isReceiptItemUnavailable,
+} from '@/lib/importReceiptAvailability';
 interface ImportReceiptItem {
     productId: string;
     productName: string;
@@ -54,11 +54,16 @@ interface ImportReceiptItem {
     importPrice: number;
     quality?: string;
     oldCostPrice?: number;
+    status?: 'requested' | 'approved' | 'ordered' | 'in_stock' | 'unavailable' | 'selected';
     availability?: 'in_stock' | 'unavailable';
     supplier?: string;
     supplierId?: string;
+    ticketId?: string;
+    partLineId?: string;
+    allocatedHeldQuantity?: number;
+    surplusQuantity?: number;
+    unlinkedReason?: 'missing_line' | 'inactive_line' | 'already_allocated';
 }
-
 interface ImportReceipt {
     id: string;
     supplier?: string;
@@ -68,6 +73,7 @@ interface ImportReceipt {
     note?: string;
     receiptType?: 'component' | 'retail';
     status: 'draft' | 'ordered' | 'completed';
+    version?: number;
     paymentMethod?: 'paid' | 'debt';
     createdBy: string;
     createdByName: string;
@@ -76,15 +82,11 @@ interface ImportReceipt {
     // Optional: link back to repair ticket that requested these parts
     repairTicketId?: string;
 }
-
 interface SupplierOption {
     id: string;
     name: string;
     totalDebt: number;
 }
-
-
-
 interface NewPartInfo {
     model?: string;
     partType?: string;
@@ -93,13 +95,11 @@ interface NewPartInfo {
     categoryIds?: string[];
     [key: string]: unknown;
 }
-
 interface ImportPreviewState {
     isOpen: boolean;
     receipt: ImportReceipt | null;
     newParts: Record<string, NewPartInfo>;
 }
-
 export default function PartsPage() {
     const { user } = useAuth(); // Ensure authenticated
     const { data: products, loading } = useFirestoreCollection<Product>('products', [orderBy('createdAt', 'desc')]);
@@ -110,7 +110,6 @@ export default function PartsPage() {
         const isService = p.category === 'service' || firstCatId.startsWith('sua-chua');
         return !isComponent && !isService;
     });
-
     const [searchQuery, setSearchQuery] = useState('');
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isCreateReceiptOpen, setIsCreateReceiptOpen] = useState(false);
@@ -118,7 +117,7 @@ export default function PartsPage() {
     const [qrPart, setQrPart] = useState<(Product & { id: string }) | null>(null);
     const [activeTab, setActiveTab] = useState<'parts' | 'proposals' | 'ordered'>('parts');
     const [showFixHidden, setShowFixHidden] = useState(false);
-
+    const [isLotTrackingOpen, setIsLotTrackingOpen] = useState(false);
     // Import Proposals State
     const [draftReceipts, setDraftReceipts] = useState<ImportReceipt[]>([]);
     const [loadingDrafts, setLoadingDrafts] = useState(true);
@@ -126,12 +125,11 @@ export default function PartsPage() {
     const [editingPrices, setEditingPrices] = useState<Record<string, number[]>>({});
     const [editingQuantities, setEditingQuantities] = useState<Record<string, number[]>>({});
     const [isProcessing, setIsProcessing] = useState(false);
-    
+
     // Filters and Modals
     const [statusFilter, setStatusFilter] = useState<'all' | 'out_of_stock' | 'bestseller'>('all');
     const [importPreviewModal, setImportPreviewModal] = useState<ImportPreviewState>({ isOpen: false, receipt: null, newParts: {} });
     const [forecastCostPrices, setForecastCostPrices] = useState<Map<string, number>>(new Map());
-
     // Confirm Modal State
     const [confirmModal, setConfirmModal] = useState<{
         isOpen: boolean;
@@ -140,17 +138,14 @@ export default function PartsPage() {
         confirmText?: string;
         dangerous?: boolean;
         onConfirm: () => void;
-    }>({ isOpen: false, title: '', message: '', onConfirm: () => {} });
-
+    }>({ isOpen: false, title: '', message: '', onConfirm: () => { } });
     // Warranty part types from config
     const [partTypeOptions, setPartTypeOptions] = useState<string[]>([]);
-
     // Supplier list for dropdown
     const [supplierList, setSupplierList] = useState<SupplierOption[]>([]);
     // Draft supplier editing state
     const [draftSupplierSearch, setDraftSupplierSearch] = useState('');
     const [draftSupplierActiveKey, setDraftSupplierActiveKey] = useState<string | null>(null);
-
     // Fetch suppliers for dropdown
     useEffect(() => {
         const unsub = onSnapshot(
@@ -161,7 +156,6 @@ export default function PartsPage() {
         );
         return () => unsub();
     }, []);
-
     // Load warranty config for partType dropdown
     useEffect(() => {
         const unsub = onSnapshot(doc(db, 'system_config', 'repairs'), (snap) => {
@@ -174,7 +168,6 @@ export default function PartsPage() {
         });
         return () => unsub();
     }, []);
-
     // Fetch draft import receipts
     const fetchDrafts = async () => {
         setLoadingDrafts(true);
@@ -188,14 +181,11 @@ export default function PartsPage() {
             setLoadingDrafts(false);
         }
     };
-
     useEffect(() => {
         fetchDrafts();
     }, []);
-
     const drafts = draftReceipts.filter(r => r.status === 'draft');
     const orderedReceipts = draftReceipts.filter(r => r.status === 'ordered');
-
     const handleArchive = (part: Product) => {
         const blockReason = getArchiveBlockReason(part);
         if (blockReason) {
@@ -217,40 +207,32 @@ export default function PartsPage() {
             }
         });
     };
-
     const filteredParts = parts.filter((p) => {
         // Hide soft-deleted and proposed products
         if (isProductArchived(p) || p.isProposed) return false;
-
         const matchSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                            (p.description && p.description.toLowerCase().includes(searchQuery.toLowerCase()));
-        
+            (p.description && p.description.toLowerCase().includes(searchQuery.toLowerCase()));
+
         let matchStatus = true;
         if (statusFilter === 'out_of_stock') matchStatus = Number(p.stock) <= 0;
         else if (statusFilter === 'bestseller') matchStatus = Number(p.sold) > 0;
-
         return matchSearch && matchStatus;
     }).sort((a, b) => {
         if (statusFilter === 'bestseller') return Number(b.sold || 0) - Number(a.sold || 0);
         return 0; // fallback default sorting based on initial load
     });
-
     const formatPrice = (price?: number) => {
         if (!price) return '0đ';
         return new Intl.NumberFormat('vi-VN').format(price) + 'đ';
     };
-
     const { paginatedData: paginatedParts, currentPage, totalPages, pageSize, totalFiltered, setPage, setPageSize, resetPage } = useClientPagination(filteredParts, 20);
-
     // eslint-disable-next-line react-hooks/exhaustive-deps
     useEffect(() => { resetPage(); }, [searchQuery]);
-
     const formatDate = (ts: FirestoreDateValue | Date | number | null | undefined) => {
         if (!ts) return '—';
         const d = typeof ts === 'object' && 'toDate' in ts && typeof ts.toDate === 'function' ? ts.toDate() : new Date(ts as number | Date);
         return d.toLocaleDateString('vi-VN') + ' ' + d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
     };
-
     // ─── Draft Receipt Actions ─────────────
     const handleExpandReceipt = (receiptId: string) => {
         if (expandedReceiptId === receiptId) {
@@ -268,11 +250,10 @@ export default function PartsPage() {
             }
         }
     };
-
     const handleAutoSaveItem = async (receiptId: string, itemIdx: number, newPrice: number, newQty: number) => {
         const receipt = draftReceipts.find(r => r.id === receiptId);
         if (!receipt) return;
-        
+
         try {
             const updatedItems = [...receipt.items];
             updatedItems[itemIdx] = {
@@ -280,8 +261,7 @@ export default function PartsPage() {
                 importPrice: newPrice,
                 quantity: newQty
             };
-            const totalAmount = updatedItems.reduce((sum, i) => sum + i.importPrice * i.quantity, 0);
-
+            const totalAmount = calculateImportableTotal(updatedItems);
             await updateDoc(doc(db, 'import_receipts', receipt.id), {
                 items: updatedItems,
                 totalAmount,
@@ -295,10 +275,13 @@ export default function PartsPage() {
             toastError('Lỗi tự động lưu!');
         }
     };
-
     const handleOrderReceipt = async (receipt: ImportReceipt) => {
-        // Validate: all items must have supplier assigned
-        const missingSupplier = receipt.items.filter(i => !i.supplier);
+        const importableItems = receipt.items.filter((item) => !isReceiptItemUnavailable(item));
+        if (importableItems.length === 0) {
+            toastError('Phiếu không còn linh kiện có thể đặt hàng.');
+            return;
+        }
+        const missingSupplier = importableItems.filter(i => !i.supplier && !i.supplierId);
         if (missingSupplier.length > 0) {
             toastError(`Còn ${missingSupplier.length} sản phẩm chưa gán NCC. Vui lòng chọn NCC cho tất cả trước khi đặt hàng.`);
             return;
@@ -311,10 +294,22 @@ export default function PartsPage() {
             onConfirm: async () => {
                 setIsProcessing(true);
                 try {
-                    await updateDoc(doc(db, 'import_receipts', receipt.id), {
-                        status: 'ordered',
-                        updatedAt: serverTimestamp()
+                    const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
+                    const res = await fetch('/api/inventory/import', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${idToken}`,
+                        },
+                        body: JSON.stringify({
+                            action: 'order_receipt',
+                            receiptId: receipt.id,
+                            receiptVersion: receipt.version || 0,
+                            idempotencyKey: crypto.randomUUID(),
+                        }),
                     });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.error || 'Lỗi khi chốt đặt hàng');
                     await fetchDrafts();
                     toastSuccess('Đã chuyển sang trạng thái ĐẶT HÀNG!');
                 } catch (err) {
@@ -326,7 +321,6 @@ export default function PartsPage() {
             }
         });
     };
-
     const handleAutoSaveSupplier = async (receiptId: string, itemIdx: number, supplierName: string, supplierId: string) => {
         const receipt = draftReceipts.find(r => r.id === receiptId);
         if (!receipt) return;
@@ -344,14 +338,24 @@ export default function PartsPage() {
             toastError('Lỗi cập nhật NCC!');
         }
     };
-
     const handleImportReceipt = async (receipt: ImportReceipt) => {
+        const importableItems = receipt.items.filter((item) => !isReceiptItemUnavailable(item));
+        if (importableItems.length === 0) {
+            toastError('Phiếu không có linh kiện nào để nhập kho.');
+            return;
+        }
+        const importableReceipt = {
+            ...receipt,
+            items: importableItems,
+            totalAmount: calculateImportableTotal(receipt.items),
+        };
         // Identify proposed/new items by checking against known products
         const initNewParts: Record<string, NewPartInfo> = {};
-        for (const item of receipt.items) {
+        for (const item of importableItems) {
             const existingPart = parts.find(p => p.id === item.productId);
-            if (!existingPart || existingPart.isProposed) {
-                initNewParts[item.productId] = {
+            if (!item.productId || !existingPart || existingPart.isProposed) {
+                const partKey = item.productId || item.partLineId || String(Math.random());
+                initNewParts[partKey] = {
                     model: '',
                     partType: '',
                     price_promo: 0,
@@ -359,10 +363,10 @@ export default function PartsPage() {
                 };
             }
         }
-        
+
         // Final prep for forecast (only for existing active products)
         const forecasts = new Map<string, number>();
-        for (const item of receipt.items) {
+        for (const item of importableItems) {
             if (!(item.productId in initNewParts)) {
                 const p = parts.find(part => part.id === item.productId);
                 if (p) {
@@ -376,19 +380,17 @@ export default function PartsPage() {
                 }
             }
         }
-
         setForecastCostPrices(forecasts);
         setImportPreviewModal({
             isOpen: true,
-            receipt: receipt,
+            receipt: importableReceipt,
             newParts: initNewParts
         });
     };
-
     const executeFinalImport = async (paymentMethod: 'paid' | 'debt') => {
         const { receipt, newParts } = importPreviewModal;
         if (!receipt) return;
-        
+
         setIsProcessing(true);
         try {
             const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
@@ -407,21 +409,18 @@ export default function PartsPage() {
                     newParts: newParts
                 })
             });
-
             const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'Lá»—i nháº­p kho!');
-
-            toastSuccess('Nháº­p kho thĂ nh cĂ´ng!');
+            if (!res.ok) throw new Error(data.error || 'Lỗi nhập kho!');
+            toastSuccess('Nhập kho thành công!');
             setImportPreviewModal({ isOpen: false, receipt: null, newParts: {} });
             await fetchDrafts();
         } catch (error) {
             console.error('Final import error:', error);
-            toastError(error instanceof Error ? error.message : 'Lá»—i nháº­p kho!');
+            toastError(error instanceof Error ? error.message : 'Lỗi nhập kho!');
         } finally {
             setIsProcessing(false);
         }
     };
-
     const handleDeleteDraft = (id: string) => {
         setConfirmModal({
             isOpen: true,
@@ -441,9 +440,9 @@ export default function PartsPage() {
             }
         });
     };
-
-    const handleMarkAvailability = async (receipt: ImportReceipt, item: ImportReceiptItem, isAvailable: boolean) => {
+    const handleMarkAvailability = async (receipt: ImportReceipt, item: ImportReceiptItem, itemIndex: number, isAvailable: boolean) => {
         setIsProcessing(true);
+        const targetAvailability = isAvailable ? ((receipt.status === 'draft' || !receipt.status) ? 'approved' : 'in_stock') : 'unavailable';
         try {
             const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
             const res = await fetch('/api/inventory/import', {
@@ -457,24 +456,22 @@ export default function PartsPage() {
                     receiptId: receipt.id,
                     receiptVersion: (receipt as ImportReceipt & { version?: number }).version || 0,
                     idempotencyKey: crypto.randomUUID(),
-                    partLineId: (item as ImportReceiptItem & { partLineId?: string }).partLineId,
-                    availability: isAvailable ? 'in_stock' : 'unavailable'
+                    partLineId: item.partLineId,
+                    itemIndex,
+                    availability: targetAvailability
                 })
             });
-
             const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'Lá»—i cáº­p nháº­t tĂ¬nh tráº¡ng');
-
-            toastSuccess('ÄĂ£ cáº­p nháº­t tĂ¬nh tráº¡ng hĂ ng');
+            if (!res.ok) throw new Error(data.error || 'Lỗi cập nhật tình trạng');
+            toastSuccess('Đã cập nhật tình trạng hàng');
             await fetchDrafts();
         } catch (error) {
             console.error('Mark availability error:', error);
-            toastError(error instanceof Error ? error.message : 'Lá»—i cáº­p nháº­t tĂ¬nh tráº¡ng');
+            toastError(error instanceof Error ? error.message : 'Lỗi cập nhật tình trạng');
         } finally {
             setIsProcessing(false);
         }
     };
-
     return (
         <div className="space-y-6">
             {/* Header */}
@@ -486,6 +483,13 @@ export default function PartsPage() {
                     <p className="text-gray-500">{parts.length} linh kiện · {drafts.length} đề xuất nhập hàng</p>
                 </div>
                 <div className="flex items-center gap-3">
+                    <button
+                        onClick={() => setIsLotTrackingOpen(true)}
+                        className="flex items-center gap-2 bg-indigo-50 text-indigo-700 border border-indigo-200 px-4 py-2.5 rounded-lg font-medium hover:bg-indigo-100 transition-colors shadow-sm"
+                    >
+                        <Search size={20} />
+                        Tra cứu Mã Lô
+                    </button>
                     <button
                         onClick={() => setShowFixHidden(true)}
                         className="flex items-center gap-2 border-2 border-amber-300 text-amber-700 px-4 py-2.5 rounded-lg font-medium hover:bg-amber-50 transition-colors text-sm"
@@ -502,27 +506,24 @@ export default function PartsPage() {
                     </button>
                 </div>
             </div>
-
             {/* Tabs */}
             <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
                 <button
                     onClick={() => setActiveTab('parts')}
-                    className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium text-sm transition-all ${
-                        activeTab === 'parts'
+                    className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium text-sm transition-all ${activeTab === 'parts'
                             ? 'bg-white text-orange-600 shadow-sm'
                             : 'text-gray-500 hover:text-gray-700'
-                    }`}
+                        }`}
                 >
                     <Settings size={16} />
                     Danh sách Linh Kiện
                 </button>
                 <button
                     onClick={() => setActiveTab('proposals')}
-                    className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium text-sm transition-all ${
-                        activeTab === 'proposals'
+                    className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium text-sm transition-all ${activeTab === 'proposals'
                             ? 'bg-white text-orange-600 shadow-sm'
                             : 'text-gray-500 hover:text-gray-700'
-                    }`}
+                        }`}
                 >
                     <PackagePlus size={16} />
                     Đề xuất Nhập Hàng
@@ -532,11 +533,10 @@ export default function PartsPage() {
                 </button>
                 <button
                     onClick={() => setActiveTab('ordered')}
-                    className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium text-sm transition-all ${
-                        activeTab === 'ordered'
+                    className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium text-sm transition-all ${activeTab === 'ordered'
                             ? 'bg-white text-orange-600 shadow-sm'
                             : 'text-gray-500 hover:text-gray-700'
-                    }`}
+                        }`}
                 >
                     <CheckCircle2 size={16} />
                     Đã Đặt Hàng
@@ -545,7 +545,6 @@ export default function PartsPage() {
                     )}
                 </button>
             </div>
-
             {/* ═══════ TAB 1: Parts List ═══════ */}
             {activeTab === 'parts' && (
                 <>
@@ -564,31 +563,27 @@ export default function PartsPage() {
                         <div className="flex gap-2 overflow-x-auto pb-1 sm:pb-0">
                             <button
                                 onClick={() => setStatusFilter('all')}
-                                className={`px-4 py-2 text-sm font-medium rounded-lg whitespace-nowrap transition-colors ${
-                                    statusFilter === 'all' ? 'bg-orange-100 text-orange-700' : 'bg-white text-gray-600 border hover:bg-gray-50'
-                                }`}
+                                className={`px-4 py-2 text-sm font-medium rounded-lg whitespace-nowrap transition-colors ${statusFilter === 'all' ? 'bg-orange-100 text-orange-700' : 'bg-white text-gray-600 border hover:bg-gray-50'
+                                    }`}
                             >
                                 Tất cả
                             </button>
                             <button
                                 onClick={() => setStatusFilter('out_of_stock')}
-                                className={`px-4 py-2 text-sm font-medium rounded-lg whitespace-nowrap transition-colors ${
-                                    statusFilter === 'out_of_stock' ? 'bg-red-100 text-red-700' : 'bg-white text-gray-600 border hover:bg-gray-50'
-                                }`}
+                                className={`px-4 py-2 text-sm font-medium rounded-lg whitespace-nowrap transition-colors ${statusFilter === 'out_of_stock' ? 'bg-red-100 text-red-700' : 'bg-white text-gray-600 border hover:bg-gray-50'
+                                    }`}
                             >
                                 Hết hàng
                             </button>
                             <button
                                 onClick={() => setStatusFilter('bestseller')}
-                                className={`px-4 py-2 text-sm font-medium rounded-lg whitespace-nowrap transition-colors ${
-                                    statusFilter === 'bestseller' ? 'bg-emerald-100 text-emerald-700' : 'bg-white text-gray-600 border hover:bg-gray-50'
-                                }`}
+                                className={`px-4 py-2 text-sm font-medium rounded-lg whitespace-nowrap transition-colors ${statusFilter === 'bestseller' ? 'bg-emerald-100 text-emerald-700' : 'bg-white text-gray-600 border hover:bg-gray-50'
+                                    }`}
                             >
                                 Bán chạy nhất
                             </button>
                         </div>
                     </div>
-
                     {/* Parts Table */}
                     <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-100">
                         {loading ? (
@@ -602,200 +597,198 @@ export default function PartsPage() {
                             </div>
                         ) : (
                             <>
-                            {/* Mobile Card View */}
-                            <div className="block md:hidden divide-y divide-gray-100">
-                                {paginatedParts.map((part) => (
-                                    <div key={part.id} className="p-4 space-y-2 hover:bg-gray-50 transition-colors">
-                                        <div className="flex items-start justify-between">
-                                            <div className="flex-1 min-w-0">
-                                                <p className="font-medium text-gray-900 text-sm">{part.name}</p>
-                                                <div className="flex flex-wrap gap-1 mt-1">
-                                                    {part.partType && (
-                                                        <span className="inline-block px-2 py-0.5 text-[10px] font-medium bg-emerald-100 text-emerald-700 rounded-full">
-                                                            {part.partType}
-                                                        </span>
-                                                    )}
-                                                    {part.quality && (
-                                                        <span className="inline-block px-2 py-0.5 text-[10px] font-medium bg-blue-100 text-blue-700 rounded-full">
-                                                            {part.quality}
-                                                        </span>
-                                                    )}
-                                                    {part.status === 'inactive' && (
-                                                        <span className="inline-block px-2 py-0.5 text-[10px] font-medium bg-red-100 text-red-700 rounded-full">
-                                                            Tạm ẩn
-                                                        </span>
-                                                    )}
-                                                </div>
-                                                {part.description && (
-                                                    <p className="text-xs text-gray-500 mt-1 line-clamp-1">{part.description}</p>
-                                                )}
-                                            </div>
-                                            <div className="flex items-baseline ml-3">
-                                                <span className={`text-sm font-bold ${(part.stock || 0) > 10 ? 'text-green-600' : (part.stock || 0) > 0 ? 'text-yellow-600' : 'text-red-600'}`}>
-                                                    Tồn: {part.stock || 0}
-                                                </span>
-                                                {(part.held || 0) > 0 && (
-                                                    <span className="text-xs font-medium text-gray-400 ml-1">
-                                                        (giữ: {part.held})
-                                                    </span>
-                                                )}
-                                            </div>
-                                        </div>
-                                        <div className="flex items-center justify-between bg-gray-50/80 rounded-lg px-3 py-2">
-                                            <div>
-                                                <p className="text-[10px] text-gray-400 uppercase font-medium">Giá vốn</p>
-                                                <p className="text-sm font-medium text-gray-800">
-                                                    {formatPrice(part.price_original)}
-                                                </p>
-                                                {part.supplier && <p className="text-[10px] text-gray-500 italic mt-0.5 max-w-[100px] truncate" title={part.supplier}>Nguồn: {part.supplier}</p>}
-                                                {part.oldCostPrice && part.oldCostPrice !== part.price_original && (
-                                                    <span className={`block text-[10px] font-bold mt-0.5 ${part.price_original > part.oldCostPrice ? 'text-red-500' : 'text-green-500'}`}>
-                                                        {part.price_original > part.oldCostPrice ? '▲' : '▼'} {formatPrice(Math.abs(part.price_original - part.oldCostPrice))}
-                                                    </span>
-                                                )}
-                                                {forecastCostPrices.has(part.id) && forecastCostPrices.get(part.id) !== part.price_original && (
-                                                    <span className="block text-[10px] font-bold mt-0.5 text-blue-500">
-                                                        Dự kiến: {formatPrice(forecastCostPrices.get(part.id)!)}
-                                                    </span>
-                                                )}
-                                            </div>
-                                            <div className="text-right mr-3">
-                                                <p className="text-[10px] text-gray-400 uppercase font-medium">Giá bán</p>
-                                                <p className="text-sm font-bold text-orange-600">{formatPrice(part.price_promo || 0)}</p>
-                                            </div>
-                                            <div className="flex items-center gap-1">
-                                                <button onClick={() => { setEditingPart(part); setIsModalOpen(true); }} className="p-2 hover:bg-blue-100 text-blue-600 rounded-lg" title="Sửa"><Edit size={18} /></button>
-                                                <button onClick={() => handleArchive(part)} className="p-2 hover:bg-red-100 text-red-600 rounded-lg" title="Lưu trữ"><Archive size={18} /></button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                            {/* Desktop Table View */}
-                            <div className="hidden md:block overflow-x-auto">
-                                <table className="w-full min-w-[800px]">
-                                    <thead className="bg-gray-50">
-                                        <tr>
-                                            <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Tên Linh Kiện</th>
-                                            <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Phân loại & Dòng máy</th>
-                                            <th className="px-6 py-3 text-center text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Giá Vốn & Nguồn</th>
-                                            <th className="px-6 py-3 text-center text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Giá Bán</th>
-                                            <th className="px-6 py-3 text-center text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Tồn Kho</th>
-                                            <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Hành động</th>
-                                        </tr>
-                                    </thead>
-                                <tbody className="divide-y divide-gray-100">
+                                {/* Mobile Card View */}
+                                <div className="block md:hidden divide-y divide-gray-100">
                                     {paginatedParts.map((part) => (
-                                        <tr key={part.id} className="hover:bg-orange-50/50 transition-colors">
-                                            <td className="px-6 py-4">
-                                                <p className="font-medium text-gray-900">{part.name}</p>
-                                                <div className="flex flex-wrap gap-1 mt-1">
-                                                    {part.partType && (
-                                                        <span className="inline-block px-2 py-0.5 text-[10px] font-medium bg-emerald-100 text-emerald-700 rounded-full">
-                                                            {part.partType}
-                                                        </span>
-                                                    )}
-                                                    {part.quality && (
-                                                        <span className="inline-block px-2 py-0.5 text-[10px] font-medium bg-blue-100 text-blue-700 rounded-full">
-                                                            {part.quality}
-                                                        </span>
-                                                    )}
-                                                    {part.status === 'inactive' && (
-                                                        <span className="inline-block px-2 py-0.5 text-[10px] font-medium bg-red-100 text-red-700 rounded-full">
-                                                            Tạm ẩn
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                <div className="flex flex-col gap-1">
-                                                    <span className="inline-block w-max px-2 py-0.5 text-[11px] font-medium bg-emerald-100 text-emerald-700 rounded-full">{part.partType || 'Chưa PL'}</span>
-                                                    <p className="text-xs text-gray-500 max-w-[180px] break-words line-clamp-2" title={part.description}>{part.description || 'Chưa cung cấp dòng máy'}</p>
-                                                </div>
-                                            </td>
-                                            <td className="px-6 py-4 text-center">
-                                                <p className="text-sm font-medium text-gray-800">{formatPrice(part.price_original)}</p>
-                                                {part.supplier && (
-                                                    <p className="text-[11px] text-gray-500 italic mt-0.5 whitespace-nowrap bg-gray-100 px-1.5 py-0.5 rounded inline-block">
-                                                        {part.supplier}
-                                                    </p>
-                                                )}
-                                                <div className="flex flex-col items-center gap-0.5 mt-1">
-                                                    {part.oldCostPrice && part.oldCostPrice !== part.price_original && (
-                                                        <p className={`text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm border ${
-                                                            part.price_original > part.oldCostPrice ? 'text-red-500 border-red-100 bg-red-50' : 'text-green-600 border-green-100 bg-green-50'
-                                                        }`}>
-                                                            {part.price_original > part.oldCostPrice ? '▲ Tăng' : '▼ Giảm'} {formatPrice(Math.abs(part.price_original - (part.oldCostPrice || 0)))}
-                                                        </p>
-                                                    )}
-                                                    {forecastCostPrices.has(part.id) && forecastCostPrices.get(part.id) !== part.price_original && (
-                                                        <p className="text-[10px] font-bold text-blue-600 bg-blue-50 border border-blue-100 px-1.5 py-0.5 rounded">
-                                                            Dự báo: {formatPrice(forecastCostPrices.get(part.id)!)}
-                                                        </p>
+                                        <div key={part.id} className="p-4 space-y-2 hover:bg-gray-50 transition-colors">
+                                            <div className="flex items-start justify-between">
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="font-medium text-gray-900 text-sm">{part.name}</p>
+                                                    <div className="flex flex-wrap gap-1 mt-1">
+                                                        {part.partType && (
+                                                            <span className="inline-block px-2 py-0.5 text-[10px] font-medium bg-emerald-100 text-emerald-700 rounded-full">
+                                                                {part.partType}
+                                                            </span>
+                                                        )}
+                                                        {part.quality && (
+                                                            <span className="inline-block px-2 py-0.5 text-[10px] font-medium bg-blue-100 text-blue-700 rounded-full">
+                                                                {part.quality}
+                                                            </span>
+                                                        )}
+                                                        {part.status === 'inactive' && (
+                                                            <span className="inline-block px-2 py-0.5 text-[10px] font-medium bg-red-100 text-red-700 rounded-full">
+                                                                Tạm ẩn
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    {part.description && (
+                                                        <p className="text-xs text-gray-500 mt-1 line-clamp-1">{part.description}</p>
                                                     )}
                                                 </div>
-                                            </td>
-                                            <td className="px-6 py-4 text-center">
-                                                <p className="text-sm font-bold text-orange-600">{formatPrice(part.price_promo || 0)}</p>
-                                            </td>
-                                            <td className="px-6 py-4 text-center">
-                                                <div className="flex flex-col items-center justify-center">
+                                                <div className="flex items-baseline ml-3">
                                                     <span className={`text-sm font-bold ${(part.stock || 0) > 10 ? 'text-green-600' : (part.stock || 0) > 0 ? 'text-yellow-600' : 'text-red-600'}`}>
-                                                        {part.stock || 0}
+                                                        Tồn: {part.stock || 0}
                                                     </span>
                                                     {(part.held || 0) > 0 && (
-                                                        <span className="text-[10px] font-medium text-gray-400 mt-0.5">
+                                                        <span className="text-xs font-medium text-gray-400 ml-1">
                                                             (giữ: {part.held})
                                                         </span>
                                                     )}
                                                 </div>
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                <div className="flex items-center justify-end gap-2">
-                                                    <button
-                                                        onClick={() => setQrPart(part as Product & { id: string })}
-                                                        className="p-2 hover:bg-orange-100 text-orange-600 rounded-lg transition-colors"
-                                                        title="In tem QR / barcode"
-                                                    >
-                                                        <QrCode size={18} />
-                                                    </button>
-                                                    <button
-                                                        onClick={() => { setEditingPart(part); setIsModalOpen(true); }}
-                                                        className="p-2 hover:bg-blue-100 text-blue-600 rounded-lg transition-colors"
-                                                        title="Sửa"
-                                                    >
-                                                        <Edit size={18} />
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleArchive(part)}
-                                                        className="p-2 hover:bg-red-100 text-red-600 rounded-lg transition-colors"
-                                                        title="Lưu trữ"
-                                                    >
-                                                        <Archive size={18} />
-                                                    </button>
+                                            </div>
+                                            <div className="flex items-center justify-between bg-gray-50/80 rounded-lg px-3 py-2">
+                                                <div>
+                                                    <p className="text-[10px] text-gray-400 uppercase font-medium">Giá vốn</p>
+                                                    <p className="text-sm font-medium text-gray-800">
+                                                        {formatPrice(part.price_original)}
+                                                    </p>
+                                                    {part.supplier && <p className="text-[10px] text-gray-500 italic mt-0.5 max-w-[100px] truncate" title={part.supplier}>Nguồn: {part.supplier}</p>}
+                                                    {part.oldCostPrice && part.oldCostPrice !== part.price_original && (
+                                                        <span className={`block text-[10px] font-bold mt-0.5 ${part.price_original > part.oldCostPrice ? 'text-red-500' : 'text-green-500'}`}>
+                                                            {part.price_original > part.oldCostPrice ? '▲' : '▼'} {formatPrice(Math.abs(part.price_original - part.oldCostPrice))}
+                                                        </span>
+                                                    )}
+                                                    {forecastCostPrices.has(part.id) && forecastCostPrices.get(part.id) !== part.price_original && (
+                                                        <span className="block text-[10px] font-bold mt-0.5 text-blue-500">
+                                                            Dự kiến: {formatPrice(forecastCostPrices.get(part.id)!)}
+                                                        </span>
+                                                    )}
                                                 </div>
-                                            </td>
-                                        </tr>
+                                                <div className="text-right mr-3">
+                                                    <p className="text-[10px] text-gray-400 uppercase font-medium">Giá bán</p>
+                                                    <p className="text-sm font-bold text-orange-600">{formatPrice(part.price_promo || 0)}</p>
+                                                </div>
+                                                <div className="flex items-center gap-1">
+                                                    <button onClick={() => { setEditingPart(part); setIsModalOpen(true); }} className="p-2 hover:bg-blue-100 text-blue-600 rounded-lg" title="Sửa"><Edit size={18} /></button>
+                                                    <button onClick={() => handleArchive(part)} className="p-2 hover:bg-red-100 text-red-600 rounded-lg" title="Lưu trữ"><Archive size={18} /></button>
+                                                </div>
+                                            </div>
+                                        </div>
                                     ))}
-                                </tbody>
-                                </table>
-                            </div>
-                            <PaginationBar
-                                currentPage={currentPage}
-                                totalPages={totalPages}
-                                pageSize={pageSize}
-                                totalFiltered={totalFiltered}
-                                totalAll={parts.length}
-                                onPageChange={setPage}
-                                onPageSizeChange={setPageSize}
-                                entityLabel="linh kiện"
-                            />
+                                </div>
+                                {/* Desktop Table View */}
+                                <div className="hidden md:block overflow-x-auto">
+                                    <table className="w-full min-w-[800px]">
+                                        <thead className="bg-gray-50">
+                                            <tr>
+                                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Tên Linh Kiện</th>
+                                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Phân loại & Dòng máy</th>
+                                                <th className="px-6 py-3 text-center text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Giá Vốn & Nguồn</th>
+                                                <th className="px-6 py-3 text-center text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Giá Bán</th>
+                                                <th className="px-6 py-3 text-center text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Tồn Kho</th>
+                                                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Hành động</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-100">
+                                            {paginatedParts.map((part) => (
+                                                <tr key={part.id} className="hover:bg-orange-50/50 transition-colors">
+                                                    <td className="px-6 py-4">
+                                                        <p className="font-medium text-gray-900">{part.name}</p>
+                                                        <div className="flex flex-wrap gap-1 mt-1">
+                                                            {part.partType && (
+                                                                <span className="inline-block px-2 py-0.5 text-[10px] font-medium bg-emerald-100 text-emerald-700 rounded-full">
+                                                                    {part.partType}
+                                                                </span>
+                                                            )}
+                                                            {part.quality && (
+                                                                <span className="inline-block px-2 py-0.5 text-[10px] font-medium bg-blue-100 text-blue-700 rounded-full">
+                                                                    {part.quality}
+                                                                </span>
+                                                            )}
+                                                            {part.status === 'inactive' && (
+                                                                <span className="inline-block px-2 py-0.5 text-[10px] font-medium bg-red-100 text-red-700 rounded-full">
+                                                                    Tạm ẩn
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-6 py-4">
+                                                        <div className="flex flex-col gap-1">
+                                                            <span className="inline-block w-max px-2 py-0.5 text-[11px] font-medium bg-emerald-100 text-emerald-700 rounded-full">{part.partType || 'Chưa PL'}</span>
+                                                            <p className="text-xs text-gray-500 max-w-[180px] break-words line-clamp-2" title={part.description}>{part.description || 'Chưa cung cấp dòng máy'}</p>
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-6 py-4 text-center">
+                                                        <p className="text-sm font-medium text-gray-800">{formatPrice(part.price_original)}</p>
+                                                        {part.supplier && (
+                                                            <p className="text-[11px] text-gray-500 italic mt-0.5 whitespace-nowrap bg-gray-100 px-1.5 py-0.5 rounded inline-block">
+                                                                {part.supplier}
+                                                            </p>
+                                                        )}
+                                                        <div className="flex flex-col items-center gap-0.5 mt-1">
+                                                            {part.oldCostPrice && part.oldCostPrice !== part.price_original && (
+                                                                <p className={`text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm border ${part.price_original > part.oldCostPrice ? 'text-red-500 border-red-100 bg-red-50' : 'text-green-600 border-green-100 bg-green-50'
+                                                                    }`}>
+                                                                    {part.price_original > part.oldCostPrice ? '▲ Tăng' : '▼ Giảm'} {formatPrice(Math.abs(part.price_original - (part.oldCostPrice || 0)))}
+                                                                </p>
+                                                            )}
+                                                            {forecastCostPrices.has(part.id) && forecastCostPrices.get(part.id) !== part.price_original && (
+                                                                <p className="text-[10px] font-bold text-blue-600 bg-blue-50 border border-blue-100 px-1.5 py-0.5 rounded">
+                                                                    Dự báo: {formatPrice(forecastCostPrices.get(part.id)!)}
+                                                                </p>
+                                                            )}
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-6 py-4 text-center">
+                                                        <p className="text-sm font-bold text-orange-600">{formatPrice(part.price_promo || 0)}</p>
+                                                    </td>
+                                                    <td className="px-6 py-4 text-center">
+                                                        <div className="flex flex-col items-center justify-center">
+                                                            <span className={`text-sm font-bold ${(part.stock || 0) > 10 ? 'text-green-600' : (part.stock || 0) > 0 ? 'text-yellow-600' : 'text-red-600'}`}>
+                                                                {part.stock || 0}
+                                                            </span>
+                                                            {(part.held || 0) > 0 && (
+                                                                <span className="text-[10px] font-medium text-gray-400 mt-0.5">
+                                                                    (giữ: {part.held})
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-6 py-4">
+                                                        <div className="flex items-center justify-end gap-2">
+                                                            <button
+                                                                onClick={() => setQrPart(part as Product & { id: string })}
+                                                                className="p-2 hover:bg-orange-100 text-orange-600 rounded-lg transition-colors"
+                                                                title="In tem QR / barcode"
+                                                            >
+                                                                <QrCode size={18} />
+                                                            </button>
+                                                            <button
+                                                                onClick={() => { setEditingPart(part); setIsModalOpen(true); }}
+                                                                className="p-2 hover:bg-blue-100 text-blue-600 rounded-lg transition-colors"
+                                                                title="Sửa"
+                                                            >
+                                                                <Edit size={18} />
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleArchive(part)}
+                                                                className="p-2 hover:bg-red-100 text-red-600 rounded-lg transition-colors"
+                                                                title="Lưu trữ"
+                                                            >
+                                                                <Archive size={18} />
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <PaginationBar
+                                    currentPage={currentPage}
+                                    totalPages={totalPages}
+                                    pageSize={pageSize}
+                                    totalFiltered={totalFiltered}
+                                    totalAll={parts.length}
+                                    onPageChange={setPage}
+                                    onPageSizeChange={setPageSize}
+                                    entityLabel="linh kiện"
+                                />
                             </>
                         )}
                     </div>
                 </>
             )}
-
             {/* ═══════ TAB 2: Import Proposals ═══════ */}
             {activeTab === 'proposals' && (
                 <div className="space-y-4">
@@ -815,7 +808,10 @@ export default function PartsPage() {
                                 const isExpanded = expandedReceiptId === receipt.id;
                                 const prices = editingPrices[receipt.id] || receipt.items.map(i => i.importPrice);
                                 const quantities = editingQuantities[receipt.id] || receipt.items.map(i => i.quantity);
-
+                                const unavailableCount = receipt.items.filter(isReceiptItemUnavailable).length;
+                                const importableItems = receipt.items.filter((item) => !isReceiptItemUnavailable(item));
+                                const missingSupplierCount = importableItems.filter((item) => !item.supplier && !item.supplierId).length;
+                                const importableTotal = calculateImportableTotal(receipt.items);
                                 return (
                                     <div key={receipt.id} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
                                         {/* Receipt Header */}
@@ -834,7 +830,7 @@ export default function PartsPage() {
                                                         <span className="font-semibold text-gray-800">#{receipt.id.slice(-6).toUpperCase()}</span>
                                                     </div>
                                                     <p className="text-sm text-gray-500 mt-0.5">
-                                                        {(() => { const s = [...new Set(receipt.items.map(i => i.supplier).filter(Boolean))]; return s.length > 0 ? s.join(', ') : 'Chưa gán NCC'; })()} · {receipt.items.length} sản phẩm · {formatDate(receipt.createdAt)}
+                                                        {(() => { const s = [...new Set(importableItems.map(i => i.supplier).filter(Boolean))]; return s.length > 0 ? s.join(', ') : 'Chưa gán NCC'; })()} · {importableItems.length} cần đặt{unavailableCount > 0 ? ` · ${unavailableCount} không có` : ''} · {formatDate(receipt.createdAt)}
                                                     </p>
                                                     {receipt.note && (
                                                         <p className="text-xs text-blue-600 mt-1 italic">{receipt.note}</p>
@@ -843,11 +839,10 @@ export default function PartsPage() {
                                             </div>
                                             <div className="flex items-center gap-2">
                                                 <span className="text-sm font-bold text-gray-700">
-                                                    {formatPrice(receipt.totalAmount)}
+                                                    {formatPrice(importableTotal)}
                                                 </span>
                                             </div>
                                         </div>
-
                                         {/* Expanded: Item Details + Price Editing */}
                                         {isExpanded && (
                                             <div className="border-t border-gray-100 overflow-x-auto">
@@ -867,8 +862,10 @@ export default function PartsPage() {
                                                         {receipt.items.map((item, idx) => {
                                                             const priceVal = prices[idx] ?? item.importPrice;
                                                             const isCustom = !parts.find(p => p.id === item.productId) || parts.find(p => p.id === item.productId)?.isProposed;
+                                                            const itemAvailability = getReceiptItemAvailability(item);
+                                                            const isUnavailable = itemAvailability === 'unavailable';
                                                             return (
-                                                                <tr key={idx} className="hover:bg-orange-50/30">
+                                                                <tr key={item.partLineId || `${item.productId}_${idx}`} className={isUnavailable ? 'bg-red-50/60 text-gray-400' : 'hover:bg-orange-50/30'}>
                                                                     <td className="px-6 py-3">
                                                                         <p className="font-medium text-gray-800 text-sm">{item.productName}</p>
                                                                         <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
@@ -889,6 +886,7 @@ export default function PartsPage() {
                                                                         <input
                                                                             type="number"
                                                                             value={quantities[idx] ?? item.quantity}
+                                                                            disabled={isUnavailable}
                                                                             onChange={(e) => {
                                                                                 const newQ = [...quantities];
                                                                                 newQ[idx] = Number(e.target.value) || 0;
@@ -904,6 +902,7 @@ export default function PartsPage() {
                                                                     <td className="px-6 py-3">
                                                                         <CurrencyInput
                                                                             value={priceVal}
+                                                                            disabled={isUnavailable}
                                                                             onChange={(v) => {
                                                                                 const newPrices = [...prices];
                                                                                 newPrices[idx] = v;
@@ -924,13 +923,13 @@ export default function PartsPage() {
                                                                                     <input
                                                                                         type="text"
                                                                                         value={isActive ? draftSupplierSearch : (item.supplier || '')}
+                                                                                        disabled={isUnavailable}
                                                                                         onChange={(e) => { setDraftSupplierSearch(e.target.value); setDraftSupplierActiveKey(itemKey); }}
                                                                                         onFocus={() => { setDraftSupplierActiveKey(itemKey); setDraftSupplierSearch(item.supplier || ''); }}
                                                                                         onBlur={() => setTimeout(() => setDraftSupplierActiveKey(null), 200)}
                                                                                         placeholder="Chọn NCC"
-                                                                                        className={`w-full max-w-[140px] h-9 px-2 text-xs border rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 ${
-                                                                                            !item.supplier ? 'border-red-300 bg-red-50/50' : 'border-gray-300'
-                                                                                        }`}
+                                                                                        className={`w-full max-w-[140px] h-9 px-2 text-xs border rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 ${!item.supplier ? 'border-red-300 bg-red-50/50' : 'border-gray-300'
+                                                                                            }`}
                                                                                     />
                                                                                     {isActive && (filtered.length > 0 || isNew) && (
                                                                                         <div className="absolute z-50 mt-1 w-48 max-h-40 overflow-y-auto bg-white border rounded-lg shadow-lg text-xs">
@@ -956,39 +955,33 @@ export default function PartsPage() {
                                                                         })()}
                                                                     </td>
                                                                     <td className="px-6 py-3 text-right text-sm font-semibold text-gray-700">
-                                                                        {formatPrice(priceVal * (quantities[idx] ?? item.quantity))}
+                                                                        {isUnavailable ? 'Đã loại' : formatPrice(priceVal * (quantities[idx] ?? item.quantity))}
                                                                     </td>
                                                                     <td className="px-6 py-3 text-right text-xs">
-                                                                        {receipt.repairTicketId ? (
-                                                                            <div className="flex items-center justify-end gap-1.5">
-                                                                                <button
-                                                                                    type="button"
-                                                                                    onClick={() => handleMarkAvailability(receipt, item, true)}
-                                                                                    disabled={isProcessing}
-                                                                                    className={`px-2 py-1 rounded-full text-[11px] font-semibold transition-colors disabled:opacity-50 ${
-                                                                                        item.availability === 'in_stock' 
-                                                                                        ? 'bg-emerald-500 text-white border-transparent shadow-sm' 
+                                                                        <div className="flex items-center justify-end gap-1.5" data-testid={`availability-${item.partLineId || idx}`}>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => handleMarkAvailability(receipt, item, idx, true)}
+                                                                                disabled={isProcessing}
+                                                                                className={`px-2 py-1 rounded-full text-[11px] font-semibold transition-colors disabled:opacity-50 ${(itemAvailability === 'in_stock' || itemAvailability === 'approved')
+                                                                                        ? 'bg-emerald-500 text-white border-transparent shadow-sm'
                                                                                         : 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
                                                                                     }`}
-                                                                                >
-                                                                                    {item.availability === 'in_stock' ? '✓ Đã báo Có' : 'Có hàng'}
-                                                                                </button>
-                                                                                <button
-                                                                                    type="button"
-                                                                                    onClick={() => handleMarkAvailability(receipt, item, false)}
-                                                                                    disabled={isProcessing}
-                                                                                    className={`px-2 py-1 rounded-full text-[11px] font-semibold transition-colors disabled:opacity-50 ${
-                                                                                        item.availability === 'unavailable' 
-                                                                                        ? 'bg-red-500 text-white border-transparent shadow-sm' 
+                                                                            >
+                                                                                {(itemAvailability === 'in_stock' || itemAvailability === 'approved') ? '✓ Có hàng' : 'Có hàng'}
+                                                                            </button>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => handleMarkAvailability(receipt, item, idx, false)}
+                                                                                disabled={isProcessing}
+                                                                                className={`px-2 py-1 rounded-full text-[11px] font-semibold transition-colors disabled:opacity-50 ${itemAvailability === 'unavailable'
+                                                                                        ? 'bg-red-500 text-white border-transparent shadow-sm'
                                                                                         : 'bg-red-50 text-red-600 border border-red-200 hover:bg-red-100'
                                                                                     }`}
-                                                                                >
-                                                                                    {item.availability === 'unavailable' ? '✓ Đã báo Hết' : 'Không có'}
-                                                                                </button>
-                                                                            </div>
-                                                                        ) : (
-                                                                            <span className="text-[11px] text-gray-400 italic">Phiếu lẻ</span>
-                                                                        )}
+                                                                            >
+                                                                                {itemAvailability === 'unavailable' ? '✓ Không có' : 'Không có'}
+                                                                            </button>
+                                                                        </div>
                                                                     </td>
                                                                 </tr>
                                                             );
@@ -998,20 +991,20 @@ export default function PartsPage() {
                                                         <tr className="bg-gray-50">
                                                             <td colSpan={5} className="px-6 py-3 text-right text-sm font-bold text-gray-700">Tổng cộng:</td>
                                                             <td className="px-6 py-3 text-right text-sm font-bold text-orange-600">
-                                                                {formatPrice(prices.reduce((sum, p, idx) => sum + p * (quantities[idx] ?? receipt.items[idx]?.quantity ?? 1), 0))}
+                                                                {formatPrice(receipt.items.reduce((sum, item, idx) => (
+                                                                    sum + (isReceiptItemUnavailable(item) ? 0 : prices[idx] * (quantities[idx] ?? item.quantity))
+                                                                ), 0))}
                                                             </td>
                                                         </tr>
                                                     </tfoot>
                                                 </table>
-
                                                 {/* Warning: missing NCC */}
-                                                {receipt.items.some(i => !i.supplier) && (
+                                                {missingSupplierCount > 0 && (
                                                     <div className="flex items-center gap-2 px-4 py-2.5 bg-amber-50 border-t border-amber-200 text-amber-700 text-xs font-medium">
                                                         <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" /></svg>
-                                                        Còn {receipt.items.filter(i => !i.supplier).length}/{receipt.items.length} sản phẩm chưa gán NCC
+                                                        Còn {missingSupplierCount}/{importableItems.length} linh kiện cần đặt chưa gán NCC
                                                     </div>
                                                 )}
-
                                                 {/* Action Buttons */}
                                                 <div className="flex items-center justify-end gap-3 p-4 border-t bg-gray-50/50">
                                                     <button
@@ -1024,13 +1017,12 @@ export default function PartsPage() {
                                                     </button>
                                                     <button
                                                         onClick={() => handleOrderReceipt(receipt)}
-                                                        disabled={isProcessing || receipt.items.some(i => !i.supplier)}
-                                                        className={`flex items-center gap-1.5 px-5 py-2 text-sm font-bold rounded-lg transition-colors disabled:opacity-50 shadow-sm ${
-                                                            receipt.items.some(i => !i.supplier)
+                                                        disabled={isProcessing || importableItems.length === 0 || missingSupplierCount > 0}
+                                                        className={`flex items-center gap-1.5 px-5 py-2 text-sm font-bold rounded-lg transition-colors disabled:opacity-50 shadow-sm ${importableItems.length === 0 || missingSupplierCount > 0
                                                                 ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                                                                 : 'text-white bg-blue-600 hover:bg-blue-700'
-                                                        }`}
-                                                        title={receipt.items.some(i => !i.supplier) ? 'Cần gán NCC cho tất cả sản phẩm' : ''}
+                                                            }`}
+                                                        title={importableItems.length === 0 ? 'Không còn linh kiện có thể đặt' : missingSupplierCount > 0 ? 'Cần gán NCC cho các linh kiện sẽ đặt' : ''}
                                                     >
                                                         {isProcessing ? <Loader2 size={15} className="animate-spin" /> : <PackagePlus size={15} />}
                                                         Chốt Đặt hàng
@@ -1045,7 +1037,6 @@ export default function PartsPage() {
                     )}
                 </div>
             )}
-
             {/* ═══════ TAB 3: Ordered Receipts ═══════ */}
             {activeTab === 'ordered' && (
                 <div className="space-y-4">
@@ -1062,7 +1053,9 @@ export default function PartsPage() {
                         <div className="space-y-3">
                             {orderedReceipts.map((receipt) => {
                                 const isExpanded = expandedReceiptId === receipt.id;
-
+                                const unavailableCount = receipt.items.filter(isReceiptItemUnavailable).length;
+                                const importableItems = receipt.items.filter((item) => !isReceiptItemUnavailable(item));
+                                const importableTotal = calculateImportableTotal(receipt.items);
                                 return (
                                     <div key={receipt.id} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
                                         <div
@@ -1080,7 +1073,7 @@ export default function PartsPage() {
                                                         <span className="font-semibold text-gray-800">#{receipt.id.slice(-6).toUpperCase()}</span>
                                                     </div>
                                                     <p className="text-sm text-gray-500 mt-0.5">
-                                                        {(() => { const s = [...new Set(receipt.items.map(i => i.supplier).filter(Boolean))]; return s.length > 0 ? s.join(', ') : 'Chưa gán NCC'; })()} · {receipt.items.length} sản phẩm · {formatDate(receipt.createdAt)}
+                                                        {(() => { const s = [...new Set(importableItems.map(i => i.supplier).filter(Boolean))]; return s.length > 0 ? s.join(', ') : 'Chưa gán NCC'; })()} · {importableItems.length} chờ nhập{unavailableCount > 0 ? ` · ${unavailableCount} không có` : ''} · {formatDate(receipt.createdAt)}
                                                     </p>
                                                     {receipt.note && (
                                                         <p className="text-xs text-blue-600 mt-1 italic">{receipt.note}</p>
@@ -1089,11 +1082,10 @@ export default function PartsPage() {
                                             </div>
                                             <div className="flex items-center gap-2">
                                                 <span className="text-sm font-bold text-gray-700">
-                                                    {formatPrice(receipt.totalAmount)}
+                                                    {formatPrice(importableTotal)}
                                                 </span>
                                             </div>
                                         </div>
-
                                         {isExpanded && (
                                             <div className="border-t border-gray-100 overflow-x-auto">
                                                 <table className="w-full min-w-[600px]">
@@ -1104,13 +1096,16 @@ export default function PartsPage() {
                                                             <th className="px-6 py-2 text-center text-xs font-semibold text-gray-500">SL</th>
                                                             <th className="px-6 py-2 text-center text-xs font-semibold text-gray-500">Giá nhập (VNĐ)</th>
                                                             <th className="px-6 py-2 text-right text-xs font-semibold text-gray-500">Thành tiền</th>
+                                                            <th className="px-6 py-2 text-right text-xs font-semibold text-gray-500">Tình trạng</th>
                                                         </tr>
                                                     </thead>
                                                     <tbody className="divide-y divide-gray-50">
                                                         {receipt.items.map((item, idx) => {
                                                             const isCustom = !parts.find(p => p.id === item.productId) || parts.find(p => p.id === item.productId)?.isProposed;
+                                                            const itemAvailability = getReceiptItemAvailability(item);
+                                                            const isUnavailable = itemAvailability === 'unavailable';
                                                             return (
-                                                                <tr key={idx} className="hover:bg-blue-50/30">
+                                                                <tr key={item.partLineId || `${item.productId}_${idx}`} className={isUnavailable ? 'bg-red-50/60 text-gray-400' : 'hover:bg-blue-50/30'}>
                                                                     <td className="px-6 py-3">
                                                                         <p className="font-medium text-gray-800 text-sm">{item.productName}</p>
                                                                         {isCustom && (
@@ -1125,7 +1120,33 @@ export default function PartsPage() {
                                                                         {formatPrice(item.importPrice)}
                                                                     </td>
                                                                     <td className="px-6 py-3 text-right text-sm font-semibold text-gray-700">
-                                                                        {formatPrice(item.importPrice * item.quantity)}
+                                                                        {isUnavailable ? 'Đã loại' : formatPrice(item.importPrice * item.quantity)}
+                                                                    </td>
+                                                                    <td className="px-6 py-3 text-right text-xs">
+                                                                        <div className="flex items-center justify-end gap-1.5" data-testid={`ordered-availability-${item.partLineId || idx}`}>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => handleMarkAvailability(receipt, item, idx, true)}
+                                                                                disabled={isProcessing}
+                                                                                className={`px-2 py-1 rounded-full text-[11px] font-semibold transition-colors disabled:opacity-50 ${(itemAvailability === 'in_stock' || itemAvailability === 'approved')
+                                                                                        ? 'bg-emerald-500 text-white'
+                                                                                        : 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
+                                                                                    }`}
+                                                                            >
+                                                                                {(itemAvailability === 'in_stock' || itemAvailability === 'approved') ? '✓ Có hàng' : 'Có hàng'}
+                                                                            </button>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => handleMarkAvailability(receipt, item, idx, false)}
+                                                                                disabled={isProcessing}
+                                                                                className={`px-2 py-1 rounded-full text-[11px] font-semibold transition-colors disabled:opacity-50 ${itemAvailability === 'unavailable'
+                                                                                        ? 'bg-red-500 text-white'
+                                                                                        : 'bg-red-50 text-red-600 border border-red-200 hover:bg-red-100'
+                                                                                    }`}
+                                                                            >
+                                                                                {itemAvailability === 'unavailable' ? '✓ Không có' : 'Không có'}
+                                                                            </button>
+                                                                        </div>
                                                                     </td>
                                                                 </tr>
                                                             );
@@ -1135,12 +1156,12 @@ export default function PartsPage() {
                                                         <tr className="bg-gray-50">
                                                             <td colSpan={4} className="px-6 py-3 text-right text-sm font-bold text-gray-700">Tổng cộng:</td>
                                                             <td className="px-6 py-3 text-right text-sm font-bold text-orange-600">
-                                                                {formatPrice(receipt.totalAmount)}
+                                                                {formatPrice(importableTotal)}
                                                             </td>
+                                                            <td />
                                                         </tr>
                                                     </tfoot>
                                                 </table>
-
                                                 <div className="flex items-center justify-end gap-3 p-4 border-t bg-gray-50/50">
                                                     <button
                                                         onClick={() => handleDeleteDraft(receipt.id)}
@@ -1152,7 +1173,7 @@ export default function PartsPage() {
                                                     </button>
                                                     <button
                                                         onClick={() => handleImportReceipt(receipt)}
-                                                        disabled={isProcessing}
+                                                        disabled={isProcessing || importableItems.length === 0}
                                                         className="flex items-center gap-1.5 px-5 py-2 text-sm font-bold text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors disabled:opacity-50 shadow-sm"
                                                     >
                                                         {isProcessing ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}
@@ -1168,7 +1189,6 @@ export default function PartsPage() {
                     )}
                 </div>
             )}
-
             {/* Modal */}
             <UniversalProductModal
                 isOpen={isModalOpen}
@@ -1179,7 +1199,6 @@ export default function PartsPage() {
                 onUpdated={() => setIsModalOpen(false)}
                 partTypeOptions={partTypeOptions}
             />
-
             {/* Confirm UI Modal */}
             <Modal
                 isOpen={confirmModal.isOpen}
@@ -1203,15 +1222,13 @@ export default function PartsPage() {
                             confirmModal.onConfirm();
                             setConfirmModal(prev => ({ ...prev, isOpen: false }));
                         }}
-                        className={`px-5 py-2.5 text-sm font-semibold text-white rounded-xl transition-colors shadow-sm ${
-                            confirmModal.dangerous ? 'bg-red-500 hover:bg-red-600' : 'bg-blue-600 hover:bg-blue-700'
-                        }`}
+                        className={`px-5 py-2.5 text-sm font-semibold text-white rounded-xl transition-colors shadow-sm ${confirmModal.dangerous ? 'bg-red-500 hover:bg-red-600' : 'bg-blue-600 hover:bg-blue-700'
+                            }`}
                     >
                         {confirmModal.confirmText || 'Xác nhận'}
                     </button>
                 </div>
             </Modal>
-
             {/* Import Preview Modal */}
             {importPreviewModal.isOpen && (
                 <ImportPreviewModal
@@ -1223,7 +1240,6 @@ export default function PartsPage() {
                     onConfirm={executeFinalImport}
                 />
             )}
-
             {/* Create Receipt Modal */}
             {isCreateReceiptOpen && (
                 <CreateReceiptModal
@@ -1238,12 +1254,10 @@ export default function PartsPage() {
             )}
             <ProductQrLabelModal product={qrPart} onClose={() => setQrPart(null)} />
             <FixHiddenProductsModal isOpen={showFixHidden} onClose={() => setShowFixHidden(false)} products={products} />
+            <LotTrackingModal isOpen={isLotTrackingOpen} onClose={() => setIsLotTrackingOpen(false)} />
         </div>
     );
 }
-
-
-
 interface ImportPreviewModalProps {
     importPreviewModal: ImportPreviewState;
     setImportPreviewModal: React.Dispatch<React.SetStateAction<ImportPreviewState>>;
@@ -1252,7 +1266,6 @@ interface ImportPreviewModalProps {
     suppliers: SupplierOption[];
     onConfirm: (paymentMethod: 'paid' | 'debt') => Promise<void>;
 }
-
 // Import Preview Modal Component
 function ImportPreviewModal({
     importPreviewModal,
@@ -1264,12 +1277,15 @@ function ImportPreviewModal({
     const { receipt, newParts } = importPreviewModal;
     const [loading, setLoading] = useState(false);
     const [paymentMethod, setPaymentMethod] = useState<'paid' | 'debt'>('debt');
-
     if (!receipt) return null;
-
-    const newItems = receipt.items.filter((i: ImportReceiptItem) => i.productId in newParts);
-    const existingItems = receipt.items.filter((i: ImportReceiptItem) => !(i.productId in newParts));
-
+    const newItems = receipt.items.filter((i: ImportReceiptItem) => {
+        const partKey = i.productId || i.partLineId || '';
+        return partKey in newParts;
+    });
+    const existingItems = receipt.items.filter((i: ImportReceiptItem) => {
+        const partKey = i.productId || i.partLineId || '';
+        return !(partKey in newParts);
+    });
     const handleNewPartChange = (productId: string, field: string, value: string | number | string[]) => {
         setImportPreviewModal((prev) => ({
             ...prev,
@@ -1282,7 +1298,6 @@ function ImportPreviewModal({
             }
         }));
     };
-
     const handleNewPartTaxonomyChange = (productId: string, ids: string[], category: string) => {
         setImportPreviewModal((prev) => ({
             ...prev,
@@ -1296,17 +1311,16 @@ function ImportPreviewModal({
             }
         }));
     };
-
     const isRetail = receipt?.receiptType === 'retail';
-    const isReady = newItems.every((item: ImportReceiptItem) => {
-        const info = newParts[item.productId];
+    const isReady = newItems.every((item: ImportReceiptItem, idx: number) => {
+        const partKey = item.productId || item.partLineId || `custom_${idx}`;
+        const info = newParts[partKey];
         const hasTaxonomy = Boolean(info?.categoryIds && info.categoryIds.length > 0);
         if (isRetail) {
             return info && hasTaxonomy && Number(info.price_promo) > 0;
         }
         return info && hasTaxonomy && info.model && info.partType && Number(info.price_promo) > 0;
     });
-
     return (
         <Modal
             isOpen={true}
@@ -1314,72 +1328,71 @@ function ImportPreviewModal({
             title="Chi tiết nhập kho"
             size="2xl"
         >
-                <div className="p-6 overflow-y-auto flex-1 space-y-6">
-                    {/* Payment Method Toggle */}
-                    <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
-                        <h4 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                            <Building2 size={18} className="text-purple-500" />
-                            Phương thức thanh toán
-                        </h4>
-                        <div className="flex gap-3">
-                            <button
-                                type="button"
-                                onClick={() => setPaymentMethod('debt')}
-                                className={`flex-1 py-2.5 px-4 rounded-xl text-sm font-medium border-2 transition-all ${
-                                    paymentMethod === 'debt'
-                                        ? 'border-red-500 bg-red-50 text-red-700'
-                                        : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
+            <div className="p-6 overflow-y-auto flex-1 space-y-6">
+                {/* Payment Method Toggle */}
+                <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
+                    <h4 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                        <Building2 size={18} className="text-purple-500" />
+                        Phương thức thanh toán
+                    </h4>
+                    <div className="flex gap-3">
+                        <button
+                            type="button"
+                            onClick={() => setPaymentMethod('debt')}
+                            className={`flex-1 py-2.5 px-4 rounded-xl text-sm font-medium border-2 transition-all ${paymentMethod === 'debt'
+                                    ? 'border-red-500 bg-red-50 text-red-700'
+                                    : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
                                 }`}
-                            >
-                                📋 Ghi công nợ
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setPaymentMethod('paid')}
-                                className={`flex-1 py-2.5 px-4 rounded-xl text-sm font-medium border-2 transition-all ${
-                                    paymentMethod === 'paid'
-                                        ? 'border-green-500 bg-green-50 text-green-700'
-                                        : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
+                        >
+                            📋 Ghi công nợ
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setPaymentMethod('paid')}
+                            className={`flex-1 py-2.5 px-4 rounded-xl text-sm font-medium border-2 transition-all ${paymentMethod === 'paid'
+                                    ? 'border-green-500 bg-green-50 text-green-700'
+                                    : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
                                 }`}
-                            >
-                                💰 Thanh toán ngay
-                            </button>
-                        </div>
-                        <p className="text-xs text-gray-500 mt-2">
-                            {paymentMethod === 'debt'
-                                ? 'Số tiền sẽ được cộng vào công nợ NCC (theo từng SP).'
-                                : 'Ghi nhận đã thanh toán, không cộng công nợ.'}
-                        </p>
-                        {/* Per-item supplier summary */}
-                        {(() => {
-                            const supplierMap = new Map<string, number>();
-                            receipt.items.forEach(it => {
-                                const name = it.supplier || 'Chưa gán NCC';
-                                supplierMap.set(name, (supplierMap.get(name) || 0) + it.importPrice * it.quantity);
-                            });
-                            return supplierMap.size > 0 ? (
-                                <div className="mt-3 space-y-1">
-                                    {Array.from(supplierMap).map(([name, amount]) => (
-                                        <div key={name} className="flex justify-between text-xs">
-                                            <span className={name === 'Chưa gán NCC' ? 'text-yellow-600 italic' : 'text-gray-600'}>{name}</span>
-                                            <span className="font-medium text-gray-700">{new Intl.NumberFormat('vi-VN').format(amount)}đ</span>
-                                        </div>
-                                    ))}
-                                </div>
-                            ) : null;
-                        })()}
+                        >
+                            💰 Thanh toán ngay
+                        </button>
                     </div>
-
-                    {/* Existing Items Forecast */}
-                    {existingItems.length > 0 && (
-                        <div>
-                            <h4 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                                <CheckCircle2 size={18} className="text-blue-500" />
-                                Linh kiện đã có trong kho ({existingItems.length})
-                            </h4>
-                            <div className="bg-blue-50/50 rounded-xl p-4 border border-blue-100/50 space-y-3">
-                                {existingItems.map((item: ImportReceiptItem) => (
-                                    <div key={item.productId} className="flex justify-between items-center bg-white p-3 rounded-lg border border-gray-100 shadow-sm">
+                    <p className="text-xs text-gray-500 mt-2">
+                        {paymentMethod === 'debt'
+                            ? 'Số tiền sẽ được cộng vào công nợ NCC (theo từng SP).'
+                            : 'Ghi nhận đã thanh toán, không cộng công nợ.'}
+                    </p>
+                    {/* Per-item supplier summary */}
+                    {(() => {
+                        const supplierMap = new Map<string, number>();
+                        receipt.items.forEach(it => {
+                            const name = it.supplier || 'Chưa gán NCC';
+                            supplierMap.set(name, (supplierMap.get(name) || 0) + it.importPrice * it.quantity);
+                        });
+                        return supplierMap.size > 0 ? (
+                            <div className="mt-3 space-y-1">
+                                {Array.from(supplierMap).map(([name, amount]) => (
+                                    <div key={name} className="flex justify-between text-xs">
+                                        <span className={name === 'Chưa gán NCC' ? 'text-yellow-600 italic' : 'text-gray-600'}>{name}</span>
+                                        <span className="font-medium text-gray-700">{new Intl.NumberFormat('vi-VN').format(amount)}đ</span>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : null;
+                    })()}
+                </div>
+                {/* Existing Items Forecast */}
+                {existingItems.length > 0 && (
+                    <div>
+                        <h4 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                            <CheckCircle2 size={18} className="text-blue-500" />
+                            Linh kiện đã có trong kho ({existingItems.length})
+                        </h4>
+                        <div className="bg-blue-50/50 rounded-xl p-4 border border-blue-100/50 space-y-3">
+                            {existingItems.map((item: ImportReceiptItem, idx: number) => {
+                                const partKey = item.productId || item.partLineId || `existing_${idx}`;
+                                return (
+                                    <div key={partKey} className="flex justify-between items-center bg-white p-3 rounded-lg border border-gray-100 shadow-sm">
                                         <div>
                                             <p className="font-medium text-sm text-gray-800">{item.productName}</p>
                                             <p className="text-xs text-gray-500 mt-0.5">SL: {item.quantity} x {new Intl.NumberFormat('vi-VN').format(item.importPrice)}đ {item.supplier && <span className="text-purple-600 ml-1">· {item.supplier}</span>}</p>
@@ -1387,179 +1400,175 @@ function ImportPreviewModal({
                                         {forecastCostPrices.has(item.productId) && (
                                             <div className="text-right">
                                                 <p className="text-[10px] text-gray-500 uppercase font-medium">Giá vốn sẽ thành</p>
-                                                <p className={`text-sm font-bold flex items-center justify-end gap-1 ${
-                                                    forecastCostPrices.get(item.productId)! > (item.oldCostPrice || 0) ? 'text-red-600' : 'text-green-600'
-                                                }`}>
+                                                <p className={`text-sm font-bold flex items-center justify-end gap-1 ${forecastCostPrices.get(item.productId)! > (item.oldCostPrice || 0) ? 'text-red-600' : 'text-green-600'
+                                                    }`}>
                                                     {new Intl.NumberFormat('vi-VN').format(forecastCostPrices.get(item.productId)!)}đ
                                                     {forecastCostPrices.get(item.productId)! > (item.oldCostPrice || 0) ? <span className="text-xs text-red-500 ml-1">↑ tăng</span> : <span className="text-xs text-green-500 ml-1">↓ giảm</span>}
                                                 </p>
                                             </div>
                                         )}
                                     </div>
-                                ))}
-                            </div>
+                                );
+                            })}
                         </div>
-                    )}
-
-                    {/* New Items Configuration */}
-                    {newItems.length > 0 && (
-                        <div>
-                            <h4 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                                <PackagePlus size={18} className="text-orange-500" />
-                                {isRetail ? `Sản phẩm mới cần thông tin (${newItems.length})` : `Linh kiện mới cần thông tin (${newItems.length})`}
-                            </h4>
-                            <div className="space-y-4">
-                                {newItems.map((item: ImportReceiptItem) => {
-                                    const info = newParts[item.productId] || {};
-                                    return (
-                                        <div key={item.productId} className="bg-orange-50/50 border border-orange-100 p-4 rounded-xl space-y-4 shadow-sm">
-                                            <div>
-                                                <p className="font-medium text-gray-800 text-sm">{item.productName}</p>
-                                                <p className="text-xs text-gray-500 mt-0.5">Giá nhập: <span className="font-semibold text-red-500">{new Intl.NumberFormat('vi-VN').format(item.importPrice)}đ</span>, SL: {item.quantity}</p>
-                                            </div>
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                {isRetail ? (
-                                                    /* Retail: Category Taxonomy Selector */
-                                                    <>
-                                                        <div className="md:col-span-2">
-                                                            <label className="block text-xs font-medium text-gray-700 mb-1">Danh mục sản phẩm *</label>
-                                                            <CategoryTaxonomySelector
-                                                                type="retail"
-                                                                value={info.categoryIds || []}
-                                                                onChange={(ids, catName) => handleNewPartTaxonomyChange(item.productId, ids, catName)}
-                                                            />
-                                                        </div>
-                                                        <div>
-                                                            <label className="block text-xs font-medium text-gray-700 mb-1">Nguồn cung cấp *</label>
-                                                            <input
-                                                                type="text"
-                                                                value={info.supplier || ''}
-                                                                onChange={(e) => handleNewPartChange(item.productId, 'supplier', e.target.value)}
-                                                                className="w-full h-9 px-3 text-sm border border-gray-300 rounded-lg focus:border-orange-500 outline-none transition-colors"
-                                                                placeholder="Vd: Apple Store VN"
-                                                            />
-                                                        </div>
-                                                        <div>
-                                                            <label className="block text-xs font-medium text-gray-700 mb-1">Giá bán lẻ *</label>
-                                                            <CurrencyInput
-                                                                value={info.price_promo || ''}
-                                                                onChange={(v) => handleNewPartChange(item.productId, 'price_promo', v)}
-                                                                className="w-full h-9 px-3 text-sm border border-gray-300 rounded-lg focus:border-orange-500 outline-none transition-colors"
-                                                                placeholder="Vd: 25.000.000"
-                                                            />
-                                                        </div>
-                                                    </>
-                                                ) : (
-                                                    /* Component: taxonomy + model + partType fields */
-                                                    <>
-                                                        <div className="md:col-span-2">
-                                                            <label className="block text-xs font-medium text-gray-700 mb-1">Danh mục linh kiện *</label>
-                                                            <CategoryTaxonomySelector
-                                                                type="component"
-                                                                value={info.categoryIds || []}
-                                                                onChange={(ids) => handleNewPartTaxonomyChange(item.productId, ids, PART_CATEGORY_LABEL)}
-                                                            />
-                                                        </div>
-                                                        <div>
-                                                            <label className="block text-xs font-medium text-gray-700 mb-1">Dòng máy tương thích *</label>
-                                                            <input
-                                                                type="text"
-                                                                value={info.model || ''}
-                                                                onChange={(e) => handleNewPartChange(item.productId, 'model', e.target.value)}
-                                                                className="w-full h-9 px-3 text-sm border border-gray-300 rounded-lg focus:border-orange-500 outline-none transition-colors"
-                                                                placeholder="Vd: iPhone 13 Pro Max"
-                                                            />
-                                                        </div>
-                                                        <div>
-                                                            <label className="block text-xs font-medium text-gray-700 mb-1">Loại linh kiện *</label>
-                                                            <div className="relative">
-                                                                <select
-                                                                    value={info.partType || ''}
-                                                                    onChange={(e) => handleNewPartChange(item.productId, 'partType', e.target.value)}
-                                                                    title="Loại linh kiện"
-                                                                    aria-label="Loại linh kiện"
-                                                                    className="w-full h-9 px-3 text-sm border border-gray-300 rounded-lg focus:border-orange-500 outline-none appearance-none bg-white transition-colors"
-                                                                >
-                                                                    <option value="" disabled>-- Chọn loại --</option>
-                                                                    {partTypeOptions.map((opt: string) => (
-                                                                        <option key={opt} value={opt}>{opt}</option>
-                                                                    ))}
-                                                                </select>
-                                                                <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-                                                            </div>
-                                                        </div>
-                                                        <div>
-                                                            <label className="block text-xs font-medium text-gray-700 mb-1">Nguồn cung cấp *</label>
-                                                            <input
-                                                                type="text"
-                                                                value={info.supplier || ''}
-                                                                onChange={(e) => handleNewPartChange(item.productId, 'supplier', e.target.value)}
-                                                                className="w-full h-9 px-3 text-sm border border-gray-300 rounded-lg focus:border-orange-500 outline-none transition-colors"
-                                                                placeholder="Vd: Zin LK Sài Gòn"
-                                                            />
-                                                        </div>
-                                                        <div>
-                                                            <label className="block text-xs font-medium text-gray-700 mb-1">Giá bán sửa chữa *</label>
-                                                            <CurrencyInput
-                                                                value={info.price_promo || ''}
-                                                                onChange={(v) => handleNewPartChange(item.productId, 'price_promo', v)}
-                                                                className="w-full h-9 px-3 text-sm border border-gray-300 rounded-lg focus:border-orange-500 outline-none transition-colors"
-                                                                placeholder="Vd: 500.000"
-                                                            />
-                                                        </div>
-                                                    </>
-                                                )}
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </div>
-                    )}
-
-                </div>
-                
-                <div className="bg-gray-50/80 px-6 py-4 flex items-center gap-3 justify-between border-t border-gray-100 shrink-0">
-                    <p className="text-sm text-gray-500">
-                        {newItems.length > 0 && !isReady ? 'Vui lòng chọn đúng taxonomy và điền đủ thông tin cho mặt hàng mới' : 'Xác nhận nhập kho sẽ cập nhật giá vốn và tồn kho'}
-                    </p>
-                    <div className="flex items-center gap-2">
-                        <button
-                            onClick={() => setImportPreviewModal({ isOpen: false, receipt: null, newParts: {} })}
-                            className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
-                        >
-                            Hủy
-                        </button>
-                        <button
-                            onClick={async () => {
-                                setLoading(true);
-                                await onConfirm(paymentMethod);
-                                setLoading(false);
-                            }}
-                            disabled={!isReady || loading}
-                            className={`px-6 py-2.5 text-sm font-semibold text-white rounded-xl transition-all shadow-sm flex items-center gap-2 ${
-                                isReady && !loading ? 'bg-orange-600 hover:bg-orange-700' : 'bg-gray-300 cursor-not-allowed hidden md:flex'
-                            }`}
-                        >
-                            {loading ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-                            Chốt Nhập Kho
-                        </button>
-                        
-                        {/* Mobile view text for disabled button */}
-                        <button
-                            disabled={true}
-                            className={`px-4 py-2 text-sm font-semibold text-white bg-gray-300 rounded-xl md:hidden ${
-                                isReady && !loading ? 'hidden' : 'block flex gap-1 items-center'
-                            }`}
-                        >
-                           Mục (*)
-                        </button>
                     </div>
+                )}
+                {/* New Items Configuration */}
+                {newItems.length > 0 && (
+                    <div>
+                        <h4 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                            <PackagePlus size={18} className="text-orange-500" />
+                            {isRetail ? `Sản phẩm mới cần thông tin (${newItems.length})` : `Linh kiện mới cần thông tin (${newItems.length})`}
+                        </h4>
+                        <div className="space-y-4">
+                            {newItems.map((item: ImportReceiptItem, idx: number) => {
+                                const partKey = item.productId || item.partLineId || `custom_${idx}`;
+                                const info = newParts[partKey] || {};
+                                return (
+                                    <div key={partKey} className="bg-orange-50/50 border border-orange-100 p-4 rounded-xl space-y-4 shadow-sm">
+                                        <div>
+                                            <p className="font-medium text-gray-800 text-sm">{item.productName} {item.quality && <span className="text-[10px] bg-white border border-gray-200 text-gray-600 px-1.5 py-0.5 rounded ml-2 font-medium">{item.quality}</span>}</p>
+                                            <p className="text-xs text-gray-500 mt-0.5">Giá nhập: <span className="font-semibold text-red-500">{new Intl.NumberFormat('vi-VN').format(item.importPrice)}đ</span>, SL: {item.quantity}</p>
+                                        </div>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            {isRetail ? (
+                                                /* Retail: Category Taxonomy Selector */
+                                                <>
+                                                    <div className="md:col-span-2">
+                                                        <label className="block text-xs font-medium text-gray-700 mb-1">Danh mục sản phẩm *</label>
+                                                        <CategoryTaxonomySelector
+                                                            type="retail"
+                                                            value={info.categoryIds || []}
+                                                            onChange={(ids, catName) => handleNewPartTaxonomyChange(partKey, ids, catName)}
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-xs font-medium text-gray-700 mb-1">Nguồn cung cấp *</label>
+                                                        <input
+                                                            type="text"
+                                                            value={info.supplier || ''}
+                                                            onChange={(e) => handleNewPartChange(partKey, 'supplier', e.target.value)}
+                                                            className="w-full h-9 px-3 text-sm border border-gray-300 rounded-lg focus:border-orange-500 outline-none transition-colors"
+                                                            placeholder="Vd: Apple Store VN"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-xs font-medium text-gray-700 mb-1">Giá bán lẻ *</label>
+                                                        <CurrencyInput
+                                                            value={info.price_promo || ''}
+                                                            onChange={(v) => handleNewPartChange(partKey, 'price_promo', v)}
+                                                            className="w-full h-9 px-3 text-sm border border-gray-300 rounded-lg focus:border-orange-500 outline-none transition-colors"
+                                                            placeholder="Vd: 25.000.000"
+                                                        />
+                                                    </div>
+                                                </>
+                                            ) : (
+                                                /* Component: taxonomy + model + partType fields */
+                                                <>
+                                                    <div className="md:col-span-2">
+                                                        <label className="block text-xs font-medium text-gray-700 mb-1">Danh mục linh kiện *</label>
+                                                        <CategoryTaxonomySelector
+                                                            type="component"
+                                                            value={info.categoryIds || []}
+                                                            onChange={(ids, catName) => handleNewPartTaxonomyChange(partKey, ids, catName)}
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-xs font-medium text-gray-700 mb-1">Dòng máy tương thích *</label>
+                                                        <input
+                                                            type="text"
+                                                            value={info.model || ''}
+                                                            onChange={(e) => handleNewPartChange(partKey, 'model', e.target.value)}
+                                                            className="w-full h-9 px-3 text-sm border border-gray-300 rounded-lg focus:border-orange-500 outline-none transition-colors"
+                                                            placeholder="Vd: iPhone 13 Pro Max"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-xs font-medium text-gray-700 mb-1">Loại linh kiện *</label>
+                                                        <div className="relative">
+                                                            <select
+                                                                value={info.partType || ''}
+                                                                onChange={(e) => handleNewPartChange(partKey, 'partType', e.target.value)}
+                                                                title="Loại linh kiện"
+                                                                aria-label="Loại linh kiện"
+                                                                className="w-full h-9 px-3 text-sm border border-gray-300 rounded-lg focus:border-orange-500 outline-none appearance-none bg-white transition-colors"
+                                                            >
+                                                                <option value="" disabled>-- Chọn loại --</option>
+                                                                {partTypeOptions.map((opt: string) => (
+                                                                    <option key={opt} value={opt}>{opt}</option>
+                                                                ))}
+                                                            </select>
+                                                            <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                                                        </div>
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-xs font-medium text-gray-700 mb-1">Nguồn cung cấp *</label>
+                                                        <input
+                                                            type="text"
+                                                            value={info.supplier || ''}
+                                                            onChange={(e) => handleNewPartChange(partKey, 'supplier', e.target.value)}
+                                                            className="w-full h-9 px-3 text-sm border border-gray-300 rounded-lg focus:border-orange-500 outline-none transition-colors"
+                                                            placeholder="Vd: Zin LK Sài Gòn"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-xs font-medium text-gray-700 mb-1">Giá bán sửa chữa *</label>
+                                                        <CurrencyInput
+                                                            value={info.price_promo || ''}
+                                                            onChange={(v) => handleNewPartChange(partKey, 'price_promo', v)}
+                                                            className="w-full h-9 px-3 text-sm border border-gray-300 rounded-lg focus:border-orange-500 outline-none transition-colors"
+                                                            placeholder="Vd: 500.000"
+                                                        />
+                                                    </div>
+                                                </>
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            <div className="bg-gray-50/80 px-6 py-4 flex items-center gap-3 justify-between border-t border-gray-100 shrink-0">
+                <p className="text-sm text-gray-500">
+                    {newItems.length > 0 && !isReady ? 'Vui lòng chọn đúng taxonomy và điền đủ thông tin cho mặt hàng mới' : 'Xác nhận nhập kho sẽ cập nhật giá vốn và tồn kho'}
+                </p>
+                <div className="flex items-center gap-2">
+                    <button
+                        onClick={() => setImportPreviewModal({ isOpen: false, receipt: null, newParts: {} })}
+                        className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
+                    >
+                        Hủy
+                    </button>
+                    <button
+                        onClick={async () => {
+                            setLoading(true);
+                            await onConfirm(paymentMethod);
+                            setLoading(false);
+                        }}
+                        disabled={!isReady || loading}
+                        className={`px-6 py-2.5 text-sm font-semibold text-white rounded-xl transition-all shadow-sm flex items-center gap-2 ${isReady && !loading ? 'bg-orange-600 hover:bg-orange-700' : 'bg-gray-300 cursor-not-allowed hidden md:flex'
+                            }`}
+                    >
+                        {loading ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                        Chốt Nhập Kho
+                    </button>
+
+                    {/* Mobile view text for disabled button */}
+                    <button
+                        disabled={true}
+                        className={`px-4 py-2 text-sm font-semibold text-white bg-gray-300 rounded-xl md:hidden ${isReady && !loading ? 'hidden' : 'block flex gap-1 items-center'
+                            }`}
+                    >
+                        Mục (*)
+                    </button>
                 </div>
+            </div>
         </Modal>
     );
 }
-
 interface CreateReceiptModalProps {
     isOpen: boolean;
     onClose: () => void;
@@ -1569,7 +1578,6 @@ interface CreateReceiptModalProps {
     currentUser: { uid: string; displayName?: string | null; email?: string | null } | null;
     suppliers: SupplierOption[];
 }
-
 // Create Receipt Modal
 function CreateReceiptModal({ isOpen, onClose, parts, retailProducts, onCreated, currentUser, suppliers }: CreateReceiptModalProps) {
     const [search, setSearch] = useState('');
@@ -1580,12 +1588,10 @@ function CreateReceiptModal({ isOpen, onClose, parts, retailProducts, onCreated,
     // Per-item supplier dropdown state
     const [activeSupplierIdx, setActiveSupplierIdx] = useState<number | null>(null);
     const [itemSupplierSearch, setItemSupplierSearch] = useState('');
-
     const searchSource = receiptType === 'component' ? parts : (retailProducts || []);
-    const filteredOptions = search.length > 1 
+    const filteredOptions = search.length > 1
         ? searchSource.filter((p: Product & { id: string }) => p.name.toLowerCase().includes(search.toLowerCase()))
         : [];
-
     const addItem = (part: Product & { id: string }) => {
         if (items.find(i => i.productId === part.id)) return;
         setItems([...items, {
@@ -1597,7 +1603,6 @@ function CreateReceiptModal({ isOpen, onClose, parts, retailProducts, onCreated,
         }]);
         setSearch('');
     };
-
     const addCustomItem = async () => {
         const exactName = search.trim();
         if (!exactName) return;
@@ -1645,19 +1650,15 @@ function CreateReceiptModal({ isOpen, onClose, parts, retailProducts, onCreated,
             toastError('Lỗi khi tạo linh kiện mới');
         }
     };
-
     const removeItem = (idx: number) => {
         setItems(items.filter((_, i) => i !== idx));
     };
-
     const updateItem = (idx: number, field: string, value: string | number) => {
         const newItems = [...items];
         newItems[idx] = { ...newItems[idx], [field]: value };
         setItems(newItems);
     };
-
     const totalAmount = items.reduce((sum, item) => sum + (item.importPrice * item.quantity), 0);
-
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (items.length === 0) return;
@@ -1682,9 +1683,7 @@ function CreateReceiptModal({ isOpen, onClose, parts, retailProducts, onCreated,
             setIsSubmitting(false);
         }
     };
-
     if (!isOpen) return null;
-
     return (
         <Modal
             isOpen={true}
@@ -1692,208 +1691,202 @@ function CreateReceiptModal({ isOpen, onClose, parts, retailProducts, onCreated,
             title="Tạo phiếu đề xuất nhập hàng"
             size="2xl"
         >
-                <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-6 pb-48">
-                    {/* Receipt Type Toggle */}
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Loại phiếu nhập</label>
-                        <div className="flex gap-2">
-                            <button
-                                type="button"
-                                onClick={() => { setReceiptType('component'); setItems([]); setSearch(''); }}
-                                className={`px-4 py-2 text-sm font-medium rounded-xl border transition-all ${
-                                    receiptType === 'component'
-                                        ? 'bg-orange-50 border-orange-300 text-orange-700 shadow-sm'
-                                        : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-                                }`}
-                            >
-                                🔧 Linh kiện
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => { setReceiptType('retail'); setItems([]); setSearch(''); }}
-                                className={`px-4 py-2 text-sm font-medium rounded-xl border transition-all ${
-                                    receiptType === 'retail'
-                                        ? 'bg-blue-50 border-blue-300 text-blue-700 shadow-sm'
-                                        : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-                                }`}
-                            >
-                                📦 Sản phẩm bán lẻ
-                            </button>
-                        </div>
-                    </div>
-
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Ghi chú</label>
-                        <input 
-                            type="text" value={note} onChange={(e) => setNote(e.target.value)}
-                            className="w-full h-10 px-3 border rounded-lg focus:ring-2 focus:ring-orange-500"
-                            placeholder="Vd: Nhập hàng gấp cho iPhone 13"
-                        />
-                    </div>
-
-                    <div className="relative">
-                        <label className="block text-sm font-medium text-gray-700 mb-1">{receiptType === 'retail' ? 'Tìm sản phẩm cần nhập' : 'Tìm linh kiện cần nhập'}</label>
-                        <div className="relative">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-                            <input 
-                                type="text" value={search} onChange={(e) => setSearch(e.target.value)}
-                                className="w-full h-11 pl-10 pr-4 border rounded-xl focus:ring-2 focus:ring-orange-500"
-                                placeholder={receiptType === 'retail' ? 'Gõ tên sản phẩm để tìm...' : 'Gõ tên linh kiện để tìm...'}
-                            />
-                        </div>
-                        
-                        {search.length > 1 && (
-                            <div className="absolute left-0 right-0 mt-1 bg-white border rounded-xl shadow-lg z-20 max-h-60 overflow-y-auto">
-                                {filteredOptions.length > 0 ? (
-                                    filteredOptions.map((p: Product & { id: string }) => (
-                                        <button 
-                                            key={p.id} type="button" onClick={() => addItem(p)}
-                                            className="w-full text-left px-4 py-3 hover:bg-orange-50 flex items-center justify-between border-b last:border-0"
-                                        >
-                                            <span className="font-medium text-sm">{p.name}</span>
-                                            <span className="text-xs text-gray-400">Tồn: {p.stock}</span>
-                                        </button>
-                                    ))
-                                ) : (
-                                    <button 
-                                        type="button" onClick={addCustomItem}
-                                        className="w-full text-left px-4 py-3 hover:bg-blue-50 text-blue-600 flex items-center gap-2"
-                                    >
-                                        <Plus size={16} />
-                                        <span className="text-sm">Thêm mới: &quot;{search}&quot;</span>
-                                    </button>
-                                )}
-                            </div>
-                        )}
-                    </div>
-
-                    <div className="space-y-3">
-                        <h4 className="font-semibold text-gray-700 text-sm">{receiptType === 'retail' ? `Danh sách sản phẩm chọn (${items.length})` : `Danh sách linh kiện chọn (${items.length})`}</h4>
-                        {items.length === 0 ? (
-                            <div className="text-center py-8 bg-gray-50 rounded-xl border-2 border-dashed border-gray-200 text-gray-400 text-sm">
-                                {receiptType === 'retail' ? 'Chưa có sản phẩm nào trong danh sách' : 'Chưa có linh kiện nào trong danh sách'}
-                            </div>
-                        ) : (
-                            <div className="border rounded-xl">
-                                <table className="w-full text-sm">
-                                    <thead className="bg-gray-50 font-medium [&>tr>th:first-child]:rounded-tl-xl [&>tr>th:last-child]:rounded-tr-xl">
-                                        <tr>
-                                            <th className="px-4 py-2 text-left">{receiptType === 'retail' ? 'Sản phẩm' : 'Linh kiện'}</th>
-                                            <th className="px-4 py-2 text-center w-20">SL</th>
-                                            <th className="px-4 py-2 text-right">Giá nhập</th>
-                                            <th className="px-4 py-2 text-left min-w-[140px]">NCC</th>
-                                            <th className="px-4 py-2 w-10"></th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y">
-                                        {items.map((item, idx) => (
-                                            <tr key={idx}>
-                                                <td className="px-4 py-3">
-                                                    <p className="font-medium">{item.productName}</p>
-                                                    {!parts.find((p) => p.id === item.productId && !p.isProposed) && <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">Mới</span>}
-                                                </td>
-                                                <td className="px-4 py-3">
-                                                    <input 
-                                                        type="number" value={item.quantity} onChange={(e) => updateItem(idx, 'quantity', Number(e.target.value))}
-                                                        title="Số lượng" aria-label="Số lượng" placeholder="SL"
-                                                        className="w-full h-8 text-center border rounded" min={1}
-                                                    />
-                                                </td>
-                                                <td className="px-4 py-3">
-                                                    <CurrencyInput 
-                                                        value={item.importPrice} onChange={(v) => updateItem(idx, 'importPrice', v)}
-                                                        title="Giá nhập" aria-label="Giá nhập" placeholder="Giá nhập"
-                                                        className="w-full h-8 text-right px-2 border rounded"
-                                                    />
-                                                </td>
-                                                <td className="px-4 py-3 relative">
-                                                    <input
-                                                        type="text"
-                                                        value={activeSupplierIdx === idx ? itemSupplierSearch : (item.supplier || '')}
-                                                        onChange={(e) => {
-                                                            setItemSupplierSearch(e.target.value);
-                                                            setActiveSupplierIdx(idx);
-                                                            if (!e.target.value) {
-                                                                const newItems = [...items];
-                                                                newItems[idx] = { ...newItems[idx], supplier: '', supplierId: undefined };
-                                                                setItems(newItems);
-                                                            }
-                                                        }}
-                                                        onFocus={() => { setActiveSupplierIdx(idx); setItemSupplierSearch(''); }}
-                                                        onBlur={() => setTimeout(() => setActiveSupplierIdx(null), 200)}
-                                                        className="w-full h-8 px-2 text-sm border rounded focus:ring-1 focus:ring-orange-400"
-                                                        placeholder="Chọn NCC"
-                                                    />
-                                                    {activeSupplierIdx === idx && (
-                                                        <div className="absolute left-0 right-0 mt-1 bg-white border rounded-lg shadow-lg z-30 max-h-40 overflow-y-auto">
-                                                            {suppliers
-                                                                .filter(s => s.name.toLowerCase().includes((itemSupplierSearch || '').toLowerCase()))
-                                                                .map(s => (
-                                                                    <button key={s.id} type="button"
-                                                                        onMouseDown={(e) => e.preventDefault()}
-                                                                        onClick={() => {
-                                                                            const newItems = [...items];
-                                                                            newItems[idx] = { ...newItems[idx], supplier: s.name, supplierId: s.id };
-                                                                            setItems(newItems);
-                                                                            setActiveSupplierIdx(null);
-                                                                            setItemSupplierSearch('');
-                                                                        }}
-                                                                        className="w-full text-left px-3 py-2 hover:bg-orange-50 text-sm border-b last:border-0"
-                                                                    >
-                                                                        {s.name}
-                                                                    </button>
-                                                                ))}
-                                                            {(itemSupplierSearch || '').trim() && !suppliers.some(s => s.name.toLowerCase() === (itemSupplierSearch || '').toLowerCase()) && (
-                                                                <button type="button"
-                                                                    onMouseDown={(e) => e.preventDefault()}
-                                                                    onClick={async () => {
-                                                                        const nm = (itemSupplierSearch || '').trim();
-                                                                        try {
-                                                                            const ref = await addDoc(collection(db, 'suppliers'), { name: nm, totalDebt: 0, isActive: true, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
-                                                                            const newItems = [...items];
-                                                                            newItems[idx] = { ...newItems[idx], supplier: nm, supplierId: ref.id };
-                                                                            setItems(newItems);
-                                                                            setActiveSupplierIdx(null);
-                                                                            setItemSupplierSearch('');
-                                                                            toastSuccess(`Đã tạo NCC "${nm}"`);
-                                                                        } catch { toastError('Lỗi tạo NCC'); }
-                                                                    }}
-                                                                    className="w-full text-left px-3 py-2 hover:bg-blue-50 text-blue-600 text-sm flex items-center gap-1"
-                                                                >
-                                                                    <Plus size={14} /> Tạo: &quot;{itemSupplierSearch}&quot;
-                                                                </button>
-                                                            )}
-                                                        </div>
-                                                    )}
-                                                </td>
-                                                <td className="px-4 py-3 text-center">
-                                                    <button type="button" title="Xóa" aria-label="Xóa" onClick={() => removeItem(idx)} className="text-red-400 hover:text-red-600 pt-1"><Trash2 size={16} /></button>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        )}
-                    </div>
-                </form>
-
-                <div className="p-6 border-t bg-gray-50 flex items-center justify-between">
-                    <div>
-                        <p className="text-xs text-gray-500 uppercase font-bold">Tổng tiền dự kiến</p>
-                        <p className="text-xl font-bold text-orange-600">{new Intl.NumberFormat('vi-VN').format(totalAmount)}đ</p>
-                    </div>
-                    <div className="flex gap-3">
-                        <button type="button" onClick={onClose} className="px-6 py-2 border rounded-xl font-medium hover:bg-white transition-colors">Hủy</button>
-                        <button 
+            <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-6 pb-48">
+                {/* Receipt Type Toggle */}
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Loại phiếu nhập</label>
+                    <div className="flex gap-2">
+                        <button
                             type="button"
-                            onClick={handleSubmit} disabled={items.length === 0 || isSubmitting}
-                            className="px-8 py-2 bg-orange-600 text-white rounded-xl font-bold hover:bg-orange-700 disabled:opacity-50 transition-colors shadow-sm"
+                            onClick={() => { setReceiptType('component'); setItems([]); setSearch(''); }}
+                            className={`px-4 py-2 text-sm font-medium rounded-xl border transition-all ${receiptType === 'component'
+                                    ? 'bg-orange-50 border-orange-300 text-orange-700 shadow-sm'
+                                    : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                                }`}
                         >
-                            {isSubmitting ? <Loader2 className="animate-spin" size={20} /> : 'Lưu bản nháp'}
+                            🔧 Linh kiện
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => { setReceiptType('retail'); setItems([]); setSearch(''); }}
+                            className={`px-4 py-2 text-sm font-medium rounded-xl border transition-all ${receiptType === 'retail'
+                                    ? 'bg-blue-50 border-blue-300 text-blue-700 shadow-sm'
+                                    : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                                }`}
+                        >
+                            📦 Sản phẩm bán lẻ
                         </button>
                     </div>
                 </div>
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Ghi chú</label>
+                    <input
+                        type="text" value={note} onChange={(e) => setNote(e.target.value)}
+                        className="w-full h-10 px-3 border rounded-lg focus:ring-2 focus:ring-orange-500"
+                        placeholder="Vd: Nhập hàng gấp cho iPhone 13"
+                    />
+                </div>
+                <div className="relative">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">{receiptType === 'retail' ? 'Tìm sản phẩm cần nhập' : 'Tìm linh kiện cần nhập'}</label>
+                    <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                        <input
+                            type="text" value={search} onChange={(e) => setSearch(e.target.value)}
+                            className="w-full h-11 pl-10 pr-4 border rounded-xl focus:ring-2 focus:ring-orange-500"
+                            placeholder={receiptType === 'retail' ? 'Gõ tên sản phẩm để tìm...' : 'Gõ tên linh kiện để tìm...'}
+                        />
+                    </div>
+
+                    {search.length > 1 && (
+                        <div className="absolute left-0 right-0 mt-1 bg-white border rounded-xl shadow-lg z-20 max-h-60 overflow-y-auto">
+                            {filteredOptions.length > 0 ? (
+                                filteredOptions.map((p: Product & { id: string }) => (
+                                    <button
+                                        key={p.id} type="button" onClick={() => addItem(p)}
+                                        className="w-full text-left px-4 py-3 hover:bg-orange-50 flex items-center justify-between border-b last:border-0"
+                                    >
+                                        <span className="font-medium text-sm">{p.name}</span>
+                                        <span className="text-xs text-gray-400">Tồn: {p.stock}</span>
+                                    </button>
+                                ))
+                            ) : (
+                                <button
+                                    type="button" onClick={addCustomItem}
+                                    className="w-full text-left px-4 py-3 hover:bg-blue-50 text-blue-600 flex items-center gap-2"
+                                >
+                                    <Plus size={16} />
+                                    <span className="text-sm">Thêm mới: &quot;{search}&quot;</span>
+                                </button>
+                            )}
+                        </div>
+                    )}
+                </div>
+                <div className="space-y-3">
+                    <h4 className="font-semibold text-gray-700 text-sm">{receiptType === 'retail' ? `Danh sách sản phẩm chọn (${items.length})` : `Danh sách linh kiện chọn (${items.length})`}</h4>
+                    {items.length === 0 ? (
+                        <div className="text-center py-8 bg-gray-50 rounded-xl border-2 border-dashed border-gray-200 text-gray-400 text-sm">
+                            {receiptType === 'retail' ? 'Chưa có sản phẩm nào trong danh sách' : 'Chưa có linh kiện nào trong danh sách'}
+                        </div>
+                    ) : (
+                        <div className="border rounded-xl">
+                            <table className="w-full text-sm">
+                                <thead className="bg-gray-50 font-medium [&>tr>th:first-child]:rounded-tl-xl [&>tr>th:last-child]:rounded-tr-xl">
+                                    <tr>
+                                        <th className="px-4 py-2 text-left">{receiptType === 'retail' ? 'Sản phẩm' : 'Linh kiện'}</th>
+                                        <th className="px-4 py-2 text-center w-20">SL</th>
+                                        <th className="px-4 py-2 text-right">Giá nhập</th>
+                                        <th className="px-4 py-2 text-left min-w-[140px]">NCC</th>
+                                        <th className="px-4 py-2 w-10"></th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y">
+                                    {items.map((item, idx) => (
+                                        <tr key={idx}>
+                                            <td className="px-4 py-3">
+                                                <p className="font-medium">{item.productName}</p>
+                                                {!parts.find((p) => p.id === item.productId && !p.isProposed) && <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">Mới</span>}
+                                            </td>
+                                            <td className="px-4 py-3">
+                                                <input
+                                                    type="number" value={item.quantity} onChange={(e) => updateItem(idx, 'quantity', Number(e.target.value))}
+                                                    title="Số lượng" aria-label="Số lượng" placeholder="SL"
+                                                    className="w-full h-8 text-center border rounded" min={1}
+                                                />
+                                            </td>
+                                            <td className="px-4 py-3">
+                                                <CurrencyInput
+                                                    value={item.importPrice} onChange={(v) => updateItem(idx, 'importPrice', v)}
+                                                    title="Giá nhập" aria-label="Giá nhập" placeholder="Giá nhập"
+                                                    className="w-full h-8 text-right px-2 border rounded"
+                                                />
+                                            </td>
+                                            <td className="px-4 py-3 relative">
+                                                <input
+                                                    type="text"
+                                                    value={activeSupplierIdx === idx ? itemSupplierSearch : (item.supplier || '')}
+                                                    onChange={(e) => {
+                                                        setItemSupplierSearch(e.target.value);
+                                                        setActiveSupplierIdx(idx);
+                                                        if (!e.target.value) {
+                                                            const newItems = [...items];
+                                                            newItems[idx] = { ...newItems[idx], supplier: '', supplierId: undefined };
+                                                            setItems(newItems);
+                                                        }
+                                                    }}
+                                                    onFocus={() => { setActiveSupplierIdx(idx); setItemSupplierSearch(''); }}
+                                                    onBlur={() => setTimeout(() => setActiveSupplierIdx(null), 200)}
+                                                    className="w-full h-8 px-2 text-sm border rounded focus:ring-1 focus:ring-orange-400"
+                                                    placeholder="Chọn NCC"
+                                                />
+                                                {activeSupplierIdx === idx && (
+                                                    <div className="absolute left-0 right-0 mt-1 bg-white border rounded-lg shadow-lg z-30 max-h-40 overflow-y-auto">
+                                                        {suppliers
+                                                            .filter(s => s.name.toLowerCase().includes((itemSupplierSearch || '').toLowerCase()))
+                                                            .map(s => (
+                                                                <button key={s.id} type="button"
+                                                                    onMouseDown={(e) => e.preventDefault()}
+                                                                    onClick={() => {
+                                                                        const newItems = [...items];
+                                                                        newItems[idx] = { ...newItems[idx], supplier: s.name, supplierId: s.id };
+                                                                        setItems(newItems);
+                                                                        setActiveSupplierIdx(null);
+                                                                        setItemSupplierSearch('');
+                                                                    }}
+                                                                    className="w-full text-left px-3 py-2 hover:bg-orange-50 text-sm border-b last:border-0"
+                                                                >
+                                                                    {s.name}
+                                                                </button>
+                                                            ))}
+                                                        {(itemSupplierSearch || '').trim() && !suppliers.some(s => s.name.toLowerCase() === (itemSupplierSearch || '').toLowerCase()) && (
+                                                            <button type="button"
+                                                                onMouseDown={(e) => e.preventDefault()}
+                                                                onClick={async () => {
+                                                                    const nm = (itemSupplierSearch || '').trim();
+                                                                    try {
+                                                                        const ref = await addDoc(collection(db, 'suppliers'), { name: nm, totalDebt: 0, isActive: true, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+                                                                        const newItems = [...items];
+                                                                        newItems[idx] = { ...newItems[idx], supplier: nm, supplierId: ref.id };
+                                                                        setItems(newItems);
+                                                                        setActiveSupplierIdx(null);
+                                                                        setItemSupplierSearch('');
+                                                                        toastSuccess(`Đã tạo NCC "${nm}"`);
+                                                                    } catch { toastError('Lỗi tạo NCC'); }
+                                                                }}
+                                                                className="w-full text-left px-3 py-2 hover:bg-blue-50 text-blue-600 text-sm flex items-center gap-1"
+                                                            >
+                                                                <Plus size={14} /> Tạo: &quot;{itemSupplierSearch}&quot;
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </td>
+                                            <td className="px-4 py-3 text-center">
+                                                <button type="button" title="Xóa" aria-label="Xóa" onClick={() => removeItem(idx)} className="text-red-400 hover:text-red-600 pt-1"><Trash2 size={16} /></button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </div>
+            </form>
+            <div className="p-6 border-t bg-gray-50 flex items-center justify-between">
+                <div>
+                    <p className="text-xs text-gray-500 uppercase font-bold">Tổng tiền dự kiến</p>
+                    <p className="text-xl font-bold text-orange-600">{new Intl.NumberFormat('vi-VN').format(totalAmount)}đ</p>
+                </div>
+                <div className="flex gap-3">
+                    <button type="button" onClick={onClose} className="px-6 py-2 border rounded-xl font-medium hover:bg-white transition-colors">Hủy</button>
+                    <button
+                        type="button"
+                        onClick={handleSubmit} disabled={items.length === 0 || isSubmitting}
+                        className="px-8 py-2 bg-orange-600 text-white rounded-xl font-bold hover:bg-orange-700 disabled:opacity-50 transition-colors shadow-sm"
+                    >
+                        {isSubmitting ? <Loader2 className="animate-spin" size={20} /> : 'Lưu bản nháp'}
+                    </button>
+                </div>
+            </div>
         </Modal>
     );
 }
