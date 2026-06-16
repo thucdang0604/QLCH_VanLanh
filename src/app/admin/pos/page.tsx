@@ -363,6 +363,7 @@ export default function POSPage() {
                         if (repair.paymentStatus === 'paid' || repair.paymentStatus === 'refunded') return;
 
                         newItems.push({
+                            cartItemId: repair.id,
                             productId: repair.id,
                             name: `[Phiếu sửa chữa] ${repair.deviceModel}`,
                             originalPrice: repair.paymentAmount,
@@ -377,6 +378,7 @@ export default function POSPage() {
                                 const cartGiftId = `gift_${repair.id}_${giftId}`;
                                 if (!cart.some(c => c.productId === cartGiftId) && !newItems.some(i => i.productId === cartGiftId)) {
                                     newItems.push({
+                                        cartItemId: cartGiftId,
                                         productId: cartGiftId,
                                         name: `[Quà tặng] Mã SP: ${giftId}`,
                                         originalPrice: 0,
@@ -712,6 +714,7 @@ export default function POSPage() {
             if (part.status === 'selected') {
                 usedPartsCount++;
                 newItems.push({
+                    cartItemId: `${repair.id}_part_${index}`,
                     productId: `${repair.id}_part_${index}`,
                     name: `[LK Sửa] ${part.productName}`,
                     originalPrice: part.unitPriceAtUse || 0,
@@ -730,6 +733,7 @@ export default function POSPage() {
         if (laborCost > 0 || (usedPartsCount === 0 && repair.paymentAmount > 0)) {
             const finalLaborCost = laborCost > 0 ? laborCost : repair.paymentAmount;
             newItems.push({
+                cartItemId: `${repair.id}_labor`,
                 productId: `${repair.id}_labor`,
                 name: `[Công SC] ${repair.deviceModel}`,
                 originalPrice: finalLaborCost,
@@ -746,6 +750,7 @@ export default function POSPage() {
                 const cartGiftId = `gift_${repair.id}_${giftId}`;
                 if (!cart.some(c => c.productId === cartGiftId)) {
                     newItems.push({
+                        cartItemId: cartGiftId,
                         productId: cartGiftId,
                         name: `[Quà tặng] Mã SP: ${giftId}`,
                         originalPrice: 0,
@@ -1567,9 +1572,12 @@ export default function POSPage() {
                                                     <div className="flex flex-wrap justify-center gap-2">
                                                         {defaultAccs.map((acc, idx) => (
                                                             <div key={idx} className="flex flex-col items-center">
-                                                                <img
+                                                                <Image
                                                                     src={`https://img.vietqr.io/image/${acc.bankId}-${acc.accountNo}-compact2.png?amount=${Math.max(0, lastOrder.total_amount - lastOrder.deposit_amount)}&addInfo=${lastOrder.id.slice(-6)}&accountName=${encodeURIComponent(acc.accountName || '')}`}
                                                                     alt="VietQR"
+                                                                    width={128}
+                                                                    height={128}
+                                                                    unoptimized
                                                                     className="w-32 h-32 object-contain mx-auto"
                                                                 />
                                                                 <span className="text-[9px] mt-1 text-gray-600">{acc.bankId}</span>

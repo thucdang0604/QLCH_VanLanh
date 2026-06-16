@@ -1,6 +1,6 @@
 {
   "projectName": "QLCH_VanLanh",
-  "lastSync": "2026-06-13T00:00:00.000Z",
+  "lastSync": "2026-06-16T00:00:00.000Z",
   "stats": {
     "completionPercent": 98,
     "openP0": 0,
@@ -10,6 +10,29 @@
   },
   "constraints": [],
   "aiPlans": [
+    {
+      "id": "plan-large-code-file-refactor-20260616",
+      "title": "Refactor cac file code lon theo phase",
+      "date": "16.06.2026",
+      "status": "in_progress",
+      "planFile": "data/ai_plans/plan_large_code_file_refactor_20260616.md",
+      "taskFile": "data/ai_plans/task_large_code_file_refactor_20260616.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_large_code_file_refactor_20260616.md",
+      "scope": [
+        "src/components/admin/ExcelImportModal.tsx",
+        "src/app/admin/parts/page.tsx",
+        "src/app/admin/repairs/page.tsx",
+        "src/app/admin/technician/page.tsx",
+        "src/app/admin/pos/page.tsx"
+      ],
+      "decisions": [
+        "Tach theo workflow nghiep vu va boundary pure logic/hook/API/component, khong tach co hoc theo so dong.",
+        "Moi phase phai focused ESLint va typecheck truoc khi sang phase tiep theo.",
+        "Uu tien dua business mutation ve API/service da co de tranh logic song song trong client page.",
+        "Bat dau voi ExcelImportModal vi co nhieu pure helper co the tach va test doc lap."
+      ],
+      "updatedAt": "2026-06-16T00:00:00.000Z"
+    },
     {
       "id": "plan-batch-tracking-fifo",
       "title": "Quản lý tồn kho theo Lô (Batch Tracking) kết hợp FIFO sổ sách",

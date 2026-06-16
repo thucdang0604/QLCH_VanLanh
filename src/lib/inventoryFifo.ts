@@ -59,7 +59,7 @@ export function executeFifoDeductionsWrites(
 
         let remainingToDeduct = req.quantityToDeduct;
         const results: FifoDeductionResult[] = [];
-        let productLots = lotsDataByProduct.get(req.productId) || [];
+        const productLots = lotsDataByProduct.get(req.productId) || [];
 
         // Pre-process preferred lots if any
         if (req.preferredLotCodes && req.preferredLotCodes.length > 0) {
@@ -69,7 +69,7 @@ export function executeFifoDeductionsWrites(
                 const lotIndex = productLots.findIndex(doc => doc.data.lotCode === pref.lotCode);
                 if (lotIndex >= 0) {
                     const doc = productLots[lotIndex];
-                    let lotRemaining = doc.data.remainingQuantity !== undefined ? Number(doc.data.remainingQuantity) : 0;
+                    const lotRemaining = doc.data.remainingQuantity !== undefined ? Number(doc.data.remainingQuantity) : 0;
                     if (lotRemaining > 0) {
                         const deductAmount = Math.min(lotRemaining, pref.quantity, remainingToDeduct);
                         if (deductAmount > 0) {

@@ -6,7 +6,7 @@ import type { RepairTicket } from '@/lib/types';
 import { calculateAndSaveCommissionsServer } from '@/lib/commissionCalcServer';
 import { REPAIR_STATUS, isSelectedRepairPart, isWarrantyEligibleRepairPart } from '@/lib/repairStatus';
 import { getConfiguredWorkflow } from '@/lib/repairWorkflowConfig';
-import { fetchFifoLogsForDeduction, executeFifoDeductionsWrites, type FifoDeductionResult } from '@/lib/inventoryFifo';
+import { fetchFifoLogsForDeduction, executeFifoDeductionsWrites, type FifoDeductionResult, type FifoDeductor } from '@/lib/inventoryFifo';
 
 const LEGACY_TERMINAL_STATUSES = [REPAIR_STATUS.DONE, REPAIR_STATUS.OUT, REPAIR_STATUS.REFUND, 'bh_hoan_tat', 'bh_tu_choi', 'bh_refund'];
 
@@ -112,7 +112,7 @@ export async function POST(request: NextRequest) {
 
             let fifoResultsMap = new Map<string, FifoDeductionResult[]>();
             let fifoLogsDataMap: Awaited<ReturnType<typeof fetchFifoLogsForDeduction>> = new Map();
-            let fifoDeductors: { productId: string, quantityToDeduct: number }[] = [];
+            let fifoDeductors: FifoDeductor[] = [];
 
             // --- READ PHASE ---
             let custSnap: FirebaseFirestore.DocumentSnapshot | null = null;
@@ -130,7 +130,7 @@ export async function POST(request: NextRequest) {
 
                 // Read products
                 if (selectedParts.length > 0) {
-                    const deductions = [];
+                    const deductions: (FifoDeductor & { lotCode?: string })[] = [];
                     for (const p of selectedParts) {
                         if (p.productId && !productDocs.has(p.productId)) {
                             const pRef = db.collection('products').doc(p.productId);
@@ -153,8 +153,8 @@ export async function POST(request: NextRequest) {
                                 fifoMap.set(curr.productId, fifoItem);
                             }
                             fifoItem.quantity += curr.quantityToDeduct;
-                            if ((curr as any).lotCode) {
-                                fifoItem.preferredLotCodes.set((curr as any).lotCode, (fifoItem.preferredLotCodes.get((curr as any).lotCode) || 0) + curr.quantityToDeduct);
+                            if (curr.lotCode) {
+                                fifoItem.preferredLotCodes.set(curr.lotCode, (fifoItem.preferredLotCodes.get(curr.lotCode) || 0) + curr.quantityToDeduct);
                             }
                         }
 
@@ -171,7 +171,7 @@ export async function POST(request: NextRequest) {
             }
             // --- END READ PHASE ---
 
-            let checkoutWarnings: string[] = [];
+            const checkoutWarnings: string[] = [];
 
             if (!isWarranty) {
                 // Execute FIFO Writes

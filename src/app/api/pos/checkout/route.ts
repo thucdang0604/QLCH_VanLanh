@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
 
             // Fetch products
             const productDocs = new Map<string, { ref: FirebaseFirestore.DocumentReference; data: FirebaseFirestore.DocumentData }>();
-            for (const productId of preAggregated.keys()) {
+            for (const productId of preAggregatedForStock.keys()) {
                 const pRef = db.collection('products').doc(productId);
                 const pSnap = await tx.get(pRef);
                 if (!pSnap.exists) {
@@ -115,7 +115,7 @@ export async function POST(request: NextRequest) {
             }
 
             // Verify stock
-            for (const [productId, totalQty] of preAggregated.entries()) {
+            for (const [productId, totalQty] of preAggregatedForStock.entries()) {
                 const pSnap = productDocs.get(productId)!;
                 const d = pSnap.data;
                 if (isProductArchived({ status: String(d.status || '') as 'active' | 'hidden' | 'inactive' }) || d.status !== PRODUCT_STATUS.ACTIVE || d.isProposed === true) {
@@ -308,7 +308,7 @@ export async function POST(request: NextRequest) {
             // ── ALL WRITES START HERE ──
             // ==========================================
 
-            let checkoutWarnings: string[] = [];
+            const checkoutWarnings: string[] = [];
 
             if (!isPending && fifoDeductors.length > 0) {
                 fifoResultsMap = executeFifoDeductionsWrites(tx, fifoDeductors, fifoLogsDataMap);
@@ -330,7 +330,7 @@ export async function POST(request: NextRequest) {
             }
 
             // Stock Deduction
-            for (const [productId, totalQty] of preAggregated.entries()) {
+            for (const [productId, totalQty] of preAggregatedForStock.entries()) {
                 const pSnap = productDocs.get(productId)!;
                 const d = pSnap.data;
                 const currentStock = Number(d.stock) || 0;

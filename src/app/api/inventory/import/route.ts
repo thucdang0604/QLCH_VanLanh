@@ -154,7 +154,7 @@ export async function POST(request: NextRequest) {
                 }
             };
             
-            let generatedLotsToReturn: { productId: string, productName: string, lotCode: string, quantity: number }[] | null = null;
+            let generatedLotsToReturn: { product: { id: string } & Record<string, unknown>, lotCode: string, copies: number }[] | null = null;
 
             if (action === 'order_receipt') {
                 if (receipt.status !== 'draft') {
