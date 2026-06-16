@@ -1,4 +1,4 @@
-﻿import { NextResponse, NextRequest } from 'next/server';
+import { NextResponse, NextRequest } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requirePermission } from '@/lib/apiAuth';
 import { FieldValue } from 'firebase-admin/firestore';
@@ -6,6 +6,7 @@ import type { RepairTicket } from '@/lib/types';
 import { calculateAndSaveCommissionsServer } from '@/lib/commissionCalcServer';
 import { REPAIR_STATUS, isSelectedRepairPart, isWarrantyEligibleRepairPart } from '@/lib/repairStatus';
 import { getConfiguredWorkflow } from '@/lib/repairWorkflowConfig';
+import { fetchFifoLogsForDeduction, executeFifoDeductionsWrites } from '@/lib/inventoryFifo';
 
 const LEGACY_TERMINAL_STATUSES = [REPAIR_STATUS.DONE, REPAIR_STATUS.OUT, REPAIR_STATUS.REFUND, 'bh_hoan_tat', 'bh_tu_choi', 'bh_refund'];
 
@@ -14,7 +15,7 @@ export async function POST(request: NextRequest) {
         const caller = await requirePermission(request, 'manage_repairs');
 
         const body = await request.json();
-        const { ticketId, targetStatus, ticketVersion, idempotencyKey } = body;
+        const { ticketId, targetStatus, ticketVersion, idempotencyKey, laborCost } = body;
 
         if (!ticketId || !targetStatus) {
             return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
@@ -86,7 +87,9 @@ export async function POST(request: NextRequest) {
             const currentPayment = ticket.payment || {} as RepairTicket['payment'];
             const additionalFees = Number(currentPayment.additionalFees) || 0;
             const discountAmount = Number(currentPayment.discountAmount) || 0;
-            const amount = partsCost + additionalFees - discountAmount;
+            const calculatedLaborCost = (ticket.issues || []).reduce((sum, i) => sum + (Number(i.estimatedPrice) || 0), 0);
+            const finalLaborCost = laborCost !== undefined ? Number(laborCost) : (currentPayment.laborCost !== undefined ? currentPayment.laborCost : calculatedLaborCost);
+            const amount = partsCost + finalLaborCost + additionalFees - discountAmount;
 
             const updateData: Record<string, unknown> = {
                 status: targetStatus,
@@ -98,6 +101,7 @@ export async function POST(request: NextRequest) {
                 payment: {
                     ...currentPayment,
                     partsCost,
+                    laborCost: finalLaborCost,
                     amount
                 },
                 version: (ticket.version || 0) + 1,
@@ -106,6 +110,10 @@ export async function POST(request: NextRequest) {
 
             const isWarranty = targetStatus.startsWith('bh_');
 
+            let fifoResultsMap = new Map<string, any[]>();
+            let fifoLogsDataMap = new Map<string, any[]>();
+            let fifoDeductors: { productId: string, quantityToDeduct: number }[] = [];
+            
             // --- READ PHASE ---
             let custSnap: FirebaseFirestore.DocumentSnapshot | null = null;
             let custRef: FirebaseFirestore.DocumentReference | null = null;
@@ -122,6 +130,7 @@ export async function POST(request: NextRequest) {
 
                 // Read products
                 if (selectedParts.length > 0) {
+                    const deductions = [];
                     for (const p of selectedParts) {
                         if (p.productId && !productDocs.has(p.productId)) {
                             const pRef = db.collection('products').doc(p.productId);
@@ -130,13 +139,42 @@ export async function POST(request: NextRequest) {
                                 productDocs.set(p.productId, { ref: pRef, data: pSnap.data() || {} });
                             }
                         }
+                        if (p.productId) {
+                            deductions.push({ productId: p.productId, quantityToDeduct: p.quantity });
+                        }
+                    }
+
+                    if (deductions.length > 0) {
+                        const aggregated = deductions.reduce((acc, curr) => {
+                            const existing = acc.find(a => a.productId === curr.productId);
+                            if (existing) {
+                                existing.quantityToDeduct += curr.quantityToDeduct;
+                            } else {
+                                acc.push({ ...curr });
+                            }
+                            return acc;
+                        }, [] as { productId: string, quantityToDeduct: number }[]);
+                        
+                        fifoLogsDataMap = await fetchFifoLogsForDeduction(tx, db, aggregated);
+                        fifoDeductors = aggregated;
                     }
                 }
             }
             // --- END READ PHASE ---
 
             if (!isWarranty) {
+                // Execute FIFO Writes
+                if (fifoDeductors.length > 0) {
+                    fifoResultsMap = executeFifoDeductionsWrites(tx, fifoDeductors, fifoLogsDataMap);
+                }
+
                 // Stamp Warranty
+                if (!ticket.parts || ticket.parts.filter(p => isWarrantyEligibleRepairPart(p)).length === 0) {
+                    const expireDate = new Date();
+                    expireDate.setMonth(expireDate.getMonth() + 3);
+                    updateData.serviceWarrantyExpiresAt = expireDate.getTime();
+                }
+
                 if (ticket.parts && ticket.parts.length > 0) {
                     const ruleMap = new Map<string, number>();
                     for (const r of warrantyRules) {
@@ -226,6 +264,7 @@ export async function POST(request: NextRequest) {
                             type: 'REPAIR_HANDOVER',
                             referenceId: ticketId,
                             referenceType: 'repair',
+                            lotsDeducted: fifoResultsMap.get(p.productId) || [],
                             createdBy: caller.uid,
                             createdAt: FieldValue.serverTimestamp()
                         });
