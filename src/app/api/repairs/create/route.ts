@@ -5,6 +5,7 @@ import { loadRepairWorkflow } from '@/lib/repairWorkflowServer';
 import { FieldValue } from 'firebase-admin/firestore';
 import { Timestamp } from 'firebase-admin/firestore';
 import { isTechnicianUser } from '@/lib/repairAccess';
+import { incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 
 type CreateRepairBody = Record<string, unknown> & {
     ticketType?: 'repair' | 'warranty';
@@ -95,6 +96,17 @@ export async function POST(request: NextRequest) {
 
             const newTicketRef = db.collection('repairs').doc();
             tx.set(newTicketRef, finalData);
+            if (body.ticketType !== 'warranty' && Array.isArray(body.paymentHistory)) {
+                const depositRevenue = body.paymentHistory.reduce((sum, entry) => {
+                    if (!entry || typeof entry !== 'object') return sum;
+                    const data = entry as { amount?: unknown; type?: unknown };
+                    const amount = Number(data.amount) || 0;
+                    return data.type === 'refund' ? sum - amount : sum + amount;
+                }, 0);
+                if (depositRevenue !== 0) {
+                    incrementRevenueAggregates(tx, db, { repairRevenue: depositRevenue });
+                }
+            }
 
             return { id: newTicketRef.id, status: entryNode.id };
         });

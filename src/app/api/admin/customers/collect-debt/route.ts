@@ -3,6 +3,7 @@ import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requirePermission } from '@/lib/apiAuth';
 import { FieldValue } from 'firebase-admin/firestore';
 import type { Order } from '@/lib/types';
+import { incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 
 export async function POST(request: NextRequest) {
     try {
@@ -107,6 +108,7 @@ export async function POST(request: NextRequest) {
                 createdByName,
                 createdAt: FieldValue.serverTimestamp()
             });
+            incrementRevenueAggregates(tx, db, { orderRevenue: numAmount });
 
             return { success: true, updatedOrderIds, amountPaid: numAmount, remainingDebt: currentDebt - numAmount };
         });

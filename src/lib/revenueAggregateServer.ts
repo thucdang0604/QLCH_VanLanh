@@ -1,0 +1,90 @@
+import { FieldValue, type Firestore, type Transaction } from 'firebase-admin/firestore';
+import type { Order } from '@/lib/types';
+import {
+    getRevenueAggregateIds,
+    normalizeRevenueAggregateDelta,
+    type RevenueAggregateDelta,
+} from '@/lib/revenueAggregate';
+
+function safeNumber(value: unknown): number {
+    const n = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(n) ? n : 0;
+}
+
+function buildIncrementPayload(delta: RevenueAggregateDelta, period: 'daily' | 'monthly', id: string, monthId: string) {
+    const payload: Record<string, unknown> = {
+        period,
+        month: monthId,
+        updatedAt: FieldValue.serverTimestamp(),
+    };
+
+    if (period === 'daily') {
+        payload.date = id;
+    }
+
+    for (const [field, value] of Object.entries(delta)) {
+        if (value !== 0) {
+            payload[field] = FieldValue.increment(value);
+        }
+    }
+
+    return payload;
+}
+
+export function incrementRevenueAggregates(
+    tx: Transaction,
+    db: Firestore,
+    delta: RevenueAggregateDelta,
+    occurredAt: Date = new Date(),
+) {
+    const normalized = normalizeRevenueAggregateDelta(delta);
+    if (Object.keys(normalized).length === 0) return;
+
+    const { dayId, monthId } = getRevenueAggregateIds(occurredAt);
+    tx.set(
+        db.collection('revenue_daily_aggregates').doc(dayId),
+        buildIncrementPayload(normalized, 'daily', dayId, monthId),
+        { merge: true },
+    );
+    tx.set(
+        db.collection('revenue_monthly_aggregates').doc(monthId),
+        buildIncrementPayload(normalized, 'monthly', monthId, monthId),
+        { merge: true },
+    );
+}
+
+export function buildCompletedOrderRevenueDelta(order: Order, multiplier = 1): RevenueAggregateDelta {
+    const orderTotal = safeNumber(order.total_amount)
+        || order.items?.reduce((sum, item) => sum + safeNumber(item.price) * safeNumber(item.quantity), 0)
+        || 0;
+    const paidSoFar = Array.isArray(order.paymentHistory)
+        ? order.paymentHistory.reduce((sum, payment) => sum + safeNumber(payment.amount), 0)
+        : 0;
+    const isDebt = order.paymentStatus === 'debt' || order.payment_method === 'Debt';
+    const hasPaymentHistory = Array.isArray(order.paymentHistory) && order.paymentHistory.length > 0;
+
+    let orderRevenue = 0;
+    let debtRevenue = 0;
+
+    if (hasPaymentHistory) {
+        orderRevenue = paidSoFar;
+        if (isDebt) {
+            debtRevenue = Math.max(0, orderTotal - paidSoFar);
+        }
+    } else if (isDebt) {
+        debtRevenue = orderTotal;
+    } else {
+        orderRevenue = orderTotal;
+    }
+
+    const isPos = order.source === 'pos';
+
+    return {
+        orderRevenue: orderRevenue * multiplier,
+        debtRevenue: debtRevenue * multiplier,
+        webOrderCount: isPos ? 0 : multiplier,
+        posOrderCount: isPos ? multiplier : 0,
+        webOrderRevenue: isPos ? 0 : orderTotal * multiplier,
+        posOrderRevenue: isPos ? orderTotal * multiplier : 0,
+    };
+}

@@ -8,6 +8,7 @@ import type { Order } from '@/lib/types';
 import { PRODUCT_STATUS, isProductArchived } from '@/lib/productLifecycle';
 import { normalizeVietnamPhone } from '@/lib/phone';
 import { fetchFifoLogsForDeduction, executeFifoDeductionsWrites, type FifoDeductionResult } from '@/lib/inventoryFifo';
+import { buildCompletedOrderRevenueDelta, incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 
 export async function POST(request: NextRequest) {
     try {
@@ -362,6 +363,13 @@ export async function POST(request: NextRequest) {
             }
 
             tx.set(orderRef, order);
+            if (!isPending) {
+                incrementRevenueAggregates(
+                    tx,
+                    db,
+                    buildCompletedOrderRevenueDelta({ id: orderId, ...order } as Order),
+                );
+            }
 
             // ── Increment Voucher Usage ──
             if (appliedVoucherCode && voucherRef && !isPending) {
@@ -436,7 +444,7 @@ export async function POST(request: NextRequest) {
             // Repair Ticket Link
             if (!isPending) {
                 if (repairTicketId && repairRef && repairSnap && repairSnap.exists) {
-                    const repairPrice = items.find((i: Record<string, unknown>) => i.isRepairTicket)?.price || 0;
+                    const repairPrice = Number(items.find((i: Record<string, unknown>) => i.isRepairTicket)?.price) || 0;
                     tx.update(repairRef, {
                         'payment.status': 'paid',
                         status: 'out',
@@ -454,6 +462,9 @@ export async function POST(request: NextRequest) {
                             note: `Thanh toán gộp hóa đơn POS #${orderId.slice(-6)}`
                         })
                     });
+                    if (repairPrice > 0) {
+                        incrementRevenueAggregates(tx, db, { repairRevenue: repairPrice });
+                    }
                 }
             }
 

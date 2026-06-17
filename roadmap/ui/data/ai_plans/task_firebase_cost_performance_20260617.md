@@ -38,7 +38,14 @@
 
 ## Phase 8.4 - Revenue Aggregates
 
-- [ ] Tao huong aggregate ngay/thang cho orders, repairs, import receipts, commissions, expenses.
+- [x] Tao schema aggregate ngay/thang `revenue_daily_aggregates` va `revenue_monthly_aggregates`.
+- [x] Them helper server transaction de increment aggregate theo bucket revenue/expense/count.
+- [x] Cap nhat write-path chinh: order transition/cancel, POS checkout, repair create/handover, import complete, commission/reversal, collect debt.
+- [x] Chuyen tao phieu chi thu cong sang server API de ghi expense va aggregate cung transaction.
+- [x] Revenue page doc aggregate cho range sau rollout; range cu van fallback legacy de khong mat du lieu chua backfill.
+- [x] Them Firestore rule read-only cho aggregate collections.
+- [x] Focused ESLint Phase 8.4 pass.
+- [x] `pnpm typecheck` pass.
 
 ## Phase 8.5 - Write Throttling
 

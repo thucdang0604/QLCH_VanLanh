@@ -4,6 +4,7 @@ import { requirePermission } from '@/lib/apiAuth';
 import { FieldValue, type DocumentReference } from 'firebase-admin/firestore';
 import type { Order } from '@/lib/types';
 import { calculateAndSaveCommissionsServer, reverseCommissionServer } from '@/lib/commissionCalcServer';
+import { buildCompletedOrderRevenueDelta, incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 
 type FirestoreData = Record<string, unknown>;
 type ProductDoc = { ref: DocumentReference; data: FirestoreData };
@@ -189,6 +190,7 @@ export async function POST(request: NextRequest) {
 
                     // Tính HOA HỒNG server-side (Decision 2)
                     await calculateAndSaveCommissionsServer(tx, { uid: caller.uid, displayName: '' }, 'order', docDataForCommission);
+                    incrementRevenueAggregates(tx, db, buildCompletedOrderRevenueDelta(docDataForCommission));
 
                 } else if (targetStatus === 'Cancelled' && oldStatus === 'Completed') {
                     if (custSnap.exists) {
@@ -211,6 +213,7 @@ export async function POST(request: NextRequest) {
 
                     // THU HỒI HOA HỒNG (Fix 12)
                     await reverseCommissionServer(tx, orderId, 'order', caller.uid);
+                    incrementRevenueAggregates(tx, db, buildCompletedOrderRevenueDelta(freshOrder, -1));
                 }
             }
 

@@ -8,6 +8,7 @@ import { PART_CATEGORY_LABEL } from '@/lib/constants';
 import { REPAIR_PART_STATUS, isRepairPartStatus, isSelectedRepairPart } from '@/lib/repairStatus';
 import { buildReactivateOnImportUpdate } from '@/lib/productLifecycle';
 import { applyProductImport, planRepairImportAllocation } from '@/lib/inventoryImportAllocation';
+import { incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 
 type RepairLine = NonNullable<RepairTicket['parts']>[number];
 type ReceiptItem = ImportReceiptItem & {
@@ -482,6 +483,7 @@ export async function POST(request: NextRequest) {
                     version: (receipt.version || 0) + 1,
                     updatedAt: FieldValue.serverTimestamp()
                 });
+                incrementRevenueAggregates(tx, db, { importCost: totalAmount });
 
                 // Add Supplier Transaction if debt
                 if (paymentMethod === 'debt') {

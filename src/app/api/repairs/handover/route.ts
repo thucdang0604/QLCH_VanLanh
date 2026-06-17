@@ -7,6 +7,7 @@ import { calculateAndSaveCommissionsServer } from '@/lib/commissionCalcServer';
 import { REPAIR_STATUS, isSelectedRepairPart, isWarrantyEligibleRepairPart } from '@/lib/repairStatus';
 import { getConfiguredWorkflow } from '@/lib/repairWorkflowConfig';
 import { fetchFifoLogsForDeduction, executeFifoDeductionsWrites, type FifoDeductionResult, type FifoDeductor } from '@/lib/inventoryFifo';
+import { incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 
 const LEGACY_TERMINAL_STATUSES = [REPAIR_STATUS.DONE, REPAIR_STATUS.OUT, REPAIR_STATUS.REFUND, 'bh_hoan_tat', 'bh_tu_choi', 'bh_refund'];
 
@@ -329,9 +330,17 @@ export async function POST(request: NextRequest) {
                 } as RepairTicket;
 
                 await calculateAndSaveCommissionsServer(tx, { uid: caller.uid, displayName: '' }, 'repair', docDataForCommission);
+                incrementRevenueAggregates(tx, db, {
+                    repairRevenue: amount,
+                    repairCount: targetStatus === REPAIR_STATUS.DONE ? 1 : 0,
+                    totalGiftDiscount: targetStatus === REPAIR_STATUS.DONE ? Number(currentPayment.giftDiscount) || 0 : 0,
+                });
             } else {
                 // Warranty case: we may not charge anything, or just record handover
                 // For simplicity, we just mark as handed over.
+                incrementRevenueAggregates(tx, db, {
+                    warrantyCount: targetStatus === REPAIR_STATUS.DONE ? 1 : 0,
+                });
             }
 
             tx.update(ticketRef, updateData);

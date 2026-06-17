@@ -218,6 +218,14 @@ service cloud.firestore {
     match /expenses/{expenseId} {
       allow read, write: if hasPermission('view_revenue');
     }
+    match /revenue_daily_aggregates/{aggregateId} {
+      allow read: if hasPermission('view_revenue');
+      allow write: if false;
+    }
+    match /revenue_monthly_aggregates/{aggregateId} {
+      allow read: if hasPermission('view_revenue');
+      allow write: if false;
+    }
 
     // Suppliers
     match /suppliers/{supplierId} {
