@@ -39,3 +39,12 @@
   - Focused ESLint pass voi `--max-warnings=0` cho `repairs/page.tsx` va toan bo `src/features/repairs/*`.
   - `pnpm typecheck` pass sau refactor UI repairs.
   - `pnpm lint` pass exit code 0; con 36 warnings no cu o roadmap scripts, technician, bank settings va proxy-image.
+- Phase 4:
+  - Commit checkpoint Phase 3: `462676a9 refactor: split repairs workflow UI`.
+  - Tach `TechnicianPageHeader` sang `src/features/technician/TechnicianPageHeader.tsx`.
+  - Tach cac modal workflow cua technician sang `src/features/technician/TechnicianWorkflowModals.tsx`: chuyen KTV, confirm status, verify parts, tech note.
+  - Giu cac luong transition/transfer/confirm parts qua API hien co trong `src/app/admin/technician/page.tsx`.
+  - Don warnings cu trong `technician/page.tsx` va giam file tu khoang 1698 dong xuong 1452 dong.
+  - Focused ESLint pass voi `--max-warnings=0` cho `technician/page.tsx` va `src/features/technician/*`.
+  - `pnpm typecheck` pass.
+  - `pnpm lint` pass exit code 0; con 31 warnings no cu ngoai Phase 4.

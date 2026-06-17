@@ -4,7 +4,7 @@
 
 import { useState, useEffect } from 'react';
 import {
-    Wrench, Smartphone, Search, Eye, ChevronRight, Clock,
+    Wrench, Smartphone, Search, Eye, Clock,
     CheckCircle2, Loader2, Image as ImageIcon, Video, AlertCircle, X, Package, Trash2,
     User as UserIcon, ArrowRightLeft, ShieldAlert
 } from 'lucide-react';
@@ -17,11 +17,18 @@ import { toastError, toastSuccess, toastWarning } from '@/lib/toast';
 import { PART_CATEGORY_LABEL, isPartCategory } from '@/lib/constants';
 import { REPAIR_PART_STATUS, REPAIR_STATUS, isPendingRepairPart, isRepairPartStatus, isRepairStatus } from '@/lib/repairStatus';
 import Modal from '@/components/admin/Modal';
-import { buildProductCodeFromId } from '@/lib/productCodes';
-import { createProductWithCodes } from '@/lib/productCodeRegistry';
 import { isRepairManager } from '@/lib/repairAccess';
 import { normalizeRepairWorkflow, normalizeWarrantyWorkflow } from '@/lib/repairWorkflowConfig';
 import { isSelectedRepairPart } from '@/lib/repairStatus';
+import {
+    TechnicianWorkflowModals,
+    type TechnicianNoteModal,
+    type TechnicianPartVerificationSelection,
+    type TechnicianPartsVerificationModal,
+    type TechnicianStatusModal,
+    type TechnicianTransferModal,
+} from '@/features/technician/TechnicianWorkflowModals';
+import { TechnicianPageHeader } from '@/features/technician/TechnicianPageHeader';
 
 
 const checklistLabels: Record<string, string> = {
@@ -104,20 +111,16 @@ export default function TechnicianPage() {
     const [selectedTicket, setSelectedTicket] = useState<RepairTicket | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
 
-    // Status confirm modal state
-    const [statusConfirmModal, setStatusConfirmModal] = useState<{ ticketId: string; newStatus: string } | null>(null);
+    const [statusConfirmModal, setStatusConfirmModal] = useState<TechnicianStatusModal | null>(null);
     const [isStatusChanging, setIsStatusChanging] = useState(false);
 
-    // Tech Note Modal State
-    const [noteModalPayload, setNoteModalPayload] = useState<{ ticketId: string, newStatus: string, currentNote: string } | null>(null);
+    const [noteModalPayload, setNoteModalPayload] = useState<TechnicianNoteModal | null>(null);
     const [techNoteText, setTechNoteText] = useState('');
 
-    // Parts Verification Modal State
-    const [partsVerificationModalPayload, setPartsVerificationModalPayload] = useState<{ ticketId: string; newStatus: string } | null>(null);
-    const [partsVerificationSelections, setPartsVerificationSelections] = useState<Record<string, 'use' | 'return'>>({});
+    const [partsVerificationModalPayload, setPartsVerificationModalPayload] = useState<TechnicianPartsVerificationModal | null>(null);
+    const [partsVerificationSelections, setPartsVerificationSelections] = useState<Record<string, TechnicianPartVerificationSelection>>({});
     const [isPartsVerifying, setIsPartsVerifying] = useState(false);
 
-    // Part Selection State
     const [partSearchQuery, setPartSearchQuery] = useState('');
     const [partSearchResults, setPartSearchResults] = useState<Product[]>([]);
     const [isSearchingParts, setIsSearchingParts] = useState(false);
@@ -128,7 +131,7 @@ export default function TechnicianPage() {
     const [warrantyStatuses, setWarrantyStatuses] = useState<WorkflowNode[]>([]);
     const [technicians, setTechnicians] = useState<{ uid: string; displayName: string }[]>([]);
     const [userNamesMap, setUserNamesMap] = useState<Record<string, string>>({});
-    const [transferModal, setTransferModal] = useState<{ ticket: RepairTicket } | null>(null);
+    const [transferModal, setTransferModal] = useState<TechnicianTransferModal | null>(null);
     const [transferTechnicianId, setTransferTechnicianId] = useState('');
     const [transferReason, setTransferReason] = useState('');
     const [isTransferSubmitting, setIsTransferSubmitting] = useState(false);
@@ -137,9 +140,7 @@ export default function TechnicianPage() {
         return ticket.ticketType === 'warranty' ? warrantyStatuses : dynamicStatuses;
     };
 
-    // (Handover moved to repairs/cashier page)
 
-    // Search parts — server-side Firestore query (BUG-INV-003 fix)
     useEffect(() => {
         if (!partSearchQuery.trim()) {
             setPartSearchResults([]);
@@ -148,7 +149,6 @@ export default function TechnicianPage() {
         const timer = setTimeout(async () => {
             setIsSearchingParts(true);
             try {
-                // Normalize query the same way as generateSearchKeywords
                 const normalizedQ = normalizePartSearch(partSearchQuery);
 
                 if (!normalizedQ) {
@@ -156,7 +156,6 @@ export default function TechnicianPage() {
                     return;
                 }
 
-                // Server-side: query only parts matching the keyword
                 const snap = await getDocs(query(
                     collection(db, 'products'),
                     where('status', '==', 'active'),
@@ -194,7 +193,6 @@ export default function TechnicianPage() {
         return () => clearTimeout(timer);
     }, [partSearchQuery]);
 
-    // Add part to ticket directly via API
     const handleAddPart = async (ticket: RepairTicket, product: Product) => {
         try {
             const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
@@ -234,7 +232,6 @@ export default function TechnicianPage() {
         }
     };
 
-    // Request part (out of stock) via API
     const handleRequestPart = async (ticket: RepairTicket, product: Product) => {
         try {
             const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
@@ -268,7 +265,6 @@ export default function TechnicianPage() {
         }
     };
 
-    // Request custom part (not in inventory) via API
     const handleAddCustomPart = async (ticket: RepairTicket) => {
         if (!customPartName.trim()) return;
 
@@ -373,7 +369,6 @@ export default function TechnicianPage() {
                 .map(item => ({ uid: item.id, displayName: item.data().displayName || 'Kỹ thuật viên' }))))
             .catch(error => console.error('Load technicians error:', error));
 
-        // Fetch user names map to resolve IDs in Timeline
         getDocs(collection(db, 'users'))
             .then(snap => {
                 const map: Record<string, string> = {};
@@ -392,19 +387,16 @@ export default function TechnicianPage() {
 
             const workflow = getWorkflowForTicket(ticket);
             const currentCfg = workflow.find(s => s.id === ticket.status);
-            // Block terminal states
             if (currentCfg?.isTerminal) {
                 toastError('Phiếu đã đóng, không thể thay đổi trạng thái!');
                 return;
             }
 
-            // Block KTV from changing status when ticket is waiting for handover (cashier's job)
             if (isRepairStatus(ticket.status, REPAIR_STATUS.CUSTOMER_HANDOVER)) {
                 toastWarning('Phiếu đang chờ bàn giao cho khách. Vui lòng liên hệ thu ngân để xử lý.');
                 return;
             }
 
-            // Warn (but allow) transitioning without parts selection
             if (currentCfg?.allowedFeatures?.includes('allowPartsSelection')) {
                 const partsCount = (ticket.parts || []).length;
                 if (partsCount === 0) {
@@ -412,7 +404,6 @@ export default function TechnicianPage() {
                 }
             }
 
-            // ── Checklist requirement check (Feature 1) ──
             if (currentCfg?.allowedFeatures?.includes('requireChecklist')) {
                 if (!isChecklistComplete(ticket.deviceInfo?.checklist as Record<string, unknown> | undefined)) {
                     toastError('Trạng thái hiện tại yêu cầu hoàn thành Checklist (8 mục) trước khi chuyển tiếp. Vui lòng mở phiếu để điền checklist.');
@@ -420,7 +411,6 @@ export default function TechnicianPage() {
                 }
             }
 
-            // ── Check requirePartsReady ──
             if (currentCfg?.allowedFeatures?.includes('requirePartsReady')) {
                 if (!areAllPartsReady(ticket)) {
                     const pendingCount = (ticket.parts || []).filter(
@@ -433,21 +423,16 @@ export default function TechnicianPage() {
                 }
             }
 
-            // ── Payment gate: KTV không xử lý bàn giao, chỉ chuyển trạng thái bình thường ──
-            // (requirePaymentGate is handled by cashier in repairs/page.tsx)
 
-            // --- INTERCEPT: Manager Override ---
             const isAssignedKTV = ticket.staff?.assignedTechnician === user?.uid;
             const isManager = isRepairManager(user);
 
             if (ticket.staff?.assignedTechnician && !isAssignedKTV && isManager) {
-                // If it's a manager override, force them to enter a note/reason if they haven't already
                 setTechNoteText(ticket.issue?.notes || '');
                 setNoteModalPayload({ ticketId, newStatus, currentNote: ticket.issue?.notes || '' });
                 return;
             }
 
-            // --- INTERCEPT: If transitioning INTO "cho_ban_giao_khach", require Parts Verification ---
             if (isRepairStatus(newStatus, REPAIR_STATUS.CUSTOMER_HANDOVER)) {
                 const selectedParts = (ticket.parts || []).filter(p => isSelectedRepairPart(p));
                 if (selectedParts.length > 0) {
@@ -459,14 +444,12 @@ export default function TechnicianPage() {
                 }
             }
 
-            // --- INTERCEPT: If transitioning OUT of "dang_kiem_tra", require Tech Notes ---
             if (isRepairStatus(ticket.status, REPAIR_STATUS.INSPECTION) && newStatus !== REPAIR_STATUS.INSPECTION) {
                 setTechNoteText(ticket.issue?.notes || '');
                 setNoteModalPayload({ ticketId, newStatus, currentNote: ticket.issue?.notes || '' });
                 return;
             }
 
-            // Normal flow (if not intercepting)
             await finalizeStatusChange(ticket, newStatus, ticket.issue?.notes);
 
         } catch (err) {
@@ -483,10 +466,9 @@ export default function TechnicianPage() {
 
             const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
 
-            // Build commands for returned parts
             const rejectCommands = Object.entries(partsVerificationSelections)
-                .filter(([_, action]) => action === 'return')
-                .map(([partLineId, _]) => ({
+                .filter(([, action]) => action === 'return')
+                .map(([partLineId]) => ({
                     type: 'reject_request',
                     partLineId
                 }));
@@ -508,11 +490,9 @@ export default function TechnicianPage() {
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.error || 'Lỗi trả linh kiện Test');
 
-                // Update local version so transition won't fail with version mismatch
                 ticket.version = (ticket.version || 0) + 1;
             }
 
-            // Now proceed with normal status change
             await finalizeStatusChange(ticket, partsVerificationModalPayload.newStatus, ticket.issue?.notes);
             setPartsVerificationModalPayload(null);
             setPartsVerificationSelections({});
@@ -666,13 +646,11 @@ export default function TechnicianPage() {
         }
     };
 
-    // (handleTechHandover removed — handover is managed by cashier in repairs/page.tsx)
 
     const formatPrice = (p: number) => p > 0 ? p.toLocaleString('vi-VN') + 'đ' : '—';
 
 
 
-    // ── Inline checklist update ──
     const handleChecklistUpdate = async (ticketId: string, key: string, newValue: string) => {
         try {
             await updateDoc(doc(db, 'repairs', ticketId), {
@@ -721,38 +699,15 @@ export default function TechnicianPage() {
 
     return (
         <div className="p-3 sm:p-4 md:p-6 space-y-4">
-            {/* Header */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-                <div>
-                    <h1 className="text-xl sm:text-2xl font-bold text-gray-900 flex items-center gap-2">
-                        <Wrench className="text-orange-500" /> Khu vực Kỹ thuật viên
-                    </h1>
-                    <p className="text-sm text-gray-500 mt-0.5">
-                        {tickets.filter(t => t.status === 'dang_sua_chua').length} máy đang sửa •
-                        {' '}{tickets.filter(t => isRepairStatus(t.status, REPAIR_STATUS.DONE)).length} máy chờ trả
-                    </p>
-                </div>
-                <div className="flex items-center gap-2">
-                    <div className="relative flex-1 md:w-64">
-                        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                        <input title="Tìm máy, khách..." type="text" placeholder="Tìm máy, khách..."
-                            value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-                            className="w-full pl-9 pr-3 py-2 text-sm border rounded-lg focus:border-orange-500 focus:outline-none" />
-                    </div>
-                    <div className="hidden sm:flex bg-gray-100 rounded-lg p-0.5">
-                        <button title="Xem danh sách" onClick={() => setViewMode('list')}
-                            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${viewMode === 'list' ? 'bg-white shadow-sm text-orange-600' : 'text-gray-500'}`}>
-                            Danh sách
-                        </button>
-                        <button title="Xem kanban" onClick={() => setViewMode('kanban')}
-                            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${viewMode === 'kanban' ? 'bg-white shadow-sm text-orange-600' : 'text-gray-500'}`}>
-                            Kanban
-                        </button>
-                    </div>
-                </div>
-            </div>
+            <TechnicianPageHeader
+                activeRepairCount={tickets.filter(ticket => ticket.status === 'dang_sua_chua').length}
+                doneCount={tickets.filter(ticket => isRepairStatus(ticket.status, REPAIR_STATUS.DONE)).length}
+                searchQuery={searchQuery}
+                onSearchQueryChange={setSearchQuery}
+                viewMode={viewMode}
+                onViewModeChange={setViewMode}
+            />
 
-            {/* ═══ LIST VIEW ═══ */}
             {viewMode === 'list' && (
                 <div className="space-y-2">
                     {filtered.length === 0 ? (
@@ -791,18 +746,15 @@ export default function TechnicianPage() {
                                 title="Xem chi tiết"
                                 onClick={() => setSelectedTicket(ticket)}
                             >
-                                {/* KTV Badge */}
                                 <div className="absolute top-2 right-2 flex items-center gap-1 bg-orange-50 text-orange-600 border border-orange-200 rounded-full px-2 py-0.5 text-[10px] font-medium max-w-[140px]">
                                     <UserIcon size={10} className="flex-shrink-0" />
                                     <span className="truncate">{ticket.staff?.assignedTechnicianName || 'Chưa phân công'}</span>
                                 </div>
                                 <div className="flex flex-col sm:flex-row items-stretch sm:items-start gap-3 mt-4">
-                                    {/* Device Icon */}
                                     <div className="w-10 h-10 rounded-lg bg-white border flex items-center justify-center flex-shrink-0">
                                         <Smartphone size={20} className="text-gray-600" />
                                     </div>
 
-                                    {/* Info */}
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-2 flex-wrap">
                                             <p title="Máy" className="font-bold text-gray-900 text-lg sm:text-xl">{ticket.deviceInfo?.model || 'Thiết bị'}</p>
@@ -843,7 +795,6 @@ export default function TechnicianPage() {
                                             </div>
                                         )}
 
-                                        {/* Parts summary badge row */}
                                         {st?.allowedFeatures?.includes('allowPartsSelection') && (
                                             <div className="mt-2 flex flex-wrap gap-1.5 items-center">
                                                 <span className="text-[10px] font-semibold text-gray-500 uppercase">Linh kiện:</span>
@@ -884,7 +835,6 @@ export default function TechnicianPage() {
                                             </div>
                                         )}
 
-                                        {/* Inline Checklist (editable dropdowns) - only when feature enabled */}
                                         {st?.allowedFeatures?.includes('requireChecklist') && (
                                             <div className="mt-3 border-t pt-3">
                                                 <p className="text-xs font-bold text-gray-400 uppercase mb-2 flex items-center gap-1"><CheckCircle2 size={14} /> Checklist kiểm tra</p>
@@ -915,7 +865,6 @@ export default function TechnicianPage() {
                                                         );
                                                     })}
                                                 </div>
-                                                {/* Device history flags */}
                                                 <div className="flex flex-wrap gap-2 mt-2">
                                                     {(['hasPriorRepair', 'hasWaterDamage', 'hasNonGenuineParts'] as const).map(key => {
                                                         const labels: Record<string, string> = { hasPriorRepair: 'Đã từng sửa', hasWaterDamage: 'Vào nước', hasNonGenuineParts: 'Kém/Lô' };
@@ -935,7 +884,6 @@ export default function TechnicianPage() {
                                         )}
                                     </div>
 
-                                    {/* Actions */}
                                     <div className="grid grid-cols-2 gap-2 w-full sm:w-56 sm:flex sm:flex-col flex-shrink-0 mt-3 sm:mt-0">
                                         <button
                                             onClick={(e) => { e.stopPropagation(); setSelectedTicket(ticket); }}
@@ -981,7 +929,6 @@ export default function TechnicianPage() {
 
                                             return (
                                                 <>
-                                                    {/* Dynamic Transition Button for Báo Giá */}
                                                     {(() => {
                                                         if (isReadOnly) return null;
 
@@ -1027,7 +974,6 @@ export default function TechnicianPage() {
                 </div>
             )}
 
-            {/* ═══ KANBAN VIEW ═══ */}
             {viewMode === 'kanban' && (
                 <div className="flex overflow-x-auto pb-4 gap-4 snap-x">
                     {Array.from(new Map(
@@ -1061,7 +1007,6 @@ export default function TechnicianPage() {
 
                                         return (
                                             <div key={ticket.id} className="bg-white rounded-lg border p-3 shadow-sm hover:shadow-md transition-shadow relative group">
-                                                {/* KTV Badge */}
                                                 <div className="flex items-center gap-1 text-[10px] font-medium text-orange-600 bg-orange-50 border border-orange-100 rounded-full px-2 py-0.5 mb-1.5 w-fit max-w-full">
                                                     <UserIcon size={10} className="flex-shrink-0" />
                                                     <span className="truncate">{ticket.staff?.assignedTechnicianName || 'Chưa phân công'}</span>
@@ -1090,7 +1035,6 @@ export default function TechnicianPage() {
                                                     <p className="text-sm text-gray-500 mt-2 line-clamp-2 bg-gray-50 p-2 rounded">{ticket.issue.description}</p>
                                                 )}
 
-                                                {/* Inline Checklist (compact dropdown for kanban) - only when feature enabled */}
                                                 {st?.allowedFeatures?.includes('requireChecklist') && (
                                                     <div className="mt-2 pt-2 border-t">
                                                         <div className="grid grid-cols-2 gap-0.5">
@@ -1123,7 +1067,6 @@ export default function TechnicianPage() {
                                                     </div>
                                                 )}
 
-                                                {/* Actions */}
                                                 {(() => {
                                                     const isIncomingTransfer = ticket.pendingTechnicianTransfer?.toTechnicianId === user?.uid && ticket.pendingTechnicianTransfer?.status === 'pending';
                                                     if (isIncomingTransfer) {
@@ -1143,7 +1086,6 @@ export default function TechnicianPage() {
 
                                                     return (
                                                         <>
-                                                            {/* Dynamic Transition Button for Báo Giá */}
                                                             {(() => {
                                                                 const hasRequestedParts = ticket.parts && ticket.parts.length > 0 && ticket.parts.some(p => isRepairPartStatus(p.status, REPAIR_PART_STATUS.REQUESTED));
                                                                 const targetStatusId = hasRequestedParts ? 'dang_tim_linh_kien' : 'dang_sua_chua';
@@ -1195,7 +1137,6 @@ export default function TechnicianPage() {
                 </div>
             )}
 
-            {/* ═══ DETAIL MODAL ═══ */}
             {selectedTicket && (
                 <Modal
                     isOpen={true}
@@ -1204,7 +1145,6 @@ export default function TechnicianPage() {
                     size="lg"
                 >
                     <div className="p-5 space-y-4">
-                        {/* Read-Only Guard / Transfer Lock Guard */}
                         {(() => {
                             const workflow = getWorkflowForTicket(selectedTicket);
                             const currentCfg = workflow.find(s => s.id === selectedTicket.status);
@@ -1246,7 +1186,6 @@ export default function TechnicianPage() {
 
                             return null;
                         })()}
-                        {/* Status */}
                         {(() => {
                             const workflow = getWorkflowForTicket(selectedTicket);
                             const st = workflow.find(s => s.id === selectedTicket.status) || { id: selectedTicket.status, label: selectedTicket.status, color: 'text-gray-700 bg-gray-50 border-gray-200' };
@@ -1257,7 +1196,6 @@ export default function TechnicianPage() {
                             );
                         })()}
 
-                        {/* Issue */}
                         {selectedTicket.issues && selectedTicket.issues.length > 0 ? (
                             <div className="bg-gray-50 rounded-xl p-3">
                                 <p className="text-xs font-semibold text-gray-500 mb-1 flex items-center gap-1"><AlertCircle size={12} /> Danh sách lỗi</p>
@@ -1283,7 +1221,6 @@ export default function TechnicianPage() {
                             </div>
                         )}
 
-                        {/* Checklist */}
                         {selectedTicket.deviceInfo?.checklist && (
                             <div>
                                 <p className="text-xs font-semibold text-gray-500 mb-2 flex items-center gap-1"><CheckCircle2 size={12} /> Checklist kiểm tra</p>
@@ -1302,7 +1239,6 @@ export default function TechnicianPage() {
                                         ))}
                                 </div>
 
-                                {/* Lịch sử máy */}
                                 <div className="mt-3">
                                     <p className="text-xs font-semibold text-gray-500 mb-2 flex items-center gap-1"><AlertCircle size={12} /> Lịch sử máy</p>
                                     <div className="flex flex-wrap gap-2 text-[11px]">
@@ -1320,7 +1256,6 @@ export default function TechnicianPage() {
                             </div>
                         )}
 
-                        {/* --- Linh kiện sử dụng --- */}
                         {(() => {
                             const workflow = getWorkflowForTicket(selectedTicket);
                             const st = workflow.find(s => s.id === selectedTicket.status);
@@ -1339,7 +1274,6 @@ export default function TechnicianPage() {
                                         <Package size={16} className="text-orange-500" /> Linh kiện sử dụng
                                     </p>
 
-                                    {/* Existing Parts List */}
                                     {selectedTicket.parts && selectedTicket.parts.length > 0 && (
                                         <div className="mb-4 space-y-2">
                                             {selectedTicket.parts.map((p, pIdx) => (
@@ -1395,7 +1329,6 @@ export default function TechnicianPage() {
                                         </div>
                                     )}
 
-                                    {/* Add Part Section */}
                                     <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
                                         <label className="text-xs font-semibold text-gray-600 mb-1.5 block">Thêm linh kiện mới</label>
                                         <div className="relative mb-3">
@@ -1411,7 +1344,6 @@ export default function TechnicianPage() {
                                             />
                                         </div>
 
-                                        {/* Dropdown Phân loại */}
                                         <div className="mb-3">
                                             <label className="text-[11px] font-medium text-gray-500 mb-1 block">Chất lượng / Loại hàng:</label>
                                             <select
@@ -1429,7 +1361,6 @@ export default function TechnicianPage() {
                                             </select>
                                         </div>
 
-                                        {/* Search Results */}
                                         {partSearchQuery && (
                                             <div className="mt-2 bg-white border border-gray-200 rounded-md shadow-sm divide-y max-h-48 overflow-y-auto mb-3">
                                                 {isSearchingParts ? (
@@ -1488,7 +1419,6 @@ export default function TechnicianPage() {
                                             </div>
                                         )}
 
-                                        {/* Custom Part Request */}
                                         <div className="pt-3 border-t border-gray-200">
                                             <label className="text-xs font-semibold text-gray-600 mb-1.5 block">Linh kiện ngoài / Chưa có trên hệ thống</label>
                                             <div className="flex gap-2">
@@ -1512,7 +1442,6 @@ export default function TechnicianPage() {
                                 </div>
                             )}
 
-                        {/* Pre-repair Media */}
                         {selectedTicket.preRepairMedia?.length > 0 && (
                             <div>
                                 <p className="text-xs font-semibold text-gray-500 mb-2 flex items-center gap-1"><ImageIcon size={12} /> Ảnh/Video nhận máy</p>
@@ -1530,7 +1459,6 @@ export default function TechnicianPage() {
                             </div>
                         )}
 
-                        {/* Post-repair Media */}
                         {selectedTicket.postRepairMedia?.length > 0 && (
                             <div>
                                 <p className="text-xs font-semibold text-gray-500 mb-2 flex items-center gap-1"><Video size={12} /> Video / Media bàn giao</p>
@@ -1554,7 +1482,6 @@ export default function TechnicianPage() {
                             </div>
                         )}
 
-                        {/* Timeline */}
                         {selectedTicket.statusTimeline?.length > 0 && (
                             <div>
                                 <p className="text-xs font-semibold text-gray-500 mb-2 flex items-center gap-1"><Clock size={12} /> Nhật ký phiếu</p>
@@ -1578,11 +1505,9 @@ export default function TechnicianPage() {
                             </div>
                         )}
 
-                        {/* Quick Status Buttons */}
                         {(() => {
                             const workflow = getWorkflowForTicket(selectedTicket);
                             const currentStatusCfg = workflow.find(s => s.id === selectedTicket.status);
-                            // Read-only guard: hide status change buttons entirely
                             const isTerminal = isRepairStatus(selectedTicket.status, REPAIR_STATUS.CUSTOMER_HANDOVER) || !!currentStatusCfg?.isTerminal;
                             const isAssignedToMe = selectedTicket.staff?.assignedTechnician === user?.uid;
                             const isIncomingTransferToMe = selectedTicket.pendingTechnicianTransfer?.toTechnicianId === user?.uid && selectedTicket.pendingTechnicianTransfer?.status === 'pending';
@@ -1621,226 +1546,43 @@ export default function TechnicianPage() {
                 </Modal>
             )}
 
-            {/* ══════════  Status Change Confirm Modal  ══════════ */}
-            {transferModal && (
-                <Modal
-                    isOpen={true}
-                    onClose={() => { setTransferModal(null); setTransferTechnicianId(''); setTransferReason(''); }}
-                    title={`Chuyển KTV — #${transferModal.ticket.id.slice(-6).toUpperCase()}`}
-                    size="sm"
-                    mobileSheet={true}
-                >
-                    <div className="p-4 space-y-4">
-                        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                            KTV hiện tại vẫn chịu trách nhiệm cho đến khi KTV mới bấm chấp nhận.
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">KTV nhận mới</label>
-                            <select
-                                title="Chọn KTV nhận mới"
-                                value={transferTechnicianId}
-                                onChange={event => setTransferTechnicianId(event.target.value)}
-                                className="w-full min-h-11 px-3 py-2 border rounded-lg bg-white"
-                            >
-                                <option value="">-- Chọn KTV --</option>
-                                {technicians.filter(technician => technician.uid !== transferModal.ticket.staff?.assignedTechnician).map(technician => (
-                                    <option key={technician.uid} value={technician.uid}>{technician.displayName}</option>
-                                ))}
-                            </select>
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Lý do chuyển <span className="text-red-500">*</span></label>
-                            <textarea
-                                value={transferReason}
-                                onChange={event => setTransferReason(event.target.value)}
-                                rows={4}
-                                placeholder="Mô tả rõ nguyên nhân chuyển để lưu nhật ký chống gian lận"
-                                className="w-full min-h-28 px-3 py-2 border rounded-lg"
-                            />
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                            <button onClick={() => { setTransferModal(null); setTransferTechnicianId(''); setTransferReason(''); }} className="min-h-11 rounded-lg bg-gray-100 text-sm font-medium">Hủy</button>
-                            <button
-                                onClick={handleTransferRequest}
-                                disabled={isTransferSubmitting || !transferTechnicianId || !transferReason.trim()}
-                                className="min-h-11 rounded-lg bg-blue-600 text-white text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
-                            >
-                                {isTransferSubmitting ? <Loader2 size={16} className="animate-spin" /> : <ArrowRightLeft size={16} />}
-                                Gửi yêu cầu
-                            </button>
-                        </div>
-                    </div>
-                </Modal>
-            )}
-
-            {statusConfirmModal && (() => {
-                const ticket = tickets.find(t => t.id === statusConfirmModal.ticketId);
-                if (!ticket) return null;
-                const workflow = getWorkflowForTicket(ticket);
-                const currentLabel = workflow.find(s => s.id === ticket.status)?.label || ticket.status;
-                const nextLabel = workflow.find(s => s.id === statusConfirmModal.newStatus)?.label || statusConfirmModal.newStatus;
-
-                return (
-                    <Modal
-                        isOpen={true}
-                        onClose={() => { if (!isStatusChanging) setStatusConfirmModal(null); }}
-                        title="Xác nhận chuyển trạng thái"
-                        size="md"
-                    >
-                        <div className="p-6 space-y-4">
-                            <p className="text-sm text-gray-500">
-                                Phiếu #{ticket.id.slice(-6).toUpperCase()} • {ticket.customer?.name || '—'}
-                            </p>
-
-                            <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 text-sm">
-                                <div className="flex justify-between">
-                                    <span className="text-gray-600">Từ:</span>
-                                    <span className="font-semibold text-gray-900">{currentLabel}</span>
-                                </div>
-                                <div className="flex justify-between mt-1">
-                                    <span className="text-gray-600">Sang:</span>
-                                    <span className="font-semibold text-orange-600">{nextLabel}</span>
-                                </div>
-                            </div>
-
-                            <div className="flex justify-end gap-3 pt-2">
-                                <button
-                                    onClick={() => { if (!isStatusChanging) setStatusConfirmModal(null); }}
-                                    disabled={isStatusChanging}
-                                    className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50"
-                                >
-                                    Huỷ
-                                </button>
-                                <button
-                                    onClick={async () => {
-                                        try {
-                                            setIsStatusChanging(true);
-                                            const { ticketId, newStatus } = statusConfirmModal;
-                                            setStatusConfirmModal(null);
-                                            await executeStatusChange(ticketId, newStatus);
-                                        } finally {
-                                            setIsStatusChanging(false);
-                                        }
-                                    }}
-                                    disabled={isStatusChanging}
-                                    className="px-4 py-2 text-sm font-semibold text-white bg-orange-500 rounded-lg hover:bg-orange-600 transition-colors disabled:opacity-50"
-                                >
-                                    Xác nhận
-                                </button>
-                            </div>
-                        </div>
-                    </Modal>
-                );
-            })()}
-
-            {/* ══════════  Parts Verification Modal  ══════════ */}
-            {partsVerificationModalPayload && (() => {
-                const ticket = tickets.find(t => t.id === partsVerificationModalPayload.ticketId);
-                if (!ticket) return null;
-                const selectedParts = (ticket.parts || []).filter(p => isSelectedRepairPart(p));
-
-                return (
-                    <Modal
-                        isOpen={true}
-                        onClose={() => { if (!isPartsVerifying) setPartsVerificationModalPayload(null); }}
-                        title="Xác nhận sử dụng linh kiện"
-                    >
-                        <div className="p-6">
-                            <div className="flex gap-3 text-amber-800 bg-amber-50 p-4 rounded-xl border border-amber-200 mb-6">
-                                <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
-                                <div className="text-sm">
-                                    <p className="font-semibold mb-1">Phiếu đã hoàn tất sửa chữa!</p>
-                                    <p>Vui lòng xác nhận các linh kiện đã thêm vào phiếu. Linh kiện <b>Hoàn kho (Test)</b> sẽ được trả về kho ngay lập tức. Linh kiện <b>Đã dùng</b> sẽ được trừ kho khi thanh toán.</p>
-                                </div>
-                            </div>
-
-                            <div className="space-y-4 max-h-[60vh] overflow-y-auto">
-                                {selectedParts.map((part) => (
-                                    <div key={part.partLineId} className="border rounded-lg p-4 bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                                        <div>
-                                            <p className="font-medium text-gray-900">{part.productName}</p>
-                                            <p className="text-sm text-gray-500 mt-1">SL: {part.quantity} • {part.quality || 'N/A'}</p>
-                                        </div>
-                                        <div className="flex bg-gray-100 p-1 rounded-lg shrink-0">
-                                            <button
-                                                onClick={() => setPartsVerificationSelections(prev => ({ ...prev, [part.partLineId!]: 'use' }))}
-                                                className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${partsVerificationSelections[part.partLineId!] === 'use' ? 'bg-white text-green-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-                                            >
-                                                Đã dùng
-                                            </button>
-                                            <button
-                                                onClick={() => setPartsVerificationSelections(prev => ({ ...prev, [part.partLineId!]: 'return' }))}
-                                                className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${partsVerificationSelections[part.partLineId!] === 'return' ? 'bg-white text-amber-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-                                            >
-                                                Hoàn kho (Test)
-                                            </button>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-
-                            <div className="mt-8 flex justify-end gap-3">
-                                <button
-                                    onClick={() => setPartsVerificationModalPayload(null)}
-                                    disabled={isPartsVerifying}
-                                    className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50"
-                                >
-                                    Huỷ
-                                </button>
-                                <button
-                                    onClick={handlePartsVerificationSubmit}
-                                    disabled={isPartsVerifying}
-                                    className="px-4 py-2 text-sm font-semibold text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 flex items-center gap-2"
-                                >
-                                    {isPartsVerifying ? <Loader2 size={16} className="animate-spin" /> : 'Xác nhận & Chuyển bước'}
-                                </button>
-                            </div>
-                        </div>
-                    </Modal>
-                );
-            })()}
-
-            {/* ══════════  Tech Notes Prompt Modal  ══════════ */}
-            {noteModalPayload && (
-                <Modal
-                    isOpen={true}
-                    onClose={() => setNoteModalPayload(null)}
-                    title="Cập nhật Ghi chú kỹ thuật"
-                    size="md"
-                >
-                    <div className="p-6 space-y-4">
-                        <p className="text-sm text-gray-500">
-                            Chuyển sang: {(tickets.find(t => t.id === noteModalPayload.ticketId)?.ticketType === 'warranty' ? warrantyStatuses : dynamicStatuses).find(s => s.id === noteModalPayload.newStatus)?.label || noteModalPayload.newStatus}
-                        </p>
-
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                Ghi chú / Lý do ghi đè (Bắt buộc nếu bạn là Quản lý)
-                            </label>
-                            <textarea
-                                rows={4}
-                                value={techNoteText}
-                                onChange={e => setTechNoteText(e.target.value)}
-                                placeholder="Nhập ghi chú kỹ thuật hoặc lý do ghi đè trước khi chuyển trạng thái..."
-                                className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20"
-                            />
-                            <p className="text-xs text-gray-400 mt-1">Lý do này sẽ được lưu cùng với phiếu sửa chữa và admin có thể xem trong lịch sử trạng thái.</p>
-                        </div>
-
-                        <div className="flex justify-end gap-3 pt-2">
-                            <button onClick={() => setNoteModalPayload(null)}
-                                className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
-                                Đóng
-                            </button>
-                            <button onClick={handleNoteSubmit}
-                                className="px-4 py-2 text-sm font-semibold text-white bg-orange-500 rounded-lg hover:bg-orange-600 transition-colors">
-                                Xác nhận chuyển đổi
-                            </button>
-                        </div>
-                    </div>
-                </Modal>
-            )}
-
+            <TechnicianWorkflowModals
+                tickets={tickets}
+                dynamicStatuses={dynamicStatuses}
+                warrantyStatuses={warrantyStatuses}
+                technicians={technicians}
+                transferModal={transferModal}
+                transferTechnicianId={transferTechnicianId}
+                transferReason={transferReason}
+                isTransferSubmitting={isTransferSubmitting}
+                onTransferTechnicianIdChange={setTransferTechnicianId}
+                onTransferReasonChange={setTransferReason}
+                onCloseTransfer={() => { setTransferModal(null); setTransferTechnicianId(''); setTransferReason(''); }}
+                onSubmitTransfer={handleTransferRequest}
+                statusConfirmModal={statusConfirmModal}
+                isStatusChanging={isStatusChanging}
+                onCloseStatusConfirm={() => { if (!isStatusChanging) setStatusConfirmModal(null); }}
+                onConfirmStatusChange={async (ticketId, newStatus) => {
+                    try {
+                        setIsStatusChanging(true);
+                        setStatusConfirmModal(null);
+                        await executeStatusChange(ticketId, newStatus);
+                    } finally {
+                        setIsStatusChanging(false);
+                    }
+                }}
+                partsVerificationModalPayload={partsVerificationModalPayload}
+                partsVerificationSelections={partsVerificationSelections}
+                setPartsVerificationSelections={setPartsVerificationSelections}
+                isPartsVerifying={isPartsVerifying}
+                onClosePartsVerification={() => { if (!isPartsVerifying) setPartsVerificationModalPayload(null); }}
+                onSubmitPartsVerification={handlePartsVerificationSubmit}
+                noteModalPayload={noteModalPayload}
+                techNoteText={techNoteText}
+                onTechNoteTextChange={setTechNoteText}
+                onCloseNote={() => setNoteModalPayload(null)}
+                onSubmitNote={handleNoteSubmit}
+            />
         </div>
     );
 }

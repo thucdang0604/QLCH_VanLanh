@@ -36,10 +36,12 @@
 
 ## Phase 4: Technician page
 
-- [ ] Tach ticket list/detail va modal phu tung/chuyen giao.
-- [ ] Giu transition/transfer qua API.
-- [ ] Focused ESLint pass.
-- [ ] `pnpm typecheck` pass.
+- [x] Tach header/search/view toggle sang component rieng.
+- [x] Tach workflow modals: chuyen KTV, confirm status, verify parts, tech note.
+- [ ] Tach ticket list/detail modal sau hon neu can tiep tuc giam complexity.
+- [x] Giu transition/transfer qua API.
+- [x] Focused ESLint pass.
+- [x] `pnpm typecheck` pass.
 
 ## Phase 5: POS page
 
