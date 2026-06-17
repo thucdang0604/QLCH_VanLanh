@@ -27,3 +27,15 @@
   - Focused ESLint pass voi `--max-warnings=0` cho `parts/page.tsx` va `src/features/parts/*`.
   - `pnpm typecheck` pass.
   - `pnpm lint` pass exit code 0; con 44 warnings no cu o roadmap scripts, repairs, technician, bank settings.
+- Phase 3:
+  - Commit checkpoint Phase 1-2: `09eefbff refactor: split import and parts workflows`.
+  - Bat dau tach `src/app/admin/repairs/page.tsx` bang helper/type thuan trong `src/features/repairs/repairPageUtils.ts`.
+  - Tach stats grid sang `src/features/repairs/RepairStatsGrid.tsx`.
+  - Focused ESLint pass voi `--max-warnings=0` cho `repairs/page.tsx`, `repairPageUtils.ts`, va `RepairStatsGrid.tsx`.
+  - `pnpm typecheck` pass.
+  - Tiep tuc giam `src/app/admin/repairs/page.tsx` tu khoang 2447 dong sau buoc dau xuong 1456 dong.
+  - Tach filters, header, pagination/load-more, media managers, print templates, editor modal, detail modal, handover modal, warranty modal va auxiliary modals sang `src/features/repairs/`.
+  - Sua lai dependency hook thay cho disable comment cu bi xoa khi don page.
+  - Focused ESLint pass voi `--max-warnings=0` cho `repairs/page.tsx` va toan bo `src/features/repairs/*`.
+  - `pnpm typecheck` pass sau refactor UI repairs.
+  - `pnpm lint` pass exit code 0; con 36 warnings no cu o roadmap scripts, technician, bank settings va proxy-image.

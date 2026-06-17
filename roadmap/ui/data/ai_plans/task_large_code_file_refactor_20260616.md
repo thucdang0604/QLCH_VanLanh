@@ -24,11 +24,15 @@
 
 ## Phase 3: Repairs page
 
-- [ ] Tach data hooks va filter/stats.
-- [ ] Tach table/form/handover/warranty/print UI.
+- [x] Tach type/helper thuan sang feature module.
+- [x] Tach stats grid sang component rieng.
+- [x] Tach filters va pagination/media/header UI sang component rieng.
+- [x] Tach editor/detail/handover/warranty/auxiliary/print UI sang component rieng.
 - [ ] Doi mutation phu hop sang repair API da co.
-- [ ] Focused ESLint pass.
-- [ ] `pnpm typecheck` pass.
+- [x] Focused ESLint pass cho buoc helper dau tien.
+- [x] `pnpm typecheck` pass cho buoc helper dau tien.
+- [x] Focused ESLint pass cho repairs feature components.
+- [x] `pnpm typecheck` pass sau khi tach repairs UI.
 
 ## Phase 4: Technician page
 
