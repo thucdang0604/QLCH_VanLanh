@@ -28,7 +28,13 @@
 
 ## Phase 8.3 - Badge Counters
 
-- [ ] Thay nhieu listener trong `useAdminBadges` bang count query hoac aggregate doc.
+- [x] Thay realtime listeners cho badge `orders`, `appointments`, `reviews`, `repairs` bang `getCountFromServer`.
+- [x] Gop refresh Firestore badges vao mot ham `refreshFirestoreBadges`, chay luc mount va khi tab/window focus.
+- [x] Giu `repairDocs` chi de tinh badge technician, query gioi han 200 phieu status `INTAKE/PARTS_ORDERED`.
+- [x] Giu RTDB chat listener vi nguon doc la Realtime Database chat unread state.
+- [x] Gioi han `activities` listener xuong 20 unread docs thay vi nghe toan bo unread activities.
+- [x] Focused ESLint `src/lib/useAdminBadges.ts` pass.
+- [x] `pnpm typecheck` pass.
 
 ## Phase 8.4 - Revenue Aggregates
 
