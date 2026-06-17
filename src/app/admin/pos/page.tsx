@@ -8,7 +8,7 @@ import {
     Package, Loader2, CheckCircle2,
     AlertTriangle, Camera, Keyboard
 } from 'lucide-react';
-import { collection, getDocs, query, where, orderBy as fbOrderBy } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, limit, query, where, orderBy as fbOrderBy } from 'firebase/firestore';
 
 import { useConfig } from '@/lib/ConfigContext';
 import Modal from '@/components/admin/Modal';
@@ -24,6 +24,7 @@ import { fetchActiveDiscountRules, calculateAccessoryDiscounts } from '@/lib/dis
 import { consumeChatWorkflowHandoff } from '@/lib/chatWorkflowHandoff';
 import { extractProductCodeFromScan, getPrimaryProductCode, getProductScanCandidates, productCodeSearchText } from '@/lib/productCodes';
 import { isProductSellable } from '@/lib/productLifecycle';
+import { generateSearchKeywords } from '@/lib/utils';
 import { PosCartPanel } from '@/features/pos/PosCartPanel';
 import type { AppliedVoucher, CartItem, DiscountDetail, LastOrderData, OrderLineItem, RepairTicketInfo, VoucherStatus } from '@/features/pos/posTypes';
 
@@ -37,6 +38,10 @@ type BrowserBarcodeDetectorConstructor = {
 };
 const RETAIL_CATEGORY_IDS = DEFAULT_CONFIG.taxonomy.retail.map((node) => node.id);
 const CAMERA_BARCODE_FORMATS = ['qr_code', 'code_128'];
+const POS_DEFAULT_PRODUCT_LIMIT = 120;
+const POS_SEARCH_PRODUCT_LIMIT = 60;
+const POS_LEGACY_SCAN_FALLBACK_LIMIT = 500;
+type PosProduct = Product & { id: string };
 
 declare global {
     interface Window {
@@ -87,7 +92,7 @@ export default function POSPage() {
     }, [config?.taxonomy?.retail]);
 
     // Products
-    const [products, setProducts] = useState<(Product & { id: string })[]>([]);
+    const [products, setProducts] = useState<PosProduct[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
     const [activeCategory, setActiveCategory] = useState('all');
@@ -375,7 +380,7 @@ export default function POSPage() {
 
     const searchRef = useRef<HTMLInputElement>(null);
 
-    const filterPosProducts = useCallback((data: (Product & { id: string })[]) => {
+    const filterPosProducts = useCallback((data: PosProduct[]) => {
         return data.filter(p => {
             if (!isProductSellable(p)) return false;
             if (isPartCategory(p.category, p.categoryIds)) return true;
@@ -386,21 +391,61 @@ export default function POSPage() {
         });
     }, []);
 
-    // ── Load products ──
+    const mergeProducts = useCallback((nextProducts: PosProduct[]) => {
+        const sellableProducts = filterPosProducts(nextProducts);
+        setProducts(prev => {
+            const merged = new Map(prev.map(product => [product.id, product]));
+            sellableProducts.forEach(product => merged.set(product.id, product));
+            return Array.from(merged.values());
+        });
+    }, [filterPosProducts]);
+
+    const loadDefaultProducts = useCallback(async () => {
+        const snap = await getDocs(query(
+            collection(db, 'products'),
+            fbOrderBy('createdAt', 'desc'),
+            limit(POS_DEFAULT_PRODUCT_LIMIT),
+        ));
+        const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as PosProduct));
+        setProducts(filterPosProducts(data));
+    }, [filterPosProducts]);
+
+    // Load a bounded POS product cache instead of the full products collection.
     useEffect(() => {
         const load = async () => {
             try {
-                const snap = await getDocs(collection(db, 'products'));
-                const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as Product & { id: string }));
-                setProducts(filterPosProducts(data));
+                await loadDefaultProducts();
             } catch (err) {
-                console.error('Failed to load products:', err);
+                console.error('Failed to load POS products:', err);
             } finally {
                 setLoading(false);
             }
         };
         load();
-    }, [filterPosProducts]);
+    }, [loadDefaultProducts]);
+
+    useEffect(() => {
+        const normalizedSearch = searchQuery.trim();
+        if (normalizedSearch.length === 0) return;
+        if (normalizedSearch.length < 2) return;
+
+        const timeoutId = window.setTimeout(async () => {
+            try {
+                const keyword = generateSearchKeywords(normalizedSearch)[0] || normalizedSearch.toLowerCase();
+                const snap = await getDocs(query(
+                    collection(db, 'products'),
+                    where('searchKeywords', 'array-contains', keyword),
+                    limit(POS_SEARCH_PRODUCT_LIMIT),
+                ));
+                const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as PosProduct));
+                mergeProducts(data);
+            } catch (err) {
+                console.error('Failed to search POS products:', err);
+            }
+        }, 250);
+
+        return () => window.clearTimeout(timeoutId);
+    }, [loadDefaultProducts, mergeProducts, searchQuery]);
 
     // Keyboard shortcut: F1 to focus search
     useEffect(() => {
@@ -474,18 +519,61 @@ export default function POSPage() {
         });
     }, [resolveWarranty]);
 
-    const findProductByScanCode = useCallback((rawCode: string) => {
+    const findProductByScanCode = useCallback(async (rawCode: string): Promise<PosProduct | null> => {
         const code = extractProductCodeFromScan(rawCode);
         if (!code) return null;
-        return products.find((product) => getProductScanCandidates(product).some((candidate) => candidate === rawCode.trim() || candidate === code)) || null;
-    }, [products]);
 
-    const handleProductScan = useCallback((rawCode: string, source: 'keyboard' | 'camera' | 'manual') => {
+        const cached = products.find((product) => getProductScanCandidates(product).some((candidate) => candidate === rawCode.trim() || candidate === code));
+        if (cached) return cached;
+
+        const registrySnap = await getDoc(doc(db, 'product_code_registry', code));
+        const registryProductId = registrySnap.exists() ? registrySnap.data().productId as string | undefined : undefined;
+        if (registryProductId) {
+            const productSnap = await getDoc(doc(db, 'products', registryProductId));
+            if (productSnap.exists()) {
+                const product = { id: productSnap.id, ...productSnap.data() } as PosProduct;
+                const [sellable] = filterPosProducts([product]);
+                if (sellable) {
+                    mergeProducts([sellable]);
+                    return sellable;
+                }
+            }
+        }
+
+        const productsRef = collection(db, 'products');
+        const legacySnapshots = await Promise.all([
+            getDocs(query(productsRef, where('sku', '==', code), limit(1))),
+            getDocs(query(productsRef, where('barcode', '==', code), limit(1))),
+            getDocs(query(productsRef, where('productCode', '==', code), limit(1))),
+            getDocs(query(productsRef, where('qrCodes', 'array-contains', code), limit(1))),
+        ]);
+        for (const snapshot of legacySnapshots) {
+            const docSnap = snapshot.docs[0];
+            if (!docSnap) continue;
+            const product = { id: docSnap.id, ...docSnap.data() } as PosProduct;
+            const [sellable] = filterPosProducts([product]);
+            if (sellable) {
+                mergeProducts([sellable]);
+                return sellable;
+            }
+        }
+
+        const fallbackSnap = await getDocs(query(
+            productsRef,
+            fbOrderBy('createdAt', 'desc'),
+            limit(POS_LEGACY_SCAN_FALLBACK_LIMIT),
+        ));
+        const fallbackProducts = filterPosProducts(fallbackSnap.docs.map(d => ({ id: d.id, ...d.data() } as PosProduct)));
+        mergeProducts(fallbackProducts);
+        return fallbackProducts.find((product) => getProductScanCandidates(product).some((candidate) => candidate === rawCode.trim() || candidate === code)) || null;
+    }, [filterPosProducts, mergeProducts, products]);
+
+    const handleProductScan = useCallback(async (rawCode: string, source: 'keyboard' | 'camera' | 'manual') => {
         const code = extractProductCodeFromScan(rawCode);
         const parts = rawCode.trim().split('#');
         const lotCode = parts.length > 1 ? parts[1] : undefined;
-        
-        const found = findProductByScanCode(rawCode);
+
+        const found = await findProductByScanCode(rawCode);
         if (!found) {
             const label = code || rawCode.trim();
             setScanStatus(`Không tìm thấy mã ${label}`);
@@ -526,7 +614,7 @@ export default function POSPage() {
                         e.preventDefault();
                         setSearchQuery('');
                     }
-                    handleProductScan(code, 'keyboard');
+                    void handleProductScan(code, 'keyboard');
                 }
             } else if (e.key.length === 1) {
                 barcodeBuffer.current += e.key;
@@ -579,7 +667,7 @@ export default function POSPage() {
                         video,
                         (result) => {
                             const rawValue = result?.getText();
-                            if (rawValue) handleProductScanRef.current(rawValue, 'camera');
+                            if (rawValue) void handleProductScanRef.current(rawValue, 'camera');
                         },
                     );
                     if (cancelled) {
@@ -611,7 +699,7 @@ export default function POSPage() {
                         if (scannerVideoRef.current.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
                             const results = await detector.detect(scannerVideoRef.current);
                             const rawValue = results[0]?.rawValue;
-                            if (rawValue && handleProductScanRef.current(rawValue, 'camera')) return;
+                            if (rawValue && await handleProductScanRef.current(rawValue, 'camera')) return;
                         }
                     } catch (err) {
                         console.error('Camera scan failed:', err);
@@ -897,9 +985,7 @@ export default function POSPage() {
     // Reload products after adding new one
     const reloadProducts = async () => {
         try {
-            const snap = await getDocs(collection(db, 'products'));
-            const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as Product & { id: string }));
-            setProducts(filterPosProducts(data));
+            await loadDefaultProducts();
         } catch (err) {
             console.error(err);
         }
@@ -1101,9 +1187,9 @@ export default function POSPage() {
 
                     <form
                         className="flex flex-col gap-2 sm:flex-row"
-                        onSubmit={(e) => {
+                        onSubmit={async (e) => {
                             e.preventDefault();
-                            if (handleProductScan(manualScanCode, 'manual')) setManualScanCode('');
+                            if (await handleProductScan(manualScanCode, 'manual')) setManualScanCode('');
                         }}
                     >
                         <div className="relative flex-1">
