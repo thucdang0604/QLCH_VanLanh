@@ -57,3 +57,16 @@
   - Focused ESLint pass voi `--max-warnings=0` cho `pos/page.tsx` va `src/features/pos/*`.
   - `pnpm typecheck` pass.
   - `pnpm lint` pass exit code 0; con 31 warnings no cu ngoai Phase 5.
+- Phase 6:
+  - Commit checkpoint Phase 5: `2d78c34a refactor: split pos cart workflow`.
+  - Deep split sau khi ra soat lai cac file con lon:
+    - Tach `src/app/admin/articles/page.tsx` thanh page orchestration + `src/features/articles/ArticleEditorModal.tsx`, `ArticleComments.tsx`, `articleTypes.ts`.
+    - Tach modal chi tiet phieu KTV sang `src/features/technician/TechnicianTicketDetailModal.tsx`, giu transition/transfer/search handler tai `technician/page.tsx`.
+    - Tach board danh sach mobile/table cua repairs sang `src/features/repairs/RepairTicketBoard.tsx`, giu orchestration/modal state tai `repairs/page.tsx`.
+  - Ket qua giam file:
+    - `src/app/admin/articles/page.tsx`: con 281 dong.
+    - `src/app/admin/technician/page.tsx`: 1452 dong xuong 1086 dong.
+    - `src/app/admin/repairs/page.tsx`: 1456 dong xuong 1072 dong.
+  - Focused ESLint pass voi `--max-warnings=0` cho toan bo file articles/technician/repairs vua tach.
+  - `pnpm typecheck` pass.
+  - `pnpm lint` pass exit code 0; con 31 warnings baseline ngoai Phase 6.
