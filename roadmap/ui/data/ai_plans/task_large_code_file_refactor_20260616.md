@@ -45,10 +45,11 @@
 
 ## Phase 5: POS page
 
-- [ ] Tach product/cart/scanner/repair lookup hooks.
-- [ ] Tach product grid va cart panel.
-- [ ] Focused ESLint pass.
-- [ ] `pnpm typecheck` pass.
+- [x] Tach POS shared types sang `src/features/pos/posTypes.ts`.
+- [x] Tach cart panel/checkout sidebar sang `src/features/pos/PosCartPanel.tsx`.
+- [ ] Tach product grid/scanner/repair lookup hooks neu can giam tiep.
+- [x] Focused ESLint pass.
+- [x] `pnpm typecheck` pass.
 
 ## Final
 

@@ -48,3 +48,12 @@
   - Focused ESLint pass voi `--max-warnings=0` cho `technician/page.tsx` va `src/features/technician/*`.
   - `pnpm typecheck` pass.
   - `pnpm lint` pass exit code 0; con 31 warnings no cu ngoai Phase 4.
+- Phase 5:
+  - Commit checkpoint Phase 4: `e91fdaef refactor: split technician workflow UI`.
+  - Tach shared POS types sang `src/features/pos/posTypes.ts`.
+  - Tach cart panel/checkout sidebar sang `src/features/pos/PosCartPanel.tsx`.
+  - Giu checkout, voucher, repair lookup va scanner logic trong `src/app/admin/pos/page.tsx`.
+  - Giam `src/app/admin/pos/page.tsx` tu khoang 1689 dong xuong 1361 dong.
+  - Focused ESLint pass voi `--max-warnings=0` cho `pos/page.tsx` va `src/features/pos/*`.
+  - `pnpm typecheck` pass.
+  - `pnpm lint` pass exit code 0; con 31 warnings no cu ngoai Phase 5.
