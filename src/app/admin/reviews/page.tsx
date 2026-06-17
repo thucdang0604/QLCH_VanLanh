@@ -8,7 +8,7 @@ import {
     Search, Loader2,
     Eye, Store, Package
 } from 'lucide-react';
-import { collection, query, orderBy, onSnapshot, doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, doc, updateDoc, deleteDoc, limit } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
 import type { FirestoreDateValue, Review, ProductReview } from '@/lib/types';
@@ -51,7 +51,7 @@ export default function AdminReviewsPage() {
 
         setLoading(true);
         const collectionName = filterSource === 'store' ? 'reviews' : 'product_reviews';
-        const q = query(collection(db, collectionName), orderBy('createdAt', 'desc'));
+        const q = query(collection(db, collectionName), orderBy('createdAt', 'desc'), limit(200));
 
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const data: UnifiedReview[] = [];

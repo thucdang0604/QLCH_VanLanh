@@ -6,7 +6,7 @@ import {
     Loader2, Video, MessageCircle
 } from 'lucide-react';
 import {
-    collection, query, orderBy, onSnapshot,
+    collection, query, orderBy, onSnapshot, limit,
     deleteDoc, doc
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
@@ -30,7 +30,7 @@ export default function ArticlesPage() {
 
     // ── Realtime subscription to Firestore ──
     useEffect(() => {
-        const q = query(collection(db, 'articles'), orderBy('createdAt', 'desc'));
+        const q = query(collection(db, 'articles'), orderBy('createdAt', 'desc'), limit(200));
         const unsub = onSnapshot(q, (snap) => {
             const items = snap.docs.map(d => ({ id: d.id, ...d.data() } as Article));
             setArticles(items);

@@ -17,8 +17,14 @@
 
 ## Phase 8.2 - Admin Realtime Listener Audit
 
-- [ ] Them limit/pagination cho `articles`, `vouchers`, `reviews`, `suppliers`, `discount rules/customers`.
-- [ ] Chuyen cac list khong can realtime sang `getDocs` + refresh sau thao tac ghi.
+- [x] Them query limit cho `articles` va `reviews` realtime listeners: moi man chi nghe 200 ban ghi moi nhat.
+- [x] Chuyen `vouchers` tu realtime listener sang `getDocs` gioi han 200 + refresh sau create/update/toggle/delete.
+- [x] Chuyen `suppliers` tu realtime listener sang `getDocs` gioi han 200 + refresh sau add/edit/payment.
+- [x] Gioi han `supplier_transactions` khi mo rong NCC: 100 giao dich moi nhat.
+- [x] Chuyen `discount rules/customers` sang `getDocs`: accessory rules gioi han 100, tier customer preview gioi han 500 khach theo `totalSpent`.
+- [x] Giu realtime cho doc nho `system_config/tier_settings` vi chi doc 1 document.
+- [x] Focused ESLint cho 5 file Phase 8.2 pass.
+- [x] `pnpm typecheck` pass.
 
 ## Phase 8.3 - Badge Counters
 

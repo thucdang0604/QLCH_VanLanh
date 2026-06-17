@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { collection, query, orderBy, onSnapshot, addDoc, updateDoc, doc, deleteDoc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { useState, useEffect, useCallback } from 'react';
+import { collection, query, orderBy, onSnapshot, addDoc, updateDoc, doc, deleteDoc, serverTimestamp, setDoc, limit, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Percent, Plus, Edit2, Trash2, ToggleLeft, ToggleRight, X, Tag, Medal, Users } from 'lucide-react';
 import { toast } from 'sonner';
@@ -139,35 +139,40 @@ export default function DiscountRulesTab() {
     // Format currency with commas
     const fmtCurrency = (n: number) => n.toLocaleString('vi-VN');
 
-    useEffect(() => {
-        const unsubCustomers = onSnapshot(collection(db, 'customers'), snap => {
-            const grouped: Record<string, { name: string; phone: string; totalSpent: number }[]> = {};
-            for (const tier of tiers) grouped[tier.name] = [];
+    const loadTierCustomers = useCallback(async () => {
+        const customerPreviewQuery = query(collection(db, 'customers'), orderBy('totalSpent', 'desc'), limit(500));
+        const snap = await getDocs(customerPreviewQuery);
+        const grouped: Record<string, { name: string; phone: string; totalSpent: number }[]> = {};
+        for (const tier of tiers) grouped[tier.name] = [];
 
-            snap.docs.forEach(d => {
-                const data = d.data();
-                const spent = Number(data.totalSpent || 0);
-                let matched = 'Bronze';
-                for (const tier of tiers) {
-                    if (tier.minSpent > 0 && spent >= tier.minSpent) { matched = tier.name; break; }
-                }
-                if (!grouped[matched]) grouped[matched] = [];
-                grouped[matched].push({ name: data.name || data.phone || d.id, phone: d.id, totalSpent: spent });
-            });
-            for (const key of Object.keys(grouped)) {
-                grouped[key].sort((a, b) => b.totalSpent - a.totalSpent);
+        snap.docs.forEach(d => {
+            const data = d.data();
+            const spent = Number(data.totalSpent || 0);
+            let matched = 'Bronze';
+            for (const tier of tiers) {
+                if (tier.minSpent > 0 && spent >= tier.minSpent) { matched = tier.name; break; }
             }
-            setTierCustomers(grouped);
+            if (!grouped[matched]) grouped[matched] = [];
+            grouped[matched].push({ name: data.name || data.phone || d.id, phone: d.id, totalSpent: spent });
         });
-        return () => unsubCustomers();
+        for (const key of Object.keys(grouped)) {
+            grouped[key].sort((a, b) => b.totalSpent - a.totalSpent);
+        }
+        setTierCustomers(grouped);
     }, [tiers]);
 
     useEffect(() => {
-        // Fetch Accessory Rules
-        const qRules = query(collection(db, 'accessory_discount_rules'), orderBy('createdAt', 'desc'));
-        const unsubRules = onSnapshot(qRules, snap => {
-            setRules(snap.docs.map(d => ({ id: d.id, ...d.data() } as AccessoryDiscountRule & { id: string })));
-        });
+        loadTierCustomers().catch(error => console.error('Failed to load tier customers:', error));
+    }, [loadTierCustomers]);
+
+    const loadAccessoryRules = useCallback(async () => {
+        const qRules = query(collection(db, 'accessory_discount_rules'), orderBy('createdAt', 'desc'), limit(100));
+        const snap = await getDocs(qRules);
+        setRules(snap.docs.map(d => ({ id: d.id, ...d.data() } as AccessoryDiscountRule & { id: string })));
+    }, []);
+
+    useEffect(() => {
+        loadAccessoryRules().catch(error => console.error('Failed to load accessory discount rules:', error));
 
         // Fetch Tier Settings
         const unsubTiers = onSnapshot(doc(db, 'system_config', 'tier_settings'), snap => {
@@ -176,8 +181,8 @@ export default function DiscountRulesTab() {
             }
         });
 
-        return () => { unsubRules(); unsubTiers(); };
-    }, []);
+        return () => { unsubTiers(); };
+    }, [loadAccessoryRules]);
 
     // Handlers for Accessories
     const handleSaveAccessoryRule = async (data: Partial<AccessoryDiscountRule>) => {
@@ -188,17 +193,20 @@ export default function DiscountRulesTab() {
             await addDoc(collection(db, 'accessory_discount_rules'), { ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
             toast.success('Đã thêm rule phụ kiện mới');
         }
+        await loadAccessoryRules();
     };
 
     const toggleAccessoryActive = async (rule: AccessoryDiscountRule & { id: string }) => {
         await updateDoc(doc(db, 'accessory_discount_rules', rule.id), { isActive: !rule.isActive, updatedAt: serverTimestamp() });
         toast.success(rule.isActive ? 'Đã tắt rule' : 'Đã bật rule');
+        await loadAccessoryRules();
     };
 
     const handleDeleteAccessoryRule = async (id: string) => {
         if (!confirm('Xóa rule này?')) return;
         await deleteDoc(doc(db, 'accessory_discount_rules', id));
         toast.success('Đã xóa rule');
+        await loadAccessoryRules();
     };
 
     // Handlers for Tiers

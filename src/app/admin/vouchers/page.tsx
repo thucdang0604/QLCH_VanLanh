@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { collection, query, orderBy, onSnapshot, addDoc, updateDoc, doc, deleteDoc, serverTimestamp } from 'firebase/firestore';
+import { useState, useEffect, useCallback } from 'react';
+import { collection, query, orderBy, getDocs, addDoc, updateDoc, doc, deleteDoc, serverTimestamp, limit } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Ticket, Plus, Edit2, Trash2, ToggleLeft, ToggleRight, X, Copy, Check, Settings, Target } from 'lucide-react';
 import { toast } from 'sonner';
@@ -320,13 +320,15 @@ export default function VouchersPage() {
     const [copiedCode, setCopiedCode] = useState('');
     const [activeTab, setActiveTab] = useState<'vouchers' | 'discount-rules' | 'missions'>('vouchers');
 
-    useEffect(() => {
-        const q = query(collection(db, 'vouchers'), orderBy('createdAt', 'desc'));
-        const unsub = onSnapshot(q, snap => {
-            setVouchers(snap.docs.map(d => ({ id: d.id, ...d.data() } as Voucher & { id: string })));
-        });
-        return unsub;
+    const loadVouchers = useCallback(async () => {
+        const q = query(collection(db, 'vouchers'), orderBy('createdAt', 'desc'), limit(200));
+        const snap = await getDocs(q);
+        setVouchers(snap.docs.map(d => ({ id: d.id, ...d.data() } as Voucher & { id: string })));
     }, []);
+
+    useEffect(() => {
+        loadVouchers().catch(error => console.error('Failed to load vouchers:', error));
+    }, [loadVouchers]);
 
     const handleSave = async (data: Partial<Voucher>) => {
         if (editVoucher) {
@@ -336,17 +338,20 @@ export default function VouchersPage() {
             await addDoc(collection(db, 'vouchers'), { ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
             toast.success('Đã tạo Voucher mới');
         }
+        await loadVouchers();
     };
 
     const toggleActive = async (v: Voucher & { id: string }) => {
         await updateDoc(doc(db, 'vouchers', v.id), { isActive: !v.isActive, updatedAt: serverTimestamp() });
         toast.success(v.isActive ? 'Đã tắt Voucher' : 'Đã bật Voucher');
+        await loadVouchers();
     };
 
     const handleDelete = async (id: string) => {
         if (!confirm('Xóa Voucher này?')) return;
         await deleteDoc(doc(db, 'vouchers', id));
         toast.success('Đã xóa Voucher');
+        await loadVouchers();
     };
 
     const copyCode = (code: string) => {

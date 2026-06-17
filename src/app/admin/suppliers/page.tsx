@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { collection, query, orderBy, onSnapshot, addDoc, updateDoc, doc, serverTimestamp, getDocs, where } from 'firebase/firestore';
+import { collection, query, orderBy, addDoc, updateDoc, doc, serverTimestamp, getDocs, where, limit } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
 import { Building2, Plus, Search, Phone, Mail, MapPin, CreditCard, Edit2, ChevronDown, ChevronUp, ArrowDownToLine, ArrowUpFromLine, X } from 'lucide-react';
@@ -172,18 +172,20 @@ export default function SuppliersPage() {
     const [loadingTx, setLoadingTx] = useState(false);
     const [paySupplier, setPaySupplier] = useState<Supplier | null>(null);
 
-    // Listen suppliers
-    useEffect(() => {
-        const q = query(collection(db, 'suppliers'), orderBy('createdAt', 'desc'));
-        return onSnapshot(q, snap => {
-            setSuppliers(snap.docs.map(d => ({ id: d.id, ...d.data() } as Supplier & { id: string })));
-        });
+    const loadSuppliers = useCallback(async () => {
+        const q = query(collection(db, 'suppliers'), orderBy('createdAt', 'desc'), limit(200));
+        const snap = await getDocs(q);
+        setSuppliers(snap.docs.map(d => ({ id: d.id, ...d.data() } as Supplier & { id: string })));
     }, []);
+
+    useEffect(() => {
+        loadSuppliers().catch(error => console.error('Failed to load suppliers:', error));
+    }, [loadSuppliers]);
 
     // Load transactions when expanded
     const loadTransactions = useCallback(async (supplierId: string) => {
         setLoadingTx(true);
-        const q = query(collection(db, 'supplier_transactions'), where('supplierId', '==', supplierId), orderBy('createdAt', 'desc'));
+        const q = query(collection(db, 'supplier_transactions'), where('supplierId', '==', supplierId), orderBy('createdAt', 'desc'), limit(100));
         const snap = await getDocs(q);
         setTransactions(snap.docs.map(d => ({ id: d.id, ...d.data() } as SupplierTransaction)));
         setLoadingTx(false);
@@ -204,6 +206,7 @@ export default function SuppliersPage() {
             await addDoc(collection(db, 'suppliers'), { ...data, totalDebt: 0, isActive: true, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
             toast.success('Đã thêm NCC mới');
         }
+        await loadSuppliers();
     };
 
     // Pay debt
