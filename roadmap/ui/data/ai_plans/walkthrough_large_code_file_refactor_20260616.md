@@ -70,3 +70,12 @@
   - Focused ESLint pass voi `--max-warnings=0` cho toan bo file articles/technician/repairs vua tach.
   - `pnpm typecheck` pass.
   - `pnpm lint` pass exit code 0; con 31 warnings baseline ngoai Phase 6.
+- Phase 7:
+  - Commit checkpoint Phase 6: `ac1ee703 refactor: split remaining admin UI sections`.
+  - Muc tieu: giam tai `src/lib/types.ts` theo domain type ma khong lam churn 80 import hien co.
+  - Da tach `src/lib/types.ts` thanh compatibility barrel 9 dong, re-export cac module trong `src/lib/types/`.
+  - Ranh gioi da tach: `common`, `catalog`, `commerce`, `content`, `repair`, `inventory`, `finance`, `voucher`, `workflow`.
+  - File domain lon nhat con lai la `src/lib/types/repair.ts` 200 dong; cac domain khac nam trong khoang 14-105 dong.
+  - Focused ESLint pass voi `--max-warnings=0` cho `src/lib/types.ts` va toan bo `src/lib/types/*.ts`.
+  - `pnpm typecheck` pass, xac nhan import cu `@/lib/types` van tuong thich.
+  - `pnpm lint` pass exit code 0; con 31 warnings baseline ngoai Phase 7.
