@@ -39,6 +39,29 @@ function getMonthsAgoTimestamp(months: number): Timestamp {
     return Timestamp.fromDate(d);
 }
 
+type RevenueOrderItem = Order['items'][number] & {
+    isRepairTicket?: boolean;
+    repairTicketId?: string;
+};
+
+function isRepairOrderItem(item: RevenueOrderItem) {
+    return item.isRepairTicket === true || Boolean(item.repairTicketId);
+}
+
+function getRetailOrderTotal(order: Order) {
+    const items = (order.items || []) as RevenueOrderItem[];
+    if (items.length === 0) return Number(order.total_amount) || 0;
+
+    const hasRepairItems = items.some(isRepairOrderItem);
+    if (!hasRepairItems) return Number(order.total_amount) || 0;
+
+    const retailSubtotal = items
+        .filter(item => !isRepairOrderItem(item))
+        .reduce((sum, item) => sum + (Number(item.price) || 0) * (Number(item.quantity) || 1), 0);
+    const retailDiscount = Math.min(Number(order.discount_amount) || 0, retailSubtotal);
+    return Math.max(0, retailSubtotal - retailDiscount);
+}
+
 export default function RevenuePage() {
     // Data
     const [orders, setOrders] = useState<Order[]>([]);
@@ -202,17 +225,19 @@ export default function RevenuePage() {
                 if (o.paymentHistory && o.paymentHistory.length > 0) {
                     // Có lịch sử thanh toán (từ POS hoặc Thu nợ)
                     const paidSoFar = o.paymentHistory.reduce((s, p) => s + (p.amount || 0), 0);
-                    orderRevenue += paidSoFar;
+                    const retailTotal = getRetailOrderTotal(o);
+                    const paidRetail = Math.min(paidSoFar, retailTotal);
+                    orderRevenue += paidRetail;
 
                     if (o.paymentStatus === 'debt') {
-                        debtRevenue += Math.max(0, (o.total_amount || 0) - paidSoFar);
+                        debtRevenue += Math.max(0, retailTotal - paidRetail);
                     }
                 } else if (o.status === 'Completed' || o.status === 'Shipping') {
                     // Đơn web cũ hoặc không có POS history, nhưng đã hoàn thành
                     if (o.paymentStatus === 'debt' || o.payment_method === 'Debt') {
-                        debtRevenue += (o.total_amount || 0);
+                        debtRevenue += getRetailOrderTotal(o);
                     } else {
-                        orderRevenue += (o.total_amount || 0);
+                        orderRevenue += getRetailOrderTotal(o);
                     }
                 }
             }
@@ -267,8 +292,9 @@ export default function RevenuePage() {
         const netProfit = totalRevenue - totalExpenses - totalGiftDiscount;
 
         // Orders breakdown
-        const webOrders = orders.filter(o => (o.source !== 'pos') && (o.status === 'Completed' || o.status === 'Shipping') && inRange(o.completedAt || o.updatedAt || o.createdAt));
-        const posOrders = orders.filter(o => o.source === 'pos' && (o.status === 'Completed' || o.status === 'Shipping') && inRange(o.completedAt || o.updatedAt || o.createdAt));
+        const completedRetailOrders = orders.filter(o => (o.status === 'Completed' || o.status === 'Shipping') && inRange(o.completedAt || o.updatedAt || o.createdAt) && getRetailOrderTotal(o) > 0);
+        const webOrders = completedRetailOrders.filter(o => o.source !== 'pos');
+        const posOrders = completedRetailOrders.filter(o => o.source === 'pos');
 
         return {
             orderRevenue, repairRevenue, debtRevenue, totalRevenue, totalGiftDiscount,
@@ -276,8 +302,8 @@ export default function RevenuePage() {
             netProfit,
             webOrderCount: webOrders.length,
             posOrderCount: posOrders.length,
-            webOrderRevenue: webOrders.reduce((s, o) => s + (o.total_amount || 0), 0),
-            posOrderRevenue: posOrders.reduce((s, o) => s + (o.total_amount || 0), 0),
+            webOrderRevenue: webOrders.reduce((s, o) => s + getRetailOrderTotal(o), 0),
+            posOrderRevenue: posOrders.reduce((s, o) => s + getRetailOrderTotal(o), 0),
             repairCount: repairs.filter(r => r.status === 'done' && r.ticketType !== 'warranty' && inRange(r.timing?.completedAt || r.createdAt)).length,
             warrantyCount: repairs.filter(r => r.ticketType === 'warranty' && inRange(r.timing?.completedAt || r.createdAt)).length,
         };
@@ -346,9 +372,10 @@ export default function RevenuePage() {
             orders.forEach(o => {
                 if (isInDay(o.completedAt || o.updatedAt || o.createdAt)) {
                     if (o.paymentHistory && o.paymentHistory.length > 0) {
-                        rev += o.paymentHistory.reduce((s, p) => s + (p.amount || 0), 0);
+                        const paidSoFar = o.paymentHistory.reduce((s, p) => s + (p.amount || 0), 0);
+                        rev += Math.min(paidSoFar, getRetailOrderTotal(o));
                     } else if ((o.status === 'Completed' || o.status === 'Shipping') && o.paymentStatus !== 'debt' && o.payment_method !== 'Debt') {
-                        rev += (o.total_amount || 0);
+                        rev += getRetailOrderTotal(o);
                     }
                 }
             });

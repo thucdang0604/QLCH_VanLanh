@@ -88,6 +88,13 @@
 - Verification: focused ESLint passed for the touched files; `tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
 - Remaining risk: order documents are still created as POS receipts for repair payments, so the next part must adjust order/admin display and any legacy revenue fallback paths that still derive totals directly from `orders`.
 
+### Part 2 - Revenue fallback excludes repair payment lines from order revenue
+- Covered IDs: UT-20260618-001, UT-20260618-007.
+- Files touched: `src/app/admin/revenue/page.tsx`.
+- Change: legacy/fallback revenue calculations now derive order revenue, POS order revenue, web order revenue, and daily chart order revenue from retail-only order lines. POS receipt lines marked as repair payments no longer inflate order revenue when aggregate docs are not used.
+- Verification: focused ESLint passed for `src/app/admin/revenue/page.tsx`; `tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
+- Remaining risk: historical POS repair receipts created before Part 1 may not have `isRepairTicket` or `repairTicketId` on every repair-related line, so a one-time data audit/backfill may still be needed for old data.
+
 ## Intake List
 ### Batch 1 - User Reported 2026-06-18
 
