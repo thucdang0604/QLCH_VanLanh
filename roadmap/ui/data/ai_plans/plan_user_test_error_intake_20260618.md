@@ -123,6 +123,13 @@
 - Verification: no source references remain for `ai-creator`, `AI Creator`, `manage_ai_creator`, or `aiCreator`; focused ESLint passed for admin module/layout files; `next typegen && tsc --noEmit` passed after clearing stale `.next/types/app/admin/ai-creator`.
 - Remaining risk: existing staff documents may still contain the old `manage_ai_creator` string, but it no longer grants access to any admin route.
 
+### Part 7 - Bank config updates require TOTP
+- Covered IDs: UT-20260618-032.
+- Files touched: `src/components/admin/settings/BankIntegrationConfig.tsx`, `src/app/api/admin/bank-config/update/route.ts`.
+- Change: the bank settings UI now requires Authenticator setup before edit; labels no longer say the admin phone receives OTP; the update API rejects bank config changes until TOTP is configured and still requires a valid TOTP token for every save.
+- Verification: focused ESLint passed for the touched files with existing `<img>` warnings only; `next typegen && tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
+- Remaining risk: the field name `otpToken` remains as an internal request key for compatibility, but the runtime verification is TOTP-only.
+
 ## Intake List
 ### Batch 1 - User Reported 2026-06-18
 

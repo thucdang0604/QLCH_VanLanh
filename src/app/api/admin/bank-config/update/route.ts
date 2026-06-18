@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminDb, getAdminAuth } from '@/lib/firebaseAdmin';
+import { getAdminDb } from '@/lib/firebaseAdmin';
 import { normalizeVietnamPhone } from '@/lib/phone';
 import { requirePermission } from '@/lib/apiAuth';
 
@@ -38,6 +38,9 @@ export async function POST(request: NextRequest) {
         // 2. Kiểm tra TOTP nếu hệ thống đã bật
         const configDoc = await db.collection('settings').doc('bank_config').get();
         const configData = configDoc.data();
+        if (!configData?.totpEnabled || !configData?.totpSecret) {
+            return NextResponse.json({ success: false, error: 'Vui lòng thiết lập Authenticator trước khi cập nhật cấu hình ngân hàng.' }, { status: 403 });
+        }
         if (configData?.totpEnabled && configData?.totpSecret) {
             if (!otpToken) {
                 return NextResponse.json({ success: false, error: 'Yêu cầu mã xác thực TOTP.' }, { status: 400 });
