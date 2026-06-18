@@ -23,7 +23,7 @@ import { PART_CATEGORY, isPartCategory } from '@/lib/constants';
 import { fetchActiveDiscountRules, calculateAccessoryDiscounts } from '@/lib/discountRuleUtils';
 import { consumeChatWorkflowHandoff } from '@/lib/chatWorkflowHandoff';
 import { extractProductCodeFromScan, getPrimaryProductCode, getProductScanCandidates, productCodeSearchText } from '@/lib/productCodes';
-import { isProductSellable } from '@/lib/productLifecycle';
+import { PRODUCT_STATUS, isProductSellable } from '@/lib/productLifecycle';
 import { generateSearchKeywords } from '@/lib/utils';
 import { PosCartPanel } from '@/features/pos/PosCartPanel';
 import type { AppliedVoucher, CartItem, DiscountDetail, LastOrderData, OrderLineItem, RepairTicketInfo, VoucherStatus } from '@/features/pos/posTypes';
@@ -382,9 +382,10 @@ export default function POSPage() {
 
     const searchRef = useRef<HTMLInputElement>(null);
 
-    const filterPosProducts = useCallback((data: PosProduct[]) => {
+    const filterPosProducts = useCallback((data: PosProduct[], options?: { includeOutOfStock?: boolean }) => {
         return data.filter(p => {
-            if (!isProductSellable(p)) return false;
+            if (p.status !== PRODUCT_STATUS.ACTIVE || p.isProposed === true) return false;
+            if (!options?.includeOutOfStock && !isProductSellable(p)) return false;
             if (isPartCategory(p.category, p.categoryIds)) return true;
             if (p.categoryIds && p.categoryIds.length > 0) {
                 return RETAIL_CATEGORY_IDS.includes(p.categoryIds[0]);
@@ -393,8 +394,8 @@ export default function POSPage() {
         });
     }, []);
 
-    const mergeProducts = useCallback((nextProducts: PosProduct[]) => {
-        const sellableProducts = filterPosProducts(nextProducts);
+    const mergeProducts = useCallback((nextProducts: PosProduct[], options?: { includeOutOfStock?: boolean }) => {
+        const sellableProducts = filterPosProducts(nextProducts, options);
         setProducts(prev => {
             const merged = new Map(prev.map(product => [product.id, product]));
             sellableProducts.forEach(product => merged.set(product.id, product));
@@ -440,7 +441,7 @@ export default function POSPage() {
                     limit(POS_SEARCH_PRODUCT_LIMIT),
                 ));
                 const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as PosProduct));
-                mergeProducts(data);
+                mergeProducts(data, { includeOutOfStock: true });
             } catch (err) {
                 console.error('Failed to search POS products:', err);
             }
@@ -534,7 +535,7 @@ export default function POSPage() {
             const productSnap = await getDoc(doc(db, 'products', registryProductId));
             if (productSnap.exists()) {
                 const product = { id: productSnap.id, ...productSnap.data() } as PosProduct;
-                const [sellable] = filterPosProducts([product]);
+                const [sellable] = filterPosProducts([product], { includeOutOfStock: true });
                 if (sellable) {
                     mergeProducts([sellable]);
                     return sellable;
@@ -553,7 +554,7 @@ export default function POSPage() {
             const docSnap = snapshot.docs[0];
             if (!docSnap) continue;
             const product = { id: docSnap.id, ...docSnap.data() } as PosProduct;
-            const [sellable] = filterPosProducts([product]);
+                const [sellable] = filterPosProducts([product], { includeOutOfStock: true });
             if (sellable) {
                 mergeProducts([sellable]);
                 return sellable;
@@ -565,7 +566,10 @@ export default function POSPage() {
             fbOrderBy('createdAt', 'desc'),
             limit(POS_LEGACY_SCAN_FALLBACK_LIMIT),
         ));
-        const fallbackProducts = filterPosProducts(fallbackSnap.docs.map(d => ({ id: d.id, ...d.data() } as PosProduct)));
+        const fallbackProducts = filterPosProducts(
+            fallbackSnap.docs.map(d => ({ id: d.id, ...d.data() } as PosProduct)),
+            { includeOutOfStock: true }
+        );
         mergeProducts(fallbackProducts);
         return fallbackProducts.find((product) => getProductScanCandidates(product).some((candidate) => candidate === rawCode.trim() || candidate === code)) || null;
     }, [filterPosProducts, mergeProducts, products]);

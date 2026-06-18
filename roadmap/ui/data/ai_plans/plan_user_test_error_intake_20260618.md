@@ -109,6 +109,13 @@
 - Verification: focused ESLint passed for `src/app/api/pos/checkout/route.ts`; `tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
 - Remaining risk: if a store workflow has multiple terminal choices from the current status and none is marked with commission features, checkout now fails loudly instead of guessing. The workflow config should make the paid-completion terminal unambiguous.
 
+### Part 5 - POS search shows active out-of-stock products
+- Covered IDs: UT-20260618-003.
+- Files touched: `src/app/admin/pos/page.tsx`.
+- Change: the default POS product cache still hides out-of-stock items, but search and scan now merge active out-of-stock products into the grid so staff see the product with the existing "Hết hàng" badge instead of a false "not found" result.
+- Verification: focused ESLint passed for `src/app/admin/pos/page.tsx`; `tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
+- Remaining risk: this keeps hidden/inactive/proposed products excluded. If staff need to see inactive catalog entries in POS search, that should be a separate permissioned lookup.
+
 ## Intake List
 ### Batch 1 - User Reported 2026-06-18
 
