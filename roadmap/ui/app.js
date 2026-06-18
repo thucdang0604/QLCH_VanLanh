@@ -242,7 +242,8 @@ async function loadData() {
         }
         
         // 3. Tải tất cả các file con cùng lúc
-        const fetchPromises = fileUrls.map(url => fetch(url, freshData).then(r => r.ok ? r.text() : ''));
+        const uniqueFileUrls = [...new Set(fileUrls)];
+        const fetchPromises = uniqueFileUrls.map(url => fetch(url, freshData).then(r => r.ok ? r.text() : ''));
         const contents = await Promise.all(fetchPromises);
         
         // 4. Tải manifest.json và các file dữ liệu tĩnh khác
@@ -1225,6 +1226,34 @@ window.loadSecurityScanFile = async function (fileId) {
     }
 };
 
+function getAIPlanTime(plan) {
+    const raw = plan.updatedAt || plan.completedAt || plan.date || '';
+    if (!raw) return 0;
+    const normalized = String(raw).includes('.')
+        ? String(raw).split('.').reverse().join('-')
+        : String(raw);
+    const parsed = Date.parse(normalized);
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function getSortedAIPlans() {
+    return [...(manifestData.aiPlans || [])].sort((a, b) => getAIPlanTime(b) - getAIPlanTime(a));
+}
+
+function getAIPlanStatusMeta(status) {
+    const value = String(status || 'pending').toLowerCase();
+    if (['final', 'completed', 'done', 'resolved'].includes(value)) {
+        return { label: 'Final', color: 'var(--success)' };
+    }
+    if (['in_progress', 'in-progress', 'active', 'implemented-awaiting-e2e', 'implemented-awaiting-admin-smoke'].includes(value)) {
+        return { label: 'In Progress', color: 'var(--warning)' };
+    }
+    if (['blocked', 'implemented-with-external-blockers'].includes(value)) {
+        return { label: 'Blocked', color: 'var(--danger)' };
+    }
+    return { label: 'Pending', color: 'var(--text-secondary)' };
+}
+
 // Render AI Plans View
 async function renderAIPlansView() {
     const content = document.getElementById('dynamic-content');
@@ -1233,26 +1262,28 @@ async function renderAIPlansView() {
         Đang tải dữ liệu AI Plans...
     </div>`;
 
-    const plans = manifestData.aiPlans || [];
+    const plans = getSortedAIPlans();
     if (plans.length === 0) {
         content.innerHTML = `<div class="dashboard-view"><p style="color: var(--text-secondary);">Chưa có AI Plan nào được lưu trữ.</p></div>`;
         return;
     }
 
-    // Default to the latest plan (last item in array)
-    const currentPlanIndex = plans.length - 1;
+    // Default to the latest plan after sorting by updatedAt/date.
+    const currentPlan = plans[0];
     
     let html = `<div class="dashboard-view" style="display: flex; gap: 20px; align-items: flex-start;">
         <div style="flex: 0 0 250px; background: var(--bg-card); border-radius: 8px; padding: 15px; border: 1px solid var(--border-color); position: sticky; top: 20px;">
             <h3 style="margin-top:0; color: var(--accent-color); font-size: 1.1rem; padding-bottom: 10px; border-bottom: 1px solid var(--border-color);">Lịch sử AI Plans</h3>
             <ul style="list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px;">`;
             
-    // Clone and reverse to show newest first in menu
-    [...plans].reverse().forEach((p, i) => {
-        const isSelected = p.id === plans[currentPlanIndex].id;
+    // Show newest first in menu
+    plans.forEach((p) => {
+        const statusMeta = getAIPlanStatusMeta(p.status);
+        const isSelected = p.id === currentPlan.id;
         html += `<li id="plan-menu-${p.id}" class="menu-item ${isSelected ? 'active' : ''}" style="padding: 10px; border-radius: 6px; cursor: pointer; border: 1px solid ${isSelected ? 'var(--accent-color)' : 'transparent'}; background: ${isSelected ? 'rgba(56,189,248,0.1)' : 'transparent'}; transition: 0.2s;" onclick="loadAIPlanData('${p.id}')">
             <div style="font-weight: 600; color: ${isSelected ? 'var(--accent-color)' : 'var(--text-color)'}; font-size: 0.9rem;">${p.title}</div>
             <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 4px;">📅 ${p.date}</div>
+            <div style="font-size: 0.72rem; margin-top: 5px; color: ${statusMeta.color}; font-weight: 700;">${statusMeta.label}</div>
         </li>`;
     });
 
@@ -1265,11 +1296,11 @@ async function renderAIPlansView() {
     content.innerHTML = html;
     
     // Load default plan
-    await loadAIPlanData(plans[currentPlanIndex].id);
+    await loadAIPlanData(currentPlan.id);
 }
 
 window.loadAIPlanData = async function(planId) {
-    const plans = manifestData.aiPlans || [];
+    const plans = getSortedAIPlans();
     const plan = plans.find(p => p.id === planId);
     if (!plan) return;
     
@@ -1299,8 +1330,18 @@ window.loadAIPlanData = async function(planId) {
         { id: 'task', title: 'Task Tracker', url: plan.taskFile },
         { id: 'walkthrough', title: 'Walkthrough', url: plan.walkthroughFile }
     ];
+    const statusMeta = getAIPlanStatusMeta(plan.status);
 
-    let html = `<div class="tabs" style="display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 1px solid var(--border-color); padding-bottom: 15px;">`;
+    let html = `
+        <div style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+            <div style="font-size: 1.2rem; font-weight: 700; color: var(--text-color);">${plan.title}</div>
+            <div style="margin-top: 8px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; color: var(--text-secondary); font-size: 0.85rem;">
+                <span>Date: <b>${plan.date || '-'}</b></span>
+                <span>Status: <b style="color: ${statusMeta.color};">${statusMeta.label}</b></span>
+                ${plan.completedAt ? `<span>Completed: <b>${plan.completedAt}</b></span>` : ''}
+            </div>
+        </div>
+        <div class="tabs" style="display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 1px solid var(--border-color); padding-bottom: 15px;">`;
 
     files.forEach((f, idx) => {
         html += `<button class="btn ${idx === 0 ? 'active' : ''}" id="tab-btn-${f.id}" onclick="switchAIPlanTab('${f.id}')" style="${idx === 0 ? 'background: var(--accent-color); border-color: var(--accent-color); color: #fff;' : 'background: transparent; color: var(--text-secondary);'} font-weight: 600;">${f.title}</button>`;

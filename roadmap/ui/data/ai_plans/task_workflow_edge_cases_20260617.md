@@ -1,0 +1,21 @@
+# Task List: Cập nhật Workflow theo vận hành thực tế
+
+- `[x]` Khởi tạo plan và task tracker
+- `[x]` Đăng ký plan vào `manifest.json`
+- `[x]` **Phân hệ Sửa chữa (`repair.md` & `repair_workflow_v2.md`)**
+  - Xóa luồng thanh toán độc lập của phiếu sửa chữa.
+  - Sửa lại nút thắt cuối cùng: "Bàn giao & Chuyển sang POS thanh toán".
+  - Bổ sung luồng "Khách quay lại bảo hành sửa chữa".
+- `[x]` **Phân hệ POS & Đơn hàng (`pos-orders.md`)**
+  - Đặt POS làm trung tâm: Có thể lấy dữ liệu từ "Sản phẩm lẻ" hoặc "Phiếu sửa chữa".
+  - Thêm logic tính toán giảm giá: Mã giảm giá, VIP, Mua kèm phụ kiện.
+  - Bổ sung luồng "Trả hàng / Hoàn tiền".
+  - Bổ sung luồng "Giao hàng thất bại / Bùng đơn".
+  - Bổ sung luồng "Hủy cọc".
+- `[x]` **Phân hệ Kho hàng (`inventory.md`)**
+  - Bổ sung luồng "Trả hàng Nhà Cung Cấp".
+  - Bổ sung luồng "Kiểm kê & Điều chỉnh hao hụt".
+- `[x]` **Phân hệ Tài chính (`finance-hr.md`)**
+  - Bổ sung luồng "Xử lý công nợ (Trả nhiều lần)".
+  - Bổ sung luồng "Giảm trừ hoa hồng (Do trả hàng/làm hỏng)".
+- `[x]` Kiểm tra lại các file markdown đảm bảo Mermaid render tốt.

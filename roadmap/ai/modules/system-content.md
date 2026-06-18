@@ -54,6 +54,8 @@ graph TD
 - Admin can override the Place ID from `/admin/appearance`.
 - If Google Places is unavailable, the homepage falls back to an official Google Maps URL CTA without mock reviews.
 
+# 🐛 Bugs
+
 ## BUG-HARDCODE-001: Hardcode cleanup cho secret, storefront fallback và business identity
 
 - **Status:** fixed

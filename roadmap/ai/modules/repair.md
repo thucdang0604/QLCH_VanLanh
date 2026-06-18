@@ -1,5 +1,7 @@
 # 🧩 Workflows
 ## repair
+# 🧩 Workflows
+## repair
 - **Title:** Sửa chữa
 - **Icon:** 🔧
 ### 📁 Target Files (Các file đích)
@@ -9,6 +11,9 @@
 ```mermaid
 graph TD
             A("🚀 Chờ Tiếp nhận") --> A1("🔐 Kiểm tra Quyền & Check-in")
+            A -->|"Khách quay lại bảo hành"| WAR_CLAIM("🛡️ Check hạn Bảo hành")
+            WAR_CLAIM -->|"Còn hạn"| A1
+            WAR_CLAIM -->|"Hết hạn"| C
             A1 -->|"Gán KTV, Checklist"| B("🔍 Đang Kiểm Tra")
             A -->|"Khách đổi ý"| OUT("❌ Trả Máy / Hủy")
             B --> B1{"Có lỗi phát sinh?"}
@@ -26,7 +31,9 @@ graph TD
             F -.->|Đã vá| BUG_REP_005["✅ ĐÃ VÁ: Race Condition Tổng hợp"]
             E -->|"Từ chối"| OUT
             E -->|"Đòi lại cọc"| REFUND("💸 Hoàn Phí")
-            F -->|"Đã đặt mua"| G("📦 Đã Đặt LK")
+            F -->|"Linh kiện chưa có sẵn"| F_PROP("📝 Tạo Phiếu Đề Xuất Nhập (Kèm repairTicketId)")
+            F_PROP -->|"Đã đặt mua"| G("📦 Đã Đặt LK")
+            F_PROP -->|"Không đặt được hàng (unavailable)"| REFUND
             F -->|"Không tìm được"| REFUND
             F -->|"Khách lấy lại"| OUT
             G -->|"Chốt: LK đã về"| D
@@ -45,10 +52,10 @@ graph TD
             D6 -->|"Thất bại"| REFUND
             DONE --> DONE_INV("📑 Printable Invoice")
             DONE_INV --> DONE_WAR("🏷️ Gán Bảo Hành (warrantyUtils)")
-            DONE_WAR --> DONE_FIN("🔗 Ghi nhận Doanh Thu (Tài Chính)")
-            %% Liên kết chuyển trang cho node Tìm Linh Kiện
+            DONE_WAR --> POS_PAY("🔗 💳 Chuyển sang POS Thanh toán")
+            %% Liên kết chuyển trang cho node Tìm Linh Kiện và POS
             click F call handleWorkflowClick("inventory") "Mở Sơ đồ Luồng Kho"
-            click DONE_FIN call handleWorkflowClick("finance-hr") "Mở Sơ đồ Tài Chính"
+            click POS_PAY call handleWorkflowClick("pos-orders") "Mở Sơ đồ POS & Đơn hàng"
             click BUG_REP_001 call handleBugClick("BUG-REP-001") "Mở chi tiết"
             click BUG_REP_002 call handleBugClick("BUG-REP-002") "Mở chi tiết"
             click BUG_REP_003 call handleBugClick("BUG-REP-003") "Mở chi tiết"
@@ -57,6 +64,7 @@ graph TD
             click BUG_REP_005 call handleBugClick("BUG-REP-005") "Mở chi tiết"
             click BUG_REP_006 call handleBugClick("BUG-REP-006") "Mở chi tiết"
             click BUG_REP_007 call handleBugClick("BUG-REP-007") "Mở chi tiết"
+            click F_PROP call handleMasterNodeClick("F_PROP")
 ```
 # 🚧 Kế hoạch nâng cấp workflow KTV và UI mobile
 

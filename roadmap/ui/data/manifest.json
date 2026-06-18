@@ -1,6 +1,6 @@
 {
   "projectName": "QLCH_VanLanh",
-  "lastSync": "2026-06-16T00:00:00.000Z",
+  "lastSync": "2026-06-18T00:00:00.000+07:00",
   "stats": {
     "completionPercent": 98,
     "openP0": 0,
@@ -10,6 +10,72 @@
   },
   "constraints": [],
   "aiPlans": [
+    {
+      "id": "plan-firebase-cost-performance-20260617",
+      "title": "Firebase Cost & Performance Optimization",
+      "date": "17.06.2026",
+      "status": "final",
+      "completedAt": "18.06.2026",
+      "planFile": "data/ai_plans/plan_firebase_cost_performance_20260617.md",
+      "taskFile": "data/ai_plans/task_firebase_cost_performance_20260617.md",
+      "walkthroughFile": "",
+      "scope": [
+        "src/app/admin/pos/page.tsx",
+        "src/app/admin/revenue/page.tsx",
+        "src/lib/useAdminBadges.ts",
+        "src/app/(customer)/tin-tuc/[slug]/ArticleClientParts.tsx",
+        "src/app/api/articles/view/route.ts",
+        "src/lib/revenueAggregate.ts",
+        "src/lib/revenueAggregateServer.ts",
+        "firestore.rules"
+      ],
+      "decisions": [
+        "Bound high-read admin and POS queries before changing business behavior.",
+        "Use Firestore aggregate/count reads and bounded snapshots where realtime is not required.",
+        "Keep legacy revenue fallback until aggregate backfill is available.",
+        "Move public article view writes to a server API with 24h client/server throttling."
+      ],
+      "updatedAt": "2026-06-18T00:00:00.000+07:00"
+    },
+    {
+      "id": "plan-workflow-edge-cases-20260617",
+      "title": "Cập Nhật Workflows với Các Edge Cases và POS làm Trung Tâm",
+      "date": "17.06.2026",
+      "status": "in_progress",
+      "planFile": "data/ai_plans/plan_workflow_edge_cases_20260617.md",
+      "taskFile": "data/ai_plans/task_workflow_edge_cases_20260617.md",
+      "walkthroughFile": "",
+      "scope": [
+        "roadmap/ai/modules/repair.md",
+        "roadmap/ai/modules/pos-orders.md",
+        "roadmap/ai/modules/inventory.md",
+        "roadmap/ai/modules/finance-hr.md"
+      ],
+      "decisions": [
+        "Đưa luồng thanh toán sửa chữa về trung tâm POS.",
+        "Xóa luồng Outsource và Khách bỏ máy.",
+        "Thêm các edge case: Hủy cọc, Trả hàng hoàn tiền, Giao thất bại, Điều chỉnh hao hụt, Trả NCC."
+      ],
+      "updatedAt": "2026-06-17T00:00:00.000Z"
+    },
+    {
+      "id": "plan-upgrade-master-hub-20260617",
+      "title": "Nâng cấp Master Hub Workflow Diagram (Omnichannel, CRM v2, POS Scanner, Bulk Import)",
+      "date": "17.06.2026",
+      "status": "completed",
+      "completedAt": "17.06.2026",
+      "planFile": "data/ai_plans/plan_upgrade_master_hub_20260617.md",
+      "taskFile": "",
+      "walkthroughFile": "",
+      "scope": [
+        "roadmap/ai/modules/master.md"
+      ],
+      "decisions": [
+        "Bổ sung luồng CRM v2, Omnichannel Chat, POS Scanner, Discount Stacking, Bulk Excel Import vào sơ đồ.",
+        "Chia luồng Payment cho Import NCC (Paid/Debt)."
+      ],
+      "updatedAt": "2026-06-17T00:00:00.000Z"
+    },
     {
       "id": "plan-large-code-file-refactor-20260616",
       "title": "Refactor cac file code lon theo phase",
