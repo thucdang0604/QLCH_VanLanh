@@ -165,6 +165,13 @@
 - Verification: `next typegen && tsc --noEmit` passed; `firestore.rules` brace balance check passed; `git diff --check` only reported Windows CRLF warnings. Firebase CLI/rules emulator is not installed locally in this repo.
 - Remaining risk: this matches the current client-side fallback design, which reads source documents directly for pre-aggregate date ranges.
 
+### Part 13 - Technical notes are not appended again on status transitions
+- Covered IDs: UT-20260618-016, UT-20260618-025.
+- Files touched: `src/app/api/repairs/transition/route.ts`, `src/app/admin/technician/page.tsx`, `src/features/technician/TechnicianWorkflowModals.tsx`.
+- Change: technician status changes no longer send the existing ticket note as a new note; the note modal starts blank and shows the current note as read-only context. The transition API trims notes and skips appending a note when the same content already exists, including dated note lines.
+- Verification: focused ESLint passed for the touched files; `next typegen && tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
+- Remaining risk: old duplicated notes already stored in Firestore are not automatically cleaned; this prevents new duplicates.
+
 ## Intake List
 ### Batch 1 - User Reported 2026-06-18
 

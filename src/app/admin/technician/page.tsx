@@ -426,7 +426,7 @@ export default function TechnicianPage() {
             const isManager = isRepairManager(user);
 
             if (ticket.staff?.assignedTechnician && !isAssignedKTV && isManager) {
-                setTechNoteText(ticket.issue?.notes || '');
+                setTechNoteText('');
                 setNoteModalPayload({ ticketId, newStatus, currentNote: ticket.issue?.notes || '' });
                 return;
             }
@@ -443,12 +443,16 @@ export default function TechnicianPage() {
             }
 
             if (isRepairStatus(ticket.status, REPAIR_STATUS.INSPECTION) && newStatus !== REPAIR_STATUS.INSPECTION) {
-                setTechNoteText(ticket.issue?.notes || '');
-                setNoteModalPayload({ ticketId, newStatus, currentNote: ticket.issue?.notes || '' });
+                if (!ticket.issue?.notes?.trim()) {
+                    setTechNoteText('');
+                    setNoteModalPayload({ ticketId, newStatus, currentNote: '' });
+                    return;
+                }
+                await finalizeStatusChange(ticket, newStatus);
                 return;
             }
 
-            await finalizeStatusChange(ticket, newStatus, ticket.issue?.notes);
+            await finalizeStatusChange(ticket, newStatus);
 
         } catch (err) {
             console.error('Status check error:', err);
@@ -491,7 +495,7 @@ export default function TechnicianPage() {
                 ticket.version = (ticket.version || 0) + 1;
             }
 
-            await finalizeStatusChange(ticket, partsVerificationModalPayload.newStatus, ticket.issue?.notes);
+            await finalizeStatusChange(ticket, partsVerificationModalPayload.newStatus);
             setPartsVerificationModalPayload(null);
             setPartsVerificationSelections({});
         } catch (err: unknown) {
@@ -559,7 +563,7 @@ export default function TechnicianPage() {
                 return;
             }
 
-            await finalizeStatusChange(ticket, noteModalPayload.newStatus, techNoteText);
+            await finalizeStatusChange(ticket, noteModalPayload.newStatus, techNoteText.trim());
         }
 
         setNoteModalPayload(null);

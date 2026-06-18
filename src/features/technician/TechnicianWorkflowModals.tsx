@@ -230,6 +230,12 @@ export function TechnicianWorkflowModals({
                                 ? getWorkflowForTicket(noteTicket, dynamicStatuses, warrantyStatuses).find(status => status.id === noteModalPayload.newStatus)?.label || noteModalPayload.newStatus
                                 : noteModalPayload.newStatus}
                         </p>
+                        {noteModalPayload.currentNote && (
+                            <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
+                                <p className="mb-1 font-semibold text-gray-800">Ghi chú hiện tại</p>
+                                <p className="whitespace-pre-wrap">{noteModalPayload.currentNote}</p>
+                            </div>
+                        )}
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">
                                 Ghi chú / Lý do ghi đè (Bắt buộc nếu bạn là Quản lý)
