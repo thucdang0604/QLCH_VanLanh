@@ -36,6 +36,8 @@ import { toastError, toastSuccess } from '@/lib/toast';
 import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
 
+type AppointmentIntakeMethod = 'walk_in' | 'send_to_store';
+
 // Appointment Interface
 interface Appointment {
     id: string;
@@ -45,6 +47,7 @@ interface Appointment {
     timeSlot: string;
     store: string; // store id
     status: 'pending' | 'confirmed' | 'completed' | 'cancelled';
+    intakeMethod?: AppointmentIntakeMethod | null;
     serviceName?: string;
     serviceId?: string;
     createdAt: FirestoreDateValue;
@@ -61,6 +64,11 @@ const timeSlotLabels: Record<string, string> = {
     morning: 'Sáng (9h - 12h)',
     afternoon: 'Chiều (12h - 17h)',
     evening: 'Tối (17h - 21h)',
+};
+
+const intakeMethodConfig: Record<AppointmentIntakeMethod, { label: string; shortLabel: string }> = {
+    walk_in: { label: 'Khách đến trực tiếp', shortLabel: 'Đến trực tiếp' },
+    send_to_store: { label: 'Khách gửi máy đến cửa hàng', shortLabel: 'Gửi máy' },
 };
 
 export default function AppointmentsPage() {
@@ -146,10 +154,14 @@ export default function AppointmentsPage() {
 
     const handleUpdateStatus = async (id: string, newStatus: string) => {
         try {
-            await updateDoc(doc(db, 'appointments', id), {
+            const payload: Record<string, unknown> = {
                 status: newStatus,
                 updatedAt: serverTimestamp(),
-            });
+            };
+            if (newStatus !== 'confirmed') {
+                payload.intakeMethod = null;
+            }
+            await updateDoc(doc(db, 'appointments', id), payload);
         } catch (error) {
             console.error('Error updating status:', error);
             toastError('Có lỗi xảy ra khi cập nhật trạng thái.');
@@ -171,6 +183,59 @@ export default function AppointmentsPage() {
             console.error('Error marking appointment call:', error);
             toastError('Có lỗi xảy ra khi ghi nhận cuộc gọi xác nhận.');
         }
+    };
+
+    const handleUpdateIntakeMethod = async (appointment: Appointment, intakeMethod: AppointmentIntakeMethod) => {
+        if (appointment.status !== 'confirmed') return;
+
+        try {
+            await updateDoc(doc(db, 'appointments', appointment.id), {
+                intakeMethod,
+                updatedAt: serverTimestamp(),
+            });
+            toastSuccess('Đã ghi nhận cách khách giao máy.');
+        } catch (error) {
+            console.error('Error updating appointment intake method:', error);
+            toastError('Có lỗi xảy ra khi cập nhật cách khách giao máy.');
+        }
+    };
+
+    const renderIntakeActions = (appointment: Appointment, variant: 'mobile' | 'desktop') => {
+        if (appointment.status !== 'confirmed') return null;
+
+        const selectedMethod = appointment.intakeMethod ? intakeMethodConfig[appointment.intakeMethod] : null;
+        const isMobile = variant === 'mobile';
+
+        return (
+            <div className={isMobile ? 'space-y-2' : 'mt-2 flex flex-col items-end gap-2'}>
+                <div className={isMobile ? 'grid grid-cols-2 gap-2' : 'inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5'}>
+                    {(Object.entries(intakeMethodConfig) as [AppointmentIntakeMethod, typeof intakeMethodConfig[AppointmentIntakeMethod]][]).map(([method, configItem]) => {
+                        const active = appointment.intakeMethod === method;
+                        return (
+                            <button
+                                key={method}
+                                type="button"
+                                onClick={() => void handleUpdateIntakeMethod(appointment, method)}
+                                className={`${isMobile ? 'rounded-lg border px-2 py-2' : 'rounded-md px-2.5 py-1'} text-xs font-semibold transition-colors ${active ? 'border-orange-500 bg-orange-500 text-white' : 'border-gray-200 bg-white text-gray-600 hover:text-orange-700'}`}
+                            >
+                                {isMobile ? configItem.shortLabel : configItem.label}
+                            </button>
+                        );
+                    })}
+                </div>
+                {selectedMethod ? (
+                    <Link
+                        href={`/admin/repairs?appointmentId=${appointment.id}`}
+                        className={isMobile ? 'inline-flex w-full items-center justify-center gap-1 rounded-lg bg-orange-500 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-orange-600' : 'inline-flex items-center gap-1 rounded-lg border border-orange-200 bg-orange-50 px-2.5 py-1 text-xs font-semibold text-orange-700 transition-colors hover:bg-orange-100'}
+                    >
+                        <Wrench size={12} />
+                        Tạo phiếu - {selectedMethod.shortLabel}
+                    </Link>
+                ) : (
+                    <span className="text-xs text-gray-500">Chọn cách khách giao máy để lên đơn</span>
+                )}
+            </div>
+        );
     };
 
     // Derived state for filtering
@@ -313,25 +378,18 @@ export default function AppointmentsPage() {
                                         </div>
                                     )}
                                     {app.status !== 'completed' && (
-                                        <div className="flex items-center gap-2">
+                                        <div className="flex flex-col gap-2">
                                             <select
                                                 title="Chọn trạng thái"
                                                 value={app.status}
                                                 onChange={(e) => handleUpdateStatus(app.id, e.target.value)}
-                                                className="flex-1 text-sm border-gray-300 rounded-lg py-2 pl-3 pr-8 bg-white border"
+                                                className="w-full text-sm border-gray-300 rounded-lg py-2 pl-3 pr-8 bg-white border"
                                             >
                                                 {Object.entries(statusConfig).map(([key, value]) => (
                                                     <option key={key} value={key}>{value.label}</option>
                                                 ))}
                                             </select>
-                                            {app.status === 'confirmed' && (
-                                                <Link
-                                                    href={`/admin/repairs?appointmentId=${app.id}`}
-                                                    className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors whitespace-nowrap"
-                                                >
-                                                    <Wrench size={12} /> Tạo phiếu
-                                                </Link>
-                                            )}
+                                            {renderIntakeActions(app, 'mobile')}
                                         </div>
                                     )}
                                 </div>
@@ -428,15 +486,7 @@ export default function AppointmentsPage() {
                                                                 <option key={key} value={key}>{value.label}</option>
                                                             ))}
                                                         </select>
-                                                        {app.status === 'confirmed' && (
-                                                            <Link
-                                                                href={`/admin/repairs?appointmentId=${app.id}`}
-                                                                className="ml-2 inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold bg-orange-50 text-orange-700 rounded-lg hover:bg-orange-100 border border-orange-200 transition-colors whitespace-nowrap"
-                                                            >
-                                                                <Wrench size={12} />
-                                                                Tạo phiếu
-                                                            </Link>
-                                                        )}
+                                                        {renderIntakeActions(app, 'desktop')}
                                                     </>
                                                 )}
                                             </td>

@@ -483,3 +483,10 @@
 - Change: When staff clicks an appointment phone number, the existing `tel:` action is preserved and pending appointments are marked `confirmed` with `calledAt`, `confirmedAt`, and `updatedAt` timestamps.
 - Guardrail: Completed/cancelled/already-confirmed appointments are not changed by clicking the phone link.
 - Verification: `eslint src/app/admin/appointments/page.tsx`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
+
+### Part 18 - Appointment intake method before repair creation
+- Covered IDs: UT-20260618-014
+- Files touched: `src/app/admin/appointments/page.tsx`
+- Change: Confirmed appointments now require staff to choose whether the customer comes directly or sends the device to the store before the repair-ticket link appears. The choice is saved as `intakeMethod` on the appointment.
+- Guardrail: Appointment `status` remains one of the existing public states (`pending`, `confirmed`, `completed`, `cancelled`) so customer tracking is not forced to understand new status IDs.
+- Verification: `eslint src/app/admin/appointments/page.tsx`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
