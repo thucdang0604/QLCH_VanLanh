@@ -9,6 +9,7 @@ import {
     onSnapshot,
     doc,
     updateDoc,
+    serverTimestamp,
     where,
 
     limit,
@@ -31,7 +32,7 @@ import {
 import { useConfig } from '@/lib/ConfigContext';
 import type { FirestoreDateValue } from '@/lib/types';
 import type { LucideIcon } from 'lucide-react';
-import { toastError } from '@/lib/toast';
+import { toastError, toastSuccess } from '@/lib/toast';
 import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
 
@@ -147,10 +148,28 @@ export default function AppointmentsPage() {
         try {
             await updateDoc(doc(db, 'appointments', id), {
                 status: newStatus,
+                updatedAt: serverTimestamp(),
             });
         } catch (error) {
             console.error('Error updating status:', error);
             toastError('Có lỗi xảy ra khi cập nhật trạng thái.');
+        }
+    };
+
+    const handleCustomerCall = async (appointment: Appointment) => {
+        if (appointment.status !== 'pending') return;
+
+        try {
+            await updateDoc(doc(db, 'appointments', appointment.id), {
+                status: 'confirmed',
+                calledAt: serverTimestamp(),
+                confirmedAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+            });
+            toastSuccess('Đã ghi nhận cuộc gọi xác nhận lịch hẹn.');
+        } catch (error) {
+            console.error('Error marking appointment call:', error);
+            toastError('Có lỗi xảy ra khi ghi nhận cuộc gọi xác nhận.');
         }
     };
 
@@ -263,7 +282,7 @@ export default function AppointmentsPage() {
                                             </div>
                                             <div>
                                                 <p className="font-medium text-gray-900 text-sm">{app.fullName}</p>
-                                                <a href={`tel:${app.phone}`} className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 mt-0.5 transition-colors">
+                                                <a href={`tel:${app.phone}`} onClick={() => void handleCustomerCall(app)} className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 mt-0.5 transition-colors">
                                                     <Phone size={12} />
                                                     {app.phone}
                                                 </a>
@@ -352,7 +371,7 @@ export default function AppointmentsPage() {
                                                     </div>
                                                     <div>
                                                         <p className="font-medium text-gray-900">{app.fullName}</p>
-                                                        <a href={`tel:${app.phone}`} className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 mt-1 transition-colors">
+                                                        <a href={`tel:${app.phone}`} onClick={() => void handleCustomerCall(app)} className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 mt-1 transition-colors">
                                                             <Phone size={12} />
                                                             {app.phone}
                                                         </a>

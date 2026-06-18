@@ -476,3 +476,10 @@
 - Frequency:
 - Initial bucket:
 - Status: open
+
+### Part 17 - Appointment phone call confirms booking
+- Covered IDs: UT-20260618-014
+- Files touched: `src/app/admin/appointments/page.tsx`
+- Change: When staff clicks an appointment phone number, the existing `tel:` action is preserved and pending appointments are marked `confirmed` with `calledAt`, `confirmedAt`, and `updatedAt` timestamps.
+- Guardrail: Completed/cancelled/already-confirmed appointments are not changed by clicking the phone link.
+- Verification: `eslint src/app/admin/appointments/page.tsx`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
