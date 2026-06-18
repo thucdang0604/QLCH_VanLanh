@@ -229,14 +229,14 @@ export default function ProductDetailClient({ data, variants = [] }: ProductDeta
                 )}
 
                 {/* Actions */}
-                <div className="flex flex-col sm:flex-row gap-3 pt-4">
+                <div className="grid grid-cols-[minmax(0,1fr)_3.5rem] gap-3 pt-4 sm:flex sm:flex-row">
                     {!isService && (
-                        <div className="flex items-center border-2 border-gray-100 rounded-xl bg-white h-12">
+                        <div className="col-span-2 flex h-14 items-center justify-between border-2 border-gray-100 rounded-xl bg-white sm:col-span-1 sm:h-12 sm:justify-start">
                             <button
                                 onClick={() => setQuantity(Math.max(1, quantity - 1))}
                                 title="Giảm số lượng"
                                 aria-label="Giảm số lượng"
-                                className="px-4 h-full hover:bg-gray-50 transition-colors"
+                                className="h-full w-14 px-4 hover:bg-gray-50 transition-colors sm:w-auto"
                             >
                                 <Minus size={16} />
                             </button>
@@ -245,7 +245,7 @@ export default function ProductDetailClient({ data, variants = [] }: ProductDeta
                                 onClick={() => setQuantity(quantity + 1)}
                                 title="Tăng số lượng"
                                 aria-label="Tăng số lượng"
-                                className="px-4 h-full hover:bg-gray-50 transition-colors"
+                                className="h-full w-14 px-4 hover:bg-gray-50 transition-colors sm:w-auto"
                             >
                                 <Plus size={16} />
                             </button>
@@ -268,20 +268,20 @@ export default function ProductDetailClient({ data, variants = [] }: ProductDeta
                                 window.location.href = '#booking';
                             }
                         }}
-                        className="flex-1 h-12 bg-orange-600 hover:bg-orange-700 text-white font-bold rounded-xl shadow-lg shadow-orange-200 transition-all flex items-center justify-center gap-2"
+                        className="col-span-1 flex min-h-14 items-center justify-center gap-2 rounded-xl bg-orange-600 px-4 text-sm font-bold text-white shadow-lg shadow-orange-200 transition-all hover:bg-orange-700 sm:h-12 sm:flex-1 sm:text-base"
                     >
                         {isService ? <Wrench size={20} /> : <ShoppingCart size={20} />}
                         {isService ? 'ĐẶT LỊCH SỬA NGAY' : 'THÊM VÀO GIỎ HÀNG'}
                     </button>
 
                     {isService && (
-                        <Link href="/#booking" className="h-12 px-5 border-2 border-orange-200 text-orange-600 font-bold rounded-xl hover:bg-orange-50 transition-all flex items-center justify-center gap-2">
+                        <Link href="/#booking" className="col-span-1 flex min-h-14 items-center justify-center gap-2 rounded-xl border-2 border-orange-200 px-5 text-sm font-bold text-orange-600 transition-all hover:bg-orange-50 sm:h-12 sm:text-base">
                             <Calendar size={18} />
                             Đặt lịch
                         </Link>
                     )}
 
-                    <button title="Thêm vào danh sách yêu thích" aria-label="Thêm vào danh sách yêu thích" className="h-12 w-12 flex items-center justify-center border-2 border-gray-100 rounded-xl hover:bg-red-50 hover:border-red-100 group transition-all">
+                    <button title="Thêm vào danh sách yêu thích" aria-label="Thêm vào danh sách yêu thích" className="flex h-14 w-14 items-center justify-center rounded-xl border-2 border-gray-100 transition-all hover:border-red-100 hover:bg-red-50 group sm:h-12 sm:w-12">
                         <Heart size={20} className="text-gray-400 group-hover:text-red-500 transition-colors" />
                     </button>
                 </div>

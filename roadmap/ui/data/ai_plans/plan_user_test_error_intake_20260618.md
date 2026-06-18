@@ -144,6 +144,13 @@
 - Verification: focused ESLint passed for the touched files; `next typegen && tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
 - Remaining risk: if the configured workflow order is wrong in Firebase, the first node will still be treated as the intake node by design.
 
+### Part 10 - Product detail mobile action sizing
+- Covered IDs: UT-20260618-013.
+- Files touched: `src/app/(customer)/product/[id]/ProductDetailClient.tsx`.
+- Change: mobile product/service action controls now use a two-column grid with 56px touch targets, full-width quantity controls, larger primary action buttons, and a larger favorite button while preserving the desktop flex layout.
+- Verification: focused ESLint passed for the touched component; `next typegen && tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
+- Remaining risk: browser/device visual QA is still needed to confirm exact spacing with the fixed mobile bottom navigation.
+
 ## Intake List
 ### Batch 1 - User Reported 2026-06-18
 
