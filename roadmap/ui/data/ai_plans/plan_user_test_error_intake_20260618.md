@@ -172,6 +172,13 @@
 - Verification: focused ESLint passed for the touched files; `next typegen && tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
 - Remaining risk: old duplicated notes already stored in Firestore are not automatically cleaned; this prevents new duplicates.
 
+### Part 14 - Technician ticket journal is collapsed by default
+- Covered IDs: UT-20260618-023.
+- Files touched: `src/features/technician/TechnicianTicketDetailModal.tsx`.
+- Change: the technician ticket detail modal now hides the status timeline behind a "Xem/An" toggle and resets the journal to hidden when a different ticket is opened.
+- Verification: focused ESLint passed for the touched component; `next typegen && tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
+- Remaining risk: this changes only the technician detail modal; the admin repair detail timeline remains visible.
+
 ## Intake List
 ### Batch 1 - User Reported 2026-06-18
 

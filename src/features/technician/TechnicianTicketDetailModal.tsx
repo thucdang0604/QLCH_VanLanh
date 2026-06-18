@@ -2,6 +2,7 @@
 
 /* eslint-disable @next/next/no-img-element */
 
+import { useEffect, useState } from 'react';
 import { AlertCircle, CheckCircle2, Clock, Image as ImageIcon, Loader2, Package, Search, Trash2, Video } from 'lucide-react';
 import Modal from '@/components/admin/Modal';
 import type { Product, RepairTicket, User, WorkflowNode } from '@/lib/types';
@@ -64,6 +65,12 @@ export function TechnicianTicketDetailModal({
     handleAddCustomPart,
     handleStatusChange,
 }: TechnicianTicketDetailModalProps) {
+    const [showTimeline, setShowTimeline] = useState(false);
+
+    useEffect(() => {
+        setShowTimeline(false);
+    }, [selectedTicket?.id]);
+
     if (!selectedTicket) return null;
 
     return (
@@ -413,24 +420,33 @@ export function TechnicianTicketDetailModal({
 
                 {selectedTicket.statusTimeline?.length > 0 && (
                     <div>
-                        <p className="text-xs font-semibold text-gray-500 mb-2 flex items-center gap-1"><Clock size={12} /> Nhật ký phiếu</p>
-                        <div className="space-y-2">
-                            {[...selectedTicket.statusTimeline].reverse().map((entry, i) => (
-                                <div key={`${entry.requestId || entry.timestamp || i}-${i}`} className="rounded-lg border bg-gray-50 p-3 text-xs">
-                                    <div className="flex items-start justify-between gap-3">
-                                        <span className="font-semibold text-gray-800">{getTimelineTitle(entry, getWorkflowForTicket(selectedTicket))}</span>
-                                        <span className="shrink-0 text-gray-400">
-                                            {getTimelineTimestamp(entry).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                                        </span>
+                        <button
+                            type="button"
+                            onClick={() => setShowTimeline(value => !value)}
+                            className="flex w-full items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-100"
+                        >
+                            <span className="flex items-center gap-1"><Clock size={12} /> Nhật ký phiếu ({selectedTicket.statusTimeline.length})</span>
+                            <span>{showTimeline ? 'Ẩn' : 'Xem'}</span>
+                        </button>
+                        {showTimeline && (
+                            <div className="mt-2 space-y-2">
+                                {[...selectedTicket.statusTimeline].reverse().map((entry, i) => (
+                                    <div key={`${entry.requestId || entry.timestamp || i}-${i}`} className="rounded-lg border bg-gray-50 p-3 text-xs">
+                                        <div className="flex items-start justify-between gap-3">
+                                            <span className="font-semibold text-gray-800">{getTimelineTitle(entry, getWorkflowForTicket(selectedTicket))}</span>
+                                            <span className="shrink-0 text-gray-400">
+                                                {getTimelineTimestamp(entry).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                                            </span>
+                                        </div>
+                                        {(entry.actorName || entry.actorId || entry.by) && (
+                                            <p className="mt-1 text-gray-600">Thực hiện: {entry.actorName || userNamesMap[(entry.actorId || entry.by) as string] || entry.actorId || entry.by} {entry.actorRole ? `(${entry.actorRole})` : ''}</p>
+                                        )}
+                                        {(entry.reason || entry.note) && <p className="mt-1 text-gray-700">Lý do: {entry.reason || entry.note}</p>}
+                                        {entry.requestId && <p className="mt-1 break-all text-[10px] text-gray-400">Mã đối soát: {entry.requestId}</p>}
                                     </div>
-                                    {(entry.actorName || entry.actorId || entry.by) && (
-                                        <p className="mt-1 text-gray-600">Thực hiện: {entry.actorName || userNamesMap[(entry.actorId || entry.by) as string] || entry.actorId || entry.by} {entry.actorRole ? `(${entry.actorRole})` : ''}</p>
-                                    )}
-                                    {(entry.reason || entry.note) && <p className="mt-1 text-gray-700">Lý do: {entry.reason || entry.note}</p>}
-                                    {entry.requestId && <p className="mt-1 break-all text-[10px] text-gray-400">Mã đối soát: {entry.requestId}</p>}
-                                </div>
-                            ))}
-                        </div>
+                                ))}
+                            </div>
+                        )}
                     </div>
                 )}
 
