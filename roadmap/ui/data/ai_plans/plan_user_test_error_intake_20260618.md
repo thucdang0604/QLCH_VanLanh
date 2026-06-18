@@ -137,6 +137,13 @@
 - Verification: focused ESLint passed for the touched components; `next typegen && tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
 - Remaining risk: visual QA on a real mobile viewport is still needed to confirm exact spacing with device safe-area insets.
 
+### Part 9 - New repair tickets start at workflow intake
+- Covered IDs: UT-20260618-020.
+- Files touched: `src/features/repairs/RepairEditorModal.tsx`, `src/app/admin/repairs/page.tsx`.
+- Change: create-repair mode no longer exposes an editable status selector. New tickets display the workflow initial status as read-only, and the create payload writes the first configured workflow status with `REPAIR_STATUS.INTAKE` only as a fallback.
+- Verification: focused ESLint passed for the touched files; `next typegen && tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
+- Remaining risk: if the configured workflow order is wrong in Firebase, the first node will still be treated as the intake node by design.
+
 ## Intake List
 ### Batch 1 - User Reported 2026-06-18
 

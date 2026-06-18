@@ -714,8 +714,9 @@ export default function RepairPage() {
             setPostMediaFiles(ticket.postRepairMedia || []);
             setEditingTicket(ticket);
         } else {
+            const initialStatus = (dynamicStatuses[0]?.id || REPAIR_STATUS.INTAKE) as RepairStatus;
             setEditingTicket(null);
-            setFormData({ ...emptyForm, technicianId: '' });
+            setFormData({ ...emptyForm, technicianId: '', status: initialStatus });
             setPreMediaFiles([]);
             setPostMediaFiles([]);
         }
@@ -818,6 +819,7 @@ export default function RepairPage() {
                     transaction.update(ticketRef, updateData);
                 });
             } else {
+                const initialStatus = (dynamicStatuses[0]?.id || REPAIR_STATUS.INTAKE) as RepairStatus;
                 const ticketData: Record<string, unknown> = {
                     appointmentId: formData.appointmentId || null,
                     categoryPath: formData.selectedCategoryPath,
@@ -844,7 +846,7 @@ export default function RepairPage() {
                     },
                     preRepairMedia: preMediaFiles,
                     postRepairMedia: postMediaFiles,
-                    statusTimeline: [{ status: formData.status, timestamp: Date.now() }],
+                    statusTimeline: [{ status: initialStatus, timestamp: Date.now() }],
                     issue: {
                         description: formData.issues.length > 0
                             ? formData.issues.map(i => i.label).join(' | ')
@@ -871,7 +873,7 @@ export default function RepairPage() {
                         assignedTechnician: formData.technicianId,
                         assignedTechnicianName: tech?.displayName || '',
                     },
-                    status: formData.status,
+                    status: initialStatus,
                     updatedAt: serverTimestamp(),
                     createdAt: serverTimestamp(),
                     version: 1,
