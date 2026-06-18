@@ -490,3 +490,10 @@
 - Change: Confirmed appointments now require staff to choose whether the customer comes directly or sends the device to the store before the repair-ticket link appears. The choice is saved as `intakeMethod` on the appointment.
 - Guardrail: Appointment `status` remains one of the existing public states (`pending`, `confirmed`, `completed`, `cancelled`) so customer tracking is not forced to understand new status IDs.
 - Verification: `eslint src/app/admin/appointments/page.tsx`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
+
+### Part 19 - Repair screen pattern passcode input
+- Covered IDs: UT-20260618-019
+- Files touched: `src/features/repairs/RepairEditorModal.tsx`
+- Change: The repair editor keeps the existing passcode text field and adds a 9-point pattern keypad that writes the selected order into `devicePasscode` as `1->2->3` style text.
+- Guardrail: No repair schema change; saved/printed passcode behavior continues to use the existing `deviceInfo.passcode` field.
+- Verification: `eslint src/features/repairs/RepairEditorModal.tsx`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
