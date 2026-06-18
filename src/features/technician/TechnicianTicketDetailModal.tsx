@@ -9,8 +9,8 @@ import { getYouTubeEmbedUrl, isYouTubeUrl } from '@/lib/workflowFeatures';
 import { REPAIR_PART_STATUS, REPAIR_STATUS, isRepairPartStatus, isRepairStatus } from '@/lib/repairStatus';
 
 const checklistLabels: Record<string, string> = {
-    body: 'V? m?y', screen: 'M?n h?nh', touch: 'C?m ?ng', camera: 'Camera',
-    speaker: 'Loa/Mic', connectivity: 'K?t n?i', battery: 'Pin', biometric: 'FaceID/V?n tay',
+    body: 'Vỏ máy', screen: 'Màn hình', touch: 'Cảm ứng', camera: 'Camera',
+    speaker: 'Loa/Mic', connectivity: 'Kết nối', battery: 'Pin', biometric: 'FaceID/Vân tay',
 };
 
 type RepairTimelineEntry = NonNullable<RepairTicket['statusTimeline']>[number];

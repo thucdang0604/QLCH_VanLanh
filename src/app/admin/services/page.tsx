@@ -644,7 +644,7 @@ function ServiceModal({
                             <p className="text-xs text-gray-400 mt-0.5">{formData.seoDescription.length}/160</p>
                         </div>
                         <div>
-                            <label className="block text-xs font-medium text-gray-600 mb-1">Tags (phĂ¢n cĂ¡ch báº±ng dáº¥u pháº©y)</label>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Tags (phân cách bằng dấu phẩy)</label>
                             <input
                                 type="text"
                                 value={formData.tags}
