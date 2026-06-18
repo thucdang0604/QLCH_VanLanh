@@ -158,6 +158,13 @@
 - Verification: focused ESLint passed for the touched files; `next typegen && tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
 - Remaining risk: existing tickets do not have this optional field until staff add it during edit.
 
+### Part 12 - Revenue date fallback source read permissions
+- Covered IDs: UT-20260618-002.
+- Files touched: `firestore.rules`.
+- Change: Firestore rules now let users with `view_revenue` read the source collections used by the revenue page fallback path: `orders`, `repairs`, `import_receipts`, and `commissions`. Write/update/delete rules remain unchanged.
+- Verification: `next typegen && tsc --noEmit` passed; `firestore.rules` brace balance check passed; `git diff --check` only reported Windows CRLF warnings. Firebase CLI/rules emulator is not installed locally in this repo.
+- Remaining risk: this matches the current client-side fallback design, which reads source documents directly for pre-aggregate date ranges.
+
 ## Intake List
 ### Batch 1 - User Reported 2026-06-18
 
