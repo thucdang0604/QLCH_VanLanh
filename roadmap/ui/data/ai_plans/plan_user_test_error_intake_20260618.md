@@ -130,6 +130,13 @@
 - Verification: focused ESLint passed for the touched files with existing `<img>` warnings only; `next typegen && tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
 - Remaining risk: the field name `otpToken` remains as an internal request key for compatibility, but the runtime verification is TOTP-only.
 
+### Part 8 - Customer mobile bottom nav and voucher offset
+- Covered IDs: UT-20260618-010, UT-20260618-011.
+- Files touched: `src/components/layout/MobileBottomNav.tsx`, `src/components/MissionsWidget.tsx`.
+- Change: customer mobile bottom nav now has Home, Category, Contact, Appointment, Tracking; admin/staff mobile nav keeps Home, Category, Contact, Tracking, Admin. The voucher mission button and open panel are lifted above the mobile bottom nav while keeping the desktop position unchanged.
+- Verification: focused ESLint passed for the touched components; `next typegen && tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
+- Remaining risk: visual QA on a real mobile viewport is still needed to confirm exact spacing with device safe-area insets.
+
 ## Intake List
 ### Batch 1 - User Reported 2026-06-18
 
