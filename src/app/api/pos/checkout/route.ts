@@ -15,13 +15,19 @@ export async function POST(request: NextRequest) {
         const caller = await requirePermission(request, 'manage_orders');
 
         const body = await request.json();
-        const { idempotencyKey, repairTicketId, customer_info, items, discount_amount, total_amount, deposit_amount, payment_method, voucherCode } = body;
+        const { idempotencyKey, repairTicketId, repairTicketIds, customer_info, items, discount_amount, total_amount, deposit_amount, payment_method, voucherCode } = body;
 
         if (!items || items.length === 0) {
             return NextResponse.json({ error: 'Giỏ hàng trống' }, { status: 400 });
         }
 
         const db = getAdminDb();
+        const normalizeRepairTicketId = (value: unknown) => {
+            const raw = String(value || '').trim();
+            if (!raw) return '';
+            const syntheticMatch = raw.match(/^(.+)_(?:part_\d+|labor)$/);
+            return syntheticMatch?.[1] || raw;
+        };
 
         const result = await db.runTransaction(async (tx) => {
             if (idempotencyKey) {
@@ -138,9 +144,11 @@ export async function POST(request: NextRequest) {
                 const price = Number(item.price) || 0;
 
                 if (item.isRepairTicket) {
+                    const itemRepairTicketId = normalizeRepairTicketId(item.repairTicketId || item.productId);
                     normalizedItems.push({
                         id: pid,
                         productId: pid,
+                        repairTicketId: itemRepairTicketId || undefined,
                         productName: item.productName || '[Phiếu sửa chữa]',
                         price,
                         quantity: qty,
@@ -261,11 +269,37 @@ export async function POST(request: NextRequest) {
                 incomingName = (customer_info?.name || '').trim();
             }
 
-            let repairRef: FirebaseFirestore.DocumentReference | null = null;
-            let repairSnap: FirebaseFirestore.DocumentSnapshot | null = null;
-            if (repairTicketId) {
-                repairRef = db.collection('repairs').doc(repairTicketId);
-                repairSnap = await tx.get(repairRef);
+            const repairIdSet = new Set<string>();
+            if (repairTicketId) repairIdSet.add(normalizeRepairTicketId(repairTicketId));
+            if (Array.isArray(repairTicketIds)) {
+                repairTicketIds.forEach((id: unknown) => {
+                    const normalized = normalizeRepairTicketId(id);
+                    if (normalized) repairIdSet.add(normalized);
+                });
+            }
+            for (const item of items) {
+                if (!item.isRepairTicket) continue;
+                const normalized = normalizeRepairTicketId(item.repairTicketId || item.productId);
+                if (normalized) repairIdSet.add(normalized);
+            }
+
+            const repairDocs = new Map<string, { ref: FirebaseFirestore.DocumentReference; snap: FirebaseFirestore.DocumentSnapshot }>();
+            for (const id of repairIdSet) {
+                const ref = db.collection('repairs').doc(id);
+                const snap = await tx.get(ref);
+                if (snap.exists) {
+                    repairDocs.set(id, { ref, snap });
+                }
+            }
+
+            const repairPaymentTotals = new Map<string, number>();
+            for (const item of items) {
+                if (!item.isRepairTicket) continue;
+                const itemRepairTicketId = normalizeRepairTicketId(item.repairTicketId || item.productId);
+                if (!itemRepairTicketId || !repairDocs.has(itemRepairTicketId)) continue;
+                const qty = Math.max(1, Math.floor(Number(item.quantity) || 1));
+                const price = Number(item.price) || 0;
+                repairPaymentTotals.set(itemRepairTicketId, (repairPaymentTotals.get(itemRepairTicketId) || 0) + price * qty);
             }
 
             // ── Construct Order Object ──
@@ -285,6 +319,8 @@ export async function POST(request: NextRequest) {
                 ...(appliedVoucherCode ? { voucherCode: appliedVoucherCode, discountSource: 'voucher' } : {}),
                 status: isPending ? 'Pending' : 'Completed',
                 source: 'pos',
+                containsRepairPayment: repairPaymentTotals.size > 0,
+                repairTicketIds: Array.from(repairPaymentTotals.keys()),
                 is_vat_exported: false,
                 payment_method: payment_method || 'CASH',
                 createdAt: FieldValue.serverTimestamp(),
@@ -364,11 +400,35 @@ export async function POST(request: NextRequest) {
 
             tx.set(orderRef, order);
             if (!isPending) {
-                incrementRevenueAggregates(
-                    tx,
-                    db,
-                    buildCompletedOrderRevenueDelta({ id: orderId, ...order } as Order),
-                );
+                const retailItems = normalizedItems.filter((item) => !item.isRepairTicket);
+                const retailSubtotal = retailItems.reduce((sum, item) => sum + (Number(item.price) || 0) * (Number(item.quantity) || 1), 0);
+                const retailDiscount = Math.min(Number(discount_amount) || 0, retailSubtotal);
+                const retailTotal = Math.max(0, retailSubtotal - retailDiscount);
+                const repairRevenue = Array.from(repairPaymentTotals.values()).reduce((sum, amount) => sum + amount, 0);
+
+                if (retailItems.length > 0) {
+                    incrementRevenueAggregates(
+                        tx,
+                        db,
+                        buildCompletedOrderRevenueDelta({
+                            id: orderId,
+                            ...order,
+                            items: retailItems,
+                            subtotal_amount: retailSubtotal,
+                            discount_amount: retailDiscount,
+                            total_amount: retailTotal,
+                            paymentHistory: retailTotal > 0 ? [{
+                                type: 'full',
+                                amount: retailTotal,
+                                timestamp: Date.now(),
+                                note: `Doanh thu POS retail - ${payment_method || 'CASH'}`
+                            }] : [],
+                        } as unknown as Order),
+                    );
+                }
+                if (repairRevenue > 0) {
+                    incrementRevenueAggregates(tx, db, { repairRevenue });
+                }
             }
 
             // ── Increment Voucher Usage ──
@@ -443,9 +503,10 @@ export async function POST(request: NextRequest) {
 
             // Repair Ticket Link
             if (!isPending) {
-                if (repairTicketId && repairRef && repairSnap && repairSnap.exists) {
-                    const repairPrice = Number(items.find((i: Record<string, unknown>) => i.isRepairTicket)?.price) || 0;
-                    tx.update(repairRef, {
+                for (const [id, repairPrice] of repairPaymentTotals.entries()) {
+                    const repairDoc = repairDocs.get(id);
+                    if (!repairDoc) continue;
+                    tx.update(repairDoc.ref, {
                         'payment.status': 'paid',
                         status: 'out',
                         'payment.method': payment_method || 'CASH',
@@ -462,9 +523,6 @@ export async function POST(request: NextRequest) {
                             note: `Thanh toán gộp hóa đơn POS #${orderId.slice(-6)}`
                         })
                     });
-                    if (repairPrice > 0) {
-                        incrementRevenueAggregates(tx, db, { repairRevenue: repairPrice });
-                    }
                 }
             }
 

@@ -79,6 +79,15 @@
 - Root cause: several features are usable but not yet aligned with the newer workflow/security/product decisions.
 - Direction: implement after P0/P1 data-flow fixes: hide manual order status controls, improve mobile navigation/product detail layout, enrich supplier detail, remove AI Creator route/nav/permission, and make TOTP mandatory for payment/bank config changes.
 
+## Implementation Log
+
+### Part 1 - POS repair checkout ID contract and revenue aggregate split
+- Covered IDs: UT-20260618-001, UT-20260618-005, UT-20260618-007, UT-20260618-017.
+- Files touched: `src/app/admin/pos/page.tsx`, `src/app/api/pos/checkout/route.ts`, `src/features/pos/posTypes.ts`.
+- Change: POS cart repair lines now carry the real `repairTicketId`; checkout sends a deduplicated repair ticket list; the API accepts plural `repairTicketIds`, maps legacy synthetic repair line IDs back to the real ticket ID, updates all matching repair tickets, and splits revenue aggregates so retail lines count as POS order revenue while repair lines count as repair revenue.
+- Verification: focused ESLint passed for the touched files; `tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
+- Remaining risk: order documents are still created as POS receipts for repair payments, so the next part must adjust order/admin display and any legacy revenue fallback paths that still derive totals directly from `orders`.
+
 ## Intake List
 ### Batch 1 - User Reported 2026-06-18
 

@@ -25,6 +25,7 @@ export interface LastOrderData {
 export interface CartItem {
     cartItemId: string;
     productId: string;
+    repairTicketId?: string;
     name: string;
     image?: string;
     originalPrice: number;

@@ -215,6 +215,7 @@ export default function POSPage() {
             sellingPrice: repair.paymentAmount,
             costPrice: 0,
             quantity: 1,
+            repairTicketId: repair.id,
             isRepairTicket: true,
         }];
         repair.gifts?.forEach(giftId => {
@@ -313,6 +314,7 @@ export default function POSPage() {
                             sellingPrice: repair.paymentAmount,
                             costPrice: 0,
                             quantity: 1,
+                            repairTicketId: repair.id,
                             isRepairTicket: true
                         });
 
@@ -747,6 +749,7 @@ export default function POSPage() {
                     sellingPrice: part.unitPriceAtUse || 0,
                     costPrice: 0,
                     quantity: part.quantity || 1,
+                    repairTicketId: repair.id,
                     isRepairTicket: true
                 });
             }
@@ -766,6 +769,7 @@ export default function POSPage() {
                 sellingPrice: finalLaborCost,
                 costPrice: 0,
                 quantity: 1,
+                repairTicketId: repair.id,
                 isRepairTicket: true
             });
         }
@@ -901,8 +905,12 @@ export default function POSPage() {
 
             const operationKey = crypto.randomUUID();
 
-            const repairItems = cart.filter(c => c.isRepairTicket);
-            const repairTicketIds = repairItems.map(item => item.productId);
+            const repairTicketIds = Array.from(new Set(
+                cart
+                    .filter(c => c.isRepairTicket)
+                    .map(item => item.repairTicketId || item.productId)
+                    .filter(Boolean)
+            ));
 
             const orderData = {
                 idempotencyKey: operationKey,
@@ -917,6 +925,7 @@ export default function POSPage() {
                     quantity: c.quantity,
                     price: c.sellingPrice,
                     isRepairTicket: c.isRepairTicket,
+                    repairTicketId: c.repairTicketId,
                     imeis: c.imeis,
                     lotCode: c.lotCode
                 })),
