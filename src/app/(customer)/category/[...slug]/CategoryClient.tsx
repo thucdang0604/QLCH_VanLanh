@@ -74,6 +74,7 @@ type CategoryItem = {
     price?: number;
     price_original?: number;
     price_promo?: number;
+    hidePrice?: boolean;
     warranty_text?: string;
     repair_time?: string;
     isFlashSale?: boolean;
@@ -490,6 +491,7 @@ export default function CategoryClient({
                                         image={svc.image}
                                         price_original={svc.price_original ?? svc.price}
                                         price_promo={svc.price_promo}
+                                        hidePrice={svc.hidePrice}
                                         warranty_text={svc.warranty_text}
                                         repair_time={svc.repair_time}
                                         tags={svc.tags}

@@ -186,6 +186,13 @@
 - Verification: focused ESLint passed for the touched component; `next typegen && tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
 - Remaining risk: remove/add part actions remain governed by the existing workflow feature gates.
 
+### Part 16 - Services can hide customer-facing price
+- Covered IDs: UT-20260618-012, UT-20260618-026.
+- Files touched: `src/app/admin/services/page.tsx`, `src/app/(customer)/service/[id]/ServiceDetailClient.tsx`, `src/components/home/ServiceCard.tsx`, `src/components/home/PricingSection.tsx`, `src/app/(customer)/category/[...slug]/CategoryClient.tsx`, `src/app/(customer)/product/[id]/ProductDetailClient.tsx`.
+- Change: services now support `hidePrice`. Admin can toggle "An gia phia khach hang"; customer-facing service pages, category cards, homepage pricing, and legacy product-route fallback show "Lien he nhan bao gia" instead of numeric prices when the flag is enabled.
+- Verification: focused ESLint passed for the touched files; `next typegen && tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
+- Remaining risk: existing services default to showing price until staff enables the flag.
+
 ## Intake List
 ### Batch 1 - User Reported 2026-06-18
 

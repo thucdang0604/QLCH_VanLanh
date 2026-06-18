@@ -32,6 +32,7 @@ interface Service {
     price?: string; // legacy string price (backward compat)
     price_original: number;
     price_promo?: number;
+    hidePrice?: boolean;
     device_model: string;
     imageUrl?: string;
     images?: string[];
@@ -166,12 +167,14 @@ export default function ServicesPage() {
 
     /** Get display price â€” prefers numeric fields, falls back to legacy string */
     const getDisplayPrice = (s: Service) => {
+        if (s.hidePrice) return 'Liên hệ nhận báo giá';
         if (s.price_original > 0) return formatPrice(s.price_original);
         if (s.price) return s.price; // legacy string
         return 'Liên hệ';
     };
 
     const getPromoPrice = (s: Service) => {
+        if (s.hidePrice) return null;
         if (s.price_promo && s.price_promo > 0 && s.price_original > 0 && s.price_promo < s.price_original) {
             return formatPrice(s.price_promo);
         }
@@ -401,6 +404,7 @@ function ServiceModal({
         description: '',
         price_original: 0,
         price_promo: 0,
+        hidePrice: false,
         device_model: '',
         category: '',
         categoryIds: [] as string[],
@@ -418,6 +422,7 @@ function ServiceModal({
                 description: service?.description || '',
                 price_original: service?.price_original || parseLegacyPrice(service?.price),
                 price_promo: service?.price_promo || 0,
+                hidePrice: service?.hidePrice ?? false,
                 device_model: service?.device_model || '',
                 category: service?.category || '',
                 categoryIds: service?.categoryIds || [],
@@ -451,6 +456,7 @@ function ServiceModal({
                 description: formData.description,
                 price_original: formData.price_original,
                 price_promo: formData.price_promo || null,
+                hidePrice: formData.hidePrice,
                 device_model: formData.device_model,
                 category: formData.category,
                 categoryIds: formData.categoryIds,
@@ -583,6 +589,18 @@ function ServiceModal({
                             />
                         </div>
                     </div>
+                    <label className="flex items-start gap-3 rounded-lg border border-orange-100 bg-orange-50/60 p-3 cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={formData.hidePrice}
+                            onChange={(e) => setFormData({ ...formData, hidePrice: e.target.checked })}
+                            className="mt-0.5 w-5 h-5 accent-orange-500"
+                        />
+                        <span>
+                            <span className="block text-sm font-semibold text-orange-800">Ẩn giá phía khách hàng</span>
+                            <span className="block text-xs text-orange-700">Trang khách sẽ hiển thị “Liên hệ nhận báo giá”. Giá vẫn được lưu nội bộ để admin tham khảo.</span>
+                        </span>
+                    </label>
 
                     {/* Category */}
                     <div>

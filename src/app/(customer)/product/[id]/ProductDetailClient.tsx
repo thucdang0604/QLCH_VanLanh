@@ -42,6 +42,7 @@ export interface ProductData {
     price?: number;
     price_original?: number;
     price_promo?: number;
+    hidePrice?: boolean;
     description?: string;
     content?: string;
     seoDescription?: string;
@@ -93,11 +94,12 @@ export default function ProductDetailClient({ data, variants = [] }: ProductDeta
     if (!data) return null;
 
     const isService = data._type === 'service';
+    const hidePrice = data.hidePrice === true;
     const images = data.images || (data.imageUrl ? [data.imageUrl] : (data.image ? [data.image] : []));
     const originalPrice = data.price_original || (typeof data.price === 'number' ? data.price : 0);
     const promoPrice = data.price_promo || 0;
-    const hasDiscount = promoPrice > 0 && promoPrice < originalPrice;
-    const displayPrice = promoPrice > 0 ? promoPrice : (originalPrice > 0 ? originalPrice : 0);
+    const hasDiscount = !hidePrice && promoPrice > 0 && promoPrice < originalPrice;
+    const displayPrice = hidePrice ? 0 : (promoPrice > 0 ? promoPrice : (originalPrice > 0 ? originalPrice : 0));
 
     return (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 bg-white rounded-2xl p-6 shadow-sm">
@@ -169,9 +171,13 @@ export default function ProductDetailClient({ data, variants = [] }: ProductDeta
                 {/* Price Section */}
                 <div className="bg-gray-50 rounded-2xl p-5 border border-gray-100">
                     <div className="flex items-center gap-4 flex-wrap">
-                        <span className="text-3xl font-extrabold text-red-600">
-                            {formatPrice(displayPrice)}
-                        </span>
+                        {hidePrice ? (
+                            <span className="text-2xl font-extrabold text-red-600">Liên hệ nhận báo giá</span>
+                        ) : (
+                            <span className="text-3xl font-extrabold text-red-600">
+                                {formatPrice(displayPrice)}
+                            </span>
+                        )}
                         {hasDiscount && (
                             <>
                                 <span className="text-gray-400 text-lg line-through decoration-gray-400/50">

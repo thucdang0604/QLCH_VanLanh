@@ -12,6 +12,7 @@ interface ServiceCardProps {
     price?: number;
     price_original?: number;
     price_promo?: number;
+    hidePrice?: boolean;
     warranty_text?: string;
     repair_time?: string;
     tags?: string[];
@@ -29,6 +30,7 @@ export default function ServiceCard({
     price,
     price_original,
     price_promo,
+    hidePrice,
     warranty_text,
     repair_time,
     tags = [],
@@ -42,7 +44,8 @@ export default function ServiceCard({
     const promoPrice = price_promo ?? undefined;
     const displayImage = image || imageUrl || '';
 
-    const discount = promoPrice && originalPrice
+    const shouldHidePrice = hidePrice === true;
+    const discount = !shouldHidePrice && promoPrice && originalPrice
         ? Math.round(((originalPrice - promoPrice) / originalPrice) * 100)
         : 0;
 
@@ -135,7 +138,9 @@ export default function ServiceCard({
 
                 {/* Price */}
                 <div className="mt-2">
-                    {promoPrice && promoPrice > 0 ? (
+                    {shouldHidePrice ? (
+                        <span className="text-copper font-semibold text-sm">Liên hệ nhận báo giá</span>
+                    ) : promoPrice && promoPrice > 0 ? (
                         <div className="flex items-baseline gap-2 flex-wrap">
                             <span className="text-accent font-bold text-base">
                                 {formatPrice(promoPrice)}

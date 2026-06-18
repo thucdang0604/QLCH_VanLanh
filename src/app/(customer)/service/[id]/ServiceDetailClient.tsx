@@ -24,6 +24,7 @@ export interface ServiceData {
     price?: number;
     price_original?: number;
     price_promo?: number;
+    hidePrice?: boolean;
     image?: string;
     imageUrl?: string;
     images?: string[];
@@ -145,9 +146,10 @@ export default function ServiceDetailClient({ service }: { service: ServiceData 
     if (!service) return null;
 
     // Computed prices
+    const hidePrice = service.hidePrice === true;
     const originalPrice = service.price_original ?? service.price ?? 0;
     const promoPrice = service.price_promo ?? undefined;
-    const discount = promoPrice && originalPrice
+    const discount = !hidePrice && promoPrice && originalPrice
         ? Math.round(((originalPrice - promoPrice) / originalPrice) * 100)
         : 0;
     const images = service.images?.length
@@ -226,7 +228,9 @@ export default function ServiceDetailClient({ service }: { service: ServiceData 
 
                     {/* Price */}
                     <div className="mb-6">
-                        {promoPrice && promoPrice > 0 ? (
+                        {hidePrice ? (
+                            <span className="text-2xl font-bold text-copper">Liên hệ nhận báo giá</span>
+                        ) : promoPrice && promoPrice > 0 ? (
                             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-2 min-w-0">
                                 <span className="text-3xl font-bold text-accent break-words">{formatPrice(promoPrice)}</span>
                                 {originalPrice > 0 && (
