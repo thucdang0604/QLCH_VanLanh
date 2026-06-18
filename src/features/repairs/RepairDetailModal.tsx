@@ -113,7 +113,7 @@ export function RepairDetailModal({ ticket, dynamicStatuses, onClose }: RepairDe
                         <p className="text-xs font-semibold text-gray-500 mb-2 flex items-center gap-1"><CheckCircle2 size={12} /> Checklist kiểm tra</p>
                         <div className="grid grid-cols-2 gap-2">
                             {Object.entries(ticket.deviceInfo.checklist)
-                                .filter(([key]) => !['hasPriorRepair', 'hasWaterDamage', 'hasNonGenuineParts'].includes(key))
+                                .filter(([key]) => !['hasPriorRepair', 'hasWaterDamage', 'hasNonGenuineParts', 'historyOtherNote'].includes(key))
                                 .map(([key, value]) => (
                                     <div key={key} className={`text-[11px] rounded-lg px-2.5 py-2 border font-medium flex items-center justify-between ${checklistClassName(value)}`}>
                                         <span className="opacity-70">{checklistLabels[key] || key}:</span>
@@ -135,6 +135,11 @@ export function RepairDetailModal({ ticket, dynamicStatuses, onClose }: RepairDe
                                     {ticket.deviceInfo.checklist.hasNonGenuineParts ? '☑' : '☐'} Kém/Lô
                                 </span>
                             </div>
+                            {ticket.deviceInfo.checklist.historyOtherNote && (
+                                <div className="mt-2 rounded-lg border border-orange-100 bg-orange-50 px-3 py-2 text-[11px] text-orange-800">
+                                    <span className="font-semibold">Khác: </span>{ticket.deviceInfo.checklist.historyOtherNote}
+                                </div>
+                            )}
                         </div>
                     </div>
                 )}

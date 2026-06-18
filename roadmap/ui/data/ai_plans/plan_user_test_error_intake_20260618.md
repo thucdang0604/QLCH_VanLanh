@@ -151,6 +151,13 @@
 - Verification: focused ESLint passed for the touched component; `next typegen && tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
 - Remaining risk: browser/device visual QA is still needed to confirm exact spacing with the fixed mobile bottom navigation.
 
+### Part 11 - Repair device history other note
+- Covered IDs: UT-20260618-022.
+- Files touched: `src/lib/types/repair.ts`, `src/features/repairs/RepairEditorModal.tsx`, `src/features/repairs/RepairDetailModal.tsx`, `src/app/admin/repairs/page.tsx`.
+- Change: the repair device history section now has a free-text "Khac" note stored as `deviceInfo.checklist.historyOtherNote`, loaded back when editing, saved on create/update, and displayed in repair details without polluting the technical checklist grid.
+- Verification: focused ESLint passed for the touched files; `next typegen && tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
+- Remaining risk: existing tickets do not have this optional field until staff add it during edit.
+
 ## Intake List
 ### Batch 1 - User Reported 2026-06-18
 

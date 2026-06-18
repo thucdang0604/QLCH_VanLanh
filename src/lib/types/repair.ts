@@ -77,6 +77,7 @@ export interface DeviceChecklist {
     hasPriorRepair?: boolean;
     hasWaterDamage?: boolean;
     hasNonGenuineParts?: boolean;
+    historyOtherNote?: string;
 }
 
 export interface RepairIssue {

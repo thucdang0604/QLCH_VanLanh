@@ -34,6 +34,7 @@ export type RepairEditorFormData = {
     hasPriorRepair: boolean;
     hasWaterDamage: boolean;
     hasNonGenuineParts: boolean;
+    historyOtherNote: string;
     partsCost: string | number;
     laborCost: string | number;
     depositAmount: string | number;
@@ -282,6 +283,18 @@ export function RepairEditorModal({
                                         <input type="checkbox" checked={formData.hasNonGenuineParts} onChange={e => setFormData(p => ({ ...p, hasNonGenuineParts: e.target.checked }))} className="w-4 h-4 text-orange-500 border-gray-300 rounded focus:ring-orange-500" />
                                         <span>Máy đã thay linh kiện không chính hãng</span>
                                     </label>
+                                    <div className="space-y-1">
+                                        <label className="block text-sm font-medium text-gray-700">Khác</label>
+                                        <textarea
+                                            rows={2}
+                                            value={formData.historyOtherNote}
+                                            onChange={e => setFormData(p => ({ ...p, historyOtherNote: e.target.value }))}
+                                            aria-label="Lý do khác về tình trạng và lịch sử máy"
+                                            title="Lý do khác về tình trạng và lịch sử máy"
+                                            placeholder="Nhập lý do khác nếu có"
+                                            className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-white text-sm focus:ring-2 focus:ring-orange-500/20"
+                                        />
+                                    </div>
                                 </div>
                             </fieldset>
                             <hr className="border-gray-100" />
