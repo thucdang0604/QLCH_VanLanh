@@ -116,6 +116,13 @@
 - Verification: focused ESLint passed for `src/app/admin/pos/page.tsx`; `tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
 - Remaining risk: this keeps hidden/inactive/proposed products excluded. If staff need to see inactive catalog entries in POS search, that should be a separate permissioned lookup.
 
+### Part 6 - Remove admin AI Creator surface
+- Covered IDs: UT-20260618-031.
+- Files touched: `src/app/admin/ai-creator/page.tsx`, `src/app/admin/layout.tsx`, `src/lib/adminModules.ts`.
+- Change: removed the AI Creator route file, admin nav item, icon registry key, permission registry entry, and content-role preset permission.
+- Verification: no source references remain for `ai-creator`, `AI Creator`, `manage_ai_creator`, or `aiCreator`; focused ESLint passed for admin module/layout files; `next typegen && tsc --noEmit` passed after clearing stale `.next/types/app/admin/ai-creator`.
+- Remaining risk: existing staff documents may still contain the old `manage_ai_creator` string, but it no longer grants access to any admin route.
+
 ## Intake List
 ### Batch 1 - User Reported 2026-06-18
 
