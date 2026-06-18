@@ -37,6 +37,27 @@ const statusConfig: Record<string, { color: string; icon: React.ComponentType<{ 
     Cancelled: { color: 'bg-red-100 text-red-700', icon: XCircle, label: 'Đã hủy' },
 };
 
+type OrderItemWithRepair = Order['items'][number] & {
+    name?: string;
+    product_name?: string;
+    isRepairTicket?: boolean;
+    repairTicketId?: string;
+};
+
+type OrderWithRepairPayment = Order & {
+    containsRepairPayment?: boolean;
+    repairTicketIds?: string[];
+};
+
+function isRepairPaymentOrder(order: Order) {
+    const orderWithRepair = order as OrderWithRepairPayment;
+    return orderWithRepair.containsRepairPayment === true
+        || (order.items || []).some(item => {
+            const line = item as OrderItemWithRepair;
+            return line.isRepairTicket === true || Boolean(line.repairTicketId);
+        });
+}
+
 export default function OrdersPage() {
     const { config } = useConfig();
     useAuth();
@@ -594,16 +615,32 @@ export default function OrdersPage() {
                                     );
                                 })()}
                                 <select
+                                    disabled
                                     value={selectedOrder.status}
                                     onChange={(e) => updateStatus(selectedOrder.id, e.target.value)}
                                     title="Cập nhật trạng thái"
                                     aria-label="Cập nhật trạng thái"
-                                    className="h-10 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
+                                    className="hidden"
                                 >
                                     {Object.entries(statusConfig).map(([key, value]) => (
                                         <option key={key} value={key}>{value.label}</option>
                                     ))}
                                 </select>
+                                <div className="flex flex-col items-end gap-2 text-right">
+                                    <span className="text-xs font-medium text-gray-500">
+                                        Trạng thái do hệ thống cập nhật
+                                    </span>
+                                    {isRepairPaymentOrder(selectedOrder) && (
+                                        <span className="inline-flex items-center rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+                                            Receipt thanh toán sửa chữa
+                                        </span>
+                                    )}
+                                    {(selectedOrder.paymentStatus === 'debt' || selectedOrder.payment_method === 'Debt') && (
+                                        <span className="inline-flex items-center rounded-full bg-orange-50 px-3 py-1 text-xs font-semibold text-orange-700">
+                                            Ghi nợ - chờ thu
+                                        </span>
+                                    )}
+                                </div>
                             </div>
 
                             {/* Customer Info */}
@@ -638,15 +675,21 @@ export default function OrdersPage() {
                                 <h3 className="font-semibold text-gray-900 mb-3">Chi tiết sản phẩm</h3>
                                 <div className="space-y-3">
                                     {selectedOrder.items?.map((item, index: number) => {
-                                        const it = item as Partial<{ name: string; product_name: string; quantity: number; price: number; warrantyType: string; imeis: string[] }>;
+                                        const it = item as Partial<OrderItemWithRepair & { productName: string; quantity: number; price: number; warrantyType: string; imeis: string[]; productId: string }>;
                                         const qty = it.quantity || 0;
                                         const price = it.price || 0;
+                                        const itemName = it.name || it.productName || it.product_name || it.productId || 'Sản phẩm';
                                         return (
                                         <div key={index} className="flex flex-col py-3 border-b">
                                             <div className="flex justify-between items-center">
                                                 <div>
-                                                    <p className="font-medium text-gray-900">{it.name || it.product_name}</p>
+                                                    <p className="font-medium text-gray-900">{itemName}</p>
                                                     <p className="text-sm text-gray-500">SL: {qty} x {formatPrice(price)}</p>
+                                                    {(it.isRepairTicket || it.repairTicketId) && (
+                                                        <p className="mt-1 text-xs font-medium text-blue-700">
+                                                            Phiếu sửa chữa{it.repairTicketId ? ` #${it.repairTicketId.slice(-6).toUpperCase()}` : ''}
+                                                        </p>
+                                                    )}
                                                 </div>
                                                 <p className="font-medium text-gray-900">{formatPrice(price * qty)}</p>
                                             </div>

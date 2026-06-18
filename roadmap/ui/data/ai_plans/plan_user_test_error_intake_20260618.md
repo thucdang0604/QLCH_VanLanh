@@ -95,6 +95,13 @@
 - Verification: focused ESLint passed for `src/app/admin/revenue/page.tsx`; `tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
 - Remaining risk: historical POS repair receipts created before Part 1 may not have `isRepairTicket` or `repairTicketId` on every repair-related line, so a one-time data audit/backfill may still be needed for old data.
 
+### Part 3 - Order detail modal is read-only for status and clearer for repair receipts
+- Covered IDs: UT-20260618-008, UT-20260618-009.
+- Files touched: `src/app/admin/orders/page.tsx`.
+- Change: the order detail modal no longer exposes a visible manual status selector; it shows a read-only system-managed status note, labels repair payment receipts, labels DEBT orders as "Ghi nợ - chờ thu", and reads POS item `productName` so line items are visible instead of blank/unclear.
+- Verification: focused ESLint passed for `src/app/admin/orders/page.tsx`; `tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
+- Remaining risk: deeper order workflow automation still belongs in the order transition/payment source model; this part only removes the confusing manual control from the detail popup.
+
 ## Intake List
 ### Batch 1 - User Reported 2026-06-18
 
