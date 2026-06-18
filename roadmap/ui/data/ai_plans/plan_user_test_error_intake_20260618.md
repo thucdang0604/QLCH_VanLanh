@@ -179,6 +179,13 @@
 - Verification: focused ESLint passed for the touched component; `next typegen && tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
 - Remaining risk: this changes only the technician detail modal; the admin repair detail timeline remains visible.
 
+### Part 15 - Technician detail always shows selected parts
+- Covered IDs: UT-20260618-024.
+- Files touched: `src/features/technician/TechnicianTicketDetailModal.tsx`.
+- Change: selected/requested/in-stock repair parts now render in a read-only "Linh kien da chon" section whenever the ticket has parts. Workflow-gated part controls remain separate under "Thao tac linh kien".
+- Verification: focused ESLint passed for the touched component; `next typegen && tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
+- Remaining risk: remove/add part actions remain governed by the existing workflow feature gates.
+
 ## Intake List
 ### Batch 1 - User Reported 2026-06-18
 

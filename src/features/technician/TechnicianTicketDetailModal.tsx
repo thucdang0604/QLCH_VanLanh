@@ -3,7 +3,7 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { useEffect, useState } from 'react';
-import { AlertCircle, CheckCircle2, Clock, Image as ImageIcon, Loader2, Package, Search, Trash2, Video } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Clock, Image as ImageIcon, Loader2, Package, Search, Video } from 'lucide-react';
 import Modal from '@/components/admin/Modal';
 import type { Product, RepairTicket, User, WorkflowNode } from '@/lib/types';
 import { getYouTubeEmbedUrl, isYouTubeUrl } from '@/lib/workflowFeatures';
@@ -59,7 +59,6 @@ export function TechnicianTicketDetailModal({
     getTimelineTimestamp,
     formatPrice,
     handleTransferResponse,
-    handleRemovePart,
     handleAddPart,
     handleRequestPart,
     handleAddCustomPart,
@@ -192,6 +191,47 @@ export function TechnicianTicketDetailModal({
                     </div>
                 )}
 
+                {selectedTicket.parts && selectedTicket.parts.length > 0 && (
+                    <div className="mt-4 border-t pt-4">
+                        <p className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                            <Package size={16} className="text-orange-500" /> Linh kiện đã chọn
+                        </p>
+                        <div className="space-y-2">
+                            {selectedTicket.parts.map((p, pIdx) => (
+                                <div key={p.partLineId || pIdx} className="flex flex-col sm:flex-row sm:items-center justify-between bg-orange-50/50 p-2.5 rounded-lg border border-orange-100">
+                                    <div>
+                                        <p className="font-medium text-sm text-gray-900">{p.productName || p.name || p.partName || 'Linh kiện'}</p>
+                                        <p className="text-xs text-gray-500">
+                                            Phân loại: {p.quality || 'Chưa phân loại'} (SL: {p.quantity || 1})
+                                            {p.price ? (
+                                                <> · Giá dự kiến: <span className="font-semibold text-orange-600">{formatPrice((p as Partial<{ price: number }>).price || 0)}</span></>
+                                            ) : null}
+                                        </p>
+                                    </div>
+                                    <span
+                                        className={`mt-2 w-fit text-[10px] font-bold px-2 py-1 rounded-md border sm:mt-0 ${isRepairPartStatus(p.status, REPAIR_PART_STATUS.SELECTED)
+                                                ? 'bg-green-50 text-green-700 border-green-200'
+                                                : isRepairPartStatus(p.status, REPAIR_PART_STATUS.IN_STOCK)
+                                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                                    : p.status === 'unavailable'
+                                                        ? 'bg-red-50 text-red-600 border-red-200'
+                                                        : 'bg-yellow-50 text-yellow-700 border-yellow-200'
+                                            }`}
+                                    >
+                                        {isRepairPartStatus(p.status, REPAIR_PART_STATUS.SELECTED)
+                                            ? 'Đã sử dụng'
+                                            : isRepairPartStatus(p.status, REPAIR_PART_STATUS.IN_STOCK)
+                                                ? 'Đã chọn test'
+                                                : p.status === 'unavailable'
+                                                    ? 'Không có hàng'
+                                                    : 'Đang yêu cầu'}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
                 {(() => {
                     const workflow = getWorkflowForTicket(selectedTicket);
                     const st = workflow.find(s => s.id === selectedTicket.status);
@@ -207,63 +247,8 @@ export function TechnicianTicketDetailModal({
                 })() && (
                         <div className="mt-4 border-t pt-4">
                             <p className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                                <Package size={16} className="text-orange-500" /> Linh kiện sử dụng
+                                <Package size={16} className="text-orange-500" /> Thao tác linh kiện
                             </p>
-
-                            {selectedTicket.parts && selectedTicket.parts.length > 0 && (
-                                <div className="mb-4 space-y-2">
-                                    {selectedTicket.parts.map((p, pIdx) => (
-                                        <div key={pIdx} className="flex flex-col sm:flex-row sm:items-center justify-between bg-orange-50/50 p-2.5 rounded-lg border border-orange-100">
-                                            <div>
-                                                <p className="font-medium text-sm text-gray-900">{p.productName}</p>
-                                                <p className="text-xs text-gray-500">
-                                                    Phân loại: {p.quality} (SL: {p.quantity})
-                                                    {p.price ? (
-                                                        <> · Giá dự kiến: <span className="font-semibold text-orange-600">{formatPrice((p as Partial<{ price: number }>).price || 0)}</span></>
-                                                    ) : null}
-                                                </p>
-                                            </div>
-                                            <div className="flex items-center gap-2 mt-2 sm:mt-0">
-                                                <span
-                                                    className={`text-[10px] font-bold px-2 py-1 rounded-md border ${isRepairPartStatus(p.status, REPAIR_PART_STATUS.SELECTED)
-                                                            ? 'bg-green-50 text-green-700 border-green-200'
-                                                            : isRepairPartStatus(p.status, REPAIR_PART_STATUS.IN_STOCK)
-                                                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                                                : p.status === 'unavailable'
-                                                                    ? 'bg-red-50 text-red-600 border-red-200'
-                                                                    : 'bg-yellow-50 text-yellow-700 border-yellow-200'
-                                                        }`}
-                                                >
-                                                    {isRepairPartStatus(p.status, REPAIR_PART_STATUS.SELECTED)
-                                                        ? 'Đã xuất'
-                                                        : isRepairPartStatus(p.status, REPAIR_PART_STATUS.IN_STOCK)
-                                                            ? 'Đã tìm được'
-                                                            : p.status === 'unavailable'
-                                                                ? 'Không có hàng'
-                                                                : 'Đang yêu cầu'}
-                                                </span>
-                                                {!(() => {
-                                                    const wf = getWorkflowForTicket(selectedTicket);
-                                                    const cfg = wf.find(s => s.id === selectedTicket.status);
-                                                    const isTerminal = isRepairStatus(selectedTicket.status, REPAIR_STATUS.CUSTOMER_HANDOVER) || !!cfg?.isTerminal;
-                                                    const isAssignedToMe = selectedTicket.staff?.assignedTechnician === user?.uid;
-                                                    const isIncomingTransferToMe = selectedTicket.pendingTechnicianTransfer?.toTechnicianId === user?.uid && selectedTicket.pendingTechnicianTransfer?.status === 'pending';
-                                                    const isKtvLocked = user?.role !== 'admin' && (!isAssignedToMe || isIncomingTransferToMe);
-                                                    return isTerminal || isKtvLocked;
-                                                })() && (
-                                                        <button
-                                                            onClick={() => handleRemovePart(selectedTicket, pIdx)}
-                                                            className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-white rounded-md transition-colors"
-                                                            title="Xóa linh kiện"
-                                                        >
-                                                            <Trash2 size={14} />
-                                                        </button>
-                                                    )}
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
 
                             <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
                                 <label className="text-xs font-semibold text-gray-600 mb-1.5 block">Thêm linh kiện mới</label>
