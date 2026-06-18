@@ -4,11 +4,35 @@ import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requirePermission } from '@/lib/apiAuth';
 import { FieldValue } from 'firebase-admin/firestore';
 import { calculateAndSaveCommissionsServer } from '@/lib/commissionCalcServer';
-import type { Order } from '@/lib/types';
+import type { Order, RepairTicket, WorkflowNode } from '@/lib/types';
 import { PRODUCT_STATUS, isProductArchived } from '@/lib/productLifecycle';
 import { normalizeVietnamPhone } from '@/lib/phone';
 import { fetchFifoLogsForDeduction, executeFifoDeductionsWrites, type FifoDeductionResult } from '@/lib/inventoryFifo';
 import { buildCompletedOrderRevenueDelta, incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
+import { loadRepairWorkflow, requireWorkflowNode, workflowNodeHasFeature } from '@/lib/repairWorkflowServer';
+
+function resolvePaymentCompletionTarget(workflow: WorkflowNode[], currentStatus: string) {
+    const currentNode = requireWorkflowNode(workflow, currentStatus);
+    if (currentNode.isTerminal) {
+        return { targetStatus: currentNode.id, shouldCountCompletion: false };
+    }
+
+    const allowedTerminalNodes = (currentNode.allowedNext || [])
+        .map(nextId => workflow.find(node => node.id === nextId))
+        .filter((node): node is WorkflowNode => Boolean(node?.isTerminal));
+
+    const commissionTerminal = allowedTerminalNodes.find(node =>
+        workflowNodeHasFeature(node, 'enableTechnicianCommission')
+        || workflowNodeHasFeature(node, 'enableSellerCommission')
+    );
+    const targetNode = commissionTerminal || (allowedTerminalNodes.length === 1 ? allowedTerminalNodes[0] : null);
+
+    if (!targetNode) {
+        throw new Error(`Trạng thái ${currentStatus} chưa có bước hoàn tất thanh toán hợp lệ trong workflow sửa chữa.`);
+    }
+
+    return { targetStatus: targetNode.id, shouldCountCompletion: true };
+}
 
 export async function POST(request: NextRequest) {
     try {
@@ -302,6 +326,14 @@ export async function POST(request: NextRequest) {
                 repairPaymentTotals.set(itemRepairTicketId, (repairPaymentTotals.get(itemRepairTicketId) || 0) + price * qty);
             }
 
+            const repairCompletionTargets = new Map<string, { targetStatus: string; shouldCountCompletion: boolean }>();
+            for (const [id, repairDoc] of repairDocs.entries()) {
+                if (!repairPaymentTotals.has(id)) continue;
+                const repairTicket = repairDoc.snap.data() as RepairTicket;
+                const workflow = await loadRepairWorkflow(tx, db, repairTicket);
+                repairCompletionTargets.set(id, resolvePaymentCompletionTarget(workflow, repairTicket.status));
+            }
+
             // ── Construct Order Object ──
             const order: Record<string, unknown> = {
                 customer_info: {
@@ -427,7 +459,10 @@ export async function POST(request: NextRequest) {
                     );
                 }
                 if (repairRevenue > 0) {
-                    incrementRevenueAggregates(tx, db, { repairRevenue });
+                    const repairCount = Array.from(repairCompletionTargets.values())
+                        .filter(target => target.shouldCountCompletion)
+                        .length;
+                    incrementRevenueAggregates(tx, db, { repairRevenue, repairCount });
                 }
             }
 
@@ -505,16 +540,32 @@ export async function POST(request: NextRequest) {
             if (!isPending) {
                 for (const [id, repairPrice] of repairPaymentTotals.entries()) {
                     const repairDoc = repairDocs.get(id);
+                    const completionTarget = repairCompletionTargets.get(id);
                     if (!repairDoc) continue;
+                    if (!completionTarget) continue;
                     tx.update(repairDoc.ref, {
                         'payment.status': 'paid',
-                        status: 'out',
+                        status: completionTarget.targetStatus,
                         'payment.method': payment_method || 'CASH',
                         'payment.amount': repairPrice,
                         'payment.paidAt': FieldValue.serverTimestamp(),
                         completedAt: FieldValue.serverTimestamp(),
                         'timing.completedAt': FieldValue.serverTimestamp(),
                         updatedAt: FieldValue.serverTimestamp(),
+                        statusTimeline: FieldValue.arrayUnion({
+                            eventType: 'pos_repair_payment',
+                            status: completionTarget.targetStatus,
+                            timestamp: Date.now(),
+                            by: caller.uid,
+                            actorId: caller.uid,
+                            actorName: createdByName,
+                            actorRole: caller.role,
+                            fromStatus: repairDoc.snap.data()?.status || null,
+                            toStatus: completionTarget.targetStatus,
+                            source: 'pos',
+                            requestId: idempotencyKey || null,
+                            note: `Thanh toán POS #${orderId.slice(-6)}`
+                        }),
                         paymentHistory: FieldValue.arrayUnion({
                             type: 'full',
                             amount: repairPrice,

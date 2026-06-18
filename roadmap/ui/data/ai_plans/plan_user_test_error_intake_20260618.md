@@ -102,6 +102,13 @@
 - Verification: focused ESLint passed for `src/app/admin/orders/page.tsx`; `tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
 - Remaining risk: deeper order workflow automation still belongs in the order transition/payment source model; this part only removes the confusing manual control from the detail popup.
 
+### Part 4 - POS repair completion follows configured workflow terminal
+- Covered IDs: UT-20260618-017, UT-20260618-024.
+- Files touched: `src/app/api/pos/checkout/route.ts`.
+- Change: POS repair checkout no longer hardcodes repair status to `out`. It loads the configured repair workflow, resolves a valid terminal transition from the current node, prefers terminal nodes carrying commission features, records a POS payment timeline entry, and counts completed repairs only when the ticket actually moves into a terminal state.
+- Verification: focused ESLint passed for `src/app/api/pos/checkout/route.ts`; `tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
+- Remaining risk: if a store workflow has multiple terminal choices from the current status and none is marked with commission features, checkout now fails loudly instead of guessing. The workflow config should make the paid-completion terminal unambiguous.
+
 ## Intake List
 ### Batch 1 - User Reported 2026-06-18
 
