@@ -1,11 +1,17 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { doc, updateDoc, increment, collection, addDoc, serverTimestamp, query, where, orderBy, limit, getDocs } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, query, where, orderBy, limit, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Timestamp } from 'firebase/firestore';
 import { Star, Loader2, Send } from 'lucide-react';
 import type { ArticleComment } from '@/lib/types';
+
+const ARTICLE_VIEW_TTL_MS = 24 * 60 * 60 * 1000;
+
+function getArticleViewStorageKey(slug: string): string {
+    return `vl_article_view:${slug}`;
+}
 
 function maskPhone(p?: string): string {
     if (!p) return '';
@@ -42,9 +48,32 @@ export default function ArticleClientParts({ slug }: { slug: string }) {
 
 
     useEffect(() => {
-        // Tăng view count
-        const docRef = doc(db, 'articles', slug);
-        updateDoc(docRef, { views: increment(1) }).catch(() => {});
+        // Count at most one view per article per browser per day.
+        if (!slug || typeof window === 'undefined') return;
+
+        const storageKey = getArticleViewStorageKey(slug);
+        const now = Date.now();
+
+        try {
+            const nextAllowedAt = Number(window.localStorage.getItem(storageKey)) || 0;
+            if (nextAllowedAt > now) return;
+            window.localStorage.setItem(storageKey, String(now + ARTICLE_VIEW_TTL_MS));
+        } catch {
+            // Ignore storage failures; the API also has a 24h cookie guard.
+        }
+
+        fetch('/api/articles/view', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ slug }),
+            keepalive: true,
+        }).catch(() => {
+            try {
+                window.localStorage.removeItem(storageKey);
+            } catch {
+                // Ignore storage cleanup failures.
+            }
+        });
     }, [slug]);
 
     useEffect(() => {

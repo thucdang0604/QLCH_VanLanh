@@ -49,4 +49,8 @@
 
 ## Phase 8.5 - Write Throttling
 
-- [ ] Throttle article view increment theo session/localStorage hoac batch aggregate.
+- [x] Throttle article view increment bang `localStorage` 24h theo tung bai viet.
+- [x] Chuyen public article view write tu client Firestore SDK sang server API `/api/articles/view`.
+- [x] API dat httpOnly cookie 24h theo article slug de chan write lap lai neu localStorage khong kha dung.
+- [x] API dung Admin SDK increment `articles.views`, tranh loi public client bi Firestore rules deny.
+- [x] Them rate limit server cho article view endpoint.
