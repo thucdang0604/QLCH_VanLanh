@@ -11,6 +11,26 @@
   "constraints": [],
   "aiPlans": [
     {
+      "id": "plan-user-test-error-intake-20260618",
+      "title": "User Test Error Intake 2026-06-18",
+      "date": "18.06.2026",
+      "status": "analysis",
+      "planFile": "data/ai_plans/plan_user_test_error_intake_20260618.md",
+      "taskFile": "data/ai_plans/task_user_test_error_intake_20260618.md",
+      "walkthroughFile": "",
+      "scope": [
+        "roadmap/ui/data/ai_plans/plan_user_test_error_intake_20260618.md",
+        "roadmap/ui/data/ai_plans/task_user_test_error_intake_20260618.md"
+      ],
+      "decisions": [
+        "Collect user-tested errors before analysis or implementation.",
+        "Keep failure families separate until root cause is proven.",
+        "User confirmed current intake is complete; analysis grouped defects by root cause and dependency order.",
+        "Do not implement fixes until the analysis phase is approved."
+      ],
+      "updatedAt": "2026-06-18T02:10:00.000+07:00"
+    },
+    {
       "id": "plan-firebase-cost-performance-20260617",
       "title": "Firebase Cost & Performance Optimization",
       "date": "17.06.2026",
