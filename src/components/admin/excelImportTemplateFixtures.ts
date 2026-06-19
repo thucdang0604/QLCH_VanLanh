@@ -1,10 +1,12 @@
-export type ExcelImportTemplateMode = 'product' | 'accessory' | 'part' | 'service';
+export type ExcelImportTemplateMode = 'product' | 'accessory' | 'part' | 'service' | 'customer' | 'supplier';
 
 export const EXCEL_IMPORT_PRIMARY_EXAMPLE_ROWS: Record<ExcelImportTemplateMode, string[]> = {
     product: ['iPhone 15 Pro Max 256GB', '', 'Apple', 'Điện thoại > iPhone > iPhone 15 Series', '29000000', '28500000', '27000000', 'NCC VN/A', '10', 'new', '12', 'Hàng chính hãng VN/A nguyên seal', 'https://example.com/iphone-15.jpg', 'https://example.com/iphone-15-2.jpg; https://example.com/iphone-15-3.jpg', 'Màn hình:6.7 inch; RAM:8GB; Bộ nhớ:256GB', 'iphone-15-pro-max', 'Titan tự nhiên', '256GB', 'yes', ''],
     accessory: ['Cáp sạc USB-C 60W chính hãng', '', 'Apple', 'Phụ kiện > Cáp sạc', '450000', '390000', '250000', 'NCC Phụ kiện', '30', 'new', '6', 'Cáp sạc nhanh USB-C 60W', 'https://example.com/cap-sac.jpg', '', 'Công suất:60W; Chuẩn:USB-C', ''],
-    part: ['Màn hình iPhone 13 Pro Max Zin', '', 'Linh kiện Điện thoại > Màn hình', '1800000', '2500000', 'NCC Linh kiện', '5', 'Zin', 'Màn hình', 'iPhone 13 Pro Max', '6', 'Màn zin bóc máy, ép kính sẵn', 'https://example.com/man-iphone-13pm.jpg', ''],
+    part: ['Màn hình iPhone 13 Pro Max Zin', '', 'Linh kiện Điện thoại > Màn hình', '1800000', '2500005', 'NCC Linh kiện', '5', 'Zin', 'Màn hình', 'iPhone 13 Pro Max', '6', 'Màn zin bóc máy, ép kính sẵn', 'https://example.com/man-iphone-13pm.jpg', ''],
     service: ['Thay pin iPhone 15 Pro Max', 'iPhone 15 Pro Max', 'Dịch vụ phổ biến > Thay Pin', '1500000', '1450000', '6 tháng', '30 phút', 'Pin dung lượng cao, bảo hành rõ ràng', 'https://example.com/thay-pin.jpg', 'https://example.com/thay-pin-2.jpg; https://example.com/thay-pin-3.jpg', 'Thay pin iPhone 15 Pro Max chính hãng, lấy liền tại cửa hàng.', 'pin, iphone, thay pin', ''],
+    customer: ['Nguyễn Văn A', '0912345678', 'Khách lẻ', 'anguyen@example.com', '123 Đường Láng, Hà Nội', 'Thân thiết, Vip', '15000000', '5', '2', '0', 'Khách hay mua online'],
+    supplier: ['Công ty Linh Kiện Hà Nội', '0243123456', 'Anh Bình', 'contact@lkboard.vn', '789 Đường Láng, Hà Nội', 'Công ty cổ phần Linh Kiện Hà Nội', 'Màn hình', '0102030405', '123456789', 'Vietcombank', '30', 'Nguyễn Văn C', 'Linh kiện chính, Uy tín', '5000000', 'Giao hàng nhanh'],
 };
 
 export const EXCEL_IMPORT_ADDITIONAL_EXAMPLE_ROWS: Record<ExcelImportTemplateMode, Record<string, string>> = {
@@ -78,5 +80,35 @@ export const EXCEL_IMPORT_ADDITIONAL_EXAMPLE_ROWS: Record<ExcelImportTemplateMod
         'seo description': 'Ép kính iPhone 14 Pro Max lấy liền, bảo hành rõ ràng tại cửa hàng.',
         tags: 'ep kinh, iphone, sua chua',
         video: 'https://www.youtube.com/watch?v=example',
+    },
+    customer: {
+        'ten kh': 'Công ty TNHH MTV B',
+        'sdt': '0987654321',
+        'loai kh': 'Khách sỉ',
+        email: 'contact@companyb.com',
+        'dia chi': '456 Lê Lợi, TP. HCM',
+        tags: 'Khách sỉ, Linh kiện',
+        'chi tieu': '50000000',
+        'don hang': '12',
+        'sua chua': '0',
+        'cong no': '-1500000',
+        'ghi chu': 'Đang dư cọc',
+    },
+    supplier: {
+        'ten ncc': 'Nhà phân phối Pisen Việt Nam',
+        'sdt': '19001234',
+        'nguoi lien he': 'Chị Hoa',
+        email: 'sales@pisenvietnam.vn',
+        'dia chi': '101 Nguyễn Huệ, TP. HCM',
+        'cong ty': 'Công ty TNHH Pisen Việt Nam',
+        'phan loai': 'Pin',
+        'ma so thue': '0304050607',
+        'so tai khoan': '987654321',
+        'ngan hang': 'Techcombank',
+        'han thanh toan': '15',
+        'phu trách': 'Trần Văn D',
+        tags: 'Chính hãng, Pin Pisen',
+        'cong no': '-2000000',
+        'ghi chu': 'Đã đặt cọc pin mới',
     },
 };

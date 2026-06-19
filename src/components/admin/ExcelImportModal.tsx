@@ -29,7 +29,6 @@ import {
     IMAGE_MAIN_HEADERS,
     IMAGE_OTHER_HEADERS,
     MODE_CONFIG,
-    PREVIEW_CHECK_KEYS,
     QUALITY_OPTIONS,
     buildCheck,
     buildImportProductId,
@@ -41,7 +40,9 @@ import {
     getBoolean,
     getFileRelativePath,
     getNumber,
+    getPreviewCheckKeys,
     getValue,
+    getSignedNumber,
     imageUploadFolderForMode,
     isAccessoryCategory,
     isLocalImageReference,
@@ -49,8 +50,10 @@ import {
     loadExistingDocIds,
     loadExistingProductCodes,
     normalizeConditionInput,
+    normalizeImportPhone,
     normalizeLocalImageKey,
     parseImages,
+    parseDebtInput,
     parseNumberInput,
     parseSpecs,
     productKindForMode,
@@ -71,6 +74,7 @@ import {
     type ParsedRow,
     type PreviewFilter,
     type Step,
+    type CheckSeverity,
 } from '@/features/excel-import/importSupport';
 
 export type { ExcelImportMode } from '@/features/excel-import/importSupport';
@@ -118,7 +122,7 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
                     return;
                 }
 
-                const taxonomy = config.taxonomy?.[modeConfig.taxonomyType] || [];
+                const taxonomy = (modeConfig.taxonomyType && config.taxonomy?.[modeConfig.taxonomyType]) || [];
                 const names = jsonRows.map((row) => getValue(row, modeConfig.nameHeaders)).filter(Boolean);
                 const normalizedSeen = new Set<string>();
                 const duplicateInFile = new Set<string>();
@@ -161,7 +165,7 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
                 }
 
                 const existingDocIds = await loadExistingDocIds(modeConfig.collectionName, targetIds);
-                const existingCodes = mode === 'service' ? new Set<string>() : await loadExistingProductCodes(expectedCodes);
+                const existingCodes = mode === 'service' || mode === 'customer' || mode === 'supplier' ? new Set<string>() : await loadExistingProductCodes(expectedCodes);
 
                 const parsed = jsonRows.map((row, index) => {
                     const rowNum = index + 2;
@@ -183,6 +187,125 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
                         checks.push(buildCheck('name', 'Tên', name, 'error', 'Tên đã tồn tại trên hệ thống'));
                     } else {
                         checks.push(buildCheck('name', 'Tên', name, 'ok', targetDocId ? `ID sẽ tạo: ${targetDocId}` : 'Tên có thể import'));
+                    }
+
+                    if (mode === 'customer') {
+                        checks.length = 0;
+                        const phoneRaw = getValue(row, ['SĐT', 'sdt', 'phone', 'Phone', 'Số điện thoại']);
+                        const phone = normalizeImportPhone(phoneRaw);
+                        const customerTypeRaw = getValue(row, ['Loại KH', 'Customer Type', 'Type']);
+                        const customerType = customerTypeRaw.toLowerCase();
+                        const email = getValue(row, ['Email']);
+                        const totalSpentInput = parseNumberInput(row, ['Chi tiêu', 'Spent', 'Tổng chi tiêu']);
+                        const totalOrdersInput = parseNumberInput(row, ['Đơn hàng', 'Orders', 'Tổng đơn hàng']);
+                        const totalRepairsInput = parseNumberInput(row, ['Sửa chữa', 'Repairs', 'Tổng sửa chữa']);
+                        const debtInput = parseDebtInput(row, ['Công nợ', 'Nợ', 'Debt']);
+
+                        if (!name) {
+                            checks.push(buildCheck('name', 'Tên', '', 'error', 'Thiếu tên khách hàng'));
+                        } else {
+                            checks.push(buildCheck('name', 'Tên', name, 'ok', 'Tên khách hàng hợp lệ'));
+                        }
+
+                        if (!phoneRaw) {
+                            checks.push(buildCheck('phone', 'SĐT', '', 'error', 'Thiếu SĐT để làm ID khách hàng'));
+                        } else if (!/^\d{9,15}$/.test(phone)) {
+                            checks.push(buildCheck('phone', 'SĐT', phoneRaw, 'error', 'SĐT cần có 9-15 chữ số'));
+                        } else if (duplicateTargetIdsInFile.has(phone)) {
+                            checks.push(buildCheck('phone', 'SĐT', phoneRaw, 'error', `Trùng SĐT trong file: ${phone}`));
+                        } else if (existingDocIds.has(phone)) {
+                            checks.push(buildCheck('phone', 'SĐT', phoneRaw, 'error', `Khách hàng ${phone} đã tồn tại`));
+                        } else {
+                            checks.push(buildCheck('phone', 'SĐT', phone, 'ok', `ID sẽ tạo: ${phone}`));
+                        }
+
+                        if (!customerTypeRaw || ['khách lẻ', 'khach le', 'retail', 'le', 'khách sỉ', 'khach si', 'wholesale', 'si'].includes(customerType)) {
+                            checks.push(buildCheck('type', 'Loại KH', customerTypeRaw || 'Khách lẻ', 'ok', customerTypeRaw ? 'Loại khách hợp lệ' : 'Mặc định Khách lẻ'));
+                        } else {
+                            checks.push(buildCheck('type', 'Loại KH', customerTypeRaw, 'warning', 'Không nhận diện loại khách, sẽ lưu Khách lẻ'));
+                        }
+
+                        const emailSeverity: CheckSeverity = email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? 'warning' : 'ok';
+                        checks.push(buildCheck('email', 'Email', email, emailSeverity, emailSeverity === 'ok' ? 'Email có thể import' : 'Email không đúng định dạng'));
+
+                        const statsIssues = [
+                            totalSpentInput.hasValue && !totalSpentInput.isValid ? 'Chi tiêu' : '',
+                            totalOrdersInput.hasValue && !totalOrdersInput.isValid ? 'Đơn hàng' : '',
+                            totalRepairsInput.hasValue && !totalRepairsInput.isValid ? 'Sửa chữa' : '',
+                        ].filter(Boolean);
+                        checks.push(buildCheck(
+                            'stats',
+                            'Thống kê',
+                            [totalSpentInput.raw, totalOrdersInput.raw, totalRepairsInput.raw].filter(Boolean).join(' / '),
+                            statsIssues.length > 0 ? 'error' : 'ok',
+                            statsIssues.length > 0 ? `${statsIssues.join(', ')} không hợp lệ` : 'Thống kê có thể import',
+                        ));
+
+                        checks.push(buildCheck(
+                            'debt',
+                            'Công nợ',
+                            debtInput.raw,
+                            debtInput.isValid ? 'ok' : 'error',
+                            debtInput.isValid ? 'Công nợ có thể import' : 'Công nợ không hợp lệ',
+                        ));
+                        checks.push(buildCheck('details', 'Thông tin thêm', getValue(row, ['Tags', 'Ghi chú', 'Note']), 'ok', 'Thông tin phụ có thể import'));
+
+                        const errors = summarizeChecks(checks, 'error');
+                        const warnings = summarizeChecks(checks, 'warning');
+                        return { rowNum, data: row, errors, warnings, checks, categoryIds: [], category: '' };
+                    }
+
+                    if (mode === 'supplier') {
+                        checks.length = 0;
+                        const phoneRaw = getValue(row, ['SĐT', 'sdt', 'phone', 'Phone', 'Số điện thoại']);
+                        const phone = normalizeImportPhone(phoneRaw);
+                        const email = getValue(row, ['Email']);
+                        const contact = getValue(row, ['Người liên hệ', 'Contact']);
+                        const bank = [getValue(row, ['Số tài khoản', 'Bank Account']), getValue(row, ['Ngân hàng', 'Bank'])].filter(Boolean).join(' / ');
+                        const paymentTermsInput = parseNumberInput(row, ['Hạn thanh toán', 'Payment Terms']);
+                        const debtInput = parseDebtInput(row, ['Công nợ', 'Nợ', 'Debt']);
+
+                        if (!name) {
+                            checks.push(buildCheck('name', 'Tên', '', 'error', 'Thiếu tên nhà cung cấp'));
+                        } else if (duplicateInFile.has(name.toLowerCase())) {
+                            checks.push(buildCheck('name', 'Tên', name, 'error', 'Trùng tên trong file'));
+                        } else if (existingNames.has(name.toLowerCase())) {
+                            checks.push(buildCheck('name', 'Tên', name, 'error', 'Tên đã tồn tại trên hệ thống'));
+                        } else {
+                            checks.push(buildCheck('name', 'Tên', name, 'ok', 'Tên nhà cung cấp hợp lệ'));
+                        }
+
+                        if (!phoneRaw) {
+                            checks.push(buildCheck('phone', 'SĐT', '', 'warning', 'Thiếu SĐT nhà cung cấp'));
+                        } else if (!/^\d{9,15}$/.test(phone)) {
+                            checks.push(buildCheck('phone', 'SĐT', phoneRaw, 'error', 'SĐT cần có 9-15 chữ số'));
+                        } else {
+                            checks.push(buildCheck('phone', 'SĐT', phone, 'ok', 'SĐT hợp lệ'));
+                        }
+
+                        checks.push(buildCheck('contact', 'Liên hệ', contact, contact ? 'ok' : 'warning', contact ? 'Người liên hệ có thể import' : 'Thiếu người liên hệ'));
+                        const emailSeverity: CheckSeverity = email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? 'warning' : 'ok';
+                        checks.push(buildCheck('email', 'Email', email, emailSeverity, emailSeverity === 'ok' ? 'Email có thể import' : 'Email không đúng định dạng'));
+                        checks.push(buildCheck('bank', 'Ngân hàng', bank, bank ? 'ok' : 'warning', bank ? 'Thông tin ngân hàng có thể import' : 'Thiếu thông tin ngân hàng'));
+                        checks.push(buildCheck(
+                            'terms',
+                            'Hạn thanh toán',
+                            paymentTermsInput.raw,
+                            paymentTermsInput.isValid ? 'ok' : 'error',
+                            paymentTermsInput.isValid ? 'Hạn thanh toán có thể import' : 'Hạn thanh toán không hợp lệ',
+                        ));
+                        checks.push(buildCheck(
+                            'debt',
+                            'Công nợ',
+                            debtInput.raw,
+                            debtInput.isValid ? 'ok' : 'error',
+                            debtInput.isValid ? 'Công nợ có thể import' : 'Công nợ không hợp lệ',
+                        ));
+                        checks.push(buildCheck('details', 'Thông tin thêm', getValue(row, ['Phân loại', 'Tags', 'Ghi chú', 'Note']), 'ok', 'Thông tin phụ có thể import'));
+
+                        const errors = summarizeChecks(checks, 'error');
+                        const warnings = summarizeChecks(checks, 'warning');
+                        return { rowNum, data: row, errors, warnings, checks, categoryIds: [], category: '' };
                     }
 
                     if (!categoryPath) {
@@ -418,11 +541,12 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
     const importProductLikeRow = async (row: ParsedRow) => {
         const name = getValue(row.data, modeConfig.nameHeaders);
         const category = mode === 'part' ? PART_CATEGORY_LABEL : row.category;
-        if (mode === 'service') {
-            throw new Error('Dịch vụ không được import bằng luồng sản phẩm.');
+        if (mode === 'service' || mode === 'customer' || mode === 'supplier') {
+            throw new Error(`${modeConfig.title} không được import bằng luồng sản phẩm.`);
         }
-        const productId = buildImportProductId(mode, name, mode === 'accessory' ? 'phu-kien' : row.category);
-        const kind = productKindForMode(mode, category, row.categoryIds);
+        const productMode = mode;
+        const productId = buildImportProductId(productMode, name, productMode === 'accessory' ? 'phu-kien' : row.category);
+        const kind = productKindForMode(productMode, category, row.categoryIds);
         const customCode = normalizeProductCode(getValue(row.data, ['Mã hàng', 'SKU', 'Barcode']));
         const productCode = customCode || buildProductCodeFromId(productId, kind);
         const images = parseImages(row.data, IMAGE_MAIN_HEADERS, IMAGE_OTHER_HEADERS);
@@ -534,6 +658,106 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
         });
     };
 
+    const importCustomerRow = async (row: ParsedRow) => {
+        const name = getValue(row.data, modeConfig.nameHeaders);
+        const phone = normalizeImportPhone(getValue(row.data, ['SĐT', 'sdt', 'phone', 'Phone', 'Số điện thoại']));
+        if (!phone) throw new Error('Thiếu SĐT khách hàng.');
+
+        const rawType = getValue(row.data, ['Loại KH', 'Customer Type', 'Type']).toLowerCase();
+        const type = ['khách sỉ', 'khach si', 'wholesale', 'si'].includes(rawType) ? 'wholesale' : 'retail';
+        const totalDebt = getSignedNumber(row.data, ['Công nợ', 'Nợ', 'Debt']);
+        const totalSpent = getNumber(row.data, ['Chi tiêu', 'Spent', 'Tổng chi tiêu']);
+        const totalOrders = getNumber(row.data, ['Đơn hàng', 'Orders', 'Tổng đơn hàng']);
+        const totalRepairs = getNumber(row.data, ['Sửa chữa', 'Repairs', 'Tổng sửa chữa']);
+        const customerRef = doc(db, 'customers', phone);
+        const txRef = totalDebt !== 0 ? doc(collection(db, 'customer_transactions')) : null;
+
+        await runTransaction(db, async (transaction) => {
+            const snapshot = await transaction.get(customerRef);
+            if (snapshot.exists()) {
+                throw new Error(`Khách hàng ${phone} đã tồn tại.`);
+            }
+
+            transaction.set(customerRef, {
+                phone,
+                name,
+                type,
+                email: getValue(row.data, ['Email']),
+                address: getValue(row.data, ['Địa chỉ', 'Address']),
+                tags: splitList(getValue(row.data, ['Tags', 'Tag'])),
+                note: getValue(row.data, ['Ghi chú', 'Note']),
+                totalSpent,
+                totalOrders,
+                totalRepairs,
+                totalDebt,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+                lastVisit: serverTimestamp(),
+            });
+
+            if (txRef) {
+                transaction.set(txRef, {
+                    customerId: phone,
+                    customerName: name || phone,
+                    type: totalDebt > 0 ? 'DEBT' : 'PAYMENT',
+                    amount: Math.abs(totalDebt),
+                    paymentMethod: 'INITIAL_EXCEL_IMPORT',
+                    note: 'Công nợ khởi tạo từ import Excel',
+                    createdBy: user?.uid || '',
+                    createdByName: user?.displayName || user?.email || '',
+                    createdAt: serverTimestamp(),
+                });
+            }
+        });
+    };
+
+    const importSupplierRow = async (row: ParsedRow) => {
+        const name = getValue(row.data, modeConfig.nameHeaders);
+        if (!name) throw new Error('Thiếu tên nhà cung cấp.');
+
+        const supplierRef = doc(collection(db, 'suppliers'));
+        const supplierId = supplierRef.id;
+        const totalDebt = getSignedNumber(row.data, ['Công nợ', 'Nợ', 'Debt']);
+        const txRef = totalDebt !== 0 ? doc(collection(db, 'supplier_transactions')) : null;
+
+        await runTransaction(db, async (transaction) => {
+            transaction.set(supplierRef, {
+                name,
+                phone: normalizeImportPhone(getValue(row.data, ['SĐT', 'sdt', 'phone', 'Phone', 'Số điện thoại'])),
+                contactPerson: getValue(row.data, ['Người liên hệ', 'Contact']),
+                email: getValue(row.data, ['Email']),
+                address: getValue(row.data, ['Địa chỉ', 'Address']),
+                companyName: getValue(row.data, ['Công ty', 'Company']),
+                supplierType: getValue(row.data, ['Phân loại', 'Supplier Type']),
+                taxCode: getValue(row.data, ['Mã số thuế', 'Tax Code']),
+                bankAccount: getValue(row.data, ['Số tài khoản', 'Bank Account']),
+                bankName: getValue(row.data, ['Ngân hàng', 'Bank']),
+                paymentTermsDays: getNumber(row.data, ['Hạn thanh toán', 'Payment Terms']),
+                assignedOwner: getValue(row.data, ['Phụ trách', 'Assigned Owner']),
+                tags: splitList(getValue(row.data, ['Tags', 'Tag'])),
+                note: getValue(row.data, ['Ghi chú', 'Note']),
+                totalDebt,
+                isActive: true,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+            });
+
+            if (txRef) {
+                transaction.set(txRef, {
+                    supplierId,
+                    supplierName: name,
+                    type: totalDebt > 0 ? 'IMPORT' : 'PAYMENT',
+                    amount: Math.abs(totalDebt),
+                    paymentMethod: 'INITIAL_EXCEL_IMPORT',
+                    note: 'Công nợ khởi tạo từ import Excel',
+                    createdBy: user?.uid || '',
+                    createdByName: user?.displayName || user?.email || '',
+                    createdAt: serverTimestamp(),
+                });
+            }
+        });
+    };
+
     const handleImport = async () => {
         if (rows.length === 0) {
             toast.error('Không có dữ liệu để import');
@@ -553,7 +777,12 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
         for (let index = 0; index < rows.length; index += 5) {
             const batch = rows.slice(index, index + 5);
             const results = await Promise.allSettled(
-                batch.map((row) => mode === 'service' ? importServiceRow(row) : importProductLikeRow(row))
+                batch.map((row) => {
+                    if (mode === 'customer') return importCustomerRow(row);
+                    if (mode === 'supplier') return importSupplierRow(row);
+                    if (mode === 'service') return importServiceRow(row);
+                    return importProductLikeRow(row);
+                })
             );
             for (const result of results) {
                 if (result.status === 'fulfilled') success++;
@@ -568,6 +797,10 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
         try {
             if (mode === 'service') {
                 await triggerRevalidate(['/', '/category/sua-chua', '/sitemap.xml'], ['services']);
+            } else if (mode === 'customer') {
+                await triggerRevalidate(['/admin/customers'], ['customers']);
+            } else if (mode === 'supplier') {
+                await triggerRevalidate(['/admin/suppliers'], ['suppliers']);
             } else {
                 await triggerRevalidate(['/', '/flash-sale', '/search', '/sitemap.xml'], ['products']);
             }
@@ -617,7 +850,7 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
                     {step === 'upload' && (
                         <div className="space-y-4">
                             <button
-                                onClick={() => generateTemplate(mode, config.taxonomy?.[modeConfig.taxonomyType] || [])}
+                                onClick={() => generateTemplate(mode, (modeConfig.taxonomyType && config.taxonomy?.[modeConfig.taxonomyType]) || [])}
                                 className="flex items-center gap-2 px-4 py-2.5 border-2 border-dashed border-green-300 text-green-700 rounded-lg hover:bg-green-50 text-sm font-medium w-full justify-center"
                             >
                                 <Download size={18} /> Tải mẫu Excel {modeConfig.shortLabel}
@@ -755,7 +988,7 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
                                         <tr>
                                             <th className="px-3 py-2 text-left w-14">#</th>
                                             <th className="px-3 py-2 text-left min-w-[220px]">Dữ liệu</th>
-                                            {PREVIEW_CHECK_KEYS.map((key) => (
+                                            {getPreviewCheckKeys(mode).map((key) => (
                                                 <th key={key} className="px-3 py-2 text-left min-w-[150px]">
                                                     {filteredRows[0]?.checks.find((check) => check.key === key)?.label || key}
                                                 </th>
@@ -774,7 +1007,7 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
                                                         <p className="font-medium text-gray-900 line-clamp-2">{rowName}</p>
                                                         <p className="text-gray-400 mt-0.5">{modeConfig.title}</p>
                                                     </td>
-                                                    {PREVIEW_CHECK_KEYS.map((key) => {
+                                                    {getPreviewCheckKeys(mode).map((key) => {
                                                         const check = row.checks.find((item) => item.key === key);
                                                         if (!check) return <td key={key} className="px-3 py-2 text-gray-400">—</td>;
                                                         return (

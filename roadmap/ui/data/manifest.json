@@ -11,6 +11,28 @@
   "constraints": [],
   "aiPlans": [
     {
+      "id": "plan-import-customers-suppliers-20260619",
+      "title": "Import Khách hàng & Nhà cung cấp từ Excel",
+      "date": "19.06.2026",
+      "status": "completed",
+      "completedAt": "19.06.2026",
+      "planFile": "data/ai_plans/plan_import_customers_suppliers_20260619.md",
+      "taskFile": "data/ai_plans/task_import_customers_suppliers_20260619.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_import_customers_suppliers_20260619.md",
+      "scope": [
+        "src/features/excel-import/importSupport.ts",
+        "src/components/admin/ExcelImportModal.tsx",
+        "src/app/admin/initial-data/page.tsx",
+        "src/components/admin/excelImportTemplateFixtures.ts"
+      ],
+      "decisions": [
+        "Sử dụng chuẩn hóa SĐT làm khóa chính và Document ID cho Khách hàng",
+        "Sử dụng Tên nhà cung cấp để kiểm tra trùng lặp cho Nhà cung cấp",
+        "Tự động tạo giao dịch nợ đầu kỳ nếu công nợ > 0"
+      ],
+      "updatedAt": "2026-06-19T11:15:00.000+07:00"
+    },
+    {
       "id": "plan-pos-discount-and-repair-lookup-fix-20260618",
       "title": "POS Discount Rules & SĐT Repair Ticket Lookup Fix",
       "date": "18.06.2026",

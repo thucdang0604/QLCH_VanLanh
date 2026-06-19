@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { collection, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
-import { AlertTriangle, Cable, FileSpreadsheet, Image as ImageIcon, Link2, Package, ShieldAlert, Upload, Wrench } from 'lucide-react';
+import { AlertTriangle, Cable, FileSpreadsheet, Image as ImageIcon, Link2, Package, ShieldAlert, Upload, Wrench, Users, Building2 } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
 import { db } from '@/lib/firebase';
 import ExcelImportModal, { type ExcelImportMode } from '@/components/admin/ExcelImportModal';
@@ -49,6 +49,22 @@ const IMPORT_OPTIONS: ImportOption[] = [
         icon: FileSpreadsheet,
         accent: 'text-violet-600 bg-violet-50 border-violet-200',
         columns: 'giá, dòng máy, bảo hành, thời gian, ảnh, tags',
+    },
+    {
+        mode: 'customer',
+        title: 'Khách hàng (CRM)',
+        description: 'Thông tin liên hệ khách hàng, phân loại, tags và công nợ đầu kỳ.',
+        icon: Users,
+        accent: 'text-pink-600 bg-pink-50 border-pink-200',
+        columns: 'sdt, tên KH, loại KH, email, địa chỉ, công nợ, chi tiêu',
+    },
+    {
+        mode: 'supplier',
+        title: 'Nhà cung cấp',
+        description: 'Thông tin liên hệ nhà cung cấp, thông tin thanh toán và công nợ đầu kỳ.',
+        icon: Building2,
+        accent: 'text-teal-600 bg-teal-50 border-teal-200',
+        columns: 'tên NCC, sdt, ngân hàng, số tài khoản, hạn thanh toán, công nợ',
     },
 ];
 
@@ -351,7 +367,7 @@ export default function InitialDataPage() {
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {IMPORT_OPTIONS.map((option) => {
                     const Icon = option.icon;
                     return (

@@ -10,7 +10,7 @@ import { optimizeImage } from '@/lib/imageOptimizer';
 import { validateImageFile } from '@/lib/validateImage';
 import { EXCEL_IMPORT_ADDITIONAL_EXAMPLE_ROWS, EXCEL_IMPORT_PRIMARY_EXAMPLE_ROWS } from '@/components/admin/excelImportTemplateFixtures';
 
-export type ExcelImportMode = 'product' | 'accessory' | 'part' | 'service';
+export type ExcelImportMode = 'product' | 'accessory' | 'part' | 'service' | 'customer' | 'supplier';
 
 export type Step = 'upload' | 'validating' | 'preview' | 'importing' | 'done';
 export type CellValue = string | number | boolean | Date | null | undefined;
@@ -56,13 +56,13 @@ export interface ModeConfig {
     title: string;
     shortLabel: string;
     sheetName: string;
-    collectionName: 'products' | 'services';
-    taxonomyType: TaxonomyType;
+    collectionName: 'products' | 'services' | 'customers' | 'suppliers';
+    taxonomyType?: TaxonomyType;
     nameHeaders: string[];
     requiredHeaders: string[];
     templateHeaders: string[];
     exampleRow: string[];
-    icon: 'product' | 'part' | 'service';
+    icon: 'product' | 'part' | 'service' | 'customer' | 'supplier';
 }
 
 export const MODE_CONFIG: Record<ExcelImportMode, ModeConfig> = {
@@ -114,11 +114,62 @@ export const MODE_CONFIG: Record<ExcelImportMode, ModeConfig> = {
         exampleRow: EXCEL_IMPORT_PRIMARY_EXAMPLE_ROWS.service,
         icon: 'service',
     },
+    customer: {
+        title: 'Khách hàng',
+        shortLabel: 'khách hàng',
+        sheetName: 'Khach_hang',
+        collectionName: 'customers',
+        nameHeaders: ['Tên KH', 'Tên', 'Tên khách hàng'],
+        requiredHeaders: ['Tên KH', 'SĐT'],
+        templateHeaders: ['Tên KH', 'SĐT', 'Loại KH', 'Email', 'Địa chỉ', 'Tags', 'Chi tiêu', 'Đơn hàng', 'Sửa chữa', 'Công nợ', 'Ghi chú'],
+        exampleRow: EXCEL_IMPORT_PRIMARY_EXAMPLE_ROWS.customer,
+        icon: 'customer',
+    },
+    supplier: {
+        title: 'Nhà cung cấp',
+        shortLabel: 'nhà cung cấp',
+        sheetName: 'Nha_cung_cap',
+        collectionName: 'suppliers',
+        nameHeaders: ['Tên NCC', 'Tên', 'Tên nhà cung cấp'],
+        requiredHeaders: ['Tên NCC'],
+        templateHeaders: ['Tên NCC', 'SĐT', 'Người liên hệ', 'Email', 'Địa chỉ', 'Công ty', 'Phân loại', 'Mã số thuế', 'Số tài khoản', 'Ngân hàng', 'Hạn thanh toán', 'Phụ trách', 'Tags', 'Công nợ', 'Ghi chú'],
+        exampleRow: EXCEL_IMPORT_PRIMARY_EXAMPLE_ROWS.supplier,
+        icon: 'supplier',
+    },
 };
 
 export const QUALITY_OPTIONS = ['Zin', 'Loại 1', 'Loại 2', 'Bóc máy'];
 export const PRODUCT_CONDITIONS: ProductCondition[] = ['new', 'like-new', 'used'];
 export const PREVIEW_CHECK_KEYS = ['name', 'category', 'price', 'cost', 'stock', 'code', 'images', 'details'];
+export function getPreviewCheckKeys(mode: ExcelImportMode): string[] {
+    if (mode === 'customer') {
+        return ['name', 'phone', 'type', 'email', 'stats', 'debt', 'details'];
+    }
+    if (mode === 'supplier') {
+        return ['name', 'phone', 'contact', 'email', 'bank', 'terms', 'debt', 'details'];
+    }
+    return ['name', 'category', 'price', 'cost', 'stock', 'code', 'images', 'details'];
+}
+
+export function parseDebtInput(row: ExcelRow, headers: string[]) {
+    const raw = getValue(row, headers);
+    if (!raw) return { raw, value: 0, hasValue: false, isValid: true };
+    const value = parseRawNumber(raw);
+    return {
+        raw,
+        value,
+        hasValue: true,
+        isValid: Number.isFinite(value),
+    };
+}
+
+export function getSignedNumber(row: ExcelRow, headers: string[]): number {
+    const raw = getValue(row, headers);
+    if (!raw) return 0;
+    const value = parseRawNumber(raw);
+    return Number.isFinite(value) ? value : 0;
+}
+
 export const FIRESTORE_QUERY_CHUNK_SIZE = 10;
 export const IMAGE_MAIN_HEADERS = ['Ảnh chính', 'Ảnh', 'Image'];
 export const IMAGE_OTHER_HEADERS = ['Ảnh phụ', 'Images'];
@@ -140,6 +191,10 @@ export function getValue(row: ExcelRow, headers: string[]): string {
         }
     }
     return '';
+}
+
+export function normalizeImportPhone(value: string): string {
+    return value.trim().replace(/[^\d]/g, '');
 }
 
 export function parseRawNumber(raw: string): number {
@@ -299,7 +354,7 @@ export function productKindForMode(mode: ExcelImportMode, category: string, cate
     return getProductCodeKind({ category, categoryIds });
 }
 
-export function buildImportProductId(mode: Exclude<ExcelImportMode, 'service'>, name: string, category: string): string {
+export function buildImportProductId(mode: 'product' | 'accessory' | 'part', name: string, category: string): string {
     const categorySlug = generateSlug(category || '');
     const prefix =
         mode === 'part'
@@ -313,6 +368,13 @@ export function buildImportProductId(mode: Exclude<ExcelImportMode, 'service'>, 
 export function resolveTargetDocId(mode: ExcelImportMode, row: ExcelRow, modeConfig: ModeConfig, taxonomy: TaxonomyNode[]): string {
     const name = getValue(row, modeConfig.nameHeaders);
     if (!name) return '';
+    if (mode === 'customer') {
+        const phone = getValue(row, ['SĐT', 'sdt', 'phone', 'Phone', 'Số điện thoại']);
+        return normalizeImportPhone(phone);
+    }
+    if (mode === 'supplier') {
+        return '';
+    }
     if (mode === 'service') return generateSlug(name);
     const categoryPath = getValue(row, ['Danh mục', 'Category']);
     const { category } = resolveCategoryPath(categoryPath, taxonomy);
@@ -320,13 +382,13 @@ export function resolveTargetDocId(mode: ExcelImportMode, row: ExcelRow, modeCon
 }
 
 export function resolveExpectedProductCode(mode: ExcelImportMode, row: ExcelRow, modeConfig: ModeConfig, taxonomy: TaxonomyNode[]): string {
-    if (mode === 'service') return '';
+    if (mode === 'service' || mode === 'customer' || mode === 'supplier') return '';
     const customCode = normalizeProductCode(getValue(row, ['Mã hàng', 'SKU', 'Barcode']));
     if (customCode) return customCode;
     const targetId = resolveTargetDocId(mode, row, modeConfig, taxonomy);
     const categoryPath = getValue(row, ['Danh mục', 'Category']);
     const { categoryIds, category } = resolveCategoryPath(categoryPath, taxonomy);
-    const kind = productKindForMode(mode, category, categoryIds);
+    const kind = productKindForMode(mode as 'product' | 'accessory' | 'part', category, categoryIds);
     return targetId ? buildProductCodeFromId(targetId, kind) : '';
 }
 
@@ -525,7 +587,7 @@ export async function findExistingImportImage(fileName: string, folder: LocalIma
     return preferMediaMatch(recentMatches, folder);
 }
 
-export async function loadExistingDocIds(collectionName: 'products' | 'services', ids: string[]): Promise<Set<string>> {
+export async function loadExistingDocIds(collectionName: 'products' | 'services' | 'customers' | 'suppliers', ids: string[]): Promise<Set<string>> {
     const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
     const existingIds = new Set<string>();
     await Promise.all(uniqueIds.map(async (id) => {
@@ -743,6 +805,54 @@ export function columnGuideForHeader(header: string, modeConfig: ModeConfig): Co
     if (normalized === 'tags') {
         return { ...base, purpose: 'Từ khóa nội bộ cho dịch vụ.', inputRule: 'Phân tách bằng dấu phẩy, dấu ; hoặc xuống dòng.', acceptedValues: 'pin, iphone, thay pin', savedTo: 'tags[]' };
     }
+    if (normalized === 'ten kh') {
+        return { ...base, purpose: 'Tên khách hàng.', inputRule: 'Không để trống.', savedTo: 'name' };
+    }
+    if (normalized === 'sdt') {
+        return { ...base, purpose: 'Số điện thoại liên hệ.', inputRule: 'Không để trống đối với Khách hàng (SĐT dùng làm ID). Nếu trùng lặp hoặc đã tồn tại sẽ bị báo lỗi.', savedTo: 'phone, id' };
+    }
+    if (normalized === 'loai kh') {
+        return { ...base, purpose: 'Loại khách hàng.', inputRule: 'Nhập Khách lẻ hoặc Khách sỉ. Để trống mặc định Khách lẻ.', acceptedValues: 'Khách lẻ, Khách sỉ, retail, wholesale', savedTo: 'type' };
+    }
+    if (normalized === 'chi tieu') {
+        return { ...base, purpose: 'Tổng chi tiêu cũ của khách hàng.', inputRule: 'Chỉ nhập số nguyên không âm.', savedTo: 'totalSpent' };
+    }
+    if (normalized === 'don hang') {
+        return { ...base, purpose: 'Tổng số đơn hàng cũ.', inputRule: 'Chỉ nhập số nguyên không âm.', savedTo: 'totalOrders' };
+    }
+    if (normalized === 'sua chua') {
+        return { ...base, purpose: 'Tổng số lần sửa chữa cũ.', inputRule: 'Chỉ nhập số nguyên không âm.', savedTo: 'totalRepairs' };
+    }
+    if (normalized === 'cong no') {
+        return { ...base, purpose: 'Công nợ khởi tạo.', inputRule: 'Nhập số dương nếu cửa hàng nợ đối tác, số âm nếu đối tác nợ cửa hàng.', savedTo: 'totalDebt' };
+    }
+    if (normalized === 'ten ncc') {
+        return { ...base, purpose: 'Tên nhà cung cấp.', inputRule: 'Không để trống, không trùng lặp.', savedTo: 'name' };
+    }
+    if (normalized === 'nguoi lien he') {
+        return { ...base, purpose: 'Tên người liên hệ đại diện.', inputRule: 'Nhập text.', savedTo: 'contactPerson' };
+    }
+    if (normalized === 'cong ty') {
+        return { ...base, purpose: 'Tên công ty hoặc pháp nhân.', inputRule: 'Nhập text.', savedTo: 'companyName' };
+    }
+    if (normalized === 'phan loai') {
+        return { ...base, purpose: 'Phân loại nhóm nhà cung cấp.', inputRule: 'Nhập text.', savedTo: 'supplierType' };
+    }
+    if (normalized === 'ma so thue') {
+        return { ...base, purpose: 'Mã số thuế của NCC.', inputRule: 'Nhập chuỗi số.', savedTo: 'taxCode' };
+    }
+    if (normalized === 'so tai khoan') {
+        return { ...base, purpose: 'Số tài khoản ngân hàng.', inputRule: 'Nhập chuỗi số.', savedTo: 'bankAccount' };
+    }
+    if (normalized === 'ngan hang') {
+        return { ...base, purpose: 'Tên ngân hàng thụ hưởng.', inputRule: 'Nhập text.', savedTo: 'bankName' };
+    }
+    if (normalized === 'han thanh toan') {
+        return { ...base, purpose: 'Hạn thanh toán định kỳ (số ngày).', inputRule: 'Nhập số nguyên không âm.', savedTo: 'paymentTermsDays' };
+    }
+    if (normalized === 'phu trach') {
+        return { ...base, purpose: 'Nhân sự phụ trách NCC.', inputRule: 'Nhập text.', savedTo: 'assignedOwner' };
+    }
 
     return base;
 }
@@ -784,6 +894,20 @@ export function flattenTaxonomyRows(nodes: TaxonomyNode[], parentNames: string[]
 }
 
 export function buildQuickGuideRows(modeConfig: ModeConfig): TemplateCell[][] {
+    const isProductLike = modeConfig.collectionName === 'products' || modeConfig.collectionName === 'services';
+
+    if (!isProductLike) {
+        return [
+            ['HƯỚNG DẪN IMPORT DỮ LIỆU BAN ĐẦU', '', ''],
+            ['Loại dữ liệu', modeConfig.title, ''],
+            ['Sheet cần nhập', `Nhập dữ liệu ở sheet đầu tiên: ${modeConfig.sheetName}. Các sheet sau chỉ để hướng dẫn.`, ''],
+            ['Cột bắt buộc', modeConfig.requiredHeaders.join(', '), 'Không được để trống.'],
+            ['Quy trình', '1. Tải mẫu -> 2. Điền sheet đầu tiên -> 3. Upload Excel -> 4. Sửa lỗi trong bảng preview -> 5. Import hàng loạt.', ''],
+            ['Công nợ', 'Nhập số dương nếu cửa hàng nợ đối tác, số âm nếu đối tác nợ cửa hàng.', ''],
+            ['Import gate', 'Nút import bị khóa nếu còn lỗi. Warning chỉ nhắc kiểm tra lại và không chặn import.', ''],
+        ];
+    }
+
     return [
         ['HƯỚNG DẪN IMPORT DỮ LIỆU BAN ĐẦU', '', ''],
         ['Loại dữ liệu', modeConfig.title, ''],
@@ -869,7 +993,7 @@ export function generateTemplate(mode: ExcelImportMode, taxonomy: TaxonomyNode[]
         dataRows,
         modeConfig.templateHeaders.map((header) => {
             const normalized = normalizeText(header);
-            if (normalized.includes('mo ta') || normalized.includes('anh') || normalized.includes('thong so')) return 44;
+            if (normalized.includes('mo ta') || normalized.includes('anh') || normalized.includes('thong so') || normalized.includes('dia chi') || normalized.includes('ghi chu')) return 44;
             if (normalized === 'danh muc') return 38;
             return 18;
         }),
@@ -880,9 +1004,13 @@ export function generateTemplate(mode: ExcelImportMode, taxonomy: TaxonomyNode[]
     XLSX.utils.book_append_sheet(wb, dataSheet, modeConfig.sheetName);
     XLSX.utils.book_append_sheet(wb, worksheetFromRows(buildQuickGuideRows(modeConfig), [24, 96, 48]), 'Huong_dan');
     XLSX.utils.book_append_sheet(wb, worksheetFromRows(buildColumnGuideRows(modeConfig), [24, 14, 44, 56, 38, 42, 38], true), 'Quy_uoc_cot');
-    XLSX.utils.book_append_sheet(wb, worksheetFromRows(buildAcceptedValuesRows(mode), [24, 44, 30, 70], true), 'Gia_tri_hop_le');
-    XLSX.utils.book_append_sheet(wb, worksheetFromRows(buildMediaGuideRows(mode), [34, 58, 74], true), 'Anh_va_Media');
-    XLSX.utils.book_append_sheet(wb, worksheetFromRows(buildTaxonomyRows(taxonomy), [10, 58, 36, 28, 22, 18, 44], true), 'Taxonomy_mau');
+
+    if (mode !== 'customer' && mode !== 'supplier') {
+        XLSX.utils.book_append_sheet(wb, worksheetFromRows(buildAcceptedValuesRows(mode), [24, 44, 30, 70], true), 'Gia_tri_hop_le');
+        XLSX.utils.book_append_sheet(wb, worksheetFromRows(buildMediaGuideRows(mode), [34, 58, 74], true), 'Anh_va_Media');
+        XLSX.utils.book_append_sheet(wb, worksheetFromRows(buildTaxonomyRows(taxonomy), [10, 58, 36, 28, 22, 18, 44], true), 'Taxonomy_mau');
+    }
+
     XLSX.utils.book_append_sheet(wb, worksheetFromRows(buildExampleRows(mode, modeConfig), modeConfig.templateHeaders.map(() => 24), true), 'Vi_du_day_du');
     XLSX.writeFile(wb, `mau_khoi_tao_${modeConfig.sheetName.toLowerCase()}.xlsx`);
 }

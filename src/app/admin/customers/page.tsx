@@ -128,7 +128,7 @@ export default function CustomersPage() {
             (c.name || '').toLowerCase().includes(q) ||
             (c.tags || []).some(t => t.toLowerCase().includes(q));
         const matchesType = !typeFilter || c.type === typeFilter;
-        const matchesDebt = !hasDebtFilter || (c.totalDebt && c.totalDebt > 0);
+        const matchesDebt = !hasDebtFilter || (c.totalDebt && c.totalDebt !== 0);
         return matchesSearch && matchesType && matchesDebt;
     });
 
@@ -415,6 +415,10 @@ export default function CustomersPage() {
                                         {customer.totalDebt && customer.totalDebt > 0 ? (
                                             <div className="flex flex-col gap-1">
                                                 <span className="text-sm font-bold text-red-600">{formatPrice(customer.totalDebt)}</span>
+                                            </div>
+                                        ) : customer.totalDebt && customer.totalDebt < 0 ? (
+                                            <div className="flex flex-col gap-1">
+                                                <span className="text-sm font-bold text-green-600">Dư: {formatPrice(Math.abs(customer.totalDebt))}</span>
                                             </div>
                                         ) : (
                                             <span className="text-sm text-gray-400 font-medium">Không có nợ</span>

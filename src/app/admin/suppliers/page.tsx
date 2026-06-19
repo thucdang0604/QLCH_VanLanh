@@ -322,8 +322,8 @@ export default function SuppliersPage() {
                                 )}
                             </div>
                             <div className="text-right shrink-0 space-y-1">
-                                <div className={`text-sm font-bold ${(s.totalDebt || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                                    {(s.totalDebt || 0) > 0 ? `Nợ: ${fmt(s.totalDebt)}` : 'Hết nợ'}
+                                <div className={`text-sm font-bold ${(s.totalDebt || 0) > 0 ? 'text-red-600' : (s.totalDebt || 0) < 0 ? 'text-green-600' : 'text-gray-500'}`}>
+                                    {(s.totalDebt || 0) > 0 ? `Nợ: ${fmt(s.totalDebt)}` : (s.totalDebt || 0) < 0 ? `Dư: ${fmt(Math.abs(s.totalDebt))}` : 'Hết nợ'}
                                 </div>
                                 <div className="flex gap-1">
                                     {(s.totalDebt || 0) > 0 && (
