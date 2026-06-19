@@ -567,3 +567,10 @@
 - Change: After staff creates a retail product import proposal from `/admin/products`, the page now routes to `/admin/inventory?tab=draft` so proposal follow-up happens in the inventory aggregate workspace.
 - Guardrail: Product creation/editing remains on `/admin/products`; only the purchase proposal follow-up is handed off.
 - Verification: `eslint src/app/admin/products/page.tsx`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
+
+### Part 30 - Parts proposal handoff to inventory
+- Covered IDs: UT-20260618-028
+- Files touched: `src/app/admin/parts/page.tsx`
+- Change: After staff creates an import proposal from `/admin/parts`, the page now routes to `/admin/inventory?tab=draft` so proposal follow-up happens in the inventory aggregate workspace.
+- Guardrail: Parts catalog creation/editing remains on `/admin/parts`; existing proposal creation logic is reused unchanged.
+- Verification: `eslint src/app/admin/parts/page.tsx`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.

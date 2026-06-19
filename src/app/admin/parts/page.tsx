@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import {
     Archive,
     Plus,
@@ -56,6 +57,7 @@ import type {
 } from '@/features/parts/importReceiptTypes';
 export default function PartsPage() {
     const { user } = useAuth(); // Ensure authenticated
+    const router = useRouter();
     const { data: products, loading } = useFirestoreCollection<Product>('products', [orderBy('createdAt', 'desc')]);
     const parts = products.filter(p => isPartCategory(p.category, p.categoryIds));
     const retailProducts = products.filter(p => {
@@ -1178,7 +1180,10 @@ export default function PartsPage() {
                     retailProducts={retailProducts}
                     currentUser={user}
                     suppliers={supplierList}
-                    onCreated={() => fetchDrafts()}
+                    onCreated={() => {
+                        void fetchDrafts();
+                        router.push('/admin/inventory?tab=draft');
+                    }}
                 />
             )}
             {importSuccessLots && importSuccessLots.length > 0 && (
