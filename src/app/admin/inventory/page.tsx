@@ -21,10 +21,19 @@ import ProductQrLabelModal, { PrintBatchItem } from '@/components/admin/ProductQ
 
 // ── Status Config ──
 const statusConfig = {
-    draft: { label: 'Nháp', color: 'bg-yellow-100 text-yellow-700', icon: Clock },
+    draft: { label: 'Đề xuất', color: 'bg-yellow-100 text-yellow-700', icon: Clock },
     ordered: { label: 'Đã đặt hàng', color: 'bg-blue-100 text-blue-700', icon: Package },
     completed: { label: 'Đã nhập', color: 'bg-green-100 text-green-700', icon: CheckCircle2 },
 };
+
+type InventoryTab = 'completed' | 'draft' | 'ordered' | 'all';
+
+const inventoryTabs: { id: InventoryTab; label: string; description: string }[] = [
+    { id: 'completed', label: 'Phiếu nhập hàng', description: 'Đã hoàn tất nhập kho' },
+    { id: 'draft', label: 'Phiếu đề xuất', description: 'Cần duyệt hoặc đặt hàng' },
+    { id: 'ordered', label: 'Phiếu đã đặt', description: 'Đang chờ hàng về' },
+    { id: 'all', label: 'Tất cả', description: 'Toàn bộ phiếu' },
+];
 
 export default function InventoryPage() {
     const { user } = useAuth();
@@ -34,6 +43,7 @@ export default function InventoryPage() {
     const [searchQuery, setSearchQuery] = useState('');
     const [isProcessing, setIsProcessing] = useState(false);
     const [timeFilter, setTimeFilter] = useState<'all' | 'today' | 'week' | 'month'>('all');
+    const [activeTab, setActiveTab] = useState<InventoryTab>('completed');
 
     // Expanded receipt
     const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -212,7 +222,8 @@ export default function InventoryPage() {
     };
 
     // ── Filter ──
-    const filtered = receipts.filter(r => {
+    const tabReceipts = receipts.filter(r => activeTab === 'all' || r.status === activeTab);
+    const filtered = tabReceipts.filter(r => {
         // Text search
         const matchSearch = !searchQuery || r.supplier?.toLowerCase().includes(searchQuery.toLowerCase())
             || r.items.some(i => i.productName.toLowerCase().includes(searchQuery.toLowerCase()));
@@ -276,6 +287,28 @@ export default function InventoryPage() {
                     <p className="text-xs text-gray-500">Sản phẩm có tồn kho</p>
                     <p className="text-2xl font-bold text-blue-600">{products.filter(p => (p.stock || 0) > 0).length}</p>
                 </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                {inventoryTabs.map(tab => {
+                    const count = tab.id === 'all' ? receipts.length : receipts.filter(receipt => receipt.status === tab.id).length;
+                    const isActive = activeTab === tab.id;
+                    return (
+                        <button
+                            key={tab.id}
+                            onClick={() => setActiveTab(tab.id)}
+                            className={`rounded-xl border p-3 text-left transition-colors ${isActive ? 'border-orange-300 bg-orange-50 text-orange-700' : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'}`}
+                        >
+                            <div className="flex items-center justify-between gap-2">
+                                <span className="text-sm font-semibold">{tab.label}</span>
+                                <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${isActive ? 'bg-orange-100 text-orange-700' : 'bg-gray-100 text-gray-600'}`}>
+                                    {count}
+                                </span>
+                            </div>
+                            <p className="mt-1 text-xs text-gray-500">{tab.description}</p>
+                        </button>
+                    );
+                })}
             </div>
 
             {/* Search + Time Filter */}

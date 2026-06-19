@@ -539,3 +539,10 @@
 - Change: The bank config API now returns `totpEnabled` to the settings UI, so existing Authenticator setup is recognized before editing. The setup/verify APIs reject attempts to overwrite an already-enabled TOTP secret, and the UI requires a verified TOTP token before saving bank/payment config.
 - Guardrail: TOTP secret is still never returned by the read API; existing bank account display and VietQR config fields remain unchanged.
 - Verification: `eslint src/components/admin/settings/BankIntegrationConfig.tsx src/app/api/admin/bank-config/route.ts src/app/api/admin/bank-config/totp/setup/route.ts src/app/api/admin/bank-config/totp/verify/route.ts` passed with existing `<img>` warnings only, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
+
+### Part 26 - Inventory lists split by receipt status
+- Covered IDs: UT-20260618-028
+- Files touched: `src/app/admin/inventory/page.tsx`
+- Change: `/admin/inventory` now separates the shared `import_receipts` collection into visible tabs for completed import receipts, draft proposal receipts, ordered receipts, and all receipts. This starts moving inventory toward the requested aggregate workspace while leaving `/admin/inventory/stock` unchanged.
+- Guardrail: No receipt mutation logic was moved in this step; products and parts proposal creation flows continue to work as before.
+- Verification: `eslint src/app/admin/inventory/page.tsx`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
