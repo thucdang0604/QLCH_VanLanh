@@ -511,3 +511,10 @@
 - Change: Each repair issue row now suggests service taxonomy groups from the typed issue name. Selecting a suggestion stores `categoryPath` and `serviceName` on that issue while also updating the ticket-level service/category fallback.
 - Guardrail: The existing manual service category selector remains available; existing tickets without per-issue category metadata continue to work.
 - Verification: `eslint src/features/repairs/RepairEditorModal.tsx src/lib/types/repair.ts`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
+
+### Part 22 - Supplier richer profile fields
+- Covered IDs: UT-20260618-030
+- Files touched: `src/app/admin/suppliers/page.tsx`, `src/lib/types/inventory.ts`
+- Change: Suppliers can now store and display richer CRM-like profile fields: company/legal name, supplier type, website, payment terms, assigned owner, and tags. Search now includes company name, tax code, and tags.
+- Guardrail: Existing supplier debt/payment flow and transaction history remain unchanged; all new fields are optional for backward compatibility.
+- Verification: `eslint src/app/admin/suppliers/page.tsx src/lib/types/inventory.ts`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.

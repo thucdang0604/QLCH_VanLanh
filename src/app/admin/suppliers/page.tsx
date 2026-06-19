@@ -32,6 +32,12 @@ function SupplierModal({ supplier, onClose, onSave }: {
         bankAccount: supplier?.bankAccount || '',
         bankName: supplier?.bankName || '',
         contactPerson: supplier?.contactPerson || '',
+        companyName: supplier?.companyName || '',
+        supplierType: supplier?.supplierType || '',
+        website: supplier?.website || '',
+        paymentTermsDays: supplier?.paymentTermsDays?.toString() || '',
+        assignedOwner: supplier?.assignedOwner || '',
+        tags: supplier?.tags?.join(', ') || '',
         note: supplier?.note || '',
     });
     const [saving, setSaving] = useState(false);
@@ -40,7 +46,12 @@ function SupplierModal({ supplier, onClose, onSave }: {
         if (!form.name.trim()) { toast.error('Vui lòng nhập tên NCC'); return; }
         setSaving(true);
         try {
-            await onSave({ ...form, isActive: true });
+            await onSave({
+                ...form,
+                paymentTermsDays: Number(form.paymentTermsDays) || 0,
+                tags: form.tags.split(',').map(tag => tag.trim()).filter(Boolean),
+                isActive: true,
+            });
             onClose();
         } catch { toast.error('Lỗi khi lưu'); }
         setSaving(false);
@@ -48,13 +59,19 @@ function SupplierModal({ supplier, onClose, onSave }: {
 
     const fields: { key: keyof typeof form; label: string; type?: string }[] = [
         { key: 'name', label: 'Tên nhà cung cấp *' },
+        { key: 'companyName', label: 'Tên công ty / pháp nhân' },
+        { key: 'supplierType', label: 'Phân loại NCC' },
         { key: 'contactPerson', label: 'Người liên hệ' },
         { key: 'phone', label: 'Số điện thoại' },
         { key: 'email', label: 'Email', type: 'email' },
+        { key: 'website', label: 'Website' },
         { key: 'address', label: 'Địa chỉ' },
         { key: 'taxCode', label: 'Mã số thuế' },
         { key: 'bankAccount', label: 'Số tài khoản' },
         { key: 'bankName', label: 'Ngân hàng' },
+        { key: 'paymentTermsDays', label: 'Hạn thanh toán (ngày)' },
+        { key: 'assignedOwner', label: 'Nhân sự phụ trách' },
+        { key: 'tags', label: 'Tags (phân cách bằng dấu phẩy)' },
     ];
 
     return (
@@ -235,7 +252,10 @@ export default function SuppliersPage() {
     const filtered = suppliers.filter(s =>
         s.name.toLowerCase().includes(search.toLowerCase()) ||
         s.phone?.includes(search) ||
-        s.contactPerson?.toLowerCase().includes(search.toLowerCase())
+        s.contactPerson?.toLowerCase().includes(search.toLowerCase()) ||
+        s.companyName?.toLowerCase().includes(search.toLowerCase()) ||
+        s.taxCode?.toLowerCase().includes(search.toLowerCase()) ||
+        s.tags?.some(tag => tag.toLowerCase().includes(search.toLowerCase()))
     );
 
     const totalDebt = suppliers.reduce((sum, s) => sum + (s.totalDebt || 0), 0);
@@ -274,14 +294,32 @@ export default function SuppliersPage() {
                             <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2 mb-1">
                                     <h3 className="font-bold text-gray-900 truncate">{s.name}</h3>
+                                    {s.supplierType && <span className="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded">{s.supplierType}</span>}
                                     {!s.isActive && <span className="text-[10px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded">Ngưng HĐ</span>}
                                 </div>
+                                {(s.companyName || s.contactPerson || s.paymentTermsDays || s.assignedOwner) && (
+                                    <div className="mb-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600">
+                                        {s.companyName && <span>Công ty: <b>{s.companyName}</b></span>}
+                                        {s.contactPerson && <span>Liên hệ: <b>{s.contactPerson}</b></span>}
+                                        {!!s.paymentTermsDays && <span>Hạn TT: <b>{s.paymentTermsDays} ngày</b></span>}
+                                        {s.assignedOwner && <span>Phụ trách: <b>{s.assignedOwner}</b></span>}
+                                    </div>
+                                )}
                                 <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
                                     {s.phone && <span className="flex items-center gap-1"><Phone size={12} />{s.phone}</span>}
                                     {s.email && <span className="flex items-center gap-1"><Mail size={12} />{s.email}</span>}
+                                    {s.website && <span>{s.website}</span>}
                                     {s.address && <span className="flex items-center gap-1"><MapPin size={12} />{s.address}</span>}
+                                    {s.taxCode && <span>MST: {s.taxCode}</span>}
                                     {s.bankAccount && <span className="flex items-center gap-1"><CreditCard size={12} />{s.bankAccount} - {s.bankName}</span>}
                                 </div>
+                                {s.tags && s.tags.length > 0 && (
+                                    <div className="mt-2 flex flex-wrap gap-1">
+                                        {s.tags.map(tag => (
+                                            <span key={tag} className="rounded-md bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-600">{tag}</span>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                             <div className="text-right shrink-0 space-y-1">
                                 <div className={`text-sm font-bold ${(s.totalDebt || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>

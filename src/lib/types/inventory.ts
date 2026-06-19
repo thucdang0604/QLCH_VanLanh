@@ -85,6 +85,12 @@ export interface Supplier {
     bankAccount?: string;       // Số tài khoản
     bankName?: string;
     contactPerson?: string;     // Người liên hệ
+    companyName?: string;
+    supplierType?: string;
+    website?: string;
+    paymentTermsDays?: number;
+    assignedOwner?: string;
+    tags?: string[];
     totalDebt: number;          // Tổng công nợ hiện tại
     note?: string;
     isActive: boolean;
