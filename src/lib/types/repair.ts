@@ -85,6 +85,8 @@ export interface RepairIssue {
     label: string;
     estimatedPrice: number;
     status: 'pending' | 'resolved' | 'unresolved';
+    categoryPath?: string[];
+    serviceName?: string;
 }
 
 // Sản phẩm quà tặng kèm khi bàn giao

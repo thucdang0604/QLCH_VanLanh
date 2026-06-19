@@ -1,13 +1,22 @@
 'use client';
 /* eslint-disable @next/next/no-img-element */
+import { useMemo } from 'react';
 import type { Dispatch, FormEvent, SetStateAction } from 'react';
 import { AlertTriangle, CheckCircle2, DollarSign, Image as ImageIcon, Plus, Save, Smartphone, Trash2, Upload, User, Video, Wrench } from 'lucide-react';
 import Modal from '@/components/admin/Modal';
 import CategoryTaxonomySelector from '@/components/admin/CategoryTaxonomySelector';
 import CurrencyInput from '@/components/admin/CurrencyInput';
-import type { PaymentStatus, RepairIssue, RepairStatus, RepairTicket, WorkflowNode } from '@/lib/types';
+import { useConfig } from '@/lib/ConfigContext';
+import type { PaymentStatus, RepairIssue, RepairStatus, RepairTicket, TaxonomyNode, WorkflowNode } from '@/lib/types';
 
 type RepairFormValue = string | number | boolean | RepairIssue[] | string[] | PaymentStatus | RepairStatus;
+
+type ServiceSuggestion = {
+    id: string;
+    name: string;
+    path: string[];
+    searchText: string;
+};
 
 export type RepairEditorFormData = {
     appointmentId: string;
@@ -83,6 +92,11 @@ export function RepairEditorModal({
     onDelete,
 }: RepairEditorModalProps) {
     const selectedStatus = dynamicStatuses.find(s => s.id === formData.status);
+    const { config } = useConfig();
+    const serviceSuggestions = useMemo(
+        () => flattenServiceSuggestions(config.taxonomy?.service || []),
+        [config.taxonomy?.service]
+    );
 
     return (
         <>
@@ -161,16 +175,28 @@ export function RepairEditorModal({
                                     {formData.issues.map((issue, idx) => (
                                         <div key={issue.id} className="flex items-center gap-2 mb-2">
                                             <span className="text-xs text-gray-400 w-5 text-center">{idx + 1}</span>
-                                            <input
-                                                type="text"
-                                                placeholder="Tên lỗi (VD: Thay màn hình)"
-                                                value={issue.label}
-                                                onChange={e => setFormData(p => ({
-                                                    ...p,
-                                                    issues: p.issues.map(i => i.id === issue.id ? { ...i, label: e.target.value } : i)
-                                                }))}
-                                                className="flex-1 px-3 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-orange-500/20"
-                                            />
+                                            <div className="min-w-0 flex-1 space-y-1">
+                                                <input
+                                                    type="text"
+                                                    placeholder="Tên lỗi (VD: Thay màn hình)"
+                                                    value={issue.label}
+                                                    onChange={e => setFormData(p => ({
+                                                        ...p,
+                                                        issues: p.issues.map(i => i.id === issue.id ? { ...i, label: e.target.value } : i)
+                                                    }))}
+                                                    className="w-full px-3 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-orange-500/20"
+                                                />
+                                                <IssueServiceSuggestions
+                                                    issue={issue}
+                                                    suggestions={serviceSuggestions}
+                                                    onSelect={suggestion => setFormData(p => ({
+                                                        ...p,
+                                                        selectedCategoryPath: suggestion.path,
+                                                        selectedServiceName: suggestion.name,
+                                                        issues: p.issues.map(i => i.id === issue.id ? { ...i, categoryPath: suggestion.path, serviceName: suggestion.name } : i)
+                                                    }))}
+                                                />
+                                            </div>
                                             <CurrencyInput
                                                 placeholder="Giá dự kiến"
                                                 value={issue.estimatedPrice || ''}
@@ -479,6 +505,70 @@ function InputField({ label, value, onChange, type = 'text', placeholder, requir
                 required={required}
                 className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20 focus:outline-none"
             />
+        </div>
+    );
+}
+
+function normalizeSearchText(value: string) {
+    return value
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/đ/g, 'd')
+        .replace(/Đ/g, 'D')
+        .toLowerCase()
+        .trim();
+}
+
+function flattenServiceSuggestions(nodes: TaxonomyNode[], parentPath: string[] = [], parentNames: string[] = []): ServiceSuggestion[] {
+    return nodes.flatMap(node => {
+        const path = [...parentPath, node.id];
+        const names = [...parentNames, node.name];
+        const current: ServiceSuggestion = {
+            id: path.join('/'),
+            name: node.name,
+            path,
+            searchText: normalizeSearchText(names.join(' ')),
+        };
+        return [
+            current,
+            ...flattenServiceSuggestions(node.children || [], path, names),
+        ];
+    });
+}
+
+function IssueServiceSuggestions({
+    issue,
+    suggestions,
+    onSelect,
+}: {
+    issue: RepairIssue;
+    suggestions: ServiceSuggestion[];
+    onSelect: (suggestion: ServiceSuggestion) => void;
+}) {
+    const query = normalizeSearchText(issue.label);
+    const matches = query.length >= 2
+        ? suggestions.filter(suggestion => suggestion.searchText.includes(query)).slice(0, 3)
+        : [];
+
+    if (matches.length === 0 && !issue.serviceName) return null;
+
+    return (
+        <div className="flex flex-wrap items-center gap-1">
+            {issue.serviceName && (
+                <span className="rounded-md border border-orange-200 bg-orange-50 px-2 py-0.5 text-[11px] font-semibold text-orange-700">
+                    {issue.serviceName}
+                </span>
+            )}
+            {matches.map(suggestion => (
+                <button
+                    key={suggestion.id}
+                    type="button"
+                    onClick={() => onSelect(suggestion)}
+                    className="rounded-md border border-gray-200 bg-white px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:border-orange-300 hover:text-orange-700"
+                >
+                    {suggestion.name}
+                </button>
+            ))}
         </div>
     );
 }

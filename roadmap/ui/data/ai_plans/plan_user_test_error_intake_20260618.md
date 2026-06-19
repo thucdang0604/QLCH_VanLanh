@@ -504,3 +504,10 @@
 - Change: Completed repair tickets without warranty-eligible parts can now open the warranty flow when the service/category has a warranty template. The warranty modal allows creating a service/repair warranty ticket without selected parts. Handover now stamps `serviceWarrantyExpiresAt` from the service taxonomy `warrantyMonths`, falling back to 3 months when no category value exists.
 - Guardrail: Part warranty behavior is unchanged; if active warranty parts exist, staff still must select at least one part before creating the warranty ticket.
 - Verification: `eslint src/features/repairs/RepairTicketBoard.tsx src/features/repairs/RepairWarrantyModal.tsx src/app/admin/repairs/page.tsx src/app/api/repairs/handover/route.ts`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
+
+### Part 21 - Repair issue service-category suggestions
+- Covered IDs: UT-20260618-018
+- Files touched: `src/features/repairs/RepairEditorModal.tsx`, `src/lib/types/repair.ts`
+- Change: Each repair issue row now suggests service taxonomy groups from the typed issue name. Selecting a suggestion stores `categoryPath` and `serviceName` on that issue while also updating the ticket-level service/category fallback.
+- Guardrail: The existing manual service category selector remains available; existing tickets without per-issue category metadata continue to work.
+- Verification: `eslint src/features/repairs/RepairEditorModal.tsx src/lib/types/repair.ts`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
