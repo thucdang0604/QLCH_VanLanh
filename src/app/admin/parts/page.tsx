@@ -1186,6 +1186,8 @@ export default function PartsPage() {
                     retailProducts={retailProducts}
                     currentUser={user}
                     suppliers={supplierList}
+                    initialReceiptType="component"
+                    lockReceiptType
                     onCreated={() => {
                         void fetchDrafts();
                         router.push('/admin/inventory?tab=draft');

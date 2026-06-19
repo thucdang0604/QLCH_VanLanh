@@ -581,3 +581,10 @@
 - Change: `/admin/inventory` now exposes separate proposal actions for retail products and parts. Those links open `/admin/products?createImportProposal=1` or `/admin/parts?createImportProposal=1`, and both catalog pages auto-open the existing import proposal modal.
 - Guardrail: Inventory still owns the aggregate receipt/proposal/order lists; product and part pages only provide the source-specific proposal creation flow.
 - Verification: `eslint src/app/admin/inventory/page.tsx src/app/admin/products/page.tsx src/app/admin/parts/page.tsx`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
+
+### Part 32 - Parts proposal flow is component-only
+- Covered IDs: UT-20260618-028
+- Files touched: `src/app/admin/parts/page.tsx`
+- Change: `/admin/parts` now opens the import proposal modal locked in component/part mode, matching the separated products-versus-parts ownership.
+- Guardrail: The shared modal is unchanged; `/admin/products` remains locked to retail mode, `/admin/parts` is locked to component mode.
+- Verification: `eslint src/app/admin/parts/page.tsx`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
