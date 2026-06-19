@@ -21,6 +21,14 @@ interface FlatNode {
     seoKeywords?: string;
 }
 
+interface ServiceLinkSuggestion {
+    id: string;
+    name: string;
+    categoryIds: string[];
+    linkedProductCategoryIds: string[];
+    tags?: string[];
+}
+
 function flattenTaxonomy(nodes: TaxonomyNode[], parentPath = '', depth = 0): FlatNode[] {
     const result: FlatNode[] = [];
     for (const node of nodes) {
@@ -178,12 +186,13 @@ function KeywordChips({ keywords, onChange }: { keywords: string[]; onChange: (k
 }
 
 // ── Accessory Rule Modal (Visual Builder) ──
-function AccessoryRuleModal({ rule, onClose, onSave, serviceNodes, productNodes }: {
+function AccessoryRuleModal({ rule, onClose, onSave, serviceNodes, productNodes, serviceLinkSuggestions }: {
     rule: AccessoryDiscountRule | null;
     onClose: () => void;
     onSave: (data: Partial<AccessoryDiscountRule>) => Promise<void>;
     serviceNodes: FlatNode[];
     productNodes: FlatNode[];
+    serviceLinkSuggestions: ServiceLinkSuggestion[];
 }) {
     const [form, setForm] = useState({
         name: rule?.name || '',
@@ -200,6 +209,11 @@ function AccessoryRuleModal({ rule, onClose, onSave, serviceNodes, productNodes 
     // Find selected node names for preview
     const triggerNode = serviceNodes.find(n => n.id === form.triggerServiceCategory);
     const targetNode = productNodes.find(n => n.id === form.targetProductCategory);
+    const linkedSuggestions = serviceLinkSuggestions.filter(service =>
+        form.triggerServiceCategory &&
+        service.linkedProductCategoryIds.length > 0 &&
+        service.categoryIds.includes(form.triggerServiceCategory)
+    );
 
     const previewText = (() => {
         const trigger = triggerNode?.name || form.triggerKeywords[0] || '...';
@@ -227,6 +241,15 @@ function AccessoryRuleModal({ rule, onClose, onSave, serviceNodes, productNodes 
             targetKeywords: node?.seoKeywords
                 ? node.seoKeywords.split(',').map(s => s.trim()).filter(Boolean)
                 : nodeId ? p.targetKeywords : [],
+        }));
+    };
+
+    const applyServiceLinkSuggestion = (suggestion: ServiceLinkSuggestion) => {
+        const targetCategory = suggestion.linkedProductCategoryIds[suggestion.linkedProductCategoryIds.length - 1] || '';
+        setForm(p => ({
+            ...p,
+            targetProductCategory: targetCategory,
+            targetKeywords: suggestion.tags?.length ? suggestion.tags : p.targetKeywords,
         }));
     };
 
@@ -283,6 +306,23 @@ function AccessoryRuleModal({ rule, onClose, onSave, serviceNodes, productNodes 
                                 onChange={handleTriggerSelect}
                                 placeholder="Chọn danh mục dịch vụ..."
                             />
+                            {linkedSuggestions.length > 0 && (
+                                <div className="rounded-lg border border-blue-100 bg-white p-3">
+                                    <p className="text-xs font-semibold text-blue-800">Gợi ý bán kèm từ dịch vụ</p>
+                                    <div className="mt-2 flex flex-wrap gap-2">
+                                        {linkedSuggestions.map(suggestion => (
+                                            <button
+                                                key={suggestion.id}
+                                                type="button"
+                                                onClick={() => applyServiceLinkSuggestion(suggestion)}
+                                                className="rounded-lg border border-blue-100 bg-blue-50 px-2.5 py-1.5 text-left text-xs font-medium text-blue-700 hover:bg-blue-100"
+                                            >
+                                                {suggestion.name}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                             <div>
                                 <p className="text-xs text-gray-500 mb-1.5">Từ khóa kích hoạt (tự động từ taxonomy hoặc thêm thủ công):</p>
                                 <KeywordChips keywords={form.triggerKeywords} onChange={kw => setForm(p => ({ ...p, triggerKeywords: kw }))} />
@@ -379,6 +419,7 @@ export default function DiscountRulesTab() {
     const [rules, setRules] = useState<(AccessoryDiscountRule & { id: string })[]>([]);
     const [showAccessoryModal, setShowAccessoryModal] = useState(false);
     const [editRule, setEditRule] = useState<AccessoryDiscountRule | null>(null);
+    const [serviceLinkSuggestions, setServiceLinkSuggestions] = useState<ServiceLinkSuggestion[]>([]);
 
     // Tiers State
     const [tiers, setTiers] = useState<TierConfig[]>(TIER_CONFIGS);
@@ -438,8 +479,26 @@ export default function DiscountRulesTab() {
         setRules(snap.docs.map(d => ({ id: d.id, ...d.data() } as AccessoryDiscountRule & { id: string })));
     }, []);
 
+    const loadServiceLinkSuggestions = useCallback(async () => {
+        const snap = await getDocs(collection(db, 'services'));
+        setServiceLinkSuggestions(snap.docs
+            .map(docSnap => {
+                const data = docSnap.data() as Partial<ServiceLinkSuggestion>;
+                return {
+                    id: docSnap.id,
+                    name: String(data.name || docSnap.id),
+                    categoryIds: Array.isArray(data.categoryIds) ? data.categoryIds : [],
+                    linkedProductCategoryIds: Array.isArray(data.linkedProductCategoryIds) ? data.linkedProductCategoryIds : [],
+                    tags: Array.isArray(data.tags) ? data.tags : [],
+                };
+            })
+            .filter(service => service.categoryIds.length > 0 && service.linkedProductCategoryIds.length > 0)
+        );
+    }, []);
+
     useEffect(() => {
         loadAccessoryRules().catch(error => console.error('Failed to load accessory discount rules:', error));
+        loadServiceLinkSuggestions().catch(error => console.error('Failed to load service link suggestions:', error));
 
         // Fetch Tier Settings
         const unsubTiers = onSnapshot(doc(db, 'system_config', 'tier_settings'), snap => {
@@ -449,7 +508,7 @@ export default function DiscountRulesTab() {
         });
 
         return () => { unsubTiers(); };
-    }, [loadAccessoryRules]);
+    }, [loadAccessoryRules, loadServiceLinkSuggestions]);
 
     // Handlers for Accessories
     const handleSaveAccessoryRule = async (data: Partial<AccessoryDiscountRule>) => {
@@ -688,6 +747,7 @@ export default function DiscountRulesTab() {
                             onSave={handleSaveAccessoryRule}
                             serviceNodes={serviceNodes}
                             productNodes={productNodes}
+                            serviceLinkSuggestions={serviceLinkSuggestions}
                         />
                     )}
                 </div>

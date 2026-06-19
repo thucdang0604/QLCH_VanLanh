@@ -611,3 +611,10 @@
 - Change: `/admin/services` can now store optional service metadata for `linkedProductCategoryIds` and `recommendedPartCategoryIds`. Admins can select a retail/accessory category for POS bundle suggestions and a component category for repair-intake context. Service cards show compact badges when these links exist.
 - Guardrail: these fields are advisory metadata only. They do not move inventory, do not change repair workflow transitions, and do not automatically apply POS discounts yet.
 - Verification: focused ESLint passed for `src/app/admin/services/page.tsx` and `src/lib/types/catalog.ts`; `tsc --noEmit` passed.
+
+### Part 35 - Discount rule builder uses service catalog suggestions
+- Covered IDs: UT-20260618-027, UT-20260618-006
+- Files touched: `src/app/admin/vouchers/DiscountRulesTab.tsx`
+- Change: the accessory/service discount rule modal now reads service records with `linkedProductCategoryIds`. When admins choose a service taxonomy category, the modal shows matching service suggestions; clicking a suggestion fills the target product/accessory category and optional tags.
+- Guardrail: this only improves rule authoring. POS discount calculation remains governed by saved `accessory_discount_rules`; no automatic rule is created from a service.
+- Verification: focused ESLint passed for `src/app/admin/vouchers/DiscountRulesTab.tsx`; `tsc --noEmit` passed.
