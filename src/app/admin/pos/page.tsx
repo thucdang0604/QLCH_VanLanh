@@ -390,14 +390,37 @@ export default function POSPage() {
 
         const timeoutId = window.setTimeout(async () => {
             try {
+                const normalizedQuery = normalizedSearch.toLowerCase();
                 const keyword = generateSearchKeywords(normalizedSearch)[0] || normalizedSearch.toLowerCase();
-                const snap = await getDocs(query(
+                const keywordSnap = await getDocs(query(
                     collection(db, 'products'),
                     where('searchKeywords', 'array-contains', keyword),
                     limit(POS_SEARCH_PRODUCT_LIMIT),
                 ));
-                const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as PosProduct));
-                mergeProducts(data, { includeOutOfStock: true });
+
+                const fallbackSnap = await getDocs(query(
+                    collection(db, 'products'),
+                    fbOrderBy('createdAt', 'desc'),
+                    limit(POS_SEARCH_PRODUCT_LIMIT),
+                ));
+
+                const candidates = new Map<string, PosProduct>();
+                keywordSnap.docs.forEach(d => candidates.set(d.id, { id: d.id, ...d.data() } as PosProduct));
+                fallbackSnap.docs.forEach(d => {
+                    const product = { id: d.id, ...d.data() } as PosProduct;
+                    const searchKeywords = (product as { searchKeywords?: unknown }).searchKeywords;
+                    const haystack = [
+                        product.name,
+                        product.id,
+                        productCodeSearchText(product),
+                        ...(Array.isArray(searchKeywords) ? searchKeywords : []),
+                    ].join(' ').toLowerCase();
+                    if (haystack.includes(normalizedQuery)) {
+                        candidates.set(product.id, product);
+                    }
+                });
+
+                mergeProducts(Array.from(candidates.values()), { includeOutOfStock: true });
             } catch (err) {
                 console.error('Failed to search POS products:', err);
             }
