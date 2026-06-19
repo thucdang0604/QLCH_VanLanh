@@ -43,6 +43,49 @@ const POS_SEARCH_PRODUCT_LIMIT = 60;
 const POS_LEGACY_SCAN_FALLBACK_LIMIT = 500;
 type PosProduct = Product & { id: string };
 
+function toStringArray(value: unknown): string[] {
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+function mapRepairTicketInfo(id: string, data: Record<string, unknown>, fallbackPhone = ''): RepairTicketInfo {
+    const customer = (data.customer || {}) as Record<string, unknown>;
+    const deviceInfo = (data.deviceInfo || {}) as Record<string, unknown>;
+    const payment = (data.payment || {}) as Record<string, unknown>;
+
+    return {
+        id,
+        customerName: String(customer.name || data.customerName || ''),
+        customerPhone: String(customer.phone || data.customerPhone || fallbackPhone),
+        deviceModel: String(deviceInfo.model || data.deviceModel || ''),
+        status: String(data.status || ''),
+        serviceName: typeof data.serviceName === 'string' ? data.serviceName : '',
+        categoryPath: toStringArray(data.categoryPath),
+        parts: Array.isArray(data.parts) ? data.parts.map((part) => {
+            const item = (part || {}) as Record<string, unknown>;
+            return {
+                productName: String(item.productName || item.name || item.partName || ''),
+                partType: String(item.partType || ''),
+                unitPriceAtUse: Number(item.unitPriceAtUse || 0),
+                status: String(item.status || ''),
+                quantity: Number(item.quantity || 1),
+            };
+        }) : [],
+        gifts: toStringArray(data.gifts),
+        paymentAmount: Number(payment.amount || 0),
+        paymentLaborCost: Number(payment.laborCost || 0),
+        paymentStatus: String(payment.status || 'unpaid'),
+        issues: Array.isArray(data.issues) ? data.issues.map((issue) => {
+            const item = (issue || {}) as Record<string, unknown>;
+            return {
+                label: typeof item.label === 'string' ? item.label : '',
+                estimatedPrice: Number(item.estimatedPrice || 0),
+                categoryPath: toStringArray(item.categoryPath),
+                serviceName: typeof item.serviceName === 'string' ? item.serviceName : '',
+            };
+        }) : [],
+    };
+}
+
 declare global {
     interface Window {
         BarcodeDetector?: BrowserBarcodeDetectorConstructor;
@@ -162,26 +205,7 @@ export default function POSPage() {
                 const snapshot = await getDoc(doc(db, 'repairs', repairId));
                 if (!snapshot.exists() || cancelled) return;
 
-                const data = snapshot.data();
-                const repair: RepairTicketInfo = {
-                    id: snapshot.id,
-                    customerName: String(data.customerName || ''),
-                    customerPhone: String(data.customerPhone || ''),
-                    deviceModel: String(data.deviceModel || ''),
-                    status: String(data.status || ''),
-                    parts: (data.parts || []).map((part: Record<string, unknown>) => ({
-                        productName: String(part.productName || ''),
-                        partType: String(part.partType || ''),
-                        unitPriceAtUse: Number(part.unitPriceAtUse || 0),
-                        status: String(part.status || ''),
-                        quantity: Number(part.quantity || 1),
-                    })),
-                    gifts: Array.isArray(data.gifts) ? data.gifts.map(String) : [],
-                    paymentAmount: Number(data.payment?.amount || 0),
-                    paymentLaborCost: Number(data.payment?.laborCost || 0),
-                    paymentStatus: String(data.payment?.status || 'unpaid'),
-                    issues: data.issues || [],
-                };
+                const repair = mapRepairTicketInfo(snapshot.id, snapshot.data());
 
                 setLinkedRepairs(previous => [...previous, repair]);
                 setCustomerName(previous => previous || repair.customerName);
@@ -199,38 +223,6 @@ export default function POSPage() {
         };
     }, [searchParams, linkedRepairs]);
 
-    // Add a repair handoff to the cart once its data is available.
-    useEffect(() => {
-        const repairId = searchParams.get('repairId');
-        if (!repairId || cart.some(item => item.productId === repairId)) return;
-        if (cart.some(item => item.isRepairTicket && item.productId !== repairId)) return;
-        const repair = linkedRepairs.find(item => item.id === repairId);
-        if (!repair || repair.paymentStatus === 'paid' || repair.paymentStatus === 'refunded') return;
-
-        const newItems: CartItem[] = [{
-            cartItemId: repair.id,
-            productId: repair.id,
-            name: `[Phiếu sửa chữa] ${repair.deviceModel}`,
-            originalPrice: repair.paymentAmount,
-            sellingPrice: repair.paymentAmount,
-            costPrice: 0,
-            quantity: 1,
-            repairTicketId: repair.id,
-            isRepairTicket: true,
-        }];
-        repair.gifts?.forEach(giftId => {
-            newItems.push({
-                cartItemId: `gift_${repair.id}_${giftId}`,
-                productId: `gift_${repair.id}_${giftId}`,
-                name: `[Quà tặng] Mã SP: ${giftId}`,
-                originalPrice: 0,
-                sellingPrice: 0,
-                costPrice: 0,
-                quantity: 1,
-            });
-        });
-        setCart(previous => [...newItems, ...previous]);
-    }, [cart, linkedRepairs, searchParams]);
 
     // Lookup repair by phone
     const lookupRepairByPhone = async (phone: string) => {
@@ -263,83 +255,30 @@ export default function POSPage() {
 
             const q = query(
                 collection(db, 'repairs'),
-                where('customerPhone', '==', phone.trim()),
-                where('payment.status', 'in', ['unpaid', 'partial']),
-                fbOrderBy('createdAt', 'desc')
+                where('customer.phone', '==', phone.trim()),
             );
             const snap = await getDocs(q);
             if (!snap.empty) {
-                const repairs = snap.docs.map(d => {
+                const repairs = snap.docs
+                    .filter(d => {
+                        const ps = d.data().payment?.status;
+                        return !ps || ps === 'unpaid' || ps === 'partial';
+                    })
+                    .sort((a, b) => {
+                        const ta = a.data().createdAt?.toMillis?.() || 0;
+                        const tb = b.data().createdAt?.toMillis?.() || 0;
+                        return tb - ta;
+                    })
+                    .map(d => {
                     const data = d.data();
+                    const repair = mapRepairTicketInfo(d.id, data, phone);
                     // Auto-fill customer name if empty
-                    if (!customerName && data.customerName) {
-                        setCustomerName(prev => prev || data.customerName);
+                    if (!customerName && repair.customerName) {
+                        setCustomerName(prev => prev || repair.customerName);
                     }
-                    return {
-                        id: d.id,
-                        customerName: data.customerName || '',
-                        customerPhone: data.customerPhone || phone,
-                        deviceModel: data.deviceModel || '',
-                        status: data.status || '',
-                        parts: (data.parts || []).map((p: Record<string, unknown>) => ({
-                            productName: String(p.productName || ''),
-                            partType: String(p.partType || ''),
-                            unitPriceAtUse: Number(p.unitPriceAtUse || 0),
-                            status: String(p.status || ''),
-                            quantity: Number(p.quantity || 1),
-                        })),
-                        paymentAmount: Number(data.payment?.amount || 0),
-                        paymentLaborCost: Number(data.payment?.laborCost || 0),
-                        paymentStatus: String(data.payment?.status || 'unpaid'),
-                        gifts: data.gifts || [],
-                        issues: data.issues || []
-                    };
+                    return repair;
                 });
                 setLinkedRepairs(repairs);
-
-                // Auto inject gifts if coming from repair checkout link
-                const urlSource = new URLSearchParams(window.location.search).get('source');
-                if (urlSource === 'repair' && new URLSearchParams(window.location.search).get('phone')) {
-                    const newItems: CartItem[] = [];
-                    repairs.forEach(repair => {
-                        // Prevent adding if already in cart
-                        if (cart.some(c => c.productId === repair.id)) return;
-                        if (repair.paymentStatus === 'paid' || repair.paymentStatus === 'refunded') return;
-
-                        newItems.push({
-                            cartItemId: repair.id,
-                            productId: repair.id,
-                            name: `[Phiếu sửa chữa] ${repair.deviceModel}`,
-                            originalPrice: repair.paymentAmount,
-                            sellingPrice: repair.paymentAmount,
-                            costPrice: 0,
-                            quantity: 1,
-                            repairTicketId: repair.id,
-                            isRepairTicket: true
-                        });
-
-                        if (repair.gifts && repair.gifts.length > 0) {
-                            repair.gifts.forEach((giftId: string) => {
-                                const cartGiftId = `gift_${repair.id}_${giftId}`;
-                                if (!cart.some(c => c.productId === cartGiftId) && !newItems.some(i => i.productId === cartGiftId)) {
-                                    newItems.push({
-                                        cartItemId: cartGiftId,
-                                        productId: cartGiftId,
-                                        name: `[Quà tặng] Mã SP: ${giftId}`,
-                                        originalPrice: 0,
-                                        sellingPrice: 0,
-                                        costPrice: 0,
-                                        quantity: 1,
-                                        isRepairTicket: false
-                                    });
-                                }
-                            });
-                        }
-                    });
-                    if (newItems.length > 0) {
-                        setCart(prev => [...newItems, ...prev]);
-                    }
-                }
             } else {
                 setLinkedRepairs([]);
             }
@@ -361,24 +300,41 @@ export default function POSPage() {
                 const rules = await fetchActiveDiscountRules();
                 if (rules.length === 0) return;
 
-                let allParts: { productName: string; partType?: string; unitPriceAtUse?: number }[] = [];
+                let allParts: { productName: string; partType?: string; unitPriceAtUse?: number; categoryIds?: string[] }[] = [];
                 linkedRepairs.forEach(r => {
                     allParts = [...allParts, ...r.parts];
                 });
+                const repairContexts = linkedRepairs.map(repair => ({
+                    serviceName: repair.serviceName,
+                    categoryPath: repair.categoryPath,
+                    issues: repair.issues,
+                }));
 
-                if (allParts.length === 0) return;
+                if (allParts.length === 0 && repairContexts.every(repair =>
+                    !repair.serviceName && !repair.categoryPath?.length && (!repair.issues || repair.issues.length === 0)
+                )) return;
 
                 const results = calculateAccessoryDiscounts(
                     allParts,
-                    cart.map(c => ({ productId: c.productId, productName: c.name, price: c.sellingPrice })),
-                    rules
+                    cart.map(c => {
+                        const prod = products.find(p => p.id === c.productId);
+                        return {
+                            productId: c.productId,
+                            productName: c.name,
+                            price: c.sellingPrice,
+                            category: prod?.category,
+                            categoryIds: prod?.categoryIds,
+                        };
+                    }),
+                    rules,
+                    repairContexts
                 );
                 const totalDisc = results.reduce((s, r) => s + r.discountAmount, 0);
                 setAutoDiscountAmount(totalDisc);
                 setDiscountDetails(results);
             } catch { /* rules not configured yet */ }
         })();
-    }, [linkedRepairs, cart]);
+    }, [linkedRepairs, cart, products]);
 
     const searchRef = useRef<HTMLInputElement>(null);
 
@@ -729,7 +685,7 @@ export default function POSPage() {
 
     const addRepairToCart = (repair: RepairTicketInfo) => {
         // Prevent adding if already in cart
-        if (cart.some(c => c.productId === repair.id)) {
+        if (cart.some(c => c.repairTicketId === repair.id)) {
             toastError('Phiếu sửa chữa đã có trong hóa đơn!');
             return;
         }

@@ -45,11 +45,13 @@ export interface RepairTicketInfo {
     deviceModel: string;
     status: string;
     parts: { productName: string; partType?: string; unitPriceAtUse?: number; status?: string; quantity?: number }[];
+    serviceName?: string;
+    categoryPath?: string[];
     paymentAmount: number;
     paymentLaborCost: number;
     paymentStatus: string;
     gifts?: string[];
-    issues?: { estimatedPrice?: number }[];
+    issues?: { label?: string; estimatedPrice?: number; categoryPath?: string[]; serviceName?: string }[];
 }
 
 export interface DiscountDetail {

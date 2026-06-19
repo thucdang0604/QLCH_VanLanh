@@ -1,4 +1,4 @@
-import type { Dispatch, SetStateAction } from 'react';
+import { useState, useEffect, type Dispatch, type SetStateAction } from 'react';
 import Image from 'next/image';
 import { AlertTriangle, Banknote, CreditCard, Minus, Package, Phone, Plus, QrCode, Receipt, ShoppingCart, Tag, Trash2, User, Wrench, X } from 'lucide-react';
 import CurrencyInput from '@/components/admin/CurrencyInput';
@@ -97,6 +97,14 @@ export function PosCartPanel({
     formatPrice,
 }: PosCartPanelProps) {
     const itemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
+    const [showRepairsList, setShowRepairsList] = useState(true);
+
+    // Auto-expand repair list when a new set of repairs is loaded
+    useEffect(() => {
+        if (linkedRepairs.length > 0) {
+            setShowRepairsList(true);
+        }
+    }, [linkedRepairs]);
 
     return (
         <>
@@ -222,42 +230,64 @@ export function PosCartPanel({
                 )}
                 {repairLoading && <p className="text-xs text-gray-400 animate-pulse">Đang tra cứu phiếu sửa...</p>}
                 {linkedRepairs.length > 0 && (
-                    <div className="space-y-2">
-                        {linkedRepairs.map(repair => (
-                            <div key={repair.id} className="bg-blue-50 rounded-lg p-2.5 text-xs space-y-1 border border-blue-100">
-                                <div className="flex items-center gap-1.5 font-semibold text-blue-700">
-                                    <Wrench size={13} /> Phiếu sửa #{repair.id.slice(-6)}
-                                </div>
-                                <p className="text-blue-600">Máy: {repair.deviceModel} — {repair.status}</p>
-                                {repair.parts.length > 0 && <p className="text-blue-500">LK: {repair.parts.map(part => part.productName).join(', ')}</p>}
-                                {repair.paymentAmount > 0 && (
-                                    <div className="mt-2 pt-2 border-t border-blue-200 flex items-center justify-between gap-2">
-                                        <span className="font-semibold text-blue-800">Chi phí sửa chữa: {formatPrice(repair.paymentAmount)}</span>
-                                        {(repair.paymentStatus === 'paid' || repair.paymentStatus === 'refunded') ? (
-                                            <span className="text-green-600 font-bold bg-green-100 px-2 py-1 rounded-md whitespace-nowrap">Đã thanh toán</span>
-                                        ) : (
-                                            <button type="button" onClick={() => onAddRepairToCart(repair)} className="py-1 px-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors whitespace-nowrap">
-                                                Thêm vào HĐ
-                                            </button>
+                    <div className="space-y-1.5 border border-blue-100 rounded-lg p-2 bg-blue-50/20">
+                        <div className="flex items-center justify-between text-blue-700 font-semibold mb-1">
+                            <span className="flex items-center gap-1.5">
+                                <Wrench size={13} /> Phiếu sửa chưa thanh toán ({linkedRepairs.length})
+                            </span>
+                            <button
+                                type="button"
+                                onClick={() => setShowRepairsList(!showRepairsList)}
+                                className="text-blue-500 hover:text-blue-700 underline font-normal text-[11px]"
+                            >
+                                {showRepairsList ? 'Thu gọn' : 'Hiển thị'}
+                            </button>
+                        </div>
+                        {showRepairsList && (
+                            <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1">
+                                {linkedRepairs.map(repair => (
+                                    <div key={repair.id} className="bg-white rounded-lg p-2.5 text-xs space-y-1 border border-blue-100/60 shadow-sm">
+                                        <div className="flex items-center gap-1.5 font-semibold text-blue-700">
+                                            <Wrench size={13} /> Phiếu sửa #{repair.id.slice(-6)}
+                                        </div>
+                                        <p className="text-blue-600">Máy: {repair.deviceModel} — {repair.status}</p>
+                                        {repair.parts.length > 0 && <p className="text-blue-500">LK: {repair.parts.map(part => part.productName).join(', ')}</p>}
+                                        {repair.paymentAmount > 0 && (
+                                            <div className="mt-2 pt-2 border-t border-blue-100 flex items-center justify-between gap-2">
+                                                <span className="font-semibold text-blue-800">Chi phí: {formatPrice(repair.paymentAmount)}</span>
+                                                {(repair.paymentStatus === 'paid' || repair.paymentStatus === 'refunded') ? (
+                                                    <span className="text-green-600 font-bold bg-green-100 px-2 py-1 rounded-md whitespace-nowrap">Đã thanh toán</span>
+                                                ) : (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            onAddRepairToCart(repair);
+                                                            setShowRepairsList(false);
+                                                        }}
+                                                        className="py-1 px-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors whitespace-nowrap"
+                                                    >
+                                                        Thêm vào HĐ
+                                                    </button>
+                                                )}
+                                            </div>
                                         )}
                                     </div>
-                                )}
-                            </div>
-                        ))}
-
-                        {discountDetails.length > 0 && (
-                            <div className="bg-green-50 rounded-lg p-2.5 text-xs border border-green-200">
-                                <p className="font-semibold text-green-700">🎁 Giảm PK tự động:</p>
-                                {discountDetails.map((detail, index) => (
-                                    <p key={`${detail.productName}-${index}`} className="text-green-600">
-                                        {detail.productName}: -{detail.discountAmount.toLocaleString('vi-VN')}đ ({detail.ruleName})
-                                    </p>
                                 ))}
-                                <button type="button" onClick={() => setDiscount(previous => previous + autoDiscountAmount)} className="mt-1 w-full py-1.5 bg-green-600 text-white rounded-lg text-xs font-semibold hover:bg-green-700 transition-colors">
-                                    Áp dụng giảm {autoDiscountAmount.toLocaleString('vi-VN')}đ
-                                </button>
                             </div>
                         )}
+                    </div>
+                )}
+                {discountDetails.length > 0 && (
+                    <div className="bg-green-50 rounded-lg p-2.5 text-xs border border-green-200">
+                        <p className="font-semibold text-green-700">🎁 Giảm PK tự động:</p>
+                        {discountDetails.map((detail, index) => (
+                            <p key={`${detail.productName}-${index}`} className="text-green-600">
+                                {detail.productName}: -{detail.discountAmount.toLocaleString('vi-VN')}đ ({detail.ruleName})
+                            </p>
+                        ))}
+                        <button type="button" onClick={() => setDiscount(previous => Math.max(previous, autoDiscountAmount))} className="mt-1 w-full py-1.5 bg-green-600 text-white rounded-lg text-xs font-semibold hover:bg-green-700 transition-colors">
+                            Áp dụng giảm {autoDiscountAmount.toLocaleString('vi-VN')}đ
+                        </button>
                     </div>
                 )}
                 <div className="flex gap-1.5">

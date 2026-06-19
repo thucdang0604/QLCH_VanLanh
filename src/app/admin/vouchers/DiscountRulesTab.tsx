@@ -1,46 +1,250 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { collection, query, orderBy, onSnapshot, addDoc, updateDoc, doc, deleteDoc, serverTimestamp, setDoc, limit, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { Percent, Plus, Edit2, Trash2, ToggleLeft, ToggleRight, X, Tag, Medal, Users } from 'lucide-react';
+import { Percent, Plus, Edit2, Trash2, ToggleLeft, ToggleRight, X, Tag, Medal, Users, ChevronDown, Search, ArrowDown, Zap, ShoppingBag } from 'lucide-react';
 import { toast } from 'sonner';
 import type { AccessoryDiscountRule } from '@/lib/types';
+import type { TaxonomyNode } from '@/lib/types/catalog';
 import { TIER_CONFIGS, TierConfig } from '@/lib/customerTiers';
+import { useConfig } from '@/lib/ConfigContext';
 
 const fmt = (n: number) => n.toLocaleString('vi-VN') + 'đ';
 
-// ── Accessory Rule Modal ──
-function AccessoryRuleModal({ rule, onClose, onSave }: {
+// ── Flatten taxonomy tree into searchable list ──
+interface FlatNode {
+    id: string;
+    name: string;
+    fullPath: string; // e.g. "Sửa chữa Điện thoại › Sửa iPhone"
+    depth: number;
+    seoKeywords?: string;
+}
+
+function flattenTaxonomy(nodes: TaxonomyNode[], parentPath = '', depth = 0): FlatNode[] {
+    const result: FlatNode[] = [];
+    for (const node of nodes) {
+        const fullPath = parentPath ? `${parentPath} › ${node.name}` : node.name;
+        result.push({ id: node.id, name: node.name, fullPath, depth, seoKeywords: node.seoKeywords });
+        if (node.children?.length) {
+            result.push(...flattenTaxonomy(node.children, fullPath, depth + 1));
+        }
+    }
+    return result;
+}
+
+// ── Searchable Taxonomy Dropdown ──
+function TaxonomyDropdown({ nodes, value, onChange, placeholder }: {
+    nodes: FlatNode[];
+    value: string;
+    onChange: (nodeId: string, node: FlatNode | null) => void;
+    placeholder: string;
+}) {
+    const [open, setOpen] = useState(false);
+    const [search, setSearch] = useState('');
+    const ref = useRef<HTMLDivElement>(null);
+    const btnRef = useRef<HTMLButtonElement>(null);
+    const [pos, setPos] = useState<{ top: number; left: number; width: number }>({ top: 0, left: 0, width: 0 });
+
+    useEffect(() => {
+        const handler = (e: MouseEvent) => {
+            if (ref.current && !ref.current.contains(e.target as Node) &&
+                btnRef.current && !btnRef.current.contains(e.target as Node)) setOpen(false);
+        };
+        document.addEventListener('mousedown', handler);
+        return () => document.removeEventListener('mousedown', handler);
+    }, []);
+
+    // Recalculate position when opening
+    const toggleOpen = () => {
+        if (!open && btnRef.current) {
+            const rect = btnRef.current.getBoundingClientRect();
+            const spaceBelow = window.innerHeight - rect.bottom;
+            const dropH = 280; // approximate max dropdown height
+            const openAbove = spaceBelow < dropH && rect.top > dropH;
+            setPos({
+                top: openAbove ? rect.top - dropH : rect.bottom + 4,
+                left: rect.left,
+                width: rect.width,
+            });
+        }
+        setOpen(!open);
+    };
+
+    const filtered = useMemo(() => {
+        if (!search.trim()) return nodes;
+        const q = search.toLowerCase();
+        return nodes.filter(n => n.name.toLowerCase().includes(q) || n.fullPath.toLowerCase().includes(q));
+    }, [nodes, search]);
+
+    const selected = nodes.find(n => n.id === value);
+
+    return (
+        <div className="relative">
+            <button
+                ref={btnRef}
+                type="button"
+                onClick={toggleOpen}
+                className={`w-full flex items-center justify-between border rounded-xl px-3.5 py-2.5 text-sm text-left transition-all ${open ? 'ring-2 ring-orange-400 border-orange-300' : 'hover:border-gray-400'} ${selected ? 'text-gray-900' : 'text-gray-400'}`}
+            >
+                <span className="truncate">{selected ? selected.fullPath : placeholder}</span>
+                <ChevronDown size={16} className={`shrink-0 ml-2 transition-transform ${open ? 'rotate-180' : ''}`} />
+            </button>
+            {open && (
+                <div ref={ref} className="fixed z-[9999] bg-white border rounded-xl shadow-lg max-h-[280px] overflow-hidden"
+                    style={{ top: pos.top, left: pos.left, width: pos.width }}>
+                    <div className="p-2 border-b sticky top-0 bg-white">
+                        <div className="relative">
+                            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                            <input
+                                autoFocus
+                                value={search}
+                                onChange={e => setSearch(e.target.value)}
+                                placeholder="Tìm kiếm..."
+                                className="w-full pl-8 pr-3 py-1.5 text-sm border rounded-lg focus:ring-2 focus:ring-orange-400 focus:outline-none"
+                            />
+                        </div>
+                    </div>
+                    <div className="overflow-y-auto max-h-[220px]">
+                        {value && (
+                            <button
+                                type="button"
+                                onClick={() => { onChange('', null); setOpen(false); setSearch(''); }}
+                                className="w-full text-left px-3 py-2 text-sm text-gray-400 hover:bg-gray-50 border-b"
+                            >
+                                ✕ Bỏ chọn
+                            </button>
+                        )}
+                        {filtered.length === 0 && (
+                            <div className="px-3 py-4 text-sm text-gray-400 text-center">Không tìm thấy</div>
+                        )}
+                        {filtered.map(node => (
+                            <button
+                                key={node.id}
+                                type="button"
+                                onClick={() => { onChange(node.id, node); setOpen(false); setSearch(''); }}
+                                className={`w-full text-left px-3 py-2 text-sm hover:bg-orange-50 transition-colors ${node.id === value ? 'bg-orange-50 text-orange-700 font-medium' : 'text-gray-700'}`}
+                                style={{ paddingLeft: `${12 + node.depth * 16}px` }}
+                            >
+                                {node.depth > 0 && <span className="text-gray-300 mr-1">{'└'} </span>}
+                                {node.name}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
+// ── Keyword Chips ──
+function KeywordChips({ keywords, onChange }: { keywords: string[]; onChange: (kw: string[]) => void }) {
+    const [input, setInput] = useState('');
+
+    const addKeyword = () => {
+        const kw = input.trim();
+        if (kw && !keywords.includes(kw)) {
+            onChange([...keywords, kw]);
+        }
+        setInput('');
+    };
+
+    return (
+        <div className="space-y-2">
+            <div className="flex flex-wrap gap-1.5 min-h-[28px]">
+                {keywords.map((kw, i) => (
+                    <span key={i} className="inline-flex items-center gap-1 bg-gray-100 text-gray-700 text-xs px-2 py-1 rounded-lg">
+                        {kw}
+                        <button type="button" onClick={() => onChange(keywords.filter((_, j) => j !== i))} className="hover:text-red-500">
+                            <X size={12} />
+                        </button>
+                    </span>
+                ))}
+            </div>
+            <div className="flex gap-1.5">
+                <input
+                    value={input}
+                    onChange={e => setInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addKeyword(); } }}
+                    placeholder="Thêm từ khóa..."
+                    className="flex-1 border rounded-lg px-2.5 py-1.5 text-xs focus:ring-2 focus:ring-orange-400 focus:outline-none"
+                />
+                <button type="button" onClick={addKeyword} className="px-2 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-xs text-gray-600 transition-colors">
+                    <Plus size={14} />
+                </button>
+            </div>
+        </div>
+    );
+}
+
+// ── Accessory Rule Modal (Visual Builder) ──
+function AccessoryRuleModal({ rule, onClose, onSave, serviceNodes, productNodes }: {
     rule: AccessoryDiscountRule | null;
     onClose: () => void;
     onSave: (data: Partial<AccessoryDiscountRule>) => Promise<void>;
+    serviceNodes: FlatNode[];
+    productNodes: FlatNode[];
 }) {
     const [form, setForm] = useState({
         name: rule?.name || '',
         triggerServiceCategory: rule?.triggerServiceCategory || '',
-        triggerKeywords: rule?.triggerKeywords?.join(', ') || '',
+        triggerKeywords: rule?.triggerKeywords || [] as string[],
         discountType: rule?.discountType || 'percentage' as 'percentage' | 'fixed',
         discountValue: rule?.discountValue?.toString() || '',
         targetProductCategory: rule?.targetProductCategory || '',
-        targetKeywords: rule?.targetKeywords?.join(', ') || '',
+        targetKeywords: rule?.targetKeywords || [] as string[],
         maxDiscountAmount: rule?.maxDiscountAmount?.toString() || '',
     });
     const [saving, setSaving] = useState(false);
 
+    // Find selected node names for preview
+    const triggerNode = serviceNodes.find(n => n.id === form.triggerServiceCategory);
+    const targetNode = productNodes.find(n => n.id === form.targetProductCategory);
+
+    const previewText = (() => {
+        const trigger = triggerNode?.name || form.triggerKeywords[0] || '...';
+        const target = targetNode?.name || form.targetKeywords[0] || '...';
+        const value = form.discountValue || '?';
+        const unit = form.discountType === 'percentage' ? '%' : 'đ';
+        return `Khi dùng DV "${trigger}" → "${target}" giảm ${value}${unit}`;
+    })();
+
+    const handleTriggerSelect = (nodeId: string, node: FlatNode | null) => {
+        setForm(p => ({
+            ...p,
+            triggerServiceCategory: nodeId,
+            // Auto-populate keywords from seoKeywords if available and current keywords are empty/from previous auto-populate
+            triggerKeywords: node?.seoKeywords
+                ? node.seoKeywords.split(',').map(s => s.trim()).filter(Boolean)
+                : nodeId ? p.triggerKeywords : [],
+        }));
+    };
+
+    const handleTargetSelect = (nodeId: string, node: FlatNode | null) => {
+        setForm(p => ({
+            ...p,
+            targetProductCategory: nodeId,
+            targetKeywords: node?.seoKeywords
+                ? node.seoKeywords.split(',').map(s => s.trim()).filter(Boolean)
+                : nodeId ? p.targetKeywords : [],
+        }));
+    };
+
     const handleSave = async () => {
         if (!form.name.trim()) { toast.error('Nhập tên rule'); return; }
         if (!form.discountValue || Number(form.discountValue) <= 0) { toast.error('Giá trị giảm không hợp lệ'); return; }
+        if (!form.triggerServiceCategory && form.triggerKeywords.length === 0) { toast.error('Chọn dịch vụ kích hoạt hoặc thêm từ khóa'); return; }
+        if (!form.targetProductCategory && form.targetKeywords.length === 0) { toast.error('Chọn sản phẩm được giảm hoặc thêm từ khóa'); return; }
         setSaving(true);
         try {
             await onSave({
                 name: form.name.trim(),
-                triggerServiceCategory: form.triggerServiceCategory.trim(),
-                triggerKeywords: form.triggerKeywords.split(',').map(s => s.trim()).filter(Boolean),
+                triggerServiceCategory: form.triggerServiceCategory,
+                triggerKeywords: form.triggerKeywords,
                 discountType: form.discountType as 'percentage' | 'fixed',
                 discountValue: Number(form.discountValue),
-                targetProductCategory: form.targetProductCategory.trim(),
-                targetKeywords: form.targetKeywords.split(',').map(s => s.trim()).filter(Boolean),
+                targetProductCategory: form.targetProductCategory,
+                targetKeywords: form.targetKeywords,
                 maxDiscountAmount: form.maxDiscountAmount ? Number(form.maxDiscountAmount) : undefined,
                 isActive: true,
             });
@@ -56,56 +260,103 @@ function AccessoryRuleModal({ rule, onClose, onSave }: {
                     <h2 className="text-lg font-bold">{rule ? 'Sửa rule' : 'Thêm rule giảm giá'}</h2>
                     <button title="Hủy" onClick={onClose} className="p-1 hover:bg-gray-100 rounded-lg"><X size={20} /></button>
                 </div>
-                <div className="p-5 space-y-4">
+                <div className="p-5 space-y-5">
+                    {/* Tên rule */}
                     <div>
-                        <label className="text-sm text-gray-600 mb-1 block">Tên rule *</label>
+                        <label className="text-sm text-gray-600 mb-1.5 block font-medium">Tên rule *</label>
                         <input title="Tên rule" value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
                             placeholder="VD: Giảm 40% cường lực khi thay màn"
-                            className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none" />
+                            className="w-full border rounded-xl px-3.5 py-2.5 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none" />
                     </div>
 
-                    <div className="bg-blue-50 rounded-lg p-3 space-y-3">
-                        <p className="text-xs font-bold text-blue-700">🔧 Điều kiện kích hoạt (dịch vụ sửa chữa)</p>
-                        <input value={form.triggerServiceCategory} onChange={e => setForm(p => ({ ...p, triggerServiceCategory: e.target.value }))}
-                            placeholder="Danh mục DV (VD: thay-man-hinh)"
-                            className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none" />
-                        <input value={form.triggerKeywords} onChange={e => setForm(p => ({ ...p, triggerKeywords: e.target.value }))}
-                            placeholder="Keywords (phân cách bằng dấu phẩy): thay màn, màn hình"
-                            className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none" />
-                    </div>
-
-                    <div className="bg-green-50 rounded-lg p-3 space-y-3">
-                        <p className="text-xs font-bold text-green-700">🏷️ Sản phẩm được giảm giá</p>
-                        <input value={form.targetProductCategory} onChange={e => setForm(p => ({ ...p, targetProductCategory: e.target.value }))}
-                            placeholder="Danh mục SP (VD: cuong-luc)"
-                            className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-400 focus:outline-none" />
-                        <input value={form.targetKeywords} onChange={e => setForm(p => ({ ...p, targetKeywords: e.target.value }))}
-                            placeholder="Keywords: cường lực, dán màn, kính cường lực"
-                            className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-400 focus:outline-none" />
-                    </div>
-
-                    <div className="flex gap-3">
-                        <div className="flex-1">
-                            <label className="text-sm text-gray-600 mb-1 block">Loại giảm</label>
-                            <select title="Chọn loại giảm" value={form.discountType} onChange={e => setForm(p => ({ ...p, discountType: e.target.value as 'percentage' | 'fixed' }))}
-                                className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none">
-                                <option value="percentage">Phần trăm (%)</option>
-                                <option value="fixed">Số tiền cố định</option>
-                            </select>
+                    {/* NẾU */}
+                    <div className="rounded-xl border-2 border-blue-200 bg-blue-50/50 overflow-hidden">
+                        <div className="flex items-center gap-2 px-4 py-2.5 bg-blue-100/60 border-b border-blue-200">
+                            <Zap size={16} className="text-blue-600" />
+                            <span className="text-sm font-bold text-blue-800">NẾU</span>
+                            <span className="text-xs text-blue-600">khách sử dụng dịch vụ</span>
                         </div>
-                        <div className="flex-1">
-                            <label className="text-sm text-gray-600 mb-1 block">Giá trị *</label>
-                            <input type="number" value={form.discountValue} onChange={e => setForm(p => ({ ...p, discountValue: e.target.value }))}
-                                placeholder={form.discountType === 'percentage' ? '40' : '50000'}
-                                className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none" />
+                        <div className="p-4 space-y-3">
+                            <TaxonomyDropdown
+                                nodes={serviceNodes}
+                                value={form.triggerServiceCategory}
+                                onChange={handleTriggerSelect}
+                                placeholder="Chọn danh mục dịch vụ..."
+                            />
+                            <div>
+                                <p className="text-xs text-gray-500 mb-1.5">Từ khóa kích hoạt (tự động từ taxonomy hoặc thêm thủ công):</p>
+                                <KeywordChips keywords={form.triggerKeywords} onChange={kw => setForm(p => ({ ...p, triggerKeywords: kw }))} />
+                            </div>
                         </div>
                     </div>
 
-                    <div>
-                        <label className="text-sm text-gray-600 mb-1 block">Giảm tối đa (VNĐ, tùy chọn)</label>
-                        <input type="number" value={form.maxDiscountAmount} onChange={e => setForm(p => ({ ...p, maxDiscountAmount: e.target.value }))}
-                            placeholder="Để trống = không giới hạn"
-                            className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none" />
+                    {/* Arrow connector */}
+                    <div className="flex justify-center">
+                        <ArrowDown size={24} className="text-gray-300" />
+                    </div>
+
+                    {/* THÌ */}
+                    <div className="rounded-xl border-2 border-green-200 bg-green-50/50 overflow-hidden">
+                        <div className="flex items-center gap-2 px-4 py-2.5 bg-green-100/60 border-b border-green-200">
+                            <ShoppingBag size={16} className="text-green-600" />
+                            <span className="text-sm font-bold text-green-800">THÌ</span>
+                            <span className="text-xs text-green-600">sản phẩm được giảm giá</span>
+                        </div>
+                        <div className="p-4 space-y-3">
+                            <TaxonomyDropdown
+                                nodes={productNodes}
+                                value={form.targetProductCategory}
+                                onChange={handleTargetSelect}
+                                placeholder="Chọn danh mục sản phẩm..."
+                            />
+                            <div>
+                                <p className="text-xs text-gray-500 mb-1.5">Từ khóa sản phẩm áp dụng:</p>
+                                <KeywordChips keywords={form.targetKeywords} onChange={kw => setForm(p => ({ ...p, targetKeywords: kw }))} />
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Arrow connector */}
+                    <div className="flex justify-center">
+                        <ArrowDown size={24} className="text-gray-300" />
+                    </div>
+
+                    {/* GIẢM */}
+                    <div className="rounded-xl border-2 border-orange-200 bg-orange-50/50 overflow-hidden">
+                        <div className="flex items-center gap-2 px-4 py-2.5 bg-orange-100/60 border-b border-orange-200">
+                            <Percent size={16} className="text-orange-600" />
+                            <span className="text-sm font-bold text-orange-800">GIẢM</span>
+                        </div>
+                        <div className="p-4 space-y-3">
+                            <div className="flex gap-3">
+                                <div className="flex-1">
+                                    <label className="text-xs text-gray-500 mb-1 block">Loại giảm</label>
+                                    <select title="Chọn loại giảm" value={form.discountType} onChange={e => setForm(p => ({ ...p, discountType: e.target.value as 'percentage' | 'fixed' }))}
+                                        className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none">
+                                        <option value="percentage">Phần trăm (%)</option>
+                                        <option value="fixed">Số tiền cố định</option>
+                                    </select>
+                                </div>
+                                <div className="flex-1">
+                                    <label className="text-xs text-gray-500 mb-1 block">Giá trị *</label>
+                                    <input type="number" value={form.discountValue} onChange={e => setForm(p => ({ ...p, discountValue: e.target.value }))}
+                                        placeholder={form.discountType === 'percentage' ? '40' : '50000'}
+                                        className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none" />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="text-xs text-gray-500 mb-1 block">Giảm tối đa (VNĐ, tùy chọn)</label>
+                                <input type="number" value={form.maxDiscountAmount} onChange={e => setForm(p => ({ ...p, maxDiscountAmount: e.target.value }))}
+                                    placeholder="Để trống = không giới hạn"
+                                    className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none" />
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Preview */}
+                    <div className="bg-gray-50 rounded-xl px-4 py-3 border border-dashed border-gray-300">
+                        <p className="text-xs text-gray-500 mb-1">📋 Preview</p>
+                        <p className="text-sm font-medium text-gray-800">{previewText}</p>
                     </div>
                 </div>
                 <div className="flex justify-end gap-2 p-5 border-t">
@@ -121,6 +372,7 @@ function AccessoryRuleModal({ rule, onClose, onSave }: {
 
 // ── Main Content ──
 export default function DiscountRulesTab() {
+    const { config } = useConfig();
     const [activeTab, setActiveTab] = useState<'tiers' | 'accessories'>('tiers');
 
     // Accessories State
@@ -138,6 +390,21 @@ export default function DiscountRulesTab() {
 
     // Format currency with commas
     const fmtCurrency = (n: number) => n.toLocaleString('vi-VN');
+
+    // Flatten taxonomy nodes for dropdowns
+    const serviceNodes = useMemo(() => flattenTaxonomy(config.taxonomy?.service || []), [config.taxonomy]);
+    const productNodes = useMemo(() => {
+        const retail = flattenTaxonomy(config.taxonomy?.retail || []);
+        const component = flattenTaxonomy(config.taxonomy?.component || []);
+        return [...retail, ...component];
+    }, [config.taxonomy]);
+
+    // Build a lookup map for displaying node names in the rule list
+    const nodeMap = useMemo(() => {
+        const map = new Map<string, string>();
+        for (const n of [...serviceNodes, ...productNodes]) map.set(n.id, n.name);
+        return map;
+    }, [serviceNodes, productNodes]);
 
     const loadTierCustomers = useCallback(async () => {
         const customerPreviewQuery = query(collection(db, 'customers'), orderBy('totalSpent', 'desc'), limit(500));
@@ -229,6 +496,12 @@ export default function DiscountRulesTab() {
             toast.error('Có lỗi xảy ra khi lưu hạng thành viên');
         }
         setSavingTiers(false);
+    };
+
+    // Helper to resolve a category ID to a human-readable name
+    const resolveNodeName = (id: string, fallbackKeywords?: string[]) => {
+        if (!id && fallbackKeywords?.length) return fallbackKeywords.join(', ');
+        return nodeMap.get(id) || id || '—';
     };
 
     return (
@@ -378,10 +651,10 @@ export default function DiscountRulesTab() {
                                         <h3 className="font-bold text-gray-900">{rule.name}</h3>
                                         <div className="mt-2 flex flex-wrap gap-2 text-xs">
                                             <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg">
-                                                🔧 Khi: {rule.triggerKeywords?.join(', ') || rule.triggerServiceCategory}
+                                                🔧 Khi: {resolveNodeName(rule.triggerServiceCategory, rule.triggerKeywords)}
                                             </span>
                                             <span className="bg-green-50 text-green-700 px-2 py-1 rounded-lg">
-                                                🏷️ Giảm: {rule.targetKeywords?.join(', ') || rule.targetProductCategory}
+                                                🏷️ Giảm: {resolveNodeName(rule.targetProductCategory, rule.targetKeywords)}
                                             </span>
                                             <span className="bg-orange-50 text-orange-700 px-2 py-1 rounded-lg font-bold">
                                                 {rule.discountType === 'percentage' ? `-${rule.discountValue}%` : `-${fmt(rule.discountValue)}`}
@@ -408,7 +681,15 @@ export default function DiscountRulesTab() {
                         )}
                     </div>
 
-                    {showAccessoryModal && <AccessoryRuleModal rule={editRule} onClose={() => setShowAccessoryModal(false)} onSave={handleSaveAccessoryRule} />}
+                    {showAccessoryModal && (
+                        <AccessoryRuleModal
+                            rule={editRule}
+                            onClose={() => setShowAccessoryModal(false)}
+                            onSave={handleSaveAccessoryRule}
+                            serviceNodes={serviceNodes}
+                            productNodes={productNodes}
+                        />
+                    )}
                 </div>
             )}
         </div>

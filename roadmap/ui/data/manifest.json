@@ -11,6 +11,43 @@
   "constraints": [],
   "aiPlans": [
     {
+      "id": "plan-pos-discount-and-repair-lookup-fix-20260618",
+      "title": "POS Discount Rules & SĐT Repair Ticket Lookup Fix",
+      "date": "18.06.2026",
+      "status": "completed",
+      "completedAt": "18.06.2026",
+      "planFile": "data/ai_plans/plan_pos_discount_and_repair_lookup_fix_20260618.md",
+      "taskFile": "data/ai_plans/task_pos_discount_and_repair_lookup_fix_20260618.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_pos_discount_and_repair_lookup_fix_20260618.md",
+      "scope": [
+        "src/lib/discountCalc.ts",
+        "src/app/admin/pos/page.tsx",
+        "src/features/pos/posTypes.ts",
+        "src/features/pos/PosCartPanel.tsx"
+      ],
+      "decisions": [
+        "Sử dụng query Firestore đơn giản theo customer.phone và thực hiện lọc và sắp xếp in-memory ở client để tránh lỗi composite index.",
+        "Truyền dữ liệu categoryIds từ danh sách products vào discount calculator trong POS.",
+        "Truyền thêm serviceName, categoryPath và issue category của phiếu sửa để rule tạo theo taxonomy dịch vụ kích hoạt đúng tại POS."
+      ],
+      "updatedAt": "2026-06-18T21:55:00.000+07:00"
+    },
+    {
+      "id": "plan-visual-builder-discount-rules-20260618",
+      "title": "Redesign Rule Phụ kiện → Visual Builder (NẾU... THÌ... GIẢM...)",
+      "date": "18.06.2026",
+      "status": "completed",
+      "completedAt": "18.06.2026",
+      "planFile": "data/ai_plans/plan_visual_builder_discount_rules.md",
+      "taskFile": "data/ai_plans/task_visual_builder_discount_rules.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_visual_builder_discount_rules.md",
+      "scope": [
+        "src/app/admin/vouchers/DiscountRulesTab.tsx"
+      ],
+      "decisions": [],
+      "updatedAt": "2026-06-18T20:49:00.000+07:00"
+    },
+    {
       "id": "plan-user-test-error-intake-20260618",
       "title": "User Test Error Intake 2026-06-18",
       "date": "18.06.2026",

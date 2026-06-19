@@ -249,3 +249,23 @@ if (item.sellingPrice < item.costPrice) {
 <b>Phân tích</b>: Khách hàng mua nhiều sản phẩm online nhưng checkout không gộp quantity đúng cách gây trừ hụt kho.
 ### Solution
 <b>Giải pháp đã áp dụng</b>: Gộp các item cùng SKU trước khi update.
+
+## BUG-POS-010: Discount Rules của Phụ kiện không hoạt động ở POS
+- **Status:** fixed
+- **Severity:** high
+- **Module:** POS
+- **Files:** `src/lib/discountCalc.ts`, `src/app/admin/pos/page.tsx`
+### Cause
+<b>Phân tích</b>: POS không truyền `category` và `categoryIds` của sản phẩm vào cart item, khiến việc matching rule dựa trên Category bị bỏ qua. Ngoài ra, POS chỉ truyền danh sách linh kiện của phiếu sửa vào calculator trong khi rule mới được tạo theo taxonomy dịch vụ (`triggerServiceCategory`) và từ khóa bệnh/dịch vụ, nên trigger theo dịch vụ không có dữ liệu để khớp.
+### Solution
+<b>Giải pháp đã áp dụng</b>: Sửa `src/lib/discountCalc.ts` để tối ưu hóa matching theo 3 mức ưu tiên (Keywords -> CategoryId Prefix -> Fallback name matching), hỗ trợ cấu trúc phân cấp (e.g. `phu-kien/op-lung` match rule `phu-kien`) và nhận thêm context phiếu sửa (`serviceName`, `categoryPath`, issue category). Cập nhật `src/app/admin/pos/page.tsx` để truy vấn danh mục (`category`, `categoryIds`) từ state `products`, map đúng dữ liệu phiếu sửa mới (`customer`, `deviceInfo`) và đưa service/category context vào calculator.
+
+## BUG-POS-011: Không load được phiếu sửa chữa của khách hàng bằng SĐT tại POS
+- **Status:** fixed
+- **Severity:** high
+- **Module:** POS
+- **Files:** `src/app/admin/pos/page.tsx`
+### Cause
+<b>Phân tích</b>: Firestore query tìm kiếm phiếu sửa chữa trong `repairs` collection sử dụng trường `customerPhone` ở root level thay vì trường lồng `customer.phone`. Ngoài ra, query composite kết hợp lọc theo status và sắp xếp theo `createdAt` yêu cầu một chỉ mục (composite index) Firestore chưa được khởi tạo, gây lỗi truy vấn trên client.
+### Solution
+<b>Giải pháp đã áp dụng</b>: Chuyển target query sang field `customer.phone`. Đơn giản hóa query Firestore (chỉ lọc theo `customer.phone` để tránh yêu cầu index composite phức tạp) và thực hiện lọc trạng thái (`unpaid` / `partial`) cùng với sắp xếp theo ngày giảm dần trực tiếp trên bộ nhớ client (in-memory). Thêm fallbacks an toàn cho dữ liệu khách hàng từ nested object.
