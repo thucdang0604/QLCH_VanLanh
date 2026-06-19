@@ -2,10 +2,10 @@
 
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
-import { Archive, Plus, Search, Edit, Package, Loader2, QrCode, AlertTriangle } from 'lucide-react';
+import { Archive, Plus, Search, Edit, Package, Loader2, QrCode, AlertTriangle, PackagePlus } from 'lucide-react';
 import { useFirestoreCollection, updateDocument } from '@/lib/useFirestore';
 
-import { orderBy, serverTimestamp } from 'firebase/firestore';
+import { collection, onSnapshot, orderBy, serverTimestamp } from 'firebase/firestore';
 import { toastError } from '@/lib/toast';
 import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
@@ -14,12 +14,16 @@ import UniversalProductModal from '@/components/admin/UniversalProductModal';
 import CategoryTaxonomySelector from '@/components/admin/CategoryTaxonomySelector';
 import ProductQrLabelModal from '@/components/admin/ProductQrLabelModal';
 import FixHiddenProductsModal from '@/components/admin/FixHiddenProductsModal';
+import { CreateReceiptModal } from '@/features/parts/ImportReceiptModals';
+import type { SupplierOption } from '@/features/parts/importReceiptTypes';
 import type { Product } from '@/lib/types';
 import { useConfig } from '@/lib/ConfigContext';
 import { getCategoryPath, collectAllNodeIds } from '@/lib/utils';
 import { isPartCategory } from '@/lib/constants';
 import { productCodeSearchText } from '@/lib/productCodes';
 import { buildArchiveUpdate, getArchiveBlockReason, isProductArchived } from '@/lib/productLifecycle';
+import { useAuth } from '@/lib/AuthContext';
+import { db } from '@/lib/firebase';
 
 // Product is now imported from @/lib/types
 
@@ -31,6 +35,7 @@ const CONDITIONS: { value: Product['condition'] | ''; label: string; color: stri
 ];
 
 export default function ProductsPage() {
+    const { user } = useAuth();
     const { config } = useConfig();
     const { data: products, loading } = useFirestoreCollection<Product>('products', [orderBy('createdAt', 'desc')]);
     const [searchQuery, setSearchQuery] = useState('');
@@ -41,6 +46,15 @@ export default function ProductsPage() {
     const [editingProduct, setEditingProduct] = useState<Product | null>(null);
     const [qrProduct, setQrProduct] = useState<(Product & { id: string }) | null>(null);
     const [showFixHidden, setShowFixHidden] = useState(false);
+    const [isCreateReceiptOpen, setIsCreateReceiptOpen] = useState(false);
+    const [supplierList, setSupplierList] = useState<SupplierOption[]>([]);
+
+    useEffect(() => {
+        const unsubscribe = onSnapshot(collection(db, 'suppliers'), (snapshot) => {
+            setSupplierList(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() } as SupplierOption)));
+        });
+        return () => unsubscribe();
+    }, []);
 
     const handleArchive = async (product: Product) => {
         const blockReason = getArchiveBlockReason(product);
@@ -76,6 +90,11 @@ export default function ProductsPage() {
         const matchCondition = !filterCondition || p.condition === filterCondition;
         return matchSearch && matchCategory && matchCondition;
     });
+    const retailProducts = products.filter((p) => {
+        const firstCatId = p.categoryIds?.[0] || '';
+        const isService = p.category === 'service' || firstCatId.startsWith('sua-chua');
+        return !isProductArchived(p) && !isPartCategory(p.category, p.categoryIds) && !isService;
+    }) as (Product & { id: string })[];
 
     // --- ORPHAN CATEGORY DETECTION (ID-based) ---
     const retailTaxonomy = config?.taxonomy?.retail || [];
@@ -108,6 +127,13 @@ export default function ProductsPage() {
                     <p className="text-gray-500">{products.length} sản phẩm</p>
                 </div>
                 <div className="flex gap-2">
+                    <button
+                        onClick={() => setIsCreateReceiptOpen(true)}
+                        className="flex items-center gap-2 bg-blue-500 text-white px-4 py-2.5 rounded-lg font-medium hover:bg-blue-600 transition-colors text-sm"
+                    >
+                        <PackagePlus size={18} />
+                        Tạo đề xuất nhập
+                    </button>
                     <button
                         onClick={() => setShowFixHidden(true)}
                         className="flex items-center gap-2 border-2 border-amber-300 text-amber-700 px-4 py-2.5 rounded-lg font-medium hover:bg-amber-50 transition-colors text-sm"
@@ -417,6 +443,19 @@ export default function ProductsPage() {
             />
             <ProductQrLabelModal product={qrProduct} onClose={() => setQrProduct(null)} />
             <FixHiddenProductsModal isOpen={showFixHidden} onClose={() => setShowFixHidden(false)} products={products} />
+            {isCreateReceiptOpen && (
+                <CreateReceiptModal
+                    isOpen={isCreateReceiptOpen}
+                    onClose={() => setIsCreateReceiptOpen(false)}
+                    parts={[]}
+                    retailProducts={retailProducts}
+                    currentUser={user}
+                    suppliers={supplierList}
+                    initialReceiptType="retail"
+                    lockReceiptType
+                    onCreated={() => setIsCreateReceiptOpen(false)}
+                />
+            )}
         </div>
     );
 }

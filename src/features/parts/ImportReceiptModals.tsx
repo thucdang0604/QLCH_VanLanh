@@ -334,14 +334,16 @@ interface CreateReceiptModalProps {
     onCreated: () => void;
     currentUser: { uid: string; displayName?: string | null; email?: string | null } | null;
     suppliers: SupplierOption[];
+    initialReceiptType?: 'component' | 'retail';
+    lockReceiptType?: boolean;
 }
 // Create Receipt Modal
-export function CreateReceiptModal({ isOpen, onClose, parts, retailProducts, onCreated, currentUser, suppliers }: CreateReceiptModalProps) {
+export function CreateReceiptModal({ isOpen, onClose, parts, retailProducts, onCreated, currentUser, suppliers, initialReceiptType = 'component', lockReceiptType = false }: CreateReceiptModalProps) {
     const [search, setSearch] = useState('');
     const [items, setItems] = useState<ImportReceiptItem[]>([]);
     const [note, setNote] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
-    const [receiptType, setReceiptType] = useState<'component' | 'retail'>('component');
+    const [receiptType, setReceiptType] = useState<'component' | 'retail'>(initialReceiptType);
     // Per-item supplier dropdown state
     const [activeSupplierIdx, setActiveSupplierIdx] = useState<number | null>(null);
     const [itemSupplierSearch, setItemSupplierSearch] = useState('');
@@ -449,7 +451,7 @@ export function CreateReceiptModal({ isOpen, onClose, parts, retailProducts, onC
             size="2xl"
         >
             <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-6 pb-48">
-                {/* Receipt Type Toggle */}
+                {!lockReceiptType && (
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Loại phiếu nhập</label>
                     <div className="flex gap-2">
@@ -475,6 +477,7 @@ export function CreateReceiptModal({ isOpen, onClose, parts, retailProducts, onC
                         </button>
                     </div>
                 </div>
+                )}
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Ghi chú</label>
                     <input

@@ -546,3 +546,10 @@
 - Change: `/admin/inventory` now separates the shared `import_receipts` collection into visible tabs for completed import receipts, draft proposal receipts, ordered receipts, and all receipts. This starts moving inventory toward the requested aggregate workspace while leaving `/admin/inventory/stock` unchanged.
 - Guardrail: No receipt mutation logic was moved in this step; products and parts proposal creation flows continue to work as before.
 - Verification: `eslint src/app/admin/inventory/page.tsx`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
+
+### Part 27 - Product import proposal action
+- Covered IDs: UT-20260618-028
+- Files touched: `src/app/admin/products/page.tsx`, `src/features/parts/ImportReceiptModals.tsx`
+- Change: `/admin/products` now has a direct retail import proposal action. It reuses the existing import receipt modal, starts locked in retail-product mode, and passes the current supplier list so staff can create product purchase proposals without going through the parts page.
+- Guardrail: The shared modal remains backward-compatible for `/admin/parts`; parts keeps its component/retail toggle, while products only opens the retail flow.
+- Verification: `eslint src/app/admin/products/page.tsx src/features/parts/ImportReceiptModals.tsx`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
