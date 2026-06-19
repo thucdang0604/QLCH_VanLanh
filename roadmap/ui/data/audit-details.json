@@ -162,9 +162,9 @@
       "headers": ["#", "Hạng mục", "Effort", "Impact", "Status"],
       "rows": [
         ["1", "<b>Customer CRM Schema</b> — Tạo <code>customers/{phone}</code> + sync logic", "~8h", "⭐⭐⭐", {"text": "PENDING", "class": "status-warn"}],
-        ["2", "<b>Firestore Rules</b> — Thêm rules cho customers + xóa services trùng", "~30min", "⭐⭐", {"text": "PENDING", "class": "status-warn"}],
+        ["2", "<b>Firestore Rules</b> — Customers rules đã siết quyền; services duplicate đã stale/resolved", "~30min", "⭐⭐", {"text": "DONE", "class": "status-pass"}],
         ["3", "<b>k6 Load Test</b> — Script stress test cho <code>fixphone.vn</code>", "~2h", "⭐⭐⭐", {"text": "PENDING", "class": "status-warn"}],
-        ["4", "<b>LazyImage Decision</b> — Xóa hoặc document orphan component", "~15min", "⭐", {"text": "PENDING", "class": "status-warn"}],
+        ["4", "<b>LazyImage Decision</b> — Giữ component orphan có chủ đích để tái sử dụng skeleton/error fallback", "~15min", "⭐", {"text": "DONE", "class": "status-pass"}],
         ["5", "<b>SEO Audit</b> — Verify meta tags trên production domain", "~1h", "⭐⭐", {"text": "PENDING", "class": "status-warn"}]
       ]
     }
