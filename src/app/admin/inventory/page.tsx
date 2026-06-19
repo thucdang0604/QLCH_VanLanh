@@ -87,6 +87,14 @@ export default function InventoryPage() {
         load();
     }, []);
 
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        const tab = new URLSearchParams(window.location.search).get('tab');
+        if (tab === 'completed' || tab === 'draft' || tab === 'ordered' || tab === 'all') {
+            setActiveTab(tab);
+        }
+    }, []);
+
     const formatPrice = (n: number) => n.toLocaleString('vi-VN') + 'đ';
     const formatDate = (ts: unknown) => {
         if (!ts) return '—';

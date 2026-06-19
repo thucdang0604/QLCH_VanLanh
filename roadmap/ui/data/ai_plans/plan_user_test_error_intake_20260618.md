@@ -553,3 +553,10 @@
 - Change: `/admin/products` now has a direct retail import proposal action. It reuses the existing import receipt modal, starts locked in retail-product mode, and passes the current supplier list so staff can create product purchase proposals without going through the parts page.
 - Guardrail: The shared modal remains backward-compatible for `/admin/parts`; parts keeps its component/retail toggle, while products only opens the retail flow.
 - Verification: `eslint src/app/admin/products/page.tsx src/features/parts/ImportReceiptModals.tsx`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
+
+### Part 28 - Inventory tab deep links
+- Covered IDs: UT-20260618-028
+- Files touched: `src/app/admin/inventory/page.tsx`
+- Change: `/admin/inventory` now accepts `?tab=completed`, `?tab=draft`, `?tab=ordered`, or `?tab=all` so product/part proposal entry points can send staff directly to the aggregate receipt/proposal/order list.
+- Guardrail: The default remains completed import receipts; no receipt mutation behavior changed.
+- Verification: `eslint src/app/admin/inventory/page.tsx`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
