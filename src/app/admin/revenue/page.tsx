@@ -62,6 +62,13 @@ function getRetailOrderTotal(order: Order) {
     return Math.max(0, retailSubtotal - retailDiscount);
 }
 
+function isFirestorePermissionError(error: unknown) {
+    return typeof error === 'object'
+        && error !== null
+        && 'code' in error
+        && (error as { code?: unknown }).code === 'permission-denied';
+}
+
 export default function RevenuePage() {
     // Data
     const [orders, setOrders] = useState<Order[]>([]);
@@ -141,28 +148,7 @@ export default function RevenuePage() {
             const { from, to } = getDateRange();
             const canUseAggregates = isAggregateRangeAvailable(from);
 
-            try {
-                if (canUseAggregates) {
-                    const [aggregateSnap, recentExpensesSnap] = await Promise.all([
-                        getDocs(query(
-                            collection(db, 'revenue_daily_aggregates'),
-                            where('date', '>=', toRevenueDateId(from)),
-                            where('date', '<=', toRevenueDateId(to)),
-                            orderBy('date', 'asc'),
-                        )),
-                        getDocs(query(collection(db, 'expenses'), orderBy('createdAt', 'desc'), limit(50))),
-                    ]);
-                    if (cancelled) return;
-                    setAggregateDays(aggregateSnap.docs.map(d => ({ id: d.id, ...d.data() } as RevenueAggregateDoc)));
-                    setUseAggregateData(true);
-                    setOrders([]);
-                    setRepairs([]);
-                    setImportReceipts([]);
-                    setCommissions([]);
-                    setExpenses(recentExpensesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Expense & { id: string })));
-                    return;
-                }
-
+            const loadSourceCollections = async () => {
                 const threeMonthsAgo = getMonthsAgoTimestamp(6);
                 const [oSnap, rSnap, iSnap, cSnap, eSnap] = await Promise.all([
                     getDocs(query(collection(db, 'orders'), where('createdAt', '>=', threeMonthsAgo), orderBy('createdAt', 'desc'))),
@@ -179,8 +165,43 @@ export default function RevenuePage() {
                 setImportReceipts(iSnap.docs.map(d => ({ id: d.id, ...d.data() } as ImportReceipt)));
                 setCommissions(cSnap.docs.map(d => ({ id: d.id, ...d.data() } as Commission)));
                 setExpenses(eSnap.docs.map(d => ({ id: d.id, ...d.data() } as Expense & { id: string })));
+            };
+
+            try {
+                if (canUseAggregates) {
+                    try {
+                        const [aggregateSnap, recentExpensesSnap] = await Promise.all([
+                            getDocs(query(
+                                collection(db, 'revenue_daily_aggregates'),
+                                where('date', '>=', toRevenueDateId(from)),
+                                where('date', '<=', toRevenueDateId(to)),
+                                orderBy('date', 'asc'),
+                            )),
+                            getDocs(query(collection(db, 'expenses'), orderBy('createdAt', 'desc'), limit(50))),
+                        ]);
+                        if (cancelled) return;
+                        setAggregateDays(aggregateSnap.docs.map(d => ({ id: d.id, ...d.data() } as RevenueAggregateDoc)));
+                        setUseAggregateData(true);
+                        setOrders([]);
+                        setRepairs([]);
+                        setImportReceipts([]);
+                        setCommissions([]);
+                        setExpenses(recentExpensesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Expense & { id: string })));
+                        return;
+                    } catch (aggregateError) {
+                        if (!isFirestorePermissionError(aggregateError)) {
+                            throw aggregateError;
+                        }
+                        await loadSourceCollections();
+                        return;
+                    }
+                }
+
+                await loadSourceCollections();
             } catch (err) {
-                console.error(err);
+                if (!isFirestorePermissionError(err)) {
+                    console.warn('Failed to load revenue data:', err);
+                }
             } finally {
                 if (!cancelled) setLoading(false);
             }
