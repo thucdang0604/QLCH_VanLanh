@@ -6,7 +6,8 @@ import type { AccessoryDiscountRule } from '@/lib/types';
 export function matchesKeywords(text: string, keywords: string[]): boolean {
     if (!keywords || keywords.length === 0) return false;
     const lower = text.toLowerCase();
-    return keywords.some(kw => lower.includes(kw.toLowerCase()));
+    const normalizedText = normalizeMatchText(text);
+    return keywords.some(kw => lower.includes(kw.toLowerCase()) || normalizedText.includes(normalizeMatchText(kw)));
 }
 
 export interface DiscountCalculationResult {
@@ -21,6 +22,46 @@ export interface RepairDiscountContext {
     issues?: { label?: string; categoryPath?: string[]; serviceName?: string }[];
 }
 
+function normalizeMatchText(value: string): string {
+    return value
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/đ/gi, 'd')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+}
+
+function categoryCandidates(values: string[] | undefined): string[] {
+    if (!values?.length) return [];
+    const normalized = values
+        .filter(Boolean)
+        .map(value => value.trim())
+        .filter(Boolean);
+    const slugged = normalized.map(normalizeMatchText).filter(Boolean);
+    return Array.from(new Set([
+        ...normalized.map(value => value.toLowerCase()),
+        ...slugged,
+        normalized.join('/').toLowerCase(),
+        slugged.join('/'),
+    ].filter(Boolean)));
+}
+
+function matchesCategoryCandidate(value: string, ruleCategory: string): boolean {
+    const candidate = value.toLowerCase();
+    const rule = ruleCategory.toLowerCase();
+    const normalizedCandidate = normalizeMatchText(value);
+    const normalizedRule = normalizeMatchText(ruleCategory);
+    return [candidate, normalizedCandidate].some(current =>
+        current === rule ||
+        current === normalizedRule ||
+        current.startsWith(rule + '/') ||
+        rule.startsWith(current + '/') ||
+        current.startsWith(normalizedRule + '/') ||
+        normalizedRule.startsWith(current + '/')
+    );
+}
+
 /**
  * Check if a product's categoryIds match a rule's category slug.
  * A match occurs when any categoryId equals or starts with the rule category.
@@ -29,19 +70,12 @@ export interface RepairDiscountContext {
  */
 function matchesCategoryId(categoryIds: string[] | undefined, ruleCategory: string): boolean {
     if (!categoryIds?.length || !ruleCategory) return false;
-    const rc = ruleCategory.toLowerCase();
-    return categoryIds.some(cid => {
-        const c = cid.toLowerCase();
-        return c === rc || c.startsWith(rc + '/') || rc.startsWith(c + '/');
-    });
+    return categoryCandidates(categoryIds).some(candidate => matchesCategoryCandidate(candidate, ruleCategory));
 }
 
 function matchesCategoryPath(categoryPath: string[] | undefined, ruleCategory: string): boolean {
     if (!categoryPath?.length || !ruleCategory) return false;
-    const normalized = categoryPath.map(item => item.toLowerCase());
-    const rc = ruleCategory.toLowerCase();
-    const joined = normalized.join('/');
-    return normalized.includes(rc) || joined === rc || joined.startsWith(rc + '/') || rc.startsWith(joined + '/');
+    return categoryCandidates(categoryPath).some(candidate => matchesCategoryCandidate(candidate, ruleCategory));
 }
 
 /**
