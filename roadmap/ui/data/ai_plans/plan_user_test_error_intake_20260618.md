@@ -560,3 +560,10 @@
 - Change: `/admin/inventory` now accepts `?tab=completed`, `?tab=draft`, `?tab=ordered`, or `?tab=all` so product/part proposal entry points can send staff directly to the aggregate receipt/proposal/order list.
 - Guardrail: The default remains completed import receipts; no receipt mutation behavior changed.
 - Verification: `eslint src/app/admin/inventory/page.tsx`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
+
+### Part 29 - Product proposal handoff to inventory
+- Covered IDs: UT-20260618-028
+- Files touched: `src/app/admin/products/page.tsx`
+- Change: After staff creates a retail product import proposal from `/admin/products`, the page now routes to `/admin/inventory?tab=draft` so proposal follow-up happens in the inventory aggregate workspace.
+- Guardrail: Product creation/editing remains on `/admin/products`; only the purchase proposal follow-up is handed off.
+- Verification: `eslint src/app/admin/products/page.tsx`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.

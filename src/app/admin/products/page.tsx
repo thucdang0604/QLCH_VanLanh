@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
+import { useRouter } from 'next/navigation';
 import { Archive, Plus, Search, Edit, Package, Loader2, QrCode, AlertTriangle, PackagePlus } from 'lucide-react';
 import { useFirestoreCollection, updateDocument } from '@/lib/useFirestore';
 
@@ -36,6 +37,7 @@ const CONDITIONS: { value: Product['condition'] | ''; label: string; color: stri
 
 export default function ProductsPage() {
     const { user } = useAuth();
+    const router = useRouter();
     const { config } = useConfig();
     const { data: products, loading } = useFirestoreCollection<Product>('products', [orderBy('createdAt', 'desc')]);
     const [searchQuery, setSearchQuery] = useState('');
@@ -453,7 +455,10 @@ export default function ProductsPage() {
                     suppliers={supplierList}
                     initialReceiptType="retail"
                     lockReceiptType
-                    onCreated={() => setIsCreateReceiptOpen(false)}
+                    onCreated={() => {
+                        setIsCreateReceiptOpen(false);
+                        router.push('/admin/inventory?tab=draft');
+                    }}
                 />
             )}
         </div>
