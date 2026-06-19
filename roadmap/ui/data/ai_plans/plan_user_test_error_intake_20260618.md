@@ -518,3 +518,10 @@
 - Change: Suppliers can now store and display richer CRM-like profile fields: company/legal name, supplier type, website, payment terms, assigned owner, and tags. Search now includes company name, tax code, and tags.
 - Guardrail: Existing supplier debt/payment flow and transaction history remain unchanged; all new fields are optional for backward compatibility.
 - Verification: `eslint src/app/admin/suppliers/page.tsx src/lib/types/inventory.ts`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
+
+### Part 23 - Category-derived product variants
+- Covered IDs: UT-20260618-029
+- Files touched: `src/app/(customer)/_lib/server-queries.ts`, `src/app/(customer)/product/[id]/page.tsx`, `src/app/admin/products/page.tsx`
+- Change: Product detail variants are now derived from the product's deepest selected retail category instead of manually configured `seriesId`. The manual Series/variant grouping tab has been removed from `/admin/products` so staff only manages products and categories.
+- Guardrail: Existing `seriesId` data is left untouched for backward compatibility; the customer-facing variant list ignores it and does not require a new Firestore composite index.
+- Verification: `eslint src/app/admin/products/page.tsx`, `eslint src/app/(customer)/_lib/server-queries.ts src/app/(customer)/product/[id]/page.tsx`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.

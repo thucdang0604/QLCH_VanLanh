@@ -12,7 +12,6 @@ import PaginationBar from '@/components/admin/PaginationBar';
 import { triggerRevalidate } from '@/lib/revalidate';
 import UniversalProductModal from '@/components/admin/UniversalProductModal';
 import CategoryTaxonomySelector from '@/components/admin/CategoryTaxonomySelector';
-import ProductSeriesManager from '@/components/admin/ProductSeriesManager';
 import ProductQrLabelModal from '@/components/admin/ProductQrLabelModal';
 import FixHiddenProductsModal from '@/components/admin/FixHiddenProductsModal';
 import type { Product } from '@/lib/types';
@@ -34,7 +33,6 @@ const CONDITIONS: { value: Product['condition'] | ''; label: string; color: stri
 export default function ProductsPage() {
     const { config } = useConfig();
     const { data: products, loading } = useFirestoreCollection<Product>('products', [orderBy('createdAt', 'desc')]);
-    const [mainTab, setMainTab] = useState<'list' | 'series'>('list');
     const [searchQuery, setSearchQuery] = useState('');
     const [filterCategory, setFilterCategory] = useState('');
     const [filterCategoryIds, setFilterCategoryIds] = useState<string[]>([]);
@@ -127,27 +125,6 @@ export default function ProductsPage() {
                 </div>
             </div>
 
-            {/* Tabs */}
-            <div className="flex border-b border-gray-200">
-                <button
-                    onClick={() => setMainTab('list')}
-                    className={`py-3 px-6 text-sm font-medium border-b-2 transition-colors ${mainTab === 'list' ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-                >
-                    Danh sách Sản phẩm
-                </button>
-                <button
-                    onClick={() => setMainTab('series')}
-                    className={`py-3 px-6 text-sm font-medium border-b-2 transition-colors ${mainTab === 'series' ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-                >
-                    Nhóm Biến thể (Series)
-                </button>
-            </div>
-
-            {mainTab === 'series' ? (
-                <ProductSeriesManager />
-
-            ) : (
-                <>
             {/* Filters */}
             <div className="flex flex-col gap-3">
                 <div className="flex flex-col md:flex-row gap-4">
@@ -428,8 +405,6 @@ export default function ProductsPage() {
                     </>
                 )}
             </div>
-                </>
-            )}
 
             {/* Modal */}
             <UniversalProductModal

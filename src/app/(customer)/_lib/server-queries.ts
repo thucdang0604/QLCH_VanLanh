@@ -261,21 +261,25 @@ export const fetchServices = unstable_cache(
 );
 
 /**
- * Fetch variant siblings by seriesId.
- * Returns other products sharing the same seriesId (different color/storage).
+ * Fetch variant siblings by the product's deepest category node.
+ * Admin no longer maintains a separate Series group for customer-facing variants.
  */
-export const fetchProductVariants = cache(async (seriesId: string, excludeId: string) => {
-    if (!seriesId) return [];
+export const fetchProductVariants = cache(async (categoryId: string, excludeId: string) => {
+    if (!categoryId) return [];
     if (!isAdminAvailable()) return [];
 
     const db = getAdminDb();
     const snapshot = await db.collection('products')
-        .where('seriesId', '==', seriesId)
         .where('status', '==', 'active')
+        .limit(100)
         .get();
 
     return snapshot.docs
-        .filter(doc => doc.id !== excludeId)
+        .filter(doc => {
+            if (doc.id === excludeId) return false;
+            const data = doc.data();
+            return Array.isArray(data.categoryIds) && data.categoryIds.includes(categoryId);
+        })
         .map(doc => {
             const data = doc.data();
             return {

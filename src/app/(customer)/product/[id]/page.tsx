@@ -49,10 +49,14 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
         data._type = 'product';
     }
 
+    const categoryIdsForVariants = data && Array.isArray(data.categoryIds)
+        ? data.categoryIds.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+        : [];
+    const variantCategoryId = categoryIdsForVariants[categoryIdsForVariants.length - 1] || '';
+
     // Fetch variants + reviews in parallel
-    const seriesId = data ? String(data.seriesId || '') : '';
     const [variants, reviews, related] = await Promise.all([
-        seriesId ? fetchProductVariants(seriesId, data?.id || id) : Promise.resolve([]),
+        variantCategoryId ? fetchProductVariants(variantCategoryId, data?.id || id) : Promise.resolve([]),
         data?._type === 'product' ? fetchProductReviews(data?.id || id) : Promise.resolve([]),
         fetchRelatedItems()
     ]);
