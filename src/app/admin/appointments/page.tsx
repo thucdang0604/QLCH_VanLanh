@@ -238,6 +238,30 @@ export default function AppointmentsPage() {
         );
     };
 
+    const renderStatusGuidance = (appointment: Appointment, variant: 'mobile' | 'desktop') => {
+        if (appointment.status === 'pending') {
+            return (
+                <p className={variant === 'mobile' ? 'rounded-lg bg-yellow-50 px-3 py-2 text-xs text-yellow-700' : 'text-xs text-yellow-700'}>
+                    Bấm SĐT để gọi và tự ghi nhận đã xác nhận.
+                </p>
+            );
+        }
+
+        if (appointment.status === 'confirmed') {
+            return renderIntakeActions(appointment, variant);
+        }
+
+        if (appointment.status === 'cancelled') {
+            return (
+                <span className={variant === 'mobile' ? 'inline-flex rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-600' : 'text-xs font-medium text-red-600'}>
+                    Lịch hẹn đã hủy
+                </span>
+            );
+        }
+
+        return null;
+    };
+
     // Derived state for filtering
     const filteredAppointments = appointments.filter((app) => {
         const matchesSearch =
@@ -383,13 +407,13 @@ export default function AppointmentsPage() {
                                                 title="Chọn trạng thái"
                                                 value={app.status}
                                                 onChange={(e) => handleUpdateStatus(app.id, e.target.value)}
-                                                className="w-full text-sm border-gray-300 rounded-lg py-2 pl-3 pr-8 bg-white border"
+                                                className="hidden"
                                             >
                                                 {Object.entries(statusConfig).map(([key, value]) => (
                                                     <option key={key} value={key}>{value.label}</option>
                                                 ))}
                                             </select>
-                                            {renderIntakeActions(app, 'mobile')}
+                                            {renderStatusGuidance(app, 'mobile')}
                                         </div>
                                     )}
                                 </div>
@@ -480,13 +504,13 @@ export default function AppointmentsPage() {
                                                             title="Chọn trạng thái"
                                                             value={app.status}
                                                             onChange={(e) => handleUpdateStatus(app.id, e.target.value)}
-                                                            className="text-sm border-gray-300 rounded-md shadow-sm focus:border-orange-300 focus:ring focus:ring-orange-200 focus:ring-opacity-50 py-1 pl-2 pr-8"
+                                                            className="hidden"
                                                         >
                                                             {Object.entries(statusConfig).map(([key, value]) => (
                                                                 <option key={key} value={key}>{value.label}</option>
                                                             ))}
                                                         </select>
-                                                        {renderIntakeActions(app, 'desktop')}
+                                                        {renderStatusGuidance(app, 'desktop')}
                                                     </>
                                                 )}
                                             </td>
