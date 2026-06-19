@@ -39,6 +39,8 @@ interface Service {
     icon?: string;
     category: string;
     categoryIds?: string[];
+    linkedProductCategoryIds?: string[];
+    recommendedPartCategoryIds?: string[];
     isActive: boolean;
     warranty_text?: string;
     repair_time?: string;
@@ -140,6 +142,8 @@ export default function ServicesPage() {
 
     // --- ORPHAN CATEGORY DETECTION (ID-based) ---
     const serviceTaxonomy = config?.taxonomy?.service || [];
+    const retailTaxonomy = config?.taxonomy?.retail || [];
+    const componentTaxonomy = config?.taxonomy?.component || [];
     const validNodeIds = collectAllNodeIds(serviceTaxonomy);
 
     const getOrphanStatus = (service: Service): 'valid' | 'orphan' | 'unassigned' => {
@@ -179,6 +183,12 @@ export default function ServicesPage() {
             return formatPrice(s.price_promo);
         }
         return null;
+    };
+
+    const getLinkedCategoryPath = (type: 'retail' | 'component', categoryIds?: string[]) => {
+        const taxonomy = type === 'retail' ? retailTaxonomy : componentTaxonomy;
+        const deepestId = categoryIds?.[categoryIds.length - 1];
+        return deepestId ? getCategoryPath(deepestId, taxonomy) || deepestId : '';
     };
 
     return (
@@ -311,6 +321,20 @@ export default function ServicesPage() {
                                 return path ? <p className="text-xs text-gray-400 mb-1">📌 {path}</p> : null;
                             })()}
                             <p className="text-sm text-gray-500 line-clamp-2 mb-3">{service.description}</p>
+                            {(service.linkedProductCategoryIds?.length || service.recommendedPartCategoryIds?.length) && (
+                                <div className="mb-3 flex flex-wrap gap-1.5 text-[11px]">
+                                    {service.linkedProductCategoryIds?.length ? (
+                                        <span className="rounded-md border border-blue-100 bg-blue-50 px-2 py-0.5 font-medium text-blue-700">
+                                            Bán kèm: {getLinkedCategoryPath('retail', service.linkedProductCategoryIds)}
+                                        </span>
+                                    ) : null}
+                                    {service.recommendedPartCategoryIds?.length ? (
+                                        <span className="rounded-md border border-emerald-100 bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700">
+                                            Linh kiện: {getLinkedCategoryPath('component', service.recommendedPartCategoryIds)}
+                                        </span>
+                                    ) : null}
+                                </div>
+                            )}
                             <div className="flex items-center justify-between">
                                 <div>
                                     {promo ? (
@@ -408,6 +432,8 @@ function ServiceModal({
         device_model: '',
         category: '',
         categoryIds: [] as string[],
+        linkedProductCategoryIds: [] as string[],
+        recommendedPartCategoryIds: [] as string[],
         isActive: true,
         warranty_text: '',
         repair_time: '',
@@ -426,6 +452,8 @@ function ServiceModal({
                 device_model: service?.device_model || '',
                 category: service?.category || '',
                 categoryIds: service?.categoryIds || [],
+                linkedProductCategoryIds: service?.linkedProductCategoryIds || [],
+                recommendedPartCategoryIds: service?.recommendedPartCategoryIds || [],
                 isActive: service?.isActive ?? true,
                 warranty_text: service?.warranty_text || '',
                 repair_time: service?.repair_time || '',
@@ -460,6 +488,8 @@ function ServiceModal({
                 device_model: formData.device_model,
                 category: formData.category,
                 categoryIds: formData.categoryIds,
+                linkedProductCategoryIds: formData.linkedProductCategoryIds,
+                recommendedPartCategoryIds: formData.recommendedPartCategoryIds,
                 isActive: formData.isActive,
                 warranty_text: formData.warranty_text || '',
                 repair_time: formData.repair_time || '',
@@ -610,6 +640,31 @@ function ServiceModal({
                             value={formData.categoryIds}
                             onChange={(ids, catName) => setFormData({ ...formData, categoryIds: ids, category: catName || formData.category })}
                         />
+                    </div>
+
+                    <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-4">
+                        <p className="text-sm font-semibold text-blue-900">Liên kết nghiệp vụ</p>
+                        <p className="mt-1 text-xs text-blue-700">
+                            Dữ liệu này dùng làm gợi ý cho POS giảm giá mua kèm và luồng sửa chữa. Không thay đổi tồn kho hay workflow.
+                        </p>
+                        <div className="mt-3 space-y-3">
+                            <div>
+                                <label className="block text-xs font-medium text-gray-600 mb-1">Nhóm sản phẩm/phụ kiện bán kèm</label>
+                                <CategoryTaxonomySelector
+                                    type="retail"
+                                    value={formData.linkedProductCategoryIds}
+                                    onChange={(ids) => setFormData({ ...formData, linkedProductCategoryIds: ids })}
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-medium text-gray-600 mb-1">Nhóm linh kiện liên quan</label>
+                                <CategoryTaxonomySelector
+                                    type="component"
+                                    value={formData.recommendedPartCategoryIds}
+                                    onChange={(ids) => setFormData({ ...formData, recommendedPartCategoryIds: ids })}
+                                />
+                            </div>
+                        </div>
                     </div>
 
                     {/* Description */}

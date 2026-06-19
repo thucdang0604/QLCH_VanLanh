@@ -604,3 +604,10 @@
   4. Add a safe migration/backfill report for old repair tickets that only have free-text issue descriptions and no `categoryPath`.
 - Guardrail: do not make `services` own inventory or repair workflow statuses. Services should supply catalog metadata and pricing/warranty hints; repair workflow remains Firebase-config driven, POS remains the payment workspace, and products/parts remain the stock catalogs.
 - Verification: source inspection confirmed `/admin/services` already owns service taxonomy, hide-price, media, orphan detection, and customer-facing service content; no code behavior changed in this proposal-only slice.
+
+### Part 34 - Service catalog linked category metadata
+- Covered IDs: UT-20260618-027
+- Files touched: `src/app/admin/services/page.tsx`, `src/lib/types/catalog.ts`
+- Change: `/admin/services` can now store optional service metadata for `linkedProductCategoryIds` and `recommendedPartCategoryIds`. Admins can select a retail/accessory category for POS bundle suggestions and a component category for repair-intake context. Service cards show compact badges when these links exist.
+- Guardrail: these fields are advisory metadata only. They do not move inventory, do not change repair workflow transitions, and do not automatically apply POS discounts yet.
+- Verification: focused ESLint passed for `src/app/admin/services/page.tsx` and `src/lib/types/catalog.ts`; `tsc --noEmit` passed.

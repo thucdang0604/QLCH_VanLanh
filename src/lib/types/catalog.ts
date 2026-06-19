@@ -98,6 +98,8 @@ export interface Service {
     device_model: string;
     category: string;
     categoryIds?: string[]; // E.g., ['sua-chua', 'sua-chua/iphone']
+    linkedProductCategoryIds?: string[]; // Suggested retail/accessory category for POS bundles.
+    recommendedPartCategoryIds?: string[]; // Suggested component category for repair intake.
     description?: string;
     seoDescription?: string;
     warranty_text?: string;
