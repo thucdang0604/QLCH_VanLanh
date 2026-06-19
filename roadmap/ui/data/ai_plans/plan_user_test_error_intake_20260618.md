@@ -525,3 +525,10 @@
 - Change: Product detail variants are now derived from the product's deepest selected retail category instead of manually configured `seriesId`. The manual Series/variant grouping tab has been removed from `/admin/products` so staff only manages products and categories.
 - Guardrail: Existing `seriesId` data is left untouched for backward compatibility; the customer-facing variant list ignores it and does not require a new Firestore composite index.
 - Verification: `eslint src/app/admin/products/page.tsx`, `eslint src/app/(customer)/_lib/server-queries.ts src/app/(customer)/product/[id]/page.tsx`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
+
+### Part 24 - AI Creator removal recheck
+- Covered IDs: UT-20260618-031
+- Files touched: `roadmap/ui/data/ai_plans/plan_user_test_error_intake_20260618.md`
+- Change: Rechecked the AI Creator removal. The tracked source no longer contains `/admin/ai-creator`, `AI Creator`, `manage_ai_creator`, or `aiCreator`; the remaining empty local route folder was removed from the workspace.
+- Guardrail: No admin navigation, permission registry, or role preset changes were needed because the tracked code had already been cleaned up.
+- Verification: `rg "manage_ai_creator|aiCreator|ai-creator|AI Creator" src/lib src/app/admin src/components` returned no source matches, `git ls-files src/app/admin/ai-creator` returned no tracked files, and `git diff --check` passed.
