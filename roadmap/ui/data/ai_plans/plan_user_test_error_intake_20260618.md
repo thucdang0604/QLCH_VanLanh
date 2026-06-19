@@ -588,3 +588,19 @@
 - Change: `/admin/parts` now opens the import proposal modal locked in component/part mode, matching the separated products-versus-parts ownership.
 - Guardrail: The shared modal is unchanged; `/admin/products` remains locked to retail mode, `/admin/parts` is locked to component mode.
 - Verification: `eslint src/app/admin/parts/page.tsx`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
+
+### Part 33 - Services module integration proposal
+- Covered IDs: UT-20260618-027
+- Files touched: `roadmap/ui/data/ai_plans/plan_user_test_error_intake_20260618.md`
+- Proposal: treat `services` as the canonical service catalog for four flows instead of an isolated price list:
+  1. Storefront discovery: keep `services` as SEO/customer-facing content with `hidePrice`, media, warranty text, repair time, and taxonomy.
+  2. Repair intake: when staff types an issue, suggestions should resolve to service taxonomy/service records and store per-issue `serviceName/categoryPath` metadata for warranty and promotion logic.
+  3. POS promotion rules: discount rules should target service taxonomy/keywords from the service catalog and product/part taxonomy from catalog items, with normalized matching between names, slugs, and paths.
+  4. Warranty/printing: service taxonomy `warrantyType/warrantyMonths` should remain the source for service-only repair warranties and customer-facing warranty copy.
+- Next implementation slices:
+  1. Add optional `linkedProductCategoryIds` / `recommendedPartCategoryIds` to service records so a service can suggest accessories/parts without hardcoding product IDs.
+  2. Add a compact "Used by" panel in `/admin/services` showing whether a service category is referenced by repair issues, discount rules, homepage pricing, or warranty config.
+  3. Move discount-rule service selection to reuse the same service taxonomy picker and show service names/keywords from `services` as helper suggestions.
+  4. Add a safe migration/backfill report for old repair tickets that only have free-text issue descriptions and no `categoryPath`.
+- Guardrail: do not make `services` own inventory or repair workflow statuses. Services should supply catalog metadata and pricing/warranty hints; repair workflow remains Firebase-config driven, POS remains the payment workspace, and products/parts remain the stock catalogs.
+- Verification: source inspection confirmed `/admin/services` already owns service taxonomy, hide-price, media, orphan detection, and customer-facing service content; no code behavior changed in this proposal-only slice.
