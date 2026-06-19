@@ -11,6 +11,27 @@ import { incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 
 const LEGACY_TERMINAL_STATUSES = [REPAIR_STATUS.DONE, REPAIR_STATUS.OUT, REPAIR_STATUS.REFUND, 'bh_hoan_tat', 'bh_tu_choi', 'bh_refund'];
 
+function resolveServiceWarrantyMonths(taxonomy: unknown, categoryPath: string[] | undefined) {
+    if (!Array.isArray(categoryPath) || categoryPath.length === 0) return 3;
+
+    let currentLevel = Array.isArray((taxonomy as { service?: unknown })?.service)
+        ? (taxonomy as { service: unknown[] }).service
+        : [];
+    let months = 0;
+
+    for (const pathId of categoryPath) {
+        const node = currentLevel.find((item): item is { id?: string; warrantyMonths?: unknown; children?: unknown[] } =>
+            typeof item === 'object' && item !== null && (item as { id?: unknown }).id === pathId
+        );
+        if (!node) break;
+        const nodeMonths = Number(node.warrantyMonths) || 0;
+        if (nodeMonths > 0) months = nodeMonths;
+        currentLevel = Array.isArray(node.children) ? node.children : [];
+    }
+
+    return months > 0 ? months : 3;
+}
+
 export async function POST(request: NextRequest) {
     try {
         const caller = await requirePermission(request, 'manage_repairs');
@@ -54,6 +75,7 @@ export async function POST(request: NextRequest) {
             // Terminal Guard & Warranty Rules Config
             let isTargetTerminal = false;
             let warrantyRules: Record<string, unknown>[] = [];
+            let serviceWarrantyMonths = 3;
             const configSnap = await tx.get(db.collection('system_config').doc('repairs'));
             if (configSnap.exists) {
                 const configData = configSnap.data();
@@ -66,6 +88,10 @@ export async function POST(request: NextRequest) {
                         isTargetTerminal = true;
                     }
                 }
+            }
+            const taxonomySnap = await tx.get(db.collection('system_config').doc('taxonomy_settings'));
+            if (taxonomySnap.exists) {
+                serviceWarrantyMonths = resolveServiceWarrantyMonths(taxonomySnap.data()?.taxonomy, ticket.categoryPath);
             }
 
             if (!isTargetTerminal && LEGACY_TERMINAL_STATUSES.includes(targetStatus)) {
@@ -198,7 +224,7 @@ export async function POST(request: NextRequest) {
                 // Stamp Warranty
                 if (!ticket.parts || ticket.parts.filter(p => isWarrantyEligibleRepairPart(p)).length === 0) {
                     const expireDate = new Date();
-                    expireDate.setMonth(expireDate.getMonth() + 3);
+                    expireDate.setMonth(expireDate.getMonth() + serviceWarrantyMonths);
                     updateData.serviceWarrantyExpiresAt = expireDate.getTime();
                 }
 

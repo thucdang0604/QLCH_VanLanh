@@ -497,3 +497,10 @@
 - Change: The repair editor keeps the existing passcode text field and adds a 9-point pattern keypad that writes the selected order into `devicePasscode` as `1->2->3` style text.
 - Guardrail: No repair schema change; saved/printed passcode behavior continues to use the existing `deviceInfo.passcode` field.
 - Verification: `eslint src/features/repairs/RepairEditorModal.tsx`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
+
+### Part 20 - Service warranty for repairs without parts
+- Covered IDs: UT-20260618-021
+- Files touched: `src/features/repairs/RepairTicketBoard.tsx`, `src/features/repairs/RepairWarrantyModal.tsx`, `src/app/admin/repairs/page.tsx`, `src/app/api/repairs/handover/route.ts`, `src/lib/types/repair.ts`
+- Change: Completed repair tickets without warranty-eligible parts can now open the warranty flow when the service/category has a warranty template. The warranty modal allows creating a service/repair warranty ticket without selected parts. Handover now stamps `serviceWarrantyExpiresAt` from the service taxonomy `warrantyMonths`, falling back to 3 months when no category value exists.
+- Guardrail: Part warranty behavior is unchanged; if active warranty parts exist, staff still must select at least one part before creating the warranty ticket.
+- Verification: `eslint src/features/repairs/RepairTicketBoard.tsx src/features/repairs/RepairWarrantyModal.tsx src/app/admin/repairs/page.tsx src/app/api/repairs/handover/route.ts`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.

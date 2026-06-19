@@ -590,7 +590,9 @@ export default function RepairPage() {
         }
     };
     const handleCreateWarrantyTicket = async (originalTicket: RepairTicket, claimedPartIndexes: number[]) => {
-        if (claimedPartIndexes.length === 0) {
+        const warrantyType = getWarrantyTypeForTicket(originalTicket);
+        const hasServiceWarrantyConfig = Boolean(getWarrantyConfigForType(warrantyType));
+        if (claimedPartIndexes.length === 0 && !hasServiceWarrantyConfig) {
             toastWarning('Vui lòng chọn ít nhất 1 linh kiện cần bảo hành.');
             return;
         }
@@ -617,7 +619,10 @@ export default function RepairPage() {
                 warrantyClaim: {
                     originalTicketId: originalTicket.id,
                     claimedPartIndexes,
+                    warrantyType: warrantyType || null,
                 },
+                categoryPath: originalTicket.categoryPath || [],
+                serviceName: originalTicket.serviceName || '',
                 customer: originalTicket.customer,
                 deviceInfo: {
                     model: originalTicket.deviceInfo?.model || '',
@@ -625,12 +630,13 @@ export default function RepairPage() {
                     imei: originalTicket.deviceInfo?.imei || '',
                     color: originalTicket.deviceInfo?.color || '',
                 },
-                issue: { description: 'Bảo hành linh kiện', notes: '' },
+                issue: { description: claimedPartIndexes.length > 0 ? 'Bảo hành linh kiện' : 'Bảo hành dịch vụ/sửa chữa', notes: '' },
                 preRepairMedia: [],
                 postRepairMedia: [],
                 payment: {
                     status: 'warranty' as const,
                     partsCost: 0,
+                    laborCost: 0,
                     amount: 0,
                     depositAmount: 0,
                 },

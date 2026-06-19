@@ -45,6 +45,18 @@ interface RepairTicketBoardProps {
     onLoadMore: () => void;
 }
 
+function hasActiveWarrantyPart(ticket: RepairTicket) {
+    return (ticket.parts || []).some(part =>
+        isWarrantyEligibleRepairPart(part) &&
+        part.warrantyMonths && part.warrantyMonths > 0 &&
+        part.warrantyExpiresAt && (
+            typeof part.warrantyExpiresAt === 'number'
+                ? part.warrantyExpiresAt
+                : (part.warrantyExpiresAt as { toDate?: () => Date })?.toDate?.()?.getTime() || 0
+        ) > Date.now()
+    );
+}
+
 export function RepairTicketBoard({
     filtered,
     paginatedTickets,
@@ -85,6 +97,10 @@ export function RepairTicketBoard({
                     const st = workflow.find(s => s.id === ticket.status) || { id: ticket.status, label: ticket.status, color: 'bg-gray-100 text-gray-700 border-gray-200', allowedNext: [] };
                     const StIcon = Clock; // Fallback
                     const pay = paymentLabels[ticket.payment?.status || 'unpaid'];
+                    const warrantyType = getWarrantyTypeForTicket(ticket);
+                    const canCreateWarranty = isRepairStatus(ticket.status, REPAIR_STATUS.DONE)
+                        && ticket.ticketType !== 'warranty'
+                        && (hasActiveWarrantyPart(ticket) || Boolean(getWarrantyConfigForType(warrantyType)));
 
                     return (
                         <div key={ticket.id} className={`p-4 space-y-3 bg-white hover:bg-gray-50 transition-colors ${ticket.payment?.status === 'unpaid' ? 'bg-red-50/50' : ''}`}>
@@ -178,7 +194,7 @@ export function RepairTicketBoard({
                                     <button onClick={() => setAssignModal({ ticket })} className="flex-1 py-2 bg-blue-50 text-blue-600 text-xs font-medium rounded-lg border border-blue-200 flex items-center justify-center gap-1 active:bg-blue-100">
                                         <User size={14} /> KTV
                                     </button>
-                                    {isRepairStatus(ticket.status, REPAIR_STATUS.DONE) && ticket.ticketType !== 'warranty' && (ticket.parts || []).some(p => isWarrantyEligibleRepairPart(p) && p.warrantyMonths && p.warrantyMonths > 0 && p.warrantyExpiresAt && (typeof p.warrantyExpiresAt === 'number' ? p.warrantyExpiresAt : (p.warrantyExpiresAt as { toDate?: () => Date })?.toDate?.()?.getTime() || 0) > Date.now()) && (
+                                    {canCreateWarranty && (
                                         <button onClick={() => { setWarrantyModal(ticket); setWarrantySelectedIndexes([]); }} className="w-full py-2 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-semibold rounded-lg flex items-center justify-center gap-1 mt-1">
                                             <AlertCircle size={14} /> Kích hoạt bảo hành
                                         </button>
@@ -215,6 +231,10 @@ export function RepairTicketBoard({
                             const st = workflow.find(s => s.id === ticket.status) || { id: ticket.status, label: ticket.status, color: 'bg-gray-100 text-gray-700 border-gray-200', allowedNext: [] };
                             const StIcon = Clock; // Fallback generic icon
                             const pay = paymentLabels[ticket.payment?.status || 'unpaid'];
+                            const warrantyType = getWarrantyTypeForTicket(ticket);
+                            const canCreateWarranty = isRepairStatus(ticket.status, REPAIR_STATUS.DONE)
+                                && ticket.ticketType !== 'warranty'
+                                && (hasActiveWarrantyPart(ticket) || Boolean(getWarrantyConfigForType(warrantyType)));
                             return (
                                 <tr key={ticket.id} className={`hover:bg-gray-50/50 transition-colors ${ticket.payment?.status === 'unpaid' ? 'bg-red-50' : ''}`}>
                                     <td className="px-4 py-3 font-mono text-xs text-gray-500">
@@ -321,7 +341,6 @@ export function RepairTicketBoard({
                                                 </button>
                                             )}
                                             {(() => {
-                                                const warrantyType = getWarrantyTypeForTicket(ticket);
                                                 if (!getWarrantyConfigForType(warrantyType)) return null;
                                                 return (
                                                     <button onClick={() => openPrint(ticket, 'warranty', warrantyType)}
@@ -331,14 +350,7 @@ export function RepairTicketBoard({
                                                     </button>
                                                 );
                                             })()}
-                                            {isRepairStatus(ticket.status, REPAIR_STATUS.DONE) && ticket.ticketType !== 'warranty' && (ticket.parts || []).some(p =>
-                                                isWarrantyEligibleRepairPart(p) && p.warrantyMonths && p.warrantyMonths > 0 &&
-                                                p.warrantyExpiresAt && (
-                                                    typeof p.warrantyExpiresAt === 'number'
-                                                        ? p.warrantyExpiresAt
-                                                        : (p.warrantyExpiresAt as { toDate?: () => Date })?.toDate?.()?.getTime() || 0
-                                                ) > Date.now()
-                                            ) && (
+                                            {canCreateWarranty && (
                                                     <button onClick={() => { setWarrantyModal(ticket); setWarrantySelectedIndexes([]); }}
                                                         className="flex items-center gap-1 px-2 py-1 text-[10px] font-semibold rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition-colors"
                                                         title="Tạo phiếu bảo hành">

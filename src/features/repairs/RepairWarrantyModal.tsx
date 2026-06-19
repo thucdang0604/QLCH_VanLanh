@@ -35,6 +35,7 @@ export function RepairWarrantyModal({
                     : (part.warrantyExpiresAt as { toDate?: () => Date })?.toDate?.()?.getTime() || 0
             ) > Date.now()
         );
+    const hasActiveParts = activeParts.length > 0;
 
     return (
         <Modal
@@ -63,8 +64,10 @@ export function RepairWarrantyModal({
                     </div>
                 )}
                 <p className="text-sm text-gray-600 font-medium">Chọn linh kiện đang bị lỗi cần bảo hành:</p>
-                {activeParts.length === 0 ? (
-                    <p className="text-sm text-gray-400 italic">Không có linh kiện nào còn hạn bảo hành.</p>
+                {!hasActiveParts ? (
+                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+                        Phiếu này không có linh kiện còn hạn bảo hành. Hệ thống sẽ tạo phiếu bảo hành dịch vụ/sửa chữa từ cấu hình bảo hành của dịch vụ.
+                    </div>
                 ) : (
                     activeParts.map(part => {
                         const expiresAt = typeof part.warrantyExpiresAt === 'number'
@@ -101,11 +104,11 @@ export function RepairWarrantyModal({
                 <button onClick={onClose} className="px-4 py-2 text-sm bg-gray-100 rounded-lg hover:bg-gray-200">Hủy</button>
                 <button
                     onClick={() => onCreate(ticket, selectedIndexes)}
-                    disabled={creating || selectedIndexes.length === 0}
+                    disabled={creating || (hasActiveParts && selectedIndexes.length === 0)}
                     className="px-5 py-2 text-sm font-semibold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-2"
                 >
                     {creating ? <Loader2 className="animate-spin" size={16} /> : <CheckCircle2 size={16} />}
-                    Tạo Phiếu Bảo Hành ({selectedIndexes.length})
+                    {hasActiveParts ? `Tạo Phiếu Bảo Hành (${selectedIndexes.length})` : 'Tạo Phiếu Bảo Hành Dịch Vụ'}
                 </button>
             </div>
         </Modal>

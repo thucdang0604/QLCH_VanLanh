@@ -195,6 +195,7 @@ export interface RepairTicket {
     warrantyClaim?: {
         originalTicketId: string;
         claimedPartIndexes: number[];
+        warrantyType?: 'warrantyDevice' | 'warrantyRepair' | 'warrantyAccessory' | null;
         refundedParts?: {
             originalPartIndex: number;
             productName: string;
