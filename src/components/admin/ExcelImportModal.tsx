@@ -5,11 +5,13 @@ import { useRef, useState } from 'react';
 import {
     AlertCircle,
     CheckCircle2,
+    ClipboardList,
     Download,
     FolderOpen,
     Image as ImageIcon,
     Loader2,
     Package,
+    ShoppingBag,
     Upload,
     Wrench,
     X,
@@ -51,6 +53,8 @@ import {
     loadExistingProductCodes,
     normalizeConditionInput,
     normalizeImportPhone,
+    normalizeLegacyImportDocId,
+    normalizeText,
     normalizeLocalImageKey,
     parseImages,
     parseDebtInput,
@@ -82,7 +86,166 @@ export type { ExcelImportMode } from '@/features/excel-import/importSupport';
 function iconForMode(mode: ExcelImportMode) {
     if (MODE_CONFIG[mode].icon === 'part') return <Wrench size={22} className="text-emerald-600" />;
     if (MODE_CONFIG[mode].icon === 'service') return <Wrench size={22} className="text-blue-600" />;
+    if (MODE_CONFIG[mode].icon === 'order') return <ShoppingBag size={22} className="text-indigo-600" />;
+    if (MODE_CONFIG[mode].icon === 'repair') return <ClipboardList size={22} className="text-rose-600" />;
     return <Package size={22} className="text-orange-600" />;
+}
+
+const CUSTOMER_NAME_HEADERS = ['Tên KH', 'Tên khách hàng', 'Khách hàng', 'Customer Name'];
+const PHONE_HEADERS = ['SĐT', 'sdt', 'phone', 'Phone', 'Số điện thoại'];
+const EMAIL_HEADERS = ['Email'];
+const ADDRESS_HEADERS = ['Địa chỉ', 'Address'];
+const NOTE_HEADERS = ['Ghi chú', 'Note'];
+const ORDER_ID_HEADERS = ['Mã đơn', 'Order ID', 'Mã hóa đơn', 'orderId'];
+const REPAIR_ID_HEADERS = ['Mã phiếu', 'Repair ID', 'Mã sửa chữa', 'repairId'];
+
+function rawCellValue(row: ExcelRow, headers: string[]) {
+    for (const header of headers) {
+        const value = row[header];
+        if (value !== undefined && value !== null && String(value).trim() !== '') return value;
+    }
+    return '';
+}
+
+function parseLegacyDate(row: ExcelRow, headers: string[]): Date | null {
+    const raw = rawCellValue(row, headers);
+    if (raw instanceof Date && !Number.isNaN(raw.getTime())) return raw;
+    if (typeof raw === 'number' && Number.isFinite(raw)) {
+        const parsed = XLSX.SSF.parse_date_code(raw);
+        if (parsed) return new Date(parsed.y, parsed.m - 1, parsed.d, parsed.H || 0, parsed.M || 0, Math.floor(parsed.S || 0));
+    }
+
+    const text = String(raw || '').trim();
+    if (!text) return null;
+    const dmy = text.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/);
+    if (dmy) {
+        const year = Number(dmy[3].length === 2 ? `20${dmy[3]}` : dmy[3]);
+        const date = new Date(year, Number(dmy[2]) - 1, Number(dmy[1]));
+        return Number.isNaN(date.getTime()) ? null : date;
+    }
+    const parsed = new Date(text);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function formatCheckDate(date: Date | null): string {
+    return date ? date.toLocaleDateString('vi-VN') : '';
+}
+
+function normalizeOrderStatus(raw: string): 'Pending' | 'Confirmed' | 'Shipping' | 'Completed' | 'Cancelled' {
+    const normalized = normalizeText(raw);
+    if (['pending', 'cho xu ly', 'cho xac nhan', 'moi'].includes(normalized)) return 'Pending';
+    if (['confirmed', 'da xac nhan', 'xac nhan'].includes(normalized)) return 'Confirmed';
+    if (['shipping', 'dang giao', 'giao hang'].includes(normalized)) return 'Shipping';
+    if (['cancelled', 'canceled', 'huy', 'da huy'].includes(normalized)) return 'Cancelled';
+    return 'Completed';
+}
+
+function normalizeOrderPaymentStatus(raw: string, methodRaw: string): 'paid' | 'unpaid' | 'debt' {
+    const normalized = normalizeText(`${raw} ${methodRaw}`);
+    if (normalized.includes('debt') || normalized.includes('ghi no') || normalized.includes('cong no')) return 'debt';
+    if (normalized.includes('unpaid') || normalized.includes('chua thanh toan')) return 'unpaid';
+    return 'paid';
+}
+
+function normalizeRepairPaymentStatus(raw: string): 'paid' | 'unpaid' | 'pay_later' {
+    const normalized = normalizeText(raw);
+    if (normalized.includes('debt') || normalized.includes('ghi no') || normalized.includes('cong no') || normalized.includes('pay_later')) return 'pay_later';
+    if (normalized.includes('unpaid') || normalized.includes('chua thanh toan')) return 'unpaid';
+    return 'paid';
+}
+
+function normalizePaymentMethod(raw: string): 'COD' | 'Bank' | 'Momo' | 'Card' | 'Installment' | 'Debt' | 'QR' {
+    const normalized = normalizeText(raw);
+    if (normalized.includes('debt') || normalized.includes('ghi no') || normalized.includes('cong no')) return 'Debt';
+    if (normalized.includes('bank') || normalized.includes('chuyen khoan') || normalized.includes('ngan hang')) return 'Bank';
+    if (normalized.includes('momo')) return 'Momo';
+    if (normalized.includes('card') || normalized.includes('the')) return 'Card';
+    if (normalized.includes('installment') || normalized.includes('tra gop')) return 'Installment';
+    if (normalized.includes('qr')) return 'QR';
+    return 'COD';
+}
+
+function parseOrderItems(row: ExcelRow, orderId: string) {
+    const warrantyMonths = getNumber(row, ['Bảo hành tháng', 'Warranty Months']);
+    const warrantyStartedAt = parseLegacyDate(row, ['Ngày bắt đầu BH', 'Warranty Started At']);
+    const warrantyExpiresAt = parseLegacyDate(row, ['Ngày hết BH', 'Warranty Expires At']);
+    const detailLines = getValue(row, ['Dòng hàng', 'Items', 'Chi tiết sản phẩm'])
+        .split(/[\n;]+/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+
+    const buildItem = (productName: string, quantity: number, price: number, serialsRaw: string, lineWarrantyMonths = warrantyMonths, lineWarrantyExpiresAt = warrantyExpiresAt) => ({
+        productId: `legacy-${generateSlug(productName || orderId)}`,
+        productName: productName || 'Sản phẩm từ hệ thống cũ',
+        quantity: Math.max(1, Math.floor(quantity || 1)),
+        price: Math.max(0, price || 0),
+        imeis: splitList(serialsRaw),
+        warrantyMonths: lineWarrantyMonths || undefined,
+        warrantyStartedAt: warrantyStartedAt?.getTime(),
+        warrantyExpiresAt: lineWarrantyExpiresAt?.getTime(),
+    });
+
+    if (detailLines.length > 0) {
+        return detailLines.map((line, index) => {
+            const [nameRaw, quantityRaw, priceRaw, serialRaw, warrantyRaw, expiresRaw] = line.split('|').map((part) => part.trim());
+            const lineWarrantyMonths = Number(warrantyRaw) || warrantyMonths;
+            const lineWarrantyExpiresAt = expiresRaw ? parseLegacyDate({ value: expiresRaw }, ['value']) : warrantyExpiresAt;
+            return buildItem(
+                nameRaw || `Dòng hàng ${index + 1}`,
+                Number(quantityRaw) || 1,
+                Number(priceRaw?.replace(/[^\d-]/g, '')) || 0,
+                serialRaw || '',
+                lineWarrantyMonths,
+                lineWarrantyExpiresAt,
+            );
+        });
+    }
+
+    return [buildItem(
+        getValue(row, ['Sản phẩm', 'Tên SP', 'Product']),
+        getNumber(row, ['Số lượng', 'Quantity']) || 1,
+        getNumber(row, ['Đơn giá', 'Giá', 'Price']),
+        getValue(row, ['IMEI/Serial', 'IMEI', 'Serial']),
+    )];
+}
+
+function parseRepairIssues(row: ExcelRow) {
+    return splitList(getValue(row, ['Lỗi/Bệnh', 'Lỗi', 'Bệnh', 'Issue', 'Issues'])).map((label, index) => ({
+        id: `legacy-issue-${index + 1}`,
+        label,
+        estimatedPrice: 0,
+        status: 'resolved' as const,
+    }));
+}
+
+function parseRepairParts(row: ExcelRow) {
+    return getValue(row, ['Linh kiện', 'Parts'])
+        .split(/[\n;]+/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line, index) => {
+            const [nameRaw, quantityRaw, priceRaw, warrantyRaw, expiresRaw] = line.split('|').map((part) => part.trim());
+            const warrantyExpiresAt = expiresRaw ? parseLegacyDate({ value: expiresRaw }, ['value']) : null;
+            return {
+                partLineId: `legacy-part-${index + 1}`,
+                productId: `legacy-${generateSlug(nameRaw || `part-${index + 1}`)}`,
+                productName: nameRaw || `Linh kiện ${index + 1}`,
+                name: nameRaw || `Linh kiện ${index + 1}`,
+                partName: nameRaw || `Linh kiện ${index + 1}`,
+                quality: 'Không rõ',
+                quantity: Math.max(1, Math.floor(Number(quantityRaw) || 1)),
+                unitPriceAtUse: Number(priceRaw?.replace(/[^\d-]/g, '')) || 0,
+                warrantyMonths: Number(warrantyRaw) || undefined,
+                warrantyExpiresAt: warrantyExpiresAt || undefined,
+                status: 'selected' as const,
+            };
+        });
+}
+
+function addMonths(date: Date, months: number): Date {
+    const next = new Date(date);
+    next.setMonth(next.getMonth() + months);
+    return next;
 }
 
 export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportMode; onClose: () => void }) {
@@ -153,19 +316,21 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
 
                 const existingNames = new Set<string>();
                 const uniqueNames = Array.from(new Set(names));
-                for (let index = 0; index < uniqueNames.length; index += FIRESTORE_QUERY_CHUNK_SIZE) {
-                    const chunk = uniqueNames.slice(index, index + FIRESTORE_QUERY_CHUNK_SIZE);
-                    const snapshot = await getDocs(query(collection(db, modeConfig.collectionName), where('name', 'in', chunk)));
-                    snapshot.forEach((item) => {
-                        const data = item.data() as { name?: string; status?: string; isActive?: boolean };
-                        if (data.status !== 'inactive' && data.isActive !== false && data.name) {
-                            existingNames.add(data.name.toLowerCase());
-                        }
-                    });
+                if (mode !== 'order' && mode !== 'repair') {
+                    for (let index = 0; index < uniqueNames.length; index += FIRESTORE_QUERY_CHUNK_SIZE) {
+                        const chunk = uniqueNames.slice(index, index + FIRESTORE_QUERY_CHUNK_SIZE);
+                        const snapshot = await getDocs(query(collection(db, modeConfig.collectionName), where('name', 'in', chunk)));
+                        snapshot.forEach((item) => {
+                            const data = item.data() as { name?: string; status?: string; isActive?: boolean };
+                            if (data.status !== 'inactive' && data.isActive !== false && data.name) {
+                                existingNames.add(data.name.toLowerCase());
+                            }
+                        });
+                    }
                 }
 
                 const existingDocIds = await loadExistingDocIds(modeConfig.collectionName, targetIds);
-                const existingCodes = mode === 'service' || mode === 'customer' || mode === 'supplier' ? new Set<string>() : await loadExistingProductCodes(expectedCodes);
+                const existingCodes = mode === 'service' || mode === 'customer' || mode === 'supplier' || mode === 'order' || mode === 'repair' ? new Set<string>() : await loadExistingProductCodes(expectedCodes);
 
                 const parsed = jsonRows.map((row, index) => {
                     const rowNum = index + 2;
@@ -302,6 +467,164 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
                             debtInput.isValid ? 'Công nợ có thể import' : 'Công nợ không hợp lệ',
                         ));
                         checks.push(buildCheck('details', 'Thông tin thêm', getValue(row, ['Phân loại', 'Tags', 'Ghi chú', 'Note']), 'ok', 'Thông tin phụ có thể import'));
+
+                        const errors = summarizeChecks(checks, 'error');
+                        const warnings = summarizeChecks(checks, 'warning');
+                        return { rowNum, data: row, errors, warnings, checks, categoryIds: [], category: '' };
+                    }
+
+                    if (mode === 'order') {
+                        checks.length = 0;
+                        const orderIdRaw = getValue(row, ORDER_ID_HEADERS);
+                        const orderId = normalizeLegacyImportDocId(orderIdRaw);
+                        const customerName = getValue(row, CUSTOMER_NAME_HEADERS);
+                        const phoneRaw = getValue(row, PHONE_HEADERS);
+                        const phone = normalizeImportPhone(phoneRaw);
+                        const productRaw = getValue(row, ['Dòng hàng', 'Items', 'Chi tiết sản phẩm', 'Sản phẩm', 'Tên SP', 'Product']);
+                        const totalInput = parseNumberInput(row, ['Tổng tiền', 'Total']);
+                        const subtotalInput = parseNumberInput(row, ['Tạm tính', 'Subtotal']);
+                        const discountInput = parseNumberInput(row, ['Giảm giá', 'Discount']);
+                        const paymentRaw = getValue(row, ['Thanh toán', 'Payment Status']);
+                        const methodRaw = getValue(row, ['Phương thức', 'Payment Method']);
+                        const statusRaw = getValue(row, ['Trạng thái', 'Status']);
+                        const createdAt = parseLegacyDate(row, ['Ngày tạo', 'Created At']);
+                        const completedAt = parseLegacyDate(row, ['Ngày hoàn thành', 'Completed At']);
+                        const warrantyExpiresAt = parseLegacyDate(row, ['Ngày hết BH', 'Warranty Expires At']);
+
+                        if (!orderIdRaw) {
+                            checks.push(buildCheck('name', 'Mã đơn', '', 'error', 'Thiếu mã đơn hàng từ hệ thống cũ'));
+                        } else if (!orderId) {
+                            checks.push(buildCheck('name', 'Mã đơn', orderIdRaw, 'error', 'Mã đơn không hợp lệ để làm ID Firestore'));
+                        } else if (duplicateTargetIdsInFile.has(orderId)) {
+                            checks.push(buildCheck('name', 'Mã đơn', orderId, 'error', `Trùng mã đơn trong file: ${orderId}`));
+                        } else if (existingDocIds.has(orderId)) {
+                            checks.push(buildCheck('name', 'Mã đơn', orderId, 'error', `Đơn hàng ${orderId} đã tồn tại`));
+                        } else {
+                            checks.push(buildCheck('name', 'Mã đơn', orderId, 'ok', 'Mã đơn có thể import'));
+                        }
+
+                        if (!customerName) {
+                            checks.push(buildCheck('phone', 'Khách hàng', phoneRaw, 'error', 'Thiếu tên khách hàng'));
+                        } else if (!/^\d{9,15}$/.test(phone)) {
+                            checks.push(buildCheck('phone', 'Khách hàng', [customerName, phoneRaw].filter(Boolean).join(' / '), 'error', 'SĐT khách hàng cần có 9-15 chữ số'));
+                        } else {
+                            checks.push(buildCheck('phone', 'Khách hàng', `${customerName} / ${phone}`, 'ok', 'Thông tin khách hàng hợp lệ'));
+                        }
+
+                        checks.push(buildCheck(
+                            'items',
+                            'Sản phẩm',
+                            productRaw,
+                            productRaw ? 'ok' : 'error',
+                            productRaw ? 'Có dữ liệu sản phẩm/bảo hành để lưu vào đơn' : 'Thiếu sản phẩm hoặc dòng hàng của đơn cũ',
+                        ));
+
+                        const moneyIssues = [
+                            totalInput.hasValue && !totalInput.isValid ? 'Tổng tiền' : '',
+                            subtotalInput.hasValue && !subtotalInput.isValid ? 'Tạm tính' : '',
+                            discountInput.hasValue && !discountInput.isValid ? 'Giảm giá' : '',
+                        ].filter(Boolean);
+                        checks.push(buildCheck(
+                            'amount',
+                            'Số tiền',
+                            [subtotalInput.raw, discountInput.raw, totalInput.raw].filter(Boolean).join(' / '),
+                            !totalInput.hasValue || moneyIssues.length > 0 ? 'error' : 'ok',
+                            !totalInput.hasValue ? 'Thiếu tổng tiền đơn hàng' : moneyIssues.length > 0 ? `${moneyIssues.join(', ')} không hợp lệ` : 'Số tiền có thể import',
+                        ));
+
+                        const paymentStatus = normalizeOrderPaymentStatus(paymentRaw, methodRaw);
+                        checks.push(buildCheck('payment', 'Thanh toán', [paymentRaw || paymentStatus, methodRaw || normalizePaymentMethod(methodRaw)].filter(Boolean).join(' / '), 'ok', 'Trạng thái thanh toán sẽ được chuẩn hóa'));
+                        checks.push(buildCheck('status', 'Trạng thái', statusRaw || 'Completed', 'ok', `Sẽ lưu trạng thái đơn: ${normalizeOrderStatus(statusRaw)}`));
+
+                        checks.push(buildCheck(
+                            'dates',
+                            'Thời gian',
+                            [formatCheckDate(createdAt), formatCheckDate(completedAt)].filter(Boolean).join(' / '),
+                            createdAt ? 'ok' : 'error',
+                            createdAt ? 'Mốc thời gian lịch sử hợp lệ' : 'Thiếu hoặc sai ngày tạo đơn',
+                        ));
+                        checks.push(buildCheck(
+                            'warranty',
+                            'Bảo hành',
+                            [getValue(row, ['Bảo hành tháng', 'Warranty Months']), formatCheckDate(warrantyExpiresAt)].filter(Boolean).join(' / '),
+                            warrantyExpiresAt || getValue(row, ['Bảo hành tháng', 'Warranty Months']) ? 'ok' : 'warning',
+                            warrantyExpiresAt || getValue(row, ['Bảo hành tháng', 'Warranty Months']) ? 'Có thông tin bảo hành' : 'Thiếu thông tin bảo hành cho dòng hàng',
+                        ));
+
+                        const errors = summarizeChecks(checks, 'error');
+                        const warnings = summarizeChecks(checks, 'warning');
+                        return { rowNum, data: row, errors, warnings, checks, categoryIds: [], category: '' };
+                    }
+
+                    if (mode === 'repair') {
+                        checks.length = 0;
+                        const repairIdRaw = getValue(row, REPAIR_ID_HEADERS);
+                        const repairId = normalizeLegacyImportDocId(repairIdRaw);
+                        const customerName = getValue(row, CUSTOMER_NAME_HEADERS);
+                        const phoneRaw = getValue(row, PHONE_HEADERS);
+                        const phone = normalizeImportPhone(phoneRaw);
+                        const device = getValue(row, ['Thiết bị', 'Dòng máy', 'Device']);
+                        const issuesRaw = getValue(row, ['Lỗi/Bệnh', 'Lỗi', 'Bệnh', 'Issue', 'Issues']);
+                        const partsRaw = getValue(row, ['Linh kiện', 'Parts']);
+                        const statusRaw = getValue(row, ['Trạng thái', 'Status']);
+                        const receivedAt = parseLegacyDate(row, ['Ngày nhận', 'Received At']);
+                        const completedAt = parseLegacyDate(row, ['Ngày hoàn thành', 'Completed At']);
+                        const warrantyExpiresAt = parseLegacyDate(row, ['Ngày hết BH dịch vụ', 'Service Warranty Expires At']);
+                        const amountInput = parseNumberInput(row, ['Tổng tiền', 'Total']);
+                        const partsCostInput = parseNumberInput(row, ['Tiền linh kiện', 'Parts Cost']);
+                        const laborCostInput = parseNumberInput(row, ['Phí sửa chữa', 'Labor Cost']);
+                        const additionalFeesInput = parseNumberInput(row, ['Phí phát sinh', 'Additional Fees']);
+                        const discountInput = parseNumberInput(row, ['Giảm giá', 'Discount']);
+
+                        if (!repairIdRaw) {
+                            checks.push(buildCheck('name', 'Mã phiếu', '', 'error', 'Thiếu mã phiếu sửa chữa từ hệ thống cũ'));
+                        } else if (!repairId) {
+                            checks.push(buildCheck('name', 'Mã phiếu', repairIdRaw, 'error', 'Mã phiếu không hợp lệ để làm ID Firestore'));
+                        } else if (duplicateTargetIdsInFile.has(repairId)) {
+                            checks.push(buildCheck('name', 'Mã phiếu', repairId, 'error', `Trùng mã phiếu trong file: ${repairId}`));
+                        } else if (existingDocIds.has(repairId)) {
+                            checks.push(buildCheck('name', 'Mã phiếu', repairId, 'error', `Phiếu sửa ${repairId} đã tồn tại`));
+                        } else {
+                            checks.push(buildCheck('name', 'Mã phiếu', repairId, 'ok', 'Mã phiếu có thể import'));
+                        }
+
+                        if (!customerName) {
+                            checks.push(buildCheck('phone', 'Khách hàng', phoneRaw, 'error', 'Thiếu tên khách hàng'));
+                        } else if (!/^\d{9,15}$/.test(phone)) {
+                            checks.push(buildCheck('phone', 'Khách hàng', [customerName, phoneRaw].filter(Boolean).join(' / '), 'error', 'SĐT khách hàng cần có 9-15 chữ số'));
+                        } else {
+                            checks.push(buildCheck('phone', 'Khách hàng', `${customerName} / ${phone}`, 'ok', 'Thông tin khách hàng hợp lệ'));
+                        }
+
+                        checks.push(buildCheck('device', 'Thiết bị', device, device ? 'ok' : 'error', device ? 'Có thông tin thiết bị' : 'Thiếu thiết bị cần sửa'));
+                        checks.push(buildCheck('issues', 'Lỗi/Bệnh', issuesRaw, issuesRaw ? 'ok' : 'error', issuesRaw ? 'Có lỗi/bệnh lịch sử' : 'Thiếu lỗi hoặc bệnh của phiếu'));
+
+                        const moneyIssues = [
+                            amountInput.hasValue && !amountInput.isValid ? 'Tổng tiền' : '',
+                            partsCostInput.hasValue && !partsCostInput.isValid ? 'Tiền linh kiện' : '',
+                            laborCostInput.hasValue && !laborCostInput.isValid ? 'Phí sửa chữa' : '',
+                            additionalFeesInput.hasValue && !additionalFeesInput.isValid ? 'Phí phát sinh' : '',
+                            discountInput.hasValue && !discountInput.isValid ? 'Giảm giá' : '',
+                        ].filter(Boolean);
+                        checks.push(buildCheck(
+                            'amount',
+                            'Số tiền',
+                            [partsCostInput.raw, laborCostInput.raw, amountInput.raw].filter(Boolean).join(' / '),
+                            moneyIssues.length > 0 ? 'error' : 'ok',
+                            moneyIssues.length > 0 ? `${moneyIssues.join(', ')} không hợp lệ` : 'Chi phí sửa chữa có thể import',
+                        ));
+                        checks.push(buildCheck('payment', 'Thanh toán', getValue(row, ['Thanh toán', 'Payment Status']) || 'paid', 'ok', 'Trạng thái thanh toán sẽ được chuẩn hóa'));
+                        checks.push(buildCheck('status', 'Trạng thái', statusRaw, statusRaw ? 'ok' : 'error', statusRaw ? 'Giữ nguyên trạng thái phiếu từ Excel' : 'Thiếu trạng thái phiếu'));
+                        checks.push(buildCheck('warranty', 'Bảo hành', [getValue(row, ['Bảo hành dịch vụ tháng']), formatCheckDate(warrantyExpiresAt)].filter(Boolean).join(' / '), warrantyExpiresAt || getValue(row, ['Bảo hành dịch vụ tháng']) ? 'ok' : 'warning', warrantyExpiresAt || getValue(row, ['Bảo hành dịch vụ tháng']) ? 'Có thông tin bảo hành dịch vụ' : 'Thiếu bảo hành dịch vụ'));
+                        checks.push(buildCheck('details', 'Chi tiết', partsRaw || getValue(row, ['Ghi chú kỹ thuật', 'Ghi chú']), partsRaw ? 'ok' : 'warning', partsRaw ? 'Có linh kiện lịch sử' : 'Không có linh kiện, vẫn import được phiếu sửa không thay linh kiện'));
+
+                        checks.push(buildCheck(
+                            'dates',
+                            'Thời gian',
+                            [formatCheckDate(receivedAt), formatCheckDate(completedAt)].filter(Boolean).join(' / '),
+                            receivedAt ? 'ok' : 'error',
+                            receivedAt ? 'Mốc nhận máy hợp lệ' : 'Thiếu hoặc sai ngày nhận máy',
+                        ));
 
                         const errors = summarizeChecks(checks, 'error');
                         const warnings = summarizeChecks(checks, 'warning');
@@ -541,7 +864,7 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
     const importProductLikeRow = async (row: ParsedRow) => {
         const name = getValue(row.data, modeConfig.nameHeaders);
         const category = mode === 'part' ? PART_CATEGORY_LABEL : row.category;
-        if (mode === 'service' || mode === 'customer' || mode === 'supplier') {
+        if (mode === 'service' || mode === 'customer' || mode === 'supplier' || mode === 'order' || mode === 'repair') {
             throw new Error(`${modeConfig.title} không được import bằng luồng sản phẩm.`);
         }
         const productMode = mode;
@@ -758,6 +1081,232 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
         });
     };
 
+    const importLegacyOrderRow = async (row: ParsedRow) => {
+        const orderId = normalizeLegacyImportDocId(getValue(row.data, ORDER_ID_HEADERS));
+        const customerName = getValue(row.data, CUSTOMER_NAME_HEADERS);
+        const phone = normalizeImportPhone(getValue(row.data, PHONE_HEADERS));
+        if (!orderId) throw new Error('Thiếu mã đơn hàng.');
+        if (!phone) throw new Error('Thiếu SĐT khách hàng.');
+
+        const items = parseOrderItems(row.data, orderId);
+        const subtotal = getNumber(row.data, ['Tạm tính', 'Subtotal']) || items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+        const discount = getNumber(row.data, ['Giảm giá', 'Discount']);
+        const total = getNumber(row.data, ['Tổng tiền', 'Total']) || Math.max(0, subtotal - discount);
+        const paymentRaw = getValue(row.data, ['Thanh toán', 'Payment Status']);
+        const methodRaw = getValue(row.data, ['Phương thức', 'Payment Method']);
+        const paymentStatus = normalizeOrderPaymentStatus(paymentRaw, methodRaw);
+        const paymentMethod = normalizePaymentMethod(methodRaw || paymentRaw);
+        const createdAt = parseLegacyDate(row.data, ['Ngày tạo', 'Created At']) || new Date();
+        const completedAt = parseLegacyDate(row.data, ['Ngày hoàn thành', 'Completed At']);
+        const status = normalizeOrderStatus(getValue(row.data, ['Trạng thái', 'Status']));
+        const orderRef = doc(db, 'orders', orderId);
+        const customerRef = doc(db, 'customers', phone);
+        const txRef = paymentStatus === 'debt' ? doc(collection(db, 'customer_transactions')) : null;
+
+        await runTransaction(db, async (transaction) => {
+            const orderSnapshot = await transaction.get(orderRef);
+            const customerSnapshot = await transaction.get(customerRef);
+            if (orderSnapshot.exists()) {
+                throw new Error(`Đơn hàng ${orderId} đã tồn tại.`);
+            }
+
+            const customerData = customerSnapshot.data() as { totalSpent?: number; totalOrders?: number; totalDebt?: number } | undefined;
+            transaction.set(orderRef, {
+                id: orderId,
+                customer_info: {
+                    name: customerName,
+                    phone,
+                    email: getValue(row.data, EMAIL_HEADERS),
+                    address: getValue(row.data, ADDRESS_HEADERS),
+                    note: getValue(row.data, NOTE_HEADERS),
+                },
+                customer: {
+                    name: customerName,
+                    phone,
+                    email: getValue(row.data, EMAIL_HEADERS),
+                    address: getValue(row.data, ADDRESS_HEADERS),
+                    note: getValue(row.data, NOTE_HEADERS),
+                },
+                items,
+                subtotal_amount: subtotal,
+                discount_amount: discount,
+                total_amount: total,
+                status,
+                is_vat_exported: false,
+                payment_method: paymentMethod,
+                paymentStatus,
+                source: 'pos',
+                legacyImport: true,
+                createdBy: user?.uid || '',
+                createdByName: user?.displayName || user?.email || 'Admin',
+                createdAt,
+                updatedAt: completedAt || createdAt,
+                ...(completedAt || status === 'Completed' ? { completedAt: completedAt || createdAt } : {}),
+                paymentHistory: paymentStatus === 'paid'
+                    ? [{ type: 'full', amount: total, timestamp: (completedAt || createdAt).getTime(), note: 'Thanh toán lịch sử từ import Excel' }]
+                    : [],
+                note: getValue(row.data, NOTE_HEADERS),
+            });
+
+            transaction.set(customerRef, {
+                phone,
+                name: customerName || phone,
+                email: getValue(row.data, EMAIL_HEADERS),
+                address: getValue(row.data, ADDRESS_HEADERS),
+                totalSpent: (customerData?.totalSpent || 0) + (paymentStatus === 'paid' ? total : 0),
+                totalOrders: (customerData?.totalOrders || 0) + 1,
+                totalDebt: (customerData?.totalDebt || 0) + (paymentStatus === 'debt' ? total : 0),
+                lastOrderDate: completedAt || createdAt,
+                lastVisit: completedAt || createdAt,
+                updatedAt: serverTimestamp(),
+                ...(customerSnapshot.exists() ? {} : { createdAt: serverTimestamp(), type: 'retail' }),
+            }, { merge: true });
+
+            if (txRef) {
+                transaction.set(txRef, {
+                    customerId: phone,
+                    customerName: customerName || phone,
+                    type: 'DEBT',
+                    amount: total,
+                    orderIds: [orderId],
+                    paymentMethod: 'LEGACY_ORDER_IMPORT',
+                    note: `Công nợ đơn hàng lịch sử ${orderId}`,
+                    createdBy: user?.uid || '',
+                    createdByName: user?.displayName || user?.email || '',
+                    createdAt,
+                });
+            }
+        });
+    };
+
+    const importLegacyRepairRow = async (row: ParsedRow) => {
+        const repairId = normalizeLegacyImportDocId(getValue(row.data, REPAIR_ID_HEADERS));
+        const customerName = getValue(row.data, CUSTOMER_NAME_HEADERS);
+        const phone = normalizeImportPhone(getValue(row.data, PHONE_HEADERS));
+        if (!repairId) throw new Error('Thiếu mã phiếu sửa chữa.');
+        if (!phone) throw new Error('Thiếu SĐT khách hàng.');
+
+        const receivedAt = parseLegacyDate(row.data, ['Ngày nhận', 'Received At']) || new Date();
+        const estimatedReturnAt = parseLegacyDate(row.data, ['Ngày hẹn trả', 'Estimated Return At']);
+        const completedAt = parseLegacyDate(row.data, ['Ngày hoàn thành', 'Completed At']);
+        const serviceWarrantyMonths = getNumber(row.data, ['Bảo hành dịch vụ tháng', 'Service Warranty Months']);
+        const explicitWarrantyExpiresAt = parseLegacyDate(row.data, ['Ngày hết BH dịch vụ', 'Service Warranty Expires At']);
+        const serviceWarrantyExpiresAt = explicitWarrantyExpiresAt || (serviceWarrantyMonths > 0 ? addMonths(completedAt || receivedAt, serviceWarrantyMonths) : null);
+        const parts = parseRepairParts(row.data);
+        const issues = parseRepairIssues(row.data);
+        const partsCost = getNumber(row.data, ['Tiền linh kiện', 'Parts Cost']) || parts.reduce((sum, part) => sum + (Number(part.unitPriceAtUse) || 0) * part.quantity, 0);
+        const laborCost = getNumber(row.data, ['Phí sửa chữa', 'Labor Cost']);
+        const additionalFees = getNumber(row.data, ['Phí phát sinh', 'Additional Fees']);
+        const discountAmount = getNumber(row.data, ['Giảm giá', 'Discount']);
+        const depositAmount = getNumber(row.data, ['Đã cọc', 'Deposit']);
+        const amount = getNumber(row.data, ['Tổng tiền', 'Total']) || Math.max(0, partsCost + laborCost + additionalFees - discountAmount);
+        const paymentStatus = normalizeRepairPaymentStatus(getValue(row.data, ['Thanh toán', 'Payment Status']));
+        const status = getValue(row.data, ['Trạng thái', 'Status']);
+        const repairRef = doc(db, 'repairs', repairId);
+        const customerRef = doc(db, 'customers', phone);
+        const txRef = paymentStatus === 'pay_later' ? doc(collection(db, 'customer_transactions')) : null;
+
+        await runTransaction(db, async (transaction) => {
+            const repairSnapshot = await transaction.get(repairRef);
+            const customerSnapshot = await transaction.get(customerRef);
+            if (repairSnapshot.exists()) {
+                throw new Error(`Phiếu sửa ${repairId} đã tồn tại.`);
+            }
+
+            const customerData = customerSnapshot.data() as { totalSpent?: number; totalRepairs?: number; totalDebt?: number } | undefined;
+            transaction.set(repairRef, {
+                id: repairId,
+                customer: { name: customerName, phone },
+                deviceInfo: {
+                    model: getValue(row.data, ['Thiết bị', 'Dòng máy', 'Device']),
+                    imei: getValue(row.data, ['IMEI/Serial', 'IMEI', 'Serial']),
+                    passcode: getValue(row.data, ['Mật khẩu', 'Passcode']),
+                    color: getValue(row.data, ['Màu máy', 'Color']),
+                    checklist: {},
+                },
+                preRepairMedia: [],
+                postRepairMedia: [],
+                statusTimeline: [{
+                    status,
+                    timestamp: receivedAt.getTime(),
+                    eventType: 'status_transition',
+                    toStatus: status,
+                    actorId: user?.uid || '',
+                    actorName: user?.displayName || user?.email || 'Admin',
+                    actorRole: user?.role || 'admin',
+                    source: 'legacy_excel_import',
+                    note: 'Trạng thái lịch sử từ hệ thống cũ',
+                }],
+                issue: {
+                    description: issues.length > 0 ? issues.map((issue) => issue.label).join(' | ') : getValue(row.data, ['Lỗi/Bệnh', 'Lỗi', 'Bệnh', 'Issue', 'Issues']),
+                    notes: getValue(row.data, ['Ghi chú kỹ thuật', 'Tech Notes']),
+                },
+                issues,
+                parts,
+                timing: {
+                    receivedAt,
+                    ...(estimatedReturnAt ? { estimatedReturnAt } : {}),
+                    ...(completedAt ? { completedAt } : {}),
+                },
+                payment: {
+                    status: paymentStatus,
+                    partsCost,
+                    laborCost,
+                    additionalFees,
+                    discountAmount,
+                    amount,
+                    depositAmount,
+                },
+                paymentHistory: paymentStatus === 'paid' || depositAmount > 0
+                    ? [{
+                        type: paymentStatus === 'paid' ? 'full' : 'deposit',
+                        amount: paymentStatus === 'paid' ? amount : depositAmount,
+                        timestamp: (completedAt || receivedAt).getTime(),
+                        note: 'Thanh toán lịch sử từ import Excel',
+                    }]
+                    : [],
+                staff: {
+                    createdBy: user?.uid || '',
+                    createdByName: user?.displayName || user?.email || 'Admin',
+                    assignedTechnicianName: getValue(row.data, ['KTV', 'Technician']),
+                },
+                status,
+                ticketType: 'repair',
+                legacyImport: true,
+                note: getValue(row.data, NOTE_HEADERS),
+                ...(serviceWarrantyExpiresAt ? { serviceWarrantyExpiresAt: serviceWarrantyExpiresAt.getTime() } : {}),
+                createdAt: receivedAt,
+                updatedAt: completedAt || receivedAt,
+                version: 1,
+            });
+
+            transaction.set(customerRef, {
+                phone,
+                name: customerName || phone,
+                totalSpent: (customerData?.totalSpent || 0) + (paymentStatus === 'paid' ? amount : 0),
+                totalRepairs: (customerData?.totalRepairs || 0) + 1,
+                totalDebt: (customerData?.totalDebt || 0) + (paymentStatus === 'pay_later' ? Math.max(0, amount - depositAmount) : 0),
+                lastVisit: completedAt || receivedAt,
+                updatedAt: serverTimestamp(),
+                ...(customerSnapshot.exists() ? {} : { createdAt: serverTimestamp(), type: 'retail' }),
+            }, { merge: true });
+
+            if (txRef) {
+                transaction.set(txRef, {
+                    customerId: phone,
+                    customerName: customerName || phone,
+                    type: 'DEBT',
+                    amount: Math.max(0, amount - depositAmount),
+                    paymentMethod: 'LEGACY_REPAIR_IMPORT',
+                    note: `Công nợ phiếu sửa lịch sử ${repairId}`,
+                    createdBy: user?.uid || '',
+                    createdByName: user?.displayName || user?.email || '',
+                    createdAt: completedAt || receivedAt,
+                });
+            }
+        });
+    };
+
     const handleImport = async () => {
         if (rows.length === 0) {
             toast.error('Không có dữ liệu để import');
@@ -780,6 +1329,8 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
                 batch.map((row) => {
                     if (mode === 'customer') return importCustomerRow(row);
                     if (mode === 'supplier') return importSupplierRow(row);
+                    if (mode === 'order') return importLegacyOrderRow(row);
+                    if (mode === 'repair') return importLegacyRepairRow(row);
                     if (mode === 'service') return importServiceRow(row);
                     return importProductLikeRow(row);
                 })
@@ -801,6 +1352,10 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
                 await triggerRevalidate(['/admin/customers'], ['customers']);
             } else if (mode === 'supplier') {
                 await triggerRevalidate(['/admin/suppliers'], ['suppliers']);
+            } else if (mode === 'order') {
+                await triggerRevalidate(['/admin/orders', '/admin/customers', '/admin/revenue'], ['orders', 'customers']);
+            } else if (mode === 'repair') {
+                await triggerRevalidate(['/admin/repairs', '/admin/customers', '/admin/revenue'], ['repairs', 'customers']);
             } else {
                 await triggerRevalidate(['/', '/flash-sale', '/search', '/sitemap.xml'], ['products']);
             }

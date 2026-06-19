@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { collection, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
-import { AlertTriangle, Cable, FileSpreadsheet, Image as ImageIcon, Link2, Package, ShieldAlert, Upload, Wrench, Users, Building2 } from 'lucide-react';
+import { AlertTriangle, Building2, Cable, ClipboardList, FileSpreadsheet, Image as ImageIcon, Link2, Package, ShieldAlert, ShoppingBag, Upload, Users, Wrench } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
 import { db } from '@/lib/firebase';
 import ExcelImportModal, { type ExcelImportMode } from '@/components/admin/ExcelImportModal';
@@ -65,6 +65,22 @@ const IMPORT_OPTIONS: ImportOption[] = [
         icon: Building2,
         accent: 'text-teal-600 bg-teal-50 border-teal-200',
         columns: 'tên NCC, sdt, ngân hàng, số tài khoản, hạn thanh toán, công nợ',
+    },
+    {
+        mode: 'order',
+        title: 'Đơn hàng lịch sử',
+        description: 'Import đơn hàng từ hệ thống cũ để giữ khách hàng, doanh thu, bảo hành và công nợ.',
+        icon: ShoppingBag,
+        accent: 'text-indigo-600 bg-indigo-50 border-indigo-200',
+        columns: 'mã đơn, khách hàng, sản phẩm, tổng tiền, thanh toán, bảo hành',
+    },
+    {
+        mode: 'repair',
+        title: 'Phiếu sửa lịch sử',
+        description: 'Import phiếu sửa đang tồn đọng hoặc đã hoàn thành để giữ lịch sử máy và bảo hành.',
+        icon: ClipboardList,
+        accent: 'text-rose-600 bg-rose-50 border-rose-200',
+        columns: 'mã phiếu, thiết bị, lỗi, linh kiện, phí sửa, trạng thái, bảo hành',
     },
 ];
 
