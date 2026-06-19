@@ -96,7 +96,7 @@ Hệ thống Voucher + Discount Stacking Engine + Nhiệm vụ (Missions) để 
 Dọn dẹp kỹ thuật dư thừa phát hiện trong audit.
 
 - [x] <b>ESLint & TypeScript Build Fix:</b> Đã fix triệt để Type error (Next.js strict App Router constraint trên `page.tsx`) và gỡ bỏ code thừa, dọn dẹp các warning `any`, unused vars để `firebase deploy` (với `next build`) thành công 100%.
-- [ ] <b>Firestore Rules:</b> Xóa rule <code>services</code> trùng lặp (line 37 vs line 62)
+- [x] <b>Firestore Rules:</b> Đã xác minh chỉ còn một rule <code>services</code> trong <code>firestore.rules</code>; mục duplicate cũ đã stale.
 - [ ] <b>LazyImage:</b> Quyết định: xóa component orphan hoặc document lý do giữ
 - [ ] <b>SEO Meta:</b> Kiểm tra <code>&lt;title&gt;</code> và <code>meta description</code> trên production domain
 - [x] <b>Hardcode Cleanup:</b> <code>BUG-HARDCODE-001</code> đã merge qua PR #8; còn residual smoke admin có dữ liệu thật, không còn blocker code.
