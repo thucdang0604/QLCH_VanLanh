@@ -574,3 +574,10 @@
 - Change: After staff creates an import proposal from `/admin/parts`, the page now routes to `/admin/inventory?tab=draft` so proposal follow-up happens in the inventory aggregate workspace.
 - Guardrail: Parts catalog creation/editing remains on `/admin/parts`; existing proposal creation logic is reused unchanged.
 - Verification: `eslint src/app/admin/parts/page.tsx`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
+
+### Part 31 - Inventory proposal entry points
+- Covered IDs: UT-20260618-028
+- Files touched: `src/app/admin/inventory/page.tsx`, `src/app/admin/products/page.tsx`, `src/app/admin/parts/page.tsx`
+- Change: `/admin/inventory` now exposes separate proposal actions for retail products and parts. Those links open `/admin/products?createImportProposal=1` or `/admin/parts?createImportProposal=1`, and both catalog pages auto-open the existing import proposal modal.
+- Guardrail: Inventory still owns the aggregate receipt/proposal/order lists; product and part pages only provide the source-specific proposal creation flow.
+- Verification: `eslint src/app/admin/inventory/page.tsx src/app/admin/products/page.tsx src/app/admin/parts/page.tsx`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.

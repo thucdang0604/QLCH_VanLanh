@@ -269,10 +269,16 @@ export default function InventoryPage() {
                     </h1>
                     <p className="text-sm text-gray-500 mt-0.5">Quản lý phiếu nhập, giá vốn bình quân</p>
                 </div>
-                <Link href="/admin/parts"
-                    className="flex items-center gap-2 px-4 py-2.5 bg-orange-500 text-white rounded-xl hover:bg-orange-600 shadow-md shadow-orange-200/50 font-semibold text-sm transition-colors">
-                    <ExternalLink size={18} /> Tạo phiếu nhập mới
-                </Link>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                    <Link href="/admin/products?createImportProposal=1"
+                        className="flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 shadow-md shadow-blue-200/50 font-semibold text-sm transition-colors">
+                        <ExternalLink size={18} /> Đề xuất sản phẩm
+                    </Link>
+                    <Link href="/admin/parts?createImportProposal=1"
+                        className="flex items-center justify-center gap-2 px-4 py-2.5 bg-orange-500 text-white rounded-xl hover:bg-orange-600 shadow-md shadow-orange-200/50 font-semibold text-sm transition-colors">
+                        <ExternalLink size={18} /> Đề xuất linh kiện
+                    </Link>
+                </div>
             </div>
 
             {/* Stats row */}

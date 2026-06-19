@@ -58,6 +58,13 @@ export default function ProductsPage() {
         return () => unsubscribe();
     }, []);
 
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        if (new URLSearchParams(window.location.search).get('createImportProposal') === '1') {
+            setIsCreateReceiptOpen(true);
+        }
+    }, []);
+
     const handleArchive = async (product: Product) => {
         const blockReason = getArchiveBlockReason(product);
         if (blockReason) {

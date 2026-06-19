@@ -104,6 +104,12 @@ export default function PartsPage() {
     // Draft supplier editing state
     const [draftSupplierSearch, setDraftSupplierSearch] = useState('');
     const [draftSupplierActiveKey, setDraftSupplierActiveKey] = useState<string | null>(null);
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        if (new URLSearchParams(window.location.search).get('createImportProposal') === '1') {
+            setIsCreateReceiptOpen(true);
+        }
+    }, []);
     // Fetch suppliers for dropdown
     useEffect(() => {
         const unsub = onSnapshot(
