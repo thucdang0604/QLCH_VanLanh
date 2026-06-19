@@ -532,3 +532,10 @@
 - Change: Rechecked the AI Creator removal. The tracked source no longer contains `/admin/ai-creator`, `AI Creator`, `manage_ai_creator`, or `aiCreator`; the remaining empty local route folder was removed from the workspace.
 - Guardrail: No admin navigation, permission registry, or role preset changes were needed because the tracked code had already been cleaned up.
 - Verification: `rg "manage_ai_creator|aiCreator|ai-creator|AI Creator" src/lib src/app/admin src/components` returned no source matches, `git ls-files src/app/admin/ai-creator` returned no tracked files, and `git diff --check` passed.
+
+### Part 25 - Bank settings require TOTP state
+- Covered IDs: UT-20260618-032
+- Files touched: `src/components/admin/settings/BankIntegrationConfig.tsx`, `src/app/api/admin/bank-config/route.ts`, `src/app/api/admin/bank-config/totp/setup/route.ts`, `src/app/api/admin/bank-config/totp/verify/route.ts`
+- Change: The bank config API now returns `totpEnabled` to the settings UI, so existing Authenticator setup is recognized before editing. The setup/verify APIs reject attempts to overwrite an already-enabled TOTP secret, and the UI requires a verified TOTP token before saving bank/payment config.
+- Guardrail: TOTP secret is still never returned by the read API; existing bank account display and VietQR config fields remain unchanged.
+- Verification: `eslint src/components/admin/settings/BankIntegrationConfig.tsx src/app/api/admin/bank-config/route.ts src/app/api/admin/bank-config/totp/setup/route.ts src/app/api/admin/bank-config/totp/verify/route.ts` passed with existing `<img>` warnings only, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.

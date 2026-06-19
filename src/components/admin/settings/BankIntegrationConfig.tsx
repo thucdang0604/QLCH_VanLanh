@@ -196,6 +196,12 @@ export default function BankIntegrationConfig() {
     }
 
     async function saveConfig() {
+        if (!verifiedToken) {
+            toast.error('Vui lòng xác thực TOTP trước khi lưu cấu hình ngân hàng.');
+            setShowTotpVerify(true);
+            return;
+        }
+
         setIsProcessing(true);
         try {
             const adminToken = await getAuth(app).currentUser?.getIdToken();
@@ -445,6 +451,7 @@ export default function BankIntegrationConfig() {
                                     onClick={() => {
                                         setIsEditing(false);
                                         setEditForm(config);
+                                        setVerifiedToken('');
                                     }}
                                     className="px-4 py-2 border rounded-lg hover:bg-gray-50"
                                 >
