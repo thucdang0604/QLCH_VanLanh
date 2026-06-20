@@ -732,3 +732,10 @@
 - Change: The technician active list and kanban columns now exclude workflow statuses carrying `requirePaymentGate`, which represents the handoff/payment-gate stage where KTV no longer acts. Existing `CUSTOMER_HANDOVER` detection remains as a compatibility fallback.
 - Guardrail: This commit does not change Firestore queries or workflow transitions, so it does not introduce new composite-index requirements. Deeper read reduction belongs with the `/admin/repairs` active/closed query split.
 - Verification: focused ESLint passed for `src/app/admin/technician/page.tsx`; `tsc --noEmit` passed; `git diff --check` passed with Windows CRLF warnings only.
+
+### Part 40 - Add completed repair warranty print action
+- Covered IDs: UT-20260620-002
+- Files touched: `src/features/repairs/RepairTicketBoard.tsx`
+- Change: Closed repair tickets with a valid warranty print template now show an explicit warranty print action on both mobile cards and desktop rows, reusing the existing `openPrint(ticket, 'warranty', warrantyType)` path and receipt settings.
+- Guardrail: No Firestore reads/writes were added. The change only exposes the existing print template action from already-loaded ticket, workflow, category, and receipt-config data.
+- Verification: focused ESLint passed for `src/features/repairs/RepairTicketBoard.tsx`; `tsc --noEmit` passed; `git diff --check` passed with Windows CRLF warnings only.

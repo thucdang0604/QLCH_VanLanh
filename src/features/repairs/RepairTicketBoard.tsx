@@ -98,9 +98,13 @@ export function RepairTicketBoard({
                     const StIcon = Clock; // Fallback
                     const pay = paymentLabels[ticket.payment?.status || 'unpaid'];
                     const warrantyType = getWarrantyTypeForTicket(ticket);
+                    const warrantyConfig = getWarrantyConfigForType(warrantyType);
+                    const canPrintWarranty = Boolean(st?.isTerminal)
+                        && ticket.ticketType !== 'warranty'
+                        && Boolean(warrantyConfig);
                     const canCreateWarranty = isRepairStatus(ticket.status, REPAIR_STATUS.DONE)
                         && ticket.ticketType !== 'warranty'
-                        && (hasActiveWarrantyPart(ticket) || Boolean(getWarrantyConfigForType(warrantyType)));
+                        && (hasActiveWarrantyPart(ticket) || Boolean(warrantyConfig));
 
                     return (
                         <div key={ticket.id} className={`p-4 space-y-3 bg-white hover:bg-gray-50 transition-colors ${ticket.payment?.status === 'unpaid' ? 'bg-red-50/50' : ''}`}>
@@ -194,6 +198,11 @@ export function RepairTicketBoard({
                                     <button onClick={() => setAssignModal({ ticket })} className="flex-1 py-2 bg-blue-50 text-blue-600 text-xs font-medium rounded-lg border border-blue-200 flex items-center justify-center gap-1 active:bg-blue-100">
                                         <User size={14} /> KTV
                                     </button>
+                                    {canPrintWarranty && (
+                                        <button onClick={() => openPrint(ticket, 'warranty', warrantyType)} className="flex-1 py-2 bg-yellow-50 text-yellow-700 text-xs font-semibold rounded-lg border border-yellow-200 flex items-center justify-center gap-1 active:bg-yellow-100">
+                                            <Printer size={14} /> Phiáº¿u BH
+                                        </button>
+                                    )}
                                     {canCreateWarranty && (
                                         <button onClick={() => { setWarrantyModal(ticket); setWarrantySelectedIndexes([]); }} className="w-full py-2 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-semibold rounded-lg flex items-center justify-center gap-1 mt-1">
                                             <AlertCircle size={14} /> Kích hoạt bảo hành
@@ -232,9 +241,13 @@ export function RepairTicketBoard({
                             const StIcon = Clock; // Fallback generic icon
                             const pay = paymentLabels[ticket.payment?.status || 'unpaid'];
                             const warrantyType = getWarrantyTypeForTicket(ticket);
+                            const warrantyConfig = getWarrantyConfigForType(warrantyType);
+                            const canPrintWarranty = Boolean(st?.isTerminal)
+                                && ticket.ticketType !== 'warranty'
+                                && Boolean(warrantyConfig);
                             const canCreateWarranty = isRepairStatus(ticket.status, REPAIR_STATUS.DONE)
                                 && ticket.ticketType !== 'warranty'
-                                && (hasActiveWarrantyPart(ticket) || Boolean(getWarrantyConfigForType(warrantyType)));
+                                && (hasActiveWarrantyPart(ticket) || Boolean(warrantyConfig));
                             return (
                                 <tr key={ticket.id} className={`hover:bg-gray-50/50 transition-colors ${ticket.payment?.status === 'unpaid' ? 'bg-red-50' : ''}`}>
                                     <td className="px-4 py-3 font-mono text-xs text-gray-500">
@@ -341,12 +354,12 @@ export function RepairTicketBoard({
                                                 </button>
                                             )}
                                             {(() => {
-                                                if (!getWarrantyConfigForType(warrantyType)) return null;
+                                                if (!canPrintWarranty) return null;
                                                 return (
                                                     <button onClick={() => openPrint(ticket, 'warranty', warrantyType)}
                                                         className="flex items-center gap-1 px-2 py-1 text-[10px] font-semibold rounded-lg bg-yellow-50 text-yellow-700 border border-yellow-200 hover:bg-yellow-100 transition-colors"
                                                         title="In phiếu bảo hành">
-                                                        In BH
+                                                        <Printer size={12} /> In BH
                                                     </button>
                                                 );
                                             })()}
