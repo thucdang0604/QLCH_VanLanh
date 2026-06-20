@@ -718,3 +718,10 @@
 - Change: The service form now explains how "Liên kết nghiệp vụ" is used by POS discount suggestions, repair intake part suggestions, service warranty/printing, and expected-price hints.
 - Guardrail: No Firestore query or schema change. The linked category fields remain advisory metadata and still do not change stock, workflow, or discount rules automatically.
 - Verification: focused ESLint passed for `src/app/admin/services/page.tsx`; `tsc --noEmit` passed; `git diff --check` passed with Windows CRLF warnings only.
+
+### Part 38 - Remove manual product variant field
+- Covered IDs: UT-20260620-007
+- Files touched: `src/components/admin/UniversalProductModal.tsx`
+- Change: The retail product create/edit modal no longer shows or submits the manual "Gom nhóm Biến thể" / `seriesId` field.
+- Guardrail: Existing `seriesId` values on old products are not deleted during edit because the update payload no longer includes the field. Customer-facing variants continue to derive from category.
+- Verification: focused ESLint passed for `src/components/admin/UniversalProductModal.tsx`; `tsc --noEmit` passed; `git diff --check` passed with Windows CRLF warnings only.
