@@ -64,6 +64,15 @@ function getTimelineTitle(entry: RepairTimelineEntry, workflow: WorkflowNode[]):
     }
 }
 
+function isTechnicianHandoffStatus(status: WorkflowNode | undefined): boolean {
+    return status?.allowedFeatures?.includes('requirePaymentGate') === true;
+}
+
+function isTicketWaitingForCustomerHandoff(ticket: RepairTicket, workflow: WorkflowNode[]): boolean {
+    const status = workflow.find(item => item.id === ticket.status);
+    return isTechnicianHandoffStatus(status) || isRepairStatus(ticket.status, REPAIR_STATUS.CUSTOMER_HANDOVER);
+}
+
 type PartSearchProduct = Product & {
     code?: string;
     model?: string;
@@ -390,7 +399,7 @@ export default function TechnicianPage() {
                 return;
             }
 
-            if (isRepairStatus(ticket.status, REPAIR_STATUS.CUSTOMER_HANDOVER)) {
+            if (isTicketWaitingForCustomerHandoff(ticket, workflow)) {
                 toastWarning('Phiếu đang chờ bàn giao cho khách. Vui lòng liên hệ thu ngân để xử lý.');
                 return;
             }
@@ -431,7 +440,8 @@ export default function TechnicianPage() {
                 return;
             }
 
-            if (isRepairStatus(newStatus, REPAIR_STATUS.CUSTOMER_HANDOVER)) {
+            const targetCfg = workflow.find(s => s.id === newStatus);
+            if (isRepairStatus(newStatus, REPAIR_STATUS.CUSTOMER_HANDOVER) || isTechnicianHandoffStatus(targetCfg)) {
                 const selectedParts = (ticket.parts || []).filter(p => isSelectedRepairPart(p));
                 if (selectedParts.length > 0) {
                     setPartsVerificationModalPayload({ ticketId, newStatus });
@@ -679,6 +689,7 @@ export default function TechnicianPage() {
         const workflow = getWorkflowForTicket(t);
         const st = workflow.find(s => s.id === t.status);
         if (st?.isTerminal) return false;
+        if (isTicketWaitingForCustomerHandoff(t, workflow)) return false;
 
         if (user?.role && user.role !== 'admin' && user?.uid) {
             const isAssigned = t.staff?.assignedTechnician === user.uid;
@@ -703,7 +714,7 @@ export default function TechnicianPage() {
         <div className="p-3 sm:p-4 md:p-6 space-y-4">
             <TechnicianPageHeader
                 activeRepairCount={tickets.filter(ticket => ticket.status === 'dang_sua_chua').length}
-                doneCount={tickets.filter(ticket => isRepairStatus(ticket.status, REPAIR_STATUS.DONE)).length}
+                doneCount={tickets.filter(ticket => isTicketWaitingForCustomerHandoff(ticket, getWorkflowForTicket(ticket))).length}
                 searchQuery={searchQuery}
                 onSearchQueryChange={setSearchQuery}
                 viewMode={viewMode}
@@ -721,7 +732,7 @@ export default function TechnicianPage() {
                         const workflow = getWorkflowForTicket(ticket);
                         const st = workflow.find(s => s.id === ticket.status) || { id: ticket.status, label: ticket.status, color: 'text-gray-700 bg-gray-50 border-gray-200', allowedNext: [] } as WorkflowNode;
                         const currentCfg = workflow.find(s => s.id === ticket.status);
-                        const isTerminal = isRepairStatus(ticket.status, REPAIR_STATUS.CUSTOMER_HANDOVER) || !!currentCfg?.isTerminal;
+                        const isTerminal = isTicketWaitingForCustomerHandoff(ticket, workflow) || !!currentCfg?.isTerminal;
                         const isAssignedToMe = ticket.staff?.assignedTechnician === user?.uid;
                         const isIncomingTransferToMe = ticket.pendingTechnicianTransfer?.toTechnicianId === user?.uid && ticket.pendingTechnicianTransfer?.status === 'pending';
                         const isKtvLocked = user?.role !== 'admin' && (!isAssignedToMe || isIncomingTransferToMe);
@@ -980,7 +991,7 @@ export default function TechnicianPage() {
                 <div className="flex overflow-x-auto pb-4 gap-4 snap-x">
                     {Array.from(new Map(
                         [...dynamicStatuses, ...warrantyStatuses]
-                            .filter(s => !s.isTerminal && s.id !== 'cho_tiep_nhan' && s.id !== 'bh_tiep_nhan')
+                            .filter(s => !s.isTerminal && !isTechnicianHandoffStatus(s) && s.id !== 'cho_tiep_nhan' && s.id !== 'bh_tiep_nhan')
                             .map(s => [s.id, s])
                     ).values()).map(col => {
                         const colTickets = filtered.filter(t => t.status === col.id);
@@ -1001,7 +1012,7 @@ export default function TechnicianPage() {
                                     ) : colTickets.map(ticket => {
                                         const workflow = getWorkflowForTicket(ticket);
                                         const st = workflow.find(s => s.id === ticket.status) as WorkflowNode | undefined;
-                                        const isTerminal = isRepairStatus(ticket.status, REPAIR_STATUS.CUSTOMER_HANDOVER) || !!st?.isTerminal;
+                                        const isTerminal = isTicketWaitingForCustomerHandoff(ticket, workflow) || !!st?.isTerminal;
                                         const isAssignedToMe = ticket.staff?.assignedTechnician === user?.uid;
                                         const isIncomingTransferToMe = ticket.pendingTechnicianTransfer?.toTechnicianId === user?.uid && ticket.pendingTechnicianTransfer?.status === 'pending';
                                         const isKtvLocked = user?.role !== 'admin' && (!isAssignedToMe || isIncomingTransferToMe);

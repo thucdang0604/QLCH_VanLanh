@@ -725,3 +725,10 @@
 - Change: The retail product create/edit modal no longer shows or submits the manual "Gom nhóm Biến thể" / `seriesId` field.
 - Guardrail: Existing `seriesId` values on old products are not deleted during edit because the update payload no longer includes the field. Customer-facing variants continue to derive from category.
 - Verification: focused ESLint passed for `src/components/admin/UniversalProductModal.tsx`; `tsc --noEmit` passed; `git diff --check` passed with Windows CRLF warnings only.
+
+### Part 39 - Hide handoff-ready tickets from technician queue
+- Covered IDs: UT-20260620-005
+- Files touched: `src/app/admin/technician/page.tsx`
+- Change: The technician active list and kanban columns now exclude workflow statuses carrying `requirePaymentGate`, which represents the handoff/payment-gate stage where KTV no longer acts. Existing `CUSTOMER_HANDOVER` detection remains as a compatibility fallback.
+- Guardrail: This commit does not change Firestore queries or workflow transitions, so it does not introduce new composite-index requirements. Deeper read reduction belongs with the `/admin/repairs` active/closed query split.
+- Verification: focused ESLint passed for `src/app/admin/technician/page.tsx`; `tsc --noEmit` passed; `git diff --check` passed with Windows CRLF warnings only.
