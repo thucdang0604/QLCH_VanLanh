@@ -739,3 +739,10 @@
 - Change: Closed repair tickets with a valid warranty print template now show an explicit warranty print action on both mobile cards and desktop rows, reusing the existing `openPrint(ticket, 'warranty', warrantyType)` path and receipt settings.
 - Guardrail: No Firestore reads/writes were added. The change only exposes the existing print template action from already-loaded ticket, workflow, category, and receipt-config data.
 - Verification: focused ESLint passed for `src/features/repairs/RepairTicketBoard.tsx`; `tsc --noEmit` passed; `git diff --check` passed with Windows CRLF warnings only.
+
+### Part 41 - Split repair active and closed queues
+- Covered IDs: UT-20260620-003
+- Files touched: `src/app/admin/repairs/page.tsx`, `src/features/repairs/RepairFilters.tsx`
+- Change: `/admin/repairs` now has separate active/closed tabs. The default active tab listens only to non-terminal workflow statuses when the workflow config is available, while the closed tab loads terminal workflow statuses on demand.
+- Guardrail: Status membership is derived from Firebase repair/warranty workflows, not hardcoded legacy names. If a workflow has too many statuses for Firestore `in`, the query falls back to the existing broad query and still filters client-side.
+- Verification: focused ESLint passed for `src/app/admin/repairs/page.tsx` and `src/features/repairs/RepairFilters.tsx`; `tsc --noEmit` passed; `git diff --check` passed with Windows CRLF warnings only.

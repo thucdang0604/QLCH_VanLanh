@@ -5,7 +5,7 @@ import { Loader2 } from 'lucide-react';
 import {
     collection, query, where, getDocs, updateDoc,
     doc, serverTimestamp, orderBy, onSnapshot, Timestamp, getDoc,
-    limit, startAfter, DocumentSnapshot, runTransaction
+    limit, startAfter, DocumentSnapshot, runTransaction, type QueryConstraint
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
@@ -46,6 +46,49 @@ const paymentLabels: Record<PaymentStatus, { label: string; color: string }> = {
     warranty: { label: 'Bảo hành', color: 'text-blue-600 bg-blue-50' },
 };
 const formatPrice = formatRepairPrice;
+const REPAIRS_PAGE_SIZE = 50;
+type RepairListTab = 'active' | 'closed';
+
+function getWorkflowForTicketFromLists(ticket: RepairTicket, repairStatuses: WorkflowNode[], warrantyStatuses: WorkflowNode[]): WorkflowNode[] {
+    return ticket.ticketType === 'warranty' ? warrantyStatuses : repairStatuses;
+}
+
+function isTerminalTicket(ticket: RepairTicket, repairStatuses: WorkflowNode[], warrantyStatuses: WorkflowNode[]): boolean {
+    const workflow = getWorkflowForTicketFromLists(ticket, repairStatuses, warrantyStatuses);
+    return workflow.find(status => status.id === ticket.status)?.isTerminal === true;
+}
+
+function getRepairScopeStatusIds(tab: RepairListTab, repairStatuses: WorkflowNode[], warrantyStatuses: WorkflowNode[]): string[] {
+    const shouldUseTerminal = tab === 'closed';
+    const ids = [...repairStatuses, ...warrantyStatuses]
+        .filter(status => status.isTerminal === shouldUseTerminal)
+        .map(status => status.id)
+        .filter(Boolean);
+
+    return Array.from(new Set(ids));
+}
+
+function getRepairCreatedAtMillis(ticket: RepairTicket): number {
+    const createdAt = ticket.createdAt as unknown as Timestamp | number | undefined;
+    if (typeof createdAt === 'number') return createdAt;
+    return createdAt?.toMillis?.() || 0;
+}
+
+function sortRepairTicketsByCreatedAtDesc(ticketsToSort: RepairTicket[]): RepairTicket[] {
+    return [...ticketsToSort].sort((a, b) => getRepairCreatedAtMillis(b) - getRepairCreatedAtMillis(a));
+}
+
+function buildRepairListConstraints(statusIds: string[], cursor?: DocumentSnapshot | null): QueryConstraint[] {
+    const constraints: QueryConstraint[] = [];
+    if (statusIds.length > 0 && statusIds.length <= 30) {
+        constraints.push(where('status', 'in', statusIds));
+    } else {
+        constraints.push(orderBy('createdAt', 'desc'));
+    }
+    if (cursor) constraints.push(startAfter(cursor));
+    constraints.push(limit(REPAIRS_PAGE_SIZE));
+    return constraints;
+}
 
 export default function RepairPage() {
     const { user } = useAuth();
@@ -69,6 +112,7 @@ export default function RepairPage() {
     const [statusFilter, setStatusFilter] = useState<string>('all');
     const [techFilter, setTechFilter] = useState<string>('all');
     const [ticketTypeFilter, setTicketTypeFilter] = useState<'all' | 'repair' | 'warranty'>('all');
+    const [repairListTab, setRepairListTab] = useState<RepairListTab>('active');
     const [showModal, setShowModal] = useState(false);
     const [editingTicket, setEditingTicket] = useState<RepairTicket | null>(null);
     const [printMode, setPrintMode] = useState<'receipt' | 'invoice' | 'warranty' | null>(null);
@@ -170,9 +214,9 @@ export default function RepairPage() {
 
     const [dynamicStatuses, setDynamicStatuses] = useState<WorkflowNode[]>([]);
     const [warrantyStatuses, setWarrantyStatuses] = useState<WorkflowNode[]>([]);
-    const [, setStatusLoading] = useState(true);
+    const [statusConfigLoaded, setStatusConfigLoaded] = useState(false);
     const getWorkflowForTicket = (ticket: RepairTicket): WorkflowNode[] => {
-        return ticket.ticketType === 'warranty' ? warrantyStatuses : dynamicStatuses;
+        return getWorkflowForTicketFromLists(ticket, dynamicStatuses, warrantyStatuses);
     };
 
     const getWarrantyTypeForTicket = (ticket: RepairTicket): WarrantyPrintType | null => {
@@ -192,47 +236,80 @@ export default function RepairPage() {
         return type && receiptConfig ? receiptConfig[type] : undefined;
     };
     useEffect(() => {
-        const q = query(collection(db, 'repairs'), orderBy('createdAt', 'desc'), limit(50));
-        const unsubTickets = onSnapshot(q, (snap) => {
-            setTickets(snap.docs.map(d => ({ id: d.id, ...d.data() } as RepairTicket)));
-            setLastDoc(snap.docs[snap.docs.length - 1] || null);
-            setHasMore(snap.docs.length === 50);
-            setLoading(false);
-        }, (err) => {
-            console.error('Repairs listener error:', err);
-            setLoading(false);
-        });
         const unsubStatuses = onSnapshot(doc(db, 'system_config', 'repairs'), (docSnap) => {
             if (docSnap.exists()) {
                 const data = docSnap.data();
                 setDynamicStatuses(data.repairStatuses ?? data.statuses ?? []);
                 setWarrantyStatuses(data.warrantyStatuses ?? []);
             }
-            setStatusLoading(false);
+            setStatusConfigLoaded(true);
+        }, (err) => {
+            console.error('Repair workflow listener error:', err);
+            setStatusConfigLoaded(true);
         });
         getDoc(doc(db, 'system_config', 'receipt')).then(snap => {
             if (snap.exists()) setReceiptConfig(snap.data() as ReceiptConfig);
         }).catch(console.error);
         return () => {
-            unsubTickets();
             unsubStatuses();
         };
     }, []);
+
+    useEffect(() => {
+        if (!statusConfigLoaded) return;
+
+        const statusIds = getRepairScopeStatusIds(repairListTab, dynamicStatuses, warrantyStatuses);
+        const hasWorkflowStatuses = dynamicStatuses.length + warrantyStatuses.length > 0;
+        if (repairListTab === 'closed' && hasWorkflowStatuses && statusIds.length === 0) {
+            setTickets([]);
+            setLastDoc(null);
+            setHasMore(false);
+            setLoading(false);
+            return;
+        }
+
+        setLoading(true);
+        setTickets([]);
+        setLastDoc(null);
+        const q = query(collection(db, 'repairs'), ...buildRepairListConstraints(statusIds));
+        const unsubTickets = onSnapshot(q, (snap) => {
+            const scopedTickets = sortRepairTicketsByCreatedAtDesc(snap.docs
+                .map(d => ({ id: d.id, ...d.data() } as RepairTicket))
+                .filter(ticket => repairListTab === 'closed'
+                    ? isTerminalTicket(ticket, dynamicStatuses, warrantyStatuses)
+                    : !isTerminalTicket(ticket, dynamicStatuses, warrantyStatuses)));
+            setTickets(scopedTickets);
+            setLastDoc(snap.docs[snap.docs.length - 1] || null);
+            setHasMore(snap.docs.length === REPAIRS_PAGE_SIZE);
+            setLoading(false);
+        }, (err) => {
+            console.error('Repairs listener error:', err);
+            setLoading(false);
+        });
+
+        return () => unsubTickets();
+    }, [dynamicStatuses, repairListTab, statusConfigLoaded, warrantyStatuses]);
+
     const loadMoreData = async () => {
         if (!lastDoc || !hasMore) return;
         setLoading(true);
-        const q = query(collection(db, 'repairs'), orderBy('createdAt', 'desc'), startAfter(lastDoc), limit(50));
+        const statusIds = getRepairScopeStatusIds(repairListTab, dynamicStatuses, warrantyStatuses);
+        const q = query(collection(db, 'repairs'), ...buildRepairListConstraints(statusIds, lastDoc));
         const snap = await getDocs(q);
 
         if (!snap.empty) {
-            const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as RepairTicket));
+            const data = snap.docs
+                .map(d => ({ id: d.id, ...d.data() } as RepairTicket))
+                .filter(ticket => repairListTab === 'closed'
+                    ? isTerminalTicket(ticket, dynamicStatuses, warrantyStatuses)
+                    : !isTerminalTicket(ticket, dynamicStatuses, warrantyStatuses));
             setTickets(prev => {
                 const existingIds = new Set(prev.map(p => p.id));
                 const newItems = data.filter(d => !existingIds.has(d.id));
-                return [...prev, ...newItems];
+                return sortRepairTicketsByCreatedAtDesc([...prev, ...newItems]);
             });
             setLastDoc(snap.docs[snap.docs.length - 1]);
-            setHasMore(snap.docs.length === 50);
+            setHasMore(snap.docs.length === REPAIRS_PAGE_SIZE);
         } else {
             setHasMore(false);
         }
@@ -340,8 +417,7 @@ export default function RepairPage() {
         })();
     }, [searchParams, services, user?.uid]);
     const isTerminal = (ticket: RepairTicket) => {
-        const workflow = getWorkflowForTicket(ticket);
-        return workflow.find(s => s.id === ticket.status)?.isTerminal ?? false;
+        return isTerminalTicket(ticket, dynamicStatuses, warrantyStatuses);
     };
     const stats = {
         total: tickets.length,
@@ -361,10 +437,11 @@ export default function RepairPage() {
         const matchStatus = statusFilter === 'all' || t.status === statusFilter;
         const matchTech = techFilter === 'all' || t.staff?.assignedTechnician === techFilter;
         const matchType = ticketTypeFilter === 'all' || (ticketTypeFilter === 'warranty' ? t.ticketType === 'warranty' : t.ticketType !== 'warranty');
-        return matchSearch && matchStatus && matchTech && matchType;
+        const matchScope = repairListTab === 'closed' ? isTerminal(t) : !isTerminal(t);
+        return matchSearch && matchStatus && matchTech && matchType && matchScope;
     });
     const { paginatedData: paginatedTickets, currentPage, totalPages, pageSize, totalFiltered, setPage, setPageSize, resetPage } = useClientPagination(filtered, 20);
-    useEffect(() => { resetPage(); }, [searchTerm, statusFilter, techFilter, ticketTypeFilter, resetPage]);
+    useEffect(() => { resetPage(); }, [repairListTab, searchTerm, statusFilter, techFilter, ticketTypeFilter, resetPage]);
     const handleQuickStatus = async (ticket: RepairTicket, nextStatus: string) => {
         const workflow = getWorkflowForTicket(ticket);
         const currentCfg = workflow.find(s => s.id === ticket.status);
@@ -972,6 +1049,27 @@ export default function RepairPage() {
         <div className="space-y-6">
             <RepairPageHeader onCreate={() => handleOpenModal()} />
             <RepairStatsGrid stats={stats} />
+            <div className="flex flex-wrap items-center gap-2 print:hidden">
+                {[
+                    { id: 'active' as const, label: 'Phi\u1ebfu \u0111ang x\u1eed l\u00fd' },
+                    { id: 'closed' as const, label: 'Phi\u1ebfu \u0111\u00e3 \u0111\u00f3ng' },
+                ].map(tab => (
+                    <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => {
+                            setRepairListTab(tab.id);
+                            setStatusFilter('all');
+                        }}
+                        className={`h-9 rounded-lg border px-3 text-sm font-semibold transition-colors ${repairListTab === tab.id
+                            ? 'border-orange-300 bg-orange-50 text-orange-700'
+                            : 'border-gray-200 bg-white text-gray-600 hover:border-orange-200 hover:text-orange-600'
+                        }`}
+                    >
+                        {tab.label}
+                    </button>
+                ))}
+            </div>
             <RepairFilters
                 searchTerm={searchTerm}
                 onSearchTermChange={setSearchTerm}
@@ -985,6 +1083,7 @@ export default function RepairPage() {
                 }}
                 statusFilter={statusFilter}
                 onStatusFilterChange={setStatusFilter}
+                repairListTab={repairListTab}
                 techFilter={techFilter}
                 onTechFilterChange={setTechFilter}
                 dynamicStatuses={dynamicStatuses}

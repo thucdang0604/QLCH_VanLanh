@@ -2,6 +2,7 @@ import { Loader2, Search } from 'lucide-react';
 import type { WorkflowNode } from '@/lib/types';
 
 export type RepairTicketTypeFilter = 'all' | 'repair' | 'warranty';
+type RepairListTab = 'active' | 'closed';
 
 interface RepairFiltersProps {
     searchTerm: string;
@@ -13,6 +14,7 @@ interface RepairFiltersProps {
     onTicketTypeFilterChange: (value: RepairTicketTypeFilter) => void;
     statusFilter: string;
     onStatusFilterChange: (value: string) => void;
+    repairListTab: RepairListTab;
     techFilter: string;
     onTechFilterChange: (value: string) => void;
     dynamicStatuses: WorkflowNode[];
@@ -30,18 +32,22 @@ export function RepairFilters({
     onTicketTypeFilterChange,
     statusFilter,
     onStatusFilterChange,
+    repairListTab,
     techFilter,
     onTechFilterChange,
     dynamicStatuses,
     warrantyStatuses,
     staffs,
 }: RepairFiltersProps) {
-    const statusOptions =
-        ticketTypeFilter === 'all'
-            ? dynamicStatuses
-            : ticketTypeFilter === 'warranty'
-                ? warrantyStatuses
-                : dynamicStatuses;
+    const baseStatusOptions =
+        ticketTypeFilter === 'warranty'
+            ? warrantyStatuses
+            : ticketTypeFilter === 'repair'
+                ? dynamicStatuses
+                : [...dynamicStatuses, ...warrantyStatuses.filter(status => !dynamicStatuses.some(item => item.id === status.id))];
+    const statusOptions = baseStatusOptions.filter(status =>
+        repairListTab === 'closed' ? status.isTerminal === true : status.isTerminal !== true
+    );
 
     return (
         <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 grid grid-cols-1 md:grid-cols-5 gap-4 print:hidden">
