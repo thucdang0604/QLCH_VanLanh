@@ -85,9 +85,10 @@
         "Collect user-tested errors before analysis or implementation.",
         "Keep failure families separate until root cause is proven.",
         "User confirmed current intake is complete; analysis grouped defects by root cause and dependency order.",
-        "Do not implement fixes until the analysis phase is approved."
+        "Do not implement fixes until the analysis phase is approved.",
+        "Batch 4 captures post-code admin performance issues focused on reducing Firebase reads/writes and smoother dialogs."
       ],
-      "updatedAt": "2026-06-18T02:10:00.000+07:00"
+      "updatedAt": "2026-06-20T00:00:00.000+07:00"
     },
     {
       "id": "plan-firebase-cost-performance-20260617",

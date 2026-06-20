@@ -618,3 +618,89 @@
 - Change: the accessory/service discount rule modal now reads service records with `linkedProductCategoryIds`. When admins choose a service taxonomy category, the modal shows matching service suggestions; clicking a suggestion fills the target product/accessory category and optional tags.
 - Guardrail: this only improves rule authoring. POS discount calculation remains governed by saved `accessory_discount_rules`; no automatic rule is created from a service.
 - Verification: focused ESLint passed for `src/app/admin/vouchers/DiscountRulesTab.tsx`; `tsc --noEmit` passed.
+
+## Batch 4 - Post-Code QA / Admin Performance Focus - 2026-06-20
+
+### Scope note
+- Reporter focus: reduce Firebase read/write volume, improve perceived speed, and make popups, dialogs, and confirmation surfaces appear smoothly.
+- Performance guardrail: prefer bounded queries, active/closed tab separation, lazy detail loading, and server/API writes only when the action actually changes business state.
+- Workflow guardrail: repair and technician visibility must use workflow config from Firebase, especially terminal nodes and the handoff-ready state, not hardcoded status strings.
+
+#### UT-20260620-001 - Admin repair tickets should not expose delete action
+- Reporter note: `admin/repairs`: loại bỏ phần "xoá phiếu" với các đơn sửa chữa khi sử dụng ID có role `admin`.
+- Page/route: `/admin/repairs`
+- Expected result: Admin không còn thấy hoặc dùng được thao tác xóa phiếu sửa chữa; phiếu sửa nên được đóng/hủy theo workflow hoặc trạng thái nghiệp vụ thay vì delete document.
+- Actual result: UI hiện vẫn có phần xóa phiếu cho admin.
+- Initial bucket: repair destructive action removal, write reduction, auditability
+- Status: open
+
+#### UT-20260620-002 - Completed repair handover needs warranty print
+- Reporter note: Hiện có in "biên nhận" khi nhận máy, khi trả máy chưa có in "phiếu bảo hành" cho đơn sửa chữa đã hoàn tất theo cấu hình đã có trong cài đặt in.
+- Page/route: `/admin/repairs`
+- Expected result: Khi phiếu sửa đã hoàn tất/bàn giao, admin có thể in phiếu bảo hành theo cấu hình in hiện có, gồm linh kiện/dịch vụ, thời hạn bảo hành, khách hàng, thiết bị, IMEI và điều khoản.
+- Actual result: Luồng nhận máy có biên nhận, nhưng luồng trả máy/hoàn tất chưa có phiếu bảo hành.
+- Initial bucket: repair printing, warranty handover
+- Status: open
+
+#### UT-20260620-003 - Terminal repair tickets should move to a separate tab to reduce reads
+- Reporter note: Đơn đã chuyển đến trạng thái được gắn cờ terminal theo workflow sửa chữa cần chuyển sang tab riêng trong cùng trang để khi bấm vào xem chỉ tải những đơn cần thao tác; phiếu đã đóng chuyển sang tab khác để giảm lượt read Firebase.
+- Page/route: `/admin/repairs`
+- Expected result: Tab chính chỉ query/load phiếu đang cần thao tác. Phiếu terminal/đã đóng nằm trong tab riêng, query theo nhu cầu và có pagination/limit.
+- Actual result: Danh sách hiện có nguy cơ tải cả phiếu đang thao tác lẫn phiếu đã đóng trong cùng luồng.
+- Initial bucket: Firebase read optimization, repair active/closed split, workflow terminal filtering
+- Status: open
+
+#### UT-20260620-004 - Repair issue detail needs multiple service mappings and expected price suggestions
+- Reporter note: Một máy có thể vừa thay màn vừa thay main; nhóm dịch vụ không thể chỉ chọn một dịch vụ. Nếu nhập bệnh bên dưới và mỗi bệnh gợi ý nhóm dịch vụ, nhiều bệnh sẽ chọn được nhiều nhóm dịch vụ. Tốt hơn nữa là dựa theo dịch vụ đang có để gợi ý giá dự kiến.
+- Page/route: `/admin/repairs`
+- Expected result: Mỗi issue/bệnh trong phiếu sửa có thể chọn service/category riêng, nhiều issue có nhiều nhóm dịch vụ khác nhau, và importer/editor gợi ý giá dự kiến từ service catalog khi phù hợp.
+- Actual result: Ticket-level service group still does not fully represent multi-issue repairs like screen + main.
+- Initial bucket: repair intake model, services integration, pricing suggestion
+- Status: open
+
+#### UT-20260620-005 - Technician queue should hide tickets after handoff-ready workflow state
+- Reporter note: `admin/technician`: danh sách hiển thị cần ẩn bớt các phiếu khi đã đến trạng thái "chờ bàn giao khách" theo workflow sửa chữa Firebase vì từ trạng thái này KTV đã không còn thao tác tiếp nữa.
+- Page/route: `/admin/technician`
+- Expected result: Technician active queue excludes tickets at the workflow node equivalent to "chờ bàn giao khách"; those tickets remain available to admin/front desk handover views.
+- Actual result: KTV vẫn thấy các phiếu không còn thao tác kỹ thuật, gây tốn đọc và nhiễu danh sách.
+- Initial bucket: technician read optimization, workflow-aware queue filter
+- Status: open
+
+#### UT-20260620-006 - Services "Liên kết nghiệp vụ" needs clearer explanation and usable UX
+- Reporter note: `admin/services`: "Liên kết nghiệp vụ" cách thức hoạt động như thế nào chưa hiểu và không biết áp dụng thế nào.
+- Page/route: `/admin/services`
+- Expected result: UI giải thích ngắn gọn và thể hiện rõ liên kết nghiệp vụ dùng cho đâu: gợi ý phụ kiện/sản phẩm ở POS, gợi ý linh kiện/nhóm dịch vụ khi tạo phiếu sửa, rule giảm giá, bảo hành/in ấn.
+- Actual result: Chức năng có metadata nhưng ý nghĩa vận hành chưa rõ với admin.
+- Initial bucket: services UX, business linkage explanation
+- Status: open
+
+#### UT-20260620-007 - Product create/edit forms should remove manual variant config
+- Reporter note: `admin/products`: "Gom nhóm Biến thể" đang tự động gom theo danh mục rồi thì xóa phần cấu hình biến thể ở cuối các phiếu tạo và sửa sản phẩm.
+- Page/route: `/admin/products`
+- Expected result: Product create/edit modal no longer shows manual variant grouping fields; category remains the grouping source.
+- Actual result: Manual variant configuration still appears inside product create/edit flow.
+- Initial bucket: product variant UX cleanup, category-derived variants
+- Status: open
+
+#### UT-20260620-008 - Parts proposal and ordered logic should move fully to inventory
+- Reporter note: `admin/parts`: trang đang có các logic trong tab "đề xuất nhập hàng" và "đã đặt hàng"; cần chuyển toàn bộ logic này đến `admin/inventory`, giữ trang parts chỉ để xem danh sách linh kiện. Đây là di chuyển logic, không phải xóa logic.
+- Page/route: `/admin/parts`, `/admin/inventory`
+- Expected result: `/admin/parts` chỉ còn danh sách/catalog linh kiện và thao tác liên quan catalog. Proposal/ordered receipt lists and actions live in `/admin/inventory`.
+- Actual result: Parts still carries proposal/ordered tabs or logic that should now belong to inventory.
+- Initial bucket: parts/inventory boundary refactor, read reduction by page ownership
+- Status: open
+
+#### UT-20260620-009 - Suppliers page should match customers page richness and interaction model
+- Reporter note: `admin/suppliers`: làm giao diện trang NCC giống với `admin/customers`, các chức năng và lượng thông tin hiển thị tương tự.
+- Page/route: `/admin/suppliers`, reference `/admin/customers`
+- Expected result: Suppliers page has customer-like profile density and interactions: richer list columns, detail drawer/modal, transactions/history, tags, notes, contact/payment info, search/filter, and lazy-loaded heavy details.
+- Actual result: Supplier page is still thinner than customer CRM despite added fields.
+- Initial bucket: suppliers CRM parity, UI consistency, lazy detail loading
+- Status: open
+
+### Batch 4 Preliminary Grouping
+- P0 read reduction: split `/admin/repairs` into active vs terminal tabs and filter `/admin/technician` queue by workflow state.
+- P1 workflow UX: remove repair delete, add completed repair warranty print, keep terminal/handoff behavior workflow-config driven.
+- P1 data model: extend repair issue service mapping to support multi-service repairs and service-catalog price suggestions.
+- P2 module boundary cleanup: move parts proposal/ordered logic fully to inventory and remove product manual variant fields.
+- P2 admin clarity: explain services business links and bring suppliers UI closer to customer CRM with lazy-loaded detail surfaces.
