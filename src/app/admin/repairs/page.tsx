@@ -4,7 +4,7 @@ import { useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import {
     collection, query, where, getDocs, updateDoc,
-    doc, serverTimestamp, orderBy, deleteDoc, onSnapshot, Timestamp, getDoc,
+    doc, serverTimestamp, orderBy, onSnapshot, Timestamp, getDoc,
     limit, startAfter, DocumentSnapshot, runTransaction
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
@@ -943,10 +943,6 @@ export default function RepairPage() {
             toastError(err instanceof Error ? err.message : 'Có lỗi xảy ra!');
         }
     };
-    const handleDelete = async (id: string) => {
-        if (!confirm('Xóa phiếu này?')) return;
-        try { await deleteDoc(doc(db, 'repairs', id)); } catch (e) { console.error(e); }
-    };
     const openPrint = (ticket: RepairTicket, mode: 'receipt' | 'invoice' | 'warranty', warrantyType: WarrantyPrintType | null = null) => {
         if (mode === 'warranty' && !getWarrantyConfigForType(warrantyType)) {
             toastWarning('Danh mục này chưa có mẫu phiếu bảo hành khả dụng.');
@@ -1059,7 +1055,6 @@ export default function RepairPage() {
                 paymentLabels={paymentLabels}
                 onClose={() => setShowModal(false)}
                 onSubmit={handleSubmit}
-                onDelete={handleDelete}
             />
             <RepairPrintTemplates
                 ticket={printTicket}

@@ -704,3 +704,10 @@
 - P1 data model: extend repair issue service mapping to support multi-service repairs and service-catalog price suggestions.
 - P2 module boundary cleanup: move parts proposal/ordered logic fully to inventory and remove product manual variant fields.
 - P2 admin clarity: explain services business links and bring suppliers UI closer to customer CRM with lazy-loaded detail surfaces.
+
+### Part 36 - Remove repair ticket delete action
+- Covered IDs: UT-20260620-001
+- Files touched: `src/app/admin/repairs/page.tsx`, `src/features/repairs/RepairEditorModal.tsx`
+- Change: `/admin/repairs` no longer imports or calls `deleteDoc` for repair tickets, and the repair editor modal no longer renders the destructive "Xóa phiếu" action for admin users.
+- Guardrail: This removes only whole-ticket deletion. Existing form-level remove actions for issue rows, media, or pattern input remain untouched.
+- Verification: focused ESLint passed for `src/app/admin/repairs/page.tsx` and `src/features/repairs/RepairEditorModal.tsx`; `tsc --noEmit` passed; `git diff --check` passed with Windows CRLF warnings only.

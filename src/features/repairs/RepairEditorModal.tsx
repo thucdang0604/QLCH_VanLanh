@@ -69,7 +69,6 @@ interface RepairEditorModalProps {
     paymentLabels: Record<PaymentStatus, { label: string; color: string }>;
     onClose: () => void;
     onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-    onDelete: (id: string) => void;
 }
 
 export function RepairEditorModal({
@@ -89,7 +88,6 @@ export function RepairEditorModal({
     paymentLabels,
     onClose,
     onSubmit,
-    onDelete,
 }: RepairEditorModalProps) {
     const selectedStatus = dynamicStatuses.find(s => s.id === formData.status);
     const { config } = useConfig();
@@ -468,12 +466,6 @@ export function RepairEditorModal({
                                 </div>
                             </fieldset>
                             <div className="flex justify-end gap-3 pt-4 border-t sticky bottom-0 bg-white pb-2">
-                                {editingTicket && (
-                                    <button type="button" title="Xóa phiếu" onClick={() => onDelete(editingTicket.id)}
-                                        className="mr-auto px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg">
-                                        Xóa phiếu
-                                    </button>
-                                )}
                                 <button type="button" title="Hủy bỏ" onClick={() => onClose()}
                                     className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200">Hủy bỏ</button>
                                 <button type="submit" title="Lưu phiếu"
