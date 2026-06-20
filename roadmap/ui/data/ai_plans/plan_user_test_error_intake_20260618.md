@@ -711,3 +711,10 @@
 - Change: `/admin/repairs` no longer imports or calls `deleteDoc` for repair tickets, and the repair editor modal no longer renders the destructive "Xóa phiếu" action for admin users.
 - Guardrail: This removes only whole-ticket deletion. Existing form-level remove actions for issue rows, media, or pattern input remain untouched.
 - Verification: focused ESLint passed for `src/app/admin/repairs/page.tsx` and `src/features/repairs/RepairEditorModal.tsx`; `tsc --noEmit` passed; `git diff --check` passed with Windows CRLF warnings only.
+
+### Part 37 - Clarify service business links
+- Covered IDs: UT-20260620-006
+- Files touched: `src/app/admin/services/page.tsx`
+- Change: The service form now explains how "Liên kết nghiệp vụ" is used by POS discount suggestions, repair intake part suggestions, service warranty/printing, and expected-price hints.
+- Guardrail: No Firestore query or schema change. The linked category fields remain advisory metadata and still do not change stock, workflow, or discount rules automatically.
+- Verification: focused ESLint passed for `src/app/admin/services/page.tsx`; `tsc --noEmit` passed; `git diff --check` passed with Windows CRLF warnings only.

@@ -645,8 +645,22 @@ function ServiceModal({
                     <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-4">
                         <p className="text-sm font-semibold text-blue-900">Liên kết nghiệp vụ</p>
                         <p className="mt-1 text-xs text-blue-700">
-                            Dữ liệu này dùng làm gợi ý cho POS giảm giá mua kèm và luồng sửa chữa. Không thay đổi tồn kho hay workflow.
+                            Đây là dữ liệu gợi ý dùng lại cho các luồng khác. Không tự trừ tồn kho, không tự đổi workflow và không tự tạo khuyến mãi.
                         </p>
+                        <div className="mt-3 grid gap-2 text-xs text-blue-900 sm:grid-cols-2">
+                            <div className="rounded-lg border border-blue-100 bg-white/80 p-2">
+                                <span className="font-semibold">POS / giảm giá:</span> nhóm sản phẩm bán kèm giúp rule voucher biết dịch vụ này nên gợi ý phụ kiện nào.
+                            </div>
+                            <div className="rounded-lg border border-blue-100 bg-white/80 p-2">
+                                <span className="font-semibold">Phiếu sửa:</span> nhóm linh kiện giúp nhân viên/KTV có gợi ý linh kiện khi nhập bệnh.
+                            </div>
+                            <div className="rounded-lg border border-blue-100 bg-white/80 p-2">
+                                <span className="font-semibold">Bảo hành:</span> danh mục dịch vụ vẫn là nguồn lấy cấu hình thời hạn và mẫu phiếu bảo hành.
+                            </div>
+                            <div className="rounded-lg border border-blue-100 bg-white/80 p-2">
+                                <span className="font-semibold">Giá dự kiến:</span> giá dịch vụ dùng làm tham khảo khi tạo chi tiết sửa chữa, không khóa giá cuối.
+                            </div>
+                        </div>
                         <div className="mt-3 space-y-3">
                             <div>
                                 <label className="block text-xs font-medium text-gray-600 mb-1">Nhóm sản phẩm/phụ kiện bán kèm</label>
