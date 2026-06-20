@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import {
     Archive,
     Plus,
@@ -455,32 +456,26 @@ export default function PartsPage() {
                     <Settings size={16} />
                     Danh sách Linh Kiện
                 </button>
-                <button
-                    onClick={() => setActiveTab('proposals')}
-                    className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium text-sm transition-all ${activeTab === 'proposals'
-                        ? 'bg-white text-orange-600 shadow-sm'
-                        : 'text-gray-500 hover:text-gray-700'
-                        }`}
+                <Link
+                    href="/admin/inventory?tab=draft"
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium text-sm text-gray-500 hover:text-gray-700 transition-all"
                 >
                     <PackagePlus size={16} />
                     Đề xuất Nhập Hàng
                     {drafts.length > 0 && (
                         <span className="bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">{drafts.length}</span>
                     )}
-                </button>
-                <button
-                    onClick={() => setActiveTab('ordered')}
-                    className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium text-sm transition-all ${activeTab === 'ordered'
-                        ? 'bg-white text-orange-600 shadow-sm'
-                        : 'text-gray-500 hover:text-gray-700'
-                        }`}
+                </Link>
+                <Link
+                    href="/admin/inventory?tab=ordered"
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium text-sm text-gray-500 hover:text-gray-700 transition-all"
                 >
                     <CheckCircle2 size={16} />
                     Đã Đặt Hàng
                     {orderedReceipts.length > 0 && (
                         <span className="bg-blue-500 text-white text-xs px-2 py-0.5 rounded-full">{orderedReceipts.length}</span>
                     )}
-                </button>
+                </Link>
             </div>
             {/* ═══════ TAB 1: Parts List ═══════ */}
             {activeTab === 'parts' && (

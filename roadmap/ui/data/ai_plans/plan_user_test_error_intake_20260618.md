@@ -746,3 +746,10 @@
 - Change: `/admin/repairs` now has separate active/closed tabs. The default active tab listens only to non-terminal workflow statuses when the workflow config is available, while the closed tab loads terminal workflow statuses on demand.
 - Guardrail: Status membership is derived from Firebase repair/warranty workflows, not hardcoded legacy names. If a workflow has too many statuses for Firestore `in`, the query falls back to the existing broad query and still filters client-side.
 - Verification: focused ESLint passed for `src/app/admin/repairs/page.tsx` and `src/features/repairs/RepairFilters.tsx`; `tsc --noEmit` passed; `git diff --check` passed with Windows CRLF warnings only.
+
+### Part 42 - Route parts receipt queues to inventory
+- Covered IDs: UT-20260620-008
+- Files touched: `src/app/admin/parts/page.tsx`
+- Change: The `/admin/parts` tab buttons for import proposals and ordered receipts now route to `/admin/inventory?tab=draft` and `/admin/inventory?tab=ordered`, keeping the parts page focused on the part catalog and part proposal creation entrypoint.
+- Guardrail: This is the first migration step. The old proposal/ordered handling code is not deleted yet, so no existing workflow action is lost while the full receipt action surface is moved into inventory in the next step.
+- Verification: focused ESLint passed for `src/app/admin/parts/page.tsx`; `tsc --noEmit` passed; `git diff --check` passed with Windows CRLF warnings only.
