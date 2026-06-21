@@ -696,7 +696,7 @@
 - Expected result: Suppliers page has customer-like profile density and interactions: richer list columns, detail drawer/modal, transactions/history, tags, notes, contact/payment info, search/filter, and lazy-loaded heavy details.
 - Actual result: Supplier page is still thinner than customer CRM despite added fields.
 - Initial bucket: suppliers CRM parity, UI consistency, lazy detail loading
-- Status: open
+- Status: fixed in Part 47
 
 ### Batch 4 Preliminary Grouping
 - P0 read reduction: split `/admin/repairs` into active vs terminal tabs and filter `/admin/technician` queue by workflow state.
@@ -781,3 +781,10 @@
 - Change: Repair issue rows now use both service taxonomy and the live service catalog for suggestions. Each issue can select its own service/category mapping, service catalog suggestions show the expected price, and selecting a priced service fills the issue's estimated price when the line has no price yet.
 - Guardrail: Ticket-level `categoryPath`/`serviceName` remains as compatibility metadata, but the operational mapping is stored per `issues[]` row so one device can carry multiple service groups such as screen and mainboard work.
 - Verification: focused ESLint passed for repair files; `pnpm typecheck` passed; `git diff --check` passed with Windows CRLF warnings only.
+
+### Part 47 - Supplier CRM parity surface
+- Covered IDs: UT-20260620-009
+- Files touched: `src/app/admin/suppliers/page.tsx`
+- Change: Supplier management now has CRM-style summary stats, supplier type/tag/debt filters, clickable supplier profile cards, and a lazy-loaded detail drawer showing contact, bank, tax, assigned owner, notes, tags, debt, and transaction history.
+- Guardrail: The page still loads only the supplier list initially. Transaction history remains lazy-loaded when a supplier is expanded or opened in the drawer, preserving the Firebase read reduction goal.
+- Verification: focused ESLint passed for `src/app/admin/suppliers/page.tsx`; `pnpm typecheck` passed; `git diff --check` passed with Windows CRLF warnings only.
