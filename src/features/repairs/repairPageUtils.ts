@@ -10,6 +10,7 @@ export interface Appointment {
     timeSlot: string;
     store: string;
     status: string;
+    intakeMethod?: string | null;
     serviceName?: string;
     serviceId?: string;
     appService?: {

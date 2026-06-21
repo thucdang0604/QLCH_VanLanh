@@ -200,6 +200,18 @@ export default function AppointmentsPage() {
         }
     };
 
+    const buildRepairHandoffHref = (appointment: Appointment) => {
+        const params = new URLSearchParams({
+            appointmentId: appointment.id,
+            intakeMethod: appointment.intakeMethod || '',
+            customerName: appointment.fullName || '',
+            customerPhone: appointment.phone || '',
+        });
+        if (appointment.serviceId) params.set('serviceId', appointment.serviceId);
+        if (appointment.serviceName) params.set('serviceName', appointment.serviceName);
+        return `/admin/repairs?${params.toString()}`;
+    };
+
     const renderIntakeActions = (appointment: Appointment, variant: 'mobile' | 'desktop') => {
         if (appointment.status !== 'confirmed') return null;
 
@@ -225,7 +237,7 @@ export default function AppointmentsPage() {
                 </div>
                 {selectedMethod ? (
                     <Link
-                        href={`/admin/repairs?appointmentId=${appointment.id}`}
+                        href={buildRepairHandoffHref(appointment)}
                         className={isMobile ? 'inline-flex w-full items-center justify-center gap-1 rounded-lg bg-orange-500 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-orange-600' : 'inline-flex items-center gap-1 rounded-lg border border-orange-200 bg-orange-50 px-2.5 py-1 text-xs font-semibold text-orange-700 transition-colors hover:bg-orange-100'}
                     >
                         <Wrench size={12} />

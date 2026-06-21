@@ -154,6 +154,7 @@ export default function RepairPage() {
     }, [warrantyModal]);
     const emptyForm: RepairEditorFormData = {
         appointmentId: '',
+        appointmentIntakeMethod: '',
         customerName: '',
         customerPhone: '',
         deviceModel: '',
@@ -381,20 +382,34 @@ export default function RepairPage() {
     }, []);
     useEffect(() => {
         const appointmentId = searchParams.get('appointmentId');
-        if (!appointmentId || services.length === 0) return;
+        if (!appointmentId) return;
         (async () => {
             try {
+                const fallbackIntakeMethod = searchParams.get('intakeMethod') || '';
+                const fallbackCustomerName = searchParams.get('customerName') || '';
+                const fallbackCustomerPhone = searchParams.get('customerPhone') || '';
+                const fallbackServiceId = searchParams.get('serviceId') || '';
+                const fallbackServiceName = searchParams.get('serviceName') || '';
                 const snap = await getDoc(doc(db, 'appointments', appointmentId));
-                if (!snap.exists()) return;
-                const app = { id: snap.id, ...snap.data() } as Appointment;
+                const app = snap.exists()
+                    ? ({ id: snap.id, ...snap.data() } as Appointment)
+                    : ({
+                        id: appointmentId,
+                        fullName: fallbackCustomerName,
+                        phone: fallbackCustomerPhone,
+                        serviceId: fallbackServiceId,
+                        serviceName: fallbackServiceName,
+                        intakeMethod: fallbackIntakeMethod,
+                    } as Appointment);
                 setFormData(prev => {
                     const updated = {
                         ...prev,
                         appointmentId: app.id,
-                        customerName: app.fullName,
-                        customerPhone: app.phone,
+                        appointmentIntakeMethod: app.intakeMethod || fallbackIntakeMethod,
+                        customerName: app.fullName || fallbackCustomerName,
+                        customerPhone: app.phone || fallbackCustomerPhone,
                         technicianId: user?.uid || prev.technicianId,
-                        selectedServiceName: '',
+                        selectedServiceName: app.serviceName || fallbackServiceName || '',
                     };
                     if (app.serviceId) {
                         const svc = services.find(s => s.id === app.serviceId);
@@ -760,6 +775,7 @@ export default function RepairPage() {
             const cl = ticket.deviceInfo?.checklist;
             setFormData({
                 appointmentId: ticket.appointmentId || '',
+                appointmentIntakeMethod: (ticket as RepairTicket & { appointmentIntakeMethod?: string | null }).appointmentIntakeMethod || '',
                 customerName: ticket.customer.name,
                 customerPhone: ticket.customer.phone,
                 deviceModel: ticket.deviceInfo?.model || '',
@@ -855,6 +871,7 @@ export default function RepairPage() {
                     }
                     const updateData = {
                         appointmentId: formData.appointmentId || null,
+                        appointmentIntakeMethod: formData.appointmentIntakeMethod || null,
                         categoryPath: formData.selectedCategoryPath,
                         serviceName: formData.selectedServiceName,
                         customer: { name: formData.customerName, phone: formData.customerPhone },
@@ -908,6 +925,7 @@ export default function RepairPage() {
                 const initialStatus = (dynamicStatuses[0]?.id || REPAIR_STATUS.INTAKE) as RepairStatus;
                 const ticketData: Record<string, unknown> = {
                     appointmentId: formData.appointmentId || null,
+                    appointmentIntakeMethod: formData.appointmentIntakeMethod || null,
                     categoryPath: formData.selectedCategoryPath,
                     serviceName: formData.selectedServiceName,
                     customer: { name: formData.customerName, phone: formData.customerPhone },

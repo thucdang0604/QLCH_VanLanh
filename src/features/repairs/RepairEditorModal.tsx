@@ -20,6 +20,7 @@ type ServiceSuggestion = {
 
 export type RepairEditorFormData = {
     appointmentId: string;
+    appointmentIntakeMethod: string;
     customerName: string;
     customerPhone: string;
     deviceModel: string;

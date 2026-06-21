@@ -318,7 +318,7 @@
 - Expected result: Appointment có nhánh trực tiếp/gửi máy và handoff tạo phiếu sửa chữa prefill.
 - Actual result: Workflow chưa đủ theo mô tả.
 - Initial bucket: appointment workflow, repair handoff
-- Status: open
+- Status: fixed in Part 45
 
 #### UT-20260618-016 - Repair technical notes are duplicated
 - Reporter note: `admin/repairs`: ghi chú kỹ thuật đang bị ghi lặp lại mặc dù KTV hay admin chỉ nhập đúng 1 lần.
@@ -767,3 +767,10 @@
 - Change: POS phone lookup now loads customer debt, unpaid/partial repair tickets, and payable customer orders from the same phone number. The cart panel shows a separate "Hóa đơn cần thanh toán" list with remaining amount, status, payment state, item summary, and a direct link to the order page.
 - Guardrail: Existing order debts are not inserted into the POS cart as fake stock items. This avoids stock validation side effects in `/api/pos/checkout`; staff can inspect/pay the right order workflow from the POS context.
 - Verification: focused ESLint passed for POS files; `pnpm typecheck` passed; `git diff --check` passed with Windows CRLF warnings only.
+
+### Part 45 - Appointment intake handoff prefill
+- Covered IDs: UT-20260618-015
+- Files touched: `src/app/admin/appointments/page.tsx`, `src/app/admin/repairs/page.tsx`, `src/features/repairs/RepairEditorModal.tsx`, `src/features/repairs/repairPageUtils.ts`
+- Change: The appointment "Tạo phiếu" handoff now carries intake method, customer name/phone, and service hints to `/admin/repairs`. The repair page opens the create modal even when service data is not loaded yet, prefills customer/service fields from appointment or URL fallback, and stores `appointmentIntakeMethod` on the repair ticket.
+- Guardrail: Appointment public `status` values remain unchanged. The direct/drop-off choice is still metadata (`intakeMethod`) so customer-facing appointment tracking is not forced to understand new workflow statuses.
+- Verification: focused ESLint passed for appointment/repair files; `pnpm typecheck` passed; `git diff --check` passed with Windows CRLF warnings only.
