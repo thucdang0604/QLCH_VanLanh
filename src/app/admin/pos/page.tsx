@@ -26,7 +26,7 @@ import { extractProductCodeFromScan, getPrimaryProductCode, getProductScanCandid
 import { PRODUCT_STATUS, isProductSellable } from '@/lib/productLifecycle';
 import { generateSearchKeywords } from '@/lib/utils';
 import { PosCartPanel } from '@/features/pos/PosCartPanel';
-import type { AppliedVoucher, CartItem, DiscountDetail, LastOrderData, OrderLineItem, RepairTicketInfo, VoucherStatus } from '@/features/pos/posTypes';
+import type { AppliedVoucher, CartItem, DiscountDetail, LastOrderData, OrderLineItem, PayableOrderInfo, RepairTicketInfo, VoucherStatus } from '@/features/pos/posTypes';
 
 type BarcodeDetectionResult = { rawValue?: string };
 type BrowserBarcodeDetector = {
@@ -83,6 +83,49 @@ function mapRepairTicketInfo(id: string, data: Record<string, unknown>, fallback
                 serviceName: typeof item.serviceName === 'string' ? item.serviceName : '',
             };
         }) : [],
+    };
+}
+
+function formatLookupDate(value: unknown) {
+    if (!value) return '';
+    const timestamp = value as { toDate?: () => Date };
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(value as string | number);
+    if (Number.isNaN(date.getTime())) return '';
+    return date.toLocaleDateString('vi-VN');
+}
+
+function mapPayableOrderInfo(id: string, data: Record<string, unknown>): PayableOrderInfo | null {
+    const customer = (data.customer_info || data.customer || {}) as Record<string, unknown>;
+    const totalAmount = Number(data.total_amount || 0);
+    const paidAmount = Number(data.deposit_amount || 0);
+    const remainingAmount = Math.max(0, totalAmount - paidAmount);
+    const status = String(data.status || '');
+    const paymentMethod = String(data.payment_method || '');
+    const paymentStatus = String(data.paymentStatus || '');
+    const isDebtLike = paymentStatus === 'debt'
+        || paymentStatus === 'unpaid'
+        || paymentMethod.toLowerCase() === 'debt'
+        || paymentMethod.toLowerCase() === 'ghi nợ';
+    const isActionable = status !== 'Cancelled' && status !== 'Completed' && (remainingAmount > 0 || isDebtLike);
+
+    if (!isActionable) return null;
+
+    const items = Array.isArray(data.items) ? data.items : [];
+    return {
+        id,
+        customerName: String(customer.name || data.customerName || ''),
+        customerPhone: String(customer.phone || data.customerPhone || ''),
+        status,
+        paymentMethod,
+        paymentStatus,
+        totalAmount,
+        paidAmount,
+        remainingAmount: remainingAmount || totalAmount,
+        createdAtLabel: formatLookupDate(data.createdAt),
+        itemNames: items.slice(0, 4).map(item => {
+            const line = (item || {}) as Record<string, unknown>;
+            return String(line.productName || line.product_name || line.name || '').trim();
+        }).filter(Boolean),
     };
 }
 
@@ -179,6 +222,7 @@ export default function POSPage() {
     }, []);
 
     const [linkedRepairs, setLinkedRepairs] = useState<RepairTicketInfo[]>([]);
+    const [payableOrders, setPayableOrders] = useState<PayableOrderInfo[]>([]);
     const [repairLoading, setRepairLoading] = useState(false);
     const [autoDiscountAmount, setAutoDiscountAmount] = useState(0);
     const [discountDetails, setDiscountDetails] = useState<DiscountDetail[]>([]);
@@ -228,6 +272,7 @@ export default function POSPage() {
     const lookupRepairByPhone = async (phone: string) => {
         if (!phone || phone.length < 8) {
             setLinkedRepairs([]);
+            setPayableOrders([]);
             setAutoDiscountAmount(0);
             setDiscountDetails([]);
             setCustomerDebt(0);
@@ -257,7 +302,15 @@ export default function POSPage() {
                 collection(db, 'repairs'),
                 where('customer.phone', '==', phone.trim()),
             );
-            const snap = await getDocs(q);
+            const ordersQuery = query(
+                collection(db, 'orders'),
+                where('customer_info.phone', '==', phone.trim()),
+                limit(20),
+            );
+            const [snap, ordersSnap] = await Promise.all([
+                getDocs(q),
+                getDocs(ordersQuery),
+            ]);
             if (!snap.empty) {
                 const repairs = snap.docs
                     .filter(d => {
@@ -282,6 +335,15 @@ export default function POSPage() {
             } else {
                 setLinkedRepairs([]);
             }
+            const orders = ordersSnap.docs
+                .sort((a, b) => {
+                    const ta = a.data().createdAt?.toMillis?.() || 0;
+                    const tb = b.data().createdAt?.toMillis?.() || 0;
+                    return tb - ta;
+                })
+                .map(orderDoc => mapPayableOrderInfo(orderDoc.id, orderDoc.data()))
+                .filter((order): order is PayableOrderInfo => Boolean(order));
+            setPayableOrders(orders);
         } catch (err) {
             console.error('Repair/Customer lookup failed:', err);
         }
@@ -1003,6 +1065,7 @@ export default function POSPage() {
             customerDebt={customerDebt}
             repairLoading={repairLoading}
             linkedRepairs={linkedRepairs}
+            payableOrders={payableOrders}
             discountDetails={discountDetails}
             autoDiscountAmount={autoDiscountAmount}
             setDiscount={setDiscount}

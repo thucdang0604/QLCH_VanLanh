@@ -54,6 +54,20 @@ export interface RepairTicketInfo {
     issues?: { label?: string; estimatedPrice?: number; categoryPath?: string[]; serviceName?: string }[];
 }
 
+export interface PayableOrderInfo {
+    id: string;
+    customerName: string;
+    customerPhone: string;
+    status: string;
+    paymentMethod: string;
+    paymentStatus: string;
+    totalAmount: number;
+    paidAmount: number;
+    remainingAmount: number;
+    createdAtLabel: string;
+    itemNames: string[];
+}
+
 export interface DiscountDetail {
     productName: string;
     discountAmount: number;

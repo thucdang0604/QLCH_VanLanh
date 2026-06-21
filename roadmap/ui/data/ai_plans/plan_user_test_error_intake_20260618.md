@@ -227,7 +227,7 @@
 - Expected result: POS là trung tâm thanh toán, có thể tra khách bằng SĐT và thấy các hóa đơn cần thanh toán.
 - Actual result: Chưa có luồng này ngay trên POS.
 - Initial bucket: POS workflow, customer lookup
-- Status: open
+- Status: fixed in Part 44
 
 #### UT-20260618-005 - POS repair payment card lacks full repair details and warranty print
 - Reporter note: `admin/pos`: đã có liên kết thanh toán phiếu sửa chữa trực tiếp trên POS nhưng thông tin phiếu sửa chữa chưa hiển thị đủ, ví dụ linh kiện đã sử dụng, phí sửa chữa, in phiếu bảo hành sau khi thanh toán.
@@ -760,3 +760,10 @@
 - Change: `/admin/inventory` now owns creating retail/component import proposals, editing draft receipt quantity/price/supplier, marking availability, confirming supplier orders, importing ordered receipts through the existing preview/API path, and printing lot labels. `/admin/parts` is reduced to the part catalog surface: list/search/filter, add/edit part, QR labels, archive, lot lookup, and hidden-taxonomy recovery.
 - Guardrail: The proposal/order/import logic is moved, not removed. Inventory reuses the existing `CreateReceiptModal`, `ImportPreviewModal`, `/api/inventory/import` actions, receipt availability helpers, and lot-label printing path.
 - Verification: focused ESLint passed for `src/app/admin/inventory/page.tsx` and `src/app/admin/parts/page.tsx`; `tsc --noEmit` passed; `git diff --check` passed with Windows CRLF warnings only.
+
+### Part 44 - POS phone lookup shows payable orders
+- Covered IDs: UT-20260618-004
+- Files touched: `src/app/admin/pos/page.tsx`, `src/features/pos/PosCartPanel.tsx`, `src/features/pos/posTypes.ts`
+- Change: POS phone lookup now loads customer debt, unpaid/partial repair tickets, and payable customer orders from the same phone number. The cart panel shows a separate "Hóa đơn cần thanh toán" list with remaining amount, status, payment state, item summary, and a direct link to the order page.
+- Guardrail: Existing order debts are not inserted into the POS cart as fake stock items. This avoids stock validation side effects in `/api/pos/checkout`; staff can inspect/pay the right order workflow from the POS context.
+- Verification: focused ESLint passed for POS files; `pnpm typecheck` passed; `git diff --check` passed with Windows CRLF warnings only.

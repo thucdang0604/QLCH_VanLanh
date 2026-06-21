@@ -3,7 +3,7 @@ import Image from 'next/image';
 import { AlertTriangle, Banknote, CreditCard, Minus, Package, Phone, Plus, QrCode, Receipt, ShoppingCart, Tag, Trash2, User, Wrench, X } from 'lucide-react';
 import CurrencyInput from '@/components/admin/CurrencyInput';
 import type { Product } from '@/lib/types';
-import type { AppliedVoucher, CartItem, DiscountDetail, RepairTicketInfo, VoucherStatus } from './posTypes';
+import type { AppliedVoucher, CartItem, DiscountDetail, PayableOrderInfo, RepairTicketInfo, VoucherStatus } from './posTypes';
 
 const paymentMethods = [
     { key: 'cash', label: 'Tiền mặt', icon: Banknote },
@@ -24,6 +24,7 @@ interface PosCartPanelProps {
     customerDebt: number;
     repairLoading: boolean;
     linkedRepairs: RepairTicketInfo[];
+    payableOrders: PayableOrderInfo[];
     discountDetails: DiscountDetail[];
     autoDiscountAmount: number;
     setDiscount: Dispatch<SetStateAction<number>>;
@@ -66,6 +67,7 @@ export function PosCartPanel({
     customerDebt,
     repairLoading,
     linkedRepairs,
+    payableOrders,
     discountDetails,
     autoDiscountAmount,
     setDiscount,
@@ -101,10 +103,10 @@ export function PosCartPanel({
 
     // Auto-expand repair list when a new set of repairs is loaded
     useEffect(() => {
-        if (linkedRepairs.length > 0) {
+        if (linkedRepairs.length > 0 || payableOrders.length > 0) {
             setShowRepairsList(true);
         }
-    }, [linkedRepairs]);
+    }, [linkedRepairs, payableOrders]);
 
     return (
         <>
@@ -271,6 +273,44 @@ export function PosCartPanel({
                                                 )}
                                             </div>
                                         )}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                )}
+                {payableOrders.length > 0 && (
+                    <div className="space-y-1.5 border border-amber-100 rounded-lg p-2 bg-amber-50/30">
+                        <div className="flex items-center justify-between text-amber-700 font-semibold mb-1">
+                            <span className="flex items-center gap-1.5">
+                                <Receipt size={13} /> Hóa đơn cần thanh toán ({payableOrders.length})
+                            </span>
+                            <button
+                                type="button"
+                                onClick={() => setShowRepairsList(!showRepairsList)}
+                                className="text-amber-600 hover:text-amber-800 underline font-normal text-[11px]"
+                            >
+                                {showRepairsList ? 'Thu gọn' : 'Hiển thị'}
+                            </button>
+                        </div>
+                        {showRepairsList && (
+                            <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1">
+                                {payableOrders.map(order => (
+                                    <div key={order.id} className="bg-white rounded-lg p-2.5 text-xs space-y-1 border border-amber-100/70 shadow-sm">
+                                        <div className="flex items-center justify-between gap-2">
+                                            <span className="font-semibold text-amber-800">Đơn #{order.id.slice(-6)}</span>
+                                            <span className="rounded-md bg-amber-100 px-2 py-0.5 font-bold text-amber-700">
+                                                Còn {formatPrice(order.remainingAmount)}
+                                            </span>
+                                        </div>
+                                        <p className="text-amber-700">{order.status} · {order.paymentMethod || order.paymentStatus || 'chưa rõ'} · {order.createdAtLabel}</p>
+                                        {order.itemNames.length > 0 && <p className="text-amber-600 line-clamp-1">SP: {order.itemNames.join(', ')}</p>}
+                                        <a
+                                            href={`/admin/orders?orderId=${order.id}`}
+                                            className="mt-2 inline-flex w-full items-center justify-center rounded-lg bg-amber-600 px-3 py-1.5 font-semibold text-white hover:bg-amber-700"
+                                        >
+                                            Mở chi tiết đơn
+                                        </a>
                                     </div>
                                 ))}
                             </div>
