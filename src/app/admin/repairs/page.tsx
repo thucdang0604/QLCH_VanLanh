@@ -1170,6 +1170,7 @@ export default function RepairPage() {
                 setShowPreMediaManager={setShowPreMediaManager}
                 setShowPostMediaManager={setShowPostMediaManager}
                 paymentLabels={paymentLabels}
+                services={services}
                 onClose={() => setShowModal(false)}
                 onSubmit={handleSubmit}
             />

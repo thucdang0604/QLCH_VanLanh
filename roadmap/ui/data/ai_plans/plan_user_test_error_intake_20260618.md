@@ -656,7 +656,7 @@
 - Expected result: Mỗi issue/bệnh trong phiếu sửa có thể chọn service/category riêng, nhiều issue có nhiều nhóm dịch vụ khác nhau, và importer/editor gợi ý giá dự kiến từ service catalog khi phù hợp.
 - Actual result: Ticket-level service group still does not fully represent multi-issue repairs like screen + main.
 - Initial bucket: repair intake model, services integration, pricing suggestion
-- Status: open
+- Status: fixed in Part 46
 
 #### UT-20260620-005 - Technician queue should hide tickets after handoff-ready workflow state
 - Reporter note: `admin/technician`: danh sách hiển thị cần ẩn bớt các phiếu khi đã đến trạng thái "chờ bàn giao khách" theo workflow sửa chữa Firebase vì từ trạng thái này KTV đã không còn thao tác tiếp nữa.
@@ -774,3 +774,10 @@
 - Change: The appointment "Tạo phiếu" handoff now carries intake method, customer name/phone, and service hints to `/admin/repairs`. The repair page opens the create modal even when service data is not loaded yet, prefills customer/service fields from appointment or URL fallback, and stores `appointmentIntakeMethod` on the repair ticket.
 - Guardrail: Appointment public `status` values remain unchanged. The direct/drop-off choice is still metadata (`intakeMethod`) so customer-facing appointment tracking is not forced to understand new workflow statuses.
 - Verification: focused ESLint passed for appointment/repair files; `pnpm typecheck` passed; `git diff --check` passed with Windows CRLF warnings only.
+
+### Part 46 - Repair issue service catalog price suggestions
+- Covered IDs: UT-20260620-004
+- Files touched: `src/app/admin/repairs/page.tsx`, `src/features/repairs/RepairEditorModal.tsx`
+- Change: Repair issue rows now use both service taxonomy and the live service catalog for suggestions. Each issue can select its own service/category mapping, service catalog suggestions show the expected price, and selecting a priced service fills the issue's estimated price when the line has no price yet.
+- Guardrail: Ticket-level `categoryPath`/`serviceName` remains as compatibility metadata, but the operational mapping is stored per `issues[]` row so one device can carry multiple service groups such as screen and mainboard work.
+- Verification: focused ESLint passed for repair files; `pnpm typecheck` passed; `git diff --check` passed with Windows CRLF warnings only.

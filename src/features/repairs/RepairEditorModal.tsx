@@ -8,6 +8,7 @@ import CategoryTaxonomySelector from '@/components/admin/CategoryTaxonomySelecto
 import CurrencyInput from '@/components/admin/CurrencyInput';
 import { useConfig } from '@/lib/ConfigContext';
 import type { PaymentStatus, RepairIssue, RepairStatus, RepairTicket, TaxonomyNode, WorkflowNode } from '@/lib/types';
+import type { ServiceModel } from './repairPageUtils';
 
 type RepairFormValue = string | number | boolean | RepairIssue[] | string[] | PaymentStatus | RepairStatus;
 
@@ -16,6 +17,8 @@ type ServiceSuggestion = {
     name: string;
     path: string[];
     searchText: string;
+    estimatedPrice?: number;
+    source?: 'taxonomy' | 'service';
 };
 
 export type RepairEditorFormData = {
@@ -68,6 +71,7 @@ interface RepairEditorModalProps {
     setShowPreMediaManager: (value: boolean) => void;
     setShowPostMediaManager: (value: boolean) => void;
     paymentLabels: Record<PaymentStatus, { label: string; color: string }>;
+    services: ServiceModel[];
     onClose: () => void;
     onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }
@@ -87,14 +91,15 @@ export function RepairEditorModal({
     setShowPreMediaManager,
     setShowPostMediaManager,
     paymentLabels,
+    services,
     onClose,
     onSubmit,
 }: RepairEditorModalProps) {
     const selectedStatus = dynamicStatuses.find(s => s.id === formData.status);
     const { config } = useConfig();
     const serviceSuggestions = useMemo(
-        () => flattenServiceSuggestions(config.taxonomy?.service || []),
-        [config.taxonomy?.service]
+        () => mergeServiceSuggestions(flattenServiceSuggestions(config.taxonomy?.service || []), services),
+        [config.taxonomy?.service, services]
     );
 
     return (
@@ -192,7 +197,20 @@ export function RepairEditorModal({
                                                         ...p,
                                                         selectedCategoryPath: suggestion.path,
                                                         selectedServiceName: suggestion.name,
-                                                        issues: p.issues.map(i => i.id === issue.id ? { ...i, categoryPath: suggestion.path, serviceName: suggestion.name } : i)
+                                                        issues: p.issues.map(i => i.id === issue.id ? {
+                                                            ...i,
+                                                            categoryPath: suggestion.path,
+                                                            serviceName: suggestion.name,
+                                                            estimatedPrice: Number(i.estimatedPrice) > 0 ? i.estimatedPrice : suggestion.estimatedPrice || i.estimatedPrice,
+                                                        } : i),
+                                                        laborCost: (() => {
+                                                            const nextIssues = p.issues.map(i => i.id === issue.id ? {
+                                                                ...i,
+                                                                estimatedPrice: Number(i.estimatedPrice) > 0 ? i.estimatedPrice : suggestion.estimatedPrice || i.estimatedPrice,
+                                                            } : i);
+                                                            const nextSum = nextIssues.reduce((sum, item) => sum + (Number(item.estimatedPrice) || 0), 0);
+                                                            return nextSum || p.laborCost;
+                                                        })(),
                                                     }))}
                                                 />
                                             </div>
@@ -529,6 +547,47 @@ function flattenServiceSuggestions(nodes: TaxonomyNode[], parentPath: string[] =
     });
 }
 
+function toStringArray(value: unknown): string[] {
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+function getServiceSuggestionPrice(service: ServiceModel): number {
+    const promo = Number(service.price_promo || 0);
+    if (promo > 0) return promo;
+    const original = Number(service.price_original || 0);
+    if (original > 0) return original;
+    const legacy = Number(String(service.price || '').replace(/[^\d]/g, ''));
+    return Number.isFinite(legacy) ? legacy : 0;
+}
+
+function mergeServiceSuggestions(taxonomySuggestions: ServiceSuggestion[], services: ServiceModel[]): ServiceSuggestion[] {
+    const merged = new Map<string, ServiceSuggestion>();
+
+    taxonomySuggestions.forEach(suggestion => {
+        merged.set(suggestion.id, { ...suggestion, source: 'taxonomy' });
+    });
+
+    services.forEach(service => {
+        const name = service.name?.trim();
+        if (!name) return;
+        const categoryPath = toStringArray(service.categoryIds);
+        const categoryText = typeof service.category === 'string' ? service.category : '';
+        const path = categoryPath.length > 0 ? categoryPath : (categoryText ? [categoryText] : []);
+        const estimatedPrice = getServiceSuggestionPrice(service);
+        const suggestion: ServiceSuggestion = {
+            id: `service:${service.id}`,
+            name,
+            path,
+            estimatedPrice: estimatedPrice > 0 ? estimatedPrice : undefined,
+            source: 'service',
+            searchText: normalizeSearchText([name, categoryText, ...categoryPath].join(' ')),
+        };
+        merged.set(suggestion.id, suggestion);
+    });
+
+    return Array.from(merged.values());
+}
+
 function IssueServiceSuggestions({
     issue,
     suggestions,
@@ -540,7 +599,7 @@ function IssueServiceSuggestions({
 }) {
     const query = normalizeSearchText(issue.label);
     const matches = query.length >= 2
-        ? suggestions.filter(suggestion => suggestion.searchText.includes(query)).slice(0, 3)
+        ? suggestions.filter(suggestion => suggestion.searchText.includes(query)).slice(0, 5)
         : [];
 
     if (matches.length === 0 && !issue.serviceName) return null;
@@ -560,6 +619,7 @@ function IssueServiceSuggestions({
                     className="rounded-md border border-gray-200 bg-white px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:border-orange-300 hover:text-orange-700"
                 >
                     {suggestion.name}
+                    {suggestion.estimatedPrice ? ` · ~${suggestion.estimatedPrice.toLocaleString('vi-VN')}đ` : ''}
                 </button>
             ))}
         </div>
