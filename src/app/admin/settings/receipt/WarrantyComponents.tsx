@@ -1,7 +1,7 @@
 import React from 'react';
 import Image from 'next/image';
 import { Plus, Trash2, X } from 'lucide-react';
-import { ReceiptConfig } from './page';
+import type { ReceiptConfig } from '../ReceiptSettingsPanel';
 import { WARRANTY_RECEIPT_PREVIEW_FIXTURE } from './warrantyPreviewFixtures';
 
 export interface WarrantyTableRow {

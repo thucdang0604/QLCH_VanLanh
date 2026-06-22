@@ -43,6 +43,42 @@ const POS_SEARCH_PRODUCT_LIMIT = 60;
 const POS_LEGACY_SCAN_FALLBACK_LIMIT = 500;
 type PosProduct = Product & { id: string };
 
+function getProductCategoryPathIds(product: Product) {
+    if (Array.isArray(product.categoryIds) && product.categoryIds.length > 0) {
+        return product.categoryIds.filter(Boolean);
+    }
+
+    const category = typeof product.category === 'string' ? product.category : '';
+    const segments = category.split('/').filter(Boolean);
+    return segments.map((_, index) => segments.slice(0, index + 1).join('/'));
+}
+
+function findTaxonomyNodeById(nodes: TaxonomyNode[], id: string): TaxonomyNode | null {
+    for (const node of nodes) {
+        if (node.id === id || node.slug === id) return node;
+        const child = findTaxonomyNodeById(node.children || [], id);
+        if (child) return child;
+    }
+    return null;
+}
+
+function resolveTaxonomyWarranty(nodes: TaxonomyNode[], categoryPathIds: string[]): Product['warrantyType'] | null {
+    let currentNodes = nodes;
+    let lastFound: Product['warrantyType'] | null = null;
+
+    for (const categoryPathId of categoryPathIds) {
+        const slug = categoryPathId.split('/').pop();
+        const node = currentNodes.find((candidate) => candidate.id === categoryPathId || candidate.slug === slug)
+            || findTaxonomyNodeById(nodes, categoryPathId);
+        if (!node) break;
+        if (node.warrantyType && node.warrantyType !== 'none') lastFound = node.warrantyType;
+        else if (node.warrantyType === 'none') lastFound = null;
+        currentNodes = node.children || [];
+    }
+
+    return lastFound;
+}
+
 function toStringArray(value: unknown): string[] {
     return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
@@ -178,20 +214,7 @@ export default function POSPage() {
         }
         if (product.warrantyType === 'none') return 'none';
 
-        const cat = product.category;
-        const segments = typeof cat === 'string' ? cat.split('/') : [];
-        let nodes: TaxonomyNode[] = config?.taxonomy?.retail || [];
-        let lastFound: Product['warrantyType'] | null = null;
-        for (let i = 0; i < segments.length; i++) {
-            const partialId = segments.slice(0, i + 1).join('/');
-            const node = nodes.find((n) => n.id === partialId || n.slug === segments[i]);
-            if (!node) break;
-            if (node.warrantyType && node.warrantyType !== 'none') lastFound = node.warrantyType;
-            else if (node.warrantyType === 'none') lastFound = null;
-            if (!node.children?.length) break;
-            nodes = node.children;
-        }
-        return lastFound || 'none';
+        return resolveTaxonomyWarranty(config?.taxonomy?.retail || [], getProductCategoryPathIds(product)) || 'none';
     }, [config?.taxonomy?.retail]);
 
     // Products

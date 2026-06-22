@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useConfig, DEFAULT_CONFIG, type ContactInfo, type GeofenceConfig } from '@/lib/ConfigContext';
-import { Save, RotateCcw, Loader2, Store, Phone, Mail, MapPin, Facebook, MessageCircle, CheckCircle2, AlertCircle, ShieldCheck, Navigation, KeyRound } from 'lucide-react';
+import { Save, RotateCcw, Loader2, Store, Phone, Mail, MapPin, Facebook, MessageCircle, CheckCircle2, AlertCircle, ShieldCheck, Navigation, KeyRound, Printer } from 'lucide-react';
 import { getAuthInstance } from '@/lib/firebase';
 
 import CategoriesTab from './CategoriesTab';
@@ -10,10 +10,11 @@ import NavigationTab from './NavigationTab';
 import BankIntegrationConfig from '@/components/admin/settings/BankIntegrationConfig';
 import ChatIntegrationsTab from '@/components/admin/settings/ChatIntegrationsTab';
 import RepairsConfigTab from '@/components/admin/settings/RepairsConfigTab';
+import ReceiptSettingsPanel from './ReceiptSettingsPanel';
 
 export default function SettingsPage() {
     const { config, updateConfig, loading } = useConfig();
-    const [activeTab, setActiveTab] = useState<'general' | 'categories' | 'navigation' | 'payment' | 'chat' | 'repairs'>('general');
+    const [activeTab, setActiveTab] = useState<'general' | 'categories' | 'navigation' | 'payment' | 'chat' | 'repairs' | 'receipt'>('general');
     const [formData, setFormData] = useState<ContactInfo>(DEFAULT_CONFIG.contact_info);
     const [shopName, setShopName] = useState('');
     const [topBarText, setTopBarText] = useState('');
@@ -108,8 +109,8 @@ export default function SettingsPage() {
     }
 
     return (
-        <div className="max-w-4xl mx-auto space-y-6">
-            <div className="flex items-center gap-6 border-b border-gray-200">
+        <div className={`${activeTab === 'receipt' ? 'max-w-7xl' : 'max-w-4xl'} mx-auto space-y-6`}>
+            <div className="flex items-center gap-6 border-b border-gray-200 overflow-x-auto">
                 <button
                     onClick={() => setActiveTab('general')}
                     className={`pb-3 text-sm font-medium transition-colors border-b-2 ${activeTab === 'general'
@@ -163,6 +164,15 @@ export default function SettingsPage() {
                         }`}
                 >
                     Workflow Sửa chữa
+                </button>
+                <button
+                    onClick={() => setActiveTab('receipt')}
+                    className={`pb-3 text-sm font-medium transition-colors border-b-2 whitespace-nowrap flex items-center gap-1.5 ${activeTab === 'receipt'
+                        ? 'border-orange-500 text-orange-600'
+                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                        }`}
+                >
+                    <Printer size={15} /> Cấu hình in
                 </button>
             </div>
 
@@ -477,8 +487,10 @@ export default function SettingsPage() {
                 </div>
             ) : activeTab === 'chat' ? (
                 <ChatIntegrationsTab />
-            ) : (
+            ) : activeTab === 'repairs' ? (
                 <RepairsConfigTab />
+            ) : (
+                <ReceiptSettingsPanel />
             )}
         </div>
     );
