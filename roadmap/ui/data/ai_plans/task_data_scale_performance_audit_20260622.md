@@ -27,7 +27,7 @@
 
 - [ ] Use Firebase repair workflow config to derive active, terminal, and KTV-actionable status groups.
 - [ ] Make `admin/repairs` load active tickets by default and terminal tickets only in archive tab.
-- [ ] Make `admin/technician` exclude states where KTV has no more action, especially handoff/customer-delivery states.
+- [x] Make `admin/technician` exclude states where KTV has no more action, especially handoff/customer-delivery states.
 - [ ] Verify query constraints do not hardcode status names beyond workflow-derived IDs/features.
 
 ## Phase 5 - Aggregate-first reporting

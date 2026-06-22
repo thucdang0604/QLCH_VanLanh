@@ -73,6 +73,22 @@ function isTicketWaitingForCustomerHandoff(ticket: RepairTicket, workflow: Workf
     return isTechnicianHandoffStatus(status) || isRepairStatus(ticket.status, REPAIR_STATUS.CUSTOMER_HANDOVER);
 }
 
+function getTechnicianQueryableStatusIds(repairStatuses: WorkflowNode[], warrantyStatuses: WorkflowNode[]): string[] {
+    return Array.from(new Set([...repairStatuses, ...warrantyStatuses]
+        .filter(status => !status.isTerminal && !isTechnicianHandoffStatus(status))
+        .map(status => status.id)
+        .filter(Boolean)));
+}
+
+function getTicketCreatedAtMillis(ticket: RepairTicket): number {
+    const createdAt = ticket.createdAt as unknown as { toMillis?: () => number } | number | undefined;
+    return typeof createdAt === 'number' ? createdAt : createdAt?.toMillis?.() || 0;
+}
+
+function sortTicketsByCreatedAtDesc(ticketsToSort: RepairTicket[]): RepairTicket[] {
+    return [...ticketsToSort].sort((a, b) => getTicketCreatedAtMillis(b) - getTicketCreatedAtMillis(a));
+}
+
 type PartSearchProduct = Product & {
     code?: string;
     model?: string;
@@ -136,6 +152,7 @@ export default function TechnicianPage() {
 
     const [dynamicStatuses, setDynamicStatuses] = useState<WorkflowNode[]>([]);
     const [warrantyStatuses, setWarrantyStatuses] = useState<WorkflowNode[]>([]);
+    const [statusConfigLoaded, setStatusConfigLoaded] = useState(false);
     const [technicians, setTechnicians] = useState<{ uid: string; displayName: string }[]>([]);
     const [userNamesMap, setUserNamesMap] = useState<Record<string, string>>({});
     const [transferModal, setTransferModal] = useState<TechnicianTransferModal | null>(null);
@@ -349,25 +366,43 @@ export default function TechnicianPage() {
     };
 
     useEffect(() => {
-        const unsubTickets = onSnapshot(query(collection(db, 'repairs'), orderBy('createdAt', 'desc'), limit(100)), (snap) => {
-            const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as RepairTicket[];
-            setTickets(data);
-            setLoading(false);
-        });
-
         const unsubStatuses = onSnapshot(doc(db, 'system_config', 'repairs'), (docSnap) => {
             if (docSnap.exists()) {
                 const data = docSnap.data();
                 setDynamicStatuses(normalizeRepairWorkflow(data.repairStatuses));
                 setWarrantyStatuses(normalizeWarrantyWorkflow(data.warrantyStatuses));
             }
+            setStatusConfigLoaded(true);
         });
 
-        return () => {
-            unsubTickets();
-            unsubStatuses();
-        };
-    }, [user?.uid, user?.role]);
+        return () => unsubStatuses();
+    }, []);
+
+    useEffect(() => {
+        if (!statusConfigLoaded) return;
+
+        const statusIds = getTechnicianQueryableStatusIds(dynamicStatuses, warrantyStatuses);
+        if (statusIds.length === 0 && dynamicStatuses.length + warrantyStatuses.length > 0) {
+            setTickets([]);
+            setLoading(false);
+            return;
+        }
+
+        const ticketQuery = statusIds.length > 0 && statusIds.length <= 30
+            ? query(collection(db, 'repairs'), where('status', 'in', statusIds), limit(100))
+            : query(collection(db, 'repairs'), orderBy('createdAt', 'desc'), limit(100));
+
+        const unsubTickets = onSnapshot(ticketQuery, (snap) => {
+            const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as RepairTicket[];
+            setTickets(sortTicketsByCreatedAtDesc(data));
+            setLoading(false);
+        }, (error) => {
+            console.error('Technician repairs listener error:', error);
+            setLoading(false);
+        });
+
+        return () => unsubTickets();
+    }, [dynamicStatuses, statusConfigLoaded, warrantyStatuses]);
 
     useEffect(() => {
         getDocs(query(collection(db, 'users'), where('role', '==', 'staff')))
