@@ -198,10 +198,10 @@ export default function InventoryPage() {
                 updatedAt: serverTimestamp(),
             });
             setReceipts(prev => prev.map(item => item.id === receiptId ? { ...item, items: updatedItems, totalAmount } : item));
-            toastSuccess('Da tu dong luu.');
+            toastSuccess('Đã tự động lưu.');
         } catch (err) {
             console.error(err);
-            toastError('Loi tu dong luu.');
+            toastError('Lỗi tự động lưu.');
         }
     };
 
@@ -217,25 +217,25 @@ export default function InventoryPage() {
                 updatedAt: serverTimestamp(),
             });
             setReceipts(prev => prev.map(item => item.id === receiptId ? { ...item, items: updatedItems } : item));
-            toastSuccess('Da cap nhat NCC.');
+            toastSuccess('Đã cập nhật NCC.');
         } catch (err) {
             console.error(err);
-            toastError('Loi cap nhat NCC.');
+            toastError('Lỗi cập nhật NCC.');
         }
     };
 
     const handleOrderReceipt = async (receipt: ImportReceipt & { id: string }) => {
         const importableItems = receipt.items.filter(item => !isReceiptItemUnavailable(item));
         if (importableItems.length === 0) {
-            toastError('Phieu khong con hang co the dat.');
+            toastError('Phiếu không còn hàng có thể đặt.');
             return;
         }
         const missingSupplier = importableItems.filter(item => !item.supplier && !item.supplierId);
         if (missingSupplier.length > 0) {
-            toastError(`Con ${missingSupplier.length} dong chua gan NCC.`);
+            toastError(`Còn ${missingSupplier.length} dòng chưa gắn NCC.`);
             return;
         }
-        if (!confirm('Chot dat hang voi nha cung cap?')) return;
+        if (!confirm('Chốt đặt hàng với nhà cung cấp?')) return;
 
         setIsProcessing(true);
         try {
@@ -254,13 +254,13 @@ export default function InventoryPage() {
                 }),
             });
             const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'Loi khi chot dat hang');
+            if (!res.ok) throw new Error(data.error || 'Lỗi khi chốt đặt hàng');
             await refreshReceipts();
             setActiveTab('ordered');
-            toastSuccess('Da chuyen sang trang thai dat hang.');
+            toastSuccess('Đã chuyển sang trạng thái đặt hàng.');
         } catch (err) {
             console.error(err);
-            toastError(err instanceof Error ? err.message : 'Loi khi chot dat hang.');
+            toastError(err instanceof Error ? err.message : 'Lỗi khi chốt đặt hàng.');
         } finally {
             setIsProcessing(false);
         }
@@ -288,12 +288,12 @@ export default function InventoryPage() {
                 }),
             });
             const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'Loi cap nhat tinh trang');
+            if (!res.ok) throw new Error(data.error || 'Lỗi cập nhật tình trạng');
             await refreshReceipts();
-            toastSuccess('Da cap nhat tinh trang hang.');
+            toastSuccess('Đã cập nhật tình trạng hàng.');
         } catch (err) {
             console.error(err);
-            toastError(err instanceof Error ? err.message : 'Loi cap nhat tinh trang.');
+            toastError(err instanceof Error ? err.message : 'Lỗi cập nhật tình trạng.');
         } finally {
             setIsProcessing(false);
         }
@@ -302,7 +302,7 @@ export default function InventoryPage() {
     const handleImportReceipt = async (receipt: ImportReceipt & { id: string }) => {
         const importableItems = receipt.items.filter(item => !isReceiptItemUnavailable(item));
         if (importableItems.length === 0) {
-            toastError('Phieu khong co dong hang nao de nhap kho.');
+            toastError('Phiếu không có dòng hàng nào để nhập kho.');
             return;
         }
         const { previewState, forecastCostPrices: forecasts } = buildImportPreviewState(receipt, products);
@@ -333,31 +333,31 @@ export default function InventoryPage() {
                 }),
             });
             const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'Loi nhap kho');
+            if (!res.ok) throw new Error(data.error || 'Lỗi nhập kho');
             if (data.generatedLots && data.generatedLots.length > 0) {
                 setPrintBatchLots(data.generatedLots);
             }
             setImportPreviewModal({ isOpen: false, receipt: null, newParts: {} });
             await Promise.all([refreshReceipts(), refreshProducts()]);
             setActiveTab('completed');
-            toastSuccess('Nhap kho thanh cong.');
+            toastSuccess('Nhập kho thành công.');
         } catch (err) {
             console.error(err);
-            toastError(err instanceof Error ? err.message : 'Loi nhap kho.');
+            toastError(err instanceof Error ? err.message : 'Lỗi nhập kho.');
         } finally {
             setIsProcessing(false);
         }
     };
 
     const handleDelete = async (id: string) => {
-        if (!confirm('Xoa phieu nay?')) return;
+        if (!confirm('Xóa phiếu này?')) return;
         try {
             await deleteDoc(doc(db, 'import_receipts', id));
             setReceipts(prev => prev.filter(r => r.id !== id));
-            toastSuccess('Da xoa phieu.');
+            toastSuccess('Đã xóa phiếu.');
         } catch (err) {
             console.error(err);
-            toastError('Loi xoa phieu.');
+            toastError('Lỗi xóa phiếu.');
         }
     };
     // ── Filter ──
@@ -409,7 +409,7 @@ export default function InventoryPage() {
                         }}
                         className="flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 shadow-md shadow-blue-200/50 font-semibold text-sm transition-colors"
                     >
-                        <ExternalLink size={18} /> De xuat san pham
+                        <ExternalLink size={18} /> Đề xuất sản phẩm
                     </button>
                     <button
                         type="button"
@@ -419,7 +419,7 @@ export default function InventoryPage() {
                         }}
                         className="flex items-center justify-center gap-2 px-4 py-2.5 bg-orange-500 text-white rounded-xl hover:bg-orange-600 shadow-md shadow-orange-200/50 font-semibold text-sm transition-colors"
                     >
-                        <ExternalLink size={18} /> De xuat linh kien
+                        <ExternalLink size={18} /> Đề xuất linh kiện
                     </button>
                 </div>
             </div>
@@ -539,13 +539,13 @@ export default function InventoryPage() {
                                         <table className="w-full min-w-[860px] text-sm mt-3">
                                             <thead>
                                                 <tr className="text-gray-500 text-xs border-b">
-                                                    <th className="text-left py-2 whitespace-nowrap">San pham</th>
-                                                    <th className="text-center whitespace-nowrap">Phan loai</th>
+                                                    <th className="text-left py-2 whitespace-nowrap">Sản phẩm</th>
+                                                    <th className="text-center whitespace-nowrap">Phân loại</th>
                                                     <th className="text-center whitespace-nowrap">SL</th>
-                                                    <th className="text-center whitespace-nowrap">Gia nhap</th>
+                                                    <th className="text-center whitespace-nowrap">Giá nhập</th>
                                                     <th className="text-center whitespace-nowrap">NCC</th>
-                                                    <th className="text-right whitespace-nowrap">Thanh tien</th>
-                                                    <th className="text-right whitespace-nowrap">Tinh trang</th>
+                                                    <th className="text-right whitespace-nowrap">Thành tiền</th>
+                                                    <th className="text-right whitespace-nowrap">Tình trạng</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
@@ -582,7 +582,7 @@ export default function InventoryPage() {
                                                                         }}
                                                                         onBlur={() => handleAutoSaveItem(receipt.id, i, priceVal, quantityVal)}
                                                                         className="mx-auto h-9 w-20 rounded-lg border px-2 text-center text-sm focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500/20"
-                                                                        aria-label="So luong"
+                                                                        aria-label="Số lượng"
                                                                     />
                                                                 ) : quantityVal}
                                                             </td>
@@ -611,7 +611,7 @@ export default function InventoryPage() {
                                                                             onChange={(event) => { setSupplierSearch(event.target.value); setSupplierActiveKey(itemKey); }}
                                                                             onFocus={() => { setSupplierActiveKey(itemKey); setSupplierSearch(item.supplier || ''); }}
                                                                             onBlur={() => setTimeout(() => setSupplierActiveKey(null), 200)}
-                                                                            placeholder="Chon NCC"
+                                                                            placeholder="Chọn NCC"
                                                                             className={`h-9 w-full rounded-lg border px-2 text-xs focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500/20 ${!item.supplier ? 'border-red-300 bg-red-50/50' : 'border-gray-300'}`}
                                                                         />
                                                                         {isSupplierActive && (supplierMatches.length > 0 || canCreateSupplier) && (
@@ -642,7 +642,7 @@ export default function InventoryPage() {
                                                                                             handleAutoSaveSupplier(receipt.id, i, supplierName, newDoc.id);
                                                                                         }}
                                                                                     >
-                                                                                        + Tao: {(supplierSearch || '').trim()}
+                                                                                        + Tạo: {(supplierSearch || '').trim()}
                                                                                     </button>
                                                                                 )}
                                                                             </div>
@@ -650,7 +650,7 @@ export default function InventoryPage() {
                                                                     </div>
                                                                 ) : (item.supplier || '-')}
                                                             </td>
-                                                            <td className="text-right font-medium">{isUnavailable ? 'Da loai' : formatPrice(priceVal * quantityVal)}</td>
+                                                            <td className="text-right font-medium">{isUnavailable ? 'Đã loại' : formatPrice(priceVal * quantityVal)}</td>
                                                             <td className="text-right">
                                                                 {(receipt.status === 'draft' || receipt.status === 'ordered') ? (
                                                                     <div className="flex justify-end gap-1.5">
@@ -660,7 +660,7 @@ export default function InventoryPage() {
                                                                             disabled={isProcessing}
                                                                             className={`rounded-full px-2 py-1 text-[11px] font-semibold disabled:opacity-50 ${(itemAvailability === 'in_stock' || itemAvailability === 'approved') ? 'bg-emerald-500 text-white' : 'border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}
                                                                         >
-                                                                            Co hang
+                                                                            Có hàng
                                                                         </button>
                                                                         <button
                                                                             type="button"
@@ -668,7 +668,7 @@ export default function InventoryPage() {
                                                                             disabled={isProcessing}
                                                                             className={`rounded-full px-2 py-1 text-[11px] font-semibold disabled:opacity-50 ${itemAvailability === 'unavailable' ? 'bg-red-500 text-white' : 'border border-red-200 bg-red-50 text-red-600 hover:bg-red-100'}`}
                                                                         >
-                                                                            Khong co
+                                                                            Không có
                                                                         </button>
                                                                     </div>
                                                                 ) : <span className="text-xs text-gray-400">-</span>}
@@ -679,7 +679,7 @@ export default function InventoryPage() {
                                             </tbody>
                                             <tfoot>
                                                 <tr className="font-bold">
-                                                    <td colSpan={5} className="py-2 text-right">Tong cong:</td>
+                                                    <td colSpan={5} className="py-2 text-right">Tổng cộng:</td>
                                                     <td className="text-right text-orange-600">{formatPrice(importableTotal)}</td>
                                                     <td />
                                                 </tr>
@@ -689,7 +689,7 @@ export default function InventoryPage() {
                                     {receipt.note && <p className="mt-2 text-xs text-gray-500">{receipt.note}</p>}
                                     {receipt.status === 'draft' && missingSupplierCount > 0 && (
                                         <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700">
-                                            Con {missingSupplierCount}/{importableItems.length} dong can dat chua gan NCC.
+                                            Còn {missingSupplierCount}/{importableItems.length} dòng cần đặt chưa gắn NCC.
                                         </p>
                                     )}
 
@@ -697,31 +697,31 @@ export default function InventoryPage() {
                                         {receipt.status === 'draft' && (
                                             <>
                                                 <button onClick={() => handleDelete(receipt.id)} disabled={isProcessing} className="flex items-center gap-1.5 rounded-lg bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100 disabled:opacity-50">
-                                                    <Trash2 size={12} /> Xoa phieu
+                                                    <Trash2 size={12} /> Xóa phiếu
                                                 </button>
                                                 <button onClick={() => handleOrderReceipt(receipt)} disabled={isProcessing || importableItems.length === 0 || missingSupplierCount > 0} className="ml-auto flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300">
-                                                    {isProcessing ? <Loader2 size={12} className="animate-spin" /> : <PackagePlus size={12} />} Chot dat hang
+                                                    {isProcessing ? <Loader2 size={12} className="animate-spin" /> : <PackagePlus size={12} />} Chốt đặt hàng
                                                 </button>
                                             </>
                                         )}
                                         {receipt.status === 'ordered' && (
                                             <>
                                                 <button onClick={() => handleDelete(receipt.id)} disabled={isProcessing} className="flex items-center gap-1.5 rounded-lg bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100 disabled:opacity-50">
-                                                    <Trash2 size={12} /> Huy phieu
+                                                    <Trash2 size={12} /> Hủy phiếu
                                                 </button>
                                                 <button onClick={() => handleImportReceipt(receipt)} disabled={isProcessing || importableItems.length === 0} className="ml-auto flex items-center gap-1.5 rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-50">
-                                                    {isProcessing ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />} Xac nhan nhap kho
+                                                    {isProcessing ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />} Xác nhận nhập kho
                                                 </button>
                                             </>
                                         )}
                                         {receipt.status === 'completed' && (
                                             <span className="text-xs text-green-600 flex items-center gap-1">
-                                                <CheckCircle2 size={12} /> Da nhap kho {receipt.completedAt ? `luc ${formatDate(receipt.completedAt)}` : ''}
+                                                <CheckCircle2 size={12} /> Đã nhập kho {receipt.completedAt ? `lúc ${formatDate(receipt.completedAt)}` : ''}
                                             </span>
                                         )}
                                         {receipt.lotCode && (
                                             <button onClick={() => handlePrintLot(receipt)} className="ml-auto rounded-lg bg-orange-100 px-3 py-1.5 text-xs font-semibold text-orange-700 hover:bg-orange-200">
-                                                In tem lo hang
+                                                In tem lô hàng
                                             </button>
                                         )}
                                     </div>

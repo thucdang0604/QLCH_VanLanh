@@ -107,15 +107,15 @@ export default function PartsPage() {
         }
         setConfirmModal({
             isOpen: true,
-            title: 'Luu tru linh kien',
-            message: `Luu tru linh kien "${part.name}"? Linh kien se an khoi danh sach ban/dat linh kien nhung van giu lich su va ma hang.`,
-            confirmText: 'Luu tru',
+            title: 'Lưu trữ linh kiện',
+            message: `Lưu trữ linh kiện "${part.name}"? Linh kiện sẽ ẩn khỏi danh sách bán/đặt linh kiện nhưng vẫn giữ lịch sử và mã hàng.`,
+            confirmText: 'Lưu trữ',
             dangerous: true,
             onConfirm: async () => {
                 try {
                     await updateDocument('products', part.id, buildArchiveUpdate(serverTimestamp()));
                 } catch {
-                    toastError('Loi khi luu tru linh kien.');
+                    toastError('Lỗi khi lưu trữ linh kiện.');
                 }
             },
         });
@@ -134,9 +134,9 @@ export default function PartsPage() {
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-                        <Wrench className="text-orange-500" /> Kho linh kien
+                        <Wrench className="text-orange-500" /> Kho linh kiện
                     </h1>
-                    <p className="text-gray-500">{parts.length} linh kien trong he thong</p>
+                    <p className="text-gray-500">{parts.length} linh kiện trong hệ thống</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
                     <button
@@ -161,7 +161,7 @@ export default function PartsPage() {
                         className="flex items-center gap-2 bg-orange-500 text-white px-4 py-2.5 rounded-lg font-medium hover:bg-orange-600 transition-colors shadow-sm"
                     >
                         <Plus size={18} />
-                        Them linh kien
+                        Thêm linh kiện
                     </button>
                 </div>
             </div>
@@ -171,7 +171,7 @@ export default function PartsPage() {
                     <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                     <input
                         type="text"
-                        placeholder="Tim ten, dong may, loai linh kien..."
+                        placeholder="Tìm tên, dòng máy, loại linh kiện..."
                         value={searchQuery}
                         onChange={(event) => setSearchQuery(event.target.value)}
                         className="w-full h-11 pl-10 pr-4 border rounded-lg focus:border-orange-500 focus:outline-none"
@@ -201,7 +201,7 @@ export default function PartsPage() {
                 {paginatedParts.length === 0 ? (
                     <div className="py-16 text-center text-gray-400">
                         <Wrench size={48} className="mx-auto mb-3 opacity-40" />
-                        <p>Khong co linh kien phu hop.</p>
+                        <p>Không có linh kiện phù hợp.</p>
                     </div>
                 ) : (
                     <>
@@ -214,16 +214,16 @@ export default function PartsPage() {
                                             <p className="text-xs text-gray-500">{getPartModel(part) || PART_CATEGORY_LABEL} {part.partType ? `- ${part.partType}` : ''}</p>
                                         </div>
                                         <span className={`px-2 py-1 rounded text-xs font-semibold ${Number(part.stock) > 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
-                                            Ton: {Number(part.stock) || 0}
+                                            Tồn: {Number(part.stock) || 0}
                                         </span>
                                     </div>
                                     <div className="grid grid-cols-2 gap-2 text-xs text-gray-600">
                                         <div>
-                                            <p className="text-gray-400">Gia ban</p>
+                                            <p className="text-gray-400">Giá bán</p>
                                             <p className="font-semibold text-gray-900">{formatReceiptPrice(part.price_promo || part.price_original || 0)}</p>
                                         </div>
                                         <div>
-                                            <p className="text-gray-400">Gia von</p>
+                                            <p className="text-gray-400">Giá vốn</p>
                                             <p className="font-semibold text-gray-900">{formatReceiptPrice(part.costPrice || 0)}</p>
                                         </div>
                                     </div>
@@ -232,7 +232,7 @@ export default function PartsPage() {
                                             QR
                                         </button>
                                         <button onClick={() => { setEditingPart(part); setIsModalOpen(true); }} className="flex-1 rounded-lg bg-orange-50 px-3 py-2 text-xs font-medium text-orange-700">
-                                            Sua
+                                            Sửa
                                         </button>
                                     </div>
                                 </div>
@@ -243,13 +243,13 @@ export default function PartsPage() {
                             <table className="w-full min-w-[900px]">
                                 <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">
                                     <tr>
-                                        <th className="px-4 py-3">Linh kien</th>
-                                        <th className="px-4 py-3">Phan loai</th>
-                                        <th className="px-4 py-3 text-center">Ton</th>
-                                        <th className="px-4 py-3 text-right">Gia von</th>
-                                        <th className="px-4 py-3 text-right">Gia ban</th>
-                                        <th className="px-4 py-3 text-center">Da dung</th>
-                                        <th className="px-4 py-3 text-right">Thao tac</th>
+                                        <th className="px-4 py-3">Linh kiện</th>
+                                        <th className="px-4 py-3">Phân loại</th>
+                                        <th className="px-4 py-3 text-center">Tồn</th>
+                                        <th className="px-4 py-3 text-right">Giá vốn</th>
+                                        <th className="px-4 py-3 text-right">Giá bán</th>
+                                        <th className="px-4 py-3 text-center">Đã dùng</th>
+                                        <th className="px-4 py-3 text-right">Thao tác</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
@@ -276,10 +276,10 @@ export default function PartsPage() {
                                                     <button onClick={() => setQrPart(part as Product & { id: string })} className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg" title="In QR">
                                                         <QrCode size={16} />
                                                     </button>
-                                                    <button onClick={() => { setEditingPart(part); setIsModalOpen(true); }} className="p-2 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded-lg" title="Sua">
+                                                    <button onClick={() => { setEditingPart(part); setIsModalOpen(true); }} className="p-2 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded-lg" title="Sửa">
                                                         <Edit size={16} />
                                                     </button>
-                                                    <button onClick={() => handleArchive(part)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg" title="Luu tru">
+                                                    <button onClick={() => handleArchive(part)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg" title="Lưu trữ">
                                                         <Archive size={16} />
                                                     </button>
                                                 </div>
@@ -298,7 +298,7 @@ export default function PartsPage() {
                             totalAll={filteredParts.length}
                             onPageChange={setPage}
                             onPageSizeChange={setPageSize}
-                            entityLabel="linh kien"
+                            entityLabel="linh kiện"
                         />
                     </>
                 )}

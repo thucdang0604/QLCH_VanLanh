@@ -46,13 +46,13 @@ async function findLegacyOwner(code: string, excludedProductId?: string): Promis
 export async function assertProductCodesAvailable(codes: string[], excludedProductId?: string): Promise<string[]> {
     const normalizedCodes = normalizeCodes(codes);
     if (normalizedCodes.length !== 1) {
-        throw new Error('San pham phai co dung mot ma QR va barcode.');
+        throw new Error('Sản phẩm phải có đúng một mã QR và barcode.');
     }
 
     for (const code of normalizedCodes) {
         const owner = await findLegacyOwner(code, excludedProductId);
         if (owner) {
-            throw new Error(`Ma QR ${code} da duoc gan cho san pham "${owner.data().name || owner.id}".`);
+            throw new Error(`Mã QR ${code} đã được gắn cho sản phẩm "${owner.data().name || owner.id}".`);
         }
     }
     return normalizedCodes;
@@ -73,11 +73,11 @@ export async function createProductWithCodes(
             ...registryRefs.map((ref) => transaction.get(ref)),
         ]);
         if (productSnapshot.exists()) {
-            throw new Error(`ID san pham ${productId} da ton tai.`);
+            throw new Error(`ID sản phẩm ${productId} đã tồn tại.`);
         }
         registrySnapshots.forEach((snapshot, index) => {
             if (snapshot.exists()) {
-                throw new Error(`Ma QR ${normalizedCodes[index]} da duoc gan cho san pham khac.`);
+                throw new Error(`Mã QR ${normalizedCodes[index]} đã được gắn cho sản phẩm khác.`);
             }
         });
         registryRefs.forEach((ref, index) => {
@@ -108,7 +108,7 @@ export async function updateProductWithCodes(
     await runTransaction(db, async (transaction) => {
         const productSnapshot = await transaction.get(productRef);
         if (!productSnapshot.exists()) {
-            throw new Error('San pham khong ton tai.');
+            throw new Error('Sản phẩm không tồn tại.');
         }
 
         const oldCodes = getStoredCodes(productSnapshot.data());
@@ -120,7 +120,7 @@ export async function updateProductWithCodes(
             const index = allCodes.indexOf(code);
             const snapshot = registrySnapshots[index];
             if (snapshot.exists() && snapshot.data().productId !== productId) {
-                throw new Error(`Ma QR ${code} da duoc gan cho san pham khac.`);
+                throw new Error(`Mã QR ${code} đã được gắn cho sản phẩm khác.`);
             }
         });
 
