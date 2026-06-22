@@ -47,6 +47,7 @@ const paymentLabels: Record<PaymentStatus, { label: string; color: string }> = {
 };
 const formatPrice = formatRepairPrice;
 const REPAIRS_PAGE_SIZE = 50;
+const REPAIR_SEARCH_LIMIT = 50;
 type RepairListTab = 'active' | 'closed';
 
 function getWorkflowForTicketFromLists(ticket: RepairTicket, repairStatuses: WorkflowNode[], warrantyStatuses: WorkflowNode[]): WorkflowNode[] {
@@ -325,8 +326,8 @@ export default function RepairPage() {
         try {
             const s = searchTerm.trim();
             const queries = [
-                getDocs(query(collection(db, 'repairs'), where('customer.phone', '==', s))),
-                getDocs(query(collection(db, 'repairs'), where('deviceInfo.imei', '==', s)))
+                getDocs(query(collection(db, 'repairs'), where('customer.phone', '==', s), limit(REPAIR_SEARCH_LIMIT))),
+                getDocs(query(collection(db, 'repairs'), where('deviceInfo.imei', '==', s), limit(REPAIR_SEARCH_LIMIT)))
             ];
             const snaps = await Promise.all(queries);
             let combined: RepairTicket[] = [];
