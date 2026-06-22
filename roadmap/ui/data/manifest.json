@@ -1,6 +1,6 @@
 {
   "projectName": "QLCH_VanLanh",
-  "lastSync": "2026-06-18T00:00:00.000+07:00",
+  "lastSync": "2026-06-22T00:00:00.000+07:00",
   "stats": {
     "completionPercent": 98,
     "openP0": 0,
@@ -10,6 +10,33 @@
   },
   "constraints": [],
   "aiPlans": [
+    {
+      "id": "plan-data-scale-performance-audit-20260622",
+      "title": "Data Scale, Search & Firebase Performance Audit",
+      "date": "22.06.2026",
+      "status": "planned",
+      "planFile": "data/ai_plans/plan_data_scale_performance_audit_20260622.md",
+      "taskFile": "data/ai_plans/task_data_scale_performance_audit_20260622.md",
+      "walkthroughFile": "",
+      "scope": [
+        "src/app/admin/inventory/page.tsx",
+        "src/app/admin/inventory/stock/page.tsx",
+        "src/app/admin/revenue/page.tsx",
+        "src/app/admin/commissions/page.tsx",
+        "src/app/admin/pos/page.tsx",
+        "src/app/admin/orders/page.tsx",
+        "src/app/admin/repairs/page.tsx",
+        "src/app/admin/technician/page.tsx",
+        "src/lib/useCustomerActivity.ts"
+      ],
+      "decisions": [
+        "Large admin lists must use limit, cursor pagination, and server-side filters.",
+        "Revenue and commission reporting should prefer aggregate documents instead of client-side source collection scans.",
+        "POS code lookup should converge on product_code_registry as the one-document authoritative lookup path.",
+        "Legacy debt-collection POS orders created before the fix need a reconcile/backfill pass."
+      ],
+      "updatedAt": "2026-06-22T00:00:00.000+07:00"
+    },
     {
       "id": "plan-import-customers-suppliers-20260619",
       "title": "Import Khách hàng & Nhà cung cấp từ Excel",
