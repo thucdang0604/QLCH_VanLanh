@@ -13,7 +13,7 @@
 
 - [x] Add bounded phone search for `admin/orders`: `limit(50)` with client-side newest-first merge.
 - [x] Add bounded phone/IMEI search for `admin/repairs`.
-- [ ] Add bounded phone search for `admin/appointments`.
+- [x] Add bounded phone search for `admin/appointments`.
 - [ ] Ensure empty result distinguishes "not found" from "has records outside current filter" where relevant.
 
 ## Phase 3 - POS product-code registry as primary lookup

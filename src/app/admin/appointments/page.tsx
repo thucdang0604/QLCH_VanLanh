@@ -53,6 +53,8 @@ interface Appointment {
     createdAt: FirestoreDateValue;
 }
 
+const APPOINTMENT_SEARCH_LIMIT = 50;
+
 const statusConfig: Record<string, { color: string; label: string; icon: LucideIcon }> = {
     pending: { color: 'bg-yellow-100 text-yellow-700 border-yellow-200', label: 'Chờ xác nhận', icon: Clock },
     confirmed: { color: 'bg-blue-100 text-blue-700 border-blue-200', label: 'Đã xác nhận', icon: CheckCircle2 },
@@ -132,7 +134,7 @@ export default function AppointmentsPage() {
         setIsSearchingDB(true);
         try {
             // Find by phone
-            const qPhone = query(collection(db, 'appointments'), where('phone', '==', searchQuery.trim()));
+            const qPhone = query(collection(db, 'appointments'), where('phone', '==', searchQuery.trim()), limit(APPOINTMENT_SEARCH_LIMIT));
             const snap = await getDocs(qPhone);
             
             if (!snap.empty) {
