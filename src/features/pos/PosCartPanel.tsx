@@ -48,6 +48,7 @@ interface PosCartPanelProps {
     onCloseMobileCart: () => void;
     onLookupRepairByPhone: (phone: string) => void;
     onAddRepairToCart: (repair: RepairTicketInfo) => void;
+    onAddPayableOrderToCart: (order: PayableOrderInfo) => void;
     onApplyVoucher: () => void;
     onUpdateQuantity: (cartItemId: string, delta: number) => void;
     onUpdatePrice: (cartItemId: string, newPrice: number) => void;
@@ -91,6 +92,7 @@ export function PosCartPanel({
     onCloseMobileCart,
     onLookupRepairByPhone,
     onAddRepairToCart,
+    onAddPayableOrderToCart,
     onApplyVoucher,
     onUpdateQuantity,
     onUpdatePrice,
@@ -135,6 +137,7 @@ export function PosCartPanel({
                 )}
                 {cart.map(item => {
                     const product = products.find(candidate => candidate.id === item.productId);
+                    const isFixedPaymentItem = item.isRepairTicket || item.isOrderPayment;
                     return (
                         <div key={item.cartItemId} className="bg-gray-50 rounded-xl p-3 space-y-2">
                             <div className="flex items-start gap-2">
@@ -159,11 +162,11 @@ export function PosCartPanel({
                             </div>
                             <div className="flex items-center gap-2">
                                 <div className="flex items-center gap-1 bg-white rounded-lg border">
-                                    <button onClick={() => onUpdateQuantity(item.cartItemId, -1)} className="p-1 hover:bg-gray-100 rounded-l-lg disabled:opacity-50 disabled:cursor-not-allowed" aria-label="Giảm số lượng" title="Giảm số lượng" disabled={item.isRepairTicket}>
+                                    <button onClick={() => onUpdateQuantity(item.cartItemId, -1)} className="p-1 hover:bg-gray-100 rounded-l-lg disabled:opacity-50 disabled:cursor-not-allowed" aria-label="Giảm số lượng" title="Giảm số lượng" disabled={isFixedPaymentItem}>
                                         <Minus size={14} />
                                     </button>
                                     <span className="px-2 text-sm font-bold min-w-[24px] text-center">{item.quantity}</span>
-                                    <button onClick={() => onUpdateQuantity(item.cartItemId, 1)} className="p-1 hover:bg-gray-100 rounded-r-lg disabled:opacity-50 disabled:cursor-not-allowed" aria-label="Tăng số lượng" title="Tăng số lượng" disabled={item.isRepairTicket}>
+                                    <button onClick={() => onUpdateQuantity(item.cartItemId, 1)} className="p-1 hover:bg-gray-100 rounded-r-lg disabled:opacity-50 disabled:cursor-not-allowed" aria-label="Tăng số lượng" title="Tăng số lượng" disabled={isFixedPaymentItem}>
                                         <Plus size={14} />
                                     </button>
                                 </div>
@@ -172,8 +175,8 @@ export function PosCartPanel({
                                     <CurrencyInput
                                         value={item.sellingPrice}
                                         onChange={value => onUpdatePrice(item.cartItemId, value)}
-                                        disabled={item.isRepairTicket}
-                                        className={`w-full pl-7 pr-2 py-1 text-sm border rounded-lg text-right font-semibold ${item.sellingPrice !== item.originalPrice ? 'border-orange-300 text-orange-600 bg-orange-50' : ''} ${item.isRepairTicket ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`}
+                                        disabled={isFixedPaymentItem}
+                                        className={`w-full pl-7 pr-2 py-1 text-sm border rounded-lg text-right font-semibold ${item.sellingPrice !== item.originalPrice ? 'border-orange-300 text-orange-600 bg-orange-50' : ''} ${isFixedPaymentItem ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`}
                                     />
                                 </div>
                                 <span className="text-sm font-bold text-gray-700 whitespace-nowrap min-w-[70px] text-right">
@@ -295,7 +298,9 @@ export function PosCartPanel({
                         </div>
                         {showRepairsList && (
                             <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1">
-                                {payableOrders.map(order => (
+                                {payableOrders.map(order => {
+                                    const isInCart = cart.some(item => item.orderPaymentId === order.id);
+                                    return (
                                     <div key={order.id} className="bg-white rounded-lg p-2.5 text-xs space-y-1 border border-amber-100/70 shadow-sm">
                                         <div className="flex items-center justify-between gap-2">
                                             <span className="font-semibold text-amber-800">Đơn #{order.id.slice(-6)}</span>
@@ -305,14 +310,28 @@ export function PosCartPanel({
                                         </div>
                                         <p className="text-amber-700">{order.status} · {order.paymentMethod || order.paymentStatus || 'chưa rõ'} · {order.createdAtLabel}</p>
                                         {order.itemNames.length > 0 && <p className="text-amber-600 line-clamp-1">SP: {order.itemNames.join(', ')}</p>}
-                                        <a
-                                            href={`/admin/orders?orderId=${order.id}`}
-                                            className="mt-2 inline-flex w-full items-center justify-center rounded-lg bg-amber-600 px-3 py-1.5 font-semibold text-white hover:bg-amber-700"
-                                        >
-                                            Mở chi tiết đơn
-                                        </a>
+                                        <div className="mt-2 grid grid-cols-2 gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    onAddPayableOrderToCart(order);
+                                                    setShowRepairsList(false);
+                                                }}
+                                                disabled={isInCart}
+                                                className="inline-flex items-center justify-center rounded-lg bg-amber-600 px-3 py-1.5 font-semibold text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:bg-amber-200 disabled:text-amber-700"
+                                            >
+                                                {isInCart ? 'Đã thêm' : 'Thu nợ'}
+                                            </button>
+                                            <a
+                                                href={`/admin/orders?orderId=${order.id}`}
+                                                className="inline-flex items-center justify-center rounded-lg border border-amber-200 bg-white px-3 py-1.5 font-semibold text-amber-700 hover:bg-amber-50"
+                                            >
+                                                Chi tiết
+                                            </a>
+                                        </div>
                                     </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         )}
                     </div>

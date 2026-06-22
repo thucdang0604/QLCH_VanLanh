@@ -26,6 +26,7 @@ export interface CartItem {
     cartItemId: string;
     productId: string;
     repairTicketId?: string;
+    orderPaymentId?: string;
     name: string;
     image?: string;
     originalPrice: number;
@@ -33,6 +34,7 @@ export interface CartItem {
     costPrice?: number;
     quantity: number;
     isRepairTicket?: boolean;
+    isOrderPayment?: boolean;
     warrantyType?: string;
     imeis?: string[];
     lotCode?: string;

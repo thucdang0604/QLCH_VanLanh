@@ -97,16 +97,23 @@ function formatLookupDate(value: unknown) {
 function mapPayableOrderInfo(id: string, data: Record<string, unknown>): PayableOrderInfo | null {
     const customer = (data.customer_info || data.customer || {}) as Record<string, unknown>;
     const totalAmount = Number(data.total_amount || 0);
-    const paidAmount = Number(data.deposit_amount || 0);
+    const paymentHistory = Array.isArray(data.paymentHistory) ? data.paymentHistory : [];
+    const paidFromHistory = paymentHistory.reduce((sum, entry) => {
+        const line = (entry || {}) as Record<string, unknown>;
+        return sum + (Number(line.amount) || 0);
+    }, 0);
+    const paidAmount = Math.max(Number(data.deposit_amount || 0), paidFromHistory);
     const remainingAmount = Math.max(0, totalAmount - paidAmount);
     const status = String(data.status || '');
     const paymentMethod = String(data.payment_method || '');
     const paymentStatus = String(data.paymentStatus || '');
-    const isDebtLike = paymentStatus === 'debt'
-        || paymentStatus === 'unpaid'
-        || paymentMethod.toLowerCase() === 'debt'
-        || paymentMethod.toLowerCase() === 'ghi nợ';
-    const isActionable = status !== 'Cancelled' && status !== 'Completed' && (remainingAmount > 0 || isDebtLike);
+    const normalizedPaymentStatus = paymentStatus.toLowerCase();
+    const normalizedPaymentMethod = paymentMethod.toLowerCase();
+    const isDebtLike = normalizedPaymentStatus === 'debt'
+        || normalizedPaymentStatus === 'unpaid'
+        || normalizedPaymentMethod === 'debt'
+        || normalizedPaymentMethod === 'ghi nợ';
+    const isActionable = status !== 'Cancelled' && normalizedPaymentStatus !== 'paid' && (remainingAmount > 0 || isDebtLike);
 
     if (!isActionable) return null;
 
@@ -841,10 +848,36 @@ export default function POSPage() {
         setCart(prev => [...newItems, ...prev]);
     };
 
+    const addPayableOrderToCart = (order: PayableOrderInfo) => {
+        if (cart.some(c => c.orderPaymentId === order.id)) {
+            toastError('Hóa đơn này đã có trong giỏ POS!');
+            return;
+        }
+
+        const remainingAmount = Math.max(0, Number(order.remainingAmount) || 0);
+        if (remainingAmount <= 0) {
+            toastError('Hóa đơn này không còn số tiền cần thanh toán.');
+            return;
+        }
+
+        setCart(prev => [{
+            cartItemId: `order_payment_${order.id}`,
+            productId: `order_payment_${order.id}`,
+            orderPaymentId: order.id,
+            name: `[Thu nợ ĐH] #${order.id.slice(-6)}`,
+            originalPrice: remainingAmount,
+            sellingPrice: remainingAmount,
+            costPrice: 0,
+            quantity: 1,
+            isOrderPayment: true,
+        }, ...prev]);
+    };
+
     const updateQuantity = (cartItemId: string, delta: number) => {
         setCart(prev =>
             prev.map(c => {
                 if (c.cartItemId !== cartItemId) return c;
+                if (c.isRepairTicket || c.isOrderPayment) return c;
                 const newQty = Math.max(1, c.quantity + delta);
                 // Validate against stock
                 const product = products.find(p => p.id === c.productId);
@@ -860,6 +893,7 @@ export default function POSPage() {
 
     const updatePrice = (cartItemId: string, newPrice: number) => {
         const item = cart.find(c => c.cartItemId === cartItemId);
+        if (item?.isRepairTicket || item?.isOrderPayment) return;
         if (item && (item.costPrice || 0) > 0 && newPrice < (item.costPrice || 0) && newPrice > 0) {
             if (!confirm(`Giá bán (${newPrice.toLocaleString('vi-VN')}đ) thấp hơn giá vốn (${(item.costPrice || 0).toLocaleString('vi-VN')}đ). Bạn sẽ lỗ ${((item.costPrice || 0) - newPrice).toLocaleString('vi-VN')}đ/sp. Tiếp tục?`)) {
                 return;
@@ -875,15 +909,20 @@ export default function POSPage() {
     };
 
     const subtotal = cart.reduce((sum, c) => sum + c.sellingPrice * c.quantity, 0);
+    const orderPaymentSubtotal = cart
+        .filter(c => c.isOrderPayment)
+        .reduce((sum, c) => sum + c.sellingPrice * c.quantity, 0);
+    const discountableSubtotal = Math.max(0, subtotal - orderPaymentSubtotal);
+    const effectiveDiscount = Math.min(discount, discountableSubtotal);
 
     // Calculate voucher discount automatically based on subtotal
     const voucherDiscountAmount = appliedVoucher ? (
         appliedVoucher.type === 'fixed'
-            ? Math.min(appliedVoucher.value, subtotal)
-            : Math.min(Math.round(subtotal * appliedVoucher.value / 100), appliedVoucher.maxDiscount || Infinity)
+            ? Math.min(appliedVoucher.value, Math.max(0, discountableSubtotal - effectiveDiscount))
+            : Math.min(Math.round(discountableSubtotal * appliedVoucher.value / 100), appliedVoucher.maxDiscount || Infinity, Math.max(0, discountableSubtotal - effectiveDiscount))
     ) : 0;
 
-    const total = Math.max(0, subtotal - discount - voucherDiscountAmount + (shippingFee || 0));
+    const total = Math.max(0, subtotal - effectiveDiscount - voucherDiscountAmount + (shippingFee || 0));
 
     const formatPrice = (n: number) => n.toLocaleString('vi-VN') + 'đ';
 
@@ -897,7 +936,7 @@ export default function POSPage() {
             const res = await fetch('/api/vouchers/validate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ code: voucherCode.trim(), subtotal, phone: customerPhone }),
+                body: JSON.stringify({ code: voucherCode.trim(), subtotal: discountableSubtotal, phone: customerPhone }),
             });
             const data = await res.json();
             if (data.valid) {
@@ -971,11 +1010,13 @@ export default function POSPage() {
                     price: c.sellingPrice,
                     isRepairTicket: c.isRepairTicket,
                     repairTicketId: c.repairTicketId,
+                    isOrderPayment: c.isOrderPayment,
+                    orderPaymentId: c.orderPaymentId,
                     imeis: c.imeis,
                     lotCode: c.lotCode
                 })),
                 total_amount: total,
-                discount_amount: discount + voucherDiscountAmount,
+                discount_amount: effectiveDiscount + voucherDiscountAmount,
                 subtotal_amount: subtotal,
                 shipping_fee: shippingFee,
                 deposit_amount: deposit,
@@ -1071,7 +1112,7 @@ export default function POSPage() {
             setDiscount={setDiscount}
             paymentMethod={paymentMethod}
             setPaymentMethod={setPaymentMethod}
-            discount={discount}
+            discount={effectiveDiscount}
             voucherCode={voucherCode}
             setVoucherCode={setVoucherCode}
             voucherStatus={voucherStatus}
@@ -1089,6 +1130,7 @@ export default function POSPage() {
             onCloseMobileCart={() => setShowMobileCart(false)}
             onLookupRepairByPhone={lookupRepairByPhone}
             onAddRepairToCart={addRepairToCart}
+            onAddPayableOrderToCart={addPayableOrderToCart}
             onApplyVoucher={handleApplyVoucher}
             onUpdateQuantity={updateQuantity}
             onUpdatePrice={updatePrice}
