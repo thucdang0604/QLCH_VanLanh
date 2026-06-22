@@ -1047,9 +1047,15 @@ export default function POSPage() {
                 }
             }
 
-            setLastOrder({ id: data.orderId, ...orderData, createdAt: new Date() });
-            toastSuccess('Thanh toán thành công!');
-            setShowReceipt(true);
+            if (data.debtOnly) {
+                setLastOrder(null);
+                setShowReceipt(false);
+                toastSuccess('Thu nợ thành công, đã cập nhật lịch sử thanh toán trên đơn cũ!');
+            } else {
+                setLastOrder({ id: data.orderId, ...orderData, createdAt: new Date() });
+                toastSuccess('Thanh toán thành công!');
+                setShowReceipt(true);
+            }
 
             // Reset cart
             setCart([]);

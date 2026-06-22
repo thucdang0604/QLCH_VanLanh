@@ -72,7 +72,7 @@ export async function POST(request: NextRequest) {
                 tx.update(doc.ref, {
                     paymentStatus: isFullyPaid ? 'paid' : 'debt',
                     paymentHistory: FieldValue.arrayUnion({
-                        type: 'payment',
+                        type: 'debt_payment',
                         amount: paymentForThisOrder,
                         method: paymentMethod,
                         timestamp: Date.now(),

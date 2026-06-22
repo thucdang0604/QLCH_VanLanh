@@ -33,7 +33,8 @@ export interface PaymentHistoryEntry {
     method?: string;
     date?: FirestoreDateValue;
     timestamp?: number;
-    type: 'deposit' | 'payment' | 'full' | 'additional' | 'refund';
+    type: 'deposit' | 'payment' | 'full' | 'additional' | 'refund' | 'debt_payment';
+    referenceId?: string | null;
     note?: string;
 }
 

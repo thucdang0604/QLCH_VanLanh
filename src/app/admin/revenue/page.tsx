@@ -42,21 +42,34 @@ function getMonthsAgoTimestamp(months: number): Timestamp {
 type RevenueOrderItem = Order['items'][number] & {
     isRepairTicket?: boolean;
     repairTicketId?: string;
+    isOrderPayment?: boolean;
+    orderPaymentId?: string;
 };
 
 function isRepairOrderItem(item: RevenueOrderItem) {
     return item.isRepairTicket === true || Boolean(item.repairTicketId);
 }
 
+function isOrderPaymentItem(item: RevenueOrderItem) {
+    return item.isOrderPayment === true || Boolean(item.orderPaymentId);
+}
+
+function getRevenuePaymentTotal(order: Order) {
+    return (order.paymentHistory || []).reduce((sum, payment) => {
+        if (payment.type === 'debt_payment') return sum;
+        return payment.type === 'refund' ? sum - (payment.amount || 0) : sum + (payment.amount || 0);
+    }, 0);
+}
+
 function getRetailOrderTotal(order: Order) {
     const items = (order.items || []) as RevenueOrderItem[];
     if (items.length === 0) return Number(order.total_amount) || 0;
 
-    const hasRepairItems = items.some(isRepairOrderItem);
-    if (!hasRepairItems) return Number(order.total_amount) || 0;
+    const hasNonRetailItems = items.some(item => isRepairOrderItem(item) || isOrderPaymentItem(item));
+    if (!hasNonRetailItems) return Number(order.total_amount) || 0;
 
     const retailSubtotal = items
-        .filter(item => !isRepairOrderItem(item))
+        .filter(item => !isRepairOrderItem(item) && !isOrderPaymentItem(item))
         .reduce((sum, item) => sum + (Number(item.price) || 0) * (Number(item.quantity) || 1), 0);
     const retailDiscount = Math.min(Number(order.discount_amount) || 0, retailSubtotal);
     return Math.max(0, retailSubtotal - retailDiscount);
@@ -245,7 +258,7 @@ export default function RevenuePage() {
             if (inRange(o.completedAt || o.updatedAt || o.createdAt)) {
                 if (o.paymentHistory && o.paymentHistory.length > 0) {
                     // Có lịch sử thanh toán (từ POS hoặc Thu nợ)
-                    const paidSoFar = o.paymentHistory.reduce((s, p) => s + (p.amount || 0), 0);
+                    const paidSoFar = getRevenuePaymentTotal(o);
                     const retailTotal = getRetailOrderTotal(o);
                     const paidRetail = Math.min(paidSoFar, retailTotal);
                     orderRevenue += paidRetail;
@@ -393,7 +406,7 @@ export default function RevenuePage() {
             orders.forEach(o => {
                 if (isInDay(o.completedAt || o.updatedAt || o.createdAt)) {
                     if (o.paymentHistory && o.paymentHistory.length > 0) {
-                        const paidSoFar = o.paymentHistory.reduce((s, p) => s + (p.amount || 0), 0);
+                        const paidSoFar = getRevenuePaymentTotal(o);
                         rev += Math.min(paidSoFar, getRetailOrderTotal(o));
                     } else if ((o.status === 'Completed' || o.status === 'Shipping') && o.paymentStatus !== 'debt' && o.payment_method !== 'Debt') {
                         rev += getRetailOrderTotal(o);

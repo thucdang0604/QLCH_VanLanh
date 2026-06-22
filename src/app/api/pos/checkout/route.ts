@@ -71,7 +71,13 @@ export async function POST(request: NextRequest) {
                 if (opSnap.exists) {
                     const data = opSnap.data();
                     if (data?.status === 'completed' && data.referenceId) {
-                        return { success: true, fromCache: true, orderId: data.referenceId };
+                        return {
+                            success: true,
+                            fromCache: true,
+                            orderId: data.referenceId,
+                            debtOnly: data.debtOnly === true,
+                            updatedOrderIds: Array.isArray(data.updatedOrderIds) ? data.updatedOrderIds : [],
+                        };
                     }
                 }
             }
@@ -251,6 +257,14 @@ export async function POST(request: NextRequest) {
             const discountableSubtotal = Math.max(0, serverSubtotal - orderPaymentSubtotal);
             const serverDiscount = Math.min(Number(discount_amount) || 0, discountableSubtotal);
             const serverTotal = serverSubtotal - serverDiscount;
+            const isDebtCollectionOnly = orderPaymentSubtotal > 0 && discountableSubtotal === 0;
+
+            if (orderPaymentSubtotal > 0 && discountableSubtotal > 0) {
+                throw new Error('Vui lòng tách thu nợ đơn cũ và bán hàng mới thành 2 lần thanh toán riêng.');
+            }
+            if (isDebtCollectionOnly && voucherCode) {
+                throw new Error('Không áp dụng voucher cho khoản thu nợ đơn cũ.');
+            }
 
             // ── Voucher Validation for POS ──
             let voucherRef: FirebaseFirestore.DocumentReference | null = null;
@@ -401,6 +415,8 @@ export async function POST(request: NextRequest) {
             }
 
             const orderPaymentTotal = Array.from(orderPaymentTotals.values()).reduce((sum, amount) => sum + amount, 0);
+            const updatedOrderIds = Array.from(orderPaymentTotals.keys());
+            const debtPaymentReferenceId = updatedOrderIds.length === 1 ? updatedOrderIds[0] : (idempotencyKey || orderId);
 
             const repairCompletionTargets = new Map<string, { targetStatus: string; shouldCountCompletion: boolean }>();
             for (const [id, repairDoc] of repairDocs.entries()) {
@@ -449,7 +465,7 @@ export async function POST(request: NextRequest) {
             // ── Commission Server-Side Calculation (Reads inside) ──
             const commissionableItems = normalizedItems.filter((item) => !item.isOrderPayment);
             const commissionableTotal = Math.max(0, serverTotal - orderPaymentTotal);
-            if (!isPending && commissionableItems.length > 0 && commissionableTotal > 0) {
+            if (!isDebtCollectionOnly && !isPending && commissionableItems.length > 0 && commissionableTotal > 0) {
                 await calculateAndSaveCommissionsServer(tx, { uid: caller.uid, displayName: createdByName as string }, 'order', {
                     id: orderId,
                     ...order,
@@ -516,8 +532,10 @@ export async function POST(request: NextRequest) {
                 }
             }
 
-            tx.set(orderRef, order);
-            if (!isPending) {
+            if (!isDebtCollectionOnly) {
+                tx.set(orderRef, order);
+            }
+            if (!isDebtCollectionOnly && !isPending) {
                 const retailItems = normalizedItems.filter((item) => !item.isRepairTicket && !item.isOrderPayment);
                 const retailSubtotal = retailItems.reduce((sum, item) => sum + (Number(item.price) || 0) * (Number(item.quantity) || 1), 0);
                 const retailDiscount = Math.min(serverDiscount, retailSubtotal);
@@ -553,7 +571,7 @@ export async function POST(request: NextRequest) {
             }
 
             // ── Increment Voucher Usage ──
-            if (appliedVoucherCode && voucherRef && !isPending) {
+            if (!isDebtCollectionOnly && appliedVoucherCode && voucherRef && !isPending) {
                 tx.update(voucherRef, {
                     usedCount: FieldValue.increment(1),
                 });
@@ -632,7 +650,7 @@ export async function POST(request: NextRequest) {
                         customerId: normalizedPhoneResult!.local,
                         type: 'debt_payment',
                         amount: orderPaymentTotal,
-                        referenceId: orderId,
+                        referenceId: debtPaymentReferenceId,
                         date: FieldValue.serverTimestamp()
                     });
                 }
@@ -699,12 +717,12 @@ export async function POST(request: NextRequest) {
                         } : {}),
                         updatedAt: FieldValue.serverTimestamp(),
                         paymentHistory: FieldValue.arrayUnion({
-                            type: 'payment',
+                            type: 'debt_payment',
                             amount: paymentAmount,
                             method: payment_method || 'CASH',
                             timestamp: Date.now(),
-                            referenceId: orderId,
-                            note: `Thanh toán tiếp qua POS #${orderId.slice(-6)}`
+                            referenceId: idempotencyKey || null,
+                            note: 'Thu nợ tại POS'
                         })
                     });
                 }
@@ -715,8 +733,8 @@ export async function POST(request: NextRequest) {
                         customerName: incomingName || customer_info?.name || 'Khách lẻ',
                         type: 'PAYMENT',
                         amount: orderPaymentTotal,
-                        orderIds: Array.from(orderPaymentTotals.keys()),
-                        note: `Thu nợ qua POS #${orderId.slice(-6)}`,
+                        orderIds: updatedOrderIds,
+                        note: 'Thu nợ tại POS',
                         createdBy: caller.uid,
                         createdByName,
                         createdAt: FieldValue.serverTimestamp()
@@ -728,12 +746,20 @@ export async function POST(request: NextRequest) {
                 tx.set(db.collection('operation_requests').doc(idempotencyKey), {
                     status: 'completed',
                     completedAt: FieldValue.serverTimestamp(),
-                    type: 'pos_checkout',
-                    referenceId: orderId
+                    type: isDebtCollectionOnly ? 'pos_debt_collection' : 'pos_checkout',
+                    referenceId: isDebtCollectionOnly ? debtPaymentReferenceId : orderId,
+                    debtOnly: isDebtCollectionOnly,
+                    updatedOrderIds
                 });
             }
 
-            return { success: true, orderId: orderId, warnings: checkoutWarnings };
+            return {
+                success: true,
+                orderId: isDebtCollectionOnly ? debtPaymentReferenceId : orderId,
+                updatedOrderIds,
+                debtOnly: isDebtCollectionOnly,
+                warnings: checkoutWarnings
+            };
         });
 
         return NextResponse.json(result);

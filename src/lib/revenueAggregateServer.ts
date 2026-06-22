@@ -54,11 +54,25 @@ export function incrementRevenueAggregates(
 }
 
 export function buildCompletedOrderRevenueDelta(order: Order, multiplier = 1): RevenueAggregateDelta {
-    const orderTotal = safeNumber(order.total_amount)
-        || order.items?.reduce((sum, item) => sum + safeNumber(item.price) * safeNumber(item.quantity), 0)
-        || 0;
+    const items = order.items || [];
+    const hasOrderPaymentItems = items.some(item => {
+        const line = item as typeof item & { isOrderPayment?: boolean; orderPaymentId?: string };
+        return line.isOrderPayment === true || Boolean(line.orderPaymentId);
+    });
+    const itemTotal = items
+        .filter(item => {
+            const line = item as typeof item & { isOrderPayment?: boolean; orderPaymentId?: string };
+            return line.isOrderPayment !== true && !line.orderPaymentId;
+        })
+        .reduce((sum, item) => sum + safeNumber(item.price) * safeNumber(item.quantity), 0);
+    const orderTotal = hasOrderPaymentItems
+        ? itemTotal
+        : safeNumber(order.total_amount) || itemTotal || 0;
     const paidSoFar = Array.isArray(order.paymentHistory)
-        ? order.paymentHistory.reduce((sum, payment) => sum + safeNumber(payment.amount), 0)
+        ? order.paymentHistory.reduce((sum, payment) => {
+            if (payment.type === 'debt_payment') return sum;
+            return payment.type === 'refund' ? sum - safeNumber(payment.amount) : sum + safeNumber(payment.amount);
+        }, 0)
         : 0;
     const isDebt = order.paymentStatus === 'debt' || order.payment_method === 'Debt';
     const hasPaymentHistory = Array.isArray(order.paymentHistory) && order.paymentHistory.length > 0;
