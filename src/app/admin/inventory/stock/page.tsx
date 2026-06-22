@@ -1,15 +1,28 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Archive, Package, Search, Loader2, ArrowUpDown, TrendingDown, TrendingUp } from 'lucide-react';
-import { collection, getDocs } from 'firebase/firestore';
+import {
+    collection,
+    getDocs,
+    limit,
+    orderBy,
+    query,
+    startAfter,
+    where,
+    type DocumentSnapshot,
+    type QueryConstraint,
+} from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Product } from '@/lib/types';
 import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
 import { isProductArchived } from '@/lib/productLifecycle';
+import { generateSearchKeywords } from '@/lib/utils';
 
 const formatPrice = (n: number) => n.toLocaleString('vi-VN') + 'đ';
+
+const STOCK_BATCH_SIZE = 100;
 
 const isComponent = (p: Product) => {
     const cat = p.category?.toLowerCase() || '';
@@ -20,25 +33,72 @@ const isComponent = (p: Product) => {
 export default function StockPage() {
     const [products, setProducts] = useState<(Product & { id: string })[]>([]);
     const [loading, setLoading] = useState(true);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [lastDoc, setLastDoc] = useState<DocumentSnapshot | null>(null);
+    const [hasMore, setHasMore] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
+    const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
     const [sortBy, setSortBy] = useState<'name' | 'stock' | 'costPrice'>('name');
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
     const [stockTab, setStockTab] = useState<'all' | 'retail' | 'component'>('all');
     const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'archived'>('all');
 
-    useEffect(() => {
-        const load = async () => {
-            try {
-                const snap = await getDocs(collection(db, 'products'));
-                setProducts(snap.docs.map(d => ({ id: d.id, ...d.data() } as Product & { id: string })));
-            } catch (err) {
-                console.error(err);
-            } finally {
-                setLoading(false);
+    const buildStockQueryConstraints = useCallback((cursor?: DocumentSnapshot | null): QueryConstraint[] => {
+        const trimmedSearch = debouncedSearchQuery.trim();
+        const constraints: QueryConstraint[] = [];
+
+        if (trimmedSearch) {
+            const keyword = generateSearchKeywords(trimmedSearch)[0] || trimmedSearch.toLowerCase();
+            constraints.push(where('searchKeywords', 'array-contains', keyword));
+        } else {
+            constraints.push(orderBy('name', 'asc'));
+        }
+
+        if (cursor) constraints.push(startAfter(cursor));
+        constraints.push(limit(STOCK_BATCH_SIZE));
+        return constraints;
+    }, [debouncedSearchQuery]);
+
+    const loadProducts = useCallback(async (mode: 'reset' | 'more', cursor?: DocumentSnapshot | null) => {
+        const isReset = mode === 'reset';
+        if (isReset) {
+            setLoading(true);
+        } else {
+            setLoadingMore(true);
+        }
+
+        try {
+            const snap = await getDocs(query(
+                collection(db, 'products'),
+                ...buildStockQueryConstraints(isReset ? null : cursor),
+            ));
+            const nextProducts = snap.docs.map(d => ({ id: d.id, ...d.data() } as Product & { id: string }));
+            setProducts(current => isReset ? nextProducts : [...current, ...nextProducts]);
+            setLastDoc(snap.docs[snap.docs.length - 1] || null);
+            setHasMore(snap.docs.length === STOCK_BATCH_SIZE);
+        } catch (err) {
+            console.error(err);
+            if (isReset) {
+                setProducts([]);
+                setLastDoc(null);
+                setHasMore(false);
             }
-        };
-        load();
-    }, []);
+        } finally {
+            setLoading(false);
+            setLoadingMore(false);
+        }
+    }, [buildStockQueryConstraints]);
+
+    useEffect(() => {
+        const timer = window.setTimeout(() => {
+            setDebouncedSearchQuery(searchQuery.trim());
+        }, 250);
+        return () => window.clearTimeout(timer);
+    }, [searchQuery]);
+
+    useEffect(() => {
+        loadProducts('reset');
+    }, [loadProducts]);
 
     const tabFiltered = products.filter(p => {
         if (p.isProposed) return false;
@@ -94,7 +154,7 @@ export default function StockPage() {
                 <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
                     <Package className="text-orange-500" /> Tổng Tồn Kho
                 </h1>
-                <p className="text-sm text-gray-500 mt-0.5">{statusFiltered.length} mặt hàng{stockTab !== 'all' ? ` (${stockTab === 'retail' ? 'bán lẻ' : 'linh kiện'})` : ''} trong hệ thống</p>
+                <p className="text-sm text-gray-500 mt-0.5">{statusFiltered.length} mặt hàng đã tải{stockTab !== 'all' ? ` (${stockTab === 'retail' ? 'bán lẻ' : 'linh kiện'})` : ''}</p>
             </div>
 
             {/* Stock Tab Filter */}
@@ -296,6 +356,19 @@ export default function StockPage() {
                     onPageSizeChange={setPageSize}
                     entityLabel="sản phẩm"
                 />
+                {hasMore && (
+                    <div className="flex justify-center border-t bg-gray-50 px-4 py-3">
+                        <button
+                            type="button"
+                            onClick={() => loadProducts('more', lastDoc)}
+                            disabled={loadingMore}
+                            className="inline-flex items-center gap-2 rounded-lg border border-orange-200 bg-white px-4 py-2 text-sm font-medium text-orange-700 hover:bg-orange-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                            {loadingMore && <Loader2 size={16} className="animate-spin" />}
+                            Tải thêm {STOCK_BATCH_SIZE} mặt hàng
+                        </button>
+                    </div>
+                )}
             </div>
         </div>
     );

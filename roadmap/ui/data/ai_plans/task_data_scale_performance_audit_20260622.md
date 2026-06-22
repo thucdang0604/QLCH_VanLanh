@@ -2,7 +2,7 @@
 
 ## Phase 1 - Bound high-risk admin reads
 
-- [ ] Refactor `admin/inventory/stock` to use paginated query/server API instead of loading all `products`.
+- [x] Refactor `admin/inventory/stock` to use paginated query/server API instead of loading all `products`.
 - [ ] Refactor `admin/inventory` receipt/proposal/order lists to use tab filters, `limit`, `orderBy`, and cursor pagination.
 - [ ] Refactor `admin/commissions` to load by month/status/staff with bounded queries.
 - [ ] Add focused verification for inventory and commission screens.
