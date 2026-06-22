@@ -8,7 +8,7 @@ import Modal from '@/components/admin/Modal';
 import CurrencyInput from '@/components/admin/CurrencyInput';
 import {
     collection, getDocs, addDoc, updateDoc, deleteDoc,
-    doc, serverTimestamp, query, orderBy
+    doc, serverTimestamp, query, orderBy, where, limit, Timestamp
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
@@ -17,6 +17,19 @@ import type { CommissionRule, Commission, FirestoreWriteTimestamp } from '@/lib/
 import { toastError } from '@/lib/toast';
 import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
+
+const COMMISSION_HISTORY_LIMIT = 300;
+const COMMISSION_RULE_LIMIT = 100;
+
+function getMonthRange(monthValue: string): { start: Timestamp; end: Timestamp } {
+    const [yearRaw, monthRaw] = monthValue.split('-').map(Number);
+    const year = Number.isFinite(yearRaw) ? yearRaw : new Date().getFullYear();
+    const monthIndex = Number.isFinite(monthRaw) ? monthRaw - 1 : new Date().getMonth();
+    return {
+        start: Timestamp.fromDate(new Date(year, monthIndex, 1)),
+        end: Timestamp.fromDate(new Date(year, monthIndex + 1, 1)),
+    };
+}
 
 export default function CommissionsPage() {
     const { user } = useAuth();
@@ -60,10 +73,18 @@ export default function CommissionsPage() {
     // ── Load data ──
     useEffect(() => {
         const load = async () => {
+            setLoading(true);
             try {
+                const { start, end } = getMonthRange(filterMonth);
                 const [rulesSnap, commSnap, staffSnap] = await Promise.all([
-                    getDocs(query(collection(db, 'commission_rules'), orderBy('createdAt', 'desc'))),
-                    getDocs(query(collection(db, 'commissions'), orderBy('createdAt', 'desc'))),
+                    getDocs(query(collection(db, 'commission_rules'), orderBy('createdAt', 'desc'), limit(COMMISSION_RULE_LIMIT))),
+                    getDocs(query(
+                        collection(db, 'commissions'),
+                        where('createdAt', '>=', start),
+                        where('createdAt', '<', end),
+                        orderBy('createdAt', 'desc'),
+                        limit(COMMISSION_HISTORY_LIMIT),
+                    )),
                     getDocs(collection(db, 'users')),
                 ]);
                 setRules(rulesSnap.docs.map(d => ({ id: d.id, ...d.data() } as CommissionRule & { id: string })));
@@ -76,7 +97,7 @@ export default function CommissionsPage() {
             }
         };
         load();
-    }, []);
+    }, [filterMonth]);
 
     const formatPrice = (n: number) => n.toLocaleString('vi-VN') + 'đ';
     const formatDate = (ts: unknown) => {

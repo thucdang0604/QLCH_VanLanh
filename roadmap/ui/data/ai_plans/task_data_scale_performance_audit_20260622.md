@@ -6,6 +6,7 @@
 - [ ] Refactor `admin/inventory` receipt/proposal/order lists to use tab filters, `limit`, `orderBy`, and cursor pagination.
   - [x] Bound `import_receipts` reads on `admin/inventory` with `orderBy(createdAt desc)`, batch size, cursor, and load-more control.
 - [ ] Refactor `admin/commissions` to load by month/status/staff with bounded queries.
+  - [x] Bound commission history reads to the selected month and capped rule/history query sizes.
 - [ ] Add focused verification for inventory and commission screens.
 
 ## Phase 2 - Search paths for large history
