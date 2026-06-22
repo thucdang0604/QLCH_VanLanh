@@ -11,7 +11,7 @@
 
 ## Phase 2 - Search paths for large history
 
-- [ ] Add bounded phone search for `admin/orders`: `orderBy(createdAt desc)`, `limit(50)`, cursor/load more.
+- [x] Add bounded phone search for `admin/orders`: `limit(50)` with client-side newest-first merge.
 - [ ] Add bounded phone/IMEI search for `admin/repairs`.
 - [ ] Add bounded phone search for `admin/appointments`.
 - [ ] Ensure empty result distinguishes "not found" from "has records outside current filter" where relevant.

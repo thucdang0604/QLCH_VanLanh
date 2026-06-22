@@ -30,6 +30,7 @@ const formatDate = (ts: unknown) => {
 };
 
 type OrderPaymentHistoryEntry = NonNullable<Order['paymentHistory']>[number];
+const ORDER_SEARCH_LIMIT = 50;
 
 function getPaymentMethodLabel(method?: string) {
     const normalized = String(method || '').toUpperCase();
@@ -144,7 +145,11 @@ export default function OrdersPage() {
         }
         setIsSearchingDB(true);
         try {
-            const qPhoneNew = query(collection(db, 'orders'), where('customer_info.phone', '==', searchQuery.trim()));
+            const qPhoneNew = query(
+                collection(db, 'orders'),
+                where('customer_info.phone', '==', searchQuery.trim()),
+                limit(ORDER_SEARCH_LIMIT),
+            );
 
             const snap1 = await getDocs(qPhoneNew);
             const dataMap = new Map<string, Order>();
@@ -152,7 +157,13 @@ export default function OrdersPage() {
                 dataMap.set(d.id, { id: d.id, ...d.data() } as Order);
             });
 
-            const results = Array.from(dataMap.values());
+            const results = Array.from(dataMap.values()).sort((a, b) => {
+                const aCreatedAt = a.createdAt as unknown as { toMillis?: () => number } | number | undefined;
+                const bCreatedAt = b.createdAt as unknown as { toMillis?: () => number } | number | undefined;
+                const aTime = typeof aCreatedAt === 'number' ? aCreatedAt : aCreatedAt?.toMillis?.() || 0;
+                const bTime = typeof bCreatedAt === 'number' ? bCreatedAt : bCreatedAt?.toMillis?.() || 0;
+                return bTime - aTime;
+            });
             if(results.length > 0) {
                  setOrders(prev => {
                      const existingIds = new Set(prev.map(p => p.id));
