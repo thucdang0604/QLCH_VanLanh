@@ -1,7 +1,7 @@
 import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
 import Modal from '@/components/admin/Modal';
 import type { RepairTicket } from '@/lib/types';
-import { isWarrantyEligibleRepairPart } from '@/lib/repairStatus';
+import { isSelectedRepairPart, isWarrantyEligibleRepairPart } from '@/lib/repairStatus';
 
 interface RepairWarrantyModalProps {
     ticket: RepairTicket | null;
@@ -27,13 +27,13 @@ export function RepairWarrantyModal({
     const activeParts = (ticket.parts || [])
         .map((part, index) => ({ ...part, _origIdx: index }))
         .filter(part =>
+            isSelectedRepairPart(part) &&
             isWarrantyEligibleRepairPart(part) &&
-            part.warrantyMonths && part.warrantyMonths > 0 &&
-            part.warrantyExpiresAt && (
+            (!part.warrantyExpiresAt || (
                 typeof part.warrantyExpiresAt === 'number'
                     ? part.warrantyExpiresAt
                     : (part.warrantyExpiresAt as { toDate?: () => Date })?.toDate?.()?.getTime() || 0
-            ) > Date.now()
+            ) > Date.now())
         );
     const hasActiveParts = activeParts.length > 0;
 
@@ -73,7 +73,8 @@ export function RepairWarrantyModal({
                         const expiresAt = typeof part.warrantyExpiresAt === 'number'
                             ? part.warrantyExpiresAt
                             : (part.warrantyExpiresAt as { toDate?: () => Date })?.toDate?.()?.getTime() || 0;
-                        const expiresLabel = expiresAt ? new Date(expiresAt).toLocaleDateString('vi-VN') : '—';
+                        const expiresLabel = expiresAt ? new Date(expiresAt).toLocaleDateString('vi-VN') : 'Chưa ghi hạn';
+                        const warrantyMonthsLabel = part.warrantyMonths ? `${part.warrantyMonths} tháng` : 'Chưa ghi';
                         const checked = selectedIndexes.includes(part._origIdx);
 
                         return (
@@ -92,7 +93,7 @@ export function RepairWarrantyModal({
                                 <div className="flex-1">
                                     <p className="font-semibold text-sm text-gray-900">{part.productName}</p>
                                     <p className="text-xs text-gray-500">
-                                        {part.partType || '—'} · BH {part.warrantyMonths} tháng · Hết hạn: {expiresLabel}
+                                        {part.partType || '—'} · BH {warrantyMonthsLabel} · Hết hạn: {expiresLabel}
                                     </p>
                                 </div>
                             </label>

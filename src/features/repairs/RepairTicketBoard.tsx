@@ -9,7 +9,7 @@ import { db } from '@/lib/firebase';
 import type { PaymentStatus, RepairTicket, WorkflowNode } from '@/lib/types';
 import { uploadMedia } from '@/lib/storage';
 import { isYouTubeUrl } from '@/lib/workflowFeatures';
-import { REPAIR_STATUS, isPendingRepairPart, isRepairStatus, isWarrantyEligibleRepairPart } from '@/lib/repairStatus';
+import { REPAIR_STATUS, isPendingRepairPart, isRepairStatus, isSelectedRepairPart, isWarrantyEligibleRepairPart } from '@/lib/repairStatus';
 import { toastError } from '@/lib/toast';
 import type { WarrantyTemplateConfig } from '@/app/admin/settings/receipt/WarrantyComponents';
 import type { WarrantyPrintType } from '@/features/repairs/repairPageUtils';
@@ -47,13 +47,13 @@ interface RepairTicketBoardProps {
 
 function hasActiveWarrantyPart(ticket: RepairTicket) {
     return (ticket.parts || []).some(part =>
+        isSelectedRepairPart(part) &&
         isWarrantyEligibleRepairPart(part) &&
-        part.warrantyMonths && part.warrantyMonths > 0 &&
-        part.warrantyExpiresAt && (
+        (!part.warrantyExpiresAt || (
             typeof part.warrantyExpiresAt === 'number'
                 ? part.warrantyExpiresAt
                 : (part.warrantyExpiresAt as { toDate?: () => Date })?.toDate?.()?.getTime() || 0
-        ) > Date.now()
+        ) > Date.now())
     );
 }
 
@@ -102,7 +102,7 @@ export function RepairTicketBoard({
                     const canPrintWarranty = Boolean(st?.isTerminal)
                         && ticket.ticketType !== 'warranty'
                         && Boolean(warrantyConfig);
-                    const canCreateWarranty = isRepairStatus(ticket.status, REPAIR_STATUS.DONE)
+                    const canCreateWarranty = Boolean(st?.isTerminal)
                         && ticket.ticketType !== 'warranty'
                         && (hasActiveWarrantyPart(ticket) || Boolean(warrantyConfig));
 
@@ -245,7 +245,7 @@ export function RepairTicketBoard({
                             const canPrintWarranty = Boolean(st?.isTerminal)
                                 && ticket.ticketType !== 'warranty'
                                 && Boolean(warrantyConfig);
-                            const canCreateWarranty = isRepairStatus(ticket.status, REPAIR_STATUS.DONE)
+                            const canCreateWarranty = Boolean(st?.isTerminal)
                                 && ticket.ticketType !== 'warranty'
                                 && (hasActiveWarrantyPart(ticket) || Boolean(warrantyConfig));
                             return (

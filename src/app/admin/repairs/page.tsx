@@ -12,7 +12,7 @@ import { useAuth } from '@/lib/AuthContext';
 import { useConfig } from '@/lib/ConfigContext';
 import type { RepairTicket, RepairStatus, PaymentStatus, DeviceChecklist, WorkflowNode, RepairIssue } from '@/lib/types';
 import { isChecklistComplete, areAllPartsReady } from '@/lib/workflowFeatures';
-import { REPAIR_STATUS, isPendingRepairPart, isRepairStatus } from '@/lib/repairStatus';
+import { REPAIR_STATUS, isPendingRepairPart, isRepairStatus, isSelectedRepairPart, isWarrantyEligibleRepairPart } from '@/lib/repairStatus';
 import { normalizeVietnamPhone } from '@/lib/phone';
 import type { ReceiptConfig } from '@/components/admin/PrintableReceipt';
 import type { WarrantyTemplateConfig } from '@/app/admin/settings/receipt/WarrantyComponents';
@@ -77,6 +77,23 @@ function getRepairCreatedAtMillis(ticket: RepairTicket): number {
 
 function sortRepairTicketsByCreatedAtDesc(ticketsToSort: RepairTicket[]): RepairTicket[] {
     return [...ticketsToSort].sort((a, b) => getRepairCreatedAtMillis(b) - getRepairCreatedAtMillis(a));
+}
+
+function getDateMillis(value: unknown): number {
+    if (typeof value === 'number') return value;
+    return (value as { toDate?: () => Date; toMillis?: () => number } | undefined)?.toMillis?.()
+        || (value as { toDate?: () => Date } | undefined)?.toDate?.()?.getTime()
+        || 0;
+}
+
+function hasActiveWarrantySource(ticket: RepairTicket): boolean {
+    const hasPartWarranty = (ticket.parts || []).some(part =>
+        isSelectedRepairPart(part)
+        && isWarrantyEligibleRepairPart(part)
+        && (!part.warrantyExpiresAt || getDateMillis(part.warrantyExpiresAt) > Date.now())
+    );
+    if (hasPartWarranty) return true;
+    return getDateMillis(ticket.serviceWarrantyExpiresAt) > Date.now();
 }
 
 function buildRepairListConstraints(statusIds: string[], cursor?: DocumentSnapshot | null): QueryConstraint[] {
@@ -223,7 +240,7 @@ export default function RepairPage() {
 
     const getWarrantyTypeForTicket = (ticket: RepairTicket): WarrantyPrintType | null => {
         const categoryPath = ticket.categoryPath || [];
-        if (categoryPath.length === 0) return null;
+        if (categoryPath.length === 0) return hasActiveWarrantySource(ticket) ? 'warrantyRepair' : null;
 
         const taxonomyRoots = [
             ...(config.taxonomy?.service || []),
@@ -231,7 +248,8 @@ export default function RepairPage() {
             ...(config.taxonomy?.component || []),
         ];
 
-        return resolveWarrantyTypeFromPath(taxonomyRoots, categoryPath);
+        return resolveWarrantyTypeFromPath(taxonomyRoots, categoryPath)
+            || (hasActiveWarrantySource(ticket) ? 'warrantyRepair' : null);
     };
 
     const getWarrantyConfigForType = (type: WarrantyPrintType | null): WarrantyTemplateConfig | undefined => {

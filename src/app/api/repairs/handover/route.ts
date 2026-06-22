@@ -11,6 +11,16 @@ import { incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 
 const LEGACY_TERMINAL_STATUSES = [REPAIR_STATUS.DONE, REPAIR_STATUS.OUT, REPAIR_STATUS.REFUND, 'bh_hoan_tat', 'bh_tu_choi', 'bh_refund'];
 
+function normalizeWarrantyRuleKey(value: unknown) {
+    return String(value || '')
+        .trim()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/đ/g, 'd')
+        .replace(/Đ/g, 'd');
+}
+
 function resolveServiceWarrantyMonths(taxonomy: unknown, categoryPath: string[] | undefined) {
     if (!Array.isArray(categoryPath) || categoryPath.length === 0) return 3;
 
@@ -222,7 +232,7 @@ export async function POST(request: NextRequest) {
                 }
 
                 // Stamp Warranty
-                if (!ticket.parts || ticket.parts.filter(p => isWarrantyEligibleRepairPart(p)).length === 0) {
+                if (selectedParts.filter(p => isWarrantyEligibleRepairPart(p)).length === 0) {
                     const expireDate = new Date();
                     expireDate.setMonth(expireDate.getMonth() + serviceWarrantyMonths);
                     updateData.serviceWarrantyExpiresAt = expireDate.getTime();
@@ -232,36 +242,21 @@ export async function POST(request: NextRequest) {
                     const ruleMap = new Map<string, number>();
                     for (const r of warrantyRules) {
                         if (typeof r.partType === 'string') {
-                            ruleMap.set(r.partType, Number(r.warrantyMonths) || 0);
+                            ruleMap.set(normalizeWarrantyRuleKey(r.partType), Number(r.warrantyMonths) || 0);
                         }
                     }
 
                     const nowMs = Date.now();
                     ticket.parts = ticket.parts.map(p => {
-                        if (!isWarrantyEligibleRepairPart(p)) return p;
+                        if (!isSelectedRepairPart(p) || !isWarrantyEligibleRepairPart(p)) return p;
                         if (p.warrantyExpiresAt) return p;
 
                         const pData = p.productId ? productDocs.get(p.productId)?.data : null;
                         const rawPartType = String(p.partType || pData?.partType || '');
-                        const partType = rawPartType.trim().toLowerCase();
+                        const partType = normalizeWarrantyRuleKey(rawPartType);
 
-                        let months = 0;
-                        // Find exact match (case-insensitive)
-                        for (const [key, val] of ruleMap.entries()) {
-                            if (key.trim().toLowerCase() === partType) {
-                                months = val;
-                                break;
-                            }
-                        }
-                        // Fallback to "KhĂ¡c"
-                        if (months === 0 && partType !== '') {
-                            for (const [key, val] of ruleMap.entries()) {
-                                if (key.trim().toLowerCase() === 'khĂ¡c') {
-                                    months = val;
-                                    break;
-                                }
-                            }
-                        }
+                        let months = ruleMap.get(partType) || 0;
+                        if (months === 0) months = ruleMap.get('khac') || 0;
 
                         console.warn(`[Handover] Part: ${p.productName} | RawType: "${rawPartType}" | Mapped Months: ${months}`);
 

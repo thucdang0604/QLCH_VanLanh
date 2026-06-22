@@ -4,6 +4,7 @@ import PrintableWarranty from '@/components/admin/PrintableWarranty';
 import type { ReceiptConfig } from '@/components/admin/PrintableReceipt';
 import type { WarrantyTemplateConfig } from '@/app/admin/settings/receipt/WarrantyComponents';
 import type { RepairTicket } from '@/lib/types';
+import { isSelectedRepairPart, isWarrantyEligibleRepairPart } from '@/lib/repairStatus';
 import {
     mapWarrantyTypeToPrintType,
     type WarrantyPrintType,
@@ -43,6 +44,24 @@ export function RepairPrintTemplates({
     const warrantyConfig = getWarrantyConfigForType(warrantyType);
     if (!warrantyConfig) return null;
 
+    const warrantyPartNames = (ticket.parts || [])
+        .filter(part => {
+            if (!isSelectedRepairPart(part) || !isWarrantyEligibleRepairPart(part)) return false;
+            if (!part.warrantyExpiresAt) return true;
+            const expiresAt = typeof part.warrantyExpiresAt === 'number'
+                ? part.warrantyExpiresAt
+                : (part.warrantyExpiresAt as { toDate?: () => Date })?.toDate?.()?.getTime() || 0;
+            return expiresAt > Date.now();
+        })
+        .map(part => part.productName)
+        .filter(Boolean);
+    const issueLabels = ticket.issues?.map(issue => issue.label).filter(Boolean) || [];
+    const serviceLines = [
+        ...issueLabels,
+        ticket.issue?.description,
+        warrantyPartNames.length > 0 ? `Linh kiện bảo hành: ${warrantyPartNames.join(', ')}` : '',
+    ].filter(Boolean);
+
     const payload = {
         customerName: ticket.customer.name,
         customerPhone: ticket.customer.phone,
@@ -50,7 +69,7 @@ export function RepairPrintTemplates({
         deviceColor: ticket.deviceInfo?.color,
         deviceImei: ticket.deviceInfo?.imei,
         devicePasscode: ticket.deviceInfo?.passcode,
-        services: ticket.issues?.map(issue => issue.label).join(', ') || ticket.issue?.description,
+        services: serviceLines.join(', '),
         totalCost: Number(ticket.payment?.amount || 0),
         createdAt: ticket.createdAt,
     };
