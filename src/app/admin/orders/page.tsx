@@ -65,6 +65,17 @@ type OrderItemWithRepair = Order['items'][number] & {
     repairTicketId?: string;
 };
 
+type PrintableOrderItem = Partial<OrderItemWithRepair & {
+    productId: string;
+    productName: string;
+    warrantyType: string;
+    warrantyMonths: number;
+    warrantyExpiresAt: number;
+    imei: string;
+    serial: string;
+    serials: string[];
+}>;
+
 type OrderWithRepairPayment = Order & {
     containsRepairPayment?: boolean;
     repairTicketIds?: string[];
@@ -77,6 +88,38 @@ function isRepairPaymentOrder(order: Order) {
             const line = item as OrderItemWithRepair;
             return line.isRepairTicket === true || Boolean(line.repairTicketId);
         });
+}
+
+function getOrderItemDisplayName(item: PrintableOrderItem) {
+    return String(item.name || item.productName || item.product_name || item.productId || 'Sản phẩm').trim();
+}
+
+function getOrderItemSerials(item: PrintableOrderItem) {
+    const serials = Array.isArray(item.imeis) ? item.imeis : item.serials;
+    const normalized = Array.isArray(serials) ? serials : [];
+    const inlineSerial = item.imei || item.serial;
+    return [...normalized, inlineSerial].map(serial => String(serial || '').trim()).filter(Boolean);
+}
+
+function getWarrantyPrintType(item: PrintableOrderItem): 'device' | 'accessory' | null {
+    const rawType = String(item.warrantyType || '').toLowerCase();
+    if (rawType === 'none') return null;
+    if (rawType.includes('device')) return 'device';
+    if (rawType.includes('accessory')) return 'accessory';
+
+    const hasLegacyWarranty = Number(item.warrantyMonths || 0) > 0 || Boolean(item.warrantyExpiresAt);
+    if (!hasLegacyWarranty) return null;
+
+    return getOrderItemSerials(item).length > 0 ? 'device' : 'accessory';
+}
+
+function escapeReceiptHtml(value: string) {
+    return value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 }
 
 export default function OrdersPage() {
@@ -275,28 +318,33 @@ export default function OrdersPage() {
         let hasIncompleteImei = false;
 
         for (const item of items) {
-            const it = item as { warrantyType?: string; quantity?: number; imeis?: string[]; name?: string; product_name?: string; price?: number };
-            if (it.warrantyType === 'warrantyDevice' || it.warrantyType === 'warrantyAccessory') {
+            const it = item as PrintableOrderItem;
+            const printType = getWarrantyPrintType(it);
+            if (printType) {
                 const qty = it.quantity || 1;
-                if (it.warrantyType === 'warrantyDevice' && (!it.imeis || it.imeis.length < qty || it.imeis.some((i: string) => !i.trim()))) {
+                const serials = getOrderItemSerials(it);
+                if (printType === 'device' && serials.length < qty) {
                     hasIncompleteImei = true;
                     continue; // Skip or we can just stop
                 }
 
-                const wConfig = it.warrantyType === 'warrantyDevice'
+                const preferredConfig = printType === 'device'
                     ? receiptConfig.warrantyDevice
                     : receiptConfig.warrantyAccessory;
+                const fallbackConfig = receiptConfig.warrantyAccessory || receiptConfig.warrantyDevice;
+                const wConfig = preferredConfig || fallbackConfig;
                 if (!wConfig) continue;
+                const resolvedPrintType = preferredConfig ? printType : (receiptConfig.warrantyAccessory ? 'accessory' : 'device');
 
                 for(let i = 0; i < qty; i++) {
                     payloads.push({
                         config: wConfig,
-                        type: it.warrantyType === 'warrantyDevice' ? 'device' : 'accessory',
+                        type: resolvedPrintType,
                         payload: {
                             customerName: selectedOrder.customer?.name || selectedOrder.customer_info?.name || 'Khách lẻ',
                             customerPhone: selectedOrder.customer?.phone || selectedOrder.customer_info?.phone || '—',
-                            deviceModel: it.name || it.product_name || '',
-                            deviceImei: it.imeis?.[i] || '—',
+                            deviceModel: getOrderItemDisplayName(it),
+                            deviceImei: serials[i] || '—',
                             totalCost: it.price || 0,
                             createdAt: selectedOrder.createdAt
                         }
@@ -850,12 +898,13 @@ export default function OrdersPage() {
 
                                         if (printTemplate === 'thermal') {
                                             const itemsHtml = selectedOrder.items?.map((item) => {
-                                                const it = item as Partial<{ name: string; product_name: string; quantity: number; price: number }>;
+                                                const it = item as PrintableOrderItem;
                                                 const qty = it.quantity || 0;
                                                 const price = it.price || 0;
+                                                const itemName = escapeReceiptHtml(getOrderItemDisplayName(it));
                                                 return `
                                                 <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-                                                    <div>${it.name || it.product_name}<br/><span style="color: #666;">SL: ${qty} x ${price.toLocaleString('vi-VN')}</span></div>
+                                                    <div>${itemName}<br/><span style="color: #666;">SL: ${qty} x ${price.toLocaleString('vi-VN')}</span></div>
                                                     <div>${(price * qty).toLocaleString('vi-VN')}</div>
                                                 </div>
                                             `;
@@ -981,13 +1030,14 @@ export default function OrdersPage() {
                                                         </thead>
                                                         <tbody>
                                                             ${selectedOrder.items?.map((item, i: number) => {
-                                                                const it = item as Partial<{ name: string; product_name: string; quantity: number; price: number }>;
+                                                                const it = item as PrintableOrderItem;
                                                                 const qty = it.quantity || 0;
                                                                 const price = it.price || 0;
+                                                                const itemName = escapeReceiptHtml(getOrderItemDisplayName(it));
                                                                 return `
                                                             <tr>
                                                                 <td class="text-center">${i + 1}</td>
-                                                                <td>${it.name || it.product_name}</td>
+                                                                <td>${itemName}</td>
                                                                 <td class="text-center">${qty}</td>
                                                                 <td class="text-right">${price.toLocaleString('vi-VN')}</td>
                                                                 <td class="text-right">${(price * qty).toLocaleString('vi-VN')}</td>

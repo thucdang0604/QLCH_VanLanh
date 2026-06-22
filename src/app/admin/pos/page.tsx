@@ -94,6 +94,19 @@ function formatLookupDate(value: unknown) {
     return date.toLocaleDateString('vi-VN');
 }
 
+function getOrderLineDisplayName(item: Partial<OrderLineItem> & { name?: string }) {
+    return String(item.productName || item.product_name || item.name || item.productId || 'Sản phẩm').trim();
+}
+
+function escapeReceiptHtml(value: string) {
+    return value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 function mapPayableOrderInfo(id: string, data: Record<string, unknown>): PayableOrderInfo | null {
     const customer = (data.customer_info || data.customer || {}) as Record<string, unknown>;
     const totalAmount = Number(data.total_amount || 0);
@@ -129,10 +142,7 @@ function mapPayableOrderInfo(id: string, data: Record<string, unknown>): Payable
         paidAmount,
         remainingAmount: remainingAmount || totalAmount,
         createdAtLabel: formatLookupDate(data.createdAt),
-        itemNames: items.slice(0, 4).map(item => {
-            const line = (item || {}) as Record<string, unknown>;
-            return String(line.productName || line.product_name || line.name || '').trim();
-        }).filter(Boolean),
+        itemNames: items.slice(0, 4).map(item => getOrderLineDisplayName((item || {}) as Partial<OrderLineItem> & { name?: string })).filter(Boolean),
     };
 }
 
@@ -1379,7 +1389,7 @@ export default function POSPage() {
                                         <tbody>
                                             {lastOrder.items.map((item: OrderLineItem, i: number) => (
                                                 <tr key={i} className="border-b border-dashed">
-                                                    <td className="py-1 max-w-[100px] truncate">{item.product_name}</td>
+                                                    <td className="py-1 max-w-[100px] truncate">{getOrderLineDisplayName(item)}</td>
                                                     <td className="text-center">{item.quantity}</td>
                                                     <td className="text-right">{(item.price / 1000).toFixed(0)}k</td>
                                                     <td className="text-right font-medium">{((item.price * item.quantity) / 1000).toFixed(0)}k</td>
@@ -1544,7 +1554,7 @@ export default function POSPage() {
                                                     ${lastOrder.items.map((item: OrderLineItem, i: number) => `
                                                     <tr>
                                                         <td class="text-center">${i + 1}</td>
-                                                        <td>${item.product_name}</td>
+                                                        <td>${escapeReceiptHtml(getOrderLineDisplayName(item))}</td>
                                                         <td class="text-center">${item.quantity}</td>
                                                         <td class="text-right">${item.price.toLocaleString('vi-VN')}</td>
                                                         <td class="text-right">${(item.price * item.quantity).toLocaleString('vi-VN')}</td>
@@ -1633,7 +1643,7 @@ export default function POSPage() {
                         <tbody>
                             {lastOrder.items.map((item: OrderLineItem, i: number) => (
                                 <tr key={i}>
-                                    <td>{item.product_name}</td>
+                                    <td>{getOrderLineDisplayName(item)}</td>
                                     <td className="text-center">x{item.quantity}</td>
                                     <td className="text-right">{formatPrice(item.price * item.quantity)}</td>
                                 </tr>
