@@ -35,6 +35,9 @@ export interface PaymentHistoryEntry {
     timestamp?: number;
     type: 'deposit' | 'payment' | 'full' | 'additional' | 'refund' | 'debt_payment';
     referenceId?: string | null;
+    paymentIndex?: number;
+    paidAfter?: number;
+    remainingAfter?: number;
     note?: string;
 }
 

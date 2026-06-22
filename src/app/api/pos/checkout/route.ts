@@ -316,8 +316,8 @@ export async function POST(request: NextRequest) {
                 // In POS, we might accept client total or enforce server total. Let's enforce server total.
             }
 
-            const isPending = Number(deposit_amount) > 0 && Number(deposit_amount) < serverTotal;
-            if (orderPaymentSubtotal > 0 && (isPending || String(payment_method || '').toUpperCase() === 'DEBT')) {
+            const isPending = !isDebtCollectionOnly && Number(deposit_amount) > 0 && Number(deposit_amount) < serverTotal;
+            if (orderPaymentSubtotal > 0 && String(payment_method || '').toUpperCase() === 'DEBT') {
                 throw new Error('Thu nợ đơn hàng phải thanh toán ngay bằng tiền mặt, chuyển khoản hoặc ví.');
             }
 
@@ -391,14 +391,36 @@ export async function POST(request: NextRequest) {
                 orderPaymentDocs.set(id, { ref, snap });
             }
 
-            const orderPaymentTotals = new Map<string, number>();
+            const orderPaymentRequestedTotals = new Map<string, number>();
             for (const item of items) {
                 if (!item.isOrderPayment) continue;
                 const itemOrderPaymentId = normalizeOrderPaymentId(item.orderPaymentId || item.productId);
                 if (!itemOrderPaymentId || !orderPaymentDocs.has(itemOrderPaymentId)) continue;
                 const qty = Math.max(1, Math.floor(Number(item.quantity) || 1));
                 const price = Number(item.price) || 0;
-                orderPaymentTotals.set(itemOrderPaymentId, (orderPaymentTotals.get(itemOrderPaymentId) || 0) + price * qty);
+                orderPaymentRequestedTotals.set(itemOrderPaymentId, (orderPaymentRequestedTotals.get(itemOrderPaymentId) || 0) + price * qty);
+            }
+
+            const collectedDebtAmount = isDebtCollectionOnly
+                ? (Number(deposit_amount) > 0 ? Number(deposit_amount) : orderPaymentSubtotal)
+                : orderPaymentSubtotal;
+            if (isDebtCollectionOnly && collectedDebtAmount <= 0) {
+                throw new Error('Vui lòng nhập số tiền khách thanh toán.');
+            }
+            if (isDebtCollectionOnly && collectedDebtAmount - orderPaymentSubtotal > 1) {
+                throw new Error(`Số tiền thu nợ vượt số còn lại ${orderPaymentSubtotal.toLocaleString('vi-VN')}đ.`);
+            }
+
+            const orderPaymentTotals = new Map<string, number>();
+            let remainingDebtCollectionAmount = collectedDebtAmount;
+            for (const [id, requestedAmount] of orderPaymentRequestedTotals.entries()) {
+                const paymentAmount = isDebtCollectionOnly
+                    ? Math.min(requestedAmount, Math.max(0, remainingDebtCollectionAmount))
+                    : requestedAmount;
+                if (paymentAmount > 0) {
+                    orderPaymentTotals.set(id, paymentAmount);
+                    remainingDebtCollectionAmount -= paymentAmount;
+                }
             }
 
             for (const [id, paymentAmount] of orderPaymentTotals.entries()) {
@@ -578,7 +600,7 @@ export async function POST(request: NextRequest) {
             }
 
             // Customer Aggregate
-            const customerSpendDelta = !isPending ? Math.max(0, serverTotal - orderPaymentTotal) : 0;
+            const customerSpendDelta = !isPending && !isDebtCollectionOnly ? Math.max(0, serverTotal - orderPaymentTotal) : 0;
             if (custRef && custSnap) {
                 if (custSnap.exists) {
                     const currentData = custSnap.data()!;
@@ -706,6 +728,12 @@ export async function POST(request: NextRequest) {
                     const totalOrderAmount = Number(orderData.total_amount) || 0;
                     const paidSoFar = getPaidAmount(orderData);
                     const newPaidSoFar = Math.min(totalOrderAmount, paidSoFar + paymentAmount);
+                    const remainingAfterPayment = Math.max(0, totalOrderAmount - newPaidSoFar);
+                    const paymentHistory = Array.isArray(orderData.paymentHistory) ? orderData.paymentHistory : [];
+                    const paymentIndex = paymentHistory.filter(entry => {
+                        const type = String(entry?.type || '');
+                        return type === 'debt_payment' || type === 'payment' || type === 'deposit' || type === 'full';
+                    }).length + 1;
                     const isFullyPaid = Math.abs(totalOrderAmount - newPaidSoFar) <= 1;
 
                     tx.update(orderPaymentDoc.ref, {
@@ -722,7 +750,10 @@ export async function POST(request: NextRequest) {
                             method: payment_method || 'CASH',
                             timestamp: Date.now(),
                             referenceId: idempotencyKey || null,
-                            note: 'Thu nợ tại POS'
+                            paymentIndex,
+                            paidAfter: newPaidSoFar,
+                            remainingAfter: remainingAfterPayment,
+                            note: `Thu nợ tại POS lần ${paymentIndex}: ${paymentAmount.toLocaleString('vi-VN')}đ`
                         })
                     });
                 }

@@ -29,6 +29,26 @@ const formatDate = (ts: unknown) => {
     return d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 
+type OrderPaymentHistoryEntry = NonNullable<Order['paymentHistory']>[number];
+
+function getPaymentMethodLabel(method?: string) {
+    const normalized = String(method || '').toUpperCase();
+    if (normalized === 'CASH' || normalized === 'COD') return 'Tiền mặt';
+    if (normalized === 'BANK' || normalized === 'BANK_TRANSFER') return 'Chuyển khoản';
+    if (normalized === 'MOMO') return 'MoMo';
+    if (normalized === 'INSTALLMENT') return 'Trả góp';
+    if (normalized === 'DEBT') return 'Ghi nợ';
+    return method || 'Không rõ';
+}
+
+function getPaymentTypeLabel(entry: OrderPaymentHistoryEntry) {
+    if (entry.type === 'debt_payment') return `Thu nợ lần ${entry.paymentIndex || ''}`.trim();
+    if (entry.type === 'deposit') return 'Đặt cọc';
+    if (entry.type === 'full') return 'Thanh toán đủ';
+    if (entry.type === 'refund') return 'Hoàn tiền';
+    return 'Thanh toán';
+}
+
 const statusConfig: Record<string, { color: string; icon: React.ComponentType<{ size?: number }>; label: string }> = {
     Pending: { color: 'bg-yellow-100 text-yellow-700', icon: Clock, label: 'Chờ xử lý' },
     Confirmed: { color: 'bg-blue-100 text-blue-700', icon: Package, label: 'Đã xác nhận' },
@@ -733,7 +753,7 @@ export default function OrdersPage() {
                                     <span className="text-red-600">{formatPrice(selectedOrder.total_amount || 0)}</span>
                                 </div>
                                 {(selectedOrder.deposit_amount || 0) > 0 && (
-                                    selectedOrder.status === 'Completed' ? (
+                                    selectedOrder.paymentStatus === 'paid' ? (
                                         <div className="flex justify-between items-center pt-2 text-base font-semibold text-gray-700">
                                             <span>Đã thanh toán:</span>
                                             <span>{formatPrice(selectedOrder.total_amount || 0)}</span>
@@ -752,6 +772,51 @@ export default function OrdersPage() {
                                     )
                                 )}
                             </div>
+
+                            {(selectedOrder.paymentHistory || []).length > 0 && (
+                                <div className="bg-white rounded-xl border p-4 space-y-3">
+                                    <div className="flex items-center justify-between">
+                                        <h3 className="font-bold text-gray-800 flex items-center gap-2">
+                                            <Clock size={17} className="text-blue-500" /> Lịch sử thanh toán
+                                        </h3>
+                                        <span className="text-xs font-semibold text-gray-500">
+                                            {(selectedOrder.paymentHistory || []).length} lần ghi nhận
+                                        </span>
+                                    </div>
+                                    <div className="space-y-2">
+                                        {(selectedOrder.paymentHistory || []).map((entry, index) => {
+                                            const amount = Number(entry.amount) || 0;
+                                            const paidAfter = Number(entry.paidAfter);
+                                            const remainingAfter = Number(entry.remainingAfter);
+                                            return (
+                                                <div key={`${entry.timestamp || index}-${amount}`} className="rounded-lg bg-gray-50 border border-gray-100 px-3 py-2 text-sm">
+                                                    <div className="flex items-center justify-between gap-3">
+                                                        <span className="font-semibold text-gray-800">{getPaymentTypeLabel(entry)}</span>
+                                                        <span className={`font-bold ${entry.type === 'refund' ? 'text-red-600' : 'text-green-600'}`}>
+                                                            {entry.type === 'refund' ? '-' : '+'}{formatPrice(amount)}
+                                                        </span>
+                                                    </div>
+                                                    <div className="mt-1 grid grid-cols-1 md:grid-cols-3 gap-1 text-xs text-gray-500">
+                                                        <span>{formatDate(entry.timestamp || entry.date)}</span>
+                                                        <span>{getPaymentMethodLabel(entry.method)}</span>
+                                                        {Number.isFinite(remainingAfter) && (
+                                                            <span className="md:text-right">Còn lại: {formatPrice(remainingAfter)}</span>
+                                                        )}
+                                                    </div>
+                                                    {Number.isFinite(paidAfter) && (
+                                                        <div className="mt-1 text-xs text-gray-500">
+                                                            Đã thanh toán lũy kế: {formatPrice(paidAfter)}
+                                                        </div>
+                                                    )}
+                                                    {entry.note && (
+                                                        <div className="mt-1 text-xs text-gray-500">{entry.note}</div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            )}
 
                             {/* Actions */}
                             <div className="flex flex-col md:flex-row items-center gap-3 pt-4 border-t sticky bottom-0 bg-white mt-auto">
