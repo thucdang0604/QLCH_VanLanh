@@ -4,6 +4,7 @@
 
 - [x] Refactor `admin/inventory/stock` to use paginated query/server API instead of loading all `products`.
 - [ ] Refactor `admin/inventory` receipt/proposal/order lists to use tab filters, `limit`, `orderBy`, and cursor pagination.
+  - [x] Bound `import_receipts` reads on `admin/inventory` with `orderBy(createdAt desc)`, batch size, cursor, and load-more control.
 - [ ] Refactor `admin/commissions` to load by month/status/staff with bounded queries.
 - [ ] Add focused verification for inventory and commission screens.
 

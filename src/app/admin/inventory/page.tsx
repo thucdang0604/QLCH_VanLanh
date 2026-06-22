@@ -8,7 +8,8 @@ import {
 } from 'lucide-react';
 import {
     addDoc, collection, getDocs, deleteDoc,
-    doc, serverTimestamp, query, orderBy, updateDoc, onSnapshot
+    doc, serverTimestamp, query, orderBy, updateDoc, onSnapshot,
+    limit, startAfter, type DocumentSnapshot, type QueryConstraint
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
@@ -35,6 +36,7 @@ const statusConfig = {
 };
 
 type InventoryTab = 'completed' | 'draft' | 'ordered' | 'all';
+const RECEIPT_BATCH_SIZE = 80;
 
 const inventoryTabs: { id: InventoryTab; label: string; description: string }[] = [
     { id: 'completed', label: 'Phiếu nhập hàng', description: 'Đã hoàn tất nhập kho' },
@@ -48,6 +50,9 @@ export default function InventoryPage() {
     const [receipts, setReceipts] = useState<(ImportReceipt & { id: string })[]>([]);
     const [products, setProducts] = useState<(Product & { id: string })[]>([]);
     const [loading, setLoading] = useState(true);
+    const [loadingMoreReceipts, setLoadingMoreReceipts] = useState(false);
+    const [lastReceiptDoc, setLastReceiptDoc] = useState<DocumentSnapshot | null>(null);
+    const [hasMoreReceipts, setHasMoreReceipts] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
     const [isProcessing, setIsProcessing] = useState(false);
     const [timeFilter, setTimeFilter] = useState<'all' | 'today' | 'week' | 'month'>('all');
@@ -76,10 +81,29 @@ export default function InventoryPage() {
         return !isComponent && !isService;
     });
 
-    const refreshReceipts = useCallback(async () => {
-        const snap = await getDocs(query(collection(db, 'import_receipts'), orderBy('createdAt', 'desc')));
-        setReceipts(snap.docs.map(d => ({ id: d.id, ...d.data() } as ImportReceipt & { id: string })));
+    const buildReceiptQueryConstraints = useCallback((cursor?: DocumentSnapshot | null): QueryConstraint[] => {
+        const constraints: QueryConstraint[] = [orderBy('createdAt', 'desc')];
+        if (cursor) constraints.push(startAfter(cursor));
+        constraints.push(limit(RECEIPT_BATCH_SIZE));
+        return constraints;
     }, []);
+
+    const refreshReceipts = useCallback(async (mode: 'reset' | 'more' = 'reset', cursor?: DocumentSnapshot | null) => {
+        const isReset = mode === 'reset';
+        if (!isReset) setLoadingMoreReceipts(true);
+        try {
+            const snap = await getDocs(query(
+                collection(db, 'import_receipts'),
+                ...buildReceiptQueryConstraints(isReset ? null : cursor),
+            ));
+            const nextReceipts = snap.docs.map(d => ({ id: d.id, ...d.data() } as ImportReceipt & { id: string }));
+            setReceipts(current => isReset ? nextReceipts : [...current, ...nextReceipts]);
+            setLastReceiptDoc(snap.docs[snap.docs.length - 1] || null);
+            setHasMoreReceipts(snap.docs.length === RECEIPT_BATCH_SIZE);
+        } finally {
+            if (!isReset) setLoadingMoreReceipts(false);
+        }
+    }, [buildReceiptQueryConstraints]);
 
     const refreshProducts = useCallback(async () => {
         const snap = await getDocs(collection(db, 'products'));
@@ -710,6 +734,19 @@ export default function InventoryPage() {
                     <div className="text-center py-16 text-gray-400">
                         <Package size={48} className="mx-auto mb-3 opacity-50" />
                         <p>Chưa có phiếu nhập nào</p>
+                    </div>
+                )}
+                {hasMoreReceipts && (
+                    <div className="flex justify-center rounded-xl border bg-white px-4 py-3">
+                        <button
+                            type="button"
+                            onClick={() => refreshReceipts('more', lastReceiptDoc)}
+                            disabled={loadingMoreReceipts}
+                            className="inline-flex items-center gap-2 rounded-lg border border-orange-200 bg-white px-4 py-2 text-sm font-medium text-orange-700 hover:bg-orange-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                            {loadingMoreReceipts && <Loader2 size={16} className="animate-spin" />}
+                            Tải thêm {RECEIPT_BATCH_SIZE} phiếu
+                        </button>
                     </div>
                 )}
             </div>
