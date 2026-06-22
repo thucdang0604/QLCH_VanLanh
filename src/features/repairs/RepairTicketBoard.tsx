@@ -49,11 +49,12 @@ function hasActiveWarrantyPart(ticket: RepairTicket) {
     return (ticket.parts || []).some(part =>
         isSelectedRepairPart(part) &&
         isWarrantyEligibleRepairPart(part) &&
-        (!part.warrantyExpiresAt || (
+        Number(part.warrantyMonths || 0) > 0 &&
+        part.warrantyExpiresAt && (
             typeof part.warrantyExpiresAt === 'number'
                 ? part.warrantyExpiresAt
                 : (part.warrantyExpiresAt as { toDate?: () => Date })?.toDate?.()?.getTime() || 0
-        ) > Date.now())
+        ) > Date.now()
     );
 }
 

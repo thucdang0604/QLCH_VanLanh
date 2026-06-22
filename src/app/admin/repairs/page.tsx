@@ -90,7 +90,8 @@ function hasActiveWarrantySource(ticket: RepairTicket): boolean {
     const hasPartWarranty = (ticket.parts || []).some(part =>
         isSelectedRepairPart(part)
         && isWarrantyEligibleRepairPart(part)
-        && (!part.warrantyExpiresAt || getDateMillis(part.warrantyExpiresAt) > Date.now())
+        && Number(part.warrantyMonths || 0) > 0
+        && getDateMillis(part.warrantyExpiresAt) > Date.now()
     );
     if (hasPartWarranty) return true;
     return getDateMillis(ticket.serviceWarrantyExpiresAt) > Date.now();

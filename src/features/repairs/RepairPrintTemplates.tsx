@@ -47,7 +47,7 @@ export function RepairPrintTemplates({
     const warrantyPartNames = (ticket.parts || [])
         .filter(part => {
             if (!isSelectedRepairPart(part) || !isWarrantyEligibleRepairPart(part)) return false;
-            if (!part.warrantyExpiresAt) return true;
+            if (Number(part.warrantyMonths || 0) <= 0 || !part.warrantyExpiresAt) return false;
             const expiresAt = typeof part.warrantyExpiresAt === 'number'
                 ? part.warrantyExpiresAt
                 : (part.warrantyExpiresAt as { toDate?: () => Date })?.toDate?.()?.getTime() || 0;

@@ -29,11 +29,12 @@ export function RepairWarrantyModal({
         .filter(part =>
             isSelectedRepairPart(part) &&
             isWarrantyEligibleRepairPart(part) &&
-            (!part.warrantyExpiresAt || (
+            Number(part.warrantyMonths || 0) > 0 &&
+            part.warrantyExpiresAt && (
                 typeof part.warrantyExpiresAt === 'number'
                     ? part.warrantyExpiresAt
                     : (part.warrantyExpiresAt as { toDate?: () => Date })?.toDate?.()?.getTime() || 0
-            ) > Date.now())
+            ) > Date.now()
         );
     const hasActiveParts = activeParts.length > 0;
 
@@ -73,8 +74,8 @@ export function RepairWarrantyModal({
                         const expiresAt = typeof part.warrantyExpiresAt === 'number'
                             ? part.warrantyExpiresAt
                             : (part.warrantyExpiresAt as { toDate?: () => Date })?.toDate?.()?.getTime() || 0;
-                        const expiresLabel = expiresAt ? new Date(expiresAt).toLocaleDateString('vi-VN') : 'Chưa ghi hạn';
-                        const warrantyMonthsLabel = part.warrantyMonths ? `${part.warrantyMonths} tháng` : 'Chưa ghi';
+                        const expiresLabel = expiresAt ? new Date(expiresAt).toLocaleDateString('vi-VN') : '—';
+                        const warrantyMonthsLabel = `${part.warrantyMonths} tháng`;
                         const checked = selectedIndexes.includes(part._origIdx);
 
                         return (
