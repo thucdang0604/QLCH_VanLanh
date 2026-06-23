@@ -11,6 +11,7 @@ import { fetchFifoLogsForDeduction, executeFifoDeductionsWrites, type FifoDeduct
 import { buildCompletedOrderRevenueDelta, incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 import { loadRepairWorkflow, requireWorkflowNode, workflowNodeHasFeature } from '@/lib/repairWorkflowServer';
 import { isSelectedRepairPart } from '@/lib/repairStatus';
+import { reserveSequentialDocumentId, type ReservedSequentialDocumentId } from '@/lib/serverDocumentIds';
 
 function resolvePaymentCompletionTarget(workflow: WorkflowNode[], currentStatus: string) {
     const currentNode = requireWorkflowNode(workflow, currentStatus);
@@ -333,9 +334,6 @@ export async function POST(request: NextRequest) {
             }
 
             // ── Pre-fetch for Transaction Reads ──
-            const orderRef = db.collection('orders').doc();
-            const orderId = orderRef.id;
-
             const staffSnap = await tx.get(db.collection('users').doc(caller.uid));
             const sData = staffSnap.data();
             const createdByName = sData?.displayName || sData?.name || (caller as { email?: string }).email || caller.uid;
@@ -449,7 +447,6 @@ export async function POST(request: NextRequest) {
 
             const orderPaymentTotal = Array.from(orderPaymentTotals.values()).reduce((sum, amount) => sum + amount, 0);
             const updatedOrderIds = Array.from(orderPaymentTotals.keys());
-            const debtPaymentReferenceId = updatedOrderIds.length === 1 ? updatedOrderIds[0] : (idempotencyKey || orderId);
 
             const repairCompletionTargets = new Map<string, { targetStatus: string; shouldCountCompletion: boolean }>();
             for (const [id, repairDoc] of repairDocs.entries()) {
@@ -509,6 +506,19 @@ export async function POST(request: NextRequest) {
             if (fifoDeductors.length > 0) {
                 fifoLogsDataMap = await fetchFifoLogsForDeduction(tx, db, fifoDeductors);
             }
+
+            let orderAllocation: ReservedSequentialDocumentId | null = null;
+            if (!isDebtCollectionOnly) {
+                orderAllocation = await reserveSequentialDocumentId(tx, db, {
+                    collectionName: 'orders',
+                    prefix: 'DH',
+                });
+            }
+            const orderRef = orderAllocation?.ref || null;
+            const orderId = orderAllocation?.id || '';
+            const debtPaymentReferenceId = updatedOrderIds.length === 1
+                ? updatedOrderIds[0]
+                : (idempotencyKey || orderId || `DEBT-${updatedOrderIds.map(id => id.slice(-6)).join('-')}`);
 
             const order: Record<string, unknown> = {
                 customer_info: {
@@ -638,6 +648,10 @@ export async function POST(request: NextRequest) {
             }
 
             if (!isDebtCollectionOnly) {
+                if (!orderRef || !orderAllocation) {
+                    throw new Error('Không thể tạo mã đơn POS.');
+                }
+                orderAllocation.commitCounter();
                 tx.set(orderRef, order);
             }
             if (!isDebtCollectionOnly && !isPending) {
