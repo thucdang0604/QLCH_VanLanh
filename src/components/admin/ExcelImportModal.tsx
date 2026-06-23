@@ -24,6 +24,7 @@ import { useAuth } from '@/lib/AuthContext';
 import { useConfig } from '@/lib/ConfigContext';
 import { PART_CATEGORY_LABEL } from '@/lib/constants';
 import { buildProductCodeFromId, normalizeProductCode } from '@/lib/productCodes';
+import { buildClientDocumentId } from '@/lib/clientDocumentIds';
 import { reserveSupplierDocumentId } from '@/lib/supplierDocumentIds';
 import { generateSearchKeywords, generateSlug } from '@/lib/utils';
 import { triggerRevalidate } from '@/lib/revalidate';
@@ -994,7 +995,7 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
         const totalOrders = getNumber(row.data, ['Đơn hàng', 'Orders', 'Tổng đơn hàng']);
         const totalRepairs = getNumber(row.data, ['Sửa chữa', 'Repairs', 'Tổng sửa chữa']);
         const customerRef = doc(db, 'customers', phone);
-        const txRef = totalDebt !== 0 ? doc(collection(db, 'customer_transactions')) : null;
+        const txRef = totalDebt !== 0 ? doc(db, 'customer_transactions', buildClientDocumentId('CT', phone)) : null;
 
         await runTransaction(db, async (transaction) => {
             const snapshot = await transaction.get(customerRef);
@@ -1043,7 +1044,7 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
         const supplierId = await reserveSupplierDocumentId({ name, phone });
         const supplierRef = doc(db, 'suppliers', supplierId);
         const totalDebt = getSignedNumber(row.data, ['Công nợ', 'Nợ', 'Debt']);
-        const txRef = totalDebt !== 0 ? doc(collection(db, 'supplier_transactions')) : null;
+        const txRef = totalDebt !== 0 ? doc(db, 'supplier_transactions', buildClientDocumentId('ST', supplierId)) : null;
 
         await runTransaction(db, async (transaction) => {
             transaction.set(supplierRef, {
@@ -1103,7 +1104,7 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
         const status = normalizeOrderStatus(getValue(row.data, ['Trạng thái', 'Status']));
         const orderRef = doc(db, 'orders', orderId);
         const customerRef = doc(db, 'customers', phone);
-        const txRef = paymentStatus === 'debt' ? doc(collection(db, 'customer_transactions')) : null;
+        const txRef = paymentStatus === 'debt' ? doc(db, 'customer_transactions', buildClientDocumentId('CT', orderId)) : null;
 
         await runTransaction(db, async (transaction) => {
             const orderSnapshot = await transaction.get(orderRef);
@@ -1206,7 +1207,7 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
         const status = getValue(row.data, ['Trạng thái', 'Status']);
         const repairRef = doc(db, 'repairs', repairId);
         const customerRef = doc(db, 'customers', phone);
-        const txRef = paymentStatus === 'pay_later' ? doc(collection(db, 'customer_transactions')) : null;
+        const txRef = paymentStatus === 'pay_later' ? doc(db, 'customer_transactions', buildClientDocumentId('CT', repairId)) : null;
 
         await runTransaction(db, async (transaction) => {
             const repairSnapshot = await transaction.get(repairRef);

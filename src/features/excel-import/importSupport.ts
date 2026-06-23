@@ -5,6 +5,7 @@ import { db, getStorageInstance } from '@/lib/firebase';
 import type { ProductSpecs, TaxonomyNode } from '@/lib/types';
 import { buildProductCodeFromId, getProductCodeKind, normalizeProductCode, type ProductCodeKind } from '@/lib/productCodes';
 import { assertProductCodesAvailable } from '@/lib/productCodeRegistry';
+import { buildClientDocumentId } from '@/lib/clientDocumentIds';
 import { generateSlug } from '@/lib/utils';
 import { optimizeImage } from '@/lib/imageOptimizer';
 import { validateImageFile } from '@/lib/validateImage';
@@ -686,7 +687,7 @@ export async function createInitialProductWithCodes(
     const normalizedCodes = await assertProductCodesAvailable(codes);
     const productRef = doc(db, 'products', productId);
     const registryRefs = normalizedCodes.map((code) => doc(db, 'product_code_registry', code));
-    const logRef = inventoryLog ? doc(collection(db, 'inventory_logs')) : null;
+    const logRef = inventoryLog ? doc(db, 'inventory_logs', buildClientDocumentId('IL', productId)) : null;
 
     await runTransaction(db, async (transaction) => {
         const [productSnapshot, ...registrySnapshots] = await Promise.all([
