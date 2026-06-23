@@ -5,6 +5,7 @@ import { FieldValue, type DocumentReference } from 'firebase-admin/firestore';
 import type { Order } from '@/lib/types';
 import { calculateAndSaveCommissionsServer, reverseCommissionServer } from '@/lib/commissionCalcServer';
 import { buildCompletedOrderRevenueDelta, incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
+import { reserveSequentialDocumentIds } from '@/lib/serverDocumentIds';
 
 type FirestoreData = Record<string, unknown>;
 type ProductDoc = { ref: DocumentReference; data: FirestoreData };
@@ -90,6 +91,31 @@ export async function POST(request: NextRequest) {
                 }
             }
 
+            const writesInventoryLog =
+                (isActiveStatus(oldStatus) && targetStatus === 'Completed') ||
+                (oldStatus === 'Completed' && targetStatus === 'Cancelled');
+            const inventoryLogAllocations = await reserveSequentialDocumentIds(tx, db, {
+                collectionName: 'inventory_logs',
+                prefix: 'IL',
+                count: writesInventoryLog ? grouped.size : 0,
+            });
+            const writesCustomerLedger = Boolean(
+                freshOrder.customer_info?.phone &&
+                (
+                    (targetStatus === 'Completed' && isActiveStatus(oldStatus)) ||
+                    (targetStatus === 'Cancelled' && oldStatus === 'Completed')
+                ),
+            );
+            const customerLedgerAllocations = await reserveSequentialDocumentIds(tx, db, {
+                collectionName: 'customer_ledger',
+                prefix: 'CL',
+                count: writesCustomerLedger ? 1 : 0,
+            });
+            const customerPhone = freshOrder.customer_info?.phone || '';
+            const customerRef = customerPhone ? db.collection('customers').doc(customerPhone) : null;
+            const custSnap = customerRef ? await tx.get(customerRef) : null;
+            let inventoryLogAllocationIndex = 0;
+
             for (const [pid, group] of grouped.entries()) {
                 const p = productDocs.get(pid)!;
                 const currentStock = Number(p.data.stock) || 0;
@@ -129,7 +155,7 @@ export async function POST(request: NextRequest) {
                 }
 
                 if (logType && stockChange !== 0) {
-                    const logRef = db.collection('inventory_logs').doc();
+                    const logRef = inventoryLogAllocations[inventoryLogAllocationIndex++].ref;
                     tx.set(logRef, {
                         productId: pid,
                         productName: group.productName,
@@ -163,14 +189,12 @@ export async function POST(request: NextRequest) {
             } as Order;
 
             // Customer Aggregate Updates
-            if (freshOrder.customer_info?.phone) {
-                const phone = freshOrder.customer_info.phone;
-                const customerRef = db.collection('customers').doc(phone);
-                const custSnap = await tx.get(customerRef);
+            if (customerPhone && customerRef) {
+                const phone = customerPhone;
                 const grandTotal = freshOrder.items.reduce((sum, item) => sum + (item.price * item.quantity), 0) - (freshOrder.discount_amount || 0);
 
                 if (targetStatus === 'Completed' && isActiveStatus(oldStatus)) {
-                    if (custSnap.exists) {
+                    if (custSnap?.exists) {
                         tx.update(customerRef, {
                             totalSpent: FieldValue.increment(grandTotal),
                             totalOrders: FieldValue.increment(1),
@@ -179,7 +203,7 @@ export async function POST(request: NextRequest) {
                     }
                     
                     // Add customer ledger
-                    const ledgerRef = db.collection('customer_ledger').doc();
+                    const ledgerRef = customerLedgerAllocations[0].ref;
                     tx.set(ledgerRef, {
                         customerId: phone,
                         type: 'purchase_order',
@@ -193,7 +217,7 @@ export async function POST(request: NextRequest) {
                     incrementRevenueAggregates(tx, db, buildCompletedOrderRevenueDelta(docDataForCommission));
 
                 } else if (targetStatus === 'Cancelled' && oldStatus === 'Completed') {
-                    if (custSnap.exists) {
+                    if (custSnap?.exists) {
                         tx.update(customerRef, {
                             totalSpent: FieldValue.increment(-grandTotal),
                             totalOrders: FieldValue.increment(-1),
@@ -202,7 +226,7 @@ export async function POST(request: NextRequest) {
                     }
                     
                     // Add customer ledger negative
-                    const ledgerRef = db.collection('customer_ledger').doc();
+                    const ledgerRef = customerLedgerAllocations[0].ref;
                     tx.set(ledgerRef, {
                         customerId: phone,
                         type: 'refund_order',
@@ -225,6 +249,8 @@ export async function POST(request: NextRequest) {
                     referenceId: orderId
                 });
             }
+            inventoryLogAllocations.at(-1)?.commitCounter();
+            customerLedgerAllocations.at(-1)?.commitCounter();
         });
 
         return NextResponse.json({ success: true, message: 'Cập nhật trạng thái thành công' });
