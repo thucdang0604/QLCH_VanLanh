@@ -1,14 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requirePermission } from '@/lib/apiAuth';
 import { getAdminDb } from '@/lib/firebaseAdmin';
+import type { RepairTicket } from '@/lib/types';
+import { getConfiguredWorkflow, type RepairWorkflowSettings } from '@/lib/repairWorkflowConfig';
 
-const TERMINAL_REPAIR_STATUSES = new Set(['da_giao_khach', 'huy_phieu']);
+const LEGACY_TERMINAL_REPAIR_STATUSES = new Set(['done', 'out', 'refund', 'da_giao_khach', 'huy_phieu', 'bh_hoan_tat', 'bh_tu_choi', 'bh_refund']);
 
 type RepairPartData = {
     productId?: string;
     quantity?: number;
     reservedQuantity?: number;
     status?: string;
+};
+
+type RepairHeldData = Pick<RepairTicket, 'ticketType'> & {
+    status?: string;
+    parts?: RepairPartData[];
 };
 
 function reservedQuantity(part: RepairPartData): number {
@@ -20,19 +27,27 @@ function reservedQuantity(part: RepairPartData): number {
     return part.status === 'selected' ? quantity : 0;
 }
 
+function isTerminalRepair(repair: RepairHeldData, settings: RepairWorkflowSettings): boolean {
+    if (LEGACY_TERMINAL_REPAIR_STATUSES.has(repair.status || '')) return true;
+    const workflow = getConfiguredWorkflow(settings, repair.ticketType);
+    return workflow.some(node => node.id === repair.status && node.isTerminal === true);
+}
+
 export async function POST(request: NextRequest) {
     try {
         const caller = await requirePermission(request, 'manage_inventory');
         const db = getAdminDb();
-        const [productsSnap, repairsSnap] = await Promise.all([
+        const [productsSnap, repairsSnap, configSnap] = await Promise.all([
             db.collection('products').get(),
             db.collection('repairs').get(),
+            db.collection('system_config').doc('repairs').get(),
         ]);
+        const workflowSettings = (configSnap.data() || {}) as RepairWorkflowSettings;
 
         const heldMap = new Map<string, number>();
         for (const repairDoc of repairsSnap.docs) {
-            const repair = repairDoc.data() as { status?: string; parts?: RepairPartData[] };
-            if (TERMINAL_REPAIR_STATUSES.has(repair.status || '')) continue;
+            const repair = repairDoc.data() as RepairHeldData;
+            if (isTerminalRepair(repair, workflowSettings)) continue;
 
             for (const part of repair.parts || []) {
                 if (!part.productId) continue;
