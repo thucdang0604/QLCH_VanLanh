@@ -86,3 +86,53 @@ export async function reserveSequentialDocumentId(
 
     throw new Error(`Không thể tạo mã ${prefix} mới sau ${MAX_COLLISION_ATTEMPTS} lần kiểm tra trùng.`);
 }
+
+export async function reserveSequentialDocumentIds(
+    tx: Transaction,
+    db: Firestore,
+    input: ReserveSequentialDocumentIdInput & { count: number },
+): Promise<ReservedSequentialDocumentId[]> {
+    if (!Number.isInteger(input.count) || input.count <= 0) {
+        return [];
+    }
+
+    const dateKey = formatVietnamDateKey(input.date || new Date());
+    const prefix = input.prefix.trim().toUpperCase();
+    const padLength = input.padLength || DEFAULT_PAD_LENGTH;
+    const counterKey = `${prefix}-${dateKey}`;
+    const counterRef = db.collection('system_counters').doc(`document_ids_${counterKey}`);
+    const counterSnap = await tx.get(counterRef);
+    let sequence = Math.max(0, Number(counterSnap.data()?.sequence) || 0) + 1;
+    const allocations: ReservedSequentialDocumentId[] = [];
+
+    for (let attempt = 0; attempt < MAX_COLLISION_ATTEMPTS && allocations.length < input.count; attempt += 1) {
+        const id = buildDocumentId(prefix, dateKey, sequence, padLength);
+        const ref = db.collection(input.collectionName).doc(id);
+        const reservedSequence = sequence;
+        sequence += 1;
+
+        const existingSnap = await tx.get(ref);
+        if (!existingSnap.exists) {
+            allocations.push({
+                id,
+                ref,
+                sequence: reservedSequence,
+                counterKey,
+                commitCounter: () => {
+                    tx.set(counterRef, {
+                        prefix,
+                        dateKey,
+                        sequence: allocations.at(-1)?.sequence || reservedSequence,
+                        updatedAt: FieldValue.serverTimestamp(),
+                    }, { merge: true });
+                },
+            });
+        }
+    }
+
+    if (allocations.length !== input.count) {
+        throw new Error(`Khong the tao ${input.count} ma ${prefix} moi sau ${MAX_COLLISION_ATTEMPTS} lan kiem tra trung.`);
+    }
+
+    return allocations;
+}
