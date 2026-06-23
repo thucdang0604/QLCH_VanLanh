@@ -6,6 +6,7 @@ import type { FirestoreDateValue, RepairTicket } from '@/lib/types';
 import { loadRepairWorkflow, requireWorkflowNode } from '@/lib/repairWorkflowServer';
 import { REPAIR_PART_STATUS, isSelectedRepairPart } from '@/lib/repairStatus';
 import { randomUUID } from 'crypto';
+import { reserveSequentialDocumentId, type ReservedSequentialDocumentId } from '@/lib/serverDocumentIds';
 
 type RepairLine = NonNullable<RepairTicket['parts']>[number];
 type ProductData = Record<string, unknown>;
@@ -356,6 +357,14 @@ export async function POST(request: NextRequest) {
                 updateData.partsLockedAt = partsLockedAt;
             }
 
+            let draftReceiptAllocation: ReservedSequentialDocumentId | null = null;
+            if (draftSnap?.empty && newRequestedItems.length > 0) {
+                draftReceiptAllocation = await reserveSequentialDocumentId(tx, db, {
+                    collectionName: 'import_receipts',
+                    prefix: 'NH',
+                });
+            }
+
             // ===== START WRITES =====
             for (const productId of dirtyProductIds) {
                 const product = updatedProductRefs.get(productId);
@@ -391,9 +400,12 @@ export async function POST(request: NextRequest) {
                     draftRef = draftSnap.docs[0].ref;
                     draftData = draftSnap.docs[0].data() as unknown as DraftReceiptData;
                 } else if (newRequestedItems.length > 0) {
-                    draftRef = receiptsRef.doc();
+                    draftRef = draftReceiptAllocation?.ref;
                 } else {
                     return { success: true, parts, payment: paymentUpdate, partsLockedAt };
+                }
+                if (!draftRef) {
+                    throw new Error('Khong the tao ma phieu nhap tu dong.');
                 }
 
                 draftData.items = [
@@ -404,6 +416,7 @@ export async function POST(request: NextRequest) {
                     ...newRequestedItems,
                 ];
                 tx.set(draftRef, draftData, { merge: true });
+                draftReceiptAllocation?.commitCounter();
             }
 
             return { success: true, parts, payment: paymentUpdate, partsLockedAt };
