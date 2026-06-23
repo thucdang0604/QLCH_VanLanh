@@ -258,8 +258,11 @@ export async function POST(request: NextRequest) {
             const serverTotal = serverSubtotal - serverDiscount;
             const isDebtCollectionOnly = orderPaymentSubtotal > 0 && discountableSubtotal === 0;
             const hasRepairPayment = normalizedItems.some(item => item.isRepairTicket);
-            const paidNow = Number(deposit_amount) || 0;
             const paymentMethodCode = String(payment_method || 'CASH').toUpperCase();
+            // If payment method is not DEBT, and deposit is not provided/0, treat as fully paid.
+            const paidNow = (paymentMethodCode !== 'DEBT' && (deposit_amount === undefined || deposit_amount === null || Number(deposit_amount) === 0))
+                ? serverTotal
+                : Number(deposit_amount) || 0;
 
             if (orderPaymentSubtotal > 0 && discountableSubtotal > 0) {
                 throw new Error('Vui lòng tách thu nợ đơn cũ và bán hàng mới thành 2 lần thanh toán riêng.');
@@ -509,8 +512,15 @@ export async function POST(request: NextRequest) {
 
             const stockProductIds = new Set([...preAggregatedForStock.keys(), ...repairAggregatedForStock.keys()]);
             const oldDebt = (custSnap && custSnap.exists) ? (Number(custSnap.data()?.totalDebt) || 0) : 0;
-            const newDebt = !isDebtCollectionOnly ? Math.max(0, serverTotal - Number(deposit_amount)) : 0;
-            const surplus = !isDebtCollectionOnly ? Math.max(0, Number(deposit_amount) - serverTotal) : 0;
+            const newDebt = !isDebtCollectionOnly ? Math.max(0, serverTotal - paidNow) : 0;
+            const surplus = !isDebtCollectionOnly ? Math.max(0, paidNow - serverTotal) : 0;
+
+            // Strict Backend Validation: Debt orders or partial payments MUST have a customer phone number.
+            const isDebt = paymentMethodCode === 'DEBT' || newDebt > 0;
+            if (isDebt && !normalizedPhoneResult) {
+                throw new Error('Đơn hàng ghi nợ hoặc thanh toán thiếu bắt buộc phải có số điện thoại khách hàng hợp lệ để ghi nhận công nợ.');
+            }
+
             const debtPaymentAmount = (use_surplus_to_pay_debt === true && oldDebt > 0 && surplus > 0)
                 ? Math.min(surplus, oldDebt)
                 : 0;
@@ -522,7 +532,7 @@ export async function POST(request: NextRequest) {
             if (custRef) {
                 if (!isDebtCollectionOnly) {
                     customerLedgerCount += 1; // purchase_order
-                    if (Number(deposit_amount) > 0) {
+                    if (paidNow > 0) {
                         customerLedgerCount += 1; // purchase_payment
                     }
                 }
@@ -586,7 +596,7 @@ export async function POST(request: NextRequest) {
                 items: normalizedItems,
                 subtotal_amount: serverSubtotal,
                 discount_amount: serverDiscount,
-                deposit_amount: Number(deposit_amount) || 0,
+                deposit_amount: paidNow,
                 total_amount: serverTotal,
                 ...(appliedVoucherCode ? { voucherCode: appliedVoucherCode, discountSource: 'voucher' } : {}),
                 status: 'Completed',
@@ -603,10 +613,10 @@ export async function POST(request: NextRequest) {
                 completedAt: FieldValue.serverTimestamp(),
                 paymentHistory: [{
                     type: newDebt > 0 ? 'deposit' : 'full',
-                    amount: Math.min(Number(deposit_amount), serverTotal),
+                    amount: Math.min(paidNow, serverTotal),
                     timestamp: Date.now(),
                     note: newDebt > 0
-                        ? `Thanh toán một phần POS (${Number(deposit_amount).toLocaleString('vi-VN')}đ) — nợ lại ${newDebt.toLocaleString('vi-VN')}đ — ${payment_method}`
+                        ? `Thanh toán một phần POS (${paidNow.toLocaleString('vi-VN')}đ) — nợ lại ${newDebt.toLocaleString('vi-VN')}đ — ${payment_method}`
                         : `Thanh toán POS — ${payment_method}`
                 }],
                 createdBy: caller.uid,
