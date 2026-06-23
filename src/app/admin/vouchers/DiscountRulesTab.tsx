@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { collection, query, orderBy, onSnapshot, addDoc, updateDoc, doc, deleteDoc, serverTimestamp, setDoc, limit, getDocs } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, updateDoc, doc, deleteDoc, serverTimestamp, setDoc, limit, getDocs, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Percent, Plus, Edit2, Trash2, ToggleLeft, ToggleRight, X, Tag, Medal, Users, ChevronDown, Search, ArrowDown, Zap, ShoppingBag } from 'lucide-react';
 import { toast } from 'sonner';
@@ -9,6 +9,7 @@ import type { AccessoryDiscountRule } from '@/lib/types';
 import type { TaxonomyNode } from '@/lib/types/catalog';
 import { TIER_CONFIGS, TierConfig } from '@/lib/customerTiers';
 import { useConfig } from '@/lib/ConfigContext';
+import { generateSlug } from '@/lib/utils';
 
 const fmt = (n: number) => n.toLocaleString('vi-VN') + 'đ';
 
@@ -39,6 +40,29 @@ function flattenTaxonomy(nodes: TaxonomyNode[], parentPath = '', depth = 0): Fla
         }
     }
     return result;
+}
+
+function buildAccessoryRuleBaseId(data: Partial<AccessoryDiscountRule>): string {
+    const nameSlug = generateSlug(String(data.name || 'rule'));
+    const triggerSlug = generateSlug([
+        data.triggerServiceCategory,
+        ...(Array.isArray(data.triggerKeywords) ? data.triggerKeywords.slice(0, 2) : []),
+    ].filter(Boolean).join('-'));
+    const targetSlug = generateSlug([
+        data.targetProductCategory,
+        ...(Array.isArray(data.targetKeywords) ? data.targetKeywords.slice(0, 2) : []),
+    ].filter(Boolean).join('-'));
+    const base = [nameSlug, triggerSlug, targetSlug].filter(Boolean).join('-').slice(0, 90) || 'rule';
+    return `VCR-${base}`;
+}
+
+async function getAvailableDocId(collectionName: string, baseId: string): Promise<string> {
+    for (let i = 0; i < 50; i += 1) {
+        const candidate = i === 0 ? baseId : `${baseId}-${i + 1}`;
+        const snap = await getDoc(doc(db, collectionName, candidate));
+        if (!snap.exists()) return candidate;
+    }
+    throw new Error('Không thể tạo mã rule giảm giá không trùng.');
 }
 
 // ── Searchable Taxonomy Dropdown ──
@@ -163,7 +187,7 @@ function KeywordChips({ keywords, onChange }: { keywords: string[]; onChange: (k
                 {keywords.map((kw, i) => (
                     <span key={i} className="inline-flex items-center gap-1 bg-gray-100 text-gray-700 text-xs px-2 py-1 rounded-lg">
                         {kw}
-                        <button type="button" onClick={() => onChange(keywords.filter((_, j) => j !== i))} className="hover:text-red-500">
+                        <button type="button" title="Xóa" onClick={() => onChange(keywords.filter((_, j) => j !== i))} className="hover:text-red-500">
                             <X size={12} />
                         </button>
                     </span>
@@ -177,7 +201,7 @@ function KeywordChips({ keywords, onChange }: { keywords: string[]; onChange: (k
                     placeholder="Thêm từ khóa..."
                     className="flex-1 border rounded-lg px-2.5 py-1.5 text-xs focus:ring-2 focus:ring-orange-400 focus:outline-none"
                 />
-                <button type="button" onClick={addKeyword} className="px-2 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-xs text-gray-600 transition-colors">
+                <button type="button" title="Thêm" onClick={addKeyword} className="px-2 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-xs text-gray-600 transition-colors">
                     <Plus size={14} />
                 </button>
             </div>
@@ -516,7 +540,8 @@ export default function DiscountRulesTab() {
             await updateDoc(doc(db, 'accessory_discount_rules', editRule.id), { ...data, updatedAt: serverTimestamp() });
             toast.success('Đã cập nhật rule phụ kiện');
         } else {
-            await addDoc(collection(db, 'accessory_discount_rules'), { ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+            const ruleId = await getAvailableDocId('accessory_discount_rules', buildAccessoryRuleBaseId(data));
+            await setDoc(doc(db, 'accessory_discount_rules', ruleId), { ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
             toast.success('Đã thêm rule phụ kiện mới');
         }
         await loadAccessoryRules();
