@@ -7,8 +7,8 @@ import {
     ArrowDownToLine, ExternalLink, PackagePlus, Trash2
 } from 'lucide-react';
 import {
-    addDoc, collection, getDocs, deleteDoc,
-    doc, serverTimestamp, query, orderBy, updateDoc, onSnapshot,
+    collection, getDocs, deleteDoc,
+    doc, serverTimestamp, query, orderBy, updateDoc, onSnapshot, setDoc,
     limit, startAfter, type DocumentSnapshot, type QueryConstraint
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
@@ -27,6 +27,7 @@ import {
 import { buildImportPreviewState } from '@/features/parts/importReceiptUtils';
 import { CreateReceiptModal, ImportPreviewModal } from '@/features/parts/ImportReceiptModals';
 import type { ImportPreviewState, ImportReceiptItem, SupplierOption } from '@/features/parts/importReceiptTypes';
+import { reserveSupplierDocumentId } from '@/lib/supplierDocumentIds';
 
 // ── Status Config ──
 const statusConfig = {
@@ -637,9 +638,10 @@ export default function InventoryPage() {
                                                                                         onMouseDown={async (event) => {
                                                                                             event.preventDefault();
                                                                                             const supplierName = (supplierSearch || '').trim();
-                                                                                            const newDoc = await addDoc(collection(db, 'suppliers'), { name: supplierName, totalDebt: 0, isActive: true, createdAt: serverTimestamp() });
+                                                                                            const supplierId = await reserveSupplierDocumentId({ name: supplierName });
+                                                                                            await setDoc(doc(db, 'suppliers', supplierId), { name: supplierName, totalDebt: 0, isActive: true, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
                                                                                             setSupplierActiveKey(null);
-                                                                                            handleAutoSaveSupplier(receipt.id, i, supplierName, newDoc.id);
+                                                                                            handleAutoSaveSupplier(receipt.id, i, supplierName, supplierId);
                                                                                         }}
                                                                                     >
                                                                                         + Tạo: {(supplierSearch || '').trim()}

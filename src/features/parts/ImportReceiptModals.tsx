@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import type React from 'react';
 import { Building2, CheckCircle2, ChevronDown, Loader2, PackagePlus, Plus, Save, Search, Trash2 } from 'lucide-react';
-import { addDoc, collection, doc, getDoc, getDocs, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
 
 import CategoryTaxonomySelector from '@/components/admin/CategoryTaxonomySelector';
 import CurrencyInput from '@/components/admin/CurrencyInput';
@@ -12,6 +12,7 @@ import { db } from '@/lib/firebase';
 import type { Product } from '@/lib/types';
 import { buildProductCodeFromId } from '@/lib/productCodes';
 import { createProductWithCodes } from '@/lib/productCodeRegistry';
+import { reserveSupplierDocumentId } from '@/lib/supplierDocumentIds';
 import { toastError, toastSuccess } from '@/lib/toast';
 import type { ImportPreviewState, ImportReceiptItem, SupplierOption } from './importReceiptTypes';
 
@@ -619,9 +620,10 @@ export function CreateReceiptModal({ isOpen, onClose, parts, retailProducts, onC
                                                                 onClick={async () => {
                                                                     const nm = (itemSupplierSearch || '').trim();
                                                                     try {
-                                                                        const ref = await addDoc(collection(db, 'suppliers'), { name: nm, totalDebt: 0, isActive: true, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+                                                                        const supplierId = await reserveSupplierDocumentId({ name: nm });
+                                                                        await setDoc(doc(db, 'suppliers', supplierId), { name: nm, totalDebt: 0, isActive: true, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
                                                                         const newItems = [...items];
-                                                                        newItems[idx] = { ...newItems[idx], supplier: nm, supplierId: ref.id };
+                                                                        newItems[idx] = { ...newItems[idx], supplier: nm, supplierId };
                                                                         setItems(newItems);
                                                                         setActiveSupplierIdx(null);
                                                                         setItemSupplierSearch('');
