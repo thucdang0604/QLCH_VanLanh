@@ -32,12 +32,15 @@ interface Service {
     price?: string; // legacy string price (backward compat)
     price_original: number;
     price_promo?: number;
+    hidePrice?: boolean;
     device_model: string;
     imageUrl?: string;
     images?: string[];
     icon?: string;
     category: string;
     categoryIds?: string[];
+    linkedProductCategoryIds?: string[];
+    recommendedPartCategoryIds?: string[];
     isActive: boolean;
     warranty_text?: string;
     repair_time?: string;
@@ -139,6 +142,8 @@ export default function ServicesPage() {
 
     // --- ORPHAN CATEGORY DETECTION (ID-based) ---
     const serviceTaxonomy = config?.taxonomy?.service || [];
+    const retailTaxonomy = config?.taxonomy?.retail || [];
+    const componentTaxonomy = config?.taxonomy?.component || [];
     const validNodeIds = collectAllNodeIds(serviceTaxonomy);
 
     const getOrphanStatus = (service: Service): 'valid' | 'orphan' | 'unassigned' => {
@@ -166,16 +171,24 @@ export default function ServicesPage() {
 
     /** Get display price â€” prefers numeric fields, falls back to legacy string */
     const getDisplayPrice = (s: Service) => {
+        if (s.hidePrice) return 'Liên hệ nhận báo giá';
         if (s.price_original > 0) return formatPrice(s.price_original);
         if (s.price) return s.price; // legacy string
         return 'Liên hệ';
     };
 
     const getPromoPrice = (s: Service) => {
+        if (s.hidePrice) return null;
         if (s.price_promo && s.price_promo > 0 && s.price_original > 0 && s.price_promo < s.price_original) {
             return formatPrice(s.price_promo);
         }
         return null;
+    };
+
+    const getLinkedCategoryPath = (type: 'retail' | 'component', categoryIds?: string[]) => {
+        const taxonomy = type === 'retail' ? retailTaxonomy : componentTaxonomy;
+        const deepestId = categoryIds?.[categoryIds.length - 1];
+        return deepestId ? getCategoryPath(deepestId, taxonomy) || deepestId : '';
     };
 
     return (
@@ -308,6 +321,20 @@ export default function ServicesPage() {
                                 return path ? <p className="text-xs text-gray-400 mb-1">📌 {path}</p> : null;
                             })()}
                             <p className="text-sm text-gray-500 line-clamp-2 mb-3">{service.description}</p>
+                            {(service.linkedProductCategoryIds?.length || service.recommendedPartCategoryIds?.length) && (
+                                <div className="mb-3 flex flex-wrap gap-1.5 text-[11px]">
+                                    {service.linkedProductCategoryIds?.length ? (
+                                        <span className="rounded-md border border-blue-100 bg-blue-50 px-2 py-0.5 font-medium text-blue-700">
+                                            Bán kèm: {getLinkedCategoryPath('retail', service.linkedProductCategoryIds)}
+                                        </span>
+                                    ) : null}
+                                    {service.recommendedPartCategoryIds?.length ? (
+                                        <span className="rounded-md border border-emerald-100 bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700">
+                                            Linh kiện: {getLinkedCategoryPath('component', service.recommendedPartCategoryIds)}
+                                        </span>
+                                    ) : null}
+                                </div>
+                            )}
                             <div className="flex items-center justify-between">
                                 <div>
                                     {promo ? (
@@ -401,9 +428,12 @@ function ServiceModal({
         description: '',
         price_original: 0,
         price_promo: 0,
+        hidePrice: false,
         device_model: '',
         category: '',
         categoryIds: [] as string[],
+        linkedProductCategoryIds: [] as string[],
+        recommendedPartCategoryIds: [] as string[],
         isActive: true,
         warranty_text: '',
         repair_time: '',
@@ -418,9 +448,12 @@ function ServiceModal({
                 description: service?.description || '',
                 price_original: service?.price_original || parseLegacyPrice(service?.price),
                 price_promo: service?.price_promo || 0,
+                hidePrice: service?.hidePrice ?? false,
                 device_model: service?.device_model || '',
                 category: service?.category || '',
                 categoryIds: service?.categoryIds || [],
+                linkedProductCategoryIds: service?.linkedProductCategoryIds || [],
+                recommendedPartCategoryIds: service?.recommendedPartCategoryIds || [],
                 isActive: service?.isActive ?? true,
                 warranty_text: service?.warranty_text || '',
                 repair_time: service?.repair_time || '',
@@ -451,9 +484,12 @@ function ServiceModal({
                 description: formData.description,
                 price_original: formData.price_original,
                 price_promo: formData.price_promo || null,
+                hidePrice: formData.hidePrice,
                 device_model: formData.device_model,
                 category: formData.category,
                 categoryIds: formData.categoryIds,
+                linkedProductCategoryIds: formData.linkedProductCategoryIds,
+                recommendedPartCategoryIds: formData.recommendedPartCategoryIds,
                 isActive: formData.isActive,
                 warranty_text: formData.warranty_text || '',
                 repair_time: formData.repair_time || '',
@@ -583,6 +619,18 @@ function ServiceModal({
                             />
                         </div>
                     </div>
+                    <label className="flex items-start gap-3 rounded-lg border border-orange-100 bg-orange-50/60 p-3 cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={formData.hidePrice}
+                            onChange={(e) => setFormData({ ...formData, hidePrice: e.target.checked })}
+                            className="mt-0.5 w-5 h-5 accent-orange-500"
+                        />
+                        <span>
+                            <span className="block text-sm font-semibold text-orange-800">Ẩn giá phía khách hàng</span>
+                            <span className="block text-xs text-orange-700">Trang khách sẽ hiển thị “Liên hệ nhận báo giá”. Giá vẫn được lưu nội bộ để admin tham khảo.</span>
+                        </span>
+                    </label>
 
                     {/* Category */}
                     <div>
@@ -592,6 +640,45 @@ function ServiceModal({
                             value={formData.categoryIds}
                             onChange={(ids, catName) => setFormData({ ...formData, categoryIds: ids, category: catName || formData.category })}
                         />
+                    </div>
+
+                    <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-4">
+                        <p className="text-sm font-semibold text-blue-900">Liên kết nghiệp vụ</p>
+                        <p className="mt-1 text-xs text-blue-700">
+                            Đây là dữ liệu gợi ý dùng lại cho các luồng khác. Không tự trừ tồn kho, không tự đổi workflow và không tự tạo khuyến mãi.
+                        </p>
+                        <div className="mt-3 grid gap-2 text-xs text-blue-900 sm:grid-cols-2">
+                            <div className="rounded-lg border border-blue-100 bg-white/80 p-2">
+                                <span className="font-semibold">POS / giảm giá:</span> nhóm sản phẩm bán kèm giúp rule voucher biết dịch vụ này nên gợi ý phụ kiện nào.
+                            </div>
+                            <div className="rounded-lg border border-blue-100 bg-white/80 p-2">
+                                <span className="font-semibold">Phiếu sửa:</span> nhóm linh kiện giúp nhân viên/KTV có gợi ý linh kiện khi nhập bệnh.
+                            </div>
+                            <div className="rounded-lg border border-blue-100 bg-white/80 p-2">
+                                <span className="font-semibold">Bảo hành:</span> danh mục dịch vụ vẫn là nguồn lấy cấu hình thời hạn và mẫu phiếu bảo hành.
+                            </div>
+                            <div className="rounded-lg border border-blue-100 bg-white/80 p-2">
+                                <span className="font-semibold">Giá dự kiến:</span> giá dịch vụ dùng làm tham khảo khi tạo chi tiết sửa chữa, không khóa giá cuối.
+                            </div>
+                        </div>
+                        <div className="mt-3 space-y-3">
+                            <div>
+                                <label className="block text-xs font-medium text-gray-600 mb-1">Nhóm sản phẩm/phụ kiện bán kèm</label>
+                                <CategoryTaxonomySelector
+                                    type="retail"
+                                    value={formData.linkedProductCategoryIds}
+                                    onChange={(ids) => setFormData({ ...formData, linkedProductCategoryIds: ids })}
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-medium text-gray-600 mb-1">Nhóm linh kiện liên quan</label>
+                                <CategoryTaxonomySelector
+                                    type="component"
+                                    value={formData.recommendedPartCategoryIds}
+                                    onChange={(ids) => setFormData({ ...formData, recommendedPartCategoryIds: ids })}
+                                />
+                            </div>
+                        </div>
                     </div>
 
                     {/* Description */}
@@ -644,7 +731,7 @@ function ServiceModal({
                             <p className="text-xs text-gray-400 mt-0.5">{formData.seoDescription.length}/160</p>
                         </div>
                         <div>
-                            <label className="block text-xs font-medium text-gray-600 mb-1">Tags (phĂ¢n cĂ¡ch báº±ng dáº¥u pháº©y)</label>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Tags (phân cách bằng dấu phẩy)</label>
                             <input
                                 type="text"
                                 value={formData.tags}

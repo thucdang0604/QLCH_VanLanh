@@ -1,0 +1,790 @@
+# User Test Error Intake - 2026-06-18
+
+## Status
+- Branch: `codex/fix-user-reported-errors-20260618`
+- Mode: analysis after user-confirmed intake
+- Current phase: root-cause grouping and implementation order proposal
+
+## Ground Rules
+- Record each reported error as a separate item.
+- Keep different failure families separate: UI behavior, route/navigation, API/server error, provider/config error, permission/RBAC, data/business-state, build/deploy.
+- Do not start proposing or implementing fixes until the user confirms the test pass is complete.
+- When implementation starts later, update the matching roadmap module and mark each issue with evidence, root cause, files touched, and verification result.
+
+## Analysis Started - 2026-06-18
+
+### P0 - Payment, revenue, and repair completion are one coupled defect family
+- Covered IDs: UT-20260618-001, UT-20260618-005, UT-20260618-007, UT-20260618-017.
+- Evidence: POS checkout currently creates an `orders` document for every POS checkout, then immediately calls `buildCompletedOrderRevenueDelta(...)`. Repair handoff from the POS client sends `repairTicketIds`, but the checkout API reads `repairTicketId`, so the repair update branch is skipped for normal POS repair payments.
+- Root cause: POS is being used as the cashier surface, but the backend still treats every checkout as a retail/POS order. Repair payments need source typing before revenue aggregation.
+- Direction: introduce/standardize payable source types (`retail_order`, `repair_ticket`, `customer_debt`) and make repair payment update the repair workflow/payment ledger without polluting POS order revenue. If a POS receipt document is still needed, it must be excluded from order revenue and labeled as a repair payment receipt.
+
+### P0 - Revenue day view depends on permissions and aggregate reads
+- Covered IDs: UT-20260618-002.
+- Evidence: `/admin/revenue` reads `revenue_daily_aggregates` and `expenses` in the day/range path. Firestore rules require revenue permissions for these collections.
+- Root cause: user role/custom claims or module permission mapping is likely not aligned with the new aggregate/expense reads.
+- Direction: verify the actual staff role permission set, then align route guard, Firestore rules, and admin module permissions around `view_revenue`.
+
+### P0 - Repair workflow must stay Firebase-workflow driven
+- Covered IDs: UT-20260618-017, UT-20260618-020, UT-20260618-024.
+- Evidence: transition API loads workflow dynamically, but POS checkout still writes a hardcoded repair status, and repair/technician UI still exposes behavior that can bypass or hide workflow state.
+- Root cause: workflow enforcement exists in the transition API, but some UI/payment paths still write direct state or conditionally render by hardcoded assumptions.
+- Direction: route terminal/payment completion through workflow-aware repair APIs, lock create status to the workflow intake node, and separate read-only selected-parts display from workflow-gated add/remove controls.
+
+### P1 - POS should become a customer payable workspace, not only a cart
+- Covered IDs: UT-20260618-003, UT-20260618-004, UT-20260618-006.
+- Evidence: POS already has phone-based repair lookup and manual voucher handling, but it does not present a unified payable list for unpaid orders, repairs, and debts. Search/add-to-cart logic also does not clearly distinguish "not found" from "out of stock" in the requested way.
+- Root cause: POS data model is product-cart first; customer payable sources and stock availability are bolted on.
+- Direction: build a phone lookup panel that returns typed payable records, keep out-of-stock search results visible but disabled, and apply system discount rules through the same checkout calculation path.
+
+### P1 - Repair intake data model needs extension
+- Covered IDs: UT-20260618-018, UT-20260618-019, UT-20260618-021, UT-20260618-022.
+- Evidence: repair editor has one service group selection outside the issue list, a plain passcode field, limited condition/history booleans, and existing handover logic already has partial no-part warranty behavior.
+- Root cause: the intake schema is still ticket-level for service category and passcode, while the real workflow needs issue-level service mapping and richer device metadata.
+- Direction: add backward-compatible fields for issue service suggestions, pattern-lock passcode, condition/history other text, and surface no-part service warranty consistently in repair detail/POS print.
+
+### P1 - Technician detail duplicates notes and mixes display with edit permissions
+- Covered IDs: UT-20260618-016, UT-20260618-023, UT-20260618-024, UT-20260618-025.
+- Evidence: repair transition stores the same technical note into timeline fields and issue notes; technician detail displays both. Selected parts display is tied to workflow edit capability.
+- Root cause: audit log, issue note, and technician detail UI are not separated by purpose.
+- Direction: store/show each note once per intended surface, collapse timeline by default, and always show selected/test/used parts read-only while workflow controls decide add/remove.
+
+### P1 - Appointment workflow needs explicit confirmation and arrival method states
+- Covered IDs: UT-20260618-014, UT-20260618-015.
+- Evidence: appointments currently use a small manual status set and only link `tel:` without recording the call action.
+- Root cause: appointment state machine is too coarse for the actual front-desk workflow.
+- Direction: add call-confirmed action, direct/drop-off choice, and repair creation handoff that preserves existing prefill behavior.
+
+### P2 - Inventory/products/parts boundary needs a structural refactor
+- Covered IDs: UT-20260618-028.
+- Evidence: products, parts, and inventory currently share import/proposal behavior unevenly. `inventory/stock` is already a separate stock view and should stay as-is.
+- Root cause: page boundaries grew around UI history instead of business ownership.
+- Direction: keep products/parts focused on catalog + create + proposal, move aggregate receipt/proposal/order lists to inventory, and reuse a shared proposal/import modal/service.
+
+### P2 - Product variants should be category-derived
+- Covered IDs: UT-20260618-029.
+- Evidence: manual `ProductSeriesManager` and `seriesId` fields exist in admin product UI.
+- Root cause: variant grouping is manually configured even though the desired grouping key is category.
+- Direction: derive variant group key from category/category path for storefront grouping, hide/remove manual series configuration, and keep compatibility for old `seriesId` during migration.
+
+### P2 - Services should become reusable business taxonomy
+- Covered IDs: UT-20260618-012, UT-20260618-026, UT-20260618-027.
+- Evidence: services currently render numeric pricing and are not strongly linked to repair issues or discount rules.
+- Root cause: services are treated as storefront/admin content instead of a taxonomy used by repair and promotion workflows.
+- Direction: add `priceOnRequest`/hide-price behavior across admin and customer surfaces, then use service/category metadata for repair issue suggestions and service-based promotions.
+
+### P2 - Remaining admin/customer UX and security cleanup
+- Covered IDs: UT-20260618-008, UT-20260618-009, UT-20260618-010, UT-20260618-011, UT-20260618-013, UT-20260618-030, UT-20260618-031, UT-20260618-032.
+- Evidence: orders detail still exposes manual status controls; mobile bottom nav and missions widget need layout adjustment; supplier detail is much thinner than customer detail; AI Creator route/nav/permission still exists; bank config has TOTP support but still allows non-TOTP setup/edit paths and OTP wording remains.
+- Root cause: several features are usable but not yet aligned with the newer workflow/security/product decisions.
+- Direction: implement after P0/P1 data-flow fixes: hide manual order status controls, improve mobile navigation/product detail layout, enrich supplier detail, remove AI Creator route/nav/permission, and make TOTP mandatory for payment/bank config changes.
+
+## Implementation Log
+
+### Part 1 - POS repair checkout ID contract and revenue aggregate split
+- Covered IDs: UT-20260618-001, UT-20260618-005, UT-20260618-007, UT-20260618-017.
+- Files touched: `src/app/admin/pos/page.tsx`, `src/app/api/pos/checkout/route.ts`, `src/features/pos/posTypes.ts`.
+- Change: POS cart repair lines now carry the real `repairTicketId`; checkout sends a deduplicated repair ticket list; the API accepts plural `repairTicketIds`, maps legacy synthetic repair line IDs back to the real ticket ID, updates all matching repair tickets, and splits revenue aggregates so retail lines count as POS order revenue while repair lines count as repair revenue.
+- Verification: focused ESLint passed for the touched files; `tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
+- Remaining risk: order documents are still created as POS receipts for repair payments, so the next part must adjust order/admin display and any legacy revenue fallback paths that still derive totals directly from `orders`.
+
+### Part 2 - Revenue fallback excludes repair payment lines from order revenue
+- Covered IDs: UT-20260618-001, UT-20260618-007.
+- Files touched: `src/app/admin/revenue/page.tsx`.
+- Change: legacy/fallback revenue calculations now derive order revenue, POS order revenue, web order revenue, and daily chart order revenue from retail-only order lines. POS receipt lines marked as repair payments no longer inflate order revenue when aggregate docs are not used.
+- Verification: focused ESLint passed for `src/app/admin/revenue/page.tsx`; `tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
+- Remaining risk: historical POS repair receipts created before Part 1 may not have `isRepairTicket` or `repairTicketId` on every repair-related line, so a one-time data audit/backfill may still be needed for old data.
+
+### Part 3 - Order detail modal is read-only for status and clearer for repair receipts
+- Covered IDs: UT-20260618-008, UT-20260618-009.
+- Files touched: `src/app/admin/orders/page.tsx`.
+- Change: the order detail modal no longer exposes a visible manual status selector; it shows a read-only system-managed status note, labels repair payment receipts, labels DEBT orders as "Ghi nợ - chờ thu", and reads POS item `productName` so line items are visible instead of blank/unclear.
+- Verification: focused ESLint passed for `src/app/admin/orders/page.tsx`; `tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
+- Remaining risk: deeper order workflow automation still belongs in the order transition/payment source model; this part only removes the confusing manual control from the detail popup.
+
+### Part 4 - POS repair completion follows configured workflow terminal
+- Covered IDs: UT-20260618-017, UT-20260618-024.
+- Files touched: `src/app/api/pos/checkout/route.ts`.
+- Change: POS repair checkout no longer hardcodes repair status to `out`. It loads the configured repair workflow, resolves a valid terminal transition from the current node, prefers terminal nodes carrying commission features, records a POS payment timeline entry, and counts completed repairs only when the ticket actually moves into a terminal state.
+- Verification: focused ESLint passed for `src/app/api/pos/checkout/route.ts`; `tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
+- Remaining risk: if a store workflow has multiple terminal choices from the current status and none is marked with commission features, checkout now fails loudly instead of guessing. The workflow config should make the paid-completion terminal unambiguous.
+
+### Part 5 - POS search shows active out-of-stock products
+- Covered IDs: UT-20260618-003.
+- Files touched: `src/app/admin/pos/page.tsx`.
+- Change: the default POS product cache still hides out-of-stock items, but search and scan now merge active out-of-stock products into the grid so staff see the product with the existing "Hết hàng" badge instead of a false "not found" result.
+- Verification: focused ESLint passed for `src/app/admin/pos/page.tsx`; `tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
+- Remaining risk: this keeps hidden/inactive/proposed products excluded. If staff need to see inactive catalog entries in POS search, that should be a separate permissioned lookup.
+
+### Part 6 - Remove admin AI Creator surface
+- Covered IDs: UT-20260618-031.
+- Files touched: `src/app/admin/ai-creator/page.tsx`, `src/app/admin/layout.tsx`, `src/lib/adminModules.ts`.
+- Change: removed the AI Creator route file, admin nav item, icon registry key, permission registry entry, and content-role preset permission.
+- Verification: no source references remain for `ai-creator`, `AI Creator`, `manage_ai_creator`, or `aiCreator`; focused ESLint passed for admin module/layout files; `next typegen && tsc --noEmit` passed after clearing stale `.next/types/app/admin/ai-creator`.
+- Remaining risk: existing staff documents may still contain the old `manage_ai_creator` string, but it no longer grants access to any admin route.
+
+### Part 7 - Bank config updates require TOTP
+- Covered IDs: UT-20260618-032.
+- Files touched: `src/components/admin/settings/BankIntegrationConfig.tsx`, `src/app/api/admin/bank-config/update/route.ts`.
+- Change: the bank settings UI now requires Authenticator setup before edit; labels no longer say the admin phone receives OTP; the update API rejects bank config changes until TOTP is configured and still requires a valid TOTP token for every save.
+- Verification: focused ESLint passed for the touched files with existing `<img>` warnings only; `next typegen && tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
+- Remaining risk: the field name `otpToken` remains as an internal request key for compatibility, but the runtime verification is TOTP-only.
+
+### Part 8 - Customer mobile bottom nav and voucher offset
+- Covered IDs: UT-20260618-010, UT-20260618-011.
+- Files touched: `src/components/layout/MobileBottomNav.tsx`, `src/components/MissionsWidget.tsx`.
+- Change: customer mobile bottom nav now has Home, Category, Contact, Appointment, Tracking; admin/staff mobile nav keeps Home, Category, Contact, Tracking, Admin. The voucher mission button and open panel are lifted above the mobile bottom nav while keeping the desktop position unchanged.
+- Verification: focused ESLint passed for the touched components; `next typegen && tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
+- Remaining risk: visual QA on a real mobile viewport is still needed to confirm exact spacing with device safe-area insets.
+
+### Part 9 - New repair tickets start at workflow intake
+- Covered IDs: UT-20260618-020.
+- Files touched: `src/features/repairs/RepairEditorModal.tsx`, `src/app/admin/repairs/page.tsx`.
+- Change: create-repair mode no longer exposes an editable status selector. New tickets display the workflow initial status as read-only, and the create payload writes the first configured workflow status with `REPAIR_STATUS.INTAKE` only as a fallback.
+- Verification: focused ESLint passed for the touched files; `next typegen && tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
+- Remaining risk: if the configured workflow order is wrong in Firebase, the first node will still be treated as the intake node by design.
+
+### Part 10 - Product detail mobile action sizing
+- Covered IDs: UT-20260618-013.
+- Files touched: `src/app/(customer)/product/[id]/ProductDetailClient.tsx`.
+- Change: mobile product/service action controls now use a two-column grid with 56px touch targets, full-width quantity controls, larger primary action buttons, and a larger favorite button while preserving the desktop flex layout.
+- Verification: focused ESLint passed for the touched component; `next typegen && tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
+- Remaining risk: browser/device visual QA is still needed to confirm exact spacing with the fixed mobile bottom navigation.
+
+### Part 11 - Repair device history other note
+- Covered IDs: UT-20260618-022.
+- Files touched: `src/lib/types/repair.ts`, `src/features/repairs/RepairEditorModal.tsx`, `src/features/repairs/RepairDetailModal.tsx`, `src/app/admin/repairs/page.tsx`.
+- Change: the repair device history section now has a free-text "Khac" note stored as `deviceInfo.checklist.historyOtherNote`, loaded back when editing, saved on create/update, and displayed in repair details without polluting the technical checklist grid.
+- Verification: focused ESLint passed for the touched files; `next typegen && tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
+- Remaining risk: existing tickets do not have this optional field until staff add it during edit.
+
+### Part 12 - Revenue date fallback source read permissions
+- Covered IDs: UT-20260618-002.
+- Files touched: `firestore.rules`.
+- Change: Firestore rules now let users with `view_revenue` read the source collections used by the revenue page fallback path: `orders`, `repairs`, `import_receipts`, and `commissions`. Write/update/delete rules remain unchanged.
+- Verification: `next typegen && tsc --noEmit` passed; `firestore.rules` brace balance check passed; `git diff --check` only reported Windows CRLF warnings. Firebase CLI/rules emulator is not installed locally in this repo.
+- Remaining risk: this matches the current client-side fallback design, which reads source documents directly for pre-aggregate date ranges.
+
+### Part 13 - Technical notes are not appended again on status transitions
+- Covered IDs: UT-20260618-016, UT-20260618-025.
+- Files touched: `src/app/api/repairs/transition/route.ts`, `src/app/admin/technician/page.tsx`, `src/features/technician/TechnicianWorkflowModals.tsx`.
+- Change: technician status changes no longer send the existing ticket note as a new note; the note modal starts blank and shows the current note as read-only context. The transition API trims notes and skips appending a note when the same content already exists, including dated note lines.
+- Verification: focused ESLint passed for the touched files; `next typegen && tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
+- Remaining risk: old duplicated notes already stored in Firestore are not automatically cleaned; this prevents new duplicates.
+
+### Part 14 - Technician ticket journal is collapsed by default
+- Covered IDs: UT-20260618-023.
+- Files touched: `src/features/technician/TechnicianTicketDetailModal.tsx`.
+- Change: the technician ticket detail modal now hides the status timeline behind a "Xem/An" toggle and resets the journal to hidden when a different ticket is opened.
+- Verification: focused ESLint passed for the touched component; `next typegen && tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
+- Remaining risk: this changes only the technician detail modal; the admin repair detail timeline remains visible.
+
+### Part 15 - Technician detail always shows selected parts
+- Covered IDs: UT-20260618-024.
+- Files touched: `src/features/technician/TechnicianTicketDetailModal.tsx`.
+- Change: selected/requested/in-stock repair parts now render in a read-only "Linh kien da chon" section whenever the ticket has parts. Workflow-gated part controls remain separate under "Thao tac linh kien".
+- Verification: focused ESLint passed for the touched component; `next typegen && tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
+- Remaining risk: remove/add part actions remain governed by the existing workflow feature gates.
+
+### Part 16 - Services can hide customer-facing price
+- Covered IDs: UT-20260618-012, UT-20260618-026.
+- Files touched: `src/app/admin/services/page.tsx`, `src/app/(customer)/service/[id]/ServiceDetailClient.tsx`, `src/components/home/ServiceCard.tsx`, `src/components/home/PricingSection.tsx`, `src/app/(customer)/category/[...slug]/CategoryClient.tsx`, `src/app/(customer)/product/[id]/ProductDetailClient.tsx`.
+- Change: services now support `hidePrice`. Admin can toggle "An gia phia khach hang"; customer-facing service pages, category cards, homepage pricing, and legacy product-route fallback show "Lien he nhan bao gia" instead of numeric prices when the flag is enabled.
+- Verification: focused ESLint passed for the touched files; `next typegen && tsc --noEmit` passed; `git diff --check` only reported Windows CRLF warnings.
+- Remaining risk: existing services default to showing price until staff enables the flag.
+
+## Intake List
+### Batch 1 - User Reported 2026-06-18
+
+#### UT-20260618-001 - Revenue repair revenue is counted through POS orders
+- Reporter note: Trang `admin/revenue`: doanh thu phiếu sửa chữa được tính hoàn toàn vào doanh thu order POS.
+- Page/route: `/admin/revenue`
+- Expected result: Doanh thu sửa chữa và doanh thu order/POS phải được phân loại đúng để không tính sai.
+- Actual result: Doanh thu phiếu sửa chữa đang đi vào doanh thu order POS.
+- Cross-links: UT-20260618-008, UT-20260618-021
+- Initial bucket: revenue/accounting, data/business-state
+- Status: open
+
+#### UT-20260618-002 - Revenue daily view permission error
+- Reporter note: Trang `admin/revenue`: khi xem theo ngày đang lỗi `Missing or insufficient permissions`.
+- Page/route: `/admin/revenue`
+- Expected result: Nhân viên có quyền phù hợp xem được doanh thu theo ngày.
+- Actual result: Lỗi `Missing or insufficient permissions`.
+- Initial bucket: permission/RBAC
+- Status: open
+
+#### UT-20260618-003 - POS search hides out-of-stock distinction
+- Reporter note: `admin/pos`: hiện tại đang ẩn toàn bộ sản phẩm và linh kiện tồn kho = 0. Logic đúng nhưng chưa đủ; khi tìm kiếm sản phẩm cần hiển thị sản phẩm và báo hết hàng, không báo không tìm thấy.
+- Page/route: `/admin/pos`
+- Expected result: Tìm kiếm vẫn cho thấy sản phẩm/linh kiện tồn tại nhưng hết hàng.
+- Actual result: Nhân viên dễ nhầm giữa hết tồn kho và không có sản phẩm trong hệ thống.
+- Initial bucket: POS UX, inventory display
+- Status: open
+
+#### UT-20260618-004 - POS needs phone lookup and payable invoice list
+- Reporter note: `admin/pos`: cần tích hợp nhập SĐT và liệt kê các hóa đơn cần thanh toán của khách ngay trên POS.
+- Page/route: `/admin/pos`
+- Expected result: POS là trung tâm thanh toán, có thể tra khách bằng SĐT và thấy các hóa đơn cần thanh toán.
+- Actual result: Chưa có luồng này ngay trên POS.
+- Initial bucket: POS workflow, customer lookup
+- Status: fixed in Part 44
+
+#### UT-20260618-005 - POS repair payment card lacks full repair details and warranty print
+- Reporter note: `admin/pos`: đã có liên kết thanh toán phiếu sửa chữa trực tiếp trên POS nhưng thông tin phiếu sửa chữa chưa hiển thị đủ, ví dụ linh kiện đã sử dụng, phí sửa chữa, in phiếu bảo hành sau khi thanh toán.
+- Page/route: `/admin/pos`
+- Expected result: Khi thanh toán phiếu sửa chữa ở POS, thông tin sửa chữa đủ để thu tiền và in bảo hành.
+- Actual result: Thiếu thông tin phiếu sửa chữa.
+- Cross-links: UT-20260618-021
+- Initial bucket: POS repair payment UI, warranty print
+- Status: open
+
+#### UT-20260618-006 - POS needs system discount program integration
+- Reporter note: `admin/pos`: tích hợp áp dụng các chương trình giảm giá trên hệ thống.
+- Page/route: `/admin/pos`
+- Expected result: POS áp dụng được chương trình giảm giá đang cấu hình trên hệ thống.
+- Actual result: Chưa tích hợp đầy đủ theo nhu cầu.
+- Initial bucket: discount workflow, POS
+- Status: open
+
+#### UT-20260618-007 - Orders repair payment through POS causes wrong order revenue
+- Reporter note: `admin/orders`: POS làm trung tâm thanh toán nên khi thanh toán phiếu sửa chữa lại được tính vào order POS; nếu vậy doanh thu sẽ tính sai vì không có doanh thu phát sinh từ phiếu sửa chữa.
+- Page/route: `/admin/orders`
+- Expected result: Thanh toán sửa chữa qua POS không làm sai phân loại doanh thu/order.
+- Actual result: Phiếu sửa chữa được ghi nhận như order POS.
+- Cross-links: UT-20260618-001
+- Initial bucket: order/revenue classification, POS repair payment
+- Status: open
+
+#### UT-20260618-008 - Order detail status controls should be system-driven
+- Reporter note: `admin/orders`: popup Chi tiết đơn hàng phần thay đổi trạng thái cần ẩn đi và chỉ để hệ thống cập nhật trạng thái tự động.
+- Page/route: `/admin/orders`
+- Expected result: Trạng thái đơn hàng do hệ thống cập nhật theo workflow, không cho đổi thủ công trong popup chi tiết.
+- Actual result: Popup còn phần thay đổi trạng thái.
+- Initial bucket: orders UI, workflow control
+- Status: open
+
+#### UT-20260618-009 - Order detail product display and DEBT state unclear
+- Reporter note: `admin/orders`: chi tiết sản phẩm cần hiển thị rõ là sản phẩm nào; các trường hợp thanh toán là `ghi nợ/DEBT` nên có một trạng thái phù hợp hơn.
+- Page/route: `/admin/orders`
+- Expected result: Sản phẩm trong chi tiết đơn hàng rõ ràng; trạng thái ghi nợ dễ hiểu với nhân viên.
+- Actual result: Thông tin sản phẩm và trạng thái DEBT chưa phù hợp.
+- Initial bucket: orders UI, payment state wording
+- Status: open
+
+#### UT-20260618-010 - Customer mobile bottom nav needs quick appointment
+- Reporter note: Trang chủ khách hàng: ưu tiên tối ưu trải nghiệm mobile. Bottom nav khách hàng gồm `Trang chủ / Danh mục / Liên hệ / Đặt lịch / Tra cứu`; với admin đã đăng nhập gồm `Trang chủ / Danh mục / Liên hệ / Tra cứu / Quản lý`.
+- Page/route: customer storefront mobile
+- Expected result: Bottom nav có đúng mục theo loại người dùng, có nút đặt lịch nhanh cho khách.
+- Actual result: Chưa có bố cục bottom nav theo yêu cầu mới.
+- Initial bucket: customer mobile UX, navigation
+- Status: open
+
+#### UT-20260618-011 - Voucher mission icon overlaps bottom nav
+- Reporter note: Trang chủ khách hàng: icon làm nhiệm vụ nhận voucher cần cao hơn để không che khuất bottom.
+- Page/route: customer storefront mobile
+- Expected result: Icon nhiệm vụ không che bottom nav.
+- Actual result: Icon có nguy cơ che khuất bottom.
+- Initial bucket: customer mobile UX, layout
+- Status: open
+
+#### UT-20260618-012 - Customer service price should show contact quote when flagged
+- Reporter note: Trang chủ khách hàng: hiển thị `liên hệ nhận báo giá` với các dịch vụ được gắn cờ.
+- Page/route: customer storefront service display
+- Expected result: Dịch vụ có cờ ẩn giá hiển thị `liên hệ nhận báo giá`.
+- Actual result: Chưa có/cần kiểm tra hiển thị này.
+- Cross-links: UT-20260618-030
+- Initial bucket: services/customer display
+- Status: open
+
+#### UT-20260618-013 - Product detail mobile buttons need larger ergonomic layout
+- Reporter note: `product/[id]`: trên mobile các nút bấm có kích thước lớn hơn và đặt vị trí phù hợp, tối ưu giao diện hiển thị.
+- Page/route: `/product/[id]`
+- Expected result: Nút bấm trên mobile đủ lớn, đúng vị trí và dễ thao tác.
+- Actual result: Giao diện mobile chưa tối ưu.
+- Initial bucket: customer mobile UX, product detail
+- Status: open
+
+#### UT-20260618-014 - Appointment statuses should auto-update from confirmation call
+- Reporter note: `admin/appointments`: trạng thái cần thay đổi tự động. TT1 chờ xác nhận; nhân viên bấm SĐT gọi trực tiếp đến người đặt lịch thì hệ thống tự ghi nhận sang đã gọi xác nhận/đã xác nhận.
+- Page/route: `/admin/appointments`
+- Expected result: Click gọi SĐT ghi nhận trạng thái xác nhận phù hợp.
+- Actual result: Trạng thái chưa tự động theo hành động gọi.
+- Initial bucket: appointment workflow
+- Status: open
+
+#### UT-20260618-015 - Appointment next step needs direct/drop-off choices and repair creation handoff
+- Reporter note: `admin/appointments`: sau xác nhận, hệ thống hiện 2 lựa chọn: khách đến trực tiếp hoặc khách gửi máy đến cửa hàng; sau khi chọn trạng thái hiển thị phù hợp và nút đổi sang `lên đơn`, bấm vào chuyển đến trang sửa chữa và mở tạo phiếu sửa chữa, điền tên/SĐT.
+- Page/route: `/admin/appointments`
+- Expected result: Appointment có nhánh trực tiếp/gửi máy và handoff tạo phiếu sửa chữa prefill.
+- Actual result: Workflow chưa đủ theo mô tả.
+- Initial bucket: appointment workflow, repair handoff
+- Status: fixed in Part 45
+
+#### UT-20260618-016 - Repair technical notes are duplicated
+- Reporter note: `admin/repairs`: ghi chú kỹ thuật đang bị ghi lặp lại mặc dù KTV hay admin chỉ nhập đúng 1 lần.
+- Page/route: `/admin/repairs`
+- Expected result: Ghi chú kỹ thuật chỉ lưu/hiển thị một lần cho một lần nhập.
+- Actual result: Ghi chú bị lặp.
+- Cross-links: UT-20260618-025
+- Initial bucket: repair data/UI duplication
+- Status: open
+
+#### UT-20260618-017 - Repair completion via POS does not move repair to correct completed state
+- Reporter note: `admin/repairs`: hoàn tất đơn sửa chữa đang tích hợp thanh toán trực tiếp tại POS nhưng đơn sửa chữa không chuyển trạng thái đúng (hoàn tất đơn), lại ghi nhận một đơn POS với giá bill bằng bill sửa chữa.
+- Page/route: `/admin/repairs`, `/admin/pos`
+- Expected result: Thanh toán POS cho sửa chữa hoàn tất đúng phiếu sửa chữa theo workflow lưu trên Firebase.
+- Actual result: Phiếu sửa chữa không chuyển trạng thái đúng và phát sinh đơn POS như bill sửa chữa.
+- Cross-links: UT-20260618-005, UT-20260618-007
+- Initial bucket: repair workflow, POS payment integration, order/revenue classification
+- Status: open
+
+#### UT-20260618-018 - Repair issue entry should suggest service groups per issue, not force one group
+- Reporter note: `admin/repairs`: trong tạo phiếu sửa chữa, mục Chi tiết sửa chữa đang cho chọn nhóm dịch vụ nhưng không có ý nghĩa thực tế vì có thể chọn nhiều bệnh, mỗi bệnh thuộc nhóm khác nhau. Nên nhập tên bệnh và hệ thống tự gợi ý nhóm dịch vụ liên quan; mục đích nhóm dịch vụ là áp dụng khuyến mãi mua kèm sản phẩm theo dịch vụ.
+- Page/route: `/admin/repairs`
+- Expected result: Mỗi bệnh có thể gợi ý/thuộc nhóm dịch vụ riêng để phục vụ khuyến mãi liên quan.
+- Actual result: UI chọn nhóm dịch vụ hiện tại không khớp mô hình nhiều bệnh.
+- Initial bucket: repair intake UX, service/discount linkage
+- Status: open
+
+#### UT-20260618-019 - Repair screen-lock password needs pattern entry support
+- Reporter note: `admin/repairs`: mục mật khẩu màn hình cần hỗ trợ hình vẽ 9 điểm; nhân viên nối như bình thường nhưng mật khẩu hiện dạng `1->2->3->5->7->8->9`.
+- Page/route: `/admin/repairs`
+- Expected result: Có cách nhập pattern lock 9 điểm và lưu/hiển thị thứ tự nối.
+- Actual result: Chưa hỗ trợ đúng kiểu mật khẩu hình vẽ.
+- Initial bucket: repair intake UX
+- Status: open
+
+#### UT-20260618-020 - New repair default status must always be waiting intake
+- Reporter note: `admin/repairs`: trạng thái phiếu khi khởi tạo luôn mặc định là chờ tiếp nhận, không cho tùy chọn trạng thái như hiện tại.
+- Page/route: `/admin/repairs`
+- Expected result: Phiếu mới luôn bắt đầu ở trạng thái chờ tiếp nhận theo workflow Firebase.
+- Actual result: Hiện còn cho tùy chọn trạng thái khi tạo.
+- Initial bucket: repair workflow
+- Status: open
+
+#### UT-20260618-021 - Warranty calculation for repairs without parts
+- Reporter note: `admin/repairs`: tính bảo hành cho các trường hợp sửa không cần linh kiện.
+- Page/route: `/admin/repairs`
+- Expected result: Phiếu sửa chữa không dùng linh kiện vẫn có logic bảo hành phù hợp.
+- Actual result: Chưa có/cần kiểm tra tính bảo hành cho trường hợp này.
+- Initial bucket: repair warranty
+- Status: open
+
+#### UT-20260618-022 - Repair condition/history needs Other field
+- Reporter note: `admin/repairs`: trong phiếu sửa chữa, `Tình trạng & Lịch sử máy` có thêm mục khác để điền thêm lý do cho một số trường hợp.
+- Page/route: `/admin/repairs`
+- Expected result: Có mục `Khác` để nhập lý do/tình trạng bổ sung.
+- Actual result: Chưa có mục này.
+- Initial bucket: repair intake UX
+- Status: open
+
+#### UT-20260618-023 - Technician detail should collapse ticket log by default
+- Reporter note: `admin/technician`: chi tiết phiếu ẩn nhật ký phiếu; khi nào bấm xem mới hiện ra.
+- Page/route: `/admin/technician`
+- Expected result: Nhật ký phiếu bị ẩn mặc định, có thao tác xem khi cần.
+- Actual result: Nhật ký hiển thị ngay trong chi tiết phiếu.
+- Initial bucket: technician UI
+- Status: open
+
+#### UT-20260618-024 - Technician detail must show all selected parts, test or used
+- Reporter note: `admin/technician`: danh sách linh kiện đã chọn dù `test` hay `sử dụng` đều hiển thị trong chi tiết phiếu khi KTV mở xem; các trường hợp thêm/xóa linh kiện được quy định trong workflow sửa chữa.
+- Page/route: `/admin/technician`
+- Expected result: Chi tiết phiếu KTV hiển thị đủ linh kiện đã chọn theo workflow, không hardcode trạng thái.
+- Actual result: Cần kiểm tra/hoàn thiện hiển thị đủ linh kiện test và sử dụng.
+- Initial bucket: technician UI, repair workflow
+- Status: open
+
+#### UT-20260618-025 - Technician technical notes are duplicated
+- Reporter note: `admin/technician`: ghi chú kỹ thuật đang bị ghi lặp lại mặc dù KTV hay admin chỉ nhập đúng 1 lần.
+- Page/route: `/admin/technician`
+- Expected result: Ghi chú kỹ thuật chỉ lưu/hiển thị một lần cho một lần nhập.
+- Actual result: Ghi chú bị lặp.
+- Cross-links: UT-20260618-016
+- Initial bucket: repair data/UI duplication
+- Status: open
+
+#### UT-20260618-026 - Services need hide-price flag and customer quote text
+- Reporter note: `admin/services`: tạo dịch vụ mới, vì giá dịch vụ thường dao động nên cần tùy chọn ẩn giá và hiển thị phía khách hàng `liên hệ nhận báo giá`.
+- Page/route: `/admin/services`
+- Expected result: Dịch vụ có tùy chọn ẩn giá; phía khách hiển thị `liên hệ nhận báo giá`.
+- Actual result: Chưa có/cần hoàn thiện tùy chọn này.
+- Cross-links: UT-20260618-012
+- Initial bucket: services schema/admin UI/customer display
+- Status: open
+
+#### UT-20260618-027 - Services module is isolated from other features
+- Reporter note: `admin/services`: phần dịch vụ đang bị cô lập, chưa thể sử dụng nhiều thông tin cho các tính năng khác; cần đề xuất sau.
+- Page/route: `/admin/services`
+- Expected result: Sau khi tổng hợp lỗi, cần đánh giá cách dùng dữ liệu dịch vụ cho các tính năng khác.
+- Actual result: Dịch vụ chưa liên kết đủ với các workflow khác.
+- Initial bucket: services architecture
+- Status: open
+
+### Batch 2 - User Reported 2026-06-18
+
+#### UT-20260618-028 - Products, parts, and inventory responsibilities need restructuring
+- Reporter note: `admin/products`, `admin/inventory`, `admin/parts`: tái cấu trúc 3 file này để thực hiện đúng chức năng.
+- Page/route: `/admin/products`, `/admin/inventory`, `/admin/parts`, `/admin/inventory/stock`
+- Expected result: `products` là danh sách sản phẩm, thao tác thêm sản phẩm, thao tác tạo đề xuất nhập hàng. `parts` là danh sách linh kiện, thao tác thêm linh kiện, thao tác đề xuất nhập linh kiện. `inventory` là danh sách phiếu nhập hàng, danh sách phiếu đề xuất, danh sách phiếu đã đặt hàng, tổng hợp từ products và parts. Thao tác đề xuất ở `inventory` lấy logic từ tạo đề xuất nhập hàng product và đề xuất nhập linh kiện parts. `inventory/stock` giữ chức năng hiện tại.
+- Actual result: Chức năng hiện tại giữa 3 trang chưa đúng ranh giới mong muốn.
+- Initial bucket: inventory/products/parts workflow architecture
+- Status: open
+
+#### UT-20260618-029 - Variant grouping should be derived from category instead of separate configuration
+- Reporter note: Nhóm biến thể sẽ không cấu hình riêng; logic giữ nguyên nhưng tính theo danh mục. Danh mục được chọn giống nhau sẽ gom về cùng một nhóm biến thể và hiển thị tại trang khách hàng như hiện tại, đơn giản hóa quy trình.
+- Page/route: `/admin/products`, customer product display
+- Expected result: Các sản phẩm cùng danh mục được gom nhóm biến thể tự động, không cần cấu hình nhóm biến thể riêng.
+- Actual result: Quy trình nhóm biến thể hiện còn cần cấu hình riêng/chưa theo mong muốn đơn giản hóa.
+- Initial bucket: product variants, taxonomy workflow
+- Status: open
+
+#### UT-20260618-030 - Suppliers need richer detail similar to customers
+- Reporter note: `admin/suppliers`: thêm các thông tin chi tiết hơn tương tự như trang `admin/customers`.
+- Page/route: `/admin/suppliers`
+- Expected result: Nhà cung cấp có trang/thông tin chi tiết phong phú tương tự khách hàng.
+- Actual result: Thông tin nhà cung cấp hiện chưa đủ chi tiết theo nhu cầu.
+- Initial bucket: suppliers CRM-like detail
+- Status: open
+
+### Batch 3 - User Reported 2026-06-18
+
+#### UT-20260618-031 - Remove admin AI Creator page
+- Reporter note: Loại bỏ trang `admin/ai-creator`.
+- Page/route: `/admin/ai-creator`
+- Expected result: Trang AI Creator không còn trong admin.
+- Actual result: Trang này hiện vẫn tồn tại/cần loại bỏ.
+- Initial bucket: admin navigation/route cleanup
+- Status: open
+
+#### UT-20260618-032 - Settings payment and bank tab should use TOTP
+- Reporter note: `admin/settings` tab thanh toán và Ngân hàng thay đổi sang sử dụng TOTP.
+- Page/route: `/admin/settings`
+- Expected result: Tab thanh toán/ngân hàng dùng TOTP cho xác thực/cấu hình theo yêu cầu.
+- Actual result: Luồng hiện tại chưa đúng yêu cầu TOTP hoặc cần chuyển đổi.
+- Initial bucket: settings security, payment/bank config, TOTP
+- Status: open
+
+## Required Fields Per Error
+- Error ID:
+- Reporter note:
+- Page/route:
+- Role/account:
+- Steps to reproduce:
+- Expected result:
+- Actual result:
+- Screenshot/log:
+- Frequency:
+- Initial bucket:
+- Status: open
+
+### Part 17 - Appointment phone call confirms booking
+- Covered IDs: UT-20260618-014
+- Files touched: `src/app/admin/appointments/page.tsx`
+- Change: When staff clicks an appointment phone number, the existing `tel:` action is preserved and pending appointments are marked `confirmed` with `calledAt`, `confirmedAt`, and `updatedAt` timestamps.
+- Guardrail: Completed/cancelled/already-confirmed appointments are not changed by clicking the phone link.
+- Verification: `eslint src/app/admin/appointments/page.tsx`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
+
+### Part 18 - Appointment intake method before repair creation
+- Covered IDs: UT-20260618-014
+- Files touched: `src/app/admin/appointments/page.tsx`
+- Change: Confirmed appointments now require staff to choose whether the customer comes directly or sends the device to the store before the repair-ticket link appears. The choice is saved as `intakeMethod` on the appointment.
+- Guardrail: Appointment `status` remains one of the existing public states (`pending`, `confirmed`, `completed`, `cancelled`) so customer tracking is not forced to understand new status IDs.
+- Verification: `eslint src/app/admin/appointments/page.tsx`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
+
+### Part 19 - Repair screen pattern passcode input
+- Covered IDs: UT-20260618-019
+- Files touched: `src/features/repairs/RepairEditorModal.tsx`
+- Change: The repair editor keeps the existing passcode text field and adds a 9-point pattern keypad that writes the selected order into `devicePasscode` as `1->2->3` style text.
+- Guardrail: No repair schema change; saved/printed passcode behavior continues to use the existing `deviceInfo.passcode` field.
+- Verification: `eslint src/features/repairs/RepairEditorModal.tsx`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
+
+### Part 20 - Service warranty for repairs without parts
+- Covered IDs: UT-20260618-021
+- Files touched: `src/features/repairs/RepairTicketBoard.tsx`, `src/features/repairs/RepairWarrantyModal.tsx`, `src/app/admin/repairs/page.tsx`, `src/app/api/repairs/handover/route.ts`, `src/lib/types/repair.ts`
+- Change: Completed repair tickets without warranty-eligible parts can now open the warranty flow when the service/category has a warranty template. The warranty modal allows creating a service/repair warranty ticket without selected parts. Handover now stamps `serviceWarrantyExpiresAt` from the service taxonomy `warrantyMonths`, falling back to 3 months when no category value exists.
+- Guardrail: Part warranty behavior is unchanged; if active warranty parts exist, staff still must select at least one part before creating the warranty ticket.
+- Verification: `eslint src/features/repairs/RepairTicketBoard.tsx src/features/repairs/RepairWarrantyModal.tsx src/app/admin/repairs/page.tsx src/app/api/repairs/handover/route.ts`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
+
+### Part 21 - Repair issue service-category suggestions
+- Covered IDs: UT-20260618-018
+- Files touched: `src/features/repairs/RepairEditorModal.tsx`, `src/lib/types/repair.ts`
+- Change: Each repair issue row now suggests service taxonomy groups from the typed issue name. Selecting a suggestion stores `categoryPath` and `serviceName` on that issue while also updating the ticket-level service/category fallback.
+- Guardrail: The existing manual service category selector remains available; existing tickets without per-issue category metadata continue to work.
+- Verification: `eslint src/features/repairs/RepairEditorModal.tsx src/lib/types/repair.ts`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
+
+### Part 22 - Supplier richer profile fields
+- Covered IDs: UT-20260618-030
+- Files touched: `src/app/admin/suppliers/page.tsx`, `src/lib/types/inventory.ts`
+- Change: Suppliers can now store and display richer CRM-like profile fields: company/legal name, supplier type, website, payment terms, assigned owner, and tags. Search now includes company name, tax code, and tags.
+- Guardrail: Existing supplier debt/payment flow and transaction history remain unchanged; all new fields are optional for backward compatibility.
+- Verification: `eslint src/app/admin/suppliers/page.tsx src/lib/types/inventory.ts`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
+
+### Part 23 - Category-derived product variants
+- Covered IDs: UT-20260618-029
+- Files touched: `src/app/(customer)/_lib/server-queries.ts`, `src/app/(customer)/product/[id]/page.tsx`, `src/app/admin/products/page.tsx`
+- Change: Product detail variants are now derived from the product's deepest selected retail category instead of manually configured `seriesId`. The manual Series/variant grouping tab has been removed from `/admin/products` so staff only manages products and categories.
+- Guardrail: Existing `seriesId` data is left untouched for backward compatibility; the customer-facing variant list ignores it and does not require a new Firestore composite index.
+- Verification: `eslint src/app/admin/products/page.tsx`, `eslint src/app/(customer)/_lib/server-queries.ts src/app/(customer)/product/[id]/page.tsx`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
+
+### Part 24 - AI Creator removal recheck
+- Covered IDs: UT-20260618-031
+- Files touched: `roadmap/ui/data/ai_plans/plan_user_test_error_intake_20260618.md`
+- Change: Rechecked the AI Creator removal. The tracked source no longer contains `/admin/ai-creator`, `AI Creator`, `manage_ai_creator`, or `aiCreator`; the remaining empty local route folder was removed from the workspace.
+- Guardrail: No admin navigation, permission registry, or role preset changes were needed because the tracked code had already been cleaned up.
+- Verification: `rg "manage_ai_creator|aiCreator|ai-creator|AI Creator" src/lib src/app/admin src/components` returned no source matches, `git ls-files src/app/admin/ai-creator` returned no tracked files, and `git diff --check` passed.
+
+### Part 25 - Bank settings require TOTP state
+- Covered IDs: UT-20260618-032
+- Files touched: `src/components/admin/settings/BankIntegrationConfig.tsx`, `src/app/api/admin/bank-config/route.ts`, `src/app/api/admin/bank-config/totp/setup/route.ts`, `src/app/api/admin/bank-config/totp/verify/route.ts`
+- Change: The bank config API now returns `totpEnabled` to the settings UI, so existing Authenticator setup is recognized before editing. The setup/verify APIs reject attempts to overwrite an already-enabled TOTP secret, and the UI requires a verified TOTP token before saving bank/payment config.
+- Guardrail: TOTP secret is still never returned by the read API; existing bank account display and VietQR config fields remain unchanged.
+- Verification: `eslint src/components/admin/settings/BankIntegrationConfig.tsx src/app/api/admin/bank-config/route.ts src/app/api/admin/bank-config/totp/setup/route.ts src/app/api/admin/bank-config/totp/verify/route.ts` passed with existing `<img>` warnings only, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
+
+### Part 26 - Inventory lists split by receipt status
+- Covered IDs: UT-20260618-028
+- Files touched: `src/app/admin/inventory/page.tsx`
+- Change: `/admin/inventory` now separates the shared `import_receipts` collection into visible tabs for completed import receipts, draft proposal receipts, ordered receipts, and all receipts. This starts moving inventory toward the requested aggregate workspace while leaving `/admin/inventory/stock` unchanged.
+- Guardrail: No receipt mutation logic was moved in this step; products and parts proposal creation flows continue to work as before.
+- Verification: `eslint src/app/admin/inventory/page.tsx`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
+
+### Part 27 - Product import proposal action
+- Covered IDs: UT-20260618-028
+- Files touched: `src/app/admin/products/page.tsx`, `src/features/parts/ImportReceiptModals.tsx`
+- Change: `/admin/products` now has a direct retail import proposal action. It reuses the existing import receipt modal, starts locked in retail-product mode, and passes the current supplier list so staff can create product purchase proposals without going through the parts page.
+- Guardrail: The shared modal remains backward-compatible for `/admin/parts`; parts keeps its component/retail toggle, while products only opens the retail flow.
+- Verification: `eslint src/app/admin/products/page.tsx src/features/parts/ImportReceiptModals.tsx`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
+
+### Part 28 - Inventory tab deep links
+- Covered IDs: UT-20260618-028
+- Files touched: `src/app/admin/inventory/page.tsx`
+- Change: `/admin/inventory` now accepts `?tab=completed`, `?tab=draft`, `?tab=ordered`, or `?tab=all` so product/part proposal entry points can send staff directly to the aggregate receipt/proposal/order list.
+- Guardrail: The default remains completed import receipts; no receipt mutation behavior changed.
+- Verification: `eslint src/app/admin/inventory/page.tsx`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
+
+### Part 29 - Product proposal handoff to inventory
+- Covered IDs: UT-20260618-028
+- Files touched: `src/app/admin/products/page.tsx`
+- Change: After staff creates a retail product import proposal from `/admin/products`, the page now routes to `/admin/inventory?tab=draft` so proposal follow-up happens in the inventory aggregate workspace.
+- Guardrail: Product creation/editing remains on `/admin/products`; only the purchase proposal follow-up is handed off.
+- Verification: `eslint src/app/admin/products/page.tsx`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
+
+### Part 30 - Parts proposal handoff to inventory
+- Covered IDs: UT-20260618-028
+- Files touched: `src/app/admin/parts/page.tsx`
+- Change: After staff creates an import proposal from `/admin/parts`, the page now routes to `/admin/inventory?tab=draft` so proposal follow-up happens in the inventory aggregate workspace.
+- Guardrail: Parts catalog creation/editing remains on `/admin/parts`; existing proposal creation logic is reused unchanged.
+- Verification: `eslint src/app/admin/parts/page.tsx`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
+
+### Part 31 - Inventory proposal entry points
+- Covered IDs: UT-20260618-028
+- Files touched: `src/app/admin/inventory/page.tsx`, `src/app/admin/products/page.tsx`, `src/app/admin/parts/page.tsx`
+- Change: `/admin/inventory` now exposes separate proposal actions for retail products and parts. Those links open `/admin/products?createImportProposal=1` or `/admin/parts?createImportProposal=1`, and both catalog pages auto-open the existing import proposal modal.
+- Guardrail: Inventory still owns the aggregate receipt/proposal/order lists; product and part pages only provide the source-specific proposal creation flow.
+- Verification: `eslint src/app/admin/inventory/page.tsx src/app/admin/products/page.tsx src/app/admin/parts/page.tsx`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
+
+### Part 32 - Parts proposal flow is component-only
+- Covered IDs: UT-20260618-028
+- Files touched: `src/app/admin/parts/page.tsx`
+- Change: `/admin/parts` now opens the import proposal modal locked in component/part mode, matching the separated products-versus-parts ownership.
+- Guardrail: The shared modal is unchanged; `/admin/products` remains locked to retail mode, `/admin/parts` is locked to component mode.
+- Verification: `eslint src/app/admin/parts/page.tsx`, `next typegen`, `tsc --noEmit`, and `git diff --check` passed.
+
+### Part 33 - Services module integration proposal
+- Covered IDs: UT-20260618-027
+- Files touched: `roadmap/ui/data/ai_plans/plan_user_test_error_intake_20260618.md`
+- Proposal: treat `services` as the canonical service catalog for four flows instead of an isolated price list:
+  1. Storefront discovery: keep `services` as SEO/customer-facing content with `hidePrice`, media, warranty text, repair time, and taxonomy.
+  2. Repair intake: when staff types an issue, suggestions should resolve to service taxonomy/service records and store per-issue `serviceName/categoryPath` metadata for warranty and promotion logic.
+  3. POS promotion rules: discount rules should target service taxonomy/keywords from the service catalog and product/part taxonomy from catalog items, with normalized matching between names, slugs, and paths.
+  4. Warranty/printing: service taxonomy `warrantyType/warrantyMonths` should remain the source for service-only repair warranties and customer-facing warranty copy.
+- Next implementation slices:
+  1. Add optional `linkedProductCategoryIds` / `recommendedPartCategoryIds` to service records so a service can suggest accessories/parts without hardcoding product IDs.
+  2. Add a compact "Used by" panel in `/admin/services` showing whether a service category is referenced by repair issues, discount rules, homepage pricing, or warranty config.
+  3. Move discount-rule service selection to reuse the same service taxonomy picker and show service names/keywords from `services` as helper suggestions.
+  4. Add a safe migration/backfill report for old repair tickets that only have free-text issue descriptions and no `categoryPath`.
+- Guardrail: do not make `services` own inventory or repair workflow statuses. Services should supply catalog metadata and pricing/warranty hints; repair workflow remains Firebase-config driven, POS remains the payment workspace, and products/parts remain the stock catalogs.
+- Verification: source inspection confirmed `/admin/services` already owns service taxonomy, hide-price, media, orphan detection, and customer-facing service content; no code behavior changed in this proposal-only slice.
+
+### Part 34 - Service catalog linked category metadata
+- Covered IDs: UT-20260618-027
+- Files touched: `src/app/admin/services/page.tsx`, `src/lib/types/catalog.ts`
+- Change: `/admin/services` can now store optional service metadata for `linkedProductCategoryIds` and `recommendedPartCategoryIds`. Admins can select a retail/accessory category for POS bundle suggestions and a component category for repair-intake context. Service cards show compact badges when these links exist.
+- Guardrail: these fields are advisory metadata only. They do not move inventory, do not change repair workflow transitions, and do not automatically apply POS discounts yet.
+- Verification: focused ESLint passed for `src/app/admin/services/page.tsx` and `src/lib/types/catalog.ts`; `tsc --noEmit` passed.
+
+### Part 35 - Discount rule builder uses service catalog suggestions
+- Covered IDs: UT-20260618-027, UT-20260618-006
+- Files touched: `src/app/admin/vouchers/DiscountRulesTab.tsx`
+- Change: the accessory/service discount rule modal now reads service records with `linkedProductCategoryIds`. When admins choose a service taxonomy category, the modal shows matching service suggestions; clicking a suggestion fills the target product/accessory category and optional tags.
+- Guardrail: this only improves rule authoring. POS discount calculation remains governed by saved `accessory_discount_rules`; no automatic rule is created from a service.
+- Verification: focused ESLint passed for `src/app/admin/vouchers/DiscountRulesTab.tsx`; `tsc --noEmit` passed.
+
+## Batch 4 - Post-Code QA / Admin Performance Focus - 2026-06-20
+
+### Scope note
+- Reporter focus: reduce Firebase read/write volume, improve perceived speed, and make popups, dialogs, and confirmation surfaces appear smoothly.
+- Performance guardrail: prefer bounded queries, active/closed tab separation, lazy detail loading, and server/API writes only when the action actually changes business state.
+- Workflow guardrail: repair and technician visibility must use workflow config from Firebase, especially terminal nodes and the handoff-ready state, not hardcoded status strings.
+
+#### UT-20260620-001 - Admin repair tickets should not expose delete action
+- Reporter note: `admin/repairs`: loại bỏ phần "xoá phiếu" với các đơn sửa chữa khi sử dụng ID có role `admin`.
+- Page/route: `/admin/repairs`
+- Expected result: Admin không còn thấy hoặc dùng được thao tác xóa phiếu sửa chữa; phiếu sửa nên được đóng/hủy theo workflow hoặc trạng thái nghiệp vụ thay vì delete document.
+- Actual result: UI hiện vẫn có phần xóa phiếu cho admin.
+- Initial bucket: repair destructive action removal, write reduction, auditability
+- Status: open
+
+#### UT-20260620-002 - Completed repair handover needs warranty print
+- Reporter note: Hiện có in "biên nhận" khi nhận máy, khi trả máy chưa có in "phiếu bảo hành" cho đơn sửa chữa đã hoàn tất theo cấu hình đã có trong cài đặt in.
+- Page/route: `/admin/repairs`
+- Expected result: Khi phiếu sửa đã hoàn tất/bàn giao, admin có thể in phiếu bảo hành theo cấu hình in hiện có, gồm linh kiện/dịch vụ, thời hạn bảo hành, khách hàng, thiết bị, IMEI và điều khoản.
+- Actual result: Luồng nhận máy có biên nhận, nhưng luồng trả máy/hoàn tất chưa có phiếu bảo hành.
+- Initial bucket: repair printing, warranty handover
+- Status: open
+
+#### UT-20260620-003 - Terminal repair tickets should move to a separate tab to reduce reads
+- Reporter note: Đơn đã chuyển đến trạng thái được gắn cờ terminal theo workflow sửa chữa cần chuyển sang tab riêng trong cùng trang để khi bấm vào xem chỉ tải những đơn cần thao tác; phiếu đã đóng chuyển sang tab khác để giảm lượt read Firebase.
+- Page/route: `/admin/repairs`
+- Expected result: Tab chính chỉ query/load phiếu đang cần thao tác. Phiếu terminal/đã đóng nằm trong tab riêng, query theo nhu cầu và có pagination/limit.
+- Actual result: Danh sách hiện có nguy cơ tải cả phiếu đang thao tác lẫn phiếu đã đóng trong cùng luồng.
+- Initial bucket: Firebase read optimization, repair active/closed split, workflow terminal filtering
+- Status: open
+
+#### UT-20260620-004 - Repair issue detail needs multiple service mappings and expected price suggestions
+- Reporter note: Một máy có thể vừa thay màn vừa thay main; nhóm dịch vụ không thể chỉ chọn một dịch vụ. Nếu nhập bệnh bên dưới và mỗi bệnh gợi ý nhóm dịch vụ, nhiều bệnh sẽ chọn được nhiều nhóm dịch vụ. Tốt hơn nữa là dựa theo dịch vụ đang có để gợi ý giá dự kiến.
+- Page/route: `/admin/repairs`
+- Expected result: Mỗi issue/bệnh trong phiếu sửa có thể chọn service/category riêng, nhiều issue có nhiều nhóm dịch vụ khác nhau, và importer/editor gợi ý giá dự kiến từ service catalog khi phù hợp.
+- Actual result: Ticket-level service group still does not fully represent multi-issue repairs like screen + main.
+- Initial bucket: repair intake model, services integration, pricing suggestion
+- Status: fixed in Part 46
+
+#### UT-20260620-005 - Technician queue should hide tickets after handoff-ready workflow state
+- Reporter note: `admin/technician`: danh sách hiển thị cần ẩn bớt các phiếu khi đã đến trạng thái "chờ bàn giao khách" theo workflow sửa chữa Firebase vì từ trạng thái này KTV đã không còn thao tác tiếp nữa.
+- Page/route: `/admin/technician`
+- Expected result: Technician active queue excludes tickets at the workflow node equivalent to "chờ bàn giao khách"; those tickets remain available to admin/front desk handover views.
+- Actual result: KTV vẫn thấy các phiếu không còn thao tác kỹ thuật, gây tốn đọc và nhiễu danh sách.
+- Initial bucket: technician read optimization, workflow-aware queue filter
+- Status: open
+
+#### UT-20260620-006 - Services "Liên kết nghiệp vụ" needs clearer explanation and usable UX
+- Reporter note: `admin/services`: "Liên kết nghiệp vụ" cách thức hoạt động như thế nào chưa hiểu và không biết áp dụng thế nào.
+- Page/route: `/admin/services`
+- Expected result: UI giải thích ngắn gọn và thể hiện rõ liên kết nghiệp vụ dùng cho đâu: gợi ý phụ kiện/sản phẩm ở POS, gợi ý linh kiện/nhóm dịch vụ khi tạo phiếu sửa, rule giảm giá, bảo hành/in ấn.
+- Actual result: Chức năng có metadata nhưng ý nghĩa vận hành chưa rõ với admin.
+- Initial bucket: services UX, business linkage explanation
+- Status: open
+
+#### UT-20260620-007 - Product create/edit forms should remove manual variant config
+- Reporter note: `admin/products`: "Gom nhóm Biến thể" đang tự động gom theo danh mục rồi thì xóa phần cấu hình biến thể ở cuối các phiếu tạo và sửa sản phẩm.
+- Page/route: `/admin/products`
+- Expected result: Product create/edit modal no longer shows manual variant grouping fields; category remains the grouping source.
+- Actual result: Manual variant configuration still appears inside product create/edit flow.
+- Initial bucket: product variant UX cleanup, category-derived variants
+- Status: open
+
+#### UT-20260620-008 - Parts proposal and ordered logic should move fully to inventory
+- Reporter note: `admin/parts`: trang đang có các logic trong tab "đề xuất nhập hàng" và "đã đặt hàng"; cần chuyển toàn bộ logic này đến `admin/inventory`, giữ trang parts chỉ để xem danh sách linh kiện. Đây là di chuyển logic, không phải xóa logic.
+- Page/route: `/admin/parts`, `/admin/inventory`
+- Expected result: `/admin/parts` chỉ còn danh sách/catalog linh kiện và thao tác liên quan catalog. Proposal/ordered receipt lists and actions live in `/admin/inventory`.
+- Actual result: Parts still carries proposal/ordered tabs or logic that should now belong to inventory.
+- Initial bucket: parts/inventory boundary refactor, read reduction by page ownership
+- Status: fixed in Part 42 and Part 43
+
+#### UT-20260620-009 - Suppliers page should match customers page richness and interaction model
+- Reporter note: `admin/suppliers`: làm giao diện trang NCC giống với `admin/customers`, các chức năng và lượng thông tin hiển thị tương tự.
+- Page/route: `/admin/suppliers`, reference `/admin/customers`
+- Expected result: Suppliers page has customer-like profile density and interactions: richer list columns, detail drawer/modal, transactions/history, tags, notes, contact/payment info, search/filter, and lazy-loaded heavy details.
+- Actual result: Supplier page is still thinner than customer CRM despite added fields.
+- Initial bucket: suppliers CRM parity, UI consistency, lazy detail loading
+- Status: fixed in Part 47
+
+### Batch 4 Preliminary Grouping
+- P0 read reduction: split `/admin/repairs` into active vs terminal tabs and filter `/admin/technician` queue by workflow state.
+- P1 workflow UX: remove repair delete, add completed repair warranty print, keep terminal/handoff behavior workflow-config driven.
+- P1 data model: extend repair issue service mapping to support multi-service repairs and service-catalog price suggestions.
+- P2 module boundary cleanup: move parts proposal/ordered logic fully to inventory and remove product manual variant fields.
+- P2 admin clarity: explain services business links and bring suppliers UI closer to customer CRM with lazy-loaded detail surfaces.
+
+### Part 36 - Remove repair ticket delete action
+- Covered IDs: UT-20260620-001
+- Files touched: `src/app/admin/repairs/page.tsx`, `src/features/repairs/RepairEditorModal.tsx`
+- Change: `/admin/repairs` no longer imports or calls `deleteDoc` for repair tickets, and the repair editor modal no longer renders the destructive "Xóa phiếu" action for admin users.
+- Guardrail: This removes only whole-ticket deletion. Existing form-level remove actions for issue rows, media, or pattern input remain untouched.
+- Verification: focused ESLint passed for `src/app/admin/repairs/page.tsx` and `src/features/repairs/RepairEditorModal.tsx`; `tsc --noEmit` passed; `git diff --check` passed with Windows CRLF warnings only.
+
+### Part 37 - Clarify service business links
+- Covered IDs: UT-20260620-006
+- Files touched: `src/app/admin/services/page.tsx`
+- Change: The service form now explains how "Liên kết nghiệp vụ" is used by POS discount suggestions, repair intake part suggestions, service warranty/printing, and expected-price hints.
+- Guardrail: No Firestore query or schema change. The linked category fields remain advisory metadata and still do not change stock, workflow, or discount rules automatically.
+- Verification: focused ESLint passed for `src/app/admin/services/page.tsx`; `tsc --noEmit` passed; `git diff --check` passed with Windows CRLF warnings only.
+
+### Part 38 - Remove manual product variant field
+- Covered IDs: UT-20260620-007
+- Files touched: `src/components/admin/UniversalProductModal.tsx`
+- Change: The retail product create/edit modal no longer shows or submits the manual "Gom nhóm Biến thể" / `seriesId` field.
+- Guardrail: Existing `seriesId` values on old products are not deleted during edit because the update payload no longer includes the field. Customer-facing variants continue to derive from category.
+- Verification: focused ESLint passed for `src/components/admin/UniversalProductModal.tsx`; `tsc --noEmit` passed; `git diff --check` passed with Windows CRLF warnings only.
+
+### Part 39 - Hide handoff-ready tickets from technician queue
+- Covered IDs: UT-20260620-005
+- Files touched: `src/app/admin/technician/page.tsx`
+- Change: The technician active list and kanban columns now exclude workflow statuses carrying `requirePaymentGate`, which represents the handoff/payment-gate stage where KTV no longer acts. Existing `CUSTOMER_HANDOVER` detection remains as a compatibility fallback.
+- Guardrail: This commit does not change Firestore queries or workflow transitions, so it does not introduce new composite-index requirements. Deeper read reduction belongs with the `/admin/repairs` active/closed query split.
+- Verification: focused ESLint passed for `src/app/admin/technician/page.tsx`; `tsc --noEmit` passed; `git diff --check` passed with Windows CRLF warnings only.
+
+### Part 40 - Add completed repair warranty print action
+- Covered IDs: UT-20260620-002
+- Files touched: `src/features/repairs/RepairTicketBoard.tsx`
+- Change: Closed repair tickets with a valid warranty print template now show an explicit warranty print action on both mobile cards and desktop rows, reusing the existing `openPrint(ticket, 'warranty', warrantyType)` path and receipt settings.
+- Guardrail: No Firestore reads/writes were added. The change only exposes the existing print template action from already-loaded ticket, workflow, category, and receipt-config data.
+- Verification: focused ESLint passed for `src/features/repairs/RepairTicketBoard.tsx`; `tsc --noEmit` passed; `git diff --check` passed with Windows CRLF warnings only.
+
+### Part 41 - Split repair active and closed queues
+- Covered IDs: UT-20260620-003
+- Files touched: `src/app/admin/repairs/page.tsx`, `src/features/repairs/RepairFilters.tsx`
+- Change: `/admin/repairs` now has separate active/closed tabs. The default active tab listens only to non-terminal workflow statuses when the workflow config is available, while the closed tab loads terminal workflow statuses on demand.
+- Guardrail: Status membership is derived from Firebase repair/warranty workflows, not hardcoded legacy names. If a workflow has too many statuses for Firestore `in`, the query falls back to the existing broad query and still filters client-side.
+- Verification: focused ESLint passed for `src/app/admin/repairs/page.tsx` and `src/features/repairs/RepairFilters.tsx`; `tsc --noEmit` passed; `git diff --check` passed with Windows CRLF warnings only.
+
+### Part 42 - Route parts receipt queues to inventory
+- Covered IDs: UT-20260620-008
+- Files touched: `src/app/admin/parts/page.tsx`
+- Change: The `/admin/parts` tab buttons for import proposals and ordered receipts now route to `/admin/inventory?tab=draft` and `/admin/inventory?tab=ordered`, keeping the parts page focused on the part catalog and part proposal creation entrypoint.
+- Guardrail: This is the first migration step. The old proposal/ordered handling code is not deleted yet, so no existing workflow action is lost while the full receipt action surface is moved into inventory in the next step.
+- Verification: focused ESLint passed for `src/app/admin/parts/page.tsx`; `tsc --noEmit` passed; `git diff --check` passed with Windows CRLF warnings only.
+
+### Part 43 - Move part receipt workflow to inventory
+- Covered IDs: UT-20260620-008
+- Files touched: `src/app/admin/inventory/page.tsx`, `src/app/admin/parts/page.tsx`
+- Change: `/admin/inventory` now owns creating retail/component import proposals, editing draft receipt quantity/price/supplier, marking availability, confirming supplier orders, importing ordered receipts through the existing preview/API path, and printing lot labels. `/admin/parts` is reduced to the part catalog surface: list/search/filter, add/edit part, QR labels, archive, lot lookup, and hidden-taxonomy recovery.
+- Guardrail: The proposal/order/import logic is moved, not removed. Inventory reuses the existing `CreateReceiptModal`, `ImportPreviewModal`, `/api/inventory/import` actions, receipt availability helpers, and lot-label printing path.
+- Verification: focused ESLint passed for `src/app/admin/inventory/page.tsx` and `src/app/admin/parts/page.tsx`; `tsc --noEmit` passed; `git diff --check` passed with Windows CRLF warnings only.
+
+### Part 44 - POS phone lookup shows payable orders
+- Covered IDs: UT-20260618-004
+- Files touched: `src/app/admin/pos/page.tsx`, `src/features/pos/PosCartPanel.tsx`, `src/features/pos/posTypes.ts`
+- Change: POS phone lookup now loads customer debt, unpaid/partial repair tickets, and payable customer orders from the same phone number. The cart panel shows a separate "Hóa đơn cần thanh toán" list with remaining amount, status, payment state, item summary, and a direct link to the order page.
+- Guardrail: Existing order debts are not inserted into the POS cart as fake stock items. This avoids stock validation side effects in `/api/pos/checkout`; staff can inspect/pay the right order workflow from the POS context.
+- Verification: focused ESLint passed for POS files; `pnpm typecheck` passed; `git diff --check` passed with Windows CRLF warnings only.
+
+### Part 45 - Appointment intake handoff prefill
+- Covered IDs: UT-20260618-015
+- Files touched: `src/app/admin/appointments/page.tsx`, `src/app/admin/repairs/page.tsx`, `src/features/repairs/RepairEditorModal.tsx`, `src/features/repairs/repairPageUtils.ts`
+- Change: The appointment "Tạo phiếu" handoff now carries intake method, customer name/phone, and service hints to `/admin/repairs`. The repair page opens the create modal even when service data is not loaded yet, prefills customer/service fields from appointment or URL fallback, and stores `appointmentIntakeMethod` on the repair ticket.
+- Guardrail: Appointment public `status` values remain unchanged. The direct/drop-off choice is still metadata (`intakeMethod`) so customer-facing appointment tracking is not forced to understand new workflow statuses.
+- Verification: focused ESLint passed for appointment/repair files; `pnpm typecheck` passed; `git diff --check` passed with Windows CRLF warnings only.
+
+### Part 46 - Repair issue service catalog price suggestions
+- Covered IDs: UT-20260620-004
+- Files touched: `src/app/admin/repairs/page.tsx`, `src/features/repairs/RepairEditorModal.tsx`
+- Change: Repair issue rows now use both service taxonomy and the live service catalog for suggestions. Each issue can select its own service/category mapping, service catalog suggestions show the expected price, and selecting a priced service fills the issue's estimated price when the line has no price yet.
+- Guardrail: Ticket-level `categoryPath`/`serviceName` remains as compatibility metadata, but the operational mapping is stored per `issues[]` row so one device can carry multiple service groups such as screen and mainboard work.
+- Verification: focused ESLint passed for repair files; `pnpm typecheck` passed; `git diff --check` passed with Windows CRLF warnings only.
+
+### Part 47 - Supplier CRM parity surface
+- Covered IDs: UT-20260620-009
+- Files touched: `src/app/admin/suppliers/page.tsx`
+- Change: Supplier management now has CRM-style summary stats, supplier type/tag/debt filters, clickable supplier profile cards, and a lazy-loaded detail drawer showing contact, bank, tax, assigned owner, notes, tags, debt, and transaction history.
+- Guardrail: The page still loads only the supplier list initially. Transaction history remains lazy-loaded when a supplier is expanded or opened in the drawer, preserving the Firebase read reduction goal.
+- Verification: focused ESLint passed for `src/app/admin/suppliers/page.tsx`; `pnpm typecheck` passed; `git diff --check` passed with Windows CRLF warnings only.

@@ -1,5 +1,6 @@
 import { getFirestore, FieldValue, Transaction } from 'firebase-admin/firestore';
 import type { Commission, CommissionRule, Order, RepairTicket, Product } from '@/lib/types';
+import { incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 
 function getSafePercentage(rule: CommissionRule): number | null {
     const pct = typeof rule.percentage === 'number' ? rule.percentage : Number(rule.percentage);
@@ -179,6 +180,7 @@ export async function calculateAndSaveCommissionsServer(
             const baseId = `${comm.sourceType}_${comm.sourceId}_${comm.ruleId}_${comm.staffId}`;
             const ref = db.collection('commissions').doc(baseId);
             tx.set(ref, comm);
+            incrementRevenueAggregates(tx, db, { commissionCost: safeNumber(comm.amount) });
         }
 
     } catch (error) {
@@ -218,6 +220,7 @@ export async function reverseCommissionServer(
                 reversedAt: FieldValue.serverTimestamp(),
                 reversedBy: callerUid,
             });
+            incrementRevenueAggregates(tx, db, { commissionCost: -safeNumber(data.amount) });
         }
     }
 }

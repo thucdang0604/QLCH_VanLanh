@@ -8,6 +8,8 @@ import { PART_CATEGORY_LABEL } from '@/lib/constants';
 import { REPAIR_PART_STATUS, isRepairPartStatus, isSelectedRepairPart } from '@/lib/repairStatus';
 import { buildReactivateOnImportUpdate } from '@/lib/productLifecycle';
 import { applyProductImport, planRepairImportAllocation } from '@/lib/inventoryImportAllocation';
+import { incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
+import { reserveSequentialDocumentIds } from '@/lib/serverDocumentIds';
 
 type RepairLine = NonNullable<RepairTicket['parts']>[number];
 type ReceiptItem = ImportReceiptItem & {
@@ -153,6 +155,8 @@ export async function POST(request: NextRequest) {
                     pendingTicketUpdates.set(ticketId, updateData);
                 }
             };
+            
+            let generatedLotsToReturn: { product: { id: string } & Record<string, unknown>, lotCode: string, copies: number }[] | null = null;
 
             if (action === 'order_receipt') {
                 if (receipt.status !== 'draft') {
@@ -256,10 +260,57 @@ export async function POST(request: NextRequest) {
                 }
 
                 const totalAmount = importedItems.reduce((sum, i) => sum + ((i.importPrice || 0) * i.quantity), 0);
+                const newProductPartKeys = importedItems
+                    .map((item) => item.productId ? '' : (item.productId || item.partLineId || ''))
+                    .filter((partKey) => partKey && newParts?.[partKey]);
+                const uniqueNewProductPartKeys = [...new Set(newProductPartKeys)];
+                const newProductAllocations = await reserveSequentialDocumentIds(tx, db, {
+                    collectionName: 'products',
+                    prefix: receipt.receiptType === 'retail' ? 'SP' : 'LK',
+                    count: uniqueNewProductPartKeys.length,
+                });
+                const newProductIdsByPartKey = new Map<string, string>();
+                uniqueNewProductPartKeys.forEach((partKey, index) => {
+                    newProductIdsByPartKey.set(partKey, newProductAllocations[index].id);
+                });
+                const lotAllocations = await reserveSequentialDocumentIds(tx, db, {
+                    collectionName: 'inventory_lots',
+                    prefix: 'LOT',
+                    count: importedItems.length,
+                });
+                const inventoryLogAllocations = await reserveSequentialDocumentIds(tx, db, {
+                    collectionName: 'inventory_logs',
+                    prefix: 'IL',
+                    count: importedItems.length,
+                });
+                const debtBySupplier = new Map<string, number>();
+                if (paymentMethod === 'debt') {
+                    for (const item of importedItems) {
+                        const sId = item.supplierId || receipt.supplierId;
+                        if (!sId) {
+                            throw new Error(`KhĂ´ng thá»ƒ ghi cĂ´ng ná»£: Sáº£n pháº©m "${item.productName}" chÆ°a Ä‘Æ°á»£c gĂ¡n NhĂ  cung cáº¥p há»£p lá»‡ tá»« há»‡ thá»‘ng.`);
+                        }
+                        const itemTotal = (item.importPrice || 0) * item.quantity;
+                        debtBySupplier.set(sId, (debtBySupplier.get(sId) || 0) + itemTotal);
+                    }
+                }
+                const supplierTransactionAllocations = await reserveSequentialDocumentIds(tx, db, {
+                    collectionName: 'supplier_transactions',
+                    prefix: 'ST',
+                    count: debtBySupplier.size,
+                });
+                const expenseAllocations = await reserveSequentialDocumentIds(tx, db, {
+                    collectionName: 'expenses',
+                    prefix: 'CP',
+                    count: paymentMethod === 'debt' ? 0 : 1,
+                });
 
                 const lotCode = 'PN-' + new Date().toISOString().slice(2, 7).replace('-', '') + '-' + Math.floor(1000 + Math.random() * 9000);
 
                 const workingProducts = new Map<string, WorkingProduct>();
+                const generatedLots = [];
+                let lotAllocationIndex = 0;
+                let inventoryLogAllocationIndex = 0;
 
                 // Calculate all product mutations first. Each product is written once after aggregation.
                 for (const item of importedItems) {
@@ -272,7 +323,11 @@ export async function POST(request: NextRequest) {
                     let isNewProduct = false;
 
                     if (!targetProductId && newParts && newParts[partKey]) {
-                        targetProductId = db.collection('products').doc().id;
+                        const allocatedProductId = newProductIdsByPartKey.get(partKey);
+                        if (!allocatedProductId) {
+                            throw new Error(`Khong the tao ma san pham moi cho "${item.productName}".`);
+                        }
+                        targetProductId = allocatedProductId;
                         item.productId = targetProductId; // modify in-memory reference
                         isNewProduct = true;
                     }
@@ -388,14 +443,38 @@ export async function POST(request: NextRequest) {
                         workingProduct.updateData.createdAt = FieldValue.serverTimestamp();
                     }
 
-                    // Write Inventory Log
-                    const logRef = db.collection('inventory_logs').doc();
+                    // Create Inventory Lot
+                    const lotAllocation = lotAllocations[lotAllocationIndex++];
+                    const lotRef = lotAllocation.ref;
+                    tx.set(lotRef, {
+                        lotCode: lotCode,
+                        productId: targetProductId,
+                        supplierId: item.supplierId || receipt.supplierId || null,
+                        importPrice: item.importPrice,
+                        initialQuantity: importedQuantity,
+                        remainingQuantity: importedQuantity,
+                        status: 'active',
+                        createdAt: FieldValue.serverTimestamp(),
+                        updatedAt: FieldValue.serverTimestamp()
+                    });
+                    
+                    generatedLots.push({
+                        product: {
+                            ...pData,
+                            ...workingProduct.updateData,
+                            id: targetProductId
+                        },
+                        lotCode: lotCode,
+                        copies: importedQuantity
+                    });
+
+                    // Write Inventory Log (Audit Trail)
+                    const inventoryLogAllocation = inventoryLogAllocations[inventoryLogAllocationIndex++];
+                    const logRef = inventoryLogAllocation.ref;
                     tx.set(logRef, {
                         productId: targetProductId,
                         productName: item.productName || pData.name || 'Sản phẩm mới',
                         quantity: importedQuantity,
-                        remainingQuantity: importedQuantity,
-                        isDepleted: false,
                         supplierId: item.supplierId || receipt.supplierId || item.supplier || null,
                         lotCode: lotCode,
                         heldQuantity: allocation.heldQuantity,
@@ -457,22 +536,13 @@ export async function POST(request: NextRequest) {
                     version: (receipt.version || 0) + 1,
                     updatedAt: FieldValue.serverTimestamp()
                 });
+                incrementRevenueAggregates(tx, db, { importCost: totalAmount });
 
                 // Add Supplier Transaction if debt
                 if (paymentMethod === 'debt') {
-                    // Group debt by item.supplierId
-                    const debtBySupplier = new Map<string, number>();
-                    for (const item of importedItems) {
-                        const sId = item.supplierId || receipt.supplierId;
-                        if (!sId) {
-                            throw new Error(`Không thể ghi công nợ: Sản phẩm "${item.productName}" chưa được gán Nhà cung cấp hợp lệ từ hệ thống.`);
-                        }
-                        const itemTotal = (item.importPrice || 0) * item.quantity;
-                        debtBySupplier.set(sId, (debtBySupplier.get(sId) || 0) + itemTotal);
-                    }
-
+                    let supplierTransactionAllocationIndex = 0;
                     for (const [sId, amount] of debtBySupplier.entries()) {
-                        const suppTxRef = db.collection('supplier_transactions').doc();
+                        const suppTxRef = supplierTransactionAllocations[supplierTransactionAllocationIndex++].ref;
                         tx.set(suppTxRef, {
                             supplierId: sId,
                             type: 'import_debt',
@@ -490,7 +560,7 @@ export async function POST(request: NextRequest) {
                     }
                 } else {
                     // Pay immediately
-                    const expenseRef = db.collection('expenses').doc();
+                    const expenseRef = expenseAllocations[0].ref;
                     tx.set(expenseRef, {
                         type: 'inventory',
                         amount: totalAmount,
@@ -502,6 +572,14 @@ export async function POST(request: NextRequest) {
                         createdBy: caller.uid
                     });
                 }
+
+                newProductAllocations.at(-1)?.commitCounter();
+                lotAllocations.at(-1)?.commitCounter();
+                inventoryLogAllocations.at(-1)?.commitCounter();
+                supplierTransactionAllocations.at(-1)?.commitCounter();
+                expenseAllocations.at(-1)?.commitCounter();
+
+                generatedLotsToReturn = generatedLots;
             } else {
                 throw new Error('Action không hợp lệ.');
             }
@@ -520,7 +598,7 @@ export async function POST(request: NextRequest) {
                 });
             }
 
-            return { success: true };
+            return generatedLotsToReturn ? { success: true, generatedLots: generatedLotsToReturn } : { success: true };
         });
 
         return NextResponse.json(result);

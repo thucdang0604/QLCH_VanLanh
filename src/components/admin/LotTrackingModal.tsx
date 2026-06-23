@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import Modal from './Modal';
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Search, Loader2, Package, Building2, Calendar, FileText, ArrowDownRight, Tag } from 'lucide-react';
 import type { FirestoreDateValue } from '@/lib/types';
@@ -8,6 +8,7 @@ import type { FirestoreDateValue } from '@/lib/types';
 interface LotTrackingModalProps {
     isOpen: boolean;
     onClose: () => void;
+    initialSearchCode?: string;
 }
 
 interface LotInfo {
@@ -16,6 +17,7 @@ interface LotInfo {
     productName: string;
     lotCode: string;
     supplierId?: string;
+    supplierName?: string;
     quantity: number;
     remainingQuantity: number;
     costPriceAtLog: number;
@@ -52,16 +54,16 @@ const dateValueToMillis = (value?: FirestoreDateValue): number => {
     return 0;
 };
 
-export default function LotTrackingModal({ isOpen, onClose }: LotTrackingModalProps) {
+export default function LotTrackingModal({ isOpen, onClose, initialSearchCode }: LotTrackingModalProps) {
     const [searchCode, setSearchCode] = useState('');
     const [loading, setLoading] = useState(false);
     const [lotInfo, setLotInfo] = useState<LotInfo | null>(null);
     const [usageLogs, setUsageLogs] = useState<LotUsageLog[]>([]);
     const [error, setError] = useState('');
 
-    const handleSearch = async (e?: React.FormEvent) => {
+    const handleSearch = async (e?: React.FormEvent, forceCode?: string) => {
         if (e) e.preventDefault();
-        const code = searchCode.trim().toUpperCase();
+        const code = (forceCode || searchCode).trim().toUpperCase();
         if (!code) return;
 
         setLoading(true);
@@ -70,22 +72,49 @@ export default function LotTrackingModal({ isOpen, onClose }: LotTrackingModalPr
         setUsageLogs([]);
 
         try {
-            // 1. Find the IMPORT log for this lotCode
-            const importQ = query(
-                collection(db, 'inventory_logs'),
-                where('type', '==', 'IMPORT'),
+            // 1. Find the lot for this lotCode
+            const lotQ = query(
+                collection(db, 'inventory_lots'),
                 where('lotCode', '==', code)
             );
-            const importSnap = await getDocs(importQ);
+            const lotSnap = await getDocs(lotQ);
 
-            if (importSnap.empty) {
+            if (lotSnap.empty) {
                 setError(`Không tìm thấy lô hàng nào với mã: ${code}`);
                 setLoading(false);
                 return;
             }
 
-            const importDoc = importSnap.docs[0];
-            const lotData = { id: importDoc.id, ...importDoc.data() } as LotInfo;
+            const lotDoc = lotSnap.docs[0];
+            const lotRaw = lotDoc.data();
+
+            let fetchedSupplierName = 'Không xác định';
+            if (lotRaw.supplierId) {
+                try {
+                    const supDoc = await getDoc(doc(db, 'suppliers', lotRaw.supplierId));
+                    if (supDoc.exists()) {
+                        fetchedSupplierName = supDoc.data().name || lotRaw.supplierId;
+                    } else {
+                        fetchedSupplierName = lotRaw.supplierId;
+                    }
+                } catch (e) {
+                    console.warn('Could not fetch supplier', e);
+                    fetchedSupplierName = lotRaw.supplierId;
+                }
+            }
+
+            const lotData: LotInfo = {
+                id: lotDoc.id,
+                productId: lotRaw.productId,
+                productName: lotRaw.productName,
+                lotCode: lotRaw.lotCode,
+                supplierId: lotRaw.supplierId,
+                supplierName: fetchedSupplierName,
+                quantity: lotRaw.initialQuantity || lotRaw.quantity,
+                remainingQuantity: lotRaw.remainingQuantity,
+                costPriceAtLog: lotRaw.importPrice || lotRaw.costPriceAtLog,
+                createdAt: lotRaw.createdAt
+            };
             setLotInfo(lotData);
 
             // 2. Fetch usage history for this product
@@ -95,7 +124,7 @@ export default function LotTrackingModal({ isOpen, onClose }: LotTrackingModalPr
                 where('type', 'in', ['POS_SALE', 'REPAIR_USE', 'EXPORT'])
             );
             const usageSnap = await getDocs(usageQ);
-            
+
             const logs: LotUsageLog[] = [];
             usageSnap.forEach(doc => {
                 const data = doc.data();
@@ -126,12 +155,25 @@ export default function LotTrackingModal({ isOpen, onClose }: LotTrackingModalPr
             setUsageLogs(logs);
 
         } catch (err: unknown) {
-            console.error('Error tracking lot:', err);
-            setError('Đã xảy ra lỗi khi truy vấn dữ liệu.');
+            console.error('Error searching lot:', err);
+            setError(err instanceof Error ? err.message : 'Đã có lỗi xảy ra khi tra cứu');
         } finally {
             setLoading(false);
         }
     };
+
+    React.useEffect(() => {
+        if (isOpen && initialSearchCode) {
+            setSearchCode(initialSearchCode);
+            handleSearch(undefined, initialSearchCode);
+        } else if (!isOpen) {
+            setSearchCode('');
+            setLotInfo(null);
+            setUsageLogs([]);
+            setError('');
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isOpen, initialSearchCode]);
 
     const formatDate = (ts?: FirestoreDateValue) => {
         if (!ts) return '—';
@@ -199,7 +241,7 @@ export default function LotTrackingModal({ isOpen, onClose }: LotTrackingModalPr
                             </div>
                             <div>
                                 <p className="text-gray-500 mb-1 flex items-center gap-1"><Building2 className="w-4 h-4" /> Nhà Cung Cấp</p>
-                                <p className="font-medium text-gray-900">{lotInfo.supplierId || 'Không xác định'}</p>
+                                <p className="font-medium text-gray-900">{lotInfo.supplierName}</p>
                             </div>
                             <div>
                                 <p className="text-gray-500 mb-1 flex items-center gap-1"><Calendar className="w-4 h-4" /> Ngày nhập</p>
@@ -227,7 +269,7 @@ export default function LotTrackingModal({ isOpen, onClose }: LotTrackingModalPr
                             <FileText className="w-5 h-5 text-gray-600" />
                             Lịch sử xuất / sử dụng lô này
                         </h3>
-                        
+
                         {usageLogs.length === 0 ? (
                             <p className="text-gray-500 text-sm italic py-8 text-center border rounded-md bg-gray-50">Lô hàng này chưa được xuất hoặc sử dụng.</p>
                         ) : (
@@ -248,11 +290,10 @@ export default function LotTrackingModal({ isOpen, onClose }: LotTrackingModalPr
                                                     {formatDate(log.createdAt)}
                                                 </td>
                                                 <td className="px-4 py-3">
-                                                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                                        log.type === 'POS_SALE' ? 'bg-purple-100 text-purple-700' :
-                                                        log.type === 'REPAIR_USE' ? 'bg-amber-100 text-amber-700' :
-                                                        'bg-gray-100 text-gray-700'
-                                                    }`}>
+                                                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${log.type === 'POS_SALE' ? 'bg-purple-100 text-purple-700' :
+                                                            log.type === 'REPAIR_USE' ? 'bg-amber-100 text-amber-700' :
+                                                                'bg-gray-100 text-gray-700'
+                                                        }`}>
                                                         {translateType(log.type)}
                                                     </span>
                                                 </td>

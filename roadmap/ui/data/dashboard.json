@@ -158,8 +158,8 @@
       "color": "var(--text-muted)",
       "desc": "Dọn dẹp kỹ thuật dư thừa phát hiện trong audit.",
       "tasks": [
-        "<b>Firestore Rules:</b> Xóa rule <code>services</code> trùng lặp (line 37 vs line 62)",
-        "<b>LazyImage:</b> Quyết định: xóa component orphan hoặc document lý do giữ",
+        "<b>Firestore Rules:</b> Đã xác minh chỉ còn một rule <code>services</code> trong <code>firestore.rules</code>; mục duplicate cũ đã stale.",
+        "<b>LazyImage:</b> Giữ component orphan có chủ đích để tái sử dụng skeleton/error fallback khi adopt storefront; không import đại trà để tránh churn UI.",
         "<b>SEO Meta:</b> Kiểm tra <code>&lt;title&gt;</code> và <code>meta description</code> trên production domain"
       ]
     }

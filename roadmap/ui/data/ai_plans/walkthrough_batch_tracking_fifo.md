@@ -1,25 +1,38 @@
-# Tổng kết Triển khai Quản lý Tồn kho theo Lô (Batch Tracking) & FIFO Sổ sách
+# Hoàn Tất Cập Nhật Batch Tracking (FIFO)
 
-Hệ thống đã được nâng cấp hoàn chỉnh để theo dõi chính xác nguồn gốc, nhà cung cấp, và lịch sử nhập-xuất của từng linh kiện mà không làm thay đổi hay tăng thao tác của Kỹ thuật viên.
+Tính năng **Theo Dõi Lô Hàng (Batch Tracking)** và **Trừ Kho FIFO** đã được triển khai hoàn tất theo đúng kiến trúc Database mới. Dưới đây là tóm tắt những thay đổi đã được thực hiện:
 
-## Những thay đổi đã thực hiện:
+## 1. Cập Nhật Kiểu Dữ Liệu (`src/lib/types.ts`)
+- Định nghĩa thêm interface `InventoryLot` đại diện cho các bản ghi trong collection `inventory_lots`.
+- Bổ sung trường `lotsDeducted` vào interface `InventoryLog` để làm dấu vết kiểm toán (audit trail) khi xuất kho.
 
-### 1. Thuật toán Trừ kho FIFO (Backend)
-- Đã tách biệt logic Read/Write thông qua helper `src/lib/inventoryFifo.ts`.
-- **Cơ chế hoạt động:** 
-  - Hệ thống tự động quét các nhật ký `IMPORT` cũ nhất của sản phẩm (có `remainingQuantity > 0`).
-  - Thực hiện khấu trừ số lượng vào các lô này theo nguyên tắc FIFO (Nhập trước Xuất trước).
-  - Tự động đính kèm thông tin lô đã trừ (`lotsDeducted: [{ lotCode, qty }]`) vào log xuất kho (Bán POS hoặc Sửa chữa).
-- **Tích hợp:** Logic này đã được tích hợp phẫu thuật (surgical) vào 2 API xuất kho trọng yếu:
-  - `src/app/api/pos/checkout/route.ts`
-  - `src/app/api/repairs/handover/route.ts`
+## 2. Luồng Nhập Kho: Khởi tạo Lô Hàng (`src/app/api/inventory/import/route.ts`)
+- Mỗi khi chốt phiếu nhập kho, hệ thống tự động sinh một `lotCode` dạng `PN-YYMM-XXXX`.
+- Tạo các bản ghi `inventory_lots` (mang ý nghĩa lưu trạng thái hiện tại của từng lô hàng, bao gồm `initialQuantity`, `remainingQuantity`, và `status: 'active'`).
+- Việc ghi nhận lịch sử vào `inventory_logs` (type `IMPORT`) vẫn giữ nguyên như cũ, chỉ đính kèm thêm `lotCode` để dễ đối chiếu.
 
-### 2. Giao diện Tra cứu Nguồn gốc Lô hàng (Admin UI)
-- Đã thêm nút **"Tra cứu Mã Lô"** tại trang Quản lý Kho linh kiện (`/admin/parts`).
-- **Tính năng của Modal Tra Cứu:**
-  - Nhập mã lô (VD: `PN-2410-001`) để tra cứu.
-  - Hiển thị toàn bộ thông tin gốc của lô hàng: Ngày nhập, Giá nhập, Nhà Cung Cấp, và Tồn kho hiện tại của riêng lô đó.
-  - Tự động quét và liệt kê chi tiết Lịch sử Xuất kho của lô: Hiển thị các mã Phiếu Sửa Chữa hoặc Đơn Hàng POS đã lấy linh kiện từ lô này, cùng với số lượng tương ứng.
+## 3. Luồng Xuất Kho: Trừ FIFO (`src/lib/inventoryFifo.ts`)
+- Đã refactor logic FIFO để **query trực tiếp từ `inventory_lots`** (thay vì query trên `inventory_logs`).
+- FIFO ưu tiên trừ số lượng ở các lô cũ nhất (`orderBy('createdAt', 'asc')`) và có `status === 'active'`.
+- Khi một lô bị trừ cạn (`remainingQuantity === 0`), trạng thái của lô tự động đổi thành `'empty'`.
+- Kết quả trừ lô được trả về thông qua mảng `lotsDeducted`.
+
+## 4. Cập Nhật API POS & Sửa Chữa (`checkout/route.ts`, `handover/route.ts`)
+- Tích hợp kết quả `lotsDeducted` từ FIFO vào dữ liệu ghi `inventory_logs` cho các nghiệp vụ `POS_SALE`, `REPAIR_USE` và `EXPORT`. 
+- Đảm bảo tính minh bạch: Lịch sử xuất/nhập lưu hoàn toàn trong `inventory_logs`, còn tồn thực tế của từng lô lưu trong `inventory_lots`.
+
+## 5. UI Tra Cứu Mã Lô (`LotTrackingModal.tsx`)
+- Sửa lại nguồn query của modal **"Tra cứu Mã Lô"**: Hiện tại modal đã đọc thông tin chính của lô từ `inventory_lots` thay vì phải suy luận từ `inventory_logs`.
+- Lịch sử sử dụng của lô vẫn được lấy từ `inventory_logs` một cách chính xác và hiển thị rõ ràng trên UI.
+
+---
+
+> [!WARNING]
+> **Lưu ý Cấp Quyền Firestore Index:**
+> Vì Firebase Firestore yêu cầu index phức hợp cho các câu query có chứa `where` và `orderBy`, khi bạn thực hiện xuất kho (ví dụ: POS Checkout) lần đầu tiên có thể sẽ gặp lỗi thiếu Index trong terminal (`The query requires an index.`). Nếu gặp lỗi này, bạn chỉ cần copy link sinh ra trong Terminal dán vào trình duyệt để tạo Index tự động cho Firestore.
 
 > [!TIP]
-> Việc tích hợp này bảo toàn 100% logic báo cáo cũ của hệ thống. Kỹ thuật viên không cần quan tâm đến mã lô khi lấy hàng, hệ thống tự động gán ngầm để truy xuất khi cần bảo hành.
+> **Hướng Dẫn Kiểm Tra Tính Năng (Testing):**
+> 1. Vào luồng Nhập kho, tạo 2 phiếu nhập khác nhau cho cùng một sản phẩm (tạo thành 2 lô khác nhau).
+> 2. Vào luồng POS hoặc Bàn giao sửa chữa, thực hiện bán/xuất kho số lượng lớn hơn số lượng tồn của Lô thứ nhất (để ép hệ thống trừ xuyên qua Lô thứ hai).
+> 3. Click nút **Tra Cứu Mã Lô** để kiểm tra lịch sử trừ kho của 2 mã lô vừa rồi xem có khớp với số lượng thực tế hay không.

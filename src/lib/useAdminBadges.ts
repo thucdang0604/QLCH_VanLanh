@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { collection, getCountFromServer, getDocs, limit, query, where, onSnapshot } from 'firebase/firestore';
 import { db, getRtdbInstance } from '@/lib/firebase';
 import type { FirestoreDateValue } from '@/lib/types';
 import { REPAIR_PART_STATUS, REPAIR_STATUS, isRepairPartStatus, isRepairStatus } from '@/lib/repairStatus';
@@ -39,6 +39,9 @@ interface RepairBadgeDoc {
     }[];
 }
 
+const REPAIR_BADGE_DOC_LIMIT = 200;
+const ACTIVITY_BADGE_DOC_LIMIT = 20;
+
 // ── Hook ──
 
 /**
@@ -60,31 +63,81 @@ export function useAdminBadges(userUid?: string, userRole?: string, userPermissi
     const [pendingAppointments, setPendingAppointments] = useState(0);
     const [unreadChats, setUnreadChats] = useState(0);
     const [pendingReviews, setPendingReviews] = useState(0);
+    const [pendingRepairs, setPendingRepairs] = useState(0);
     const [repairDocs, setRepairDocs] = useState<RepairBadgeDoc[]>([]);
     const [activities, setActivities] = useState<ActivityItem[]>([]);
+    const refreshFirestoreBadges = useCallback(async () => {
+        const tasks: Promise<void>[] = [];
 
-    // ── 1. Orders: status == 'Pending' ──
-    useEffect(() => {
-        if (!hasPerm('manage_orders')) { setPendingOrders(0); return; }
-        const q = query(collection(db, 'orders'), where('status', '==', 'Pending'));
-        const unsub = onSnapshot(q,
-            (snap) => setPendingOrders(snap.size),
-            (err) => console.error('[Badges] orders error:', err)
-        );
-        return () => unsub();
+        if (hasPerm('manage_orders')) {
+            tasks.push(
+                getCountFromServer(query(collection(db, 'orders'), where('status', '==', 'Pending')))
+                    .then(snap => setPendingOrders(snap.data().count))
+                    .catch(err => console.error('[Badges] orders count error:', err)),
+                getCountFromServer(query(collection(db, 'appointments'), where('status', '==', 'pending')))
+                    .then(snap => setPendingAppointments(snap.data().count))
+                    .catch(err => console.error('[Badges] appointments count error:', err)),
+            );
+        } else {
+            setPendingOrders(0);
+            setPendingAppointments(0);
+        }
+
+        if (hasPerm('manage_reviews')) {
+            tasks.push(
+                getCountFromServer(query(collection(db, 'reviews'), where('status', '==', 'pending')))
+                    .then(snap => setPendingReviews(snap.data().count))
+                    .catch(err => console.error('[Badges] reviews count error:', err)),
+            );
+        } else {
+            setPendingReviews(0);
+        }
+
+        if (hasPerm('manage_repairs')) {
+            tasks.push(
+                getCountFromServer(query(collection(db, 'repairs'), where('status', '==', REPAIR_STATUS.INTAKE)))
+                    .then(snap => setPendingRepairs(snap.data().count))
+                    .catch(err => console.error('[Badges] repairs count error:', err)),
+                getDocs(query(
+                    collection(db, 'repairs'),
+                    where('status', 'in', [REPAIR_STATUS.INTAKE, REPAIR_STATUS.PARTS_ORDERED]),
+                    limit(REPAIR_BADGE_DOC_LIMIT),
+                ))
+                    .then(snap => {
+                        const docs = snap.docs.map(d => ({
+                            id: d.id,
+                            status: d.data().status,
+                            staff: d.data().staff,
+                            parts: d.data().parts,
+                        })) as RepairBadgeDoc[];
+                        setRepairDocs(docs);
+                    })
+                    .catch(err => console.error('[Badges] repairs docs error:', err)),
+            );
+        } else {
+            setPendingRepairs(0);
+            setRepairDocs([]);
+        }
+
+        await Promise.all(tasks);
     }, [hasPerm]);
 
-    // ── 2. Appointments: status == 'pending' ──
     useEffect(() => {
-        if (!hasPerm('manage_orders')) { setPendingAppointments(0); return; }
-        const q = query(collection(db, 'appointments'), where('status', '==', 'pending'));
-        const unsub = onSnapshot(q,
-            (snap) => setPendingAppointments(snap.size),
-            (err) => console.error('[Badges] appointments error:', err)
-        );
-        return () => unsub();
-    }, [hasPerm]);
+        let cancelled = false;
+        const refresh = async () => {
+            if (cancelled) return;
+            await refreshFirestoreBadges();
+        };
 
+        refresh();
+        window.addEventListener('focus', refresh);
+        return () => {
+            cancelled = true;
+            window.removeEventListener('focus', refresh);
+        };
+    }, [refreshFirestoreBadges]);
+
+    // Firestore badge counts use one-shot aggregation/bounded reads above.
     // ── 3. Chats: Realtime DB — info.hasUnread ──
     useEffect(() => {
         if (!hasPerm('chat_support')) { setUnreadChats(0); return; }
@@ -125,43 +178,6 @@ export function useAdminBadges(userUid?: string, userRole?: string, userPermissi
         };
     }, [hasPerm]);
 
-    // ── 4. Repairs: intake + parts-ordered (for badge and KTV logic) ──
-    // Query repairs with status in the 2 relevant statuses only — keeps reads minimal
-    useEffect(() => {
-        if (!hasPerm('manage_repairs')) { setRepairDocs([]); return; }
-        const q = query(
-            collection(db, 'repairs'),
-            where('status', 'in', [REPAIR_STATUS.INTAKE, REPAIR_STATUS.PARTS_ORDERED])
-        );
-        const unsub = onSnapshot(q,
-            (snap) => {
-                const docs = snap.docs.map(d => ({
-                    id: d.id,
-                    status: d.data().status,
-                    staff: d.data().staff,
-                    parts: d.data().parts,
-                })) as RepairBadgeDoc[];
-                setRepairDocs(docs);
-            },
-            (err) => console.error('[Badges] repairs error:', err)
-        );
-        return () => unsub();
-    }, [hasPerm]);
-
-    // ── 5. Reviews: status == 'pending' ──
-    useEffect(() => {
-        if (!hasPerm('manage_reviews')) {
-            setPendingReviews(0);
-            return;
-        }
-        const q = query(collection(db, 'reviews'), where('status', '==', 'pending'));
-        const unsub = onSnapshot(q,
-            (snap) => setPendingReviews(snap.size),
-            (err) => console.error('[Badges] reviews error:', err)
-        );
-        return () => unsub();
-    }, [hasPerm]);
-
     // ── 6. Activities (unread) — kept here to consolidate ──
     useEffect(() => {
         if (userRole !== 'admin' && userRole !== 'staff') {
@@ -170,7 +186,7 @@ export function useAdminBadges(userUid?: string, userRole?: string, userPermissi
         }
         let unsub = () => { };
         try {
-            const q = query(collection(db, 'activities'), where('read', '==', false));
+            const q = query(collection(db, 'activities'), where('read', '==', false), limit(ACTIVITY_BADGE_DOC_LIMIT));
             unsub = onSnapshot(q, (snap) => {
                 const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as ActivityItem[];
                 const toMillis = (v: unknown): number => {
@@ -202,8 +218,8 @@ export function useAdminBadges(userUid?: string, userRole?: string, userPermissi
 
     // ── Computed: repairs badge (all "Chờ tiếp nhận") ──
     const repairsBadge = useMemo(() => {
-        return repairDocs.filter(d => isRepairStatus(d.status, REPAIR_STATUS.INTAKE)).length;
-    }, [repairDocs]);
+        return pendingRepairs;
+    }, [pendingRepairs]);
 
     // ── Computed: technician badge ──
     // For staff: assigned intake tickets + tickets with parts ready in stock.

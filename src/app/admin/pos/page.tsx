@@ -4,11 +4,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
-    Search, ShoppingCart, Plus, Minus, Trash2, User, Phone, Receipt, X,
-    Package, CreditCard, Banknote, QrCode, Tag, Loader2, CheckCircle2,
-    AlertTriangle, Wrench, Camera, Keyboard
+    Search, ShoppingCart, Plus, Receipt, X,
+    Package, Loader2, CheckCircle2,
+    AlertTriangle, Camera, Keyboard
 } from 'lucide-react';
-import { collection, getDocs, query, where, orderBy as fbOrderBy } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, limit, query, where, orderBy as fbOrderBy } from 'firebase/firestore';
 
 import { useConfig } from '@/lib/ConfigContext';
 import Modal from '@/components/admin/Modal';
@@ -17,14 +17,16 @@ import Image from 'next/image';
 import { db, getAuthInstance } from '@/lib/firebase';
 import type { Product, TaxonomyNode } from '@/lib/types';
 
-import { toastError } from '@/lib/toast';
+import { toastError, toastSuccess, toastWarning } from '@/lib/toast';
 import { DEFAULT_CONFIG } from '@/lib/config-defaults';
 import { PART_CATEGORY, isPartCategory } from '@/lib/constants';
 import { fetchActiveDiscountRules, calculateAccessoryDiscounts } from '@/lib/discountRuleUtils';
-import CurrencyInput from '@/components/admin/CurrencyInput';
 import { consumeChatWorkflowHandoff } from '@/lib/chatWorkflowHandoff';
 import { extractProductCodeFromScan, getPrimaryProductCode, getProductScanCandidates, productCodeSearchText } from '@/lib/productCodes';
-import { isProductSellable } from '@/lib/productLifecycle';
+import { PRODUCT_STATUS, isProductSellable } from '@/lib/productLifecycle';
+import { generateSearchKeywords } from '@/lib/utils';
+import { PosCartPanel } from '@/features/pos/PosCartPanel';
+import type { AppliedVoucher, CartItem, DiscountDetail, LastOrderData, OrderLineItem, PayableOrderInfo, RepairTicketInfo, VoucherStatus } from '@/features/pos/posTypes';
 
 type BarcodeDetectionResult = { rawValue?: string };
 type BrowserBarcodeDetector = {
@@ -36,6 +38,149 @@ type BrowserBarcodeDetectorConstructor = {
 };
 const RETAIL_CATEGORY_IDS = DEFAULT_CONFIG.taxonomy.retail.map((node) => node.id);
 const CAMERA_BARCODE_FORMATS = ['qr_code', 'code_128'];
+const POS_DEFAULT_PRODUCT_LIMIT = 120;
+const POS_SEARCH_PRODUCT_LIMIT = 60;
+const POS_LEGACY_SCAN_FALLBACK_LIMIT = 500;
+type PosProduct = Product & { id: string };
+
+function getProductCategoryPathIds(product: Product) {
+    if (Array.isArray(product.categoryIds) && product.categoryIds.length > 0) {
+        return product.categoryIds.filter(Boolean);
+    }
+
+    const category = typeof product.category === 'string' ? product.category : '';
+    const segments = category.split('/').filter(Boolean);
+    return segments.map((_, index) => segments.slice(0, index + 1).join('/'));
+}
+
+function findTaxonomyNodeById(nodes: TaxonomyNode[], id: string): TaxonomyNode | null {
+    for (const node of nodes) {
+        if (node.id === id || node.slug === id) return node;
+        const child = findTaxonomyNodeById(node.children || [], id);
+        if (child) return child;
+    }
+    return null;
+}
+
+function resolveTaxonomyWarranty(nodes: TaxonomyNode[], categoryPathIds: string[]): Product['warrantyType'] | null {
+    let currentNodes = nodes;
+    let lastFound: Product['warrantyType'] | null = null;
+
+    for (const categoryPathId of categoryPathIds) {
+        const slug = categoryPathId.split('/').pop();
+        const node = currentNodes.find((candidate) => candidate.id === categoryPathId || candidate.slug === slug)
+            || findTaxonomyNodeById(nodes, categoryPathId);
+        if (!node) break;
+        if (node.warrantyType && node.warrantyType !== 'none') lastFound = node.warrantyType;
+        else if (node.warrantyType === 'none') lastFound = null;
+        currentNodes = node.children || [];
+    }
+
+    return lastFound;
+}
+
+function toStringArray(value: unknown): string[] {
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+function mapRepairTicketInfo(id: string, data: Record<string, unknown>, fallbackPhone = ''): RepairTicketInfo {
+    const customer = (data.customer || {}) as Record<string, unknown>;
+    const deviceInfo = (data.deviceInfo || {}) as Record<string, unknown>;
+    const payment = (data.payment || {}) as Record<string, unknown>;
+
+    return {
+        id,
+        customerName: String(customer.name || data.customerName || ''),
+        customerPhone: String(customer.phone || data.customerPhone || fallbackPhone),
+        deviceModel: String(deviceInfo.model || data.deviceModel || ''),
+        status: String(data.status || ''),
+        serviceName: typeof data.serviceName === 'string' ? data.serviceName : '',
+        categoryPath: toStringArray(data.categoryPath),
+        parts: Array.isArray(data.parts) ? data.parts.map((part) => {
+            const item = (part || {}) as Record<string, unknown>;
+            return {
+                productName: String(item.productName || item.name || item.partName || ''),
+                partType: String(item.partType || ''),
+                unitPriceAtUse: Number(item.unitPriceAtUse || 0),
+                status: String(item.status || ''),
+                quantity: Number(item.quantity || 1),
+            };
+        }) : [],
+        gifts: toStringArray(data.gifts),
+        paymentAmount: Number(payment.amount || 0),
+        paymentLaborCost: Number(payment.laborCost || 0),
+        paymentStatus: String(payment.status || 'unpaid'),
+        issues: Array.isArray(data.issues) ? data.issues.map((issue) => {
+            const item = (issue || {}) as Record<string, unknown>;
+            return {
+                label: typeof item.label === 'string' ? item.label : '',
+                estimatedPrice: Number(item.estimatedPrice || 0),
+                categoryPath: toStringArray(item.categoryPath),
+                serviceName: typeof item.serviceName === 'string' ? item.serviceName : '',
+            };
+        }) : [],
+    };
+}
+
+function formatLookupDate(value: unknown) {
+    if (!value) return '';
+    const timestamp = value as { toDate?: () => Date };
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(value as string | number);
+    if (Number.isNaN(date.getTime())) return '';
+    return date.toLocaleDateString('vi-VN');
+}
+
+function getOrderLineDisplayName(item: Partial<OrderLineItem> & { name?: string }) {
+    return String(item.productName || item.product_name || item.name || item.productId || 'Sản phẩm').trim();
+}
+
+function escapeReceiptHtml(value: string) {
+    return value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function mapPayableOrderInfo(id: string, data: Record<string, unknown>): PayableOrderInfo | null {
+    const customer = (data.customer_info || data.customer || {}) as Record<string, unknown>;
+    const totalAmount = Number(data.total_amount || 0);
+    const paymentHistory = Array.isArray(data.paymentHistory) ? data.paymentHistory : [];
+    const paidFromHistory = paymentHistory.reduce((sum, entry) => {
+        const line = (entry || {}) as Record<string, unknown>;
+        return sum + (Number(line.amount) || 0);
+    }, 0);
+    const paidAmount = Math.max(Number(data.deposit_amount || 0), paidFromHistory);
+    const remainingAmount = Math.max(0, totalAmount - paidAmount);
+    const status = String(data.status || '');
+    const paymentMethod = String(data.payment_method || '');
+    const paymentStatus = String(data.paymentStatus || '');
+    const normalizedPaymentStatus = paymentStatus.toLowerCase();
+    const normalizedPaymentMethod = paymentMethod.toLowerCase();
+    const isDebtLike = normalizedPaymentStatus === 'debt'
+        || normalizedPaymentStatus === 'unpaid'
+        || normalizedPaymentMethod === 'debt'
+        || normalizedPaymentMethod === 'ghi nợ';
+    const isActionable = status !== 'Cancelled' && normalizedPaymentStatus !== 'paid' && (remainingAmount > 0 || isDebtLike);
+
+    if (!isActionable) return null;
+
+    const items = Array.isArray(data.items) ? data.items : [];
+    return {
+        id,
+        customerName: String(customer.name || data.customerName || ''),
+        customerPhone: String(customer.phone || data.customerPhone || ''),
+        status,
+        paymentMethod,
+        paymentStatus,
+        totalAmount,
+        paidAmount,
+        remainingAmount: remainingAmount || totalAmount,
+        createdAtLabel: formatLookupDate(data.createdAt),
+        itemNames: items.slice(0, 4).map(item => getOrderLineDisplayName((item || {}) as Partial<OrderLineItem> & { name?: string })).filter(Boolean),
+    };
+}
 
 declare global {
     interface Window {
@@ -43,45 +188,6 @@ declare global {
     }
 }
 
-
-// ── Receipt item shape (matches orderData.items) ──
-interface OrderLineItem {
-    productId: string;
-    productName: string;
-    product_id?: string;
-    product_name?: string;
-    quantity: number;
-    price: number;
-    costPrice?: number;
-}
-
-interface LastOrderData {
-    id: string;
-    customer_info: { name: string; phone: string; email?: string; city?: string; district?: string; ward?: string; address?: string };
-    items: OrderLineItem[];
-    total_amount: number;
-    discount_amount: number;
-    subtotal_amount: number;
-    shipping_fee: number;
-    deposit_amount: number;
-    payment_method: string;
-    createdByName?: string;
-    createdAt: Date;
-}
-
-// ── Cart Item ──
-interface CartItem {
-    productId: string;
-    name: string;
-    image?: string;
-    originalPrice: number;
-    sellingPrice: number; // Overridable
-    costPrice?: number;
-    quantity: number;
-    isRepairTicket?: boolean;
-    warrantyType?: string;
-    imeis?: string[];
-}
 
 interface BankAccountConfig {
     id?: string;
@@ -98,14 +204,6 @@ interface BankConfig {
     accountName?: string;
 }
 
-const paymentMethods = [
-    { key: 'cash', label: 'Tiền mặt', icon: Banknote },
-    { key: 'bank', label: 'Chuyển khoản', icon: CreditCard },
-    { key: 'momo', label: 'MoMo', icon: QrCode },
-    { key: 'installment', label: 'Trả góp', icon: CreditCard },
-    { key: 'debt', label: 'Ghi nợ', icon: AlertTriangle },
-];
-
 export default function POSPage() {
     const { config } = useConfig();
     const searchParams = useSearchParams();
@@ -116,24 +214,11 @@ export default function POSPage() {
         }
         if (product.warrantyType === 'none') return 'none';
 
-        const cat = product.category;
-        const segments = typeof cat === 'string' ? cat.split('/') : [];
-        let nodes: TaxonomyNode[] = config?.taxonomy?.retail || [];
-        let lastFound: Product['warrantyType'] | null = null;
-        for (let i = 0; i < segments.length; i++) {
-            const partialId = segments.slice(0, i + 1).join('/');
-            const node = nodes.find((n) => n.id === partialId || n.slug === segments[i]);
-            if (!node) break;
-            if (node.warrantyType && node.warrantyType !== 'none') lastFound = node.warrantyType;
-            else if (node.warrantyType === 'none') lastFound = null;
-            if (!node.children?.length) break;
-            nodes = node.children;
-        }
-        return lastFound || 'none';
+        return resolveTaxonomyWarranty(config?.taxonomy?.retail || [], getProductCategoryPathIds(product)) || 'none';
     }, [config?.taxonomy?.retail]);
 
     // Products
-    const [products, setProducts] = useState<(Product & { id: string })[]>([]);
+    const [products, setProducts] = useState<PosProduct[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
     const [activeCategory, setActiveCategory] = useState('all');
@@ -149,8 +234,8 @@ export default function POSPage() {
     const [shippingFee, setShippingFee] = useState(0);
     const [useSurplusToPayDebt, setUseSurplusToPayDebt] = useState(false);
     const [voucherCode, setVoucherCode] = useState('');
-    const [voucherStatus, setVoucherStatus] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
-    const [appliedVoucher, setAppliedVoucher] = useState<{ code: string; type: string; value: number; maxDiscount?: number | null } | null>(null);
+    const [voucherStatus, setVoucherStatus] = useState<VoucherStatus | null>(null);
+    const [appliedVoucher, setAppliedVoucher] = useState<AppliedVoucher | null>(null);
     const chatPrefillApplied = useRef(false);
 
     // Checkout
@@ -176,24 +261,11 @@ export default function POSPage() {
         fetchBankConfig();
     }, []);
 
-    // Repair lookup
-    interface RepairTicketInfo {
-        id: string;
-        customerName: string;
-        customerPhone: string;
-        deviceModel: string;
-        status: string;
-        parts: { productName: string; partType?: string; unitPriceAtUse?: number, status?: string, quantity?: number }[];
-        paymentAmount: number;
-        paymentLaborCost: number;
-        paymentStatus: string;
-        gifts?: string[];
-        issues?: { estimatedPrice?: number }[];
-    }
     const [linkedRepairs, setLinkedRepairs] = useState<RepairTicketInfo[]>([]);
+    const [payableOrders, setPayableOrders] = useState<PayableOrderInfo[]>([]);
     const [repairLoading, setRepairLoading] = useState(false);
     const [autoDiscountAmount, setAutoDiscountAmount] = useState(0);
-    const [discountDetails, setDiscountDetails] = useState<{ productName: string; discountAmount: number; ruleName: string }[]>([]);
+    const [discountDetails, setDiscountDetails] = useState<DiscountDetail[]>([]);
 
     useEffect(() => {
         if (chatPrefillApplied.current || searchParams.get('source') !== 'chat') return;
@@ -217,26 +289,7 @@ export default function POSPage() {
                 const snapshot = await getDoc(doc(db, 'repairs', repairId));
                 if (!snapshot.exists() || cancelled) return;
 
-                const data = snapshot.data();
-                const repair: RepairTicketInfo = {
-                    id: snapshot.id,
-                    customerName: String(data.customerName || ''),
-                    customerPhone: String(data.customerPhone || ''),
-                    deviceModel: String(data.deviceModel || ''),
-                    status: String(data.status || ''),
-                    parts: (data.parts || []).map((part: Record<string, unknown>) => ({
-                        productName: String(part.productName || ''),
-                        partType: String(part.partType || ''),
-                        unitPriceAtUse: Number(part.unitPriceAtUse || 0),
-                        status: String(part.status || ''),
-                        quantity: Number(part.quantity || 1),
-                    })),
-                    gifts: Array.isArray(data.gifts) ? data.gifts.map(String) : [],
-                    paymentAmount: Number(data.payment?.amount || 0),
-                    paymentLaborCost: Number(data.payment?.laborCost || 0),
-                    paymentStatus: String(data.payment?.status || 'unpaid'),
-                    issues: data.issues || [],
-                };
+                const repair = mapRepairTicketInfo(snapshot.id, snapshot.data());
 
                 setLinkedRepairs(previous => [...previous, repair]);
                 setCustomerName(previous => previous || repair.customerName);
@@ -254,40 +307,12 @@ export default function POSPage() {
         };
     }, [searchParams, linkedRepairs]);
 
-    // Add a repair handoff to the cart once its data is available.
-    useEffect(() => {
-        const repairId = searchParams.get('repairId');
-        if (!repairId || cart.some(item => item.productId === repairId)) return;
-        if (cart.some(item => item.isRepairTicket && item.productId !== repairId)) return;
-        const repair = linkedRepairs.find(item => item.id === repairId);
-        if (!repair || repair.paymentStatus === 'paid' || repair.paymentStatus === 'refunded') return;
-
-        const newItems: CartItem[] = [{
-            productId: repair.id,
-            name: `[Phiếu sửa chữa] ${repair.deviceModel}`,
-            originalPrice: repair.paymentAmount,
-            sellingPrice: repair.paymentAmount,
-            costPrice: 0,
-            quantity: 1,
-            isRepairTicket: true,
-        }];
-        repair.gifts?.forEach(giftId => {
-            newItems.push({
-                productId: `gift_${repair.id}_${giftId}`,
-                name: `[Quà tặng] Mã SP: ${giftId}`,
-                originalPrice: 0,
-                sellingPrice: 0,
-                costPrice: 0,
-                quantity: 1,
-            });
-        });
-        setCart(previous => [...newItems, ...previous]);
-    }, [cart, linkedRepairs, searchParams]);
 
     // Lookup repair by phone
     const lookupRepairByPhone = async (phone: string) => {
         if (!phone || phone.length < 8) {
             setLinkedRepairs([]);
+            setPayableOrders([]);
             setAutoDiscountAmount(0);
             setDiscountDetails([]);
             setCustomerDebt(0);
@@ -315,83 +340,50 @@ export default function POSPage() {
 
             const q = query(
                 collection(db, 'repairs'),
-                where('customerPhone', '==', phone.trim()),
-                where('payment.status', 'in', ['unpaid', 'partial']),
-                fbOrderBy('createdAt', 'desc')
+                where('customer.phone', '==', phone.trim()),
             );
-            const snap = await getDocs(q);
+            const ordersQuery = query(
+                collection(db, 'orders'),
+                where('customer_info.phone', '==', phone.trim()),
+                limit(20),
+            );
+            const [snap, ordersSnap] = await Promise.all([
+                getDocs(q),
+                getDocs(ordersQuery),
+            ]);
             if (!snap.empty) {
-                const repairs = snap.docs.map(d => {
+                const repairs = snap.docs
+                    .filter(d => {
+                        const ps = d.data().payment?.status;
+                        return !ps || ps === 'unpaid' || ps === 'partial';
+                    })
+                    .sort((a, b) => {
+                        const ta = a.data().createdAt?.toMillis?.() || 0;
+                        const tb = b.data().createdAt?.toMillis?.() || 0;
+                        return tb - ta;
+                    })
+                    .map(d => {
                     const data = d.data();
+                    const repair = mapRepairTicketInfo(d.id, data, phone);
                     // Auto-fill customer name if empty
-                    if (!customerName && data.customerName) {
-                        setCustomerName(prev => prev || data.customerName);
+                    if (!customerName && repair.customerName) {
+                        setCustomerName(prev => prev || repair.customerName);
                     }
-                    return {
-                        id: d.id,
-                        customerName: data.customerName || '',
-                        customerPhone: data.customerPhone || phone,
-                        deviceModel: data.deviceModel || '',
-                        status: data.status || '',
-                        parts: (data.parts || []).map((p: Record<string, unknown>) => ({
-                            productName: String(p.productName || ''),
-                            partType: String(p.partType || ''),
-                            unitPriceAtUse: Number(p.unitPriceAtUse || 0),
-                            status: String(p.status || ''),
-                            quantity: Number(p.quantity || 1),
-                        })),
-                        paymentAmount: Number(data.payment?.amount || 0),
-                        paymentLaborCost: Number(data.payment?.laborCost || 0),
-                        paymentStatus: String(data.payment?.status || 'unpaid'),
-                        gifts: data.gifts || [],
-                        issues: data.issues || []
-                    };
+                    return repair;
                 });
                 setLinkedRepairs(repairs);
-
-                // Auto inject gifts if coming from repair checkout link
-                const urlSource = new URLSearchParams(window.location.search).get('source');
-                if (urlSource === 'repair' && new URLSearchParams(window.location.search).get('phone')) {
-                    const newItems: CartItem[] = [];
-                    repairs.forEach(repair => {
-                        // Prevent adding if already in cart
-                        if (cart.some(c => c.productId === repair.id)) return;
-                        if (repair.paymentStatus === 'paid' || repair.paymentStatus === 'refunded') return;
-
-                        newItems.push({
-                            productId: repair.id,
-                            name: `[Phiếu sửa chữa] ${repair.deviceModel}`,
-                            originalPrice: repair.paymentAmount,
-                            sellingPrice: repair.paymentAmount,
-                            costPrice: 0,
-                            quantity: 1,
-                            isRepairTicket: true
-                        });
-
-                        if (repair.gifts && repair.gifts.length > 0) {
-                            repair.gifts.forEach((giftId: string) => {
-                                const cartGiftId = `gift_${repair.id}_${giftId}`;
-                                if (!cart.some(c => c.productId === cartGiftId) && !newItems.some(i => i.productId === cartGiftId)) {
-                                    newItems.push({
-                                        productId: cartGiftId,
-                                        name: `[Quà tặng] Mã SP: ${giftId}`,
-                                        originalPrice: 0,
-                                        sellingPrice: 0,
-                                        costPrice: 0,
-                                        quantity: 1,
-                                        isRepairTicket: false
-                                    });
-                                }
-                            });
-                        }
-                    });
-                    if (newItems.length > 0) {
-                        setCart(prev => [...newItems, ...prev]);
-                    }
-                }
             } else {
                 setLinkedRepairs([]);
             }
+            const orders = ordersSnap.docs
+                .sort((a, b) => {
+                    const ta = a.data().createdAt?.toMillis?.() || 0;
+                    const tb = b.data().createdAt?.toMillis?.() || 0;
+                    return tb - ta;
+                })
+                .map(orderDoc => mapPayableOrderInfo(orderDoc.id, orderDoc.data()))
+                .filter((order): order is PayableOrderInfo => Boolean(order));
+            setPayableOrders(orders);
         } catch (err) {
             console.error('Repair/Customer lookup failed:', err);
         }
@@ -410,30 +402,48 @@ export default function POSPage() {
                 const rules = await fetchActiveDiscountRules();
                 if (rules.length === 0) return;
 
-                let allParts: { productName: string; partType?: string; unitPriceAtUse?: number }[] = [];
+                let allParts: { productName: string; partType?: string; unitPriceAtUse?: number; categoryIds?: string[] }[] = [];
                 linkedRepairs.forEach(r => {
                     allParts = [...allParts, ...r.parts];
                 });
+                const repairContexts = linkedRepairs.map(repair => ({
+                    serviceName: repair.serviceName,
+                    categoryPath: repair.categoryPath,
+                    issues: repair.issues,
+                }));
 
-                if (allParts.length === 0) return;
+                if (allParts.length === 0 && repairContexts.every(repair =>
+                    !repair.serviceName && !repair.categoryPath?.length && (!repair.issues || repair.issues.length === 0)
+                )) return;
 
                 const results = calculateAccessoryDiscounts(
                     allParts,
-                    cart.map(c => ({ productId: c.productId, productName: c.name, price: c.sellingPrice })),
-                    rules
+                    cart.map(c => {
+                        const prod = products.find(p => p.id === c.productId);
+                        return {
+                            productId: c.productId,
+                            productName: c.name,
+                            price: c.sellingPrice,
+                            category: prod?.category,
+                            categoryIds: prod?.categoryIds,
+                        };
+                    }),
+                    rules,
+                    repairContexts
                 );
                 const totalDisc = results.reduce((s, r) => s + r.discountAmount, 0);
                 setAutoDiscountAmount(totalDisc);
                 setDiscountDetails(results);
             } catch { /* rules not configured yet */ }
         })();
-    }, [linkedRepairs, cart]);
+    }, [linkedRepairs, cart, products]);
 
     const searchRef = useRef<HTMLInputElement>(null);
 
-    const filterPosProducts = useCallback((data: (Product & { id: string })[]) => {
+    const filterPosProducts = useCallback((data: PosProduct[], options?: { includeOutOfStock?: boolean }) => {
         return data.filter(p => {
-            if (!isProductSellable(p)) return false;
+            if (p.status !== PRODUCT_STATUS.ACTIVE || p.isProposed === true) return false;
+            if (!options?.includeOutOfStock && !isProductSellable(p)) return false;
             if (isPartCategory(p.category, p.categoryIds)) return true;
             if (p.categoryIds && p.categoryIds.length > 0) {
                 return RETAIL_CATEGORY_IDS.includes(p.categoryIds[0]);
@@ -442,21 +452,84 @@ export default function POSPage() {
         });
     }, []);
 
-    // ── Load products ──
+    const mergeProducts = useCallback((nextProducts: PosProduct[], options?: { includeOutOfStock?: boolean }) => {
+        const sellableProducts = filterPosProducts(nextProducts, options);
+        setProducts(prev => {
+            const merged = new Map(prev.map(product => [product.id, product]));
+            sellableProducts.forEach(product => merged.set(product.id, product));
+            return Array.from(merged.values());
+        });
+    }, [filterPosProducts]);
+
+    const loadDefaultProducts = useCallback(async () => {
+        const snap = await getDocs(query(
+            collection(db, 'products'),
+            fbOrderBy('createdAt', 'desc'),
+            limit(POS_DEFAULT_PRODUCT_LIMIT),
+        ));
+        const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as PosProduct));
+        setProducts(filterPosProducts(data));
+    }, [filterPosProducts]);
+
+    // Load a bounded POS product cache instead of the full products collection.
     useEffect(() => {
         const load = async () => {
             try {
-                const snap = await getDocs(collection(db, 'products'));
-                const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as Product & { id: string }));
-                setProducts(filterPosProducts(data));
+                await loadDefaultProducts();
             } catch (err) {
-                console.error('Failed to load products:', err);
+                console.error('Failed to load POS products:', err);
             } finally {
                 setLoading(false);
             }
         };
         load();
-    }, [filterPosProducts]);
+    }, [loadDefaultProducts]);
+
+    useEffect(() => {
+        const normalizedSearch = searchQuery.trim();
+        if (normalizedSearch.length === 0) return;
+        if (normalizedSearch.length < 2) return;
+
+        const timeoutId = window.setTimeout(async () => {
+            try {
+                const normalizedQuery = normalizedSearch.toLowerCase();
+                const keyword = generateSearchKeywords(normalizedSearch)[0] || normalizedSearch.toLowerCase();
+                const keywordSnap = await getDocs(query(
+                    collection(db, 'products'),
+                    where('searchKeywords', 'array-contains', keyword),
+                    limit(POS_SEARCH_PRODUCT_LIMIT),
+                ));
+
+                const fallbackSnap = await getDocs(query(
+                    collection(db, 'products'),
+                    fbOrderBy('createdAt', 'desc'),
+                    limit(POS_SEARCH_PRODUCT_LIMIT),
+                ));
+
+                const candidates = new Map<string, PosProduct>();
+                keywordSnap.docs.forEach(d => candidates.set(d.id, { id: d.id, ...d.data() } as PosProduct));
+                fallbackSnap.docs.forEach(d => {
+                    const product = { id: d.id, ...d.data() } as PosProduct;
+                    const searchKeywords = (product as { searchKeywords?: unknown }).searchKeywords;
+                    const haystack = [
+                        product.name,
+                        product.id,
+                        productCodeSearchText(product),
+                        ...(Array.isArray(searchKeywords) ? searchKeywords : []),
+                    ].join(' ').toLowerCase();
+                    if (haystack.includes(normalizedQuery)) {
+                        candidates.set(product.id, product);
+                    }
+                });
+
+                mergeProducts(Array.from(candidates.values()), { includeOutOfStock: true });
+            } catch (err) {
+                console.error('Failed to search POS products:', err);
+            }
+        }, 250);
+
+        return () => window.clearTimeout(timeoutId);
+    }, [loadDefaultProducts, mergeProducts, searchQuery]);
 
     // Keyboard shortcut: F1 to focus search
     useEffect(() => {
@@ -492,14 +565,17 @@ export default function POSPage() {
     });
 
     // ── Cart helpers ──
-    const addToCart = useCallback((product: Product & { id: string }) => {
+    const addToCart = useCallback((product: Product & { id: string }, preferredLotCode?: string) => {
         const available = (product.stock || 0) - (product.held || 0);
         if (available <= 0) {
             toastError('Sản phẩm đã hết hàng!');
             return;
         }
+        
+        const targetCartItemId = preferredLotCode ? `${product.id}_${preferredLotCode}` : product.id;
+        
         setCart(prev => {
-            const existing = prev.find(c => c.productId === product.id);
+            const existing = prev.find(c => c.cartItemId === targetCartItemId);
             if (existing) {
                 // Prevent exceeding available stock
                 if (existing.quantity >= available) {
@@ -507,11 +583,12 @@ export default function POSPage() {
                     return prev;
                 }
                 return prev.map(c =>
-                    c.productId === product.id ? { ...c, quantity: c.quantity + 1 } : c
+                    c.cartItemId === targetCartItemId ? { ...c, quantity: c.quantity + 1 } : c
                 );
             }
             const wType = resolveWarranty(product);
             return [...prev, {
+                cartItemId: targetCartItemId,
                 productId: product.id,
                 name: product.name,
                 image: (product as unknown as { imageUrl?: string }).imageUrl || product.images?.[0],
@@ -521,27 +598,77 @@ export default function POSPage() {
                 quantity: 1,
                 warrantyType: wType,
                 imeis: [],
+                lotCode: preferredLotCode,
             }];
         });
     }, [resolveWarranty]);
 
-    const findProductByScanCode = useCallback((rawCode: string) => {
+    const findProductByScanCode = useCallback(async (rawCode: string): Promise<PosProduct | null> => {
         const code = extractProductCodeFromScan(rawCode);
         if (!code) return null;
-        return products.find((product) => getProductScanCandidates(product).some((candidate) => candidate === rawCode.trim() || candidate === code)) || null;
-    }, [products]);
 
-    const handleProductScan = useCallback((rawCode: string, source: 'keyboard' | 'camera' | 'manual') => {
+        const cached = products.find((product) => getProductScanCandidates(product).some((candidate) => candidate === rawCode.trim() || candidate === code));
+        if (cached) return cached;
+
+        const registrySnap = await getDoc(doc(db, 'product_code_registry', code));
+        const registryProductId = registrySnap.exists() ? registrySnap.data().productId as string | undefined : undefined;
+        if (registryProductId) {
+            const productSnap = await getDoc(doc(db, 'products', registryProductId));
+            if (productSnap.exists()) {
+                const product = { id: productSnap.id, ...productSnap.data() } as PosProduct;
+                const [sellable] = filterPosProducts([product], { includeOutOfStock: true });
+                if (sellable) {
+                    mergeProducts([sellable]);
+                    return sellable;
+                }
+            }
+        }
+
+        const productsRef = collection(db, 'products');
+        const legacySnapshots = await Promise.all([
+            getDocs(query(productsRef, where('sku', '==', code), limit(1))),
+            getDocs(query(productsRef, where('barcode', '==', code), limit(1))),
+            getDocs(query(productsRef, where('productCode', '==', code), limit(1))),
+            getDocs(query(productsRef, where('qrCodes', 'array-contains', code), limit(1))),
+        ]);
+        for (const snapshot of legacySnapshots) {
+            const docSnap = snapshot.docs[0];
+            if (!docSnap) continue;
+            const product = { id: docSnap.id, ...docSnap.data() } as PosProduct;
+                const [sellable] = filterPosProducts([product], { includeOutOfStock: true });
+            if (sellable) {
+                mergeProducts([sellable]);
+                return sellable;
+            }
+        }
+
+        const fallbackSnap = await getDocs(query(
+            productsRef,
+            fbOrderBy('createdAt', 'desc'),
+            limit(POS_LEGACY_SCAN_FALLBACK_LIMIT),
+        ));
+        const fallbackProducts = filterPosProducts(
+            fallbackSnap.docs.map(d => ({ id: d.id, ...d.data() } as PosProduct)),
+            { includeOutOfStock: true }
+        );
+        mergeProducts(fallbackProducts);
+        return fallbackProducts.find((product) => getProductScanCandidates(product).some((candidate) => candidate === rawCode.trim() || candidate === code)) || null;
+    }, [filterPosProducts, mergeProducts, products]);
+
+    const handleProductScan = useCallback(async (rawCode: string, source: 'keyboard' | 'camera' | 'manual') => {
         const code = extractProductCodeFromScan(rawCode);
-        const found = findProductByScanCode(rawCode);
+        const parts = rawCode.trim().split('#');
+        const lotCode = parts.length > 1 ? parts[1] : undefined;
+
+        const found = await findProductByScanCode(rawCode);
         if (!found) {
             const label = code || rawCode.trim();
             setScanStatus(`Không tìm thấy mã ${label}`);
             toastError(`Không tìm thấy sản phẩm với mã ${label}`);
             return false;
         }
-        addToCart(found);
-        setScanStatus(`Đã thêm ${found.name}`);
+        addToCart(found, lotCode);
+        setScanStatus(`Đã thêm ${found.name}${lotCode ? ` (Lô: ${lotCode})` : ''}`);
         if (source === 'camera') setShowScanner(false);
         return true;
     }, [addToCart, findProductByScanCode]);
@@ -574,7 +701,7 @@ export default function POSPage() {
                         e.preventDefault();
                         setSearchQuery('');
                     }
-                    handleProductScan(code, 'keyboard');
+                    void handleProductScan(code, 'keyboard');
                 }
             } else if (e.key.length === 1) {
                 barcodeBuffer.current += e.key;
@@ -627,7 +754,7 @@ export default function POSPage() {
                         video,
                         (result) => {
                             const rawValue = result?.getText();
-                            if (rawValue) handleProductScanRef.current(rawValue, 'camera');
+                            if (rawValue) void handleProductScanRef.current(rawValue, 'camera');
                         },
                     );
                     if (cancelled) {
@@ -659,7 +786,7 @@ export default function POSPage() {
                         if (scannerVideoRef.current.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
                             const results = await detector.detect(scannerVideoRef.current);
                             const rawValue = results[0]?.rawValue;
-                            if (rawValue && handleProductScanRef.current(rawValue, 'camera')) return;
+                            if (rawValue && await handleProductScanRef.current(rawValue, 'camera')) return;
                         }
                     } catch (err) {
                         console.error('Camera scan failed:', err);
@@ -683,7 +810,7 @@ export default function POSPage() {
 
     const addRepairToCart = (repair: RepairTicketInfo) => {
         // Prevent adding if already in cart
-        if (cart.some(c => c.productId === repair.id)) {
+        if (cart.some(c => c.repairTicketId === repair.id)) {
             toastError('Phiếu sửa chữa đã có trong hóa đơn!');
             return;
         }
@@ -700,12 +827,14 @@ export default function POSPage() {
             if (part.status === 'selected') {
                 usedPartsCount++;
                 newItems.push({
+                    cartItemId: `${repair.id}_part_${index}`,
                     productId: `${repair.id}_part_${index}`,
                     name: `[LK Sửa] ${part.productName}`,
                     originalPrice: part.unitPriceAtUse || 0,
                     sellingPrice: part.unitPriceAtUse || 0,
                     costPrice: 0,
                     quantity: part.quantity || 1,
+                    repairTicketId: repair.id,
                     isRepairTicket: true
                 });
             }
@@ -718,12 +847,14 @@ export default function POSPage() {
         if (laborCost > 0 || (usedPartsCount === 0 && repair.paymentAmount > 0)) {
             const finalLaborCost = laborCost > 0 ? laborCost : repair.paymentAmount;
             newItems.push({
+                cartItemId: `${repair.id}_labor`,
                 productId: `${repair.id}_labor`,
                 name: `[Công SC] ${repair.deviceModel}`,
                 originalPrice: finalLaborCost,
                 sellingPrice: finalLaborCost,
                 costPrice: 0,
                 quantity: 1,
+                repairTicketId: repair.id,
                 isRepairTicket: true
             });
         }
@@ -734,6 +865,7 @@ export default function POSPage() {
                 const cartGiftId = `gift_${repair.id}_${giftId}`;
                 if (!cart.some(c => c.productId === cartGiftId)) {
                     newItems.push({
+                        cartItemId: cartGiftId,
                         productId: cartGiftId,
                         name: `[Quà tặng] Mã SP: ${giftId}`,
                         originalPrice: 0,
@@ -749,13 +881,39 @@ export default function POSPage() {
         setCart(prev => [...newItems, ...prev]);
     };
 
-    const updateQuantity = (productId: string, delta: number) => {
+    const addPayableOrderToCart = (order: PayableOrderInfo) => {
+        if (cart.some(c => c.orderPaymentId === order.id)) {
+            toastError('Hóa đơn này đã có trong giỏ POS!');
+            return;
+        }
+
+        const remainingAmount = Math.max(0, Number(order.remainingAmount) || 0);
+        if (remainingAmount <= 0) {
+            toastError('Hóa đơn này không còn số tiền cần thanh toán.');
+            return;
+        }
+
+        setCart(prev => [{
+            cartItemId: `order_payment_${order.id}`,
+            productId: `order_payment_${order.id}`,
+            orderPaymentId: order.id,
+            name: `[Thu nợ ĐH] #${order.id.slice(-6)}`,
+            originalPrice: remainingAmount,
+            sellingPrice: remainingAmount,
+            costPrice: 0,
+            quantity: 1,
+            isOrderPayment: true,
+        }, ...prev]);
+    };
+
+    const updateQuantity = (cartItemId: string, delta: number) => {
         setCart(prev =>
             prev.map(c => {
-                if (c.productId !== productId) return c;
+                if (c.cartItemId !== cartItemId) return c;
+                if (c.isRepairTicket || c.isOrderPayment) return c;
                 const newQty = Math.max(1, c.quantity + delta);
                 // Validate against stock
-                const product = products.find(p => p.id === productId);
+                const product = products.find(p => p.id === c.productId);
                 const maxAvailable = (product?.stock || 0) - (product?.held || 0);
                 if (newQty > maxAvailable) {
                     toastError(`Khả dụng chỉ còn ${maxAvailable}.`);
@@ -766,32 +924,38 @@ export default function POSPage() {
         );
     };
 
-    const updatePrice = (productId: string, newPrice: number) => {
-        const item = cart.find(c => c.productId === productId);
+    const updatePrice = (cartItemId: string, newPrice: number) => {
+        const item = cart.find(c => c.cartItemId === cartItemId);
+        if (item?.isRepairTicket || item?.isOrderPayment) return;
         if (item && (item.costPrice || 0) > 0 && newPrice < (item.costPrice || 0) && newPrice > 0) {
             if (!confirm(`Giá bán (${newPrice.toLocaleString('vi-VN')}đ) thấp hơn giá vốn (${(item.costPrice || 0).toLocaleString('vi-VN')}đ). Bạn sẽ lỗ ${((item.costPrice || 0) - newPrice).toLocaleString('vi-VN')}đ/sp. Tiếp tục?`)) {
                 return;
             }
         }
         setCart(prev =>
-            prev.map(c => c.productId === productId ? { ...c, sellingPrice: newPrice } : c)
+            prev.map(c => c.cartItemId === cartItemId ? { ...c, sellingPrice: newPrice } : c)
         );
     };
 
-    const removeFromCart = (productId: string) => {
-        setCart(prev => prev.filter(c => c.productId !== productId));
+    const removeFromCart = (cartItemId: string) => {
+        setCart(prev => prev.filter(c => c.cartItemId !== cartItemId));
     };
 
     const subtotal = cart.reduce((sum, c) => sum + c.sellingPrice * c.quantity, 0);
+    const orderPaymentSubtotal = cart
+        .filter(c => c.isOrderPayment)
+        .reduce((sum, c) => sum + c.sellingPrice * c.quantity, 0);
+    const discountableSubtotal = Math.max(0, subtotal - orderPaymentSubtotal);
+    const effectiveDiscount = Math.min(discount, discountableSubtotal);
 
     // Calculate voucher discount automatically based on subtotal
     const voucherDiscountAmount = appliedVoucher ? (
         appliedVoucher.type === 'fixed'
-            ? Math.min(appliedVoucher.value, subtotal)
-            : Math.min(Math.round(subtotal * appliedVoucher.value / 100), appliedVoucher.maxDiscount || Infinity)
+            ? Math.min(appliedVoucher.value, Math.max(0, discountableSubtotal - effectiveDiscount))
+            : Math.min(Math.round(discountableSubtotal * appliedVoucher.value / 100), appliedVoucher.maxDiscount || Infinity, Math.max(0, discountableSubtotal - effectiveDiscount))
     ) : 0;
 
-    const total = Math.max(0, subtotal - discount - voucherDiscountAmount + (shippingFee || 0));
+    const total = Math.max(0, subtotal - effectiveDiscount - voucherDiscountAmount + (shippingFee || 0));
 
     const formatPrice = (n: number) => n.toLocaleString('vi-VN') + 'đ';
 
@@ -805,7 +969,7 @@ export default function POSPage() {
             const res = await fetch('/api/vouchers/validate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ code: voucherCode.trim(), subtotal, phone: customerPhone }),
+                body: JSON.stringify({ code: voucherCode.trim(), subtotal: discountableSubtotal, phone: customerPhone }),
             });
             const data = await res.json();
             if (data.valid) {
@@ -856,10 +1020,31 @@ export default function POSPage() {
                 }
             }
 
+            const hasRepairPayment = cart.some(item => item.isRepairTicket);
+            if (hasRepairPayment && !['cash', 'bank', 'momo'].includes(paymentMethod)) {
+                toastError('Thanh toán phiếu sửa chữa phải thu ngay bằng tiền mặt, chuyển khoản hoặc ví.');
+                setIsProcessing(false);
+                return;
+            }
+            if (hasRepairPayment && deposit + 1 < total) {
+                toastError(`Thanh toán phiếu sửa chữa còn thiếu ${(total - deposit).toLocaleString('vi-VN')}đ. Vui lòng thu đủ trước khi hoàn tất.`);
+                setIsProcessing(false);
+                return;
+            }
+            if (hasRepairPayment && deposit - total > 1) {
+                toastError(`Số tiền thu vượt tổng cần thanh toán ${total.toLocaleString('vi-VN')}đ.`);
+                setIsProcessing(false);
+                return;
+            }
+
             const operationKey = crypto.randomUUID();
 
-            const repairItems = cart.filter(c => c.isRepairTicket);
-            const repairTicketIds = repairItems.map(item => item.productId);
+            const repairTicketIds = Array.from(new Set(
+                cart
+                    .filter(c => c.isRepairTicket)
+                    .map(item => item.repairTicketId || item.productId)
+                    .filter(Boolean)
+            ));
 
             const orderData = {
                 idempotencyKey: operationKey,
@@ -874,10 +1059,14 @@ export default function POSPage() {
                     quantity: c.quantity,
                     price: c.sellingPrice,
                     isRepairTicket: c.isRepairTicket,
-                    imeis: c.imeis
+                    repairTicketId: c.repairTicketId,
+                    isOrderPayment: c.isOrderPayment,
+                    orderPaymentId: c.orderPaymentId,
+                    imeis: c.imeis,
+                    lotCode: c.lotCode
                 })),
                 total_amount: total,
-                discount_amount: discount + voucherDiscountAmount,
+                discount_amount: effectiveDiscount + voucherDiscountAmount,
                 subtotal_amount: subtotal,
                 shipping_fee: shippingFee,
                 deposit_amount: deposit,
@@ -902,8 +1091,21 @@ export default function POSPage() {
                 throw new Error(data.error || 'Lỗi khi thanh toán qua API');
             }
 
-            setLastOrder({ id: data.orderId, ...orderData, createdAt: new Date() });
-            setShowReceipt(true);
+            if (data.warnings && data.warnings.length > 0) {
+                for (const warning of data.warnings) {
+                    toastWarning(warning);
+                }
+            }
+
+            if (data.debtOnly) {
+                setLastOrder(null);
+                setShowReceipt(false);
+                toastSuccess('Thu nợ thành công, đã cập nhật lịch sử thanh toán trên đơn cũ!');
+            } else {
+                setLastOrder({ id: data.orderId, ...orderData, createdAt: new Date() });
+                toastSuccess('Thanh toán thành công!');
+                setShowReceipt(true);
+            }
 
             // Reset cart
             setCart([]);
@@ -934,9 +1136,7 @@ export default function POSPage() {
     // Reload products after adding new one
     const reloadProducts = async () => {
         try {
-            const snap = await getDocs(collection(db, 'products'));
-            const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as Product & { id: string }));
-            setProducts(filterPosProducts(data));
+            await loadDefaultProducts();
         } catch (err) {
             console.error(err);
         }
@@ -951,315 +1151,49 @@ export default function POSPage() {
     );
 
     const cartSection = (
-        <>
-            {/* Cart Header */}
-            <div className="px-4 py-3 border-b flex items-center gap-2">
-                <ShoppingCart size={20} className="text-orange-500" />
-                <h2 className="font-bold text-gray-800">Giỏ hàng</h2>
-                <span className="ml-auto bg-orange-100 text-orange-600 text-xs font-bold px-2 py-0.5 rounded-full">
-                    {cart.reduce((s, c) => s + c.quantity, 0)} SP
-                </span>
-                {/* Close button for mobile */}
-                <button
-                    onClick={() => setShowMobileCart(false)}
-                    className="md:hidden p-1 text-gray-400 hover:text-gray-600"
-                    aria-label="Đóng giỏ hàng"
-                    title="Đóng giỏ hàng"
-                >
-                    <X size={20} />
-                </button>
-            </div>
-
-            {/* Cart Items */}
-            <div className="flex-1 overflow-y-auto px-4 py-2 space-y-2">
-                {cart.length === 0 && (
-                    <div className="text-center py-12 text-gray-300">
-                        <ShoppingCart size={36} className="mx-auto mb-2 opacity-40" />
-                        <p className="text-sm">Chưa có sản phẩm</p>
-                    </div>
-                )}
-                {cart.map(item => {
-                    const product = products.find(p => p.id === item.productId);
-                    return (
-                        <div key={item.productId} className="bg-gray-50 rounded-xl p-3 space-y-2">
-                            <div className="flex items-start gap-2">
-                                {/* Product image in cart */}
-                                <div className="w-12 h-12 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0 flex items-center justify-center">
-                                    {product?.images?.[0] ? (
-                                        <Image src={product.images[0]} alt="" width={48} height={48} className="w-full h-full object-cover" />
-                                    ) : (
-                                        <Package className="text-gray-300" size={18} />
-                                    )}
-                                </div>
-                                <p className="flex-1 text-sm font-medium text-gray-800 line-clamp-2">{item.name}</p>
-                                <button
-                                    onClick={() => removeFromCart(item.productId)}
-                                    className="text-red-400 hover:text-red-600 p-0.5"
-                                    aria-label="Xóa khỏi giỏ"
-                                    title="Xóa khỏi giỏ"
-                                >
-                                    <Trash2 size={14} />
-                                </button>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <div className="flex items-center gap-1 bg-white rounded-lg border">
-                                    <button
-                                        onClick={() => updateQuantity(item.productId, -1)}
-                                        className="p-1 hover:bg-gray-100 rounded-l-lg disabled:opacity-50 disabled:cursor-not-allowed"
-                                        aria-label="Giảm số lượng"
-                                        title="Giảm số lượng"
-                                        disabled={item.isRepairTicket}
-                                    >
-                                        <Minus size={14} />
-                                    </button>
-                                    <span className="px-2 text-sm font-bold min-w-[24px] text-center">{item.quantity}</span>
-                                    <button
-                                        onClick={() => updateQuantity(item.productId, 1)}
-                                        className="p-1 hover:bg-gray-100 rounded-r-lg disabled:opacity-50 disabled:cursor-not-allowed"
-                                        aria-label="Tăng số lượng"
-                                        title="Tăng số lượng"
-                                        disabled={item.isRepairTicket}
-                                    >
-                                        <Plus size={14} />
-                                    </button>
-                                </div>
-                                <div className="flex-1 relative">
-                                    <Tag size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" />
-                                    <CurrencyInput value={item.sellingPrice}
-                                        onChange={v => updatePrice(item.productId, v)}
-                                        disabled={item.isRepairTicket}
-                                        className={`w-full pl-7 pr-2 py-1 text-sm border rounded-lg text-right font-semibold ${item.sellingPrice !== item.originalPrice ? 'border-orange-300 text-orange-600 bg-orange-50' : ''} ${item.isRepairTicket ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`}
-                                    />
-                                </div>
-                                <span className="text-sm font-bold text-gray-700 whitespace-nowrap min-w-[70px] text-right">
-                                    {formatPrice(item.sellingPrice * item.quantity)}
-                                </span>
-                            </div>
-                            {item.warrantyType === 'warrantyDevice' && (
-                                <div className="mt-2 space-y-2 border-t pt-2 border-gray-100">
-                                    <p className="text-xs font-semibold text-gray-600">Bắt buộc nhập IMEI / Serial ({item.quantity})</p>
-                                    {Array.from({ length: item.quantity }).map((_, idx) => (
-                                        <div key={idx} className="relative">
-                                            <input
-                                                type="text"
-                                                placeholder={`Nhập IMEI/Serial #${idx + 1}`}
-                                                value={item.imeis?.[idx] || ''}
-                                                onChange={(e) => {
-                                                    const val = e.target.value;
-                                                    setCart(prev => prev.map(c => {
-                                                        if (c.productId !== item.productId) return c;
-                                                        const newImeis = [...(c.imeis || [])];
-                                                        newImeis[idx] = val;
-                                                        return { ...c, imeis: newImeis };
-                                                    }));
-                                                }}
-                                                className="w-full text-xs py-1.5 pl-2 pr-8 border rounded focus:ring-1 focus:ring-orange-500/20 uppercase"
-                                            />
-                                            {(item.imeis?.[idx]?.length || 0) < 5 && (
-                                                <AlertTriangle size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-orange-400" />
-                                            )}
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                    );
-                })}
-            </div>
-
-            {/* Customer + Payment + Total */}
-            <div className="border-t px-4 py-3 space-y-3">
-                <div className="grid grid-cols-2 gap-2">
-                    <div className="relative">
-                        <User size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                        <input type="text" placeholder="Tên KH" value={customerName}
-                            onChange={e => setCustomerName(e.target.value)}
-                            className="w-full pl-8 pr-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-orange-500/20" />
-                    </div>
-                    <div className="relative">
-                        <Phone size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                        <input type="text" placeholder="SĐT" value={customerPhone}
-                            onChange={e => setCustomerPhone(e.target.value)}
-                            onBlur={() => lookupRepairByPhone(customerPhone)}
-                            className="w-full pl-8 pr-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-orange-500/20" />
-                    </div>
-                </div>
-                {customerDebt > 0 && (
-                    <div className="bg-red-50 border border-red-200 text-red-600 rounded-lg p-2 text-xs flex items-center justify-between">
-                        <span className="font-semibold flex items-center gap-1.5">
-                            <AlertTriangle size={14} /> Khách đang nợ: {formatPrice(customerDebt)}
-                        </span>
-                    </div>
-                )}
-                {/* Repair ticket link */}
-                {repairLoading && <p className="text-xs text-gray-400 animate-pulse">Đang tra cứu phiếu sửa...</p>}
-                {linkedRepairs.length > 0 && (
-                    <div className="space-y-2">
-                        {linkedRepairs.map(repair => (
-                            <div key={repair.id} className="bg-blue-50 rounded-lg p-2.5 text-xs space-y-1 border border-blue-100">
-                                <div className="flex items-center gap-1.5 font-semibold text-blue-700">
-                                    <Wrench size={13} /> Phiếu sửa #{repair.id.slice(-6)}
-                                </div>
-                                <p className="text-blue-600">Máy: {repair.deviceModel} — {repair.status}</p>
-                                {repair.parts.length > 0 && (
-                                    <p className="text-blue-500">LK: {repair.parts.map(part => part.productName).join(', ')}</p>
-                                )}
-                                {repair.paymentAmount > 0 && (
-                                    <div className="mt-2 pt-2 border-t border-blue-200 flex items-center justify-between gap-2">
-                                        <span className="font-semibold text-blue-800">
-                                            Chi phí sửa chữa: {formatPrice(repair.paymentAmount)}
-                                        </span>
-                                        {(repair.paymentStatus === 'paid' || repair.paymentStatus === 'refunded') ? (
-                                            <span className="text-green-600 font-bold bg-green-100 px-2 py-1 rounded-md whitespace-nowrap">
-                                                Đã thanh toán
-                                            </span>
-                                        ) : (
-                                            <button
-                                                type="button"
-                                                onClick={() => addRepairToCart(repair)}
-                                                className="py-1 px-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors whitespace-nowrap"
-                                            >
-                                                Thêm vào HĐ
-                                            </button>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-                        ))}
-
-                        {discountDetails.length > 0 && (
-                            <div className="bg-green-50 rounded-lg p-2.5 text-xs border border-green-200">
-                                <p className="font-semibold text-green-700">🎁 Giảm PK tự động:</p>
-                                {discountDetails.map((detail, index) => (
-                                    <p key={`${detail.productName}-${index}`} className="text-green-600">
-                                        {detail.productName}: -{detail.discountAmount.toLocaleString('vi-VN')}đ ({detail.ruleName})
-                                    </p>
-                                ))}
-                                <button
-                                    type="button"
-                                    onClick={() => setDiscount(prev => prev + autoDiscountAmount)}
-                                    className="mt-1 w-full py-1.5 bg-green-600 text-white rounded-lg text-xs font-semibold hover:bg-green-700 transition-colors"
-                                >
-                                    Áp dụng giảm {autoDiscountAmount.toLocaleString('vi-VN')}đ
-                                </button>
-                            </div>
-                        )}
-                    </div>
-                )}
-                <div className="flex gap-1.5">
-                    {paymentMethods.map(method => (
-                        <button key={method.key} onClick={() => setPaymentMethod(method.key)}
-                            className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium transition-all ${paymentMethod === method.key
-                                ? 'bg-orange-500 text-white shadow-md shadow-orange-200'
-                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
-                            <method.icon size={14} />
-                            {method.label}
-                        </button>
-                    ))}
-                </div>
-                <div className="flex items-center gap-2 text-sm">
-                    <span className="text-gray-500">Giảm giá:</span>
-                    <CurrencyInput value={discount || ''} onChange={value => setDiscount(value)}
-                        placeholder="0" className="flex-1 px-3 py-1.5 border rounded-lg text-right text-sm" />
-                </div>
-
-                <div className="space-y-1">
-                    <div className="flex items-center gap-2 text-sm">
-                        <span className="text-gray-500">Voucher:</span>
-                        <div className="flex-1 relative flex gap-1">
-                            <input
-                                type="text"
-                                placeholder="Nhập mã giảm giá"
-                                value={voucherCode}
-                                onChange={event => setVoucherCode(event.target.value.toUpperCase())}
-                                className="w-full px-3 py-1.5 border rounded-lg text-sm uppercase"
-                            />
-                            <button
-                                onClick={handleApplyVoucher}
-                                className="px-3 py-1.5 bg-blue-50 text-blue-600 font-semibold rounded-lg hover:bg-blue-100 text-sm whitespace-nowrap"
-                            >
-                                Áp dụng
-                            </button>
-                        </div>
-                    </div>
-                    {voucherStatus && (
-                        <div className={`text-xs text-right pr-1 ${voucherStatus.type === 'success' ? 'text-green-600' : 'text-red-500'}`}>
-                            {voucherStatus.message}
-                            {appliedVoucher && (
-                                <button
-                                    onClick={() => { setAppliedVoucher(null); setVoucherCode(''); setVoucherStatus(null); }}
-                                    className="ml-2 text-red-500 underline"
-                                >
-                                    Bỏ
-                                </button>
-                            )}
-                        </div>
-                    )}
-                </div>
-                <div className="flex items-center gap-2 text-sm">
-                    <span className="text-gray-500">Khách trả / Cọc:</span>
-                    <CurrencyInput value={deposit || ''} onChange={value => setDeposit(value)}
-                        placeholder="0" className="flex-1 px-3 py-1.5 border rounded-lg text-right text-sm" />
-                </div>
-                {customerDebt > 0 && deposit > total && (
-                    <div className="flex items-start gap-2 bg-blue-50 p-2 rounded-lg mt-2 border border-blue-200">
-                        <input
-                            type="checkbox"
-                            id="useSurplusDebt"
-                            className="mt-0.5 w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
-                            checked={useSurplusToPayDebt}
-                            onChange={(e) => setUseSurplusToPayDebt(e.target.checked)}
-                        />
-                        <label htmlFor="useSurplusDebt" className="text-xs text-blue-800 flex-1 cursor-pointer leading-tight">
-                            <b>Khách có nợ cũ: {formatPrice(customerDebt)}</b><br/>
-                            Dùng số tiền thừa <b>{formatPrice(deposit - total)}</b> để cấn trừ nợ
-                        </label>
-                    </div>
-                )}
-                <div className="space-y-1 text-sm">
-                    <div className="flex justify-between text-gray-500">
-                        <span>Tạm tính ({cart.reduce((sum, item) => sum + item.quantity, 0)} SP)</span>
-                        <span>{formatPrice(subtotal)}</span>
-                    </div>
-                    {discount > 0 && (
-                        <div className="flex justify-between text-green-600">
-                            <span>Giảm giá NV</span>
-                            <span>-{formatPrice(discount)}</span>
-                        </div>
-                    )}
-                    {voucherDiscountAmount > 0 && (
-                        <div className="flex justify-between text-blue-600 font-medium">
-                            <span>Voucher giảm giá</span>
-                            <span>-{formatPrice(voucherDiscountAmount)}</span>
-                        </div>
-                    )}
-                    <div className="flex justify-between font-bold text-lg text-orange-600 pt-1 border-t">
-                        <span>TỔNG</span>
-                        <span>{formatPrice(total)}</span>
-                    </div>
-                    {deposit > 0 && (
-                        <div className="flex justify-between text-blue-600 pt-1">
-                            <span>Đã cọc</span>
-                            <span>{formatPrice(deposit)}</span>
-                        </div>
-                    )}
-                    {deposit > 0 && (
-                        <div className="flex justify-between font-bold text-red-600 pt-1">
-                            <span>CÒN LẠI</span>
-                            <span>{formatPrice(Math.max(0, total - deposit))}</span>
-                        </div>
-                    )}
-                </div>
-                <button onClick={handleCheckout} disabled={cart.length === 0 || isProcessing}
-                    className="w-full py-3 rounded-xl font-bold text-white bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-orange-200/50 transition-all active:scale-[0.98]">
-                    {isProcessing ? (
-                        <><Loader2 className="animate-spin" size={18} /> Đang xử lý...</>
-                    ) : (
-                        <><Receipt size={18} /> Thanh toán & Xuất hóa đơn</>
-                    )}
-                </button>
-            </div>
-        </>
+        <PosCartPanel
+            cart={cart}
+            setCart={setCart}
+            products={products}
+            customerName={customerName}
+            setCustomerName={setCustomerName}
+            customerPhone={customerPhone}
+            setCustomerPhone={setCustomerPhone}
+            customerDebt={customerDebt}
+            repairLoading={repairLoading}
+            linkedRepairs={linkedRepairs}
+            payableOrders={payableOrders}
+            discountDetails={discountDetails}
+            autoDiscountAmount={autoDiscountAmount}
+            setDiscount={setDiscount}
+            paymentMethod={paymentMethod}
+            setPaymentMethod={setPaymentMethod}
+            discount={effectiveDiscount}
+            voucherCode={voucherCode}
+            setVoucherCode={setVoucherCode}
+            voucherStatus={voucherStatus}
+            appliedVoucher={appliedVoucher}
+            setAppliedVoucher={setAppliedVoucher}
+            setVoucherStatus={setVoucherStatus}
+            voucherDiscountAmount={voucherDiscountAmount}
+            deposit={deposit}
+            setDeposit={setDeposit}
+            useSurplusToPayDebt={useSurplusToPayDebt}
+            setUseSurplusToPayDebt={setUseSurplusToPayDebt}
+            subtotal={subtotal}
+            total={total}
+            isProcessing={isProcessing}
+            onCloseMobileCart={() => setShowMobileCart(false)}
+            onLookupRepairByPhone={lookupRepairByPhone}
+            onAddRepairToCart={addRepairToCart}
+            onAddPayableOrderToCart={addPayableOrderToCart}
+            onApplyVoucher={handleApplyVoucher}
+            onUpdateQuantity={updateQuantity}
+            onUpdatePrice={updatePrice}
+            onRemoveFromCart={removeFromCart}
+            onCheckout={handleCheckout}
+            formatPrice={formatPrice}
+        />
     );
 
     return (
@@ -1406,9 +1340,9 @@ export default function POSPage() {
 
                     <form
                         className="flex flex-col gap-2 sm:flex-row"
-                        onSubmit={(e) => {
+                        onSubmit={async (e) => {
                             e.preventDefault();
-                            if (handleProductScan(manualScanCode, 'manual')) setManualScanCode('');
+                            if (await handleProductScan(manualScanCode, 'manual')) setManualScanCode('');
                         }}
                     >
                         <div className="relative flex-1">
@@ -1495,7 +1429,7 @@ export default function POSPage() {
                                         <tbody>
                                             {lastOrder.items.map((item: OrderLineItem, i: number) => (
                                                 <tr key={i} className="border-b border-dashed">
-                                                    <td className="py-1 max-w-[100px] truncate">{item.product_name}</td>
+                                                    <td className="py-1 max-w-[100px] truncate">{getOrderLineDisplayName(item)}</td>
                                                     <td className="text-center">{item.quantity}</td>
                                                     <td className="text-right">{(item.price / 1000).toFixed(0)}k</td>
                                                     <td className="text-right font-medium">{((item.price * item.quantity) / 1000).toFixed(0)}k</td>
@@ -1540,9 +1474,12 @@ export default function POSPage() {
                                                     <div className="flex flex-wrap justify-center gap-2">
                                                         {defaultAccs.map((acc, idx) => (
                                                             <div key={idx} className="flex flex-col items-center">
-                                                                <img
+                                                                <Image
                                                                     src={`https://img.vietqr.io/image/${acc.bankId}-${acc.accountNo}-compact2.png?amount=${Math.max(0, lastOrder.total_amount - lastOrder.deposit_amount)}&addInfo=${lastOrder.id.slice(-6)}&accountName=${encodeURIComponent(acc.accountName || '')}`}
                                                                     alt="VietQR"
+                                                                    width={128}
+                                                                    height={128}
+                                                                    unoptimized
                                                                     className="w-32 h-32 object-contain mx-auto"
                                                                 />
                                                                 <span className="text-[9px] mt-1 text-gray-600">{acc.bankId}</span>
@@ -1657,7 +1594,7 @@ export default function POSPage() {
                                                     ${lastOrder.items.map((item: OrderLineItem, i: number) => `
                                                     <tr>
                                                         <td class="text-center">${i + 1}</td>
-                                                        <td>${item.product_name}</td>
+                                                        <td>${escapeReceiptHtml(getOrderLineDisplayName(item))}</td>
                                                         <td class="text-center">${item.quantity}</td>
                                                         <td class="text-right">${item.price.toLocaleString('vi-VN')}</td>
                                                         <td class="text-right">${(item.price * item.quantity).toLocaleString('vi-VN')}</td>
@@ -1681,16 +1618,16 @@ export default function POSPage() {
                                             <div class="signatures" style="display: flex; justify-content: space-between; margin-top: 30px;">
                                                 <div style="flex: 1; text-align: center;">
                                                     ${lastOrder.payment_method === 'BANK' && bankConfig ? (() => {
-                                                        const defaultAccs: BankAccountConfig[] = bankConfig.accounts?.filter((account) => account.isDefault) || [];
-                                                        if (defaultAccs.length === 0 && bankConfig.bankId && bankConfig.accountNo) {
-                                                            defaultAccs.push({
-                                                                bankId: bankConfig.bankId,
-                                                                accountNo: bankConfig.accountNo,
-                                                                accountName: bankConfig.accountName || '',
-                                                            });
-                                                        }
-                                                        if (defaultAccs.length === 0) return '';
-                                                        return `
+                                            const defaultAccs: BankAccountConfig[] = bankConfig.accounts?.filter((account) => account.isDefault) || [];
+                                            if (defaultAccs.length === 0 && bankConfig.bankId && bankConfig.accountNo) {
+                                                defaultAccs.push({
+                                                    bankId: bankConfig.bankId,
+                                                    accountNo: bankConfig.accountNo,
+                                                    accountName: bankConfig.accountName || '',
+                                                });
+                                            }
+                                            if (defaultAccs.length === 0) return '';
+                                            return `
                                                             <p style="font-weight: bold; margin-bottom: 5px;">QUÉT MÃ CHUYỂN KHOẢN</p>
                                                             <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
                                                                 ${defaultAccs.map((acc) => `
@@ -1701,7 +1638,7 @@ export default function POSPage() {
                                                                 `).join('')}
                                                             </div>
                                                         `;
-                                                    })() : ''}
+                                        })() : ''}
                                                 </div>
                                                 <div style="flex: 1; text-align: center;">
                                                     <p class="title" style="margin: 0 0 70px 0; font-weight: bold;">Khách hàng</p>
@@ -1746,7 +1683,7 @@ export default function POSPage() {
                         <tbody>
                             {lastOrder.items.map((item: OrderLineItem, i: number) => (
                                 <tr key={i}>
-                                    <td>{item.product_name}</td>
+                                    <td>{getOrderLineDisplayName(item)}</td>
                                     <td className="text-center">x{item.quantity}</td>
                                     <td className="text-right">{formatPrice(item.price * item.quantity)}</td>
                                 </tr>

@@ -17,12 +17,28 @@ interface RepairTransitionRequest {
     source?: 'repairs' | 'technician';
 }
 
+function normalizeRepairNote(value: string) {
+    return value
+        .trim()
+        .replace(/^\[\d{1,2}\/\d{1,2}\/\d{4}\]:\s*/, '')
+        .replace(/\s+/g, ' ');
+}
+
+function hasExistingRepairNote(existingNotes: string | undefined, note: string) {
+    const normalizedNote = normalizeRepairNote(note);
+    if (!normalizedNote) return true;
+    return (existingNotes || '')
+        .split(/\r?\n/)
+        .some(line => normalizeRepairNote(line) === normalizedNote);
+}
+
 export async function POST(request: NextRequest) {
     try {
         const caller = await requirePermission(request, 'manage_repairs');
-        
+
         const body = await request.json() as RepairTransitionRequest;
         const { ticketId, targetStatus, technicianNote, ticketVersion, idempotencyKey, source } = body;
+        const technicianNoteText = technicianNote?.trim() || '';
 
         if (!ticketId || !targetStatus) {
             return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
@@ -47,7 +63,7 @@ export async function POST(request: NextRequest) {
 
             const ticketRef = db.collection('repairs').doc(ticketId);
             const ticketSnap = await tx.get(ticketRef);
-            
+
             if (!ticketSnap.exists) {
                 throw new Error('Phiếu sửa chữa không tồn tại.');
             }
@@ -91,7 +107,7 @@ export async function POST(request: NextRequest) {
             }
 
             // Tech note gate based on CURRENT node feature
-            if (requireTechnicianNote && !technicianNote?.trim() && !ticket.issue?.notes?.trim()) {
+            if (requireTechnicianNote && !technicianNoteText && !ticket.issue?.notes?.trim()) {
                 throw new Error('Vui lòng nhập ghi chú kỹ thuật (kết quả kiểm tra) trước khi chuyển trạng thái.');
             }
 
@@ -119,7 +135,7 @@ export async function POST(request: NextRequest) {
                 if (!isAssignedKTV && !isManager) {
                     throw new Error('Chỉ KTV được phân công hoặc Quản lý mới có thể chuyển trạng thái phiếu này.');
                 }
-                if (!isAssignedKTV && isManager && !technicianNote?.trim()) {
+                if (!isAssignedKTV && isManager && !technicianNoteText) {
                     throw new Error('Quản lý ghi đè trạng thái (Manager Override) yêu cầu phải nhập lý do vào Ghi chú kỹ thuật.');
                 }
             }
@@ -163,9 +179,9 @@ export async function POST(request: NextRequest) {
                     fromStatus: ticket.status,
                     toStatus: targetStatus,
                     source: source === 'repairs' ? 'repairs' : 'technician',
-                    reason: technicianNote?.trim() || null,
+                    reason: technicianNoteText || null,
                     requestId: idempotencyKey || null,
-                    note: technicianNote || null,
+                    note: technicianNoteText || null,
                     isOverride
                 }),
                 durationInMinutes: newDuration,
@@ -174,14 +190,16 @@ export async function POST(request: NextRequest) {
             };
 
             // Lưu ghi chú
-            if (technicianNote?.trim()) {
+            if (technicianNoteText) {
                 const currentIssue = ticket.issue || {};
-                updateData.issue = {
-                    ...currentIssue,
-                    notes: currentIssue.notes 
-                        ? `${currentIssue.notes}\n[${new Date().toLocaleDateString('vi-VN')}]: ${technicianNote}` 
-                        : technicianNote
-                };
+                if (!hasExistingRepairNote(currentIssue.notes, technicianNoteText)) {
+                    updateData.issue = {
+                        ...currentIssue,
+                        notes: currentIssue.notes
+                            ? `${currentIssue.notes}\n[${new Date().toLocaleDateString('vi-VN')}]: ${technicianNoteText}`
+                            : technicianNoteText
+                    };
+                }
             }
 
             tx.update(ticketRef, updateData);

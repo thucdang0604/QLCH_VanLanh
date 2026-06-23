@@ -38,7 +38,14 @@ export function hasRepairPartStatus(part: { status?: string }, ...targets: Repai
 }
 
 export function isPendingRepairPart(part: { status?: string }) {
-    return hasRepairPartStatus(part, REPAIR_PART_STATUS.REQUESTED, REPAIR_PART_STATUS.ORDERED);
+    return hasRepairPartStatus(
+        part,
+        REPAIR_PART_STATUS.REQUESTED,
+        REPAIR_PART_STATUS.APPROVED,
+        REPAIR_PART_STATUS.ORDERED,
+        REPAIR_PART_STATUS.IN_STOCK,
+        REPAIR_PART_STATUS.UNAVAILABLE,
+    );
 }
 
 export function isSelectedRepairPart(part: { status?: string }) {

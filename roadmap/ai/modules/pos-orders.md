@@ -33,33 +33,38 @@
 ```mermaid
 graph TD
             subgraph POS [Bán Hàng Tại Quầy - POS]
-            P0("🔐 Kiểm tra Quyền (RBAC)") --> P1("🛒 Khởi tạo Giỏ Hàng")
-            P1 --> P2("Quét Mã Vạch / Tìm SP")
+            P0("🔐 Kiểm tra Quyền (RBAC)") --> P1("🛒 Khởi tạo Đơn / Giỏ hàng")
+            P1 --> P_SRC{"Nguồn dữ liệu?"}
+            P_SRC -->|"Sản phẩm lẻ"| P2("Quét Mã Vạch / Tìm SP")
+            P_SRC -->|"Từ Sửa Chữa"| P_REP("🔗 Import Phiếu Sửa Chữa (Kèm LK, Công)")
+            P_REP --> P3("Chỉnh sửa số lượng / Xóa")
             P2 --> P2_1{"Kiểm tra tồn kho?"}
             P2_1 -->|"Hết hàng"| P2_2("🚨 Cảnh báo âm kho")
-            P2_1 -->|"Còn hàng"| P3("Chỉnh sửa số lượng / Xóa")
+            P2_1 -->|"Còn hàng"| P3
             P3 -.->|Đã vá| BUG_POS_007["✅ ĐÃ VÁ: Bán dưới giá vốn"]
             P3 --> P4{"Khách hàng?"}
-            P4 -->|"Khách vãng lai"| P5("Tính tiền trực tiếp")
+            P4 -->|"Khách vãng lai"| P5("Tính toán Tổng tiền")
             P4 -->|"Khách thành viên"| P6("Tra cứu SDT / Tạo Mới")
             P6 --> P7("Áp dụng Chiết Khấu / Mã Giảm Giá")
-            P7 -.->|Đã vá| BUG_POS_004["✅ ĐÃ VÁ: Làm tròn số thực"]
-            P7 -.->|Đã vá| BUG_POS_005["✅ ĐÃ VÁ: Cho phép nhập số âm"]
+            P7 --> P7_1("Combo Phụ kiện / VIP Discount")
+            P7_1 -.->|Đã vá| BUG_POS_004["✅ ĐÃ VÁ: Làm tròn số thực"]
+            P7_1 -.->|Đã vá| BUG_POS_005["✅ ĐÃ VÁ: Cho phép nhập số âm"]
             P5 --> P8("💳 Thanh Toán")
-            P7 --> P8
+            P7_1 --> P8
             P8 -.->|Đã vá| BUG_POS_002["✅ ĐÃ VÁ: Race Condition POS"]
             P8 --> P9{"Phương thức?"}
             P9 -->|"Ghi Nợ"| P10("Ghi nhận Công Nợ Khách Hàng")
-            P9 -->|"Tiền mặt"| P11_1("Nhận Tiền Mặt")
-            P9 -->|"Chuyển khoản"| P11_2("Xác nhận CK (QR Code)")
+            P9 -->|"Tiền mặt / CK"| P11("Xác nhận Đã Thu Tiền")
             P10 --> P12("✅ In Hóa Đơn & Hoàn Tất")
-            P11_1 --> P12
-            P11_2 --> P12
+            P11 --> P12
             P12 --> P13("💰 Tính Hoa Hồng (commissionUtils)")
             P13 -.->|Đã vá| BUG_POS_006["✅ ĐÃ VÁ: Gọi tính hoa hồng ngoài Transaction"]
             P13 --> L_POS_STOCK("🔗 Xuất Kho Sản Phẩm (Stock -= N)")
             L_POS_STOCK -.->|Đã vá| BUG_POS_003["✅ ĐÃ VÁ: Held Stock Leak"]
             P13 --> L_POS_FIN("🔗 Ghi nhận Doanh Thu POS (Tài Chính)")
+            P12 --> P_RET{"Trả hàng?"}
+            P_RET -->|"Khách trả lại hàng"| P_REFUND("💸 Hoàn tiền & Nhập lại kho (Stock += N)")
+            P_REFUND --> P_COMM_REV("➖ Giảm trừ Hoa hồng KTV (Tài chính)")
             end
             subgraph ORDERS [Đơn Hàng Trực Tuyến - Orders]
             O1("🌐 Khách Đặt Hàng Web") --> O2("📝 Đơn Chờ Xác Nhận")
@@ -67,13 +72,15 @@ graph TD
             O2 --> O2_1("🛡️ runTransaction (Lock Stock)")
             O2_1 --> L_ORD_HELD1("🔗 Giữ Chỗ Tồn Kho (Tăng Held)")
             O2 --> O3{"Nhân viên gọi điện"}
-            O3 -->|"Hủy Đơn"| O4("❌ Khách Hủy / Spam")
+            O3 -->|"Hủy Đơn / Spam"| O4("❌ Khách Hủy")
+            O3 -->|"Cọc nhưng không lấy"| O4_1("❌ Hủy Cọc")
             O4 --> L_ORD_HELD2("🔗 Giải phóng Tồn Kho (Giảm Held)")
+            O4_1 --> L_ORD_HELD2
             L_ORD_HELD2 -.->|Đã vá| BUG_ORD_002["✅ ĐÃ VÁ: Hủy đơn Completed gây âm held"]
             O3 -->|"Đồng Ý"| O5("📦 Đang Đóng Gói")
             O5 --> O6("🚚 Bàn giao Vận Chuyển")
             O6 --> O7{"Giao hàng"}
-            O7 -->|"Hoàn Hàng"| O8("🔁 Nhận lại Hàng & Trả Kho")
+            O7 -->|"Giao thất bại / Bùng đơn"| O8("🔁 Nhận lại Hàng & Trả Kho")
             O8 --> L_ORD_HELD3("🔗 Giải phóng Tồn Kho (Giảm Held)")
             O7 -->|"Thành Công"| O9("✅ Khách Đã Nhận & Thanh Toán")
             O9 --> O9_1("🛡️ runTransaction (Finalize)")
@@ -88,6 +95,7 @@ graph TD
             click L_ORD_STOCK call handleWorkflowClick("inventory") "Mở"
             click L_POS_FIN call handleWorkflowClick("finance-hr") "Mở"
             click L_ORD_FIN call handleWorkflowClick("finance-hr") "Mở"
+            click P_REP call handleWorkflowClick("repair") "Mở luồng Sửa chữa"
             click BUG_POS_002 call handleBugClick("BUG-POS-002") "Mở chi tiết"
             click BUG_POS_003 call handleBugClick("BUG-POS-003") "Mở chi tiết"
             click BUG_POS_004 call handleBugClick("BUG-POS-004") "Mở chi tiết"
@@ -97,12 +105,13 @@ graph TD
             click BUG_ORD_002 call handleBugClick("BUG-ORD-002") "Mở chi tiết"
             click BUG_ORD_003 call handleBugClick("BUG-ORD-003") "Mở chi tiết"
 ```
+
 # 🐛 Bugs
 ## BUG-POS-003: Held Stock Leak (Rò rỉ tồn kho giữ chân)
 - **Status:** fixed
 - **Severity:** high
 - **Module:** POS
-- **Files:** 
+- **Files:**
 ### Cause
 <b>Phân tích</b>: Line 329-331 trong <code>pos/page.tsx</code> luôn chỉ <code>stock: increment(-qty)</code>, không phân biệt status. Web checkout (<code>api/checkout/route.ts</code>) đã xử lý đúng: <code>stock -= qty AND held += qty</code>.
 ### Solution
@@ -120,7 +129,7 @@ transaction.update(p.ref, {
 - **Status:** fixed
 - **Severity:** high
 - **Module:** POS
-- **Files:** 
+- **Files:**
 ### Cause
 <b>Phân tích</b>: Dùng lệnh đọc và ghi riêng rẽ (Read-Modify-Write không an toàn). Không có khóa (Lock).
 ### Solution
@@ -140,7 +149,7 @@ await runTransaction(db, async (transaction) => {
 - **Status:** fixed
 - **Severity:** high
 - **Module:** POS
-- **Files:** 
+- **Files:**
 ### Cause
 <b>Phân tích</b>: Thiếu hàm làm tròn số nguyên cho các input tiền tệ.
 ### Solution
@@ -153,7 +162,7 @@ setDiscount(Math.round(Number(e.target.value)));
 - **Status:** fixed
 - **Severity:** high
 - **Module:** POS
-- **Files:** 
+- **Files:**
 ### Cause
 <b>Phân tích</b>: Thiếu validation kiểm tra giá trị lớn hơn hoặc bằng 0.
 ### Solution
@@ -166,7 +175,7 @@ if (discount < 0) throw new Error("Giảm giá không được âm!");
 - **Status:** fixed
 - **Severity:** high
 - **Module:** POS
-- **Files:** 
+- **Files:**
 ### Cause
 <b>Phân tích</b>: Commission logic tách rời khỏi transaction nhưng có cơ chế bảo vệ riêng.
 ### Solution
@@ -182,7 +191,7 @@ if (orderStatus !== 'Completed') return; // Skip
 - **Status:** fixed
 - **Severity:** high
 - **Module:** POS
-- **Files:** 
+- **Files:**
 ### Cause
 <b>Phân tích</b>: Thiếu business rule kiểm tra biên lợi nhuận.
 ### Solution
@@ -220,3 +229,43 @@ if (item.sellingPrice < item.costPrice) {
 <b>Phân tích</b>: Firestore Transactions yêu cầu toàn bộ lệnh Read (`tx.get`) phải chạy trước các lệnh Write (`tx.set`/`tx.update`). Trong `pos/checkout`, hệ thống đã thực hiện Write tồn kho (`stock`), sau đó lại gọi Read để lấy dữ liệu User, Customer, RepairTicket và tính hoa hồng, vi phạm rule của Firebase Admin SDK dẫn đến crash lúc checkout POS.
 ### Solution
 <b>Giải pháp đã áp dụng</b>: Refactor lại thứ tự lệnh trong Transaction. Di chuyển toàn bộ các lệnh Read (kéo Customer, User, RepairTicket, và thực hiện tính toán Hoa hồng) lên block trên cùng (Pre-fetch for Transaction Reads), và đưa toàn bộ lệnh Write xuống block cuối (All Writes Start Here).
+
+## BUG-ORD-002: Hủy đơn Completed gây âm held
+- **Status:** fixed
+- **Severity:** high
+- **Module:** POS
+- **Files:**
+### Cause
+<b>Phân tích</b>: Đơn `Completed` đã trừ `stock` và giải phóng `held`. Nếu hủy đơn (chuyển sang `Cancelled`), hệ thống lại gọi giải phóng `held` thêm lần nữa gây âm.
+### Solution
+<b>Giải pháp đã áp dụng</b>: Kiểm tra trạng thái cũ (nếu `Completed` thì trả lại `stock`, không đụng `held`).
+
+## BUG-ORD-003: Thiếu check cộng dồn số lượng
+- **Status:** fixed
+- **Severity:** high
+- **Module:** POS
+- **Files:**
+### Cause
+<b>Phân tích</b>: Khách hàng mua nhiều sản phẩm online nhưng checkout không gộp quantity đúng cách gây trừ hụt kho.
+### Solution
+<b>Giải pháp đã áp dụng</b>: Gộp các item cùng SKU trước khi update.
+
+## BUG-POS-010: Discount Rules của Phụ kiện không hoạt động ở POS
+- **Status:** fixed
+- **Severity:** high
+- **Module:** POS
+- **Files:** `src/lib/discountCalc.ts`, `src/app/admin/pos/page.tsx`
+### Cause
+<b>Phân tích</b>: POS không truyền `category` và `categoryIds` của sản phẩm vào cart item, khiến việc matching rule dựa trên Category bị bỏ qua. Ngoài ra, POS chỉ truyền danh sách linh kiện của phiếu sửa vào calculator trong khi rule mới được tạo theo taxonomy dịch vụ (`triggerServiceCategory`) và từ khóa bệnh/dịch vụ, nên trigger theo dịch vụ không có dữ liệu để khớp.
+### Solution
+<b>Giải pháp đã áp dụng</b>: Sửa `src/lib/discountCalc.ts` để tối ưu hóa matching theo 3 mức ưu tiên (Keywords -> CategoryId Prefix -> Fallback name matching), hỗ trợ cấu trúc phân cấp (e.g. `phu-kien/op-lung` match rule `phu-kien`) và nhận thêm context phiếu sửa (`serviceName`, `categoryPath`, issue category). Cập nhật `src/app/admin/pos/page.tsx` để truy vấn danh mục (`category`, `categoryIds`) từ state `products`, map đúng dữ liệu phiếu sửa mới (`customer`, `deviceInfo`) và đưa service/category context vào calculator.
+
+## BUG-POS-011: Không load được phiếu sửa chữa của khách hàng bằng SĐT tại POS
+- **Status:** fixed
+- **Severity:** high
+- **Module:** POS
+- **Files:** `src/app/admin/pos/page.tsx`
+### Cause
+<b>Phân tích</b>: Firestore query tìm kiếm phiếu sửa chữa trong `repairs` collection sử dụng trường `customerPhone` ở root level thay vì trường lồng `customer.phone`. Ngoài ra, query composite kết hợp lọc theo status và sắp xếp theo `createdAt` yêu cầu một chỉ mục (composite index) Firestore chưa được khởi tạo, gây lỗi truy vấn trên client.
+### Solution
+<b>Giải pháp đã áp dụng</b>: Chuyển target query sang field `customer.phone`. Đơn giản hóa query Firestore (chỉ lọc theo `customer.phone` để tránh yêu cầu index composite phức tạp) và thực hiện lọc trạng thái (`unpaid` / `partial`) cùng với sắp xếp theo ngày giảm dần trực tiếp trên bộ nhớ client (in-memory). Thêm fallbacks an toàn cho dữ liệu khách hàng từ nested object.

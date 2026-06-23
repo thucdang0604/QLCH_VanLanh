@@ -21,6 +21,7 @@ export async function GET(request: NextRequest) {
                 accountNo: data?.accountNo || '',
                 accountName: data?.accountName || '',
                 accounts: Array.isArray(data?.accounts) ? data.accounts : [],
+                totpEnabled: data?.totpEnabled === true,
             }
         });
     } catch (error: unknown) {

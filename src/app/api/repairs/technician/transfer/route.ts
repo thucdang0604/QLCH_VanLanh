@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
             if (action === 'request') {
                 const { toTechnicianId, reason, source } = body;
                 if (!toTechnicianId) throw new Error('Thiếu KTV nhận');
-                
+
                 const currentTechnician = ticket.staff?.assignedTechnician;
                 const currentTechnicianName = ticket.staff?.assignedTechnicianName || '';
 
@@ -118,13 +118,13 @@ export async function POST(request: NextRequest) {
                         timestamp: Date.now(),
                     })
                 };
-            } 
+            }
             else if (action === 'respond') {
-                const { responseStatus } = body; 
+                const { responseStatus } = body;
                 if (!ticket.pendingTechnicianTransfer || ticket.pendingTechnicianTransfer.status !== 'pending') {
                     throw new Error('Không có yêu cầu chuyển giao nào đang chờ xử lý.');
                 }
-                
+
                 const transfer = ticket.pendingTechnicianTransfer;
 
                 if (caller.uid !== transfer.toTechnicianId) {

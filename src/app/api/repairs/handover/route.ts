@@ -6,9 +6,33 @@ import type { RepairTicket } from '@/lib/types';
 import { calculateAndSaveCommissionsServer } from '@/lib/commissionCalcServer';
 import { REPAIR_STATUS, isSelectedRepairPart, isWarrantyEligibleRepairPart } from '@/lib/repairStatus';
 import { getConfiguredWorkflow } from '@/lib/repairWorkflowConfig';
-import { fetchFifoLogsForDeduction, executeFifoDeductionsWrites, type FifoDeductionResult } from '@/lib/inventoryFifo';
+import { fetchFifoLogsForDeduction, executeFifoDeductionsWrites, type FifoDeductionResult, type FifoDeductor } from '@/lib/inventoryFifo';
+import { incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
+import { stampRepairWarrantyOnParts } from '@/lib/repairWarrantyRules';
+import { reserveSequentialDocumentIds } from '@/lib/serverDocumentIds';
 
 const LEGACY_TERMINAL_STATUSES = [REPAIR_STATUS.DONE, REPAIR_STATUS.OUT, REPAIR_STATUS.REFUND, 'bh_hoan_tat', 'bh_tu_choi', 'bh_refund'];
+
+function resolveServiceWarrantyMonths(taxonomy: unknown, categoryPath: string[] | undefined) {
+    if (!Array.isArray(categoryPath) || categoryPath.length === 0) return 3;
+
+    let currentLevel = Array.isArray((taxonomy as { service?: unknown })?.service)
+        ? (taxonomy as { service: unknown[] }).service
+        : [];
+    let months = 0;
+
+    for (const pathId of categoryPath) {
+        const node = currentLevel.find((item): item is { id?: string; warrantyMonths?: unknown; children?: unknown[] } =>
+            typeof item === 'object' && item !== null && (item as { id?: unknown }).id === pathId
+        );
+        if (!node) break;
+        const nodeMonths = Number(node.warrantyMonths) || 0;
+        if (nodeMonths > 0) months = nodeMonths;
+        currentLevel = Array.isArray(node.children) ? node.children : [];
+    }
+
+    return months > 0 ? months : 3;
+}
 
 export async function POST(request: NextRequest) {
     try {
@@ -53,6 +77,7 @@ export async function POST(request: NextRequest) {
             // Terminal Guard & Warranty Rules Config
             let isTargetTerminal = false;
             let warrantyRules: Record<string, unknown>[] = [];
+            let serviceWarrantyMonths = 3;
             const configSnap = await tx.get(db.collection('system_config').doc('repairs'));
             if (configSnap.exists) {
                 const configData = configSnap.data();
@@ -65,6 +90,10 @@ export async function POST(request: NextRequest) {
                         isTargetTerminal = true;
                     }
                 }
+            }
+            const taxonomySnap = await tx.get(db.collection('system_config').doc('taxonomy_settings'));
+            if (taxonomySnap.exists) {
+                serviceWarrantyMonths = resolveServiceWarrantyMonths(taxonomySnap.data()?.taxonomy, ticket.categoryPath);
             }
 
             if (!isTargetTerminal && LEGACY_TERMINAL_STATUSES.includes(targetStatus)) {
@@ -112,8 +141,8 @@ export async function POST(request: NextRequest) {
 
             let fifoResultsMap = new Map<string, FifoDeductionResult[]>();
             let fifoLogsDataMap: Awaited<ReturnType<typeof fetchFifoLogsForDeduction>> = new Map();
-            let fifoDeductors: { productId: string, quantityToDeduct: number }[] = [];
-            
+            let fifoDeductors: FifoDeductor[] = [];
+
             // --- READ PHASE ---
             let custSnap: FirebaseFirestore.DocumentSnapshot | null = null;
             let custRef: FirebaseFirestore.DocumentReference | null = null;
@@ -130,7 +159,7 @@ export async function POST(request: NextRequest) {
 
                 // Read products
                 if (selectedParts.length > 0) {
-                    const deductions = [];
+                    const deductions: (FifoDeductor & { lotCode?: string })[] = [];
                     for (const p of selectedParts) {
                         if (p.productId && !productDocs.has(p.productId)) {
                             const pRef = db.collection('products').doc(p.productId);
@@ -140,21 +169,30 @@ export async function POST(request: NextRequest) {
                             }
                         }
                         if (p.productId) {
-                            deductions.push({ productId: p.productId, quantityToDeduct: p.quantity });
+                            deductions.push({ productId: p.productId, quantityToDeduct: p.quantity, lotCode: p.lotCode });
                         }
                     }
 
                     if (deductions.length > 0) {
-                        const aggregated = deductions.reduce((acc, curr) => {
-                            const existing = acc.find(a => a.productId === curr.productId);
-                            if (existing) {
-                                existing.quantityToDeduct += curr.quantityToDeduct;
-                            } else {
-                                acc.push({ ...curr });
+                        const fifoMap = new Map<string, { productId: string; quantity: number; preferredLotCodes: Map<string, number> }>();
+                        for (const curr of deductions) {
+                            let fifoItem = fifoMap.get(curr.productId);
+                            if (!fifoItem) {
+                                fifoItem = { productId: curr.productId, quantity: 0, preferredLotCodes: new Map<string, number>() };
+                                fifoMap.set(curr.productId, fifoItem);
                             }
-                            return acc;
-                        }, [] as { productId: string, quantityToDeduct: number }[]);
-                        
+                            fifoItem.quantity += curr.quantityToDeduct;
+                            if (curr.lotCode) {
+                                fifoItem.preferredLotCodes.set(curr.lotCode, (fifoItem.preferredLotCodes.get(curr.lotCode) || 0) + curr.quantityToDeduct);
+                            }
+                        }
+
+                        const aggregated = Array.from(fifoMap.values()).map(x => ({
+                            productId: x.productId,
+                            quantityToDeduct: x.quantity,
+                            preferredLotCodes: Array.from(x.preferredLotCodes.entries()).map(([lotCode, quantity]) => ({ lotCode, quantity }))
+                        }));
+
                         fifoLogsDataMap = await fetchFifoLogsForDeduction(tx, db, aggregated);
                         fifoDeductors = aggregated;
                     }
@@ -162,70 +200,61 @@ export async function POST(request: NextRequest) {
             }
             // --- END READ PHASE ---
 
+            const partsToLog = !isWarranty
+                ? selectedParts.filter(part => part.productId && productDocs.has(part.productId))
+                : [];
+            const inventoryLogAllocations = await reserveSequentialDocumentIds(tx, db, {
+                collectionName: 'inventory_logs',
+                prefix: 'IL',
+                count: partsToLog.length,
+            });
+            const customerLedgerAllocations = await reserveSequentialDocumentIds(tx, db, {
+                collectionName: 'customer_ledger',
+                prefix: 'CL',
+                count: !isWarranty && custRef ? 1 : 0,
+            });
+            let inventoryLogAllocationIndex = 0;
+
+            const checkoutWarnings: string[] = [];
+
             if (!isWarranty) {
                 // Execute FIFO Writes
                 if (fifoDeductors.length > 0) {
                     fifoResultsMap = executeFifoDeductionsWrites(tx, fifoDeductors, fifoLogsDataMap);
+                    
+                    // Analyze if preferred lots were fully satisfied
+                    for (const req of fifoDeductors) {
+                        const results = fifoResultsMap.get(req.productId) || [];
+                        for (const pref of req.preferredLotCodes || []) {
+                            const fulfilledQty = results
+                                .filter(r => r.lotCode === pref.lotCode)
+                                .reduce((sum, r) => sum + r.quantity, 0);
+                            
+                            if (fulfilledQty < pref.quantity) {
+                                const pData = productDocs.get(req.productId)?.data;
+                                checkoutWarnings.push(`Sản phẩm "${pData?.name || req.productId}" yêu cầu lô ${pref.lotCode} (SL: ${pref.quantity}) nhưng chỉ có ${fulfilledQty}, phần còn lại lấy từ lô khác theo cấu hình (FIFO).`);
+                            }
+                        }
+                    }
                 }
 
                 // Stamp Warranty
-                if (!ticket.parts || ticket.parts.filter(p => isWarrantyEligibleRepairPart(p)).length === 0) {
+                if (selectedParts.filter(p => isWarrantyEligibleRepairPart(p)).length === 0) {
                     const expireDate = new Date();
-                    expireDate.setMonth(expireDate.getMonth() + 3);
+                    expireDate.setMonth(expireDate.getMonth() + serviceWarrantyMonths);
                     updateData.serviceWarrantyExpiresAt = expireDate.getTime();
                 }
 
                 if (ticket.parts && ticket.parts.length > 0) {
-                    const ruleMap = new Map<string, number>();
-                    for (const r of warrantyRules) {
-                        if (typeof r.partType === 'string') {
-                            ruleMap.set(r.partType, Number(r.warrantyMonths) || 0);
-                        }
+                    const productDataById = new Map<string, Record<string, unknown> | null>();
+                    for (const [productId, productDoc] of productDocs.entries()) {
+                        productDataById.set(productId, productDoc.data);
                     }
-
-                    const nowMs = Date.now();
-                    ticket.parts = ticket.parts.map(p => {
-                        if (!isWarrantyEligibleRepairPart(p)) return p;
-                        if (p.warrantyExpiresAt) return p;
-
-                        const pData = p.productId ? productDocs.get(p.productId)?.data : null;
-                        const rawPartType = String(p.partType || pData?.partType || '');
-                        const partType = rawPartType.trim().toLowerCase();
-
-                        let months = 0;
-                        // Find exact match (case-insensitive)
-                        for (const [key, val] of ruleMap.entries()) {
-                            if (key.trim().toLowerCase() === partType) {
-                                months = val;
-                                break;
-                            }
-                        }
-                        // Fallback to "KhĂ¡c"
-                        if (months === 0 && partType !== '') {
-                             for (const [key, val] of ruleMap.entries()) {
-                                if (key.trim().toLowerCase() === 'khĂ¡c') {
-                                    months = val;
-                                    break;
-                                }
-                            }
-                        }
-
-                        console.warn(`[Handover] Part: ${p.productName} | RawType: "${rawPartType}" | Mapped Months: ${months}`);
-
-                        if (months <= 0) return { ...p, warrantyMonths: 0 };
-
-                        const expiresAt = new Date(nowMs);
-                        expiresAt.setMonth(expiresAt.getMonth() + months);
-
-                        return {
-                            ...p,
-                            warrantyMonths: months,
-                            warrantyExpiresAt: expiresAt.getTime(),
-                            partType: rawPartType
-                        };
-                    });
-
-                    updateData.parts = ticket.parts;
+                    const stamped = stampRepairWarrantyOnParts(ticket.parts, productDataById, warrantyRules, Date.now());
+                    if (stamped.changed) {
+                        updateData.parts = stamped.parts;
+                        ticket.parts = stamped.parts;
+                    }
                 }
 
                 // Stock Deduction
@@ -255,7 +284,7 @@ export async function POST(request: NextRequest) {
                         pData.data.held = currentHeld - p.quantity;
 
                         // Log
-                        const logRef = db.collection('inventory_logs').doc();
+                        const logRef = inventoryLogAllocations[inventoryLogAllocationIndex++].ref;
                         tx.set(logRef, {
                             productId: p.productId,
                             productName: p.productName,
@@ -285,7 +314,7 @@ export async function POST(request: NextRequest) {
                         });
                     }
                     // Ledger
-                    const ledgerRef = db.collection('customer_ledger').doc();
+                    const ledgerRef = customerLedgerAllocations[0].ref;
                     tx.set(ledgerRef, {
                         customerId: ticket.customer?.phone,
                         type: 'repair_payment',
@@ -303,9 +332,17 @@ export async function POST(request: NextRequest) {
                 } as RepairTicket;
 
                 await calculateAndSaveCommissionsServer(tx, { uid: caller.uid, displayName: '' }, 'repair', docDataForCommission);
+                incrementRevenueAggregates(tx, db, {
+                    repairRevenue: amount,
+                    repairCount: targetStatus === REPAIR_STATUS.DONE ? 1 : 0,
+                    totalGiftDiscount: targetStatus === REPAIR_STATUS.DONE ? Number(currentPayment.giftDiscount) || 0 : 0,
+                });
             } else {
                 // Warranty case: we may not charge anything, or just record handover
                 // For simplicity, we just mark as handed over.
+                incrementRevenueAggregates(tx, db, {
+                    warrantyCount: targetStatus === REPAIR_STATUS.DONE ? 1 : 0,
+                });
             }
 
             tx.update(ticketRef, updateData);
@@ -318,8 +355,10 @@ export async function POST(request: NextRequest) {
                     referenceId: ticketId
                 });
             }
+            inventoryLogAllocations.at(-1)?.commitCounter();
+            customerLedgerAllocations.at(-1)?.commitCounter();
 
-            return { success: true };
+            return { success: true, warnings: checkoutWarnings };
         });
 
         return NextResponse.json(result);

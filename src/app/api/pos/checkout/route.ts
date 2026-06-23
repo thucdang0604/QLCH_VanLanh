@@ -4,23 +4,67 @@ import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requirePermission } from '@/lib/apiAuth';
 import { FieldValue } from 'firebase-admin/firestore';
 import { calculateAndSaveCommissionsServer } from '@/lib/commissionCalcServer';
-import type { Order } from '@/lib/types';
+import type { Order, RepairTicket, WorkflowNode } from '@/lib/types';
 import { PRODUCT_STATUS, isProductArchived } from '@/lib/productLifecycle';
 import { normalizeVietnamPhone } from '@/lib/phone';
-import { fetchFifoLogsForDeduction, executeFifoDeductionsWrites, type FifoDeductionResult } from '@/lib/inventoryFifo';
+import { fetchFifoLogsForDeduction, executeFifoDeductionsWrites, type FifoDeductionResult, type FifoDeductor } from '@/lib/inventoryFifo';
+import { buildCompletedOrderRevenueDelta, incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
+import { loadRepairWorkflow, requireWorkflowNode, workflowNodeHasFeature } from '@/lib/repairWorkflowServer';
+import { isSelectedRepairPart } from '@/lib/repairStatus';
+import { reserveSequentialDocumentId, reserveSequentialDocumentIds, type ReservedSequentialDocumentId } from '@/lib/serverDocumentIds';
+
+function resolvePaymentCompletionTarget(workflow: WorkflowNode[], currentStatus: string) {
+    const currentNode = requireWorkflowNode(workflow, currentStatus);
+    if (currentNode.isTerminal) {
+        return { targetStatus: currentNode.id, shouldCountCompletion: false };
+    }
+
+    const allowedTerminalNodes = (currentNode.allowedNext || [])
+        .map(nextId => workflow.find(node => node.id === nextId))
+        .filter((node): node is WorkflowNode => Boolean(node?.isTerminal));
+
+    const commissionTerminal = allowedTerminalNodes.find(node =>
+        workflowNodeHasFeature(node, 'enableTechnicianCommission')
+        || workflowNodeHasFeature(node, 'enableSellerCommission')
+    );
+    const targetNode = commissionTerminal || (allowedTerminalNodes.length === 1 ? allowedTerminalNodes[0] : null);
+
+    if (!targetNode) {
+        throw new Error(`Trạng thái ${currentStatus} chưa có bước hoàn tất thanh toán hợp lệ trong workflow sửa chữa.`);
+    }
+
+    return { targetStatus: targetNode.id, shouldCountCompletion: true };
+}
 
 export async function POST(request: NextRequest) {
     try {
         const caller = await requirePermission(request, 'manage_orders');
 
         const body = await request.json();
-        const { idempotencyKey, repairTicketId, customer_info, items, discount_amount, total_amount, deposit_amount, payment_method, voucherCode } = body;
+        const { idempotencyKey, repairTicketId, repairTicketIds, customer_info, items, discount_amount, total_amount, deposit_amount, payment_method, voucherCode, use_surplus_to_pay_debt } = body;
 
         if (!items || items.length === 0) {
             return NextResponse.json({ error: 'Giỏ hàng trống' }, { status: 400 });
         }
 
         const db = getAdminDb();
+        const normalizeRepairTicketId = (value: unknown) => {
+            const raw = String(value || '').trim();
+            if (!raw) return '';
+            const syntheticMatch = raw.match(/^(.+)_(?:part_\d+|labor)$/);
+            return syntheticMatch?.[1] || raw;
+        };
+        const normalizeOrderPaymentId = (value: unknown) => {
+            const raw = String(value || '').trim();
+            if (!raw) return '';
+            const syntheticMatch = raw.match(/^order_payment_(.+)$/);
+            return syntheticMatch?.[1] || raw;
+        };
+        const getPaidAmount = (data: FirebaseFirestore.DocumentData) => {
+            const history = Array.isArray(data.paymentHistory) ? data.paymentHistory : [];
+            const paidFromHistory = history.reduce((sum, entry) => sum + (Number(entry?.amount) || 0), 0);
+            return Math.max(Number(data.deposit_amount) || 0, paidFromHistory);
+        };
 
         const result = await db.runTransaction(async (tx) => {
             if (idempotencyKey) {
@@ -29,30 +73,52 @@ export async function POST(request: NextRequest) {
                 if (opSnap.exists) {
                     const data = opSnap.data();
                     if (data?.status === 'completed' && data.referenceId) {
-                        return { success: true, fromCache: true, orderId: data.referenceId };
+                        return {
+                            success: true,
+                            fromCache: true,
+                            orderId: data.referenceId,
+                            debtOnly: data.debtOnly === true,
+                            updatedOrderIds: Array.isArray(data.updatedOrderIds) ? data.updatedOrderIds : [],
+                        };
                     }
                 }
             }
 
-            // Pre-aggregate
-            const preAggregated = new Map<string, number>();
+            // Pre-aggregate for overall stock check
+            const preAggregatedForStock = new Map<string, number>();
+            const repairAggregatedForStock = new Map<string, { quantity: number; reservedQuantity: number; productName: string }>();
+            // Pre-aggregate for FIFO deduction
+            const fifoMap = new Map<string, { productId: string; quantity: number; preferredLotCodes: Map<string, number> }>();
+            const addFifoDeduction = (productId: string, quantity: number, lotCode?: string) => {
+                let fifoItem = fifoMap.get(productId);
+                if (!fifoItem) {
+                    fifoItem = { productId, quantity: 0, preferredLotCodes: new Map<string, number>() };
+                    fifoMap.set(productId, fifoItem);
+                }
+                fifoItem.quantity += quantity;
+                if (lotCode) {
+                    fifoItem.preferredLotCodes.set(lotCode, (fifoItem.preferredLotCodes.get(lotCode) || 0) + quantity);
+                }
+            };
+
             for (const item of items) {
-                if (item.isRepairTicket) continue; // Bỏ qua check kho cho phiếu sửa chữa
+                if (item.isRepairTicket || item.isOrderPayment) continue; // Bỏ qua check kho cho phiếu sửa chữa/thu nợ
                 const pid = String(item.productId || '');
                 const qty = Math.max(1, Math.floor(Number(item.quantity) || 1));
-                preAggregated.set(pid, (preAggregated.get(pid) || 0) + qty);
+                const lot = item.lotCode ? String(item.lotCode) : undefined;
+                
+                preAggregatedForStock.set(pid, (preAggregatedForStock.get(pid) || 0) + qty);
+
+                addFifoDeduction(pid, qty, lot);
             }
 
             let fifoResultsMap = new Map<string, FifoDeductionResult[]>();
             let fifoLogsDataMap: Awaited<ReturnType<typeof fetchFifoLogsForDeduction>> = new Map();
-            const fifoDeductors = Array.from(preAggregated.entries()).map(([productId, quantityToDeduct]) => ({ productId, quantityToDeduct }));
-            if (fifoDeductors.length > 0) {
-                fifoLogsDataMap = await fetchFifoLogsForDeduction(tx, db, fifoDeductors);
-            }
+            let fifoDeductors: FifoDeductor[] = [];
 
             // Fetch products
             const productDocs = new Map<string, { ref: FirebaseFirestore.DocumentReference; data: FirebaseFirestore.DocumentData }>();
-            for (const productId of preAggregated.keys()) {
+            for (const productId of preAggregatedForStock.keys()) {
                 const pRef = db.collection('products').doc(productId);
                 const pSnap = await tx.get(pRef);
                 if (!pSnap.exists) {
@@ -96,7 +162,7 @@ export async function POST(request: NextRequest) {
             }
 
             // Verify stock
-            for (const [productId, totalQty] of preAggregated.entries()) {
+            for (const [productId, totalQty] of preAggregatedForStock.entries()) {
                 const pSnap = productDocs.get(productId)!;
                 const d = pSnap.data;
                 if (isProductArchived({ status: String(d.status || '') as 'active' | 'hidden' | 'inactive' }) || d.status !== PRODUCT_STATUS.ACTIVE || d.isProposed === true) {
@@ -111,6 +177,7 @@ export async function POST(request: NextRequest) {
             // Normalize items & deduct stock
             const normalizedItems = [];
             let serverSubtotal = 0;
+            let orderPaymentSubtotal = 0;
 
             for (const item of items) {
                 const pid = String(item.productId);
@@ -118,9 +185,11 @@ export async function POST(request: NextRequest) {
                 const price = Number(item.price) || 0;
 
                 if (item.isRepairTicket) {
+                    const itemRepairTicketId = normalizeRepairTicketId(item.repairTicketId || item.productId);
                     normalizedItems.push({
                         id: pid,
                         productId: pid,
+                        repairTicketId: itemRepairTicketId || undefined,
                         productName: item.productName || '[Phiếu sửa chữa]',
                         price,
                         quantity: qty,
@@ -128,6 +197,23 @@ export async function POST(request: NextRequest) {
                         isRepairTicket: true
                     });
                     serverSubtotal += price * qty;
+                    continue;
+                }
+                if (item.isOrderPayment) {
+                    const itemOrderPaymentId = normalizeOrderPaymentId(item.orderPaymentId || item.productId);
+                    normalizedItems.push({
+                        id: pid,
+                        productId: pid,
+                        orderPaymentId: itemOrderPaymentId || undefined,
+                        productName: item.productName || '[Thanh toán đơn hàng]',
+                        price,
+                        quantity: qty,
+                        image: '',
+                        isOrderPayment: true
+                    });
+                    const lineTotal = price * qty;
+                    serverSubtotal += lineTotal;
+                    orderPaymentSubtotal += lineTotal;
                     continue;
                 }
 
@@ -167,9 +253,32 @@ export async function POST(request: NextRequest) {
                 serverSubtotal += price * qty;
             }
 
-            const serverTotal = serverSubtotal - (Number(discount_amount) || 0);
+            const discountableSubtotal = Math.max(0, serverSubtotal - orderPaymentSubtotal);
+            const serverDiscount = Math.min(Number(discount_amount) || 0, discountableSubtotal);
+            const serverTotal = serverSubtotal - serverDiscount;
+            const isDebtCollectionOnly = orderPaymentSubtotal > 0 && discountableSubtotal === 0;
+            const hasRepairPayment = normalizedItems.some(item => item.isRepairTicket);
+            const paidNow = Number(deposit_amount) || 0;
+            const paymentMethodCode = String(payment_method || 'CASH').toUpperCase();
+
+            if (orderPaymentSubtotal > 0 && discountableSubtotal > 0) {
+                throw new Error('Vui lòng tách thu nợ đơn cũ và bán hàng mới thành 2 lần thanh toán riêng.');
+            }
+            if (isDebtCollectionOnly && voucherCode) {
+                throw new Error('Không áp dụng voucher cho khoản thu nợ đơn cũ.');
+            }
 
             // ── Voucher Validation for POS ──
+            if (hasRepairPayment && !['CASH', 'BANK', 'MOMO'].includes(paymentMethodCode)) {
+                throw new Error('Thanh toán phiếu sửa chữa phải thu ngay bằng tiền mặt, chuyển khoản hoặc ví.');
+            }
+            if (hasRepairPayment && paidNow + 1 < serverTotal) {
+                throw new Error(`Thanh toán phiếu sửa chữa còn thiếu ${(serverTotal - paidNow).toLocaleString('vi-VN')}đ. Vui lòng thu đủ trước khi hoàn tất.`);
+            }
+            if (hasRepairPayment && paidNow - serverTotal > 1) {
+                throw new Error(`Số tiền thu vượt tổng cần thanh toán ${serverTotal.toLocaleString('vi-VN')}đ.`);
+            }
+
             let voucherRef: FirebaseFirestore.DocumentReference | null = null;
             let appliedVoucherCode: string | undefined;
             let appliedPersonalVoucher = false;
@@ -195,7 +304,7 @@ export async function POST(request: NextRequest) {
                         if (voucherData.usageLimit > 0 && voucherData.usedCount >= voucherData.usageLimit) {
                             throw new Error('Mã Voucher đã hết lượt sử dụng.');
                         }
-                        if (voucherData.minOrderValue && serverSubtotal < voucherData.minOrderValue) {
+                        if (voucherData.minOrderValue && discountableSubtotal < voucherData.minOrderValue) {
                             throw new Error(`Đơn hàng tối thiểu ${voucherData.minOrderValue.toLocaleString('vi-VN')}đ để sử dụng mã này.`);
                         }
                         if (voucherData.ownerId) {
@@ -219,12 +328,12 @@ export async function POST(request: NextRequest) {
                 // In POS, we might accept client total or enforce server total. Let's enforce server total.
             }
 
-            const isPending = Number(deposit_amount) > 0 && Number(deposit_amount) < serverTotal;
+            const isPending = false;
+            if (orderPaymentSubtotal > 0 && paymentMethodCode === 'DEBT') {
+                throw new Error('Thu nợ đơn hàng phải thanh toán ngay bằng tiền mặt, chuyển khoản hoặc ví.');
+            }
 
             // ── Pre-fetch for Transaction Reads ──
-            const orderRef = db.collection('orders').doc();
-            const orderId = orderRef.id;
-
             const staffSnap = await tx.get(db.collection('users').doc(caller.uid));
             const sData = staffSnap.data();
             const createdByName = sData?.displayName || sData?.name || (caller as { email?: string }).email || caller.uid;
@@ -241,14 +350,231 @@ export async function POST(request: NextRequest) {
                 incomingName = (customer_info?.name || '').trim();
             }
 
-            let repairRef: FirebaseFirestore.DocumentReference | null = null;
-            let repairSnap: FirebaseFirestore.DocumentSnapshot | null = null;
-            if (repairTicketId) {
-                repairRef = db.collection('repairs').doc(repairTicketId);
-                repairSnap = await tx.get(repairRef);
+            const repairIdSet = new Set<string>();
+            if (repairTicketId) repairIdSet.add(normalizeRepairTicketId(repairTicketId));
+            if (Array.isArray(repairTicketIds)) {
+                repairTicketIds.forEach((id: unknown) => {
+                    const normalized = normalizeRepairTicketId(id);
+                    if (normalized) repairIdSet.add(normalized);
+                });
+            }
+            for (const item of items) {
+                if (!item.isRepairTicket) continue;
+                const normalized = normalizeRepairTicketId(item.repairTicketId || item.productId);
+                if (normalized) repairIdSet.add(normalized);
+            }
+
+            const repairDocs = new Map<string, { ref: FirebaseFirestore.DocumentReference; snap: FirebaseFirestore.DocumentSnapshot }>();
+            for (const id of repairIdSet) {
+                const ref = db.collection('repairs').doc(id);
+                const snap = await tx.get(ref);
+                if (snap.exists) {
+                    repairDocs.set(id, { ref, snap });
+                }
+            }
+
+            const repairPaymentTotals = new Map<string, number>();
+            for (const item of items) {
+                if (!item.isRepairTicket) continue;
+                const itemRepairTicketId = normalizeRepairTicketId(item.repairTicketId || item.productId);
+                if (!itemRepairTicketId || !repairDocs.has(itemRepairTicketId)) continue;
+                const qty = Math.max(1, Math.floor(Number(item.quantity) || 1));
+                const price = Number(item.price) || 0;
+                repairPaymentTotals.set(itemRepairTicketId, (repairPaymentTotals.get(itemRepairTicketId) || 0) + price * qty);
+            }
+
+            const orderPaymentIdSet = new Set<string>();
+            for (const item of items) {
+                if (!item.isOrderPayment) continue;
+                const normalized = normalizeOrderPaymentId(item.orderPaymentId || item.productId);
+                if (normalized) orderPaymentIdSet.add(normalized);
+            }
+
+            const orderPaymentDocs = new Map<string, { ref: FirebaseFirestore.DocumentReference; snap: FirebaseFirestore.DocumentSnapshot }>();
+            for (const id of orderPaymentIdSet) {
+                const ref = db.collection('orders').doc(id);
+                const snap = await tx.get(ref);
+                if (!snap.exists) {
+                    throw new Error(`Đơn hàng #${id.slice(-6)} không tồn tại.`);
+                }
+                orderPaymentDocs.set(id, { ref, snap });
+            }
+
+            const orderPaymentRequestedTotals = new Map<string, number>();
+            for (const item of items) {
+                if (!item.isOrderPayment) continue;
+                const itemOrderPaymentId = normalizeOrderPaymentId(item.orderPaymentId || item.productId);
+                if (!itemOrderPaymentId || !orderPaymentDocs.has(itemOrderPaymentId)) continue;
+                const qty = Math.max(1, Math.floor(Number(item.quantity) || 1));
+                const price = Number(item.price) || 0;
+                orderPaymentRequestedTotals.set(itemOrderPaymentId, (orderPaymentRequestedTotals.get(itemOrderPaymentId) || 0) + price * qty);
+            }
+
+            const collectedDebtAmount = isDebtCollectionOnly
+                ? (Number(deposit_amount) > 0 ? Number(deposit_amount) : orderPaymentSubtotal)
+                : orderPaymentSubtotal;
+            if (isDebtCollectionOnly && collectedDebtAmount <= 0) {
+                throw new Error('Vui lòng nhập số tiền khách thanh toán.');
+            }
+            if (isDebtCollectionOnly && collectedDebtAmount - orderPaymentSubtotal > 1) {
+                throw new Error(`Số tiền thu nợ vượt số còn lại ${orderPaymentSubtotal.toLocaleString('vi-VN')}đ.`);
+            }
+
+            const orderPaymentTotals = new Map<string, number>();
+            let remainingDebtCollectionAmount = collectedDebtAmount;
+            for (const [id, requestedAmount] of orderPaymentRequestedTotals.entries()) {
+                const paymentAmount = isDebtCollectionOnly
+                    ? Math.min(requestedAmount, Math.max(0, remainingDebtCollectionAmount))
+                    : requestedAmount;
+                if (paymentAmount > 0) {
+                    orderPaymentTotals.set(id, paymentAmount);
+                    remainingDebtCollectionAmount -= paymentAmount;
+                }
+            }
+
+            for (const [id, paymentAmount] of orderPaymentTotals.entries()) {
+                const orderPaymentDoc = orderPaymentDocs.get(id);
+                const orderData = orderPaymentDoc?.snap.data() || {};
+                const totalOrderAmount = Number(orderData.total_amount) || 0;
+                const remainingAmount = Math.max(0, totalOrderAmount - getPaidAmount(orderData));
+                if (remainingAmount <= 0) {
+                    throw new Error(`Đơn hàng #${id.slice(-6)} đã thanh toán đủ.`);
+                }
+                if (paymentAmount - remainingAmount > 1) {
+                    throw new Error(`Số tiền thu cho đơn #${id.slice(-6)} vượt số còn lại ${remainingAmount.toLocaleString('vi-VN')}đ.`);
+                }
+            }
+
+            const orderPaymentTotal = Array.from(orderPaymentTotals.values()).reduce((sum, amount) => sum + amount, 0);
+            const updatedOrderIds = Array.from(orderPaymentTotals.keys());
+
+            const repairCompletionTargets = new Map<string, { targetStatus: string; shouldCountCompletion: boolean }>();
+            for (const [id, repairDoc] of repairDocs.entries()) {
+                if (!repairPaymentTotals.has(id)) continue;
+                const repairTicket = repairDoc.snap.data() as RepairTicket;
+                const workflow = await loadRepairWorkflow(tx, db, repairTicket);
+                const completionTarget = resolvePaymentCompletionTarget(workflow, repairTicket.status);
+                repairCompletionTargets.set(id, completionTarget);
+                if (!completionTarget.shouldCountCompletion) continue;
+
+                for (const part of repairTicket.parts || []) {
+                    if (!isSelectedRepairPart(part) || !part.productId) continue;
+                    const quantity = Math.max(0, Math.floor(Number(part.quantity) || 0));
+                    if (quantity <= 0) continue;
+                    const reservedQuantity = Math.max(0, Math.min(quantity, Number(part.reservedQuantity) || quantity));
+                    const existing = repairAggregatedForStock.get(part.productId) || {
+                        quantity: 0,
+                        reservedQuantity: 0,
+                        productName: part.productName || part.productId,
+                    };
+                    repairAggregatedForStock.set(part.productId, {
+                        quantity: existing.quantity + quantity,
+                        reservedQuantity: existing.reservedQuantity + reservedQuantity,
+                        productName: existing.productName || part.productName || part.productId,
+                    });
+                    addFifoDeduction(part.productId, quantity, part.lotCode);
+                }
             }
 
             // ── Construct Order Object ──
+            for (const productId of repairAggregatedForStock.keys()) {
+                if (productDocs.has(productId)) continue;
+                const pRef = db.collection('products').doc(productId);
+                const pSnap = await tx.get(pRef);
+                if (!pSnap.exists) {
+                    throw new Error(`Linh kiện sửa chữa (ID: ${productId}) không tồn tại.`);
+                }
+                productDocs.set(productId, { ref: pRef, data: (pSnap.data() || {}) as FirebaseFirestore.DocumentData });
+            }
+
+            for (const [productId, repairQty] of repairAggregatedForStock.entries()) {
+                const productDoc = productDocs.get(productId);
+                if (!productDoc) continue;
+                const currentStock = Number(productDoc.data.stock) || 0;
+                const retailQty = preAggregatedForStock.get(productId) || 0;
+                const totalDeduct = retailQty + repairQty.quantity;
+                if (currentStock < totalDeduct) {
+                    throw new Error(`Linh kiện "${repairQty.productName}" chỉ còn ${currentStock} tồn kho nhưng cần trừ ${totalDeduct}.`);
+                }
+            }
+
+            fifoDeductors = Array.from(fifoMap.values()).map(x => ({
+                productId: x.productId,
+                quantityToDeduct: x.quantity,
+                preferredLotCodes: Array.from(x.preferredLotCodes.entries()).map(([lotCode, quantity]) => ({ lotCode, quantity }))
+            }));
+            if (fifoDeductors.length > 0) {
+                            fifoLogsDataMap = await fetchFifoLogsForDeduction(tx, db, fifoDeductors);
+            }
+
+            const stockProductIds = new Set([...preAggregatedForStock.keys(), ...repairAggregatedForStock.keys()]);
+            const oldDebt = (custSnap && custSnap.exists) ? (Number(custSnap.data()?.totalDebt) || 0) : 0;
+            const newDebt = !isDebtCollectionOnly ? Math.max(0, serverTotal - Number(deposit_amount)) : 0;
+            const surplus = !isDebtCollectionOnly ? Math.max(0, Number(deposit_amount) - serverTotal) : 0;
+            const debtPaymentAmount = (use_surplus_to_pay_debt === true && oldDebt > 0 && surplus > 0)
+                ? Math.min(surplus, oldDebt)
+                : 0;
+            const deltaDebt = isDebtCollectionOnly
+                ? -orderPaymentTotal
+                : (newDebt - debtPaymentAmount);
+
+            let customerLedgerCount = 0;
+            if (custRef) {
+                if (!isDebtCollectionOnly) {
+                    customerLedgerCount += 1; // purchase_order
+                    if (Number(deposit_amount) > 0) {
+                        customerLedgerCount += 1; // purchase_payment
+                    }
+                }
+                if (debtPaymentAmount > 0) {
+                    customerLedgerCount += 1; // cấn nợ cũ
+                }
+                if (orderPaymentTotal > 0) {
+                    customerLedgerCount += 1; // thu nợ đơn cũ
+                }
+            }
+
+            const inventoryLogCount = isPending
+                ? 0
+                : Array.from(stockProductIds).reduce((count, productId) => {
+                    const retailQty = preAggregatedForStock.get(productId) || 0;
+                    const repairQty = repairAggregatedForStock.get(productId)?.quantity || 0;
+                    return count + (retailQty > 0 ? 1 : 0) + (repairQty > 0 ? 1 : 0);
+                }, 0);
+            const customerTransactionCount = normalizedPhoneResult && (orderPaymentTotal > 0 || debtPaymentAmount > 0)
+                ? ((orderPaymentTotal > 0 ? 1 : 0) + (debtPaymentAmount > 0 ? 1 : 0))
+                : 0;
+            const inventoryLogAllocations = await reserveSequentialDocumentIds(tx, db, {
+                collectionName: 'inventory_logs',
+                prefix: 'IL',
+                count: inventoryLogCount,
+            });
+            const customerLedgerAllocations = await reserveSequentialDocumentIds(tx, db, {
+                collectionName: 'customer_ledger',
+                prefix: 'CL',
+                count: customerLedgerCount,
+            });
+            const customerTransactionAllocations = await reserveSequentialDocumentIds(tx, db, {
+                collectionName: 'customer_transactions',
+                prefix: 'CT',
+                count: customerTransactionCount,
+            });
+            let inventoryLogAllocationIndex = 0;
+            let customerLedgerAllocationIndex = 0;
+
+            let orderAllocation: ReservedSequentialDocumentId | null = null;
+            if (!isDebtCollectionOnly) {
+                orderAllocation = await reserveSequentialDocumentId(tx, db, {
+                    collectionName: 'orders',
+                    prefix: 'DH',
+                });
+            }
+            const orderRef = orderAllocation?.ref || null;
+            const orderId = orderAllocation?.id || '';
+            const debtPaymentReferenceId = updatedOrderIds.length === 1
+                ? updatedOrderIds[0]
+                : (idempotencyKey || orderId || `DEBT-${updatedOrderIds.map(id => id.slice(-6)).join('-')}`);
+
             const order: Record<string, unknown> = {
                 customer_info: {
                     name: customer_info?.name || 'Khách lẻ',
@@ -259,76 +585,172 @@ export async function POST(request: NextRequest) {
                 },
                 items: normalizedItems,
                 subtotal_amount: serverSubtotal,
-                discount_amount: Number(discount_amount) || 0,
+                discount_amount: serverDiscount,
                 deposit_amount: Number(deposit_amount) || 0,
                 total_amount: serverTotal,
                 ...(appliedVoucherCode ? { voucherCode: appliedVoucherCode, discountSource: 'voucher' } : {}),
-                status: isPending ? 'Pending' : 'Completed',
+                status: 'Completed',
                 source: 'pos',
+                containsRepairPayment: repairPaymentTotals.size > 0,
+                repairTicketIds: Array.from(repairPaymentTotals.keys()),
+                containsOrderPayment: orderPaymentTotals.size > 0,
+                orderPaymentIds: Array.from(orderPaymentTotals.keys()),
                 is_vat_exported: false,
                 payment_method: payment_method || 'CASH',
+                paymentStatus: newDebt > 0 ? 'debt' : 'paid',
                 createdAt: FieldValue.serverTimestamp(),
                 updatedAt: FieldValue.serverTimestamp(),
-                completedAt: isPending ? null : FieldValue.serverTimestamp(),
+                completedAt: FieldValue.serverTimestamp(),
                 paymentHistory: [{
-                    type: isPending ? 'deposit' : 'full',
-                    amount: isPending ? Number(deposit_amount) || 0 : serverTotal,
+                    type: newDebt > 0 ? 'deposit' : 'full',
+                    amount: Math.min(Number(deposit_amount), serverTotal),
                     timestamp: Date.now(),
-                    note: isPending ? `Đặt cọc POS — ${payment_method}` : `Thanh toán POS — ${payment_method}`
+                    note: newDebt > 0
+                        ? `Thanh toán một phần POS (${Number(deposit_amount).toLocaleString('vi-VN')}đ) — nợ lại ${newDebt.toLocaleString('vi-VN')}đ — ${payment_method}`
+                        : `Thanh toán POS — ${payment_method}`
                 }],
                 createdBy: caller.uid,
                 createdByName
             };
 
             // ── Commission Server-Side Calculation (Reads inside) ──
-            if (!isPending) {
-                await calculateAndSaveCommissionsServer(tx, { uid: caller.uid, displayName: createdByName as string }, 'order', { id: orderId, ...order } as Order);
+            const commissionableItems = normalizedItems.filter((item) => !item.isOrderPayment);
+            const commissionableTotal = Math.max(0, serverTotal - orderPaymentTotal);
+            if (!isDebtCollectionOnly && !isPending && commissionableItems.length > 0 && commissionableTotal > 0) {
+                await calculateAndSaveCommissionsServer(tx, { uid: caller.uid, displayName: createdByName as string }, 'order', {
+                    id: orderId,
+                    ...order,
+                    items: commissionableItems,
+                    subtotal_amount: Math.max(0, serverSubtotal - orderPaymentTotal),
+                    total_amount: commissionableTotal,
+                } as unknown as Order);
             }
 
             // ==========================================
             // ── ALL WRITES START HERE ──
             // ==========================================
 
+            const checkoutWarnings: string[] = [];
+
             if (!isPending && fifoDeductors.length > 0) {
                 fifoResultsMap = executeFifoDeductionsWrites(tx, fifoDeductors, fifoLogsDataMap);
+                
+                // Analyze if preferred lots were fully satisfied
+                for (const req of fifoDeductors) {
+                    const results = fifoResultsMap.get(req.productId) || [];
+                    for (const pref of req.preferredLotCodes || []) {
+                        const fulfilledQty = results
+                            .filter(r => r.lotCode === pref.lotCode)
+                            .reduce((sum, r) => sum + r.quantity, 0);
+                        
+                        if (fulfilledQty < pref.quantity) {
+                            const pData = productDocs.get(req.productId)?.data;
+                            checkoutWarnings.push(`Sản phẩm "${pData?.name || req.productId}" yêu cầu lô ${pref.lotCode} (SL: ${pref.quantity}) nhưng chỉ có ${fulfilledQty}, phần còn lại lấy từ lô khác theo cấu hình (FIFO).`);
+                        }
+                    }
+                }
             }
 
             // Stock Deduction
-            for (const [productId, totalQty] of preAggregated.entries()) {
+            for (const productId of stockProductIds) {
                 const pSnap = productDocs.get(productId)!;
                 const d = pSnap.data;
                 const currentStock = Number(d.stock) || 0;
                 const currentHeld = Number(d.held) || 0;
+                const retailQty = preAggregatedForStock.get(productId) || 0;
+                const repairQty = repairAggregatedForStock.get(productId)?.quantity || 0;
+                const repairReservedQty = repairAggregatedForStock.get(productId)?.reservedQuantity || 0;
+                const totalQty = retailQty + repairQty;
 
                 if (isPending) {
                     tx.update(pSnap.ref, {
-                        held: currentHeld + totalQty
+                        held: currentHeld + retailQty
                     });
                 } else {
                     tx.update(pSnap.ref, {
-                        stock: currentStock - totalQty
+                        stock: currentStock - totalQty,
+                        held: Math.max(0, currentHeld - repairReservedQty)
                     });
 
-                    // Log inventory
-                    tx.set(db.collection('inventory_logs').doc(), {
-                        productId,
-                        productName: d.name,
-                        quantity: -totalQty,
-                        costPriceAtLog: Number(d.costPrice) || 0,
-                        type: 'POS_SALE',
-                        referenceType: 'order',
-                        referenceId: orderId,
-                        lotsDeducted: fifoResultsMap.get(productId) || [],
-                        createdBy: caller.uid,
-                        createdAt: FieldValue.serverTimestamp()
-                    });
+                    if (retailQty > 0) {
+                        tx.set(inventoryLogAllocations[inventoryLogAllocationIndex++].ref, {
+                            productId,
+                            productName: d.name,
+                            quantity: -retailQty,
+                            costPriceAtLog: Number(d.costPrice) || 0,
+                            type: 'POS_SALE',
+                            referenceType: 'order',
+                            referenceId: orderId,
+                            lotsDeducted: fifoResultsMap.get(productId) || [],
+                            createdBy: caller.uid,
+                            createdAt: FieldValue.serverTimestamp()
+                        });
+                    }
+                    if (repairQty > 0) {
+                        tx.set(inventoryLogAllocations[inventoryLogAllocationIndex++].ref, {
+                            productId,
+                            productName: repairAggregatedForStock.get(productId)?.productName || d.name,
+                            quantity: -repairQty,
+                            costPriceAtLog: Number(d.costPrice) || 0,
+                            type: 'REPAIR_POS_HANDOVER',
+                            referenceType: 'repair',
+                            referenceId: orderId,
+                            orderId,
+                            lotsDeducted: fifoResultsMap.get(productId) || [],
+                            createdBy: caller.uid,
+                            createdAt: FieldValue.serverTimestamp()
+                        });
+                    }
                 }
             }
 
-            tx.set(orderRef, order);
+            if (!isDebtCollectionOnly) {
+                if (!orderRef || !orderAllocation) {
+                    throw new Error('Không thể tạo mã đơn POS.');
+                }
+                orderAllocation.commitCounter();
+                tx.set(orderRef, order);
+            }
+            if (!isDebtCollectionOnly && !isPending) {
+                const retailItems = normalizedItems.filter((item) => !item.isRepairTicket && !item.isOrderPayment);
+                const retailSubtotal = retailItems.reduce((sum, item) => sum + (Number(item.price) || 0) * (Number(item.quantity) || 1), 0);
+                const retailDiscount = Math.min(serverDiscount, retailSubtotal);
+                const retailTotal = Math.max(0, retailSubtotal - retailDiscount);
+                const repairRevenue = Array.from(repairPaymentTotals.values()).reduce((sum, amount) => sum + amount, 0);
+
+                if (retailItems.length > 0) {
+                    incrementRevenueAggregates(
+                        tx,
+                        db,
+                        buildCompletedOrderRevenueDelta({
+                            id: orderId,
+                            ...order,
+                            items: retailItems,
+                            subtotal_amount: retailSubtotal,
+                            discount_amount: retailDiscount,
+                            total_amount: retailTotal,
+                            paymentHistory: retailTotal > 0 ? [{
+                                type: 'full',
+                                amount: retailTotal,
+                                timestamp: Date.now(),
+                                note: `Doanh thu POS retail - ${payment_method || 'CASH'}`
+                            }] : [],
+                        } as unknown as Order),
+                    );
+                }
+                if (repairRevenue > 0) {
+                    const repairCount = Array.from(repairCompletionTargets.values())
+                        .filter(target => target.shouldCountCompletion)
+                        .length;
+                    incrementRevenueAggregates(tx, db, { repairRevenue, repairCount });
+                }
+                if (debtPaymentAmount > 0) {
+                    incrementRevenueAggregates(tx, db, { orderRevenue: debtPaymentAmount });
+                }
+            }
 
             // ── Increment Voucher Usage ──
-            if (appliedVoucherCode && voucherRef && !isPending) {
+            if (!isDebtCollectionOnly && appliedVoucherCode && voucherRef && !isPending) {
                 tx.update(voucherRef, {
                     usedCount: FieldValue.increment(1),
                 });
@@ -347,12 +769,16 @@ export async function POST(request: NextRequest) {
                         updateData.name = incomingName;
                     }
 
-                    if (!isPending) {
-                        updateData.totalSpent = FieldValue.increment(serverTotal);
+                    const customerSpendDelta = !isDebtCollectionOnly ? serverTotal : 0;
+                    if (customerSpendDelta > 0) {
+                        updateData.totalSpent = FieldValue.increment(customerSpendDelta);
                         updateData.totalOrders = FieldValue.increment(1);
                     }
+                    if (deltaDebt !== 0) {
+                        updateData.totalDebt = FieldValue.increment(deltaDebt);
+                    }
 
-                    if (appliedPersonalVoucher && appliedVoucherCode && !isPending) {
+                    if (appliedPersonalVoucher && appliedVoucherCode) {
                         updateData['missions.bounty_redeemed'] = true;
                         updateData['missions.bountyVoucherCode'] = appliedVoucherCode;
                         updateData['missions.redeemedAt'] = FieldValue.serverTimestamp();
@@ -361,55 +787,88 @@ export async function POST(request: NextRequest) {
 
                     tx.update(custRef, updateData);
                 } else {
+                    const customerSpendDelta = !isDebtCollectionOnly ? serverTotal : 0;
                     const newCust: Record<string, unknown> = {
                         phone: normalizedPhoneResult!.local,
                         name: incomingName || 'Khách lẻ',
                         type: 'retail',
-                        totalSpent: isPending ? 0 : serverTotal,
-                        totalOrders: isPending ? 0 : 1,
+                        totalSpent: customerSpendDelta,
+                        totalOrders: customerSpendDelta > 0 ? 1 : 0,
                         totalRepairs: 0,
                         totalAppointments: 0,
-                        createdAt: FieldValue.serverTimestamp(),
-                        updatedAt: FieldValue.serverTimestamp(),
-                        lastVisit: FieldValue.serverTimestamp(),
-                        tags: []
-                    };
-
-                    if (appliedPersonalVoucher && appliedVoucherCode && !isPending) {
-                        newCust.missions = {
-                            bounty_redeemed: true,
-                            bountyVoucherCode: appliedVoucherCode,
-                            redeemedAt: FieldValue.serverTimestamp(),
-                            redeemedOrderId: orderId,
-                        };
                     }
 
                     tx.set(custRef, newCust);
                 }
 
-                // Ledger
-                tx.set(db.collection('customer_ledger').doc(), {
-                    customerId: normalizedPhoneResult!.local,
-                    type: isPending ? 'deposit_order' : 'purchase_order',
-                    amount: isPending ? (Number(deposit_amount) || 0) : serverTotal,
-                    referenceId: orderId,
-                    date: FieldValue.serverTimestamp()
-                });
+                if (!isDebtCollectionOnly) {
+                    tx.set(customerLedgerAllocations[customerLedgerAllocationIndex++].ref, {
+                        customerId: normalizedPhoneResult!.local,
+                        type: 'purchase_order',
+                        amount: serverTotal,
+                        referenceId: orderId,
+                        date: FieldValue.serverTimestamp()
+                    });
+                    if (Number(deposit_amount) > 0) {
+                        tx.set(customerLedgerAllocations[customerLedgerAllocationIndex++].ref, {
+                            customerId: normalizedPhoneResult!.local,
+                            type: 'purchase_payment',
+                            amount: Math.min(Number(deposit_amount), serverTotal),
+                            referenceId: orderId,
+                            date: FieldValue.serverTimestamp()
+                        });
+                    }
+                }
+                if (debtPaymentAmount > 0) {
+                    tx.set(customerLedgerAllocations[customerLedgerAllocationIndex++].ref, {
+                        customerId: normalizedPhoneResult!.local,
+                        type: 'debt_payment',
+                        amount: debtPaymentAmount,
+                        referenceId: orderId,
+                        date: FieldValue.serverTimestamp()
+                    });
+                }
+                if (orderPaymentTotal > 0) {
+                    tx.set(customerLedgerAllocations[customerLedgerAllocationIndex++].ref, {
+                        customerId: normalizedPhoneResult!.local,
+                        type: 'debt_payment',
+                        amount: orderPaymentTotal,
+                        referenceId: debtPaymentReferenceId,
+                        date: FieldValue.serverTimestamp()
+                    });
+                }
             }
 
             // Repair Ticket Link
             if (!isPending) {
-                if (repairTicketId && repairRef && repairSnap && repairSnap.exists) {
-                    const repairPrice = items.find((i: Record<string, unknown>) => i.isRepairTicket)?.price || 0;
-                    tx.update(repairRef, {
+                for (const [id, repairPrice] of repairPaymentTotals.entries()) {
+                    const repairDoc = repairDocs.get(id);
+                    const completionTarget = repairCompletionTargets.get(id);
+                    if (!repairDoc) continue;
+                    if (!completionTarget) continue;
+                    tx.update(repairDoc.ref, {
                         'payment.status': 'paid',
-                        status: 'out',
+                        status: completionTarget.targetStatus,
                         'payment.method': payment_method || 'CASH',
                         'payment.amount': repairPrice,
                         'payment.paidAt': FieldValue.serverTimestamp(),
                         completedAt: FieldValue.serverTimestamp(),
                         'timing.completedAt': FieldValue.serverTimestamp(),
                         updatedAt: FieldValue.serverTimestamp(),
+                        statusTimeline: FieldValue.arrayUnion({
+                            eventType: 'pos_repair_payment',
+                            status: completionTarget.targetStatus,
+                            timestamp: Date.now(),
+                            by: caller.uid,
+                            actorId: caller.uid,
+                            actorName: createdByName,
+                            actorRole: caller.role,
+                            fromStatus: repairDoc.snap.data()?.status || null,
+                            toStatus: completionTarget.targetStatus,
+                            source: 'pos',
+                            requestId: idempotencyKey || null,
+                            note: `Thanh toán POS #${orderId.slice(-6)}`
+                        }),
                         paymentHistory: FieldValue.arrayUnion({
                             type: 'full',
                             amount: repairPrice,
@@ -421,16 +880,97 @@ export async function POST(request: NextRequest) {
                 }
             }
 
+            // Existing order debt payment link
+            if (!isPending) {
+                for (const [id, paymentAmount] of orderPaymentTotals.entries()) {
+                    const orderPaymentDoc = orderPaymentDocs.get(id);
+                    if (!orderPaymentDoc) continue;
+                    const orderData = orderPaymentDoc.snap.data() || {};
+                    const totalOrderAmount = Number(orderData.total_amount) || 0;
+                    const paidSoFar = getPaidAmount(orderData);
+                    const newPaidSoFar = Math.min(totalOrderAmount, paidSoFar + paymentAmount);
+                    const remainingAfterPayment = Math.max(0, totalOrderAmount - newPaidSoFar);
+                    const paymentHistory = Array.isArray(orderData.paymentHistory) ? orderData.paymentHistory : [];
+                    const paymentIndex = paymentHistory.filter(entry => {
+                        const type = String(entry?.type || '');
+                        return type === 'debt_payment' || type === 'payment' || type === 'deposit' || type === 'full';
+                    }).length + 1;
+                    const isFullyPaid = Math.abs(totalOrderAmount - newPaidSoFar) <= 1;
+
+                    tx.update(orderPaymentDoc.ref, {
+                        deposit_amount: newPaidSoFar,
+                        paymentStatus: isFullyPaid ? 'paid' : 'debt',
+                        ...(isFullyPaid ? {
+                            status: 'Completed',
+                            completedAt: orderData.completedAt || FieldValue.serverTimestamp(),
+                        } : {}),
+                        updatedAt: FieldValue.serverTimestamp(),
+                        paymentHistory: FieldValue.arrayUnion({
+                            type: 'debt_payment',
+                            amount: paymentAmount,
+                            method: payment_method || 'CASH',
+                            timestamp: Date.now(),
+                            referenceId: idempotencyKey || null,
+                            paymentIndex,
+                            paidAfter: newPaidSoFar,
+                            remainingAfter: remainingAfterPayment,
+                            note: `Thu nợ tại POS lần ${paymentIndex}: ${paymentAmount.toLocaleString('vi-VN')}đ`
+                        })
+                    });
+                }
+
+                let customerTransactionAllocationIndex = 0;
+                if (normalizedPhoneResult) {
+                    if (orderPaymentTotal > 0) {
+                        tx.set(customerTransactionAllocations[customerTransactionAllocationIndex++].ref, {
+                            customerId: normalizedPhoneResult.local,
+                            customerName: incomingName || customer_info?.name || 'Khách lẻ',
+                            type: 'PAYMENT',
+                            amount: orderPaymentTotal,
+                            orderIds: updatedOrderIds,
+                            note: 'Thu nợ tại POS',
+                            createdBy: caller.uid,
+                            createdByName,
+                            createdAt: FieldValue.serverTimestamp()
+                        });
+                    }
+                    if (debtPaymentAmount > 0) {
+                        tx.set(customerTransactionAllocations[customerTransactionAllocationIndex++].ref, {
+                            customerId: normalizedPhoneResult.local,
+                            customerName: incomingName || customer_info?.name || 'Khách lẻ',
+                            type: 'PAYMENT',
+                            amount: debtPaymentAmount,
+                            orderIds: [orderId],
+                            note: 'Cấn trừ nợ cũ bằng tiền thừa POS',
+                            createdBy: caller.uid,
+                            createdByName,
+                            createdAt: FieldValue.serverTimestamp()
+                        });
+                    }
+                }
+            }
+
             if (idempotencyKey) {
                 tx.set(db.collection('operation_requests').doc(idempotencyKey), {
                     status: 'completed',
                     completedAt: FieldValue.serverTimestamp(),
-                    type: 'pos_checkout',
-                    referenceId: orderId
+                    type: isDebtCollectionOnly ? 'pos_debt_collection' : 'pos_checkout',
+                    referenceId: isDebtCollectionOnly ? debtPaymentReferenceId : orderId,
+                    debtOnly: isDebtCollectionOnly,
+                    updatedOrderIds
                 });
             }
+            inventoryLogAllocations.at(-1)?.commitCounter();
+            customerLedgerAllocations.at(-1)?.commitCounter();
+            customerTransactionAllocations.at(-1)?.commitCounter();
 
-            return { success: true, orderId };
+            return {
+                success: true,
+                orderId: isDebtCollectionOnly ? debtPaymentReferenceId : orderId,
+                updatedOrderIds,
+                debtOnly: isDebtCollectionOnly,
+                warnings: checkoutWarnings
+            };
         });
 
         return NextResponse.json(result);

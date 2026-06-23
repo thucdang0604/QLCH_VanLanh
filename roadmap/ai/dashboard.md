@@ -96,12 +96,25 @@ Hệ thống Voucher + Discount Stacking Engine + Nhiệm vụ (Missions) để 
 Dọn dẹp kỹ thuật dư thừa phát hiện trong audit.
 
 - [x] <b>ESLint & TypeScript Build Fix:</b> Đã fix triệt để Type error (Next.js strict App Router constraint trên `page.tsx`) và gỡ bỏ code thừa, dọn dẹp các warning `any`, unused vars để `firebase deploy` (với `next build`) thành công 100%.
-- [ ] <b>Firestore Rules:</b> Xóa rule <code>services</code> trùng lặp (line 37 vs line 62)
-- [ ] <b>LazyImage:</b> Quyết định: xóa component orphan hoặc document lý do giữ
+- [x] <b>Firestore Rules:</b> Đã xác minh chỉ còn một rule <code>services</code> trong <code>firestore.rules</code>; mục duplicate cũ đã stale.
+- [x] <b>LazyImage:</b> Giữ component orphan có chủ đích để tái sử dụng skeleton/error fallback khi adopt storefront; không import đại trà để tránh churn UI.
 - [ ] <b>SEO Meta:</b> Kiểm tra <code>&lt;title&gt;</code> và <code>meta description</code> trên production domain
 - [x] <b>Hardcode Cleanup:</b> <code>BUG-HARDCODE-001</code> đã merge qua PR #8; còn residual smoke admin có dữ liệu thật, không còn blocker code.
 
 ## Changelog
+
+### 2026-06-23 - FIRESTORE DOCUMENT ID STANDARDIZATION
+- **Color:** success
+- **Summary:** Chốt nhịp chuẩn hóa ID tài liệu Firestore cho 19 collection nghiệp vụ người dùng đã nêu, giảm auto-ID ngẫu nhiên để dễ đọc, dễ truy vết, và ổn định hơn khi dữ liệu tăng lớn.
+
+- <b>Đã code:</b> Chuẩn hóa ID tạo mới cho <code>accessory_discount_rules</code>, <code>appointments</code>, <code>brands</code>, <code>commission_rules</code>, <code>customer_ledger</code>, <code>customer_transactions</code>, <code>expenses</code>, <code>import_receipts</code>, <code>inventory_logs</code>, <code>inventory_lots</code>, <code>media_library</code>, <code>orders</code>, <code>products</code>, <code>repairs</code>, <code>reviews</code>, <code>supplier_transactions</code>, <code>suppliers</code>.
+- <b>Đã giữ nguyên có chủ đích:</b> <code>users</code> tiếp tục dùng Firebase Auth UID; <code>operation_requests</code> tiếp tục dùng <code>idempotencyKey</code> để đảm bảo idempotent, không đổi sang mã tuần tự.
+- <b>Đã sửa các luồng chính:</b> checkout online, POS checkout, thu nợ POS, tạo phiếu sửa chữa/bảo hành, đặt lịch, review, chi phí, nhập kho, phiếu nhập tự động từ yêu cầu linh kiện, import Excel dữ liệu cũ, media upload, tạo nhanh NCC và sản phẩm/linh kiện đề xuất.
+- <b>Đã verify:</b> Chạy targeted ESLint, <code>pnpm typecheck</code>, <code>git diff --check</code> sau từng cụm commit. Rà pattern không còn auto-ID trực tiếp trong 19 collection nêu trên.
+- <b>Chưa thực hiện:</b> Chưa backfill/đổi ID các document cũ đã tồn tại trong Firestore; việc này cần migration riêng vì đổi document ID sẽ ảnh hưởng mọi reference hiện có.
+- <b>Chưa thực hiện:</b> Chưa kiểm thử browser end-to-end sau chuẩn hóa ID; cần smoke test tạo order POS, thu nợ order cũ, tạo/hoàn tất phiếu sửa chữa, tạo phiếu nhập, import Excel mẫu.
+- <b>Ngoài scope chưa đổi:</b> Các collection không nằm trong danh sách 19 như <code>commissions</code>, <code>vouchers</code>, <code>article_comments</code>, <code>subscribers</code> vẫn còn đường tạo auto-ID riêng nếu sau này muốn chuẩn hóa tiếp.
+- <b>Ngoài scope chưa đổi:</b> <code>lotCode</code> hiển thị nghiệp vụ nhập kho vẫn còn dạng <code>PN-...</code> kèm số ngẫu nhiên; document ID của <code>inventory_lots</code> đã chuẩn hóa, nhưng mã lô in/hiển thị cần một quyết định nghiệp vụ riêng nếu muốn bỏ random hoàn toàn.
 
 ### 2026-06-14 - FIX ISSUES & LINT ERRORS
 - **Color:** success

@@ -1,8 +1,8 @@
 {
   "_meta": {
     "description": "Bản đồ trí tuệ mã nguồn — tự động tích lũy khi AI đọc/sửa code. Giúp AI sau chỉ cần đọc file này là hiểu ngay cấu trúc, liên kết, và cách sửa.",
-    "lastUpdated": "2026-06-13T00:00:00.000Z",
-    "version": 21,
+    "lastUpdated": "2026-06-18T00:25:59.823Z",
+    "version": 22,
     "changelog": [
       "v1: Initial creation — mapped collections, key files, cross-links",
       "v2: Phase 4/6/8 completed — supplier dropdown+debt, variant+review UI, POS repair lookup+auto-discount",
@@ -24,7 +24,8 @@
       "v18: Admin config saves request background /api/revalidate instead of invoking a Server Action from the browser; the route accepts a signed admin session cookie or the internal secret.",
       "v19: QR/Barcode label print fit optimization — ProductQrLabelModal now supports smaller paper presets, custom mm size, two-labels-per-row stock, column gap tuning, configured shop-name branding, compact barcode aliases, text density, content scale, and safe margins without changing product code schema or checkout behavior.",
       "v20: Repair workflow Firestore v2 — repairStatuses is the only repair runtime source, require* features use exit-gate semantics, config validation is shared, and legacy statuses remains preserved but unused.",
-      "v21: Roadmap status reconciliation — merged/completed plans were normalized, residual production/device/role checks were separated from code completion, and the obsolete migrate:inventory package command was removed."
+      "v21: Roadmap status reconciliation — merged/completed plans were normalized, residual production/device/role checks were separated from code completion, and the obsolete migrate:inventory package command was removed.",
+      "v22: Read source code one by one and merged accurate Database Schema & API Endpoints."
     ]
   },
   "collections": {
@@ -182,6 +183,24 @@
       ],
       "changeLog": [
         "v2: Fully integrated into POS. useEffect auto-calculates discounts when repair is linked."
+      ]
+    },
+    "inventory_lots": {
+      "description": "Trạng thái lô hàng. Dùng cho Batch Tracking & FIFO.",
+      "keyFields": [
+        "lotCode",
+        "productId",
+        "supplierId",
+        "importPrice",
+        "initialQuantity",
+        "remainingQuantity",
+        "status",
+        "createdAt"
+      ],
+      "usedIn": [
+        "parts/page.tsx",
+        "pos/page.tsx",
+        "repairs/page.tsx"
       ]
     },
     "inventory_logs": {
@@ -812,7 +831,13 @@
         "membership_level": "'Smember' | 'Gold' | 'Silver' | 'Bronze'",
         "phone": "string",
         "address": "string",
-        "createdAt": "Date"
+        "createdAt": "Date",
+        "displayName?": "string",
+        "phone?": "string",
+        "address?": "string",
+        "missions?": "{\r\n        facebook_like?: boolean",
+        "tiktok_follow?": "boolean",
+        "completedAt?": "FirestoreDateValue | null"
       },
       "description": "Auto-mapped from types.ts"
     },
@@ -827,19 +852,30 @@
         "displayCount": "string",
         "subCategories": "string[];",
         "createdAt": "FirestoreDateValue",
-        "updatedAt": "FirestoreDateValue"
+        "updatedAt": "FirestoreDateValue",
+        "icon?": "string",
+        "displayCount?": "string",
+        "subCategories?": "string[]",
+        "createdAt?": "FirestoreDateValue",
+        "updatedAt?": "FirestoreDateValue"
       },
       "description": "Auto-mapped from types.ts"
     },
     "TaxonomyNode": {
       "fields": {
-        "id": "string;",
-        "name": "string;",
-        "slug": "string;",
+        "id": "string",
+        "name": "string",
+        "slug": "string",
         "icon": "string",
         "seoKeywords": "string",
         "seoDescription": "string",
-        "children": "TaxonomyNode[]"
+        "children": "TaxonomyNode[]",
+        "icon?": "string",
+        "seoKeywords?": "string",
+        "seoDescription?": "string",
+        "warrantyType?": "'none' | 'warrantyDevice' | 'warrantyRepair' | 'warrantyAccessory'",
+        "warrantyMonths?": "number",
+        "children?": "TaxonomyNode[]"
       },
       "description": "Auto-mapped from types.ts"
     },
@@ -849,7 +885,10 @@
         "name": "string",
         "logoUrl": "string",
         "createdAt": "FirestoreDateValue",
-        "updatedAt": "FirestoreDateValue"
+        "updatedAt": "FirestoreDateValue",
+        "logoUrl?": "string",
+        "createdAt?": "FirestoreDateValue",
+        "updatedAt?": "FirestoreDateValue"
       },
       "description": "Auto-mapped from types.ts"
     },
@@ -860,7 +899,13 @@
         "ram": "string",
         "storage": "string",
         "battery": "string",
-        "camera": "string"
+        "camera": "string",
+        "screen?": "string",
+        "cpu?": "string",
+        "ram?": "string",
+        "storage?": "string",
+        "battery?": "string",
+        "camera?": "string"
       },
       "description": "Auto-mapped from types.ts"
     },
@@ -869,7 +914,7 @@
         "id": "string",
         "name": "string",
         "brand": "string",
-        "category": "typeof import('./constants').RETAIL_CATEGORIES[number] | string",
+        "category": "typeof import('../constants').RETAIL_CATEGORIES[number] | string",
         "categoryIds": "string[];",
         "subCategory": "string",
         "price_original": "number",
@@ -898,7 +943,35 @@
         "storageCapacity": "string;",
         "conditionLabel": "string;",
         "createdAt": "Date",
-        "updatedAt": "Date"
+        "updatedAt": "Date",
+        "sku?": "string",
+        "barcode?": "string",
+        "productCode?": "string",
+        "qrCodes?": "string[]",
+        "categoryIds?": "string[]",
+        "subCategory?": "string",
+        "costPrice?": "number",
+        "oldCostPrice?": "number",
+        "supplier?": "string",
+        "imageUrl?": "string",
+        "imageWidth?": "number",
+        "imageHeight?": "number",
+        "condition?": "'new' | 'like-new' | 'used'",
+        "isFlashSale?": "boolean",
+        "warrantyType?": "'none' | 'warrantyDevice' | 'warrantyRepair' | 'warrantyAccessory'",
+        "sold?": "number",
+        "quality?": "string",
+        "partType?": "string",
+        "warrantyMonths?": "number",
+        "description?": "string",
+        "videoEmbedUrl?": "string",
+        "stock?": "number",
+        "held?": "number",
+        "isProposed?": "boolean",
+        "seriesId?": "string",
+        "color?": "string",
+        "storageCapacity?": "string",
+        "conditionLabel?": "string"
       },
       "description": "Auto-mapped from types.ts"
     },
@@ -921,7 +994,21 @@
         "imageUrl": "string",
         "isActive": "boolean",
         "createdAt": "FirestoreDateValue",
-        "updatedAt": "FirestoreDateValue"
+        "updatedAt": "FirestoreDateValue",
+        "price_promo?": "number",
+        "categoryIds?": "string[]",
+        "description?": "string",
+        "seoDescription?": "string",
+        "warranty_text?": "string",
+        "repair_time?": "string",
+        "slug?": "string",
+        "tags?": "string[]",
+        "videoEmbedUrl?": "string",
+        "imageUrl?": "string",
+        "images?": "string[]",
+        "isActive?": "boolean",
+        "createdAt?": "FirestoreDateValue",
+        "updatedAt?": "FirestoreDateValue"
       },
       "description": "Auto-mapped from types.ts"
     },
@@ -931,7 +1018,14 @@
         "productName": "string",
         "quantity": "number",
         "price": "number",
-        "image": "string"
+        "image": "string",
+        "image?": "string",
+        "imeis?": "string[]",
+        "lotCode?": "string",
+        "warrantyMonths?": "number",
+        "warrantyStartedAt?": "number",
+        "warrantyExpiresAt?": "number",
+        "warrantyType?": "'none' | 'warrantyDevice' | 'warrantyAccessory'"
       },
       "description": "Auto-mapped from types.ts"
     },
@@ -941,14 +1035,18 @@
         "phone": "string",
         "email": "string",
         "address": "string",
-        "note": "string"
+        "note": "string",
+        "email?": "string",
+        "note?": "string"
       },
       "description": "Auto-mapped from types.ts"
     },
     "Order": {
       "fields": {
         "id": "string",
-        "customer_info": "CustomerInfo"
+        "customer_info": "CustomerInfo",
+        "customer_info?": "CustomerInfo",
+        "customer?": "{ name: string"
       },
       "description": "Auto-mapped from types.ts"
     },
@@ -956,14 +1054,18 @@
       "fields": {
         "id": "string",
         "title": "string",
-        "content": "string;",
+        "content": "string",
         "type": "'News' | 'Promo' | 'Tips'",
         "thumbnail": "string",
         "author": "string",
         "tags": "string[]",
         "videoEmbedUrl": "string",
         "publishedAt": "Date",
-        "createdAt": "Date"
+        "createdAt": "Date",
+        "thumbnail?": "string",
+        "author?": "string",
+        "tags?": "string[]",
+        "videoEmbedUrl?": "string"
       },
       "description": "Auto-mapped from types.ts"
     },
@@ -971,13 +1073,15 @@
       "fields": {
         "id": "string",
         "articleId": "string",
-        "rating": "number;",
+        "rating": "number",
         "name": "string",
         "phone": "string",
         "content": "string",
         "status": "'pending' | 'approved'",
         "reply": "{",
-        "createdAt": "FirestoreDateValue"
+        "createdAt": "FirestoreDateValue",
+        "phone?": "string",
+        "reply?": "{\r\n        content: string"
       },
       "description": "Auto-mapped from types.ts"
     },
@@ -999,7 +1103,10 @@
         "status": "'active' | 'closed'",
         "lastMessage": "string",
         "createdAt": "FirestoreDateValue",
-        "updatedAt": "FirestoreDateValue"
+        "updatedAt": "FirestoreDateValue",
+        "userId?": "string",
+        "userName?": "string",
+        "lastMessage?": "string"
       },
       "description": "Auto-mapped from types.ts"
     },
@@ -1010,7 +1117,11 @@
         "date": "FirestoreDateValue",
         "timestamp": "number",
         "type": "'deposit' | 'payment' | 'full' | 'additional' | 'refund'",
-        "note": "string"
+        "note": "string",
+        "method?": "string",
+        "date?": "FirestoreDateValue",
+        "timestamp?": "number",
+        "note?": "string"
       },
       "description": "Auto-mapped from types.ts"
     },
@@ -1021,7 +1132,10 @@
         "color": "string",
         "allowedNext": "string[]",
         "allowedFeatures": "string[]",
-        "isTerminal": "boolean"
+        "isTerminal": "boolean",
+        "allowedFeatures?": "string[]",
+        "isTerminal?": "boolean",
+        "next?": "string"
       },
       "description": "Auto-mapped from types.ts"
     },
@@ -1031,7 +1145,8 @@
         "name": "string",
         "mappedStatuses": "string[]",
         "order": "number",
-        "isTerminal": "boolean"
+        "isTerminal": "boolean",
+        "isTerminal?": "boolean"
       },
       "description": "Auto-mapped from types.ts"
     },
@@ -1039,23 +1154,45 @@
       "fields": {
         "status": "string",
         "timestamp": "number",
-        "durationInMinutes": "number"
+        "durationInMinutes": "number",
+        "timestamp?": "number",
+        "at?": "FirestoreDateValue",
+        "durationInMinutes?": "number",
+        "eventType?": "'status_transition' | 'technician_assigned' | 'transfer_requested' | 'transfer_accepted' | 'transfer_rejected' | 'transfer_cancelled' | 'manager_override'",
+        "fromStatus?": "string",
+        "toStatus?": "string",
+        "actorId?": "string",
+        "actorName?": "string",
+        "actorRole?": "string",
+        "source?": "string",
+        "reason?": "string",
+        "requestId?": "string",
+        "fromTechnicianId?": "string",
+        "fromTechnicianName?": "string",
+        "toTechnicianId?": "string",
+        "toTechnicianName?": "string",
+        "by?": "string",
+        "note?": "string | null",
+        "isOverride?": "boolean"
       },
       "description": "Auto-mapped from types.ts"
     },
     "DeviceChecklist": {
       "fields": {
-        "body": "string;",
-        "screen": "string;",
-        "touch": "string;",
-        "camera": "string;",
-        "speaker": "string;",
-        "connectivity": "string;",
-        "battery": "string;",
-        "biometric": "string;",
+        "body": "string",
+        "screen": "string",
+        "touch": "string",
+        "camera": "string",
+        "speaker": "string",
+        "connectivity": "string",
+        "battery": "string",
+        "biometric": "string",
         "hasPriorRepair": "boolean",
         "hasWaterDamage": "boolean",
-        "hasNonGenuineParts": "boolean"
+        "hasNonGenuineParts": "boolean",
+        "hasPriorRepair?": "boolean",
+        "hasWaterDamage?": "boolean",
+        "hasNonGenuineParts?": "boolean"
       },
       "description": "Auto-mapped from types.ts"
     },
@@ -1072,7 +1209,7 @@
       "fields": {
         "productId": "string",
         "productName": "string",
-        "price": "number;",
+        "price": "number",
         "quantity": "number"
       },
       "description": "Auto-mapped from types.ts"
@@ -1086,9 +1223,15 @@
         "workflowConfigId": "string;",
         "categoryPath": "string[]",
         "serviceName": "string",
-        "customer": "{",
+        "customer": "{\r\n        name: string",
         "name": "string",
-        "phone": "string"
+        "phone": "string",
+        "version?": "number",
+        "partsLockedAt?": "FirestoreDateValue",
+        "appointmentId?": "string",
+        "workflowConfigId?": "string",
+        "categoryPath?": "string[]",
+        "serviceName?": "string"
       },
       "description": "Auto-mapped from types.ts"
     },
@@ -1097,20 +1240,31 @@
         "productId": "string",
         "productName": "string",
         "quantity": "number",
-        "importPrice": "number;",
+        "importPrice": "number",
         "oldCostPrice": "number;",
-        "quality": "string;"
+        "quality": "string;",
+        "oldCostPrice?": "number",
+        "quality?": "string",
+        "status?": "'requested' | 'approved' | 'ordered' | 'in_stock' | 'unavailable' | 'selected'",
+        "availability?": "'in_stock' | 'unavailable'",
+        "supplier?": "string",
+        "supplierId?": "string",
+        "ticketId?": "string",
+        "partLineId?": "string",
+        "allocatedHeldQuantity?": "number",
+        "surplusQuantity?": "number",
+        "unlinkedReason?": "'missing_line' | 'inactive_line' | 'already_allocated'"
       },
       "description": "Auto-mapped from types.ts"
     },
     "Review": {
       "fields": {
         "id": "string",
-        "referenceId": "string;",
+        "referenceId": "string",
         "type": "'repair' | 'order'",
         "customerName": "string",
-        "phone": "string;",
-        "rating": "number;",
+        "phone": "string",
+        "rating": "number",
         "content": "string",
         "images": "string[]",
         "status": "'pending' | 'approved'",
@@ -1133,7 +1287,14 @@
         "createdBy": "string",
         "createdByName": "string",
         "createdAt": "FirestoreDateValue",
-        "completedAt": "FirestoreDateValue"
+        "completedAt": "FirestoreDateValue",
+        "lotCode?": "string",
+        "supplierId?": "string",
+        "note?": "string",
+        "receiptType?": "'component' | 'retail'",
+        "paymentStatus?": "'paid' | 'partial' | 'unpaid'",
+        "paidAmount?": "number",
+        "completedAt?": "FirestoreDateValue"
       },
       "description": "Auto-mapped from types.ts"
     },
@@ -1142,14 +1303,17 @@
         "id": "string",
         "name": "string",
         "type": "'repair' | 'order' | 'all'",
-        "percentage": "number;",
+        "percentage": "number",
         "fixedAmount": "number;",
-        "hierarchyLevel": "1 | 2 | 3;",
-        "targetType": "'general' | 'category' | 'specific';",
+        "hierarchyLevel": "1 | 2 | 3",
+        "targetType": "'general' | 'category' | 'specific'",
         "targetValue": "string;",
         "isActive": "boolean",
         "applyAfterDiscount": "boolean;",
-        "createdAt": "FirestoreDateValue"
+        "createdAt": "FirestoreDateValue",
+        "fixedAmount?": "number",
+        "targetValue?": "string",
+        "applyAfterDiscount?": "boolean"
       },
       "description": "Auto-mapped from types.ts"
     },
@@ -1160,17 +1324,17 @@
         "staffName": "string",
         "ruleId": "string",
         "sourceType": "'repair' | 'order'",
-        "sourceId": "string;",
-        "amount": "number;",
-        "baseAmount": "number;",
+        "sourceId": "string",
+        "amount": "number",
+        "baseAmount": "number",
         "createdAt": "FirestoreDateValue"
       },
       "description": "Auto-mapped from types.ts"
     },
     "WarrantyRule": {
       "fields": {
-        "partType": "string;",
-        "warrantyMonths": "number;"
+        "partType": "string",
+        "warrantyMonths": "number"
       },
       "description": "Auto-mapped from types.ts"
     },
@@ -1192,14 +1356,15 @@
         "id": "string",
         "productId": "string",
         "productName": "string",
-        "quantity": "number;",
-        "costPriceAtLog": "number;",
-        "type": "'IMPORT' | 'SALE' | 'WEB_ORDER'",
+        "quantity": "number",
+        "costPriceAtLog": "number",
+        "type": "'IMPORT' | 'SALE' | 'WEB_ORDER'\r\n    | 'REPAIR_USE' | 'REPAIR_REFUND' | 'REPAIR_RELEASE' | 'REPAIR_RETURN'\r\n    | 'TECH_ISSUE' | 'TECH_RETURN'\r\n    | 'ORDER_CANCEL' | 'ORDER_COMPLETE' | 'ORDER_REACTIVATE'",
         "referenceId": "string",
         "referenceType": "'import_receipt' | 'order' | 'repair'",
         "createdBy": "string",
         "createdByName": "string",
-        "createdAt": "FirestoreDateValue"
+        "createdAt": "FirestoreDateValue",
+        "lotsDeducted?": "{ lotCode: string | null"
       },
       "description": "Auto-mapped from types.ts"
     },
@@ -1214,11 +1379,19 @@
         "bankAccount": "string;",
         "bankName": "string",
         "contactPerson": "string;",
-        "totalDebt": "number;",
+        "totalDebt": "number",
         "note": "string",
         "isActive": "boolean",
         "createdAt": "FirestoreDateValue",
-        "updatedAt": "FirestoreDateValue"
+        "updatedAt": "FirestoreDateValue",
+        "phone?": "string",
+        "email?": "string",
+        "address?": "string",
+        "taxCode?": "string",
+        "bankAccount?": "string",
+        "bankName?": "string",
+        "contactPerson?": "string",
+        "note?": "string"
       },
       "description": "Auto-mapped from types.ts"
     },
@@ -1227,31 +1400,35 @@
         "id": "string",
         "supplierId": "string",
         "supplierName": "string",
-        "type": "'IMPORT' | 'PAYMENT';",
-        "amount": "number;",
+        "type": "'IMPORT' | 'PAYMENT'",
+        "amount": "number",
         "importReceiptId": "string;",
         "paymentMethod": "string;",
         "note": "string",
         "createdBy": "string",
         "createdByName": "string",
-        "createdAt": "FirestoreDateValue"
+        "createdAt": "FirestoreDateValue",
+        "importReceiptId?": "string",
+        "paymentMethod?": "string",
+        "note?": "string"
       },
       "description": "Auto-mapped from types.ts"
     },
     "AccessoryDiscountRule": {
       "fields": {
         "id": "string",
-        "name": "string;",
-        "triggerServiceCategory": "string;",
-        "triggerKeywords": "string[];",
+        "name": "string",
+        "triggerServiceCategory": "string",
+        "triggerKeywords": "string[]",
         "discountType": "'percentage' | 'fixed'",
-        "discountValue": "number;",
-        "targetProductCategory": "string;",
-        "targetKeywords": "string[];",
+        "discountValue": "number",
+        "targetProductCategory": "string",
+        "targetKeywords": "string[]",
         "maxDiscountAmount": "number;",
         "isActive": "boolean",
         "createdAt": "FirestoreDateValue",
-        "updatedAt": "FirestoreDateValue"
+        "updatedAt": "FirestoreDateValue",
+        "maxDiscountAmount?": "number"
       },
       "description": "Auto-mapped from types.ts"
     },
@@ -1261,12 +1438,15 @@
         "productId": "string",
         "customerName": "string",
         "phone": "string;",
-        "rating": "number;",
+        "rating": "number",
         "content": "string",
         "images": "string[]",
         "status": "'pending' | 'approved'",
         "reply": "{",
-        "createdAt": "FirestoreDateValue"
+        "createdAt": "FirestoreDateValue",
+        "phone?": "string",
+        "images?": "string[]",
+        "reply?": "{\r\n        content: string"
       },
       "description": "Auto-mapped from types.ts"
     },
@@ -1276,7 +1456,10 @@
         "label": "string",
         "isTerminal": "boolean",
         "allowedNext": "string[]",
-        "allowedFeatures": "string[]"
+        "allowedFeatures": "string[]",
+        "isTerminal?": "boolean",
+        "allowedNext?": "string[]",
+        "allowedFeatures?": "string[]"
       },
       "description": "Auto-mapped from types.ts"
     },
@@ -1287,6 +1470,104 @@
         "nodes": "RepairWorkflowNode[]"
       },
       "description": "Auto-mapped from types.ts"
+    },
+    "Customer": {
+      "fields": {
+        "id": "string",
+        "phone": "string",
+        "name": "string",
+        "type?": "'retail' | 'wholesale'",
+        "totalSpent?": "number",
+        "totalOrders?": "number",
+        "totalRepairs?": "number",
+        "totalDebt?": "number",
+        "lastOrderDate?": "FirestoreDateValue",
+        "lastVisit?": "FirestoreDateValue",
+        "createdAt?": "FirestoreDateValue",
+        "updatedAt?": "FirestoreDateValue",
+        "tags?": "string[]",
+        "email?": "string",
+        "address?": "string",
+        "note?": "string"
+      },
+      "description": "Auto-mapped from types/commerce.ts"
+    },
+    "CustomerTransaction": {
+      "fields": {
+        "id": "string",
+        "customerId": "string",
+        "customerName": "string",
+        "type": "'DEBT' | 'PAYMENT'",
+        "amount": "number",
+        "orderIds?": "string[]",
+        "note?": "string",
+        "createdBy": "string",
+        "createdByName": "string",
+        "createdAt": "FirestoreDateValue"
+      },
+      "description": "Auto-mapped from types/commerce.ts"
+    },
+    "InventoryLot": {
+      "fields": {
+        "id": "string",
+        "lotCode": "string",
+        "productId": "string",
+        "supplierId": "string | null",
+        "importPrice": "number",
+        "initialQuantity": "number",
+        "remainingQuantity": "number",
+        "status": "'active' | 'empty'",
+        "createdAt": "FirestoreDateValue",
+        "updatedAt": "FirestoreDateValue"
+      },
+      "description": "Auto-mapped from types/inventory.ts"
+    },
+    "PendingTechnicianTransfer": {
+      "fields": {
+        "id": "string",
+        "fromTechnicianId": "string",
+        "fromTechnicianName": "string",
+        "toTechnicianId": "string",
+        "toTechnicianName": "string",
+        "requestedBy": "string",
+        "requestedByName": "string",
+        "requestedByRole": "string",
+        "reason": "string",
+        "source": "string",
+        "status": "'pending' | 'accepted' | 'rejected' | 'cancelled' | 'superseded'",
+        "requestedAt": "FirestoreDateValue",
+        "respondedAt?": "FirestoreDateValue",
+        "respondedBy?": "string",
+        "ticketVersion?": "number"
+      },
+      "description": "Auto-mapped from types/repair.ts"
+    },
+    "StackingRules": {
+      "fields": {
+        "isExclusive": "boolean",
+        "stackWithPromo": "boolean",
+        "stackWithTier": "boolean"
+      },
+      "description": "Auto-mapped from types/voucher.ts"
+    },
+    "Voucher": {
+      "fields": {
+        "id": "string",
+        "code": "string",
+        "type": "'fixed' | 'percentage'",
+        "value": "number",
+        "maxDiscount?": "number",
+        "minOrderValue?": "number",
+        "expiryDate?": "FirestoreDateValue",
+        "usageLimit": "number",
+        "usedCount": "number",
+        "isActive": "boolean",
+        "ownerId?": "string | null",
+        "stackingRules": "StackingRules",
+        "createdAt": "FirestoreDateValue",
+        "updatedAt": "FirestoreDateValue"
+      },
+      "description": "Auto-mapped from types/voucher.ts"
     }
   },
   "apiEndpoints": {
@@ -1364,6 +1645,381 @@
     },
     "tracking": {
       "/api/tracking": "POST: Khách hàng tự tra cứu tiến độ sửa chữa/đơn hàng bằng số điện thoại."
+    },
+    "/api/admin/ai": {
+      "methods": [
+        "POST"
+      ],
+      "description": "Auto-mapped from app/api/admin/ai/route.ts",
+      "file": "src/app/api/admin/ai/route.ts"
+    },
+    "/api/admin/bank-config/banks": {
+      "methods": [
+        "GET"
+      ],
+      "description": "Auto-mapped from app/api/admin/bank-config/banks/route.ts",
+      "file": "src/app/api/admin/bank-config/banks/route.ts"
+    },
+    "/api/admin/bank-config": {
+      "methods": [
+        "GET"
+      ],
+      "description": "Auto-mapped from app/api/admin/bank-config/route.ts",
+      "file": "src/app/api/admin/bank-config/route.ts"
+    },
+    "/api/admin/bank-config/totp/setup": {
+      "methods": [
+        "GET"
+      ],
+      "description": "Auto-mapped from app/api/admin/bank-config/totp/setup/route.ts",
+      "file": "src/app/api/admin/bank-config/totp/setup/route.ts"
+    },
+    "/api/admin/bank-config/totp/verify": {
+      "methods": [
+        "POST"
+      ],
+      "description": "Auto-mapped from app/api/admin/bank-config/totp/verify/route.ts",
+      "file": "src/app/api/admin/bank-config/totp/verify/route.ts"
+    },
+    "/api/admin/bank-config/update": {
+      "methods": [
+        "POST"
+      ],
+      "description": "Auto-mapped from app/api/admin/bank-config/update/route.ts",
+      "file": "src/app/api/admin/bank-config/update/route.ts"
+    },
+    "/api/admin/chat/integrations": {
+      "methods": [
+        "GET",
+        "PUT",
+        "POST"
+      ],
+      "description": "Auto-mapped from app/api/admin/chat/integrations/route.ts",
+      "file": "src/app/api/admin/chat/integrations/route.ts"
+    },
+    "/api/admin/chat/quick-replies": {
+      "methods": [
+        "GET"
+      ],
+      "description": "Auto-mapped from app/api/admin/chat/quick-replies/route.ts",
+      "file": "src/app/api/admin/chat/quick-replies/route.ts"
+    },
+    "/api/admin/chat/rooms/[roomId]/customer": {
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "description": "Auto-mapped from app/api/admin/chat/rooms/[roomId]/customer/route.ts",
+      "file": "src/app/api/admin/chat/rooms/[roomId]/customer/route.ts"
+    },
+    "/api/admin/chat/rooms/[roomId]/facebook-profile": {
+      "methods": [
+        "POST"
+      ],
+      "description": "Auto-mapped from app/api/admin/chat/rooms/[roomId]/facebook-profile/route.ts",
+      "file": "src/app/api/admin/chat/rooms/[roomId]/facebook-profile/route.ts"
+    },
+    "/api/admin/chat/rooms/[roomId]/media/[messageId]/[attachmentIndex]": {
+      "methods": [
+        "GET"
+      ],
+      "description": "Auto-mapped from app/api/admin/chat/rooms/[roomId]/media/[messageId]/[attachmentIndex]/route.ts",
+      "file": "src/app/api/admin/chat/rooms/[roomId]/media/[messageId]/[attachmentIndex]/route.ts"
+    },
+    "/api/admin/chat/send": {
+      "methods": [
+        "POST"
+      ],
+      "description": "Auto-mapped from app/api/admin/chat/send/route.ts",
+      "file": "src/app/api/admin/chat/send/route.ts"
+    },
+    "/api/admin/customers/collect-debt": {
+      "methods": [
+        "POST"
+      ],
+      "description": "Auto-mapped from app/api/admin/customers/collect-debt/route.ts",
+      "file": "src/app/api/admin/customers/collect-debt/route.ts"
+    },
+    "/api/admin/fix-held": {
+      "methods": [
+        "POST"
+      ],
+      "description": "Auto-mapped from app/api/admin/fix-held/route.ts",
+      "file": "src/app/api/admin/fix-held/route.ts"
+    },
+    "/api/admin/seed-taxonomy": {
+      "methods": [
+        "POST"
+      ],
+      "description": "Auto-mapped from app/api/admin/seed-taxonomy/route.ts",
+      "file": "src/app/api/admin/seed-taxonomy/route.ts"
+    },
+    "/api/ai": {
+      "methods": [
+        "POST"
+      ],
+      "description": "Auto-mapped from app/api/ai/route.ts",
+      "file": "src/app/api/ai/route.ts"
+    },
+    "/api/analytics/visit": {
+      "methods": [
+        "POST"
+      ],
+      "description": "Auto-mapped from app/api/analytics/visit/route.ts",
+      "file": "src/app/api/analytics/visit/route.ts"
+    },
+    "/api/appointments": {
+      "methods": [
+        "POST"
+      ],
+      "description": "Auto-mapped from app/api/appointments/route.ts",
+      "file": "src/app/api/appointments/route.ts"
+    },
+    "/api/auth/session": {
+      "methods": [
+        "POST",
+        "DELETE"
+      ],
+      "description": "Auto-mapped from app/api/auth/session/route.ts",
+      "file": "src/app/api/auth/session/route.ts"
+    },
+    "/api/bounty/claim": {
+      "methods": [
+        "POST"
+      ],
+      "description": "Auto-mapped from app/api/bounty/claim/route.ts",
+      "file": "src/app/api/bounty/claim/route.ts"
+    },
+    "/api/bounty/request-otp": {
+      "methods": [
+        "POST"
+      ],
+      "description": "Auto-mapped from app/api/bounty/request-otp/route.ts",
+      "file": "src/app/api/bounty/request-otp/route.ts"
+    },
+    "/api/checkout": {
+      "methods": [
+        "POST"
+      ],
+      "description": "Auto-mapped from app/api/checkout/route.ts",
+      "file": "src/app/api/checkout/route.ts"
+    },
+    "/api/customers/sync": {
+      "methods": [
+        "POST"
+      ],
+      "description": "Auto-mapped from app/api/customers/sync/route.ts",
+      "file": "src/app/api/customers/sync/route.ts"
+    },
+    "/api/debug/users": {
+      "methods": [
+        "GET"
+      ],
+      "description": "Auto-mapped from app/api/debug/users/route.ts",
+      "file": "src/app/api/debug/users/route.ts"
+    },
+    "/api/integrations/facebook/webhook": {
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "description": "Auto-mapped from app/api/integrations/facebook/webhook/route.ts",
+      "file": "src/app/api/integrations/facebook/webhook/route.ts"
+    },
+    "/api/integrations/facebook/webhook/test": {
+      "methods": [
+        "POST",
+        "GET"
+      ],
+      "description": "Auto-mapped from app/api/integrations/facebook/webhook/test/route.ts",
+      "file": "src/app/api/integrations/facebook/webhook/test/route.ts"
+    },
+    "/api/integrations/zalo/webhook": {
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "description": "Auto-mapped from app/api/integrations/zalo/webhook/route.ts",
+      "file": "src/app/api/integrations/zalo/webhook/route.ts"
+    },
+    "/api/inventory/import": {
+      "methods": [
+        "POST"
+      ],
+      "description": "Auto-mapped from app/api/inventory/import/route.ts",
+      "file": "src/app/api/inventory/import/route.ts"
+    },
+    "/api/orders/assign-seller": {
+      "methods": [
+        "POST"
+      ],
+      "description": "Auto-mapped from app/api/orders/assign-seller/route.ts",
+      "file": "src/app/api/orders/assign-seller/route.ts"
+    },
+    "/api/orders/transition": {
+      "methods": [
+        "POST"
+      ],
+      "description": "Auto-mapped from app/api/orders/transition/route.ts",
+      "file": "src/app/api/orders/transition/route.ts"
+    },
+    "/api/orders/[id]/imei": {
+      "methods": [
+        "POST"
+      ],
+      "description": "Auto-mapped from app/api/orders/[id]/imei/route.ts",
+      "file": "src/app/api/orders/[id]/imei/route.ts"
+    },
+    "/api/pos/checkout": {
+      "methods": [
+        "POST"
+      ],
+      "description": "Auto-mapped from app/api/pos/checkout/route.ts",
+      "file": "src/app/api/pos/checkout/route.ts"
+    },
+    "/api/products": {
+      "methods": [
+        "GET"
+      ],
+      "description": "Auto-mapped from app/api/products/route.ts",
+      "file": "src/app/api/products/route.ts"
+    },
+    "/api/proxy-image": {
+      "methods": [
+        "GET"
+      ],
+      "description": "Auto-mapped from app/api/proxy-image/route.ts",
+      "file": "src/app/api/proxy-image/route.ts"
+    },
+    "/api/repairs/confirm-parts": {
+      "methods": [
+        "POST"
+      ],
+      "description": "Auto-mapped from app/api/repairs/confirm-parts/route.ts",
+      "file": "src/app/api/repairs/confirm-parts/route.ts"
+    },
+    "/api/repairs/create": {
+      "methods": [
+        "POST"
+      ],
+      "description": "Auto-mapped from app/api/repairs/create/route.ts",
+      "file": "src/app/api/repairs/create/route.ts"
+    },
+    "/api/repairs/handover": {
+      "methods": [
+        "POST"
+      ],
+      "description": "Auto-mapped from app/api/repairs/handover/route.ts",
+      "file": "src/app/api/repairs/handover/route.ts"
+    },
+    "/api/repairs/payment-edit": {
+      "methods": [
+        "POST"
+      ],
+      "description": "Auto-mapped from app/api/repairs/payment-edit/route.ts",
+      "file": "src/app/api/repairs/payment-edit/route.ts"
+    },
+    "/api/repairs/technician/assign": {
+      "methods": [
+        "POST"
+      ],
+      "description": "Auto-mapped from app/api/repairs/technician/assign/route.ts",
+      "file": "src/app/api/repairs/technician/assign/route.ts"
+    },
+    "/api/repairs/technician/transfer": {
+      "methods": [
+        "POST"
+      ],
+      "description": "Auto-mapped from app/api/repairs/technician/transfer/route.ts",
+      "file": "src/app/api/repairs/technician/transfer/route.ts"
+    },
+    "/api/repairs/transition": {
+      "methods": [
+        "POST"
+      ],
+      "description": "Auto-mapped from app/api/repairs/transition/route.ts",
+      "file": "src/app/api/repairs/transition/route.ts"
+    },
+    "/api/revalidate": {
+      "methods": [
+        "POST",
+        "GET"
+      ],
+      "description": "Auto-mapped from app/api/revalidate/route.ts",
+      "file": "src/app/api/revalidate/route.ts"
+    },
+    "/api/revenue/expenses": {
+      "methods": [
+        "POST"
+      ],
+      "description": "Auto-mapped from app/api/revenue/expenses/route.ts",
+      "file": "src/app/api/revenue/expenses/route.ts"
+    },
+    "/api/reviews/google": {
+      "methods": [
+        "GET"
+      ],
+      "description": "Auto-mapped from app/api/reviews/google/route.ts",
+      "file": "src/app/api/reviews/google/route.ts"
+    },
+    "/api/reviews/product": {
+      "methods": [
+        "POST"
+      ],
+      "description": "Auto-mapped from app/api/reviews/product/route.ts",
+      "file": "src/app/api/reviews/product/route.ts"
+    },
+    "/api/reviews": {
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "description": "Auto-mapped from app/api/reviews/route.ts",
+      "file": "src/app/api/reviews/route.ts"
+    },
+    "/api/search": {
+      "methods": [
+        "GET"
+      ],
+      "description": "Auto-mapped from app/api/search/route.ts",
+      "file": "src/app/api/search/route.ts"
+    },
+    "/api/seed-admin": {
+      "methods": [
+        "POST",
+        "GET"
+      ],
+      "description": "Auto-mapped from app/api/seed-admin/route.ts",
+      "file": "src/app/api/seed-admin/route.ts"
+    },
+    "/api/seed-config": {
+      "methods": [
+        "POST",
+        "GET"
+      ],
+      "description": "Auto-mapped from app/api/seed-config/route.ts",
+      "file": "src/app/api/seed-config/route.ts"
+    },
+    "/api/services/homepage-pricing": {
+      "methods": [
+        "GET"
+      ],
+      "description": "Auto-mapped from app/api/services/homepage-pricing/route.ts",
+      "file": "src/app/api/services/homepage-pricing/route.ts"
+    },
+    "/api/tracking": {
+      "methods": [
+        "POST"
+      ],
+      "description": "Auto-mapped from app/api/tracking/route.ts",
+      "file": "src/app/api/tracking/route.ts"
+    },
+    "/api/vouchers/validate": {
+      "methods": [
+        "POST"
+      ],
+      "description": "Auto-mapped from app/api/vouchers/validate/route.ts",
+      "file": "src/app/api/vouchers/validate/route.ts"
     }
   }
 }

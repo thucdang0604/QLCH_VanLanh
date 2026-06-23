@@ -6,16 +6,21 @@
 graph TD
   %% --- INVENTORY MODULE ---
   subgraph INVENTORY [Kho hàng]
-    I1("📝 Tạo Phiếu Nhập") --> I2("Nhà Cung Cấp (Tạo/Chọn)")
+    I1("📝 Tạo Phiếu Nhập") --> I_EXCEL("Excel Bootstrap / Import Số Lượng Lớn")
+    I1 --> I2("Chọn NCC cho Từng Mặt Hàng (Per-item NCC)")
+    I_EXCEL --> I2
     I2 --> I3{"Loại Hàng?"}
-    I3 -->|"Sản Phẩm Bán Lẻ"| I4("Tạo/Chọn Sản Phẩm")
+    I3 -->|"Sản Phẩm Bán Lẻ"| I4("Tạo/Chọn Sản Phẩm (Tạo mã QR/Barcode)")
     I3 -->|"Linh Kiện Sửa Chữa"| I5("Tạo/Chọn Linh Kiện")
     I4 --> I6("Nhập Số lượng & Giá")
     I5 --> I6
-    I6 --> I7("Duyệt Phiếu Nhập")
+    I6 --> I7_PAY("💳 Chọn Phương Thức Thanh Toán (Tiền Mặt / Ghi Nợ)")
+    I7_PAY --> I7("Duyệt Phiếu Nhập")
     I7 --> I7_TRANS("🛡️ Firestore Transaction (Atomic)")
     I7_TRANS --> I7_LOG["📑 Ghi nhận inventory_logs"]
+    I7_TRANS --> I7_DEBT["💸 Nhóm & Ghi nhận Công Nợ NCC (supplier_transactions)"]
     I7_LOG -->|"Thành công"| I8("✅ Cập nhật Tồn Kho (Stock += N)")
+    I7_DEBT --> I8
     I7_LOG -->|"Thất bại/Hủy"| I_CANCEL("❌ Hủy Nhập")
     O_POS("🔗 Bán Hàng POS") --> O_POS_TRANS("🛡️ runTransaction")
     O_POS_TRANS --> O1("➖ Trừ Tồn Kho Sản Phẩm (Stock -= N)")
@@ -41,14 +46,15 @@ graph TD
   %% --- POS & ORDERS MODULE ---
   subgraph POS_ORDERS [POS & Đơn hàng]
     P0("🔐 Kiểm tra Quyền (RBAC)") --> P1("🛒 Khởi tạo Giỏ Hàng")
-    P1 --> P2("Quét Mã Vạch / Tìm SP")
+    P1 --> P2("📷 Quét QR/Barcode (Keyboard/Camera) hoặc Tìm kiếm")
     P2 --> P2_1{"Kiểm tra tồn kho?"}
     P2_1 -->|"Hết hàng"| P2_2("🚨 Cảnh báo âm kho")
     P2_1 -->|"Còn hàng"| P3("Chỉnh sửa số lượng / Xóa")
     P3 --> P4{"Khách hàng?"}
     P4 -->|"Khách vãng lai"| P5("Tính tiền trực tiếp")
-    P4 -->|"Khách thành viên"| P6("Tra cứu SDT / Tạo Mới")
-    P6 --> P7("Áp dụng Chiết Khấu / Mã Giảm Giá")
+    P4 -->|"Khách thành viên"| P6("Tra cứu/Tạo mới CRM Khách hàng (customers)")
+    P6 --> P6_1("Gán Hạng (Tier theo năm) & Tag")
+    P6_1 --> P7("🎁 Áp dụng Discount Stacking (Missions/Vouchers/Tier)")
     P5 --> P8("💳 Thanh Toán")
     P7 --> P8
     P8 --> P9{"Phương thức?"}
@@ -72,8 +78,10 @@ graph TD
   end
   %% --- REPAIR MODULE ---
   subgraph REPAIR_MOD [Sửa chữa]
+    CHAT_IN("💬 Live Chat Omnichannel (FB/Zalo/Web)") --> CHAT_CRM("Modal CRM -> Chuyển Giao (Handoff)")
+    CHAT_CRM --> A
     A("🚀 Chờ Tiếp nhận") --> A1("🔐 Kiểm tra Quyền & Check-in")
-    A1 -->|"Gán KTV, Checklist"| B("🔍 Đang Kiểm Tra")
+    A1 -->|"Gán KTV, Checklist"| B("🔍 Đang Kiểm Tra (Workflow v2 Exit-gates)")
     A -->|"Khách đổi ý"| OUT("❌ Trả Máy / Hủy")
     B --> B1{"Có lỗi phát sinh?"}
     B1 -->|"Có"| C("📞 Báo Tình trạng & Giá")
@@ -86,7 +94,9 @@ graph TD
     E -->|"Đồng ý, thiếu LK"| F("🔎 Tìm Linh Kiện (Mở Kho)")
     E -->|"Từ chối"| OUT
     E -->|"Đòi lại cọc"| REFUND("💸 Hoàn Phí")
-    F -->|"Đã đặt mua"| G("📦 Đã Đặt LK")
+    F -->|"Linh kiện chưa có sẵn"| F_PROP("📝 Tạo Phiếu Đề Xuất Nhập (Kèm repairTicketId)")
+    F_PROP -->|"Đã đặt mua"| G("📦 Đã Đặt LK")
+    F_PROP -->|"Không đặt được hàng (unavailable)"| REFUND
     F -->|"Không tìm được"| REFUND
     F -->|"Khách lấy lại"| OUT
     G -->|"Chốt: LK đã về"| D
@@ -95,12 +105,12 @@ graph TD
     D1 -->|"Billable"| D3("💰 Tính phí linh kiện")
     D2 --> D4("🛠️ Tiến hành Thay thế / Fix")
     D3 --> D4
-    D4 --> D5("🛡️ runTransaction (Handover)")
+    D4 --> D5("🛡️ runTransaction (Handover & Tính Bảo Hành)")
     D5 --> D6("➖ Trừ Kho LK (Stock -= N)")
     D6 -->|"Xong"| DONE
     D6 -->|"Thất bại"| REFUND
-    DONE --> DONE_INV("📑 Printable Invoice")
-    DONE_INV --> DONE_WAR("🏷️ Gán Bảo Hành (warrantyUtils)")
+    DONE --> DONE_INV("📑 Printable Invoice (Dynamic từ taxonomyTree)")
+    DONE_INV --> DONE_WAR("🏷️ Hoàn tất quá trình Bảo Hành")
   end
   %% --- FINANCE & HR MODULE ---
   subgraph FINANCE_HR [Tài chính & Nhân sự]
@@ -112,7 +122,8 @@ graph TD
     RE4("Phiếu Thu Khác") --> FUND
     C1_FIN --> FUND
     C2_FIN --> FUND
-    EX1("Phiếu Chi: Nhà Cung Cấp") --> OUT_FUND("💸 Trừ Quỹ")
+    EX1("Phiếu Chi: Thanh toán NCC (Import Paid)") --> OUT_FUND("💸 Trừ Quỹ")
+    EX1_1("Phiếu Chi: Trả Nợ NCC (Supplier Debt)") --> OUT_FUND
     EX2("Phiếu Chi Khác") --> OUT_FUND
     OUT_FUND --> FUND
     H1("Tạo Hồ Sơ Nhân Viên") --> H2("🔐 Phân quyền RBAC (permissions.ts)")
@@ -131,12 +142,14 @@ graph TD
   end
   %% --- SYSTEM & CONTENT MODULE ---
   subgraph SYSTEM_CONTENT [Hệ thống & Nội dung]
+    CHAT_HOOK("🔗 Webhook FB/Zalo") --> RTDB("Realtime DB (Anonymous Auth)")
+    RTDB --> CHAT_IN
     CMS1("Tạo Bài Viết / Sản Phẩm") --> CMS2("🖼️ Image Pipeline (Client-side)")
     CMS2 --> CMS3{"Check Kích Thước/Định Dạng"}
     CMS3 -->|"Hợp lệ"| CMS4("Resizing & Compression")
     CMS4 --> CMS5("Firebase Storage Upload")
     CMS5 --> CMS6("Lưu URL vào Firestore Document")
-    SYS1("Cài Đặt Hệ Thống (Settings)") --> SYS2("Lưu Global Config vào Firestore")
+    SYS1("Cài Đặt Hệ Thống & Giao diện (layout_settings)") --> SYS2("Lưu Global Config vào Firestore")
     SYS2 --> SYS3("🔄 Đồng bộ Realtime")
     SYS4("Yêu Cầu Từ Client") --> SYS5("🛡️ RBAC Middleware")
     SYS5 --> SYS6{"Check Permissions"}
@@ -156,8 +169,10 @@ graph TD
   ORD8 --> O4
   ORD9_1 --> O6
   F --> O_REP
+  F_PROP -->|"Đề xuất nhập hàng"| I1
   O_REP_TRANS --> O2
   I8 --> EX1
+  I8 --> EX1_1
   M6_LOG --> RE4
   P13 --> RE1
   ORD9_1 --> RE2
@@ -166,14 +181,17 @@ graph TD
   SYS8 --> P0
   SYS8 --> A1
   click I1 call handleMasterNodeClick("I1")
+  click I_EXCEL call handleMasterNodeClick("I_EXCEL")
   click I2 call handleMasterNodeClick("I2")
   click I3 call handleMasterNodeClick("I3")
   click I4 call handleMasterNodeClick("I4")
   click I5 call handleMasterNodeClick("I5")
   click I6 call handleMasterNodeClick("I6")
+  click I7_PAY call handleMasterNodeClick("I7_PAY")
   click I7 call handleMasterNodeClick("I7")
   click I7_TRANS call handleMasterNodeClick("I7_TRANS")
   click I7_LOG call handleMasterNodeClick("I7_LOG")
+  click I7_DEBT call handleMasterNodeClick("I7_DEBT")
   click I8 call handleMasterNodeClick("I8")
   click I_CANCEL call handleMasterNodeClick("I_CANCEL")
   click O_POS call handleMasterNodeClick("O_POS")
@@ -209,6 +227,7 @@ graph TD
   click P4 call handleMasterNodeClick("P4")
   click P5 call handleMasterNodeClick("P5")
   click P6 call handleMasterNodeClick("P6")
+  click P6_1 call handleMasterNodeClick("P6_1")
   click P7 call handleMasterNodeClick("P7")
   click P8 call handleMasterNodeClick("P8")
   click P9 call handleMasterNodeClick("P9")
@@ -228,8 +247,11 @@ graph TD
   click ORD8 call handleMasterNodeClick("ORD8")
   click ORD9 call handleMasterNodeClick("ORD9")
   click ORD9_1 call handleMasterNodeClick("ORD9_1")
+  click CHAT_IN call handleMasterNodeClick("CHAT_IN")
+  click CHAT_CRM call handleMasterNodeClick("CHAT_CRM")
   click A call handleMasterNodeClick("A")
   click A1 call handleMasterNodeClick("A1")
+  click F_PROP call handleMasterNodeClick("F_PROP")
   click B call handleMasterNodeClick("B")
   click OUT call handleMasterNodeClick("OUT")
   click B1 call handleMasterNodeClick("B1")
@@ -257,6 +279,7 @@ graph TD
   click RE4 call handleMasterNodeClick("RE4")
   click FUND call handleMasterNodeClick("FUND")
   click EX1 call handleMasterNodeClick("EX1")
+  click EX1_1 call handleMasterNodeClick("EX1_1")
   click EX2 call handleMasterNodeClick("EX2")
   click EX3 call handleMasterNodeClick("EX3")
   click OUT_FUND call handleMasterNodeClick("OUT_FUND")
@@ -271,6 +294,8 @@ graph TD
   click H9 call handleMasterNodeClick("H9")
   click H10 call handleMasterNodeClick("H10")
   click H11 call handleMasterNodeClick("H11")
+  click CHAT_HOOK call handleMasterNodeClick("CHAT_HOOK")
+  click RTDB call handleMasterNodeClick("RTDB")
   click CMS1 call handleMasterNodeClick("CMS1")
   click CMS2 call handleMasterNodeClick("CMS2")
   click CMS3 call handleMasterNodeClick("CMS3")
@@ -293,6 +318,6 @@ graph TD
   click AUTH2 call handleMasterNodeClick("AUTH2")
   classDef process fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#ffffff,rx:8px,ry:8px
   classDef system fill:#334155,stroke:#94a3b8,stroke-dasharray: 5 5,color:#e2e8f0
-  class I1,I2,P1,P2,A,B,CMS1,SYS1 process
+  class I1,I_EXCEL,I2,P1,P2,P6,P6_1,P7,CHAT_IN,CHAT_CRM,A,B,CHAT_HOOK,RTDB,CMS1,SYS1 process
   class I7_TRANS,O_POS_TRANS,O_REP_TRANS,O3_TRANS,O6_TRANS,M6_TRANS,ORD2_1,ORD9_1,D5,SYS5 system
 ```

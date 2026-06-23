@@ -10,7 +10,6 @@ export type PermissionId =
     | 'view_dashboard'
     | 'manage_inventory'
     | 'manage_reviews'
-    | 'manage_ai_creator'
     | 'manage_staff'
     | 'manage_appearance'
     | 'manage_settings'
@@ -35,7 +34,6 @@ export type AdminIconKey =
     | 'articles'
     | 'chat'
     | 'reviews'
-    | 'aiCreator'
     | 'staff'
     | 'commissions'
     | 'appearance'
@@ -88,7 +86,6 @@ export const PERMISSIONS_REGISTRY: PermissionDefinition[] = [
     { id: 'chat_support', label: 'Chat & CSKH', group: 'Khách hàng & CSKH' },
     { id: 'manage_reviews', label: 'Quản lý Đánh giá', group: 'Khách hàng & CSKH' },
     { id: 'manage_articles', label: 'Quản lý Bài viết', group: 'Quản trị' },
-    { id: 'manage_ai_creator', label: 'AI Creator', group: 'Quản trị' },
     { id: 'manage_staff', label: 'Quản lý Nhân viên', group: 'Quản trị' },
     { id: 'view_commissions', label: 'Xem Hoa hồng', group: 'Quản trị' },
     { id: 'manage_appearance', label: 'Quản lý Giao diện & Biên nhận', group: 'Quản trị' },
@@ -149,7 +146,6 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
         label: 'Quản trị',
         items: [
             { label: 'Bài viết', href: '/admin/articles', iconKey: 'articles', permission: 'manage_articles' },
-            { label: 'AI Creator', href: '/admin/ai-creator', iconKey: 'aiCreator', permission: 'manage_ai_creator' },
             { label: 'Nhân viên', href: '/admin/staff', iconKey: 'staff', permission: 'manage_staff' },
             { label: 'Hoa hồng', href: '/admin/commissions', iconKey: 'commissions', permission: 'view_commissions' },
             { label: 'Giao diện', href: '/admin/appearance', iconKey: 'appearance', permission: 'manage_appearance' },
@@ -205,8 +201,8 @@ export const ADMIN_ROLE_PRESETS: AdminRolePreset[] = [
     {
         id: 'content',
         label: 'Content',
-        description: 'Quản lý bài viết, giao diện nội dung và AI Creator.',
-        permissions: ['manage_articles', 'manage_appearance', 'manage_ai_creator'],
+        description: 'Quản lý bài viết và giao diện nội dung.',
+        permissions: ['manage_articles', 'manage_appearance'],
     },
 ];
 

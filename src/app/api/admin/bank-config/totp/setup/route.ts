@@ -1,11 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requirePermission } from '@/lib/apiAuth';
+import { getAdminDb } from '@/lib/firebaseAdmin';
 import { authenticator } from 'otplib';
 import QRCode from 'qrcode';
 
 export async function GET(request: NextRequest) {
     try {
         await requirePermission(request, 'manage_settings');
+        const db = getAdminDb();
+        const configDoc = await db.collection('settings').doc('bank_config').get();
+        const configData = configDoc.data();
+        if (configData?.totpEnabled && configData?.totpSecret) {
+            return NextResponse.json({ success: false, error: 'Authenticator da duoc thiet lap.' }, { status: 409 });
+        }
         
         // Sinh secret mới
         const secret = authenticator.generateSecret();

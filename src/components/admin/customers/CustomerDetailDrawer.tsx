@@ -348,9 +348,20 @@ export default function CustomerDetailDrawer({ customer, isOpen, onClose }: Prop
 
                     {activeTab === 'debt' && (
                         <section className="space-y-4">
-                            <div className="bg-red-50 p-4 rounded-xl border border-red-100 flex flex-col items-center justify-center">
+                            <div className={`p-4 rounded-xl border flex flex-col items-center justify-center ${
+                                (customer.totalDebt || 0) > 0 ? 'bg-red-50 border-red-100' : (customer.totalDebt || 0) < 0 ? 'bg-green-50 border-green-100' : 'bg-gray-50 border-gray-100'
+                            }`}>
                                 <p className="text-gray-600 text-sm mb-1">Dư nợ hiện tại</p>
-                                <p className="text-2xl font-bold text-red-600">{formatPrice(customer.totalDebt || 0)}</p>
+                                <p className={`text-2xl font-bold ${
+                                    (customer.totalDebt || 0) > 0 ? 'text-red-600' : (customer.totalDebt || 0) < 0 ? 'text-green-600' : 'text-gray-500'
+                                }`}>
+                                    {(customer.totalDebt || 0) > 0
+                                        ? formatPrice(customer.totalDebt || 0)
+                                        : (customer.totalDebt || 0) < 0
+                                            ? `Dư: ${formatPrice(Math.abs(customer.totalDebt || 0))}`
+                                            : 'Không có nợ'
+                                    }
+                                </p>
                             </div>
 
                             {(customer.totalDebt || 0) > 0 && (

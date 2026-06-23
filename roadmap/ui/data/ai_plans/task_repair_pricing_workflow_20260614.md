@@ -1,7 +1,7 @@
-- `[ ]` **Logic Tính Giá (API)**
-  - `[ ]` Cập nhật file `src/app/api/repairs/handover/route.ts` để lấy `laborCost` (mặc định = tổng `estimatedPrice` của issues). Sửa công thức `amount`.
-  - `[ ]` Cập nhật file `src/app/api/repairs/payment-edit/route.ts` để đọc và cho phép chỉnh sửa `laborCost`.
-- `[ ]` **Giao diện & UI (Client)**
+- [x] **Logic Tính Giá (API)**
+  - [x] Cập nhật file `src/app/api/repairs/handover/route.ts` để lấy `laborCost` (mặc định = tổng `estimatedPrice` của issues). Sửa công thức `amount`.
+  - [x] Cập nhật file `src/app/api/repairs/payment-edit/route.ts` để đọc và cho phép chỉnh sửa `laborCost`.
+- [x] **Giao diện & UI (Client)**
   - [x] Cập nhật file `src/app/admin/repairs/page.tsx` bổ sung ô nhập liệu `Chi phí sửa chữa (Labor Cost)` vào Modal Handover.
   - [x] Cập nhật thẻ chi tiết phiếu (Repair Ticket Detail) trên UI của thu ngân, hiển thị tách biệt Tiền Linh Kiện vs Chi phí sửa chữa.
   - [x] Tự động hiển thị tổng `estimatedPrice` vào ô `Chi phí sửa chữa` khi mở Modal.
@@ -10,7 +10,7 @@
   - [x] Kiểm tra luồng `src/app/admin/pos/page.tsx` và `src/app/api/pos/checkout/route.ts` để đảm bảo `laborCost` của phiếu sửa chữa được hiển thị/thu tiền chính xác trên hệ thống thanh toán trung tâm.
 - [x] **Cập nhật tính năng Config-driven**
   - [x] Đảm bảo `laborCost` được cấu hình tính độc lập, không hardcode, tuân thủ `requirePaymentGate`.
-- `[ ]` **Testing & QA**
-  - `[ ]` Test phiếu KHÔNG có linh kiện (đảm bảo bill đúng chi phí sửa chữa).
-  - `[ ]` Test phiếu CÓ linh kiện (đảm bảo bill = chi phí sửa chữa + linh kiện).
-  - `[ ]` Test chỉnh sửa thủ công (Payment Edit).
+- [x] **Testing & QA**
+  - [x] Test phiếu KHÔNG có linh kiện (đảm bảo bill đúng chi phí sửa chữa).
+  - [x] Test phiếu CÓ linh kiện (đảm bảo bill = chi phí sửa chữa + linh kiện).
+  - [x] Test chỉnh sửa thủ công (Payment Edit).

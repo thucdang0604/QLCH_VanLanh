@@ -9,11 +9,17 @@ import {
 import Modal from '@/components/admin/Modal';
 import CurrencyInput from '@/components/admin/CurrencyInput';
 import {
-    collection, getDocs, addDoc, serverTimestamp, query, orderBy, where, Timestamp
+    collection, getDocs, limit, query, orderBy, where, Timestamp
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { useAuth } from '@/lib/AuthContext';
 import type { Commission, Expense, ImportReceipt, Order, RepairTicket } from '@/lib/types';
+import {
+    applyRevenueAggregateDelta,
+    isAggregateRangeAvailable,
+    mergeRevenueAggregateDocs,
+    toRevenueDateId,
+    type RevenueAggregateDoc,
+} from '@/lib/revenueAggregate';
 
 // ── Expense categories ──
 const expenseCategories = [
@@ -33,15 +39,58 @@ function getMonthsAgoTimestamp(months: number): Timestamp {
     return Timestamp.fromDate(d);
 }
 
-export default function RevenuePage() {
-    const { user } = useAuth();
+type RevenueOrderItem = Order['items'][number] & {
+    isRepairTicket?: boolean;
+    repairTicketId?: string;
+    isOrderPayment?: boolean;
+    orderPaymentId?: string;
+};
 
+function isRepairOrderItem(item: RevenueOrderItem) {
+    return item.isRepairTicket === true || Boolean(item.repairTicketId);
+}
+
+function isOrderPaymentItem(item: RevenueOrderItem) {
+    return item.isOrderPayment === true || Boolean(item.orderPaymentId);
+}
+
+function getRevenuePaymentTotal(order: Order) {
+    return (order.paymentHistory || []).reduce((sum, payment) => {
+        if (payment.type === 'debt_payment') return sum;
+        return payment.type === 'refund' ? sum - (payment.amount || 0) : sum + (payment.amount || 0);
+    }, 0);
+}
+
+function getRetailOrderTotal(order: Order) {
+    const items = (order.items || []) as RevenueOrderItem[];
+    if (items.length === 0) return Number(order.total_amount) || 0;
+
+    const hasNonRetailItems = items.some(item => isRepairOrderItem(item) || isOrderPaymentItem(item));
+    if (!hasNonRetailItems) return Number(order.total_amount) || 0;
+
+    const retailSubtotal = items
+        .filter(item => !isRepairOrderItem(item) && !isOrderPaymentItem(item))
+        .reduce((sum, item) => sum + (Number(item.price) || 0) * (Number(item.quantity) || 1), 0);
+    const retailDiscount = Math.min(Number(order.discount_amount) || 0, retailSubtotal);
+    return Math.max(0, retailSubtotal - retailDiscount);
+}
+
+function isFirestorePermissionError(error: unknown) {
+    return typeof error === 'object'
+        && error !== null
+        && 'code' in error
+        && (error as { code?: unknown }).code === 'permission-denied';
+}
+
+export default function RevenuePage() {
     // Data
     const [orders, setOrders] = useState<Order[]>([]);
     const [repairs, setRepairs] = useState<RepairTicket[]>([]);
     const [importReceipts, setImportReceipts] = useState<ImportReceipt[]>([]);
     const [commissions, setCommissions] = useState<Commission[]>([]);
     const [expenses, setExpenses] = useState<(Expense & { id: string })[]>([]);
+    const [aggregateDays, setAggregateDays] = useState<RevenueAggregateDoc[]>([]);
+    const [useAggregateData, setUseAggregateData] = useState(false);
     const [loading, setLoading] = useState(true);
 
     // Filters
@@ -56,32 +105,6 @@ export default function RevenuePage() {
     const [expAmount, setExpAmount] = useState(0);
     const [isProcessing, setIsProcessing] = useState(false);
     const [showAllExpenses, setShowAllExpenses] = useState(false);
-
-    // ── Load data (6 months window to capture old tickets with recent payments) ──
-    useEffect(() => {
-        const load = async () => {
-            try {
-                const threeMonthsAgo = getMonthsAgoTimestamp(6);
-                const [oSnap, rSnap, iSnap, cSnap, eSnap] = await Promise.all([
-                    getDocs(query(collection(db, 'orders'), where('createdAt', '>=', threeMonthsAgo), orderBy('createdAt', 'desc'))),
-                    getDocs(query(collection(db, 'repairs'), where('createdAt', '>=', threeMonthsAgo), orderBy('createdAt', 'desc'))),
-                    getDocs(query(collection(db, 'import_receipts'), where('createdAt', '>=', threeMonthsAgo), orderBy('createdAt', 'desc'))),
-                    getDocs(query(collection(db, 'commissions'), where('createdAt', '>=', threeMonthsAgo), orderBy('createdAt', 'desc'))),
-                    getDocs(query(collection(db, 'expenses'), where('createdAt', '>=', threeMonthsAgo), orderBy('createdAt', 'desc'))),
-                ]);
-                setOrders(oSnap.docs.map(d => ({ id: d.id, ...d.data() } as Order)));
-                setRepairs(rSnap.docs.map(d => ({ id: d.id, ...d.data() } as RepairTicket)));
-                setImportReceipts(iSnap.docs.map(d => ({ id: d.id, ...d.data() } as ImportReceipt)));
-                setCommissions(cSnap.docs.map(d => ({ id: d.id, ...d.data() } as Commission)));
-                setExpenses(eSnap.docs.map(d => ({ id: d.id, ...d.data() } as Expense & { id: string })));
-            } catch (err) {
-                console.error(err);
-            } finally {
-                setLoading(false);
-            }
-        };
-        load();
-    }, []);
 
     const formatPrice = (n: number) => n.toLocaleString('vi-VN') + 'đ';
     const toDate = (ts: unknown) => {
@@ -130,8 +153,103 @@ export default function RevenuePage() {
         return d >= from && d <= to;
     }, [getDateRange]);
 
+    useEffect(() => {
+        let cancelled = false;
+
+        const load = async () => {
+            setLoading(true);
+            const { from, to } = getDateRange();
+            const canUseAggregates = isAggregateRangeAvailable(from);
+
+            const loadSourceCollections = async () => {
+                const threeMonthsAgo = getMonthsAgoTimestamp(6);
+                const [oSnap, rSnap, iSnap, cSnap, eSnap] = await Promise.all([
+                    getDocs(query(collection(db, 'orders'), where('createdAt', '>=', threeMonthsAgo), orderBy('createdAt', 'desc'))),
+                    getDocs(query(collection(db, 'repairs'), where('createdAt', '>=', threeMonthsAgo), orderBy('createdAt', 'desc'))),
+                    getDocs(query(collection(db, 'import_receipts'), where('createdAt', '>=', threeMonthsAgo), orderBy('createdAt', 'desc'))),
+                    getDocs(query(collection(db, 'commissions'), where('createdAt', '>=', threeMonthsAgo), orderBy('createdAt', 'desc'))),
+                    getDocs(query(collection(db, 'expenses'), where('createdAt', '>=', threeMonthsAgo), orderBy('createdAt', 'desc'))),
+                ]);
+                if (cancelled) return;
+                setUseAggregateData(false);
+                setAggregateDays([]);
+                setOrders(oSnap.docs.map(d => ({ id: d.id, ...d.data() } as Order)));
+                setRepairs(rSnap.docs.map(d => ({ id: d.id, ...d.data() } as RepairTicket)));
+                setImportReceipts(iSnap.docs.map(d => ({ id: d.id, ...d.data() } as ImportReceipt)));
+                setCommissions(cSnap.docs.map(d => ({ id: d.id, ...d.data() } as Commission)));
+                setExpenses(eSnap.docs.map(d => ({ id: d.id, ...d.data() } as Expense & { id: string })));
+            };
+
+            try {
+                if (canUseAggregates) {
+                    try {
+                        const [aggregateSnap, recentExpensesSnap] = await Promise.all([
+                            getDocs(query(
+                                collection(db, 'revenue_daily_aggregates'),
+                                where('date', '>=', toRevenueDateId(from)),
+                                where('date', '<=', toRevenueDateId(to)),
+                                orderBy('date', 'asc'),
+                            )),
+                            getDocs(query(collection(db, 'expenses'), orderBy('createdAt', 'desc'), limit(50))),
+                        ]);
+                        if (cancelled) return;
+                        setAggregateDays(aggregateSnap.docs.map(d => ({ id: d.id, ...d.data() } as RevenueAggregateDoc)));
+                        setUseAggregateData(true);
+                        setOrders([]);
+                        setRepairs([]);
+                        setImportReceipts([]);
+                        setCommissions([]);
+                        setExpenses(recentExpensesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Expense & { id: string })));
+                        return;
+                    } catch (aggregateError) {
+                        if (!isFirestorePermissionError(aggregateError)) {
+                            throw aggregateError;
+                        }
+                        await loadSourceCollections();
+                        return;
+                    }
+                }
+
+                await loadSourceCollections();
+            } catch (err) {
+                if (!isFirestorePermissionError(err)) {
+                    console.warn('Failed to load revenue data:', err);
+                }
+            } finally {
+                if (!cancelled) setLoading(false);
+            }
+        };
+
+        load();
+        return () => {
+            cancelled = true;
+        };
+    }, [getDateRange]);
+
     // ── Revenue calculations ──
     const calculations = useMemo(() => {
+        if (useAggregateData) {
+            const totals = mergeRevenueAggregateDocs(aggregateDays);
+            return {
+                orderRevenue: totals.orderRevenue,
+                repairRevenue: totals.repairRevenue,
+                debtRevenue: totals.debtRevenue,
+                totalRevenue: totals.totalRevenue,
+                totalGiftDiscount: totals.totalGiftDiscount,
+                importCost: totals.importCost,
+                commissionCost: totals.commissionCost,
+                manualExpenses: totals.manualExpenses,
+                totalExpenses: totals.totalExpenses,
+                netProfit: totals.netProfit,
+                webOrderCount: totals.webOrderCount,
+                posOrderCount: totals.posOrderCount,
+                webOrderRevenue: totals.webOrderRevenue,
+                posOrderRevenue: totals.posOrderRevenue,
+                repairCount: totals.repairCount,
+                warrantyCount: totals.warrantyCount,
+            };
+        }
+
         // REVENUE (THU THỰC TẾ)
         let orderRevenue = 0;
         let debtRevenue = 0; // TỔNG GHI NỢ
@@ -140,18 +258,20 @@ export default function RevenuePage() {
             if (inRange(o.completedAt || o.updatedAt || o.createdAt)) {
                 if (o.paymentHistory && o.paymentHistory.length > 0) {
                     // Có lịch sử thanh toán (từ POS hoặc Thu nợ)
-                    const paidSoFar = o.paymentHistory.reduce((s, p) => s + (p.amount || 0), 0);
-                    orderRevenue += paidSoFar;
+                    const paidSoFar = getRevenuePaymentTotal(o);
+                    const retailTotal = getRetailOrderTotal(o);
+                    const paidRetail = Math.min(paidSoFar, retailTotal);
+                    orderRevenue += paidRetail;
 
                     if (o.paymentStatus === 'debt') {
-                        debtRevenue += Math.max(0, (o.total_amount || 0) - paidSoFar);
+                        debtRevenue += Math.max(0, retailTotal - paidRetail);
                     }
                 } else if (o.status === 'Completed' || o.status === 'Shipping') {
                     // Đơn web cũ hoặc không có POS history, nhưng đã hoàn thành
                     if (o.paymentStatus === 'debt' || o.payment_method === 'Debt') {
-                        debtRevenue += (o.total_amount || 0);
+                        debtRevenue += getRetailOrderTotal(o);
                     } else {
-                        orderRevenue += (o.total_amount || 0);
+                        orderRevenue += getRetailOrderTotal(o);
                     }
                 }
             }
@@ -206,8 +326,9 @@ export default function RevenuePage() {
         const netProfit = totalRevenue - totalExpenses - totalGiftDiscount;
 
         // Orders breakdown
-        const webOrders = orders.filter(o => (o.source !== 'pos') && (o.status === 'Completed' || o.status === 'Shipping') && inRange(o.completedAt || o.updatedAt || o.createdAt));
-        const posOrders = orders.filter(o => o.source === 'pos' && (o.status === 'Completed' || o.status === 'Shipping') && inRange(o.completedAt || o.updatedAt || o.createdAt));
+        const completedRetailOrders = orders.filter(o => (o.status === 'Completed' || o.status === 'Shipping') && inRange(o.completedAt || o.updatedAt || o.createdAt) && getRetailOrderTotal(o) > 0);
+        const webOrders = completedRetailOrders.filter(o => o.source !== 'pos');
+        const posOrders = completedRetailOrders.filter(o => o.source === 'pos');
 
         return {
             orderRevenue, repairRevenue, debtRevenue, totalRevenue, totalGiftDiscount,
@@ -215,16 +336,35 @@ export default function RevenuePage() {
             netProfit,
             webOrderCount: webOrders.length,
             posOrderCount: posOrders.length,
-            webOrderRevenue: webOrders.reduce((s, o) => s + (o.total_amount || 0), 0),
-            posOrderRevenue: posOrders.reduce((s, o) => s + (o.total_amount || 0), 0),
+            webOrderRevenue: webOrders.reduce((s, o) => s + getRetailOrderTotal(o), 0),
+            posOrderRevenue: posOrders.reduce((s, o) => s + getRetailOrderTotal(o), 0),
             repairCount: repairs.filter(r => r.status === 'done' && r.ticketType !== 'warranty' && inRange(r.timing?.completedAt || r.createdAt)).length,
             warrantyCount: repairs.filter(r => r.ticketType === 'warranty' && inRange(r.timing?.completedAt || r.createdAt)).length,
         };
-    }, [orders, repairs, importReceipts, commissions, expenses, inRange]);
+    }, [useAggregateData, aggregateDays, orders, repairs, importReceipts, commissions, expenses, inRange]);
 
     // ── Daily chart data ──
     const chartData = useMemo(() => {
         const { from, to } = getDateRange();
+        if (useAggregateData) {
+            const docsByDate = new Map(aggregateDays.map(day => [day.date, day]));
+            const days: { date: string; revenue: number; expense: number }[] = [];
+            const d = new Date(from);
+
+            while (d <= to) {
+                const dayStr = toRevenueDateId(d);
+                const day = docsByDate.get(dayStr);
+                days.push({
+                    date: dayStr,
+                    revenue: Number(day?.totalRevenue) || 0,
+                    expense: Number(day?.totalExpenses) || 0,
+                });
+                d.setDate(d.getDate() + 1);
+            }
+
+            return days;
+        }
+
         const days: { date: string; revenue: number; expense: number }[] = [];
         const d = new Date(from);
 
@@ -266,9 +406,10 @@ export default function RevenuePage() {
             orders.forEach(o => {
                 if (isInDay(o.completedAt || o.updatedAt || o.createdAt)) {
                     if (o.paymentHistory && o.paymentHistory.length > 0) {
-                        rev += o.paymentHistory.reduce((s, p) => s + (p.amount || 0), 0);
+                        const paidSoFar = getRevenuePaymentTotal(o);
+                        rev += Math.min(paidSoFar, getRetailOrderTotal(o));
                     } else if ((o.status === 'Completed' || o.status === 'Shipping') && o.paymentStatus !== 'debt' && o.payment_method !== 'Debt') {
-                        rev += (o.total_amount || 0);
+                        rev += getRetailOrderTotal(o);
                     }
                 }
             });
@@ -282,7 +423,7 @@ export default function RevenuePage() {
             d.setDate(d.getDate() + 1);
         }
         return days;
-    }, [orders, repairs, importReceipts, commissions, expenses, getDateRange]);
+    }, [useAggregateData, aggregateDays, orders, repairs, importReceipts, commissions, expenses, getDateRange]);
 
     // Chart max value for scaling
     const chartMax = Math.max(1, ...chartData.map(d => Math.max(d.revenue, d.expense)));
@@ -292,25 +433,42 @@ export default function RevenuePage() {
         if (expAmount <= 0) return;
         setIsProcessing(true);
         try {
-            const now = new Date();
-            const dataForDB = {
+            const { getAuthInstance } = await import('@/lib/firebase');
+            const auth = await getAuthInstance();
+            const token = await auth.currentUser?.getIdToken();
+            const res = await fetch('/api/revenue/expenses', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                },
+                body: JSON.stringify({
+                    category: expCategory,
+                    description: expDescription,
+                    amount: expAmount,
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                throw new Error(data.error || 'Không thể tạo phiếu chi');
+            }
+
+            const expense = data.expense as Expense & { id: string };
+            const expenseForState = {
+                id: expense.id,
                 category: expCategory,
                 description: expDescription,
                 amount: expAmount,
-                date: serverTimestamp(),
-                createdBy: user?.uid || '',
-                createdByName: user?.displayName || 'Admin',
-                createdAt: serverTimestamp(),
-            };
+                date: new Date(String(expense.date)),
+                createdBy: expense.createdBy,
+                createdByName: expense.createdByName,
+                createdAt: new Date(String(expense.createdAt)),
+            } as Expense & { id: string };
 
-            const dataForState = {
-                ...dataForDB,
-                date: now,
-                createdAt: now,
-            };
-
-            const ref = await addDoc(collection(db, 'expenses'), dataForDB);
-            setExpenses(prev => [{ id: ref.id, ...dataForState } as unknown as Expense & { id: string }, ...prev]);
+            setExpenses(prev => [expenseForState, ...prev]);
+            if (useAggregateData) {
+                setAggregateDays(prev => applyRevenueAggregateDelta(prev, new Date(String(expense.createdAt)), { manualExpenses: expAmount }));
+            }
             setShowExpenseModal(false);
             setExpDescription('');
             setExpAmount(0);

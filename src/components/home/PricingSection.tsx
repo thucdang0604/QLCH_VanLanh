@@ -21,6 +21,7 @@ interface PricingService {
     name: string;
     price_original: number;
     price_promo?: number;
+    hidePrice?: boolean;
     device_model?: string;
     category?: string;
     categoryIds?: string[];
@@ -107,7 +108,8 @@ export default function PricingSection() {
                 {/* Pricing Grid */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {currentServices.map((service) => {
-                        const hasPromo = !!(service.price_promo && service.price_promo < service.price_original);
+                        const shouldHidePrice = service.hidePrice === true;
+                        const hasPromo = !shouldHidePrice && !!(service.price_promo && service.price_promo < service.price_original);
                         return (
                             <Link
                                 href={`/service/${service.slug || service.id}`}
@@ -124,12 +126,16 @@ export default function PricingSection() {
                                             </span>
                                         )}
                                     </div>
-                                    <div className="flex items-end gap-2 mt-2">
-                                        <span className="text-lg font-extrabold text-orange-600">{formatPrice(service.price_promo || service.price_original)}</span>
-                                        {hasPromo && (
-                                            <span className="text-xs font-semibold text-gray-400 line-through mb-1">{formatPrice(service.price_original)}</span>
-                                        )}
-                                    </div>
+                                    {shouldHidePrice ? (
+                                        <div className="mt-2 text-sm font-bold text-orange-600">Liên hệ nhận báo giá</div>
+                                    ) : (
+                                        <div className="flex items-end gap-2 mt-2">
+                                            <span className="text-lg font-extrabold text-orange-600">{formatPrice(service.price_promo || service.price_original)}</span>
+                                            {hasPromo && (
+                                                <span className="text-xs font-semibold text-gray-400 line-through mb-1">{formatPrice(service.price_original)}</span>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="w-8 h-8 rounded-full bg-gray-50 group-hover:bg-orange-500 group-hover:text-white flex items-center justify-center text-gray-400 transition-colors">
                                     <ChevronRight size={18} />

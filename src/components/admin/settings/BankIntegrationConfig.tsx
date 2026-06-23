@@ -4,7 +4,6 @@ import { useState, useEffect } from 'react';
 import { Loader2, Landmark, CheckCircle2, ShieldCheck, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { getAuth } from 'firebase/auth';
-import { normalizeVietnamPhone } from '@/lib/phone';
 import app from '@/lib/firebase';
 
 type BankAccount = {
@@ -154,7 +153,7 @@ export default function BankIntegrationConfig() {
             } else {
                 toast.error(data.error);
             }
-        } catch (error) {
+        } catch {
             toast.error('Lỗi xác thực TOTP');
         } finally {
             setIsProcessing(false);
@@ -165,7 +164,8 @@ export default function BankIntegrationConfig() {
         if (config.totpEnabled) {
             setShowTotpVerify(true);
         } else {
-            setIsEditing(true);
+            toast.error('Vui lòng thiết lập Authenticator trước khi chỉnh sửa cấu hình ngân hàng.');
+            startTotpSetup();
         }
     }
 
@@ -188,7 +188,7 @@ export default function BankIntegrationConfig() {
             } else {
                 toast.error(data.error);
             }
-        } catch (error) {
+        } catch {
             toast.error('Lỗi xác thực TOTP');
         } finally {
             setIsProcessing(false);
@@ -196,6 +196,12 @@ export default function BankIntegrationConfig() {
     }
 
     async function saveConfig() {
+        if (!verifiedToken) {
+            toast.error('Vui lòng xác thực TOTP trước khi lưu cấu hình ngân hàng.');
+            setShowTotpVerify(true);
+            return;
+        }
+
         setIsProcessing(true);
         try {
             const adminToken = await getAuth(app).currentUser?.getIdToken();
@@ -269,7 +275,7 @@ export default function BankIntegrationConfig() {
                         <div className="flex flex-col md:flex-row gap-8">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 flex-1">
                                 <div>
-                                    <p className="text-sm text-gray-500">SĐT Admin (Nhận OTP)</p>
+                                    <p className="text-sm text-gray-500">SĐT Admin liên hệ</p>
                                     <p className="font-medium mt-1">{config.adminPhone || 'Chưa thiết lập'}</p>
                                 </div>
                             </div>
@@ -326,7 +332,7 @@ export default function BankIntegrationConfig() {
 
                         <div className="grid gap-4">
                             <div>
-                                <label className="text-sm font-medium text-gray-700">SĐT Admin (Nhận OTP)</label>
+                                <label className="text-sm font-medium text-gray-700">SĐT Admin liên hệ</label>
                                 <input
                                     value={editForm.adminPhone}
                                     onChange={e => setEditForm({ ...editForm, adminPhone: e.target.value })}
@@ -445,6 +451,7 @@ export default function BankIntegrationConfig() {
                                     onClick={() => {
                                         setIsEditing(false);
                                         setEditForm(config);
+                                        setVerifiedToken('');
                                     }}
                                     className="px-4 py-2 border rounded-lg hover:bg-gray-50"
                                 >

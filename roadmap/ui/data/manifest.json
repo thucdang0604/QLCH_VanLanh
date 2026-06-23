@@ -1,6 +1,6 @@
 {
   "projectName": "QLCH_VanLanh",
-  "lastSync": "2026-06-13T00:00:00.000Z",
+  "lastSync": "2026-06-22T00:00:00.000+07:00",
   "stats": {
     "completionPercent": 98,
     "openP0": 0,
@@ -11,13 +11,245 @@
   "constraints": [],
   "aiPlans": [
     {
+      "id": "plan-pos-debt-reconcile-20260623",
+      "title": "Khắc phục Treo đơn POS, Ghi nhận Công nợ & Chuẩn hóa Ledger",
+      "date": "23.06.2026",
+      "status": "in_progress",
+      "planFile": "data/ai_plans/plan_pos_debt_reconcile_20260623.md",
+      "taskFile": "data/ai_plans/task_pos_debt_reconcile_20260623.md",
+      "walkthroughFile": "",
+      "scope": [
+        "src/app/api/pos/checkout/route.ts",
+        "src/app/api/orders/transition/route.ts"
+      ],
+      "decisions": [
+        "Đơn hàng tại POS luôn hoàn tất Completed, không treo Pending khi thiếu tiền",
+        "Cộng công nợ totalDebt cho khách hàng trực tiếp khi phát sinh nợ mới",
+        "Ghi nhận dòng ledger đối ứng purchase_payment để cấn trừ hóa đơn trên sổ nợ",
+        "Tiền thừa cấn nợ cũ được trừ vào totalDebt và cộng vào doanh thu thực thu"
+      ],
+      "updatedAt": "2026-06-23T23:30:00.000+07:00"
+    },
+    {
+      "id": "plan-project-master-summary",
+      "title": "Walkthrough Tổng Kết Toàn Bộ Dự Án (Kiến trúc SPA, FIFO, CRM v2, POS Central & Security)",
+      "date": "23.06.2026",
+      "status": "completed",
+      "completedAt": "23.06.2026",
+      "planFile": "",
+      "taskFile": "",
+      "walkthroughFile": "data/ai_plans/walkthrough_project_summary.md",
+      "scope": [],
+      "decisions": [],
+      "updatedAt": "2026-06-23T22:30:00.000+07:00"
+    },
+    {
+      "id": "plan-data-scale-performance-audit-20260622",
+      "title": "Data Scale, Search & Firebase Performance Audit",
+      "date": "22.06.2026",
+      "status": "completed",
+      "completedAt": "23.06.2026",
+      "planFile": "data/ai_plans/plan_data_scale_performance_audit_20260622.md",
+      "taskFile": "data/ai_plans/task_data_scale_performance_audit_20260622.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_data_scale_performance_audit_20260622.md",
+      "scope": [
+        "src/app/admin/inventory/page.tsx",
+        "src/app/admin/inventory/stock/page.tsx",
+        "src/app/admin/revenue/page.tsx",
+        "src/app/admin/commissions/page.tsx",
+        "src/app/admin/pos/page.tsx",
+        "src/app/admin/orders/page.tsx",
+        "src/app/admin/repairs/page.tsx",
+        "src/app/admin/technician/page.tsx",
+        "src/lib/useCustomerActivity.ts"
+      ],
+      "decisions": [
+        "Large admin lists must use limit, cursor pagination, and server-side filters.",
+        "Revenue and commission reporting should prefer aggregate documents instead of client-side source collection scans.",
+        "POS code lookup should converge on product_code_registry as the one-document authoritative lookup path.",
+        "Legacy debt-collection POS orders created before the fix need a reconcile/backfill pass."
+      ],
+      "updatedAt": "2026-06-22T00:00:00.000+07:00"
+    },
+    {
+      "id": "plan-import-customers-suppliers-20260619",
+      "title": "Import Khách hàng & Nhà cung cấp từ Excel",
+      "date": "19.06.2026",
+      "status": "completed",
+      "completedAt": "19.06.2026",
+      "planFile": "data/ai_plans/plan_import_customers_suppliers_20260619.md",
+      "taskFile": "data/ai_plans/task_import_customers_suppliers_20260619.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_import_customers_suppliers_20260619.md",
+      "scope": [
+        "src/features/excel-import/importSupport.ts",
+        "src/components/admin/ExcelImportModal.tsx",
+        "src/app/admin/initial-data/page.tsx",
+        "src/components/admin/excelImportTemplateFixtures.ts"
+      ],
+      "decisions": [
+        "Sử dụng chuẩn hóa SĐT làm khóa chính và Document ID cho Khách hàng",
+        "Sử dụng Tên nhà cung cấp để kiểm tra trùng lặp cho Nhà cung cấp",
+        "Tự động tạo giao dịch nợ đầu kỳ nếu công nợ > 0"
+      ],
+      "updatedAt": "2026-06-19T11:15:00.000+07:00"
+    },
+    {
+      "id": "plan-pos-discount-and-repair-lookup-fix-20260618",
+      "title": "POS Discount Rules & SĐT Repair Ticket Lookup Fix",
+      "date": "18.06.2026",
+      "status": "completed",
+      "completedAt": "18.06.2026",
+      "planFile": "data/ai_plans/plan_pos_discount_and_repair_lookup_fix_20260618.md",
+      "taskFile": "data/ai_plans/task_pos_discount_and_repair_lookup_fix_20260618.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_pos_discount_and_repair_lookup_fix_20260618.md",
+      "scope": [
+        "src/lib/discountCalc.ts",
+        "src/app/admin/pos/page.tsx",
+        "src/features/pos/posTypes.ts",
+        "src/features/pos/PosCartPanel.tsx"
+      ],
+      "decisions": [
+        "Sử dụng query Firestore đơn giản theo customer.phone và thực hiện lọc và sắp xếp in-memory ở client để tránh lỗi composite index.",
+        "Truyền dữ liệu categoryIds từ danh sách products vào discount calculator trong POS.",
+        "Truyền thêm serviceName, categoryPath và issue category của phiếu sửa để rule tạo theo taxonomy dịch vụ kích hoạt đúng tại POS."
+      ],
+      "updatedAt": "2026-06-18T21:55:00.000+07:00"
+    },
+    {
+      "id": "plan-visual-builder-discount-rules-20260618",
+      "title": "Redesign Rule Phụ kiện → Visual Builder (NẾU... THÌ... GIẢM...)",
+      "date": "18.06.2026",
+      "status": "completed",
+      "completedAt": "18.06.2026",
+      "planFile": "data/ai_plans/plan_visual_builder_discount_rules.md",
+      "taskFile": "data/ai_plans/task_visual_builder_discount_rules.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_visual_builder_discount_rules.md",
+      "scope": [
+        "src/app/admin/vouchers/DiscountRulesTab.tsx"
+      ],
+      "decisions": [],
+      "updatedAt": "2026-06-18T20:49:00.000+07:00"
+    },
+    {
+      "id": "plan-user-test-error-intake-20260618",
+      "title": "User Test Error Intake 2026-06-18",
+      "date": "18.06.2026",
+      "status": "analysis",
+      "planFile": "data/ai_plans/plan_user_test_error_intake_20260618.md",
+      "taskFile": "data/ai_plans/task_user_test_error_intake_20260618.md",
+      "walkthroughFile": "",
+      "scope": [
+        "roadmap/ui/data/ai_plans/plan_user_test_error_intake_20260618.md",
+        "roadmap/ui/data/ai_plans/task_user_test_error_intake_20260618.md"
+      ],
+      "decisions": [
+        "Collect user-tested errors before analysis or implementation.",
+        "Keep failure families separate until root cause is proven.",
+        "User confirmed current intake is complete; analysis grouped defects by root cause and dependency order.",
+        "Do not implement fixes until the analysis phase is approved.",
+        "Batch 4 captures post-code admin performance issues focused on reducing Firebase reads/writes and smoother dialogs."
+      ],
+      "updatedAt": "2026-06-20T00:00:00.000+07:00"
+    },
+    {
+      "id": "plan-firebase-cost-performance-20260617",
+      "title": "Firebase Cost & Performance Optimization",
+      "date": "17.06.2026",
+      "status": "final",
+      "completedAt": "18.06.2026",
+      "planFile": "data/ai_plans/plan_firebase_cost_performance_20260617.md",
+      "taskFile": "data/ai_plans/task_firebase_cost_performance_20260617.md",
+      "walkthroughFile": "",
+      "scope": [
+        "src/app/admin/pos/page.tsx",
+        "src/app/admin/revenue/page.tsx",
+        "src/lib/useAdminBadges.ts",
+        "src/app/(customer)/tin-tuc/[slug]/ArticleClientParts.tsx",
+        "src/app/api/articles/view/route.ts",
+        "src/lib/revenueAggregate.ts",
+        "src/lib/revenueAggregateServer.ts",
+        "firestore.rules"
+      ],
+      "decisions": [
+        "Bound high-read admin and POS queries before changing business behavior.",
+        "Use Firestore aggregate/count reads and bounded snapshots where realtime is not required.",
+        "Keep legacy revenue fallback until aggregate backfill is available.",
+        "Move public article view writes to a server API with 24h client/server throttling."
+      ],
+      "updatedAt": "2026-06-18T00:00:00.000+07:00"
+    },
+    {
+      "id": "plan-workflow-edge-cases-20260617",
+      "title": "Cập Nhật Workflows với Các Edge Cases và POS làm Trung Tâm",
+      "date": "17.06.2026",
+      "status": "in_progress",
+      "planFile": "data/ai_plans/plan_workflow_edge_cases_20260617.md",
+      "taskFile": "data/ai_plans/task_workflow_edge_cases_20260617.md",
+      "walkthroughFile": "",
+      "scope": [
+        "roadmap/ai/modules/repair.md",
+        "roadmap/ai/modules/pos-orders.md",
+        "roadmap/ai/modules/inventory.md",
+        "roadmap/ai/modules/finance-hr.md"
+      ],
+      "decisions": [
+        "Đưa luồng thanh toán sửa chữa về trung tâm POS.",
+        "Xóa luồng Outsource và Khách bỏ máy.",
+        "Thêm các edge case: Hủy cọc, Trả hàng hoàn tiền, Giao thất bại, Điều chỉnh hao hụt, Trả NCC."
+      ],
+      "updatedAt": "2026-06-17T00:00:00.000Z"
+    },
+    {
+      "id": "plan-upgrade-master-hub-20260617",
+      "title": "Nâng cấp Master Hub Workflow Diagram (Omnichannel, CRM v2, POS Scanner, Bulk Import)",
+      "date": "17.06.2026",
+      "status": "completed",
+      "completedAt": "17.06.2026",
+      "planFile": "data/ai_plans/plan_upgrade_master_hub_20260617.md",
+      "taskFile": "",
+      "walkthroughFile": "",
+      "scope": [
+        "roadmap/ai/modules/master.md"
+      ],
+      "decisions": [
+        "Bổ sung luồng CRM v2, Omnichannel Chat, POS Scanner, Discount Stacking, Bulk Excel Import vào sơ đồ.",
+        "Chia luồng Payment cho Import NCC (Paid/Debt)."
+      ],
+      "updatedAt": "2026-06-17T00:00:00.000Z"
+    },
+    {
+      "id": "plan-large-code-file-refactor-20260616",
+      "title": "Refactor cac file code lon theo phase",
+      "date": "16.06.2026",
+      "status": "completed",
+      "completedAt": "23.06.2026",
+      "planFile": "data/ai_plans/plan_large_code_file_refactor_20260616.md",
+      "taskFile": "data/ai_plans/task_large_code_file_refactor_20260616.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_large_code_file_refactor_20260616.md",
+      "scope": [
+        "src/components/admin/ExcelImportModal.tsx",
+        "src/app/admin/parts/page.tsx",
+        "src/app/admin/repairs/page.tsx",
+        "src/app/admin/technician/page.tsx",
+        "src/app/admin/pos/page.tsx"
+      ],
+      "decisions": [
+        "Tach theo workflow nghiep vu va boundary pure logic/hook/API/component, khong tach co hoc theo so dong.",
+        "Moi phase phai focused ESLint va typecheck truoc khi sang phase tiep theo.",
+        "Uu tien dua business mutation ve API/service da co de tranh logic song song trong client page.",
+        "Bat dau voi ExcelImportModal vi co nhieu pure helper co the tach va test doc lap."
+      ],
+      "updatedAt": "2026-06-16T00:00:00.000Z"
+    },
+    {
       "id": "plan-batch-tracking-fifo",
       "title": "Quản lý tồn kho theo Lô (Batch Tracking) kết hợp FIFO sổ sách",
       "date": "15.06.2026",
-      "status": "planned",
+      "status": "completed",
+      "completedAt": "16.06.2026",
       "planFile": "data/ai_plans/plan_batch_tracking_fifo.md",
-      "taskFile": "",
-      "walkthroughFile": "",
+      "taskFile": "data/ai_plans/task_batch_tracking_fifo.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_batch_tracking_fifo.md",
       "scope": [
         "src/app/admin/inventory/page.tsx",
         "src/app/admin/parts/page.tsx",
@@ -37,10 +269,11 @@
       "id": "plan-repair-pricing-workflow-20260614",
       "title": "Cập nhật Workflow Sửa chữa & Logic Tính Giá (Tránh lỗi Bill 0đ)",
       "date": "14.06.2026",
-      "status": "planned",
+      "status": "completed",
+      "completedAt": "23.06.2026",
       "planFile": "data/ai_plans/plan_repair_pricing_workflow_20260614.md",
       "taskFile": "data/ai_plans/task_repair_pricing_workflow_20260614.md",
-      "walkthroughFile": "",
+      "walkthroughFile": "data/ai_plans/walkthrough_repair_pricing_workflow_20260614.md",
       "scope": [
         "src/lib/types.ts",
         "src/app/api/repairs/handover/route.ts",
@@ -54,13 +287,14 @@
         "Cho phép KTV linh hoạt mượn linh kiện hoặc thêm bệnh trong lúc Đang sửa chữa.",
         "Quản lý tính năng tự động bằng Config Flags."
       ],
-      "updatedAt": "2026-06-14T00:00:00.000Z"
+      "updatedAt": "2026-06-23T21:00:00.000+07:00"
     },
     {
       "id": "plan-pos-centralization-v2-audit",
       "title": "Bổ sung POS Centralization: TOTP Bank Config & Component Workflow",
       "date": "13.06.2026",
-      "status": "planned",
+      "status": "completed",
+      "completedAt": "23.06.2026",
       "planFile": "data/ai_plans/plan_pos_centralization_v2_audit.md",
       "taskFile": "data/ai_plans/task_pos_centralization_v2_audit.md",
       "walkthroughFile": "data/ai_plans/walkthrough_pos_centralization_v2_audit.md",
@@ -78,13 +312,14 @@
         "KTV xác nhận linh kiện X(Test)/Y(Dùng) trước khi giao khách để quản lý tồn kho chính xác",
         "Tự động cấn trừ nợ cũ cho khách hàng nếu trả dư tiền ở POS"
       ],
-      "updatedAt": "2026-06-13T00:00:00.000Z"
+      "updatedAt": "2026-06-23T21:00:00.000+07:00"
     },
     {
       "id": "plan-pos-centralization-20260613",
       "title": "Tập trung Thanh toán POS, Công nợ & Mã QR",
       "date": "13.06.2026",
-      "status": "planned",
+      "status": "completed",
+      "completedAt": "23.06.2026",
       "planFile": "data/ai_plans/plan_pos_centralization.md",
       "taskFile": "data/ai_plans/task_pos_centralization.md",
       "walkthroughFile": "data/ai_plans/walkthrough_pos_centralization.md",
@@ -101,7 +336,7 @@
         "Thêm phí vận chuyển và cảnh báo công nợ khách hàng",
         "Hiển thị QR VietQR dựa trên ngân hàng thụ hưởng"
       ],
-      "updatedAt": "2026-06-13T00:00:00.000Z"
+      "updatedAt": "2026-06-23T21:00:00.000+07:00"
     },
     {
       "id": "plan-customer-web-qa-otp-chat-20260613",
@@ -190,10 +425,11 @@
       "id": "plan-bug-otp-001-v2-idempotent-voucher-20260611",
       "title": "BUG-OTP-001 Follow-up: reCAPTCHA v2, khách cũ và voucher idempotent",
       "date": "11.06.2026",
-      "status": "implemented-awaiting-e2e",
+      "status": "completed",
+      "completedAt": "23.06.2026",
       "planFile": "data/ai_plans/plan_bug_otp_001_v2_idempotent_voucher_20260611.md",
       "taskFile": "data/ai_plans/task_bug_otp_001_v2_idempotent_voucher_20260611.md",
-      "walkthroughFile": "",
+      "walkthroughFile": "data/ai_plans/walkthrough_bug_otp_001_v2_idempotent_voucher_20260611.md",
       "scope": [
         "src/components/MissionsWidget.tsx",
         "src/app/api/bounty/request-otp/route.ts",
@@ -240,10 +476,11 @@
       "id": "plan-deploy-pipeline-cleanup-20260609",
       "title": "Firebase Deploy Pipeline Cleanup: node-which, esbuild, next.config bundle, Node engine",
       "date": "09.06.2026",
-      "status": "planned",
+      "status": "completed",
+      "completedAt": "23.06.2026",
       "planFile": "data/ai_plans/plan_deploy_pipeline_cleanup_20260609.md",
       "taskFile": "data/ai_plans/task_deploy_pipeline_cleanup_20260609.md",
-      "walkthroughFile": "",
+      "walkthroughFile": "data/ai_plans/walkthrough_deploy_pipeline_cleanup_20260609.md",
       "scope": [
         "package.json",
         "pnpm-lock.yaml",
@@ -268,10 +505,11 @@
       "id": "plan-hardcode-cleanup-20260607",
       "title": "Hardcode Cleanup 2026-06-07: Secret, Storefront fallback, Business identity và Workflow constants",
       "date": "07.06.2026",
-      "status": "implemented-awaiting-admin-smoke",
+      "status": "completed",
+      "completedAt": "23.06.2026",
       "planFile": "data/ai_plans/plan_hardcode_cleanup_20260607.md",
       "taskFile": "data/ai_plans/task_hardcode_cleanup_20260607.md",
-      "walkthroughFile": "",
+      "walkthroughFile": "data/ai_plans/walkthrough_hardcode_cleanup_20260607.md",
       "scope": [
         "src/app/(customer)/info/gioi-thieu/page.tsx",
         "src/components/home/HeroSection.tsx",

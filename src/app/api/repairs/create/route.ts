@@ -5,6 +5,8 @@ import { loadRepairWorkflow } from '@/lib/repairWorkflowServer';
 import { FieldValue } from 'firebase-admin/firestore';
 import { Timestamp } from 'firebase-admin/firestore';
 import { isTechnicianUser } from '@/lib/repairAccess';
+import { incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
+import { reserveSequentialDocumentId } from '@/lib/serverDocumentIds';
 
 type CreateRepairBody = Record<string, unknown> & {
     ticketType?: 'repair' | 'warranty';
@@ -23,13 +25,13 @@ export async function POST(request: NextRequest) {
     try {
         const caller = await requirePermission(request, 'manage_repairs');
         const body = await request.json() as CreateRepairBody;
-        
+
         const db = getAdminDb();
-        
+
         const result = await db.runTransaction(async (tx) => {
             const workflow = await loadRepairWorkflow(tx, db, { ticketType: body.ticketType });
             const entryNode = workflow[0];
-            
+
             if (!entryNode) {
                 throw new Error('Không tìm thấy entry node trong workflow');
             }
@@ -93,12 +95,28 @@ export async function POST(request: NextRequest) {
                 version: 1,
             };
 
-            const newTicketRef = db.collection('repairs').doc();
+            const ticketAllocation = await reserveSequentialDocumentId(tx, db, {
+                collectionName: 'repairs',
+                prefix: body.ticketType === 'warranty' ? 'BH' : 'SC',
+            });
+            const newTicketRef = ticketAllocation.ref;
+            ticketAllocation.commitCounter();
             tx.set(newTicketRef, finalData);
-            
-            return { id: newTicketRef.id, status: entryNode.id };
+            if (body.ticketType !== 'warranty' && Array.isArray(body.paymentHistory)) {
+                const depositRevenue = body.paymentHistory.reduce((sum, entry) => {
+                    if (!entry || typeof entry !== 'object') return sum;
+                    const data = entry as { amount?: unknown; type?: unknown };
+                    const amount = Number(data.amount) || 0;
+                    return data.type === 'refund' ? sum - amount : sum + amount;
+                }, 0);
+                if (depositRevenue !== 0) {
+                    incrementRevenueAggregates(tx, db, { repairRevenue: depositRevenue });
+                }
+            }
+
+            return { id: ticketAllocation.id, status: entryNode.id };
         });
-        
+
         return NextResponse.json(result);
     } catch (error: unknown) {
         console.error('Create ticket API error:', error);

@@ -32,6 +32,9 @@ graph TD
             I7_LOG -->|"Thành công"| I8("✅ Cập nhật Tồn Kho (Stock += N)")
             I7_LOG -->|"Thất bại/Hủy"| I_CANCEL("❌ Hủy Nhập")
             I8 --> F_IN("🔗 Ghi nhận Công Nợ / Chi Phí Nhập (Tài Chính)")
+            I8 --> I_RET{"Phát hiện lỗi/hỏng?"}
+            I_RET -->|"Có"| I_RET_ACT("🔁 Trả Hàng Nhà Cung Cấp (Stock -= N)")
+            I_RET_ACT --> I_RET_FIN("🔗 Cấn trừ công nợ / Hoàn tiền (Tài chính)")
             end
             subgraph OUTBOUND [Luồng Xuất Kho & Phân Bổ]
             O_POS("🔗 Bán Hàng POS") --> O_POS_TRANS("🛡️ runTransaction")
@@ -51,7 +54,7 @@ graph TD
             end
             subgraph MGMT [Quản Lý & Kiểm Kê]
             M1("📊 Cảnh báo tồn kho") -->|"Dưới định mức"| M2("🚨 Yêu cầu nhập thêm")
-            M3("📋 Kiểm kê định kỳ") --> M4{"Có lệch kho?"}
+            M3("📋 Kiểm kê định kỳ") --> M4{"Có lệch kho (Hao hụt)?"}
             M4 -->|"Không"| M5("✅ Xác nhận khớp")
             M4 -->|"Có"| M6("Tạo Phiếu Điều Chỉnh")
             M6 --> M6_TRANS("🛡️ Transaction (Bù/Trừ)")
@@ -66,6 +69,7 @@ graph TD
             O2 -.-> M1
             O6_DONE -.-> M1
             click F_IN call handleWorkflowClick("finance-hr") "Mở"
+            click I_RET_FIN call handleWorkflowClick("finance-hr") "Mở"
             click F_ADJ call handleWorkflowClick("finance-hr") "Mở"
             click O_POS call handleWorkflowClick("pos-orders") "Mở"
             click O_ORD call handleWorkflowClick("pos-orders") "Mở"

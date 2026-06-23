@@ -8,7 +8,7 @@ import { loadRepairWorkflow, requireWorkflowNode } from '@/lib/repairWorkflowSer
 export async function POST(request: NextRequest) {
     try {
         await requirePermission(request, 'manage_repairs');
-        
+
         const body = await request.json();
         const { ticketId, ticketVersion, idempotencyKey, paymentData } = body;
 
@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
 
             const ticketRef = db.collection('repairs').doc(ticketId);
             const ticketSnap = await tx.get(ticketRef);
-            
+
             if (!ticketSnap.exists) {
                 throw new Error('Phiếu sửa chữa không tồn tại.');
             }
@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
             }
 
             const currentPayment = ticket.payment || {} as RepairTicket['payment'];
-            
+
             const updatedPayment = { ...currentPayment };
 
             // Merge allowed fields
@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
             const additionalFees = updatedPayment.additionalFees || 0;
             const discountAmount = updatedPayment.discountAmount || 0; // POS discount if any
             const laborCost = updatedPayment.laborCost || 0;
-            
+
             updatedPayment.amount = partsCost + laborCost + additionalFees - discountAmount;
 
             tx.update(ticketRef, {

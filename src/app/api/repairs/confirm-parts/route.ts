@@ -6,6 +6,7 @@ import type { FirestoreDateValue, RepairTicket } from '@/lib/types';
 import { loadRepairWorkflow, requireWorkflowNode } from '@/lib/repairWorkflowServer';
 import { REPAIR_PART_STATUS, isSelectedRepairPart } from '@/lib/repairStatus';
 import { randomUUID } from 'crypto';
+import { reserveSequentialDocumentId, type ReservedSequentialDocumentId } from '@/lib/serverDocumentIds';
 
 type RepairLine = NonNullable<RepairTicket['parts']>[number];
 type ProductData = Record<string, unknown>;
@@ -49,10 +50,14 @@ function errorMessage(error: unknown): string {
     return error instanceof Error ? error.message : 'Internal server error';
 }
 
+function getProductPartType(product: ProductData): string {
+    return String(product.partType || '').trim();
+}
+
 export async function POST(request: NextRequest) {
     try {
         const caller = await requirePermission(request, 'manage_repairs');
-        
+
         const body = await request.json();
         // command có thể là 1 object hoặc mảng các object (batch processing)
         const { ticketId, ticketVersion, operationKey, command, commands } = body;
@@ -84,7 +89,7 @@ export async function POST(request: NextRequest) {
             }
 
             const ticket = ticketSnap.data() as RepairTicket;
-            
+
             if (ticket.version !== undefined && ticket.version !== ticketVersion) {
                 throw new Error('Dữ liệu đã bị thay đổi bởi người khác (Version mismatch). Vui lòng tải lại trang.');
             }
@@ -191,6 +196,7 @@ export async function POST(request: NextRequest) {
                         reservedQuantity: quantity,
                         status: REPAIR_PART_STATUS.SELECTED,
                         quality: String(pData.quality || ''),
+                        partType: getProductPartType(pData),
                         unitPriceAtUse: Number(pData.price_promo) || Number(pData.price_original) || 0,
                         unitCostAtUse: Number(pData.costPrice) || 0,
                         priceConfirmedAt: arrayTimestampValue()
@@ -237,7 +243,7 @@ export async function POST(request: NextRequest) {
                     const { partLineId } = cmd;
                     const lineIndex = parts.findIndex(p => p.partLineId === partLineId);
                     if (lineIndex === -1) throw new Error('Part line not found');
-                    
+
                     const line = parts[lineIndex];
                     const reservedQuantity = getReservedQuantity(line);
                     if (line.productId && reservedQuantity > 0) {
@@ -279,6 +285,7 @@ export async function POST(request: NextRequest) {
                                 reservedQuantity: delta,
                                 status: REPAIR_PART_STATUS.SELECTED,
                                 quality: String(pData.quality || ''),
+                                partType: line.partType || getProductPartType(pData),
                                 unitPriceAtUse: Number(pData.price_promo) || Number(pData.price_original) || 0,
                                 unitCostAtUse: Number(pData.costPrice) || 0,
                                 priceConfirmedAt: arrayTimestampValue()
@@ -325,12 +332,12 @@ export async function POST(request: NextRequest) {
             // Server-compute payment
             const selectedParts = parts.filter(isSelectedRepairPart);
             const partsCost = selectedParts.reduce((sum, p) => sum + ((p.unitPriceAtUse || 0) * p.quantity), 0);
-            
+
             const currentPayment = ticket.payment || {};
             const laborCost = currentPayment.laborCost || 0;
             const additionalFees = currentPayment.additionalFees || 0;
             const discountAmount = currentPayment.discountAmount || 0;
-            
+
             const amount = laborCost + partsCost + additionalFees - discountAmount;
 
             const paymentUpdate = {
@@ -348,6 +355,14 @@ export async function POST(request: NextRequest) {
 
             if (partsLockedAt) {
                 updateData.partsLockedAt = partsLockedAt;
+            }
+
+            let draftReceiptAllocation: ReservedSequentialDocumentId | null = null;
+            if (draftSnap?.empty && newRequestedItems.length > 0) {
+                draftReceiptAllocation = await reserveSequentialDocumentId(tx, db, {
+                    collectionName: 'import_receipts',
+                    prefix: 'NH',
+                });
             }
 
             // ===== START WRITES =====
@@ -385,9 +400,12 @@ export async function POST(request: NextRequest) {
                     draftRef = draftSnap.docs[0].ref;
                     draftData = draftSnap.docs[0].data() as unknown as DraftReceiptData;
                 } else if (newRequestedItems.length > 0) {
-                    draftRef = receiptsRef.doc();
+                    draftRef = draftReceiptAllocation?.ref;
                 } else {
                     return { success: true, parts, payment: paymentUpdate, partsLockedAt };
+                }
+                if (!draftRef) {
+                    throw new Error('Khong the tao ma phieu nhap tu dong.');
                 }
 
                 draftData.items = [
@@ -398,6 +416,7 @@ export async function POST(request: NextRequest) {
                     ...newRequestedItems,
                 ];
                 tx.set(draftRef, draftData, { merge: true });
+                draftReceiptAllocation?.commitCounter();
             }
 
             return { success: true, parts, payment: paymentUpdate, partsLockedAt };

@@ -1,914 +1,253 @@
 'use client';
 
+
 import { useRef, useState } from 'react';
 import {
     AlertCircle,
     CheckCircle2,
+    ClipboardList,
     Download,
     FolderOpen,
     Image as ImageIcon,
     Loader2,
     Package,
+    ShoppingBag,
     Upload,
     Wrench,
     X,
 } from 'lucide-react';
-import { addDoc, collection, doc, getDoc, getDocs, limit, orderBy, query, runTransaction, serverTimestamp, where } from 'firebase/firestore';
+import { collection, doc, getDocs, query, runTransaction, serverTimestamp, where } from 'firebase/firestore';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
-import { db, getStorageInstance } from '@/lib/firebase';
+import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
 import { useConfig } from '@/lib/ConfigContext';
-import type { ProductSpecs, TaxonomyNode } from '@/lib/types';
 import { PART_CATEGORY_LABEL } from '@/lib/constants';
-import { buildProductCodeFromId, getProductCodeKind, normalizeProductCode, type ProductCodeKind } from '@/lib/productCodes';
-import { assertProductCodesAvailable } from '@/lib/productCodeRegistry';
+import { buildProductCodeFromId, normalizeProductCode } from '@/lib/productCodes';
+import { buildClientDocumentId } from '@/lib/clientDocumentIds';
+import { reserveSupplierDocumentId } from '@/lib/supplierDocumentIds';
 import { generateSearchKeywords, generateSlug } from '@/lib/utils';
 import { triggerRevalidate } from '@/lib/revalidate';
-import { optimizeImage } from '@/lib/imageOptimizer';
-import { validateImageFile } from '@/lib/validateImage';
-import { EXCEL_IMPORT_ADDITIONAL_EXAMPLE_ROWS, EXCEL_IMPORT_PRIMARY_EXAMPLE_ROWS } from './excelImportTemplateFixtures';
-
-export type ExcelImportMode = 'product' | 'accessory' | 'part' | 'service';
-
-type Step = 'upload' | 'validating' | 'preview' | 'importing' | 'done';
-type CellValue = string | number | boolean | Date | null | undefined;
-type ExcelRow = Record<string, CellValue>;
-type TaxonomyType = 'retail' | 'component' | 'service';
-type PreviewFilter = 'all' | 'valid' | 'errors' | 'warnings';
-type CheckSeverity = 'ok' | 'warning' | 'error';
-type ProductCondition = 'new' | 'like-new' | 'used';
-type LocalImageUploadFolder = 'products' | 'parts' | 'services';
-
-interface FieldCheck {
-    key: string;
-    label: string;
-    value: string;
-    severity: CheckSeverity;
-    message: string;
-}
-
-interface ParsedRow {
-    rowNum: number;
-    data: ExcelRow;
-    errors: string[];
-    warnings: string[];
-    checks: FieldCheck[];
-    categoryIds: string[];
-    category: string;
-}
-
-interface LocalImageRequirement {
-    source: string;
-    key: string;
-    fileName: string;
-    rows: number[];
-}
-
-interface UploadedMediaMatch {
-    url: string;
-    name: string;
-    folder?: string;
-}
-
-interface ModeConfig {
-    title: string;
-    shortLabel: string;
-    sheetName: string;
-    collectionName: 'products' | 'services';
-    taxonomyType: TaxonomyType;
-    nameHeaders: string[];
-    requiredHeaders: string[];
-    templateHeaders: string[];
-    exampleRow: string[];
-    icon: 'product' | 'part' | 'service';
-}
-
-const MODE_CONFIG: Record<ExcelImportMode, ModeConfig> = {
-    product: {
-        title: 'Sản phẩm bán lẻ',
-        shortLabel: 'sản phẩm',
-        sheetName: 'San_pham',
-        collectionName: 'products',
-        taxonomyType: 'retail',
-        nameHeaders: ['Tên SP', 'Tên', 'Tên sản phẩm'],
-        requiredHeaders: ['Tên SP', 'Danh mục', 'Giá gốc'],
-        templateHeaders: ['Tên SP', 'Mã hàng', 'Thương hiệu', 'Danh mục', 'Giá gốc', 'Giá KM', 'Giá vốn', 'NCC', 'Tồn kho', 'Tình trạng', 'Bảo hành tháng', 'Mô tả', 'Ảnh chính', 'Ảnh phụ', 'Thông số', 'Series ID', 'Màu sắc', 'Dung lượng', 'Flash Sale', 'Video'],
-        exampleRow: EXCEL_IMPORT_PRIMARY_EXAMPLE_ROWS.product,
-        icon: 'product',
-    },
-    accessory: {
-        title: 'Phụ kiện',
-        shortLabel: 'phụ kiện',
-        sheetName: 'Phu_kien',
-        collectionName: 'products',
-        taxonomyType: 'retail',
-        nameHeaders: ['Tên phụ kiện', 'Tên SP', 'Tên', 'Tên sản phẩm'],
-        requiredHeaders: ['Tên phụ kiện', 'Danh mục', 'Giá gốc'],
-        templateHeaders: ['Tên phụ kiện', 'Mã hàng', 'Thương hiệu', 'Danh mục', 'Giá gốc', 'Giá KM', 'Giá vốn', 'NCC', 'Tồn kho', 'Tình trạng', 'Bảo hành tháng', 'Mô tả', 'Ảnh chính', 'Ảnh phụ', 'Thông số', 'Video'],
-        exampleRow: EXCEL_IMPORT_PRIMARY_EXAMPLE_ROWS.accessory,
-        icon: 'product',
-    },
-    part: {
-        title: 'Linh kiện sửa chữa',
-        shortLabel: 'linh kiện',
-        sheetName: 'Linh_kien',
-        collectionName: 'products',
-        taxonomyType: 'component',
-        nameHeaders: ['Tên linh kiện', 'Tên LK', 'Tên', 'Tên SP'],
-        requiredHeaders: ['Tên linh kiện', 'Danh mục', 'Giá vốn', 'Giá bán'],
-        templateHeaders: ['Tên linh kiện', 'Mã hàng', 'Danh mục', 'Giá vốn', 'Giá bán', 'NCC', 'Tồn kho', 'Chất lượng', 'Loại linh kiện', 'Dòng máy tương thích', 'Bảo hành tháng', 'Mô tả', 'Ảnh chính', 'Ảnh phụ'],
-        exampleRow: EXCEL_IMPORT_PRIMARY_EXAMPLE_ROWS.part,
-        icon: 'part',
-    },
-    service: {
-        title: 'Dịch vụ sửa chữa',
-        shortLabel: 'dịch vụ',
-        sheetName: 'Dich_vu',
-        collectionName: 'services',
-        taxonomyType: 'service',
-        nameHeaders: ['Tên DV', 'Tên dịch vụ', 'Tên'],
-        requiredHeaders: ['Tên DV', 'Danh mục', 'Giá gốc'],
-        templateHeaders: ['Tên DV', 'Dòng máy', 'Danh mục', 'Giá gốc', 'Giá KM', 'Bảo hành', 'Thời gian sửa', 'Mô tả', 'Ảnh chính', 'Ảnh phụ', 'SEO Description', 'Tags', 'Video'],
-        exampleRow: EXCEL_IMPORT_PRIMARY_EXAMPLE_ROWS.service,
-        icon: 'service',
-    },
-};
-
-const QUALITY_OPTIONS = ['Zin', 'Loại 1', 'Loại 2', 'Bóc máy'];
-const PRODUCT_CONDITIONS: ProductCondition[] = ['new', 'like-new', 'used'];
-const PREVIEW_CHECK_KEYS = ['name', 'category', 'price', 'cost', 'stock', 'code', 'images', 'details'];
-const FIRESTORE_QUERY_CHUNK_SIZE = 10;
-const IMAGE_MAIN_HEADERS = ['Ảnh chính', 'Ảnh', 'Image'];
-const IMAGE_OTHER_HEADERS = ['Ảnh phụ', 'Images'];
-
-function normalizeText(value: string): string {
-    return value
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .replace(/đ/gi, 'd')
-        .toLowerCase()
-        .trim();
-}
-
-function getValue(row: ExcelRow, headers: string[]): string {
-    for (const header of headers) {
-        const value = row[header];
-        if (value !== undefined && value !== null && String(value).trim() !== '') {
-            return String(value).trim();
-        }
-    }
-    return '';
-}
-
-function parseRawNumber(raw: string): number {
-    const trimmed = raw.trim();
-    if (!trimmed) return 0;
-    const value = trimmed
-        .replace(/\s*(vnd|vnđ|đ|₫)\s*$/i, '')
-        .replace(/\s+/g, '');
-    if (!/^-?(?:\d+|\d{1,3}(?:[.,]\d{3})+)$/.test(value)) return Number.NaN;
-    const sign = value.startsWith('-') ? -1 : 1;
-    const digitsOnly = value.replace(/[^\d]/g, '');
-    return sign * Number(digitsOnly);
-}
-
-function getNumber(row: ExcelRow, headers: string[]): number {
-    const raw = getValue(row, headers);
-    if (!raw) return 0;
-    const value = parseRawNumber(raw);
-    return Number.isFinite(value) ? Math.max(0, value) : 0;
-}
-
-function parseNumberInput(row: ExcelRow, headers: string[]) {
-    const raw = getValue(row, headers);
-    if (!raw) return { raw, value: 0, hasValue: false, isValid: true };
-    const value = parseRawNumber(raw);
-    return {
-        raw,
-        value,
-        hasValue: true,
-        isValid: Number.isFinite(value) && value >= 0,
-    };
-}
-
-function getBoolean(row: ExcelRow, headers: string[]): boolean {
-    const raw = getValue(row, headers).toLowerCase();
-    return ['1', 'true', 'yes', 'y', 'co', 'có', 'x'].includes(raw);
-}
-
-function splitList(value: string): string[] {
-    return value
-        .split(/[\n;,|]+/)
-        .map((item) => item.trim())
-        .filter(Boolean);
-}
-
-function parseImages(row: ExcelRow, mainHeaders: string[], otherHeaders: string[]): string[] {
-    const main = getValue(row, mainHeaders);
-    const others = splitList(getValue(row, otherHeaders));
-    return Array.from(new Set([main, ...others].filter(Boolean)));
-}
-
-function normalizeLocalImageKey(value: string): string {
-    return value
-        .trim()
-        .replace(/^file:\/+/i, '')
-        .replace(/\\/g, '/')
-        .replace(/\/+/g, '/')
-        .replace(/^\/([a-zA-Z]:\/)/, '$1')
-        .toLowerCase();
-}
-
-function localImageFileName(value: string): string {
-    const normalized = normalizeLocalImageKey(value);
-    return decodeURIComponent(normalized.split('/').filter(Boolean).pop() || normalized);
-}
-
-function normalizeMediaBaseName(value: string): string {
-    return localImageFileName(value).replace(/\.[^.]+$/, '').toLowerCase();
-}
-
-function buildMediaNameCandidates(fileName: string): string[] {
-    const extractedName = localImageFileName(fileName);
-    const baseName = extractedName.replace(/\.[^.]+$/, '');
-    return Array.from(new Set([
-        extractedName,
-        `${baseName}.webp`,
-        `${baseName}.jpg`,
-        `${baseName}.jpeg`,
-        `${baseName}.png`,
-    ].filter(Boolean)));
-}
-
-function preferMediaMatch(matches: UploadedMediaMatch[], preferredFolder: LocalImageUploadFolder): UploadedMediaMatch | null {
-    if (matches.length === 0) return null;
-    return [...matches].sort((left, right) => {
-        const leftScore = left.folder === preferredFolder ? 0 : 1;
-        const rightScore = right.folder === preferredFolder ? 0 : 1;
-        return leftScore - rightScore;
-    })[0];
-}
-
-function isLocalImageReference(value: string): boolean {
-    const trimmed = value.trim();
-    if (!trimmed || isValidHttpUrl(trimmed)) return false;
-    return /\.(jpe?g|png|webp)$/i.test(trimmed);
-}
-
-function getFileRelativePath(file: File): string {
-    const withRelativePath = file as File & { webkitRelativePath?: string };
-    return withRelativePath.webkitRelativePath || file.name;
-}
-
-function fileMatchesLocalReference(file: File, source: string): boolean {
-    const sourceKey = normalizeLocalImageKey(source);
-    const relativePath = normalizeLocalImageKey(getFileRelativePath(file));
-    const fileName = localImageFileName(file.name);
-    if (relativePath && (sourceKey.endsWith(relativePath) || sourceKey.endsWith(`/${relativePath}`))) return true;
-    return localImageFileName(sourceKey) === fileName;
-}
-
-function isValidHttpUrl(value: string): boolean {
-    try {
-        const url = new URL(value);
-        return url.protocol === 'http:' || url.protocol === 'https:';
-    } catch {
-        return false;
-    }
-}
-
-function parseSpecs(raw: string): ProductSpecs {
-    const specs: ProductSpecs = {};
-    for (const pair of splitList(raw)) {
-        const separatorIndex = pair.search(/[:=]/);
-        if (separatorIndex <= 0) continue;
-        const key = pair.slice(0, separatorIndex).trim();
-        const value = pair.slice(separatorIndex + 1).trim();
-        if (key && value) specs[key] = value;
-    }
-    return specs;
-}
-
-function resolveCategoryPath(pathStr: string, taxonomy: TaxonomyNode[]): { categoryIds: string[]; category: string } {
-    if (!pathStr) return { categoryIds: [], category: '' };
-
-    const parts = pathStr.split('>').map((part) => part.trim()).filter(Boolean);
-    let currentNodes = taxonomy;
-    const ids: string[] = [];
-    let matchedLeafName = '';
-
-    for (const part of parts) {
-        const matchedNode = currentNodes.find((node) => node.name.trim().toLowerCase() === part.toLowerCase());
-        if (!matchedNode) break;
-        ids.push(matchedNode.id);
-        matchedLeafName = matchedNode.name;
-        currentNodes = matchedNode.children || [];
-    }
-
-    if (ids.length === parts.length) {
-        return { categoryIds: ids, category: matchedLeafName };
-    }
-    return { categoryIds: [], category: pathStr };
-}
-
-function productKindForMode(mode: ExcelImportMode, category: string, categoryIds: string[]): ProductCodeKind {
-    if (mode === 'part') return 'component';
-    if (mode === 'accessory') return 'accessory';
-    return getProductCodeKind({ category, categoryIds });
-}
-
-function buildImportProductId(mode: Exclude<ExcelImportMode, 'service'>, name: string, category: string): string {
-    const categorySlug = generateSlug(category || '');
-    const prefix =
-        mode === 'part'
-            ? 'LK'
-            : mode === 'accessory' || categorySlug === 'accessory' || categorySlug === 'phu-kien'
-              ? 'PK'
-              : 'SP';
-    return `${prefix}-${generateSlug(name)}`;
-}
-
-function resolveTargetDocId(mode: ExcelImportMode, row: ExcelRow, modeConfig: ModeConfig, taxonomy: TaxonomyNode[]): string {
-    const name = getValue(row, modeConfig.nameHeaders);
-    if (!name) return '';
-    if (mode === 'service') return generateSlug(name);
-    const categoryPath = getValue(row, ['Danh mục', 'Category']);
-    const { category } = resolveCategoryPath(categoryPath, taxonomy);
-    return buildImportProductId(mode, name, category);
-}
-
-function resolveExpectedProductCode(mode: ExcelImportMode, row: ExcelRow, modeConfig: ModeConfig, taxonomy: TaxonomyNode[]): string {
-    if (mode === 'service') return '';
-    const customCode = normalizeProductCode(getValue(row, ['Mã hàng', 'SKU', 'Barcode']));
-    if (customCode) return customCode;
-    const targetId = resolveTargetDocId(mode, row, modeConfig, taxonomy);
-    const categoryPath = getValue(row, ['Danh mục', 'Category']);
-    const { categoryIds, category } = resolveCategoryPath(categoryPath, taxonomy);
-    const kind = productKindForMode(mode, category, categoryIds);
-    return targetId ? buildProductCodeFromId(targetId, kind) : '';
-}
-
-function isAccessoryCategory(categoryIds: string[]): boolean {
-    const firstCategoryId = normalizeText(categoryIds[0] || '');
-    return firstCategoryId === 'phu-kien' || firstCategoryId.startsWith('phu-kien/');
-}
-
-function normalizeConditionInput(raw: string): ProductCondition | '' {
-    const normalized = normalizeText(raw);
-    if (!normalized) return '';
-    if (PRODUCT_CONDITIONS.includes(raw as ProductCondition)) return raw as ProductCondition;
-    if (['moi', 'moi-100', 'new-100'].includes(normalized)) return 'new';
-    if (['like-new', 'likenew', 'cu-99', 'cu-99%', '99'].includes(normalized)) return 'like-new';
-    if (['used', 'cu', 'hang-cu', 'tbh'].includes(normalized)) return 'used';
-    return '';
-}
-
-function buildCheck(key: string, label: string, value: string, severity: CheckSeverity, message: string): FieldCheck {
-    return { key, label, value: value || '—', severity, message };
-}
-
-function summarizeChecks(checks: FieldCheck[], severity: CheckSeverity): string[] {
-    return checks
-        .filter((check) => check.severity === severity)
-        .map((check) => `${check.label}: ${check.message}`);
-}
-
-function severityClasses(severity: CheckSeverity): string {
-    if (severity === 'error') return 'bg-red-50 text-red-700 border-red-200';
-    if (severity === 'warning') return 'bg-amber-50 text-amber-700 border-amber-200';
-    return 'bg-green-50 text-green-700 border-green-200';
-}
-
-function severityLabel(severity: CheckSeverity): string {
-    if (severity === 'error') return 'Lỗi';
-    if (severity === 'warning') return 'Cảnh báo';
-    return 'Hợp lệ';
-}
-
-function imageUploadFolderForMode(mode: ExcelImportMode): LocalImageUploadFolder {
-    if (mode === 'service') return 'services';
-    if (mode === 'part') return 'parts';
-    return 'products';
-}
-
-function collectLocalImageRequirements(rows: ParsedRow[]): LocalImageRequirement[] {
-    const byKey = new Map<string, LocalImageRequirement>();
-
-    rows.forEach((row) => {
-        parseImages(row.data, IMAGE_MAIN_HEADERS, IMAGE_OTHER_HEADERS)
-            .filter(isLocalImageReference)
-            .forEach((source) => {
-                const key = normalizeLocalImageKey(source);
-                const current = byKey.get(key);
-                if (current) {
-                    current.rows.push(row.rowNum);
-                } else {
-                    byKey.set(key, {
-                        source,
-                        key,
-                        fileName: localImageFileName(source),
-                        rows: [row.rowNum],
-                    });
-                }
-            });
-    });
-
-    return Array.from(byKey.values());
-}
-
-function replaceImageReferences(row: ExcelRow, replacements: Record<string, string>): ExcelRow {
-    const nextRow = { ...row };
-    [...IMAGE_MAIN_HEADERS, ...IMAGE_OTHER_HEADERS].forEach((header) => {
-        const value = nextRow[header];
-        if (typeof value !== 'string' || !value.trim()) return;
-        const items = splitList(value);
-        if (items.length === 0) return;
-        const replaced = items.map((item) => replacements[normalizeLocalImageKey(item)] || item);
-        nextRow[header] = replaced.join('; ');
-    });
-    return nextRow;
-}
-
-function refreshImageChecks(row: ParsedRow): ParsedRow {
-    const checks = row.checks.filter((check) => check.key !== 'images');
-    const images = parseImages(row.data, IMAGE_MAIN_HEADERS, IMAGE_OTHER_HEADERS);
-    const invalidImages = images.filter((image) => !isValidHttpUrl(image) && !isLocalImageReference(image));
-    const localImages = images.filter(isLocalImageReference);
-
-    if (invalidImages.length > 0) {
-        checks.push(buildCheck('images', 'Ảnh', invalidImages[0], 'error', 'Ảnh phải là URL http/https hoặc đường dẫn file ảnh local'));
-    } else if (localImages.length > 0) {
-        checks.push(buildCheck('images', 'Ảnh', localImages[0], 'error', `Còn ${localImages.length} ảnh local chưa upload`));
-    } else {
-        checks.push(images.length > 0
-            ? buildCheck('images', 'Ảnh', `${images.length} URL`, 'ok', 'Có ảnh')
-            : buildCheck('images', 'Ảnh', '', 'warning', 'Thiếu ảnh, item sẽ không có hình hiển thị')
-        );
-    }
-
-    return {
-        ...row,
-        checks,
-        errors: summarizeChecks(checks, 'error'),
-        warnings: summarizeChecks(checks, 'warning'),
-    };
-}
-
-async function uploadInitialImportImage(file: File, folder: LocalImageUploadFolder): Promise<string> {
-    const validationError = validateImageFile(file);
-    if (validationError) throw new Error(validationError);
-
-    const optimized = await optimizeImage(file, 800, 1600, 0.75);
-    const thumb = await optimizeImage(file, 128, 128, 0.60);
-    const storage = await getStorageInstance();
-    const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
-    const storagePath = `media/${folder}/${Date.now()}_${optimized.file.name}`;
-    const storageRef = ref(storage, storagePath);
-
-    await uploadBytes(storageRef, optimized.file, { contentType: optimized.file.type });
-    let url = await getDownloadURL(storageRef);
-
-    const thumbPath = storagePath.replace(/\.([a-zA-Z0-9]+)$/, '_thumb.$1');
-    const thumbRef = ref(storage, thumbPath);
-    await uploadBytes(thumbRef, thumb.file, { contentType: thumb.file.type });
-    url = `${url}&hasThumb=true`;
-
-    await addDoc(collection(db, 'media_library'), {
-        url,
-        path: storagePath,
-        name: optimized.file.name,
-        originalName: file.name,
-        normalizedBaseName: normalizeMediaBaseName(file.name),
-        type: optimized.file.type,
-        size: optimized.file.size,
-        folder,
-        width: optimized.width,
-        height: optimized.height,
-        createdAt: serverTimestamp(),
-    });
-
-    return url;
-}
-
-async function findExistingImportImage(fileName: string, folder: LocalImageUploadFolder): Promise<UploadedMediaMatch | null> {
-    const baseName = normalizeMediaBaseName(fileName);
-    if (!baseName) return null;
-
-    const toMatch = (docData: Record<string, unknown>): UploadedMediaMatch | null => {
-        const url = typeof docData.url === 'string' ? docData.url : '';
-        const name = typeof docData.name === 'string' ? docData.name : '';
-        const originalName = typeof docData.originalName === 'string' ? docData.originalName : '';
-        const normalizedBaseName = typeof docData.normalizedBaseName === 'string' ? docData.normalizedBaseName : '';
-        if (!url || !name) return null;
-        const matchesName =
-            normalizeMediaBaseName(name) === baseName ||
-            normalizeMediaBaseName(originalName) === baseName ||
-            normalizedBaseName === baseName;
-        if (!matchesName) return null;
-        return {
-            url,
-            name,
-            folder: typeof docData.folder === 'string' ? docData.folder : undefined,
-        };
-    };
-
-    const directSnapshot = await getDocs(query(
-        collection(db, 'media_library'),
-        where('name', 'in', buildMediaNameCandidates(fileName).slice(0, 10)),
-    ));
-    const directMatches = directSnapshot.docs
-        .map((docSnapshot) => toMatch(docSnapshot.data()))
-        .filter((item): item is UploadedMediaMatch => Boolean(item));
-    const directMatch = preferMediaMatch(directMatches, folder);
-    if (directMatch) return directMatch;
-
-    const normalizedSnapshot = await getDocs(query(
-        collection(db, 'media_library'),
-        where('normalizedBaseName', '==', baseName),
-    ));
-    const normalizedMatches = normalizedSnapshot.docs
-        .map((docSnapshot) => toMatch(docSnapshot.data()))
-        .filter((item): item is UploadedMediaMatch => Boolean(item));
-    const normalizedMatch = preferMediaMatch(normalizedMatches, folder);
-    if (normalizedMatch) return normalizedMatch;
-
-    const recentSnapshot = await getDocs(query(
-        collection(db, 'media_library'),
-        orderBy('createdAt', 'desc'),
-        limit(300),
-    ));
-    const recentMatches = recentSnapshot.docs
-        .map((docSnapshot) => toMatch(docSnapshot.data()))
-        .filter((item): item is UploadedMediaMatch => Boolean(item));
-    return preferMediaMatch(recentMatches, folder);
-}
-
-async function loadExistingDocIds(collectionName: 'products' | 'services', ids: string[]): Promise<Set<string>> {
-    const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
-    const existingIds = new Set<string>();
-    await Promise.all(uniqueIds.map(async (id) => {
-        const snapshot = await getDoc(doc(db, collectionName, id));
-        if (snapshot.exists()) existingIds.add(id);
-    }));
-    return existingIds;
-}
-
-async function loadExistingProductCodes(codes: string[]): Promise<Set<string>> {
-    const uniqueCodes = Array.from(new Set(codes.map(normalizeProductCode).filter(Boolean)));
-    const existingCodes = new Set<string>();
-
-    for (let index = 0; index < uniqueCodes.length; index += FIRESTORE_QUERY_CHUNK_SIZE) {
-        const chunk = uniqueCodes.slice(index, index + FIRESTORE_QUERY_CHUNK_SIZE);
-        if (chunk.length === 0) continue;
-
-        const snapshots = await Promise.all([
-            getDocs(query(collection(db, 'product_code_registry'), where('code', 'in', chunk))),
-            getDocs(query(collection(db, 'products'), where('sku', 'in', chunk))),
-            getDocs(query(collection(db, 'products'), where('barcode', 'in', chunk))),
-            getDocs(query(collection(db, 'products'), where('productCode', 'in', chunk))),
-            getDocs(query(collection(db, 'products'), where('qrCodes', 'array-contains-any', chunk))),
-        ]);
-
-        snapshots.forEach((snapshot) => {
-            snapshot.forEach((item) => {
-                const data = item.data();
-                [
-                    data.code,
-                    data.sku,
-                    data.barcode,
-                    data.productCode,
-                    ...(Array.isArray(data.qrCodes) ? data.qrCodes : []),
-                ].forEach((value) => {
-                    const code = normalizeProductCode(value);
-                    if (code && chunk.includes(code)) existingCodes.add(code);
-                });
-            });
-        });
-    }
-
-    return existingCodes;
-}
-
-async function createInitialProductWithCodes(
-    productId: string,
-    data: Record<string, unknown>,
-    codes: string[],
-    inventoryLog?: Record<string, unknown>,
-): Promise<string> {
-    const normalizedCodes = await assertProductCodesAvailable(codes);
-    const productRef = doc(db, 'products', productId);
-    const registryRefs = normalizedCodes.map((code) => doc(db, 'product_code_registry', code));
-    const logRef = inventoryLog ? doc(collection(db, 'inventory_logs')) : null;
-
-    await runTransaction(db, async (transaction) => {
-        const [productSnapshot, ...registrySnapshots] = await Promise.all([
-            transaction.get(productRef),
-            ...registryRefs.map((ref) => transaction.get(ref)),
-        ]);
-
-        if (productSnapshot.exists()) {
-            throw new Error(`ID sản phẩm ${productId} đã tồn tại.`);
-        }
-
-        registrySnapshots.forEach((snapshot, index) => {
-            if (snapshot.exists()) {
-                throw new Error(`Mã QR ${normalizedCodes[index]} đã được gán cho sản phẩm khác.`);
-            }
-        });
-
-        registryRefs.forEach((ref, index) => {
-            transaction.set(ref, {
-                productId,
-                code: normalizedCodes[index],
-                updatedAt: serverTimestamp(),
-            });
-        });
-
-        transaction.set(productRef, {
-            ...data,
-            qrCodes: normalizedCodes,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-        });
-
-        if (logRef && inventoryLog) {
-            transaction.set(logRef, {
-                ...inventoryLog,
-                createdAt: serverTimestamp(),
-            });
-        }
-    });
-
-    return productId;
-}
+import {
+    FIRESTORE_QUERY_CHUNK_SIZE,
+    IMAGE_MAIN_HEADERS,
+    IMAGE_OTHER_HEADERS,
+    MODE_CONFIG,
+    QUALITY_OPTIONS,
+    buildCheck,
+    buildImportProductId,
+    collectLocalImageRequirements,
+    createInitialProductWithCodes,
+    fileMatchesLocalReference,
+    findExistingImportImage,
+    generateTemplate,
+    getBoolean,
+    getFileRelativePath,
+    getNumber,
+    getPreviewCheckKeys,
+    getValue,
+    getSignedNumber,
+    imageUploadFolderForMode,
+    isAccessoryCategory,
+    isLocalImageReference,
+    isValidHttpUrl,
+    loadExistingDocIds,
+    loadExistingProductCodes,
+    normalizeConditionInput,
+    normalizeImportPhone,
+    normalizeLegacyImportDocId,
+    normalizeText,
+    normalizeLocalImageKey,
+    parseImages,
+    parseDebtInput,
+    parseNumberInput,
+    parseSpecs,
+    productKindForMode,
+    refreshImageChecks,
+    replaceImageReferences,
+    resolveCategoryPath,
+    resolveExpectedProductCode,
+    resolveTargetDocId,
+    severityClasses,
+    severityLabel,
+    splitList,
+    summarizeChecks,
+    uploadInitialImportImage,
+    type ExcelImportMode,
+    type ExcelRow,
+    type FieldCheck,
+    type LocalImageRequirement,
+    type ParsedRow,
+    type PreviewFilter,
+    type Step,
+    type CheckSeverity,
+} from '@/features/excel-import/importSupport';
+
+export type { ExcelImportMode } from '@/features/excel-import/importSupport';
 
 function iconForMode(mode: ExcelImportMode) {
     if (MODE_CONFIG[mode].icon === 'part') return <Wrench size={22} className="text-emerald-600" />;
     if (MODE_CONFIG[mode].icon === 'service') return <Wrench size={22} className="text-blue-600" />;
+    if (MODE_CONFIG[mode].icon === 'order') return <ShoppingBag size={22} className="text-indigo-600" />;
+    if (MODE_CONFIG[mode].icon === 'repair') return <ClipboardList size={22} className="text-rose-600" />;
     return <Package size={22} className="text-orange-600" />;
 }
 
-type TemplateCell = string | number;
+const CUSTOMER_NAME_HEADERS = ['Tên KH', 'Tên khách hàng', 'Khách hàng', 'Customer Name'];
+const PHONE_HEADERS = ['SĐT', 'sdt', 'phone', 'Phone', 'Số điện thoại'];
+const EMAIL_HEADERS = ['Email'];
+const ADDRESS_HEADERS = ['Địa chỉ', 'Address'];
+const NOTE_HEADERS = ['Ghi chú', 'Note'];
+const ORDER_ID_HEADERS = ['Mã đơn', 'Order ID', 'Mã hóa đơn', 'orderId'];
+const REPAIR_ID_HEADERS = ['Mã phiếu', 'Repair ID', 'Mã sửa chữa', 'repairId'];
 
-interface ColumnGuide {
-    column: string;
-    required: string;
-    purpose: string;
-    inputRule: string;
-    acceptedValues: string;
-    example: string;
-    savedTo: string;
+function rawCellValue(row: ExcelRow, headers: string[]) {
+    for (const header of headers) {
+        const value = row[header];
+        if (value !== undefined && value !== null && String(value).trim() !== '') return value;
+    }
+    return '';
 }
 
-function makeTemplateRow(modeConfig: ModeConfig, values: Record<string, string>): string[] {
-    return modeConfig.templateHeaders.map((header) => values[normalizeText(header)] || '');
+function parseLegacyDate(row: ExcelRow, headers: string[]): Date | null {
+    const raw = rawCellValue(row, headers);
+    if (raw instanceof Date && !Number.isNaN(raw.getTime())) return raw;
+    if (typeof raw === 'number' && Number.isFinite(raw)) {
+        const parsed = XLSX.SSF.parse_date_code(raw);
+        if (parsed) return new Date(parsed.y, parsed.m - 1, parsed.d, parsed.H || 0, parsed.M || 0, Math.floor(parsed.S || 0));
+    }
+
+    const text = String(raw || '').trim();
+    if (!text) return null;
+    const dmy = text.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/);
+    if (dmy) {
+        const year = Number(dmy[3].length === 2 ? `20${dmy[3]}` : dmy[3]);
+        const date = new Date(year, Number(dmy[2]) - 1, Number(dmy[1]));
+        return Number.isNaN(date.getTime()) ? null : date;
+    }
+    const parsed = new Date(text);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-function worksheetFromRows(rows: TemplateCell[][], widths: number[], addFilter = false): XLSX.WorkSheet {
-    const sheet = XLSX.utils.aoa_to_sheet(rows);
-    sheet['!cols'] = widths.map((wch) => ({ wch }));
-    if (addFilter && rows.length > 0 && rows[0].length > 0) {
-        sheet['!autofilter'] = {
-            ref: XLSX.utils.encode_range({
-                s: { r: 0, c: 0 },
-                e: { r: 0, c: rows[0].length - 1 },
-            }),
-        };
-    }
-    return sheet;
+function formatCheckDate(date: Date | null): string {
+    return date ? date.toLocaleDateString('vi-VN') : '';
 }
 
-function columnGuideForHeader(header: string, modeConfig: ModeConfig): ColumnGuide {
-    const normalized = normalizeText(header);
-    const exampleIndex = modeConfig.templateHeaders.indexOf(header);
-    const base: ColumnGuide = {
-        column: header,
-        required: modeConfig.requiredHeaders.includes(header) ? 'Bắt buộc' : 'Tùy chọn',
-        purpose: 'Thông tin bổ sung cho item.',
-        inputRule: 'Nhập text nếu có dữ liệu, để trống nếu chưa dùng.',
-        acceptedValues: 'Tự do',
-        example: modeConfig.exampleRow[exampleIndex] || '',
-        savedTo: header,
-    };
-
-    if (normalized.startsWith('ten')) {
-        return { ...base, purpose: 'Tên hiển thị và khóa tạo ID chuẩn hóa.', inputRule: 'Không để trống, không trùng item đang có hoặc trùng trong file.', savedTo: 'name, searchKeywords' };
-    }
-    if (normalized === 'ma hang') {
-        return { ...base, purpose: 'Mã QR/barcode/SKU dùng chung cho POS và tem QR.', inputRule: 'Có thể để trống để hệ thống tự sinh. Nếu nhập tay phải không trùng.', acceptedValues: 'A-Z, 0-9, dấu gạch ngang; ví dụ SP-IP15PM-256.', savedTo: 'sku, barcode, productCode, qrCodes, product_code_registry' };
-    }
-    if (normalized === 'thuong hieu') {
-        return { ...base, purpose: 'Thương hiệu hiển thị và hỗ trợ tìm kiếm.', inputRule: 'Nhập đúng tên brand đang dùng nếu có.', savedTo: 'brand' };
-    }
-    if (normalized === 'danh muc') {
-        return { ...base, purpose: 'Gắn item vào taxonomy chung.', inputRule: 'Nhập breadcrumb đúng cây danh mục, phân cấp bằng dấu >.', acceptedValues: 'Copy từ sheet Taxonomy_mau.', savedTo: 'category, categoryIds' };
-    }
-    if (normalized.startsWith('gia')) {
-        return { ...base, purpose: 'Giá dùng cho web, POS và tính lợi nhuận.', inputRule: 'Chỉ nhập số, không nhập dấu phẩy hoặc ký tự tiền tệ.', acceptedValues: 'Số nguyên >= 0.', savedTo: normalized.includes('von') ? 'costPrice' : normalized.includes('km') || normalized.includes('ban') ? 'price_promo' : 'price_original' };
-    }
-    if (normalized === 'ncc') {
-        return { ...base, purpose: 'Nhà cung cấp ban đầu.', inputRule: 'Text tự do, có thể để trống.', savedTo: 'supplier' };
-    }
-    if (normalized === 'ton kho') {
-        return { ...base, purpose: 'Số lượng tồn khởi tạo.', inputRule: 'Nhập số nguyên. Nếu > 0 hệ thống tạo inventory log IMPORT.', acceptedValues: '0, 1, 10...', savedTo: 'stock, inventory_logs' };
-    }
-    if (normalized === 'tinh trang') {
-        return { ...base, purpose: 'Tình trạng hàng bán lẻ/phụ kiện.', inputRule: 'Nếu để trống hệ thống dùng new.', acceptedValues: 'new, like-new, used', savedTo: 'condition' };
-    }
-    if (normalized === 'bao hanh thang') {
-        return { ...base, purpose: 'Số tháng bảo hành cho sản phẩm/phụ kiện/linh kiện.', inputRule: 'Chỉ nhập số tháng.', acceptedValues: '0, 3, 6, 12...', savedTo: 'warrantyMonths' };
-    }
-    if (normalized === 'bao hanh') {
-        return { ...base, purpose: 'Nội dung bảo hành hiển thị cho dịch vụ.', inputRule: 'Text ngắn, ví dụ 6 tháng hoặc 30 ngày.', savedTo: 'warranty_text' };
-    }
-    if (normalized === 'thoi gian sua') {
-        return { ...base, purpose: 'Thời gian dự kiến hoàn tất dịch vụ.', inputRule: 'Text ngắn, ví dụ 30 phút hoặc 1-2 ngày.', savedTo: 'repair_time' };
-    }
-    if (normalized === 'mo ta') {
-        return { ...base, purpose: 'Mô tả hiển thị trên web/admin.', inputRule: 'Text tự do, nên ngắn gọn và rõ tình trạng/cam kết.', savedTo: 'description' };
-    }
-    if (normalized === 'anh chinh') {
-        return { ...base, purpose: 'Ảnh đại diện chính.', inputRule: 'Dùng URL http/https hoặc đường dẫn local rồi chọn file ở bước preview.', acceptedValues: 'URL public, URL MediaManager, hoặc M:\\anh\\ten-file.png.', savedTo: 'imageUrl, images[0]' };
-    }
-    if (normalized === 'anh phu') {
-        return { ...base, purpose: 'Gallery ảnh phụ.', inputRule: 'Nhập nhiều ảnh bằng dấu ; hoặc xuống dòng. Có thể trộn URL và local path.', acceptedValues: 'url-1; url-2; M:\\anh\\ten-file-3.png', savedTo: 'images[]' };
-    }
-    if (normalized === 'thong so') {
-        return { ...base, purpose: 'Thông số kỹ thuật dạng key-value.', inputRule: 'Mỗi cặp key:value, phân tách bằng dấu ;.', acceptedValues: 'RAM:8GB; Bộ nhớ:256GB; Pin:5000mAh', savedTo: 'specs' };
-    }
-    if (normalized === 'series id') {
-        return { ...base, purpose: 'Nhóm series/model để gom biến thể sản phẩm.', inputRule: 'Slug ngắn, thống nhất giữa các màu/dung lượng.', savedTo: 'seriesId' };
-    }
-    if (normalized === 'mau sac') {
-        return { ...base, purpose: 'Màu sắc biến thể.', inputRule: 'Text tự do.', savedTo: 'color' };
-    }
-    if (normalized === 'dung luong') {
-        return { ...base, purpose: 'Dung lượng/bộ nhớ biến thể.', inputRule: 'Text ngắn.', savedTo: 'storageCapacity' };
-    }
-    if (normalized === 'flash sale') {
-        return { ...base, purpose: 'Đưa item vào nhóm flash sale.', inputRule: 'Nhập yes/true/1/x để bật, để trống để tắt.', acceptedValues: 'yes, true, 1, x hoặc để trống', savedTo: 'isFlashSale' };
-    }
-    if (normalized === 'video') {
-        return { ...base, purpose: 'URL video embed/giới thiệu.', inputRule: 'Nhập URL video nếu có.', acceptedValues: 'https://...', savedTo: 'videoEmbedUrl' };
-    }
-    if (normalized === 'chat luong') {
-        return { ...base, purpose: 'Phân loại chất lượng linh kiện.', inputRule: 'Nên dùng đúng danh sách để lọc và thống kê.', acceptedValues: QUALITY_OPTIONS.join(', '), savedTo: 'quality' };
-    }
-    if (normalized === 'loai linh kien') {
-        return { ...base, purpose: 'Nhóm nghiệp vụ của linh kiện sửa chữa.', inputRule: 'Nhập loại linh kiện thống nhất với quy trình sửa chữa.', acceptedValues: 'Màn hình, Pin, Camera, Chân sạc...', savedTo: 'partType' };
-    }
-    if (normalized === 'dong may tuong thich' || normalized === 'dong may') {
-        return { ...base, purpose: 'Dòng máy áp dụng.', inputRule: 'Text ngắn, có thể nhập nhiều model bằng dấu phẩy.', savedTo: normalized === 'dong may' ? 'device_model' : 'description' };
-    }
-    if (normalized === 'seo description') {
-        return { ...base, purpose: 'Mô tả SEO riêng cho dịch vụ.', inputRule: 'Khoảng 120-160 ký tự nếu có thể.', savedTo: 'seoDescription' };
-    }
-    if (normalized === 'tags') {
-        return { ...base, purpose: 'Từ khóa nội bộ cho dịch vụ.', inputRule: 'Phân tách bằng dấu phẩy, dấu ; hoặc xuống dòng.', acceptedValues: 'pin, iphone, thay pin', savedTo: 'tags[]' };
-    }
-
-    return base;
+function normalizeOrderStatus(raw: string): 'Pending' | 'Confirmed' | 'Shipping' | 'Completed' | 'Cancelled' {
+    const normalized = normalizeText(raw);
+    if (['pending', 'cho xu ly', 'cho xac nhan', 'moi'].includes(normalized)) return 'Pending';
+    if (['confirmed', 'da xac nhan', 'xac nhan'].includes(normalized)) return 'Confirmed';
+    if (['shipping', 'dang giao', 'giao hang'].includes(normalized)) return 'Shipping';
+    if (['cancelled', 'canceled', 'huy', 'da huy'].includes(normalized)) return 'Cancelled';
+    return 'Completed';
 }
 
-function buildColumnGuideRows(modeConfig: ModeConfig): TemplateCell[][] {
-    return [
-        ['Cột', 'Bắt buộc', 'Dùng để làm gì', 'Quy ước nhập', 'Giá trị hợp lệ', 'Ví dụ', 'Ghi vào dữ liệu'],
-        ...modeConfig.templateHeaders.map((header) => {
-            const guide = columnGuideForHeader(header, modeConfig);
-            return [
-                guide.column,
-                guide.required,
-                guide.purpose,
-                guide.inputRule,
-                guide.acceptedValues,
-                guide.example,
-                guide.savedTo,
-            ];
-        }),
-    ];
+function normalizeOrderPaymentStatus(raw: string, methodRaw: string): 'paid' | 'unpaid' | 'debt' {
+    const normalized = normalizeText(`${raw} ${methodRaw}`);
+    if (normalized.includes('debt') || normalized.includes('ghi no') || normalized.includes('cong no')) return 'debt';
+    if (normalized.includes('unpaid') || normalized.includes('chua thanh toan')) return 'unpaid';
+    return 'paid';
 }
 
-function flattenTaxonomyRows(nodes: TaxonomyNode[], parentNames: string[] = [], level = 1): TemplateCell[][] {
-    return nodes.flatMap((node) => {
-        const names = [...parentNames, node.name];
-        return [
-            [
-                level,
-                names.join(' > '),
-                node.id,
-                node.slug,
-                node.warrantyType || '',
-                node.warrantyMonths ?? '',
-                node.seoKeywords || '',
-            ],
-            ...flattenTaxonomyRows(node.children || [], names, level + 1),
-        ];
+function normalizeRepairPaymentStatus(raw: string): 'paid' | 'unpaid' | 'pay_later' {
+    const normalized = normalizeText(raw);
+    if (normalized.includes('debt') || normalized.includes('ghi no') || normalized.includes('cong no') || normalized.includes('pay_later')) return 'pay_later';
+    if (normalized.includes('unpaid') || normalized.includes('chua thanh toan')) return 'unpaid';
+    return 'paid';
+}
+
+function normalizePaymentMethod(raw: string): 'COD' | 'Bank' | 'Momo' | 'Card' | 'Installment' | 'Debt' | 'QR' {
+    const normalized = normalizeText(raw);
+    if (normalized.includes('debt') || normalized.includes('ghi no') || normalized.includes('cong no')) return 'Debt';
+    if (normalized.includes('bank') || normalized.includes('chuyen khoan') || normalized.includes('ngan hang')) return 'Bank';
+    if (normalized.includes('momo')) return 'Momo';
+    if (normalized.includes('card') || normalized.includes('the')) return 'Card';
+    if (normalized.includes('installment') || normalized.includes('tra gop')) return 'Installment';
+    if (normalized.includes('qr')) return 'QR';
+    return 'COD';
+}
+
+function parseOrderItems(row: ExcelRow, orderId: string) {
+    const warrantyMonths = getNumber(row, ['Bảo hành tháng', 'Warranty Months']);
+    const warrantyStartedAt = parseLegacyDate(row, ['Ngày bắt đầu BH', 'Warranty Started At']);
+    const warrantyExpiresAt = parseLegacyDate(row, ['Ngày hết BH', 'Warranty Expires At']);
+    const detailLines = getValue(row, ['Dòng hàng', 'Items', 'Chi tiết sản phẩm'])
+        .split(/[\n;]+/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+
+    const buildItem = (productName: string, quantity: number, price: number, serialsRaw: string, lineWarrantyMonths = warrantyMonths, lineWarrantyExpiresAt = warrantyExpiresAt) => ({
+        productId: `legacy-${generateSlug(productName || orderId)}`,
+        productName: productName || 'Sản phẩm từ hệ thống cũ',
+        quantity: Math.max(1, Math.floor(quantity || 1)),
+        price: Math.max(0, price || 0),
+        imeis: splitList(serialsRaw),
+        warrantyMonths: lineWarrantyMonths || undefined,
+        warrantyStartedAt: warrantyStartedAt?.getTime(),
+        warrantyExpiresAt: lineWarrantyExpiresAt?.getTime(),
     });
+
+    if (detailLines.length > 0) {
+        return detailLines.map((line, index) => {
+            const [nameRaw, quantityRaw, priceRaw, serialRaw, warrantyRaw, expiresRaw] = line.split('|').map((part) => part.trim());
+            const lineWarrantyMonths = Number(warrantyRaw) || warrantyMonths;
+            const lineWarrantyExpiresAt = expiresRaw ? parseLegacyDate({ value: expiresRaw }, ['value']) : warrantyExpiresAt;
+            return buildItem(
+                nameRaw || `Dòng hàng ${index + 1}`,
+                Number(quantityRaw) || 1,
+                Number(priceRaw?.replace(/[^\d-]/g, '')) || 0,
+                serialRaw || '',
+                lineWarrantyMonths,
+                lineWarrantyExpiresAt,
+            );
+        });
+    }
+
+    return [buildItem(
+        getValue(row, ['Sản phẩm', 'Tên SP', 'Product']),
+        getNumber(row, ['Số lượng', 'Quantity']) || 1,
+        getNumber(row, ['Đơn giá', 'Giá', 'Price']),
+        getValue(row, ['IMEI/Serial', 'IMEI', 'Serial']),
+    )];
 }
 
-function buildQuickGuideRows(modeConfig: ModeConfig): TemplateCell[][] {
-    return [
-        ['HƯỚNG DẪN IMPORT DỮ LIỆU BAN ĐẦU', '', ''],
-        ['Loại dữ liệu', modeConfig.title, ''],
-        ['Sheet cần nhập', `Nhập dữ liệu ở sheet đầu tiên: ${modeConfig.sheetName}. Các sheet sau chỉ để hướng dẫn.`, ''],
-        ['Cột bắt buộc', modeConfig.requiredHeaders.join(', '), 'Không được để trống.'],
-        ['Quy trình', '1. Tải mẫu -> 2. Điền sheet đầu tiên -> 3. Upload Excel -> 4. Sửa lỗi trong bảng preview -> 5. Chọn ảnh local nếu có -> 6. Import hàng loạt.', ''],
-        ['Danh mục', 'Phải nhập breadcrumb đúng taxonomy, ví dụ A > B > C. Copy từ sheet Taxonomy_mau để tránh sai chính tả.', ''],
-        ['Mã hàng', 'Có thể để trống để hệ thống tự sinh QR/barcode. Nếu nhập tay, mã phải hợp lệ và chưa tồn tại.', ''],
-        ['Ảnh', 'Dùng URL đã upload trong MediaManager, URL public, hoặc đường dẫn local. Local path sẽ được resolve ở bước preview.', ''],
-        ['Nhiều ảnh', 'Ảnh chính là ảnh đầu tiên. Ảnh phụ phân tách bằng dấu ; hoặc xuống dòng và sẽ lưu vào images[].', ''],
-        ['Ảnh đã upload', 'Nếu chọn file local trùng tên ảnh đã có trong MediaManager, ví dụ ten-anh.png và ten-anh.webp, hệ thống dùng lại URL đã upload.', ''],
-        ['Tồn kho', 'Nếu tồn kho > 0, hệ thống tạo inventory_logs type IMPORT cùng transaction với sản phẩm.', ''],
-        ['Import gate', 'Nút import bị khóa nếu còn lỗi. Warning chỉ nhắc kiểm tra lại và không chặn import.', ''],
-    ];
+function parseRepairIssues(row: ExcelRow) {
+    return splitList(getValue(row, ['Lỗi/Bệnh', 'Lỗi', 'Bệnh', 'Issue', 'Issues'])).map((label, index) => ({
+        id: `legacy-issue-${index + 1}`,
+        label,
+        estimatedPrice: 0,
+        status: 'resolved' as const,
+    }));
 }
 
-function buildAcceptedValuesRows(mode: ExcelImportMode): TemplateCell[][] {
-    const folder = imageUploadFolderForMode(mode);
-    return [
-        ['Nhóm', 'Giá trị / Quy ước', 'Áp dụng', 'Ghi chú'],
-        ['Tình trạng', 'new', 'Sản phẩm, phụ kiện', 'Hàng mới. Nếu để trống sẽ mặc định new.'],
-        ['Tình trạng', 'like-new', 'Sản phẩm, phụ kiện', 'Hàng cũ đẹp/99%.'],
-        ['Tình trạng', 'used', 'Sản phẩm, phụ kiện', 'Hàng đã qua sử dụng.'],
-        ['Chất lượng linh kiện', QUALITY_OPTIONS.join(', '), 'Linh kiện', 'Nên dùng thống nhất để lọc và bảo hành.'],
-        ['Boolean', 'yes, true, 1, x', 'Flash Sale', 'Các giá trị này được hiểu là bật. Để trống là tắt.'],
-        ['Danh sách', 'Dùng dấu phẩy, dấu ; hoặc xuống dòng', 'Tags, ảnh phụ', 'Importer sẽ tách thành mảng.'],
-        ['Thông số', 'key:value; key:value', 'Sản phẩm, phụ kiện', 'Ví dụ RAM:8GB; Bộ nhớ:256GB.'],
-        ['Ảnh URL', 'http:// hoặc https://', 'Tất cả loại', 'URL phải tải được từ trình duyệt.'],
-        ['Ảnh local', 'M:\\anh\\ten-file.png hoặc ten-file.png', 'Tất cả loại', 'Sau preview phải chọn file/thư mục ảnh để resolve thành URL.'],
-        ['Storage folder', folder, mode === 'service' ? 'Dịch vụ' : mode === 'part' ? 'Linh kiện' : 'Sản phẩm/phụ kiện', 'Ảnh local upload mới sẽ đi vào folder này.'],
-        ['Tối ưu ảnh', 'Resize + convert WebP + thumbnail', 'Ảnh local upload mới', 'Tên gốc được giữ base name, đổi đuôi sang .webp để tái sử dụng.'],
-        ['Video', 'URL video/embed', 'Sản phẩm, phụ kiện, dịch vụ', 'Lưu vào videoEmbedUrl.'],
-    ];
+function parseRepairParts(row: ExcelRow) {
+    return getValue(row, ['Linh kiện', 'Parts'])
+        .split(/[\n;]+/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line, index) => {
+            const [nameRaw, quantityRaw, priceRaw, warrantyRaw, expiresRaw] = line.split('|').map((part) => part.trim());
+            const warrantyExpiresAt = expiresRaw ? parseLegacyDate({ value: expiresRaw }, ['value']) : null;
+            return {
+                partLineId: `legacy-part-${index + 1}`,
+                productId: `legacy-${generateSlug(nameRaw || `part-${index + 1}`)}`,
+                productName: nameRaw || `Linh kiện ${index + 1}`,
+                name: nameRaw || `Linh kiện ${index + 1}`,
+                partName: nameRaw || `Linh kiện ${index + 1}`,
+                quality: 'Không rõ',
+                quantity: Math.max(1, Math.floor(Number(quantityRaw) || 1)),
+                unitPriceAtUse: Number(priceRaw?.replace(/[^\d-]/g, '')) || 0,
+                warrantyMonths: Number(warrantyRaw) || undefined,
+                warrantyExpiresAt: warrantyExpiresAt || undefined,
+                status: 'selected' as const,
+            };
+        });
 }
 
-function buildMediaGuideRows(mode: ExcelImportMode): TemplateCell[][] {
-    const folder = imageUploadFolderForMode(mode);
-    return [
-        ['Tình huống', 'Cách điền trong Excel', 'Kết quả khi preview/import'],
-        ['Dùng ảnh đã có trong MediaManager', 'Paste URL Firebase/MediaManager vào Ảnh chính hoặc Ảnh phụ.', 'Importer dùng URL đó, không upload thêm.'],
-        ['Dùng ảnh public online', 'https://domain.com/image.jpg', 'Importer chấp nhận nếu URL hợp lệ.'],
-        ['Dùng file local chưa upload', 'M:\\anh-san-pham\\iphone-front.png', `Ở preview, chọn file/thư mục ảnh. Hệ thống upload WebP vào media/${folder}.`],
-        ['Dùng file local đã upload trước đó', 'iphone-front.png', 'Nếu MediaManager có iphone-front.webp, hệ thống dùng lại URL cũ thay vì upload trùng.'],
-        ['Nhiều ảnh phụ', 'url-1; url-2; M:\\anh\\url-3.png', 'Tất cả được gom vào images[]. Ảnh chính vẫn là images[0].'],
-        ['Bỏ bớt ảnh', 'Xóa URL/path khỏi ô Ảnh phụ trước khi import.', 'Item chỉ lưu các ảnh còn lại, không xóa file gốc khỏi MediaManager.'],
-        ['Đổi ảnh chính', 'Đưa URL/path muốn làm ảnh chính vào cột Ảnh chính.', 'imageUrl sẽ lấy ảnh chính đó.'],
-    ];
-}
-
-function buildExampleRows(mode: ExcelImportMode, modeConfig: ModeConfig): TemplateCell[][] {
-    const rows: TemplateCell[][] = [modeConfig.templateHeaders, modeConfig.exampleRow];
-    rows.push(makeTemplateRow(modeConfig, EXCEL_IMPORT_ADDITIONAL_EXAMPLE_ROWS[mode]));
-
-    return rows;
-}
-
-function buildTaxonomyRows(taxonomy: TaxonomyNode[]): TemplateCell[][] {
-    const taxonomyRows = flattenTaxonomyRows(taxonomy);
-    return [
-        ['Cấp', 'Breadcrumb copy vào cột Danh mục', 'ID taxonomy', 'Slug', 'Loại bảo hành', 'Tháng BH mặc định', 'SEO keywords'],
-        ...(taxonomyRows.length > 0
-            ? taxonomyRows
-            : [[
-                '',
-                'Chưa có taxonomy trong cấu hình hiện tại. Hãy tạo taxonomy ở Admin Settings trước khi import.',
-                '',
-                '',
-                '',
-                '',
-                '',
-            ]]),
-    ];
-}
-
-function generateTemplate(mode: ExcelImportMode, taxonomy: TaxonomyNode[] = []) {
-    const modeConfig = MODE_CONFIG[mode];
-    const dataRows: TemplateCell[][] = [
-        modeConfig.templateHeaders,
-        modeConfig.exampleRow,
-        ...Array.from({ length: 8 }, () => modeConfig.templateHeaders.map(() => '')),
-    ];
-    const dataSheet = worksheetFromRows(
-        dataRows,
-        modeConfig.templateHeaders.map((header) => {
-            const normalized = normalizeText(header);
-            if (normalized.includes('mo ta') || normalized.includes('anh') || normalized.includes('thong so')) return 44;
-            if (normalized === 'danh muc') return 38;
-            return 18;
-        }),
-        true,
-    );
-
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, dataSheet, modeConfig.sheetName);
-    XLSX.utils.book_append_sheet(wb, worksheetFromRows(buildQuickGuideRows(modeConfig), [24, 96, 48]), 'Huong_dan');
-    XLSX.utils.book_append_sheet(wb, worksheetFromRows(buildColumnGuideRows(modeConfig), [24, 14, 44, 56, 38, 42, 38], true), 'Quy_uoc_cot');
-    XLSX.utils.book_append_sheet(wb, worksheetFromRows(buildAcceptedValuesRows(mode), [24, 44, 30, 70], true), 'Gia_tri_hop_le');
-    XLSX.utils.book_append_sheet(wb, worksheetFromRows(buildMediaGuideRows(mode), [34, 58, 74], true), 'Anh_va_Media');
-    XLSX.utils.book_append_sheet(wb, worksheetFromRows(buildTaxonomyRows(taxonomy), [10, 58, 36, 28, 22, 18, 44], true), 'Taxonomy_mau');
-    XLSX.utils.book_append_sheet(wb, worksheetFromRows(buildExampleRows(mode, modeConfig), modeConfig.templateHeaders.map(() => 24), true), 'Vi_du_day_du');
-    XLSX.writeFile(wb, `mau_khoi_tao_${modeConfig.sheetName.toLowerCase()}.xlsx`);
+function addMonths(date: Date, months: number): Date {
+    const next = new Date(date);
+    next.setMonth(next.getMonth() + months);
+    return next;
 }
 
 export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportMode; onClose: () => void }) {
@@ -948,7 +287,7 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
                     return;
                 }
 
-                const taxonomy = config.taxonomy?.[modeConfig.taxonomyType] || [];
+                const taxonomy = (modeConfig.taxonomyType && config.taxonomy?.[modeConfig.taxonomyType]) || [];
                 const names = jsonRows.map((row) => getValue(row, modeConfig.nameHeaders)).filter(Boolean);
                 const normalizedSeen = new Set<string>();
                 const duplicateInFile = new Set<string>();
@@ -979,19 +318,21 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
 
                 const existingNames = new Set<string>();
                 const uniqueNames = Array.from(new Set(names));
-                for (let index = 0; index < uniqueNames.length; index += FIRESTORE_QUERY_CHUNK_SIZE) {
-                    const chunk = uniqueNames.slice(index, index + FIRESTORE_QUERY_CHUNK_SIZE);
-                    const snapshot = await getDocs(query(collection(db, modeConfig.collectionName), where('name', 'in', chunk)));
-                    snapshot.forEach((item) => {
-                        const data = item.data() as { name?: string; status?: string; isActive?: boolean };
-                        if (data.status !== 'inactive' && data.isActive !== false && data.name) {
-                            existingNames.add(data.name.toLowerCase());
-                        }
-                    });
+                if (mode !== 'order' && mode !== 'repair') {
+                    for (let index = 0; index < uniqueNames.length; index += FIRESTORE_QUERY_CHUNK_SIZE) {
+                        const chunk = uniqueNames.slice(index, index + FIRESTORE_QUERY_CHUNK_SIZE);
+                        const snapshot = await getDocs(query(collection(db, modeConfig.collectionName), where('name', 'in', chunk)));
+                        snapshot.forEach((item) => {
+                            const data = item.data() as { name?: string; status?: string; isActive?: boolean };
+                            if (data.status !== 'inactive' && data.isActive !== false && data.name) {
+                                existingNames.add(data.name.toLowerCase());
+                            }
+                        });
+                    }
                 }
 
                 const existingDocIds = await loadExistingDocIds(modeConfig.collectionName, targetIds);
-                const existingCodes = mode === 'service' ? new Set<string>() : await loadExistingProductCodes(expectedCodes);
+                const existingCodes = mode === 'service' || mode === 'customer' || mode === 'supplier' || mode === 'order' || mode === 'repair' ? new Set<string>() : await loadExistingProductCodes(expectedCodes);
 
                 const parsed = jsonRows.map((row, index) => {
                     const rowNum = index + 2;
@@ -1013,6 +354,283 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
                         checks.push(buildCheck('name', 'Tên', name, 'error', 'Tên đã tồn tại trên hệ thống'));
                     } else {
                         checks.push(buildCheck('name', 'Tên', name, 'ok', targetDocId ? `ID sẽ tạo: ${targetDocId}` : 'Tên có thể import'));
+                    }
+
+                    if (mode === 'customer') {
+                        checks.length = 0;
+                        const phoneRaw = getValue(row, ['SĐT', 'sdt', 'phone', 'Phone', 'Số điện thoại']);
+                        const phone = normalizeImportPhone(phoneRaw);
+                        const customerTypeRaw = getValue(row, ['Loại KH', 'Customer Type', 'Type']);
+                        const customerType = customerTypeRaw.toLowerCase();
+                        const email = getValue(row, ['Email']);
+                        const totalSpentInput = parseNumberInput(row, ['Chi tiêu', 'Spent', 'Tổng chi tiêu']);
+                        const totalOrdersInput = parseNumberInput(row, ['Đơn hàng', 'Orders', 'Tổng đơn hàng']);
+                        const totalRepairsInput = parseNumberInput(row, ['Sửa chữa', 'Repairs', 'Tổng sửa chữa']);
+                        const debtInput = parseDebtInput(row, ['Công nợ', 'Nợ', 'Debt']);
+
+                        if (!name) {
+                            checks.push(buildCheck('name', 'Tên', '', 'error', 'Thiếu tên khách hàng'));
+                        } else {
+                            checks.push(buildCheck('name', 'Tên', name, 'ok', 'Tên khách hàng hợp lệ'));
+                        }
+
+                        if (!phoneRaw) {
+                            checks.push(buildCheck('phone', 'SĐT', '', 'error', 'Thiếu SĐT để làm ID khách hàng'));
+                        } else if (!/^\d{9,15}$/.test(phone)) {
+                            checks.push(buildCheck('phone', 'SĐT', phoneRaw, 'error', 'SĐT cần có 9-15 chữ số'));
+                        } else if (duplicateTargetIdsInFile.has(phone)) {
+                            checks.push(buildCheck('phone', 'SĐT', phoneRaw, 'error', `Trùng SĐT trong file: ${phone}`));
+                        } else if (existingDocIds.has(phone)) {
+                            checks.push(buildCheck('phone', 'SĐT', phoneRaw, 'error', `Khách hàng ${phone} đã tồn tại`));
+                        } else {
+                            checks.push(buildCheck('phone', 'SĐT', phone, 'ok', `ID sẽ tạo: ${phone}`));
+                        }
+
+                        if (!customerTypeRaw || ['khách lẻ', 'khach le', 'retail', 'le', 'khách sỉ', 'khach si', 'wholesale', 'si'].includes(customerType)) {
+                            checks.push(buildCheck('type', 'Loại KH', customerTypeRaw || 'Khách lẻ', 'ok', customerTypeRaw ? 'Loại khách hợp lệ' : 'Mặc định Khách lẻ'));
+                        } else {
+                            checks.push(buildCheck('type', 'Loại KH', customerTypeRaw, 'warning', 'Không nhận diện loại khách, sẽ lưu Khách lẻ'));
+                        }
+
+                        const emailSeverity: CheckSeverity = email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? 'warning' : 'ok';
+                        checks.push(buildCheck('email', 'Email', email, emailSeverity, emailSeverity === 'ok' ? 'Email có thể import' : 'Email không đúng định dạng'));
+
+                        const statsIssues = [
+                            totalSpentInput.hasValue && !totalSpentInput.isValid ? 'Chi tiêu' : '',
+                            totalOrdersInput.hasValue && !totalOrdersInput.isValid ? 'Đơn hàng' : '',
+                            totalRepairsInput.hasValue && !totalRepairsInput.isValid ? 'Sửa chữa' : '',
+                        ].filter(Boolean);
+                        checks.push(buildCheck(
+                            'stats',
+                            'Thống kê',
+                            [totalSpentInput.raw, totalOrdersInput.raw, totalRepairsInput.raw].filter(Boolean).join(' / '),
+                            statsIssues.length > 0 ? 'error' : 'ok',
+                            statsIssues.length > 0 ? `${statsIssues.join(', ')} không hợp lệ` : 'Thống kê có thể import',
+                        ));
+
+                        checks.push(buildCheck(
+                            'debt',
+                            'Công nợ',
+                            debtInput.raw,
+                            debtInput.isValid ? 'ok' : 'error',
+                            debtInput.isValid ? 'Công nợ có thể import' : 'Công nợ không hợp lệ',
+                        ));
+                        checks.push(buildCheck('details', 'Thông tin thêm', getValue(row, ['Tags', 'Ghi chú', 'Note']), 'ok', 'Thông tin phụ có thể import'));
+
+                        const errors = summarizeChecks(checks, 'error');
+                        const warnings = summarizeChecks(checks, 'warning');
+                        return { rowNum, data: row, errors, warnings, checks, categoryIds: [], category: '' };
+                    }
+
+                    if (mode === 'supplier') {
+                        checks.length = 0;
+                        const phoneRaw = getValue(row, ['SĐT', 'sdt', 'phone', 'Phone', 'Số điện thoại']);
+                        const phone = normalizeImportPhone(phoneRaw);
+                        const email = getValue(row, ['Email']);
+                        const contact = getValue(row, ['Người liên hệ', 'Contact']);
+                        const bank = [getValue(row, ['Số tài khoản', 'Bank Account']), getValue(row, ['Ngân hàng', 'Bank'])].filter(Boolean).join(' / ');
+                        const paymentTermsInput = parseNumberInput(row, ['Hạn thanh toán', 'Payment Terms']);
+                        const debtInput = parseDebtInput(row, ['Công nợ', 'Nợ', 'Debt']);
+
+                        if (!name) {
+                            checks.push(buildCheck('name', 'Tên', '', 'error', 'Thiếu tên nhà cung cấp'));
+                        } else if (duplicateInFile.has(name.toLowerCase())) {
+                            checks.push(buildCheck('name', 'Tên', name, 'error', 'Trùng tên trong file'));
+                        } else if (existingNames.has(name.toLowerCase())) {
+                            checks.push(buildCheck('name', 'Tên', name, 'error', 'Tên đã tồn tại trên hệ thống'));
+                        } else {
+                            checks.push(buildCheck('name', 'Tên', name, 'ok', 'Tên nhà cung cấp hợp lệ'));
+                        }
+
+                        if (!phoneRaw) {
+                            checks.push(buildCheck('phone', 'SĐT', '', 'warning', 'Thiếu SĐT nhà cung cấp'));
+                        } else if (!/^\d{9,15}$/.test(phone)) {
+                            checks.push(buildCheck('phone', 'SĐT', phoneRaw, 'error', 'SĐT cần có 9-15 chữ số'));
+                        } else {
+                            checks.push(buildCheck('phone', 'SĐT', phone, 'ok', 'SĐT hợp lệ'));
+                        }
+
+                        checks.push(buildCheck('contact', 'Liên hệ', contact, contact ? 'ok' : 'warning', contact ? 'Người liên hệ có thể import' : 'Thiếu người liên hệ'));
+                        const emailSeverity: CheckSeverity = email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? 'warning' : 'ok';
+                        checks.push(buildCheck('email', 'Email', email, emailSeverity, emailSeverity === 'ok' ? 'Email có thể import' : 'Email không đúng định dạng'));
+                        checks.push(buildCheck('bank', 'Ngân hàng', bank, bank ? 'ok' : 'warning', bank ? 'Thông tin ngân hàng có thể import' : 'Thiếu thông tin ngân hàng'));
+                        checks.push(buildCheck(
+                            'terms',
+                            'Hạn thanh toán',
+                            paymentTermsInput.raw,
+                            paymentTermsInput.isValid ? 'ok' : 'error',
+                            paymentTermsInput.isValid ? 'Hạn thanh toán có thể import' : 'Hạn thanh toán không hợp lệ',
+                        ));
+                        checks.push(buildCheck(
+                            'debt',
+                            'Công nợ',
+                            debtInput.raw,
+                            debtInput.isValid ? 'ok' : 'error',
+                            debtInput.isValid ? 'Công nợ có thể import' : 'Công nợ không hợp lệ',
+                        ));
+                        checks.push(buildCheck('details', 'Thông tin thêm', getValue(row, ['Phân loại', 'Tags', 'Ghi chú', 'Note']), 'ok', 'Thông tin phụ có thể import'));
+
+                        const errors = summarizeChecks(checks, 'error');
+                        const warnings = summarizeChecks(checks, 'warning');
+                        return { rowNum, data: row, errors, warnings, checks, categoryIds: [], category: '' };
+                    }
+
+                    if (mode === 'order') {
+                        checks.length = 0;
+                        const orderIdRaw = getValue(row, ORDER_ID_HEADERS);
+                        const orderId = normalizeLegacyImportDocId(orderIdRaw);
+                        const customerName = getValue(row, CUSTOMER_NAME_HEADERS);
+                        const phoneRaw = getValue(row, PHONE_HEADERS);
+                        const phone = normalizeImportPhone(phoneRaw);
+                        const productRaw = getValue(row, ['Dòng hàng', 'Items', 'Chi tiết sản phẩm', 'Sản phẩm', 'Tên SP', 'Product']);
+                        const totalInput = parseNumberInput(row, ['Tổng tiền', 'Total']);
+                        const subtotalInput = parseNumberInput(row, ['Tạm tính', 'Subtotal']);
+                        const discountInput = parseNumberInput(row, ['Giảm giá', 'Discount']);
+                        const paymentRaw = getValue(row, ['Thanh toán', 'Payment Status']);
+                        const methodRaw = getValue(row, ['Phương thức', 'Payment Method']);
+                        const statusRaw = getValue(row, ['Trạng thái', 'Status']);
+                        const createdAt = parseLegacyDate(row, ['Ngày tạo', 'Created At']);
+                        const completedAt = parseLegacyDate(row, ['Ngày hoàn thành', 'Completed At']);
+                        const warrantyExpiresAt = parseLegacyDate(row, ['Ngày hết BH', 'Warranty Expires At']);
+
+                        if (!orderIdRaw) {
+                            checks.push(buildCheck('name', 'Mã đơn', '', 'error', 'Thiếu mã đơn hàng từ hệ thống cũ'));
+                        } else if (!orderId) {
+                            checks.push(buildCheck('name', 'Mã đơn', orderIdRaw, 'error', 'Mã đơn không hợp lệ để làm ID Firestore'));
+                        } else if (duplicateTargetIdsInFile.has(orderId)) {
+                            checks.push(buildCheck('name', 'Mã đơn', orderId, 'error', `Trùng mã đơn trong file: ${orderId}`));
+                        } else if (existingDocIds.has(orderId)) {
+                            checks.push(buildCheck('name', 'Mã đơn', orderId, 'error', `Đơn hàng ${orderId} đã tồn tại`));
+                        } else {
+                            checks.push(buildCheck('name', 'Mã đơn', orderId, 'ok', 'Mã đơn có thể import'));
+                        }
+
+                        if (!customerName) {
+                            checks.push(buildCheck('phone', 'Khách hàng', phoneRaw, 'error', 'Thiếu tên khách hàng'));
+                        } else if (!/^\d{9,15}$/.test(phone)) {
+                            checks.push(buildCheck('phone', 'Khách hàng', [customerName, phoneRaw].filter(Boolean).join(' / '), 'error', 'SĐT khách hàng cần có 9-15 chữ số'));
+                        } else {
+                            checks.push(buildCheck('phone', 'Khách hàng', `${customerName} / ${phone}`, 'ok', 'Thông tin khách hàng hợp lệ'));
+                        }
+
+                        checks.push(buildCheck(
+                            'items',
+                            'Sản phẩm',
+                            productRaw,
+                            productRaw ? 'ok' : 'error',
+                            productRaw ? 'Có dữ liệu sản phẩm/bảo hành để lưu vào đơn' : 'Thiếu sản phẩm hoặc dòng hàng của đơn cũ',
+                        ));
+
+                        const moneyIssues = [
+                            totalInput.hasValue && !totalInput.isValid ? 'Tổng tiền' : '',
+                            subtotalInput.hasValue && !subtotalInput.isValid ? 'Tạm tính' : '',
+                            discountInput.hasValue && !discountInput.isValid ? 'Giảm giá' : '',
+                        ].filter(Boolean);
+                        checks.push(buildCheck(
+                            'amount',
+                            'Số tiền',
+                            [subtotalInput.raw, discountInput.raw, totalInput.raw].filter(Boolean).join(' / '),
+                            !totalInput.hasValue || moneyIssues.length > 0 ? 'error' : 'ok',
+                            !totalInput.hasValue ? 'Thiếu tổng tiền đơn hàng' : moneyIssues.length > 0 ? `${moneyIssues.join(', ')} không hợp lệ` : 'Số tiền có thể import',
+                        ));
+
+                        const paymentStatus = normalizeOrderPaymentStatus(paymentRaw, methodRaw);
+                        checks.push(buildCheck('payment', 'Thanh toán', [paymentRaw || paymentStatus, methodRaw || normalizePaymentMethod(methodRaw)].filter(Boolean).join(' / '), 'ok', 'Trạng thái thanh toán sẽ được chuẩn hóa'));
+                        checks.push(buildCheck('status', 'Trạng thái', statusRaw || 'Completed', 'ok', `Sẽ lưu trạng thái đơn: ${normalizeOrderStatus(statusRaw)}`));
+
+                        checks.push(buildCheck(
+                            'dates',
+                            'Thời gian',
+                            [formatCheckDate(createdAt), formatCheckDate(completedAt)].filter(Boolean).join(' / '),
+                            createdAt ? 'ok' : 'error',
+                            createdAt ? 'Mốc thời gian lịch sử hợp lệ' : 'Thiếu hoặc sai ngày tạo đơn',
+                        ));
+                        checks.push(buildCheck(
+                            'warranty',
+                            'Bảo hành',
+                            [getValue(row, ['Bảo hành tháng', 'Warranty Months']), formatCheckDate(warrantyExpiresAt)].filter(Boolean).join(' / '),
+                            warrantyExpiresAt || getValue(row, ['Bảo hành tháng', 'Warranty Months']) ? 'ok' : 'warning',
+                            warrantyExpiresAt || getValue(row, ['Bảo hành tháng', 'Warranty Months']) ? 'Có thông tin bảo hành' : 'Thiếu thông tin bảo hành cho dòng hàng',
+                        ));
+
+                        const errors = summarizeChecks(checks, 'error');
+                        const warnings = summarizeChecks(checks, 'warning');
+                        return { rowNum, data: row, errors, warnings, checks, categoryIds: [], category: '' };
+                    }
+
+                    if (mode === 'repair') {
+                        checks.length = 0;
+                        const repairIdRaw = getValue(row, REPAIR_ID_HEADERS);
+                        const repairId = normalizeLegacyImportDocId(repairIdRaw);
+                        const customerName = getValue(row, CUSTOMER_NAME_HEADERS);
+                        const phoneRaw = getValue(row, PHONE_HEADERS);
+                        const phone = normalizeImportPhone(phoneRaw);
+                        const device = getValue(row, ['Thiết bị', 'Dòng máy', 'Device']);
+                        const issuesRaw = getValue(row, ['Lỗi/Bệnh', 'Lỗi', 'Bệnh', 'Issue', 'Issues']);
+                        const partsRaw = getValue(row, ['Linh kiện', 'Parts']);
+                        const statusRaw = getValue(row, ['Trạng thái', 'Status']);
+                        const receivedAt = parseLegacyDate(row, ['Ngày nhận', 'Received At']);
+                        const completedAt = parseLegacyDate(row, ['Ngày hoàn thành', 'Completed At']);
+                        const warrantyExpiresAt = parseLegacyDate(row, ['Ngày hết BH dịch vụ', 'Service Warranty Expires At']);
+                        const amountInput = parseNumberInput(row, ['Tổng tiền', 'Total']);
+                        const partsCostInput = parseNumberInput(row, ['Tiền linh kiện', 'Parts Cost']);
+                        const laborCostInput = parseNumberInput(row, ['Phí sửa chữa', 'Labor Cost']);
+                        const additionalFeesInput = parseNumberInput(row, ['Phí phát sinh', 'Additional Fees']);
+                        const discountInput = parseNumberInput(row, ['Giảm giá', 'Discount']);
+
+                        if (!repairIdRaw) {
+                            checks.push(buildCheck('name', 'Mã phiếu', '', 'error', 'Thiếu mã phiếu sửa chữa từ hệ thống cũ'));
+                        } else if (!repairId) {
+                            checks.push(buildCheck('name', 'Mã phiếu', repairIdRaw, 'error', 'Mã phiếu không hợp lệ để làm ID Firestore'));
+                        } else if (duplicateTargetIdsInFile.has(repairId)) {
+                            checks.push(buildCheck('name', 'Mã phiếu', repairId, 'error', `Trùng mã phiếu trong file: ${repairId}`));
+                        } else if (existingDocIds.has(repairId)) {
+                            checks.push(buildCheck('name', 'Mã phiếu', repairId, 'error', `Phiếu sửa ${repairId} đã tồn tại`));
+                        } else {
+                            checks.push(buildCheck('name', 'Mã phiếu', repairId, 'ok', 'Mã phiếu có thể import'));
+                        }
+
+                        if (!customerName) {
+                            checks.push(buildCheck('phone', 'Khách hàng', phoneRaw, 'error', 'Thiếu tên khách hàng'));
+                        } else if (!/^\d{9,15}$/.test(phone)) {
+                            checks.push(buildCheck('phone', 'Khách hàng', [customerName, phoneRaw].filter(Boolean).join(' / '), 'error', 'SĐT khách hàng cần có 9-15 chữ số'));
+                        } else {
+                            checks.push(buildCheck('phone', 'Khách hàng', `${customerName} / ${phone}`, 'ok', 'Thông tin khách hàng hợp lệ'));
+                        }
+
+                        checks.push(buildCheck('device', 'Thiết bị', device, device ? 'ok' : 'error', device ? 'Có thông tin thiết bị' : 'Thiếu thiết bị cần sửa'));
+                        checks.push(buildCheck('issues', 'Lỗi/Bệnh', issuesRaw, issuesRaw ? 'ok' : 'error', issuesRaw ? 'Có lỗi/bệnh lịch sử' : 'Thiếu lỗi hoặc bệnh của phiếu'));
+
+                        const moneyIssues = [
+                            amountInput.hasValue && !amountInput.isValid ? 'Tổng tiền' : '',
+                            partsCostInput.hasValue && !partsCostInput.isValid ? 'Tiền linh kiện' : '',
+                            laborCostInput.hasValue && !laborCostInput.isValid ? 'Phí sửa chữa' : '',
+                            additionalFeesInput.hasValue && !additionalFeesInput.isValid ? 'Phí phát sinh' : '',
+                            discountInput.hasValue && !discountInput.isValid ? 'Giảm giá' : '',
+                        ].filter(Boolean);
+                        checks.push(buildCheck(
+                            'amount',
+                            'Số tiền',
+                            [partsCostInput.raw, laborCostInput.raw, amountInput.raw].filter(Boolean).join(' / '),
+                            moneyIssues.length > 0 ? 'error' : 'ok',
+                            moneyIssues.length > 0 ? `${moneyIssues.join(', ')} không hợp lệ` : 'Chi phí sửa chữa có thể import',
+                        ));
+                        checks.push(buildCheck('payment', 'Thanh toán', getValue(row, ['Thanh toán', 'Payment Status']) || 'paid', 'ok', 'Trạng thái thanh toán sẽ được chuẩn hóa'));
+                        checks.push(buildCheck('status', 'Trạng thái', statusRaw, statusRaw ? 'ok' : 'error', statusRaw ? 'Giữ nguyên trạng thái phiếu từ Excel' : 'Thiếu trạng thái phiếu'));
+                        checks.push(buildCheck('warranty', 'Bảo hành', [getValue(row, ['Bảo hành dịch vụ tháng']), formatCheckDate(warrantyExpiresAt)].filter(Boolean).join(' / '), warrantyExpiresAt || getValue(row, ['Bảo hành dịch vụ tháng']) ? 'ok' : 'warning', warrantyExpiresAt || getValue(row, ['Bảo hành dịch vụ tháng']) ? 'Có thông tin bảo hành dịch vụ' : 'Thiếu bảo hành dịch vụ'));
+                        checks.push(buildCheck('details', 'Chi tiết', partsRaw || getValue(row, ['Ghi chú kỹ thuật', 'Ghi chú']), partsRaw ? 'ok' : 'warning', partsRaw ? 'Có linh kiện lịch sử' : 'Không có linh kiện, vẫn import được phiếu sửa không thay linh kiện'));
+
+                        checks.push(buildCheck(
+                            'dates',
+                            'Thời gian',
+                            [formatCheckDate(receivedAt), formatCheckDate(completedAt)].filter(Boolean).join(' / '),
+                            receivedAt ? 'ok' : 'error',
+                            receivedAt ? 'Mốc nhận máy hợp lệ' : 'Thiếu hoặc sai ngày nhận máy',
+                        ));
+
+                        const errors = summarizeChecks(checks, 'error');
+                        const warnings = summarizeChecks(checks, 'warning');
+                        return { rowNum, data: row, errors, warnings, checks, categoryIds: [], category: '' };
                     }
 
                     if (!categoryPath) {
@@ -1248,11 +866,12 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
     const importProductLikeRow = async (row: ParsedRow) => {
         const name = getValue(row.data, modeConfig.nameHeaders);
         const category = mode === 'part' ? PART_CATEGORY_LABEL : row.category;
-        if (mode === 'service') {
-            throw new Error('Dịch vụ không được import bằng luồng sản phẩm.');
+        if (mode === 'service' || mode === 'customer' || mode === 'supplier' || mode === 'order' || mode === 'repair') {
+            throw new Error(`${modeConfig.title} không được import bằng luồng sản phẩm.`);
         }
-        const productId = buildImportProductId(mode, name, mode === 'accessory' ? 'phu-kien' : row.category);
-        const kind = productKindForMode(mode, category, row.categoryIds);
+        const productMode = mode;
+        const productId = buildImportProductId(productMode, name, productMode === 'accessory' ? 'phu-kien' : row.category);
+        const kind = productKindForMode(productMode, category, row.categoryIds);
         const customCode = normalizeProductCode(getValue(row.data, ['Mã hàng', 'SKU', 'Barcode']));
         const productCode = customCode || buildProductCodeFromId(productId, kind);
         const images = parseImages(row.data, IMAGE_MAIN_HEADERS, IMAGE_OTHER_HEADERS);
@@ -1364,6 +983,333 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
         });
     };
 
+    const importCustomerRow = async (row: ParsedRow) => {
+        const name = getValue(row.data, modeConfig.nameHeaders);
+        const phone = normalizeImportPhone(getValue(row.data, ['SĐT', 'sdt', 'phone', 'Phone', 'Số điện thoại']));
+        if (!phone) throw new Error('Thiếu SĐT khách hàng.');
+
+        const rawType = getValue(row.data, ['Loại KH', 'Customer Type', 'Type']).toLowerCase();
+        const type = ['khách sỉ', 'khach si', 'wholesale', 'si'].includes(rawType) ? 'wholesale' : 'retail';
+        const totalDebt = getSignedNumber(row.data, ['Công nợ', 'Nợ', 'Debt']);
+        const totalSpent = getNumber(row.data, ['Chi tiêu', 'Spent', 'Tổng chi tiêu']);
+        const totalOrders = getNumber(row.data, ['Đơn hàng', 'Orders', 'Tổng đơn hàng']);
+        const totalRepairs = getNumber(row.data, ['Sửa chữa', 'Repairs', 'Tổng sửa chữa']);
+        const customerRef = doc(db, 'customers', phone);
+        const txRef = totalDebt !== 0 ? doc(db, 'customer_transactions', buildClientDocumentId('CT', phone)) : null;
+
+        await runTransaction(db, async (transaction) => {
+            const snapshot = await transaction.get(customerRef);
+            if (snapshot.exists()) {
+                throw new Error(`Khách hàng ${phone} đã tồn tại.`);
+            }
+
+            transaction.set(customerRef, {
+                phone,
+                name,
+                type,
+                email: getValue(row.data, ['Email']),
+                address: getValue(row.data, ['Địa chỉ', 'Address']),
+                tags: splitList(getValue(row.data, ['Tags', 'Tag'])),
+                note: getValue(row.data, ['Ghi chú', 'Note']),
+                totalSpent,
+                totalOrders,
+                totalRepairs,
+                totalDebt,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+                lastVisit: serverTimestamp(),
+            });
+
+            if (txRef) {
+                transaction.set(txRef, {
+                    customerId: phone,
+                    customerName: name || phone,
+                    type: totalDebt > 0 ? 'DEBT' : 'PAYMENT',
+                    amount: Math.abs(totalDebt),
+                    paymentMethod: 'INITIAL_EXCEL_IMPORT',
+                    note: 'Công nợ khởi tạo từ import Excel',
+                    createdBy: user?.uid || '',
+                    createdByName: user?.displayName || user?.email || '',
+                    createdAt: serverTimestamp(),
+                });
+            }
+        });
+    };
+
+    const importSupplierRow = async (row: ParsedRow) => {
+        const name = getValue(row.data, modeConfig.nameHeaders);
+        if (!name) throw new Error('Thiếu tên nhà cung cấp.');
+
+        const phone = normalizeImportPhone(getValue(row.data, ['SĐT', 'sdt', 'phone', 'Phone', 'Số điện thoại']));
+        const supplierId = await reserveSupplierDocumentId({ name, phone });
+        const supplierRef = doc(db, 'suppliers', supplierId);
+        const totalDebt = getSignedNumber(row.data, ['Công nợ', 'Nợ', 'Debt']);
+        const txRef = totalDebt !== 0 ? doc(db, 'supplier_transactions', buildClientDocumentId('ST', supplierId)) : null;
+
+        await runTransaction(db, async (transaction) => {
+            transaction.set(supplierRef, {
+                name,
+                phone,
+                contactPerson: getValue(row.data, ['Người liên hệ', 'Contact']),
+                email: getValue(row.data, ['Email']),
+                address: getValue(row.data, ['Địa chỉ', 'Address']),
+                companyName: getValue(row.data, ['Công ty', 'Company']),
+                supplierType: getValue(row.data, ['Phân loại', 'Supplier Type']),
+                taxCode: getValue(row.data, ['Mã số thuế', 'Tax Code']),
+                bankAccount: getValue(row.data, ['Số tài khoản', 'Bank Account']),
+                bankName: getValue(row.data, ['Ngân hàng', 'Bank']),
+                paymentTermsDays: getNumber(row.data, ['Hạn thanh toán', 'Payment Terms']),
+                assignedOwner: getValue(row.data, ['Phụ trách', 'Assigned Owner']),
+                tags: splitList(getValue(row.data, ['Tags', 'Tag'])),
+                note: getValue(row.data, ['Ghi chú', 'Note']),
+                totalDebt,
+                isActive: true,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+            });
+
+            if (txRef) {
+                transaction.set(txRef, {
+                    supplierId,
+                    supplierName: name,
+                    type: totalDebt > 0 ? 'IMPORT' : 'PAYMENT',
+                    amount: Math.abs(totalDebt),
+                    paymentMethod: 'INITIAL_EXCEL_IMPORT',
+                    note: 'Công nợ khởi tạo từ import Excel',
+                    createdBy: user?.uid || '',
+                    createdByName: user?.displayName || user?.email || '',
+                    createdAt: serverTimestamp(),
+                });
+            }
+        });
+    };
+
+    const importLegacyOrderRow = async (row: ParsedRow) => {
+        const orderId = normalizeLegacyImportDocId(getValue(row.data, ORDER_ID_HEADERS));
+        const customerName = getValue(row.data, CUSTOMER_NAME_HEADERS);
+        const phone = normalizeImportPhone(getValue(row.data, PHONE_HEADERS));
+        if (!orderId) throw new Error('Thiếu mã đơn hàng.');
+        if (!phone) throw new Error('Thiếu SĐT khách hàng.');
+
+        const items = parseOrderItems(row.data, orderId);
+        const subtotal = getNumber(row.data, ['Tạm tính', 'Subtotal']) || items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+        const discount = getNumber(row.data, ['Giảm giá', 'Discount']);
+        const total = getNumber(row.data, ['Tổng tiền', 'Total']) || Math.max(0, subtotal - discount);
+        const paymentRaw = getValue(row.data, ['Thanh toán', 'Payment Status']);
+        const methodRaw = getValue(row.data, ['Phương thức', 'Payment Method']);
+        const paymentStatus = normalizeOrderPaymentStatus(paymentRaw, methodRaw);
+        const paymentMethod = normalizePaymentMethod(methodRaw || paymentRaw);
+        const createdAt = parseLegacyDate(row.data, ['Ngày tạo', 'Created At']) || new Date();
+        const completedAt = parseLegacyDate(row.data, ['Ngày hoàn thành', 'Completed At']);
+        const status = normalizeOrderStatus(getValue(row.data, ['Trạng thái', 'Status']));
+        const orderRef = doc(db, 'orders', orderId);
+        const customerRef = doc(db, 'customers', phone);
+        const txRef = paymentStatus === 'debt' ? doc(db, 'customer_transactions', buildClientDocumentId('CT', orderId)) : null;
+
+        await runTransaction(db, async (transaction) => {
+            const orderSnapshot = await transaction.get(orderRef);
+            const customerSnapshot = await transaction.get(customerRef);
+            if (orderSnapshot.exists()) {
+                throw new Error(`Đơn hàng ${orderId} đã tồn tại.`);
+            }
+
+            const customerData = customerSnapshot.data() as { totalSpent?: number; totalOrders?: number; totalDebt?: number } | undefined;
+            transaction.set(orderRef, {
+                id: orderId,
+                customer_info: {
+                    name: customerName,
+                    phone,
+                    email: getValue(row.data, EMAIL_HEADERS),
+                    address: getValue(row.data, ADDRESS_HEADERS),
+                    note: getValue(row.data, NOTE_HEADERS),
+                },
+                customer: {
+                    name: customerName,
+                    phone,
+                    email: getValue(row.data, EMAIL_HEADERS),
+                    address: getValue(row.data, ADDRESS_HEADERS),
+                    note: getValue(row.data, NOTE_HEADERS),
+                },
+                items,
+                subtotal_amount: subtotal,
+                discount_amount: discount,
+                total_amount: total,
+                status,
+                is_vat_exported: false,
+                payment_method: paymentMethod,
+                paymentStatus,
+                source: 'pos',
+                legacyImport: true,
+                createdBy: user?.uid || '',
+                createdByName: user?.displayName || user?.email || 'Admin',
+                createdAt,
+                updatedAt: completedAt || createdAt,
+                ...(completedAt || status === 'Completed' ? { completedAt: completedAt || createdAt } : {}),
+                paymentHistory: paymentStatus === 'paid'
+                    ? [{ type: 'full', amount: total, timestamp: (completedAt || createdAt).getTime(), note: 'Thanh toán lịch sử từ import Excel' }]
+                    : [],
+                note: getValue(row.data, NOTE_HEADERS),
+            });
+
+            transaction.set(customerRef, {
+                phone,
+                name: customerName || phone,
+                email: getValue(row.data, EMAIL_HEADERS),
+                address: getValue(row.data, ADDRESS_HEADERS),
+                totalSpent: (customerData?.totalSpent || 0) + (paymentStatus === 'paid' ? total : 0),
+                totalOrders: (customerData?.totalOrders || 0) + 1,
+                totalDebt: (customerData?.totalDebt || 0) + (paymentStatus === 'debt' ? total : 0),
+                lastOrderDate: completedAt || createdAt,
+                lastVisit: completedAt || createdAt,
+                updatedAt: serverTimestamp(),
+                ...(customerSnapshot.exists() ? {} : { createdAt: serverTimestamp(), type: 'retail' }),
+            }, { merge: true });
+
+            if (txRef) {
+                transaction.set(txRef, {
+                    customerId: phone,
+                    customerName: customerName || phone,
+                    type: 'DEBT',
+                    amount: total,
+                    orderIds: [orderId],
+                    paymentMethod: 'LEGACY_ORDER_IMPORT',
+                    note: `Công nợ đơn hàng lịch sử ${orderId}`,
+                    createdBy: user?.uid || '',
+                    createdByName: user?.displayName || user?.email || '',
+                    createdAt,
+                });
+            }
+        });
+    };
+
+    const importLegacyRepairRow = async (row: ParsedRow) => {
+        const repairId = normalizeLegacyImportDocId(getValue(row.data, REPAIR_ID_HEADERS));
+        const customerName = getValue(row.data, CUSTOMER_NAME_HEADERS);
+        const phone = normalizeImportPhone(getValue(row.data, PHONE_HEADERS));
+        if (!repairId) throw new Error('Thiếu mã phiếu sửa chữa.');
+        if (!phone) throw new Error('Thiếu SĐT khách hàng.');
+
+        const receivedAt = parseLegacyDate(row.data, ['Ngày nhận', 'Received At']) || new Date();
+        const estimatedReturnAt = parseLegacyDate(row.data, ['Ngày hẹn trả', 'Estimated Return At']);
+        const completedAt = parseLegacyDate(row.data, ['Ngày hoàn thành', 'Completed At']);
+        const serviceWarrantyMonths = getNumber(row.data, ['Bảo hành dịch vụ tháng', 'Service Warranty Months']);
+        const explicitWarrantyExpiresAt = parseLegacyDate(row.data, ['Ngày hết BH dịch vụ', 'Service Warranty Expires At']);
+        const serviceWarrantyExpiresAt = explicitWarrantyExpiresAt || (serviceWarrantyMonths > 0 ? addMonths(completedAt || receivedAt, serviceWarrantyMonths) : null);
+        const parts = parseRepairParts(row.data);
+        const issues = parseRepairIssues(row.data);
+        const partsCost = getNumber(row.data, ['Tiền linh kiện', 'Parts Cost']) || parts.reduce((sum, part) => sum + (Number(part.unitPriceAtUse) || 0) * part.quantity, 0);
+        const laborCost = getNumber(row.data, ['Phí sửa chữa', 'Labor Cost']);
+        const additionalFees = getNumber(row.data, ['Phí phát sinh', 'Additional Fees']);
+        const discountAmount = getNumber(row.data, ['Giảm giá', 'Discount']);
+        const depositAmount = getNumber(row.data, ['Đã cọc', 'Deposit']);
+        const amount = getNumber(row.data, ['Tổng tiền', 'Total']) || Math.max(0, partsCost + laborCost + additionalFees - discountAmount);
+        const paymentStatus = normalizeRepairPaymentStatus(getValue(row.data, ['Thanh toán', 'Payment Status']));
+        const status = getValue(row.data, ['Trạng thái', 'Status']);
+        const repairRef = doc(db, 'repairs', repairId);
+        const customerRef = doc(db, 'customers', phone);
+        const txRef = paymentStatus === 'pay_later' ? doc(db, 'customer_transactions', buildClientDocumentId('CT', repairId)) : null;
+
+        await runTransaction(db, async (transaction) => {
+            const repairSnapshot = await transaction.get(repairRef);
+            const customerSnapshot = await transaction.get(customerRef);
+            if (repairSnapshot.exists()) {
+                throw new Error(`Phiếu sửa ${repairId} đã tồn tại.`);
+            }
+
+            const customerData = customerSnapshot.data() as { totalSpent?: number; totalRepairs?: number; totalDebt?: number } | undefined;
+            transaction.set(repairRef, {
+                id: repairId,
+                customer: { name: customerName, phone },
+                deviceInfo: {
+                    model: getValue(row.data, ['Thiết bị', 'Dòng máy', 'Device']),
+                    imei: getValue(row.data, ['IMEI/Serial', 'IMEI', 'Serial']),
+                    passcode: getValue(row.data, ['Mật khẩu', 'Passcode']),
+                    color: getValue(row.data, ['Màu máy', 'Color']),
+                    checklist: {},
+                },
+                preRepairMedia: [],
+                postRepairMedia: [],
+                statusTimeline: [{
+                    status,
+                    timestamp: receivedAt.getTime(),
+                    eventType: 'status_transition',
+                    toStatus: status,
+                    actorId: user?.uid || '',
+                    actorName: user?.displayName || user?.email || 'Admin',
+                    actorRole: user?.role || 'admin',
+                    source: 'legacy_excel_import',
+                    note: 'Trạng thái lịch sử từ hệ thống cũ',
+                }],
+                issue: {
+                    description: issues.length > 0 ? issues.map((issue) => issue.label).join(' | ') : getValue(row.data, ['Lỗi/Bệnh', 'Lỗi', 'Bệnh', 'Issue', 'Issues']),
+                    notes: getValue(row.data, ['Ghi chú kỹ thuật', 'Tech Notes']),
+                },
+                issues,
+                parts,
+                timing: {
+                    receivedAt,
+                    ...(estimatedReturnAt ? { estimatedReturnAt } : {}),
+                    ...(completedAt ? { completedAt } : {}),
+                },
+                payment: {
+                    status: paymentStatus,
+                    partsCost,
+                    laborCost,
+                    additionalFees,
+                    discountAmount,
+                    amount,
+                    depositAmount,
+                },
+                paymentHistory: paymentStatus === 'paid' || depositAmount > 0
+                    ? [{
+                        type: paymentStatus === 'paid' ? 'full' : 'deposit',
+                        amount: paymentStatus === 'paid' ? amount : depositAmount,
+                        timestamp: (completedAt || receivedAt).getTime(),
+                        note: 'Thanh toán lịch sử từ import Excel',
+                    }]
+                    : [],
+                staff: {
+                    createdBy: user?.uid || '',
+                    createdByName: user?.displayName || user?.email || 'Admin',
+                    assignedTechnicianName: getValue(row.data, ['KTV', 'Technician']),
+                },
+                status,
+                ticketType: 'repair',
+                legacyImport: true,
+                note: getValue(row.data, NOTE_HEADERS),
+                ...(serviceWarrantyExpiresAt ? { serviceWarrantyExpiresAt: serviceWarrantyExpiresAt.getTime() } : {}),
+                createdAt: receivedAt,
+                updatedAt: completedAt || receivedAt,
+                version: 1,
+            });
+
+            transaction.set(customerRef, {
+                phone,
+                name: customerName || phone,
+                totalSpent: (customerData?.totalSpent || 0) + (paymentStatus === 'paid' ? amount : 0),
+                totalRepairs: (customerData?.totalRepairs || 0) + 1,
+                totalDebt: (customerData?.totalDebt || 0) + (paymentStatus === 'pay_later' ? Math.max(0, amount - depositAmount) : 0),
+                lastVisit: completedAt || receivedAt,
+                updatedAt: serverTimestamp(),
+                ...(customerSnapshot.exists() ? {} : { createdAt: serverTimestamp(), type: 'retail' }),
+            }, { merge: true });
+
+            if (txRef) {
+                transaction.set(txRef, {
+                    customerId: phone,
+                    customerName: customerName || phone,
+                    type: 'DEBT',
+                    amount: Math.max(0, amount - depositAmount),
+                    paymentMethod: 'LEGACY_REPAIR_IMPORT',
+                    note: `Công nợ phiếu sửa lịch sử ${repairId}`,
+                    createdBy: user?.uid || '',
+                    createdByName: user?.displayName || user?.email || '',
+                    createdAt: completedAt || receivedAt,
+                });
+            }
+        });
+    };
+
     const handleImport = async () => {
         if (rows.length === 0) {
             toast.error('Không có dữ liệu để import');
@@ -1383,7 +1329,14 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
         for (let index = 0; index < rows.length; index += 5) {
             const batch = rows.slice(index, index + 5);
             const results = await Promise.allSettled(
-                batch.map((row) => mode === 'service' ? importServiceRow(row) : importProductLikeRow(row))
+                batch.map((row) => {
+                    if (mode === 'customer') return importCustomerRow(row);
+                    if (mode === 'supplier') return importSupplierRow(row);
+                    if (mode === 'order') return importLegacyOrderRow(row);
+                    if (mode === 'repair') return importLegacyRepairRow(row);
+                    if (mode === 'service') return importServiceRow(row);
+                    return importProductLikeRow(row);
+                })
             );
             for (const result of results) {
                 if (result.status === 'fulfilled') success++;
@@ -1398,6 +1351,14 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
         try {
             if (mode === 'service') {
                 await triggerRevalidate(['/', '/category/sua-chua', '/sitemap.xml'], ['services']);
+            } else if (mode === 'customer') {
+                await triggerRevalidate(['/admin/customers'], ['customers']);
+            } else if (mode === 'supplier') {
+                await triggerRevalidate(['/admin/suppliers'], ['suppliers']);
+            } else if (mode === 'order') {
+                await triggerRevalidate(['/admin/orders', '/admin/customers', '/admin/revenue'], ['orders', 'customers']);
+            } else if (mode === 'repair') {
+                await triggerRevalidate(['/admin/repairs', '/admin/customers', '/admin/revenue'], ['repairs', 'customers']);
             } else {
                 await triggerRevalidate(['/', '/flash-sale', '/search', '/sitemap.xml'], ['products']);
             }
@@ -1447,7 +1408,7 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
                     {step === 'upload' && (
                         <div className="space-y-4">
                             <button
-                                onClick={() => generateTemplate(mode, config.taxonomy?.[modeConfig.taxonomyType] || [])}
+                                onClick={() => generateTemplate(mode, (modeConfig.taxonomyType && config.taxonomy?.[modeConfig.taxonomyType]) || [])}
                                 className="flex items-center gap-2 px-4 py-2.5 border-2 border-dashed border-green-300 text-green-700 rounded-lg hover:bg-green-50 text-sm font-medium w-full justify-center"
                             >
                                 <Download size={18} /> Tải mẫu Excel {modeConfig.shortLabel}
@@ -1585,7 +1546,7 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
                                         <tr>
                                             <th className="px-3 py-2 text-left w-14">#</th>
                                             <th className="px-3 py-2 text-left min-w-[220px]">Dữ liệu</th>
-                                            {PREVIEW_CHECK_KEYS.map((key) => (
+                                            {getPreviewCheckKeys(mode).map((key) => (
                                                 <th key={key} className="px-3 py-2 text-left min-w-[150px]">
                                                     {filteredRows[0]?.checks.find((check) => check.key === key)?.label || key}
                                                 </th>
@@ -1604,7 +1565,7 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
                                                         <p className="font-medium text-gray-900 line-clamp-2">{rowName}</p>
                                                         <p className="text-gray-400 mt-0.5">{modeConfig.title}</p>
                                                     </td>
-                                                    {PREVIEW_CHECK_KEYS.map((key) => {
+                                                    {getPreviewCheckKeys(mode).map((key) => {
                                                         const check = row.checks.find((item) => item.key === key);
                                                         if (!check) return <td key={key} className="px-3 py-2 text-gray-400">—</td>;
                                                         return (

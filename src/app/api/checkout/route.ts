@@ -5,6 +5,7 @@ import { isRateLimited } from '@/lib/rateLimit';
 import { PRODUCT_STATUS, isProductArchived } from '@/lib/productLifecycle';
 import { calculateCustomerTier, getTierDiscountPercent } from '@/lib/customerTiers';
 import { normalizeVietnamPhone } from '@/lib/phone';
+import { reserveSequentialDocumentId } from '@/lib/serverDocumentIds';
 
 const RATE_LIMIT_MAX = 3;
 const RATE_LIMIT_WINDOW_MS = 60_000; // 1 phút
@@ -312,9 +313,12 @@ export async function POST(request: NextRequest) {
             // TỪ ĐÂY TRỞ XUỐNG CHỈ CÓ WRITE (NO MORE READS)
             // ==========================================
 
-            // Tạo reference mới cho order
-            const orderRef = db.collection('orders').doc();
-            orderRefId = orderRef.id;
+            const orderAllocation = await reserveSequentialDocumentId(transaction, db, {
+                collectionName: 'orders',
+                prefix: 'DH',
+            });
+            const orderRef = orderAllocation.ref;
+            orderRefId = orderAllocation.id;
 
             const order = {
                 customer_info: {
@@ -339,6 +343,7 @@ export async function POST(request: NextRequest) {
             };
 
             // Ghi order
+            orderAllocation.commitCounter();
             transaction.set(orderRef, order);
 
             // Gom nhóm theo productId để chống payload manipulation

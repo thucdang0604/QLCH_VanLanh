@@ -60,7 +60,6 @@ const iconMap: Record<AdminIconKey, LucideIcon> = {
     articles: FileText,
     chat: MessageSquare,
     reviews: Star,
-    aiCreator: Sparkles,
     staff: User,
     commissions: Award,
     appearance: Palette,

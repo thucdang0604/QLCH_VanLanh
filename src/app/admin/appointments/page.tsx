@@ -9,6 +9,7 @@ import {
     onSnapshot,
     doc,
     updateDoc,
+    serverTimestamp,
     where,
 
     limit,
@@ -31,9 +32,11 @@ import {
 import { useConfig } from '@/lib/ConfigContext';
 import type { FirestoreDateValue } from '@/lib/types';
 import type { LucideIcon } from 'lucide-react';
-import { toastError } from '@/lib/toast';
+import { toastError, toastSuccess } from '@/lib/toast';
 import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
+
+type AppointmentIntakeMethod = 'walk_in' | 'send_to_store';
 
 // Appointment Interface
 interface Appointment {
@@ -44,10 +47,13 @@ interface Appointment {
     timeSlot: string;
     store: string; // store id
     status: 'pending' | 'confirmed' | 'completed' | 'cancelled';
+    intakeMethod?: AppointmentIntakeMethod | null;
     serviceName?: string;
     serviceId?: string;
     createdAt: FirestoreDateValue;
 }
+
+const APPOINTMENT_SEARCH_LIMIT = 50;
 
 const statusConfig: Record<string, { color: string; label: string; icon: LucideIcon }> = {
     pending: { color: 'bg-yellow-100 text-yellow-700 border-yellow-200', label: 'Chờ xác nhận', icon: Clock },
@@ -60,6 +66,11 @@ const timeSlotLabels: Record<string, string> = {
     morning: 'Sáng (9h - 12h)',
     afternoon: 'Chiều (12h - 17h)',
     evening: 'Tối (17h - 21h)',
+};
+
+const intakeMethodConfig: Record<AppointmentIntakeMethod, { label: string; shortLabel: string }> = {
+    walk_in: { label: 'Khách đến trực tiếp', shortLabel: 'Đến trực tiếp' },
+    send_to_store: { label: 'Khách gửi máy đến cửa hàng', shortLabel: 'Gửi máy' },
 };
 
 export default function AppointmentsPage() {
@@ -123,7 +134,7 @@ export default function AppointmentsPage() {
         setIsSearchingDB(true);
         try {
             // Find by phone
-            const qPhone = query(collection(db, 'appointments'), where('phone', '==', searchQuery.trim()));
+            const qPhone = query(collection(db, 'appointments'), where('phone', '==', searchQuery.trim()), limit(APPOINTMENT_SEARCH_LIMIT));
             const snap = await getDocs(qPhone);
             
             if (!snap.empty) {
@@ -145,13 +156,124 @@ export default function AppointmentsPage() {
 
     const handleUpdateStatus = async (id: string, newStatus: string) => {
         try {
-            await updateDoc(doc(db, 'appointments', id), {
+            const payload: Record<string, unknown> = {
                 status: newStatus,
-            });
+                updatedAt: serverTimestamp(),
+            };
+            if (newStatus !== 'confirmed') {
+                payload.intakeMethod = null;
+            }
+            await updateDoc(doc(db, 'appointments', id), payload);
         } catch (error) {
             console.error('Error updating status:', error);
             toastError('Có lỗi xảy ra khi cập nhật trạng thái.');
         }
+    };
+
+    const handleCustomerCall = async (appointment: Appointment) => {
+        if (appointment.status !== 'pending') return;
+
+        try {
+            await updateDoc(doc(db, 'appointments', appointment.id), {
+                status: 'confirmed',
+                calledAt: serverTimestamp(),
+                confirmedAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+            });
+            toastSuccess('Đã ghi nhận cuộc gọi xác nhận lịch hẹn.');
+        } catch (error) {
+            console.error('Error marking appointment call:', error);
+            toastError('Có lỗi xảy ra khi ghi nhận cuộc gọi xác nhận.');
+        }
+    };
+
+    const handleUpdateIntakeMethod = async (appointment: Appointment, intakeMethod: AppointmentIntakeMethod) => {
+        if (appointment.status !== 'confirmed') return;
+
+        try {
+            await updateDoc(doc(db, 'appointments', appointment.id), {
+                intakeMethod,
+                updatedAt: serverTimestamp(),
+            });
+            toastSuccess('Đã ghi nhận cách khách giao máy.');
+        } catch (error) {
+            console.error('Error updating appointment intake method:', error);
+            toastError('Có lỗi xảy ra khi cập nhật cách khách giao máy.');
+        }
+    };
+
+    const buildRepairHandoffHref = (appointment: Appointment) => {
+        const params = new URLSearchParams({
+            appointmentId: appointment.id,
+            intakeMethod: appointment.intakeMethod || '',
+            customerName: appointment.fullName || '',
+            customerPhone: appointment.phone || '',
+        });
+        if (appointment.serviceId) params.set('serviceId', appointment.serviceId);
+        if (appointment.serviceName) params.set('serviceName', appointment.serviceName);
+        return `/admin/repairs?${params.toString()}`;
+    };
+
+    const renderIntakeActions = (appointment: Appointment, variant: 'mobile' | 'desktop') => {
+        if (appointment.status !== 'confirmed') return null;
+
+        const selectedMethod = appointment.intakeMethod ? intakeMethodConfig[appointment.intakeMethod] : null;
+        const isMobile = variant === 'mobile';
+
+        return (
+            <div className={isMobile ? 'space-y-2' : 'mt-2 flex flex-col items-end gap-2'}>
+                <div className={isMobile ? 'grid grid-cols-2 gap-2' : 'inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5'}>
+                    {(Object.entries(intakeMethodConfig) as [AppointmentIntakeMethod, typeof intakeMethodConfig[AppointmentIntakeMethod]][]).map(([method, configItem]) => {
+                        const active = appointment.intakeMethod === method;
+                        return (
+                            <button
+                                key={method}
+                                type="button"
+                                onClick={() => void handleUpdateIntakeMethod(appointment, method)}
+                                className={`${isMobile ? 'rounded-lg border px-2 py-2' : 'rounded-md px-2.5 py-1'} text-xs font-semibold transition-colors ${active ? 'border-orange-500 bg-orange-500 text-white' : 'border-gray-200 bg-white text-gray-600 hover:text-orange-700'}`}
+                            >
+                                {isMobile ? configItem.shortLabel : configItem.label}
+                            </button>
+                        );
+                    })}
+                </div>
+                {selectedMethod ? (
+                    <Link
+                        href={buildRepairHandoffHref(appointment)}
+                        className={isMobile ? 'inline-flex w-full items-center justify-center gap-1 rounded-lg bg-orange-500 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-orange-600' : 'inline-flex items-center gap-1 rounded-lg border border-orange-200 bg-orange-50 px-2.5 py-1 text-xs font-semibold text-orange-700 transition-colors hover:bg-orange-100'}
+                    >
+                        <Wrench size={12} />
+                        Tạo phiếu - {selectedMethod.shortLabel}
+                    </Link>
+                ) : (
+                    <span className="text-xs text-gray-500">Chọn cách khách giao máy để lên đơn</span>
+                )}
+            </div>
+        );
+    };
+
+    const renderStatusGuidance = (appointment: Appointment, variant: 'mobile' | 'desktop') => {
+        if (appointment.status === 'pending') {
+            return (
+                <p className={variant === 'mobile' ? 'rounded-lg bg-yellow-50 px-3 py-2 text-xs text-yellow-700' : 'text-xs text-yellow-700'}>
+                    Bấm SĐT để gọi và tự ghi nhận đã xác nhận.
+                </p>
+            );
+        }
+
+        if (appointment.status === 'confirmed') {
+            return renderIntakeActions(appointment, variant);
+        }
+
+        if (appointment.status === 'cancelled') {
+            return (
+                <span className={variant === 'mobile' ? 'inline-flex rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-600' : 'text-xs font-medium text-red-600'}>
+                    Lịch hẹn đã hủy
+                </span>
+            );
+        }
+
+        return null;
     };
 
     // Derived state for filtering
@@ -263,7 +385,7 @@ export default function AppointmentsPage() {
                                             </div>
                                             <div>
                                                 <p className="font-medium text-gray-900 text-sm">{app.fullName}</p>
-                                                <a href={`tel:${app.phone}`} className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 mt-0.5 transition-colors">
+                                                <a href={`tel:${app.phone}`} onClick={() => void handleCustomerCall(app)} className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 mt-0.5 transition-colors">
                                                     <Phone size={12} />
                                                     {app.phone}
                                                 </a>
@@ -294,25 +416,18 @@ export default function AppointmentsPage() {
                                         </div>
                                     )}
                                     {app.status !== 'completed' && (
-                                        <div className="flex items-center gap-2">
+                                        <div className="flex flex-col gap-2">
                                             <select
                                                 title="Chọn trạng thái"
                                                 value={app.status}
                                                 onChange={(e) => handleUpdateStatus(app.id, e.target.value)}
-                                                className="flex-1 text-sm border-gray-300 rounded-lg py-2 pl-3 pr-8 bg-white border"
+                                                className="hidden"
                                             >
                                                 {Object.entries(statusConfig).map(([key, value]) => (
                                                     <option key={key} value={key}>{value.label}</option>
                                                 ))}
                                             </select>
-                                            {app.status === 'confirmed' && (
-                                                <Link
-                                                    href={`/admin/repairs?appointmentId=${app.id}`}
-                                                    className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors whitespace-nowrap"
-                                                >
-                                                    <Wrench size={12} /> Tạo phiếu
-                                                </Link>
-                                            )}
+                                            {renderStatusGuidance(app, 'mobile')}
                                         </div>
                                     )}
                                 </div>
@@ -352,7 +467,7 @@ export default function AppointmentsPage() {
                                                     </div>
                                                     <div>
                                                         <p className="font-medium text-gray-900">{app.fullName}</p>
-                                                        <a href={`tel:${app.phone}`} className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 mt-1 transition-colors">
+                                                        <a href={`tel:${app.phone}`} onClick={() => void handleCustomerCall(app)} className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 mt-1 transition-colors">
                                                             <Phone size={12} />
                                                             {app.phone}
                                                         </a>
@@ -403,21 +518,13 @@ export default function AppointmentsPage() {
                                                             title="Chọn trạng thái"
                                                             value={app.status}
                                                             onChange={(e) => handleUpdateStatus(app.id, e.target.value)}
-                                                            className="text-sm border-gray-300 rounded-md shadow-sm focus:border-orange-300 focus:ring focus:ring-orange-200 focus:ring-opacity-50 py-1 pl-2 pr-8"
+                                                            className="hidden"
                                                         >
                                                             {Object.entries(statusConfig).map(([key, value]) => (
                                                                 <option key={key} value={key}>{value.label}</option>
                                                             ))}
                                                         </select>
-                                                        {app.status === 'confirmed' && (
-                                                            <Link
-                                                                href={`/admin/repairs?appointmentId=${app.id}`}
-                                                                className="ml-2 inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold bg-orange-50 text-orange-700 rounded-lg hover:bg-orange-100 border border-orange-200 transition-colors whitespace-nowrap"
-                                                            >
-                                                                <Wrench size={12} />
-                                                                Tạo phiếu
-                                                            </Link>
-                                                        )}
+                                                        {renderStatusGuidance(app, 'desktop')}
                                                     </>
                                                 )}
                                             </td>

@@ -10,6 +10,7 @@
 > File này là gốc rễ điều hướng. Hãy bám theo các đường dẫn bên dưới để tìm thông tin chi tiết từng Module.
 
 - [Dashboard](dashboard.md)
+- [Codex Guidelines](CODEX_GUIDELINES.md)
 - [inventory](modules/inventory.md)
 - [pos-orders](modules/pos-orders.md)
 - [repair](modules/repair.md)

@@ -29,6 +29,27 @@ const formatDate = (ts: unknown) => {
     return d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 
+type OrderPaymentHistoryEntry = NonNullable<Order['paymentHistory']>[number];
+const ORDER_SEARCH_LIMIT = 50;
+
+function getPaymentMethodLabel(method?: string) {
+    const normalized = String(method || '').toUpperCase();
+    if (normalized === 'CASH' || normalized === 'COD') return 'Tiền mặt';
+    if (normalized === 'BANK' || normalized === 'BANK_TRANSFER') return 'Chuyển khoản';
+    if (normalized === 'MOMO') return 'MoMo';
+    if (normalized === 'INSTALLMENT') return 'Trả góp';
+    if (normalized === 'DEBT') return 'Ghi nợ';
+    return method || 'Không rõ';
+}
+
+function getPaymentTypeLabel(entry: OrderPaymentHistoryEntry) {
+    if (entry.type === 'debt_payment') return `Thu nợ lần ${entry.paymentIndex || ''}`.trim();
+    if (entry.type === 'deposit') return 'Đặt cọc';
+    if (entry.type === 'full') return 'Thanh toán đủ';
+    if (entry.type === 'refund') return 'Hoàn tiền';
+    return 'Thanh toán';
+}
+
 const statusConfig: Record<string, { color: string; icon: React.ComponentType<{ size?: number }>; label: string }> = {
     Pending: { color: 'bg-yellow-100 text-yellow-700', icon: Clock, label: 'Chờ xử lý' },
     Confirmed: { color: 'bg-blue-100 text-blue-700', icon: Package, label: 'Đã xác nhận' },
@@ -36,6 +57,70 @@ const statusConfig: Record<string, { color: string; icon: React.ComponentType<{ 
     Completed: { color: 'bg-green-100 text-green-700', icon: CheckCircle, label: 'Hoàn thành' },
     Cancelled: { color: 'bg-red-100 text-red-700', icon: XCircle, label: 'Đã hủy' },
 };
+
+type OrderItemWithRepair = Order['items'][number] & {
+    name?: string;
+    product_name?: string;
+    isRepairTicket?: boolean;
+    repairTicketId?: string;
+};
+
+type PrintableOrderItem = Partial<OrderItemWithRepair & {
+    productId: string;
+    productName: string;
+    warrantyType: string;
+    warrantyMonths: number;
+    warrantyExpiresAt: number;
+    imei: string;
+    serial: string;
+    serials: string[];
+}>;
+
+type OrderWithRepairPayment = Order & {
+    containsRepairPayment?: boolean;
+    repairTicketIds?: string[];
+};
+
+function isRepairPaymentOrder(order: Order) {
+    const orderWithRepair = order as OrderWithRepairPayment;
+    return orderWithRepair.containsRepairPayment === true
+        || (order.items || []).some(item => {
+            const line = item as OrderItemWithRepair;
+            return line.isRepairTicket === true || Boolean(line.repairTicketId);
+        });
+}
+
+function getOrderItemDisplayName(item: PrintableOrderItem) {
+    return String(item.name || item.productName || item.product_name || item.productId || 'Sản phẩm').trim();
+}
+
+function getOrderItemSerials(item: PrintableOrderItem) {
+    const serials = Array.isArray(item.imeis) ? item.imeis : item.serials;
+    const normalized = Array.isArray(serials) ? serials : [];
+    const inlineSerial = item.imei || item.serial;
+    return [...normalized, inlineSerial].map(serial => String(serial || '').trim()).filter(Boolean);
+}
+
+function getWarrantyPrintType(item: PrintableOrderItem): 'device' | 'accessory' | null {
+    const rawType = String(item.warrantyType || '').toLowerCase();
+    if (rawType === 'none') return null;
+    if (rawType.includes('device')) return 'device';
+    if (rawType.includes('accessory')) return 'accessory';
+
+    const hasLegacyWarranty = Number(item.warrantyMonths || 0) > 0 || Boolean(item.warrantyExpiresAt);
+    if (!hasLegacyWarranty) return null;
+
+    return getOrderItemSerials(item).length > 0 ? 'device' : 'accessory';
+}
+
+function escapeReceiptHtml(value: string) {
+    return value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
 
 export default function OrdersPage() {
     const { config } = useConfig();
@@ -103,7 +188,11 @@ export default function OrdersPage() {
         }
         setIsSearchingDB(true);
         try {
-            const qPhoneNew = query(collection(db, 'orders'), where('customer_info.phone', '==', searchQuery.trim()));
+            const qPhoneNew = query(
+                collection(db, 'orders'),
+                where('customer_info.phone', '==', searchQuery.trim()),
+                limit(ORDER_SEARCH_LIMIT),
+            );
 
             const snap1 = await getDocs(qPhoneNew);
             const dataMap = new Map<string, Order>();
@@ -111,7 +200,13 @@ export default function OrdersPage() {
                 dataMap.set(d.id, { id: d.id, ...d.data() } as Order);
             });
 
-            const results = Array.from(dataMap.values());
+            const results = Array.from(dataMap.values()).sort((a, b) => {
+                const aCreatedAt = a.createdAt as unknown as { toMillis?: () => number } | number | undefined;
+                const bCreatedAt = b.createdAt as unknown as { toMillis?: () => number } | number | undefined;
+                const aTime = typeof aCreatedAt === 'number' ? aCreatedAt : aCreatedAt?.toMillis?.() || 0;
+                const bTime = typeof bCreatedAt === 'number' ? bCreatedAt : bCreatedAt?.toMillis?.() || 0;
+                return bTime - aTime;
+            });
             if(results.length > 0) {
                  setOrders(prev => {
                      const existingIds = new Set(prev.map(p => p.id));
@@ -223,28 +318,33 @@ export default function OrdersPage() {
         let hasIncompleteImei = false;
 
         for (const item of items) {
-            const it = item as { warrantyType?: string; quantity?: number; imeis?: string[]; name?: string; product_name?: string; price?: number };
-            if (it.warrantyType === 'warrantyDevice' || it.warrantyType === 'warrantyAccessory') {
+            const it = item as PrintableOrderItem;
+            const printType = getWarrantyPrintType(it);
+            if (printType) {
                 const qty = it.quantity || 1;
-                if (it.warrantyType === 'warrantyDevice' && (!it.imeis || it.imeis.length < qty || it.imeis.some((i: string) => !i.trim()))) {
+                const serials = getOrderItemSerials(it);
+                if (printType === 'device' && serials.length < qty) {
                     hasIncompleteImei = true;
                     continue; // Skip or we can just stop
                 }
 
-                const wConfig = it.warrantyType === 'warrantyDevice'
+                const preferredConfig = printType === 'device'
                     ? receiptConfig.warrantyDevice
                     : receiptConfig.warrantyAccessory;
+                const fallbackConfig = receiptConfig.warrantyAccessory || receiptConfig.warrantyDevice;
+                const wConfig = preferredConfig || fallbackConfig;
                 if (!wConfig) continue;
+                const resolvedPrintType = preferredConfig ? printType : (receiptConfig.warrantyAccessory ? 'accessory' : 'device');
 
                 for(let i = 0; i < qty; i++) {
                     payloads.push({
                         config: wConfig,
-                        type: it.warrantyType === 'warrantyDevice' ? 'device' : 'accessory',
+                        type: resolvedPrintType,
                         payload: {
                             customerName: selectedOrder.customer?.name || selectedOrder.customer_info?.name || 'Khách lẻ',
                             customerPhone: selectedOrder.customer?.phone || selectedOrder.customer_info?.phone || '—',
-                            deviceModel: it.name || it.product_name || '',
-                            deviceImei: it.imeis?.[i] || '—',
+                            deviceModel: getOrderItemDisplayName(it),
+                            deviceImei: serials[i] || '—',
                             totalCost: it.price || 0,
                             createdAt: selectedOrder.createdAt
                         }
@@ -594,16 +694,32 @@ export default function OrdersPage() {
                                     );
                                 })()}
                                 <select
+                                    disabled
                                     value={selectedOrder.status}
                                     onChange={(e) => updateStatus(selectedOrder.id, e.target.value)}
                                     title="Cập nhật trạng thái"
                                     aria-label="Cập nhật trạng thái"
-                                    className="h-10 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
+                                    className="hidden"
                                 >
                                     {Object.entries(statusConfig).map(([key, value]) => (
                                         <option key={key} value={key}>{value.label}</option>
                                     ))}
                                 </select>
+                                <div className="flex flex-col items-end gap-2 text-right">
+                                    <span className="text-xs font-medium text-gray-500">
+                                        Trạng thái do hệ thống cập nhật
+                                    </span>
+                                    {isRepairPaymentOrder(selectedOrder) && (
+                                        <span className="inline-flex items-center rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+                                            Receipt thanh toán sửa chữa
+                                        </span>
+                                    )}
+                                    {(selectedOrder.paymentStatus === 'debt' || selectedOrder.payment_method === 'Debt') && (
+                                        <span className="inline-flex items-center rounded-full bg-orange-50 px-3 py-1 text-xs font-semibold text-orange-700">
+                                            Ghi nợ - chờ thu
+                                        </span>
+                                    )}
+                                </div>
                             </div>
 
                             {/* Customer Info */}
@@ -638,15 +754,21 @@ export default function OrdersPage() {
                                 <h3 className="font-semibold text-gray-900 mb-3">Chi tiết sản phẩm</h3>
                                 <div className="space-y-3">
                                     {selectedOrder.items?.map((item, index: number) => {
-                                        const it = item as Partial<{ name: string; product_name: string; quantity: number; price: number; warrantyType: string; imeis: string[] }>;
+                                        const it = item as Partial<OrderItemWithRepair & { productName: string; quantity: number; price: number; warrantyType: string; imeis: string[]; productId: string }>;
                                         const qty = it.quantity || 0;
                                         const price = it.price || 0;
+                                        const itemName = it.name || it.productName || it.product_name || it.productId || 'Sản phẩm';
                                         return (
                                         <div key={index} className="flex flex-col py-3 border-b">
                                             <div className="flex justify-between items-center">
                                                 <div>
-                                                    <p className="font-medium text-gray-900">{it.name || it.product_name}</p>
+                                                    <p className="font-medium text-gray-900">{itemName}</p>
                                                     <p className="text-sm text-gray-500">SL: {qty} x {formatPrice(price)}</p>
+                                                    {(it.isRepairTicket || it.repairTicketId) && (
+                                                        <p className="mt-1 text-xs font-medium text-blue-700">
+                                                            Phiếu sửa chữa{it.repairTicketId ? ` #${it.repairTicketId.slice(-6).toUpperCase()}` : ''}
+                                                        </p>
+                                                    )}
                                                 </div>
                                                 <p className="font-medium text-gray-900">{formatPrice(price * qty)}</p>
                                             </div>
@@ -690,7 +812,7 @@ export default function OrdersPage() {
                                     <span className="text-red-600">{formatPrice(selectedOrder.total_amount || 0)}</span>
                                 </div>
                                 {(selectedOrder.deposit_amount || 0) > 0 && (
-                                    selectedOrder.status === 'Completed' ? (
+                                    selectedOrder.paymentStatus === 'paid' ? (
                                         <div className="flex justify-between items-center pt-2 text-base font-semibold text-gray-700">
                                             <span>Đã thanh toán:</span>
                                             <span>{formatPrice(selectedOrder.total_amount || 0)}</span>
@@ -709,6 +831,51 @@ export default function OrdersPage() {
                                     )
                                 )}
                             </div>
+
+                            {(selectedOrder.paymentHistory || []).length > 0 && (
+                                <div className="bg-white rounded-xl border p-4 space-y-3">
+                                    <div className="flex items-center justify-between">
+                                        <h3 className="font-bold text-gray-800 flex items-center gap-2">
+                                            <Clock size={17} className="text-blue-500" /> Lịch sử thanh toán
+                                        </h3>
+                                        <span className="text-xs font-semibold text-gray-500">
+                                            {(selectedOrder.paymentHistory || []).length} lần ghi nhận
+                                        </span>
+                                    </div>
+                                    <div className="space-y-2">
+                                        {(selectedOrder.paymentHistory || []).map((entry, index) => {
+                                            const amount = Number(entry.amount) || 0;
+                                            const paidAfter = Number(entry.paidAfter);
+                                            const remainingAfter = Number(entry.remainingAfter);
+                                            return (
+                                                <div key={`${entry.timestamp || index}-${amount}`} className="rounded-lg bg-gray-50 border border-gray-100 px-3 py-2 text-sm">
+                                                    <div className="flex items-center justify-between gap-3">
+                                                        <span className="font-semibold text-gray-800">{getPaymentTypeLabel(entry)}</span>
+                                                        <span className={`font-bold ${entry.type === 'refund' ? 'text-red-600' : 'text-green-600'}`}>
+                                                            {entry.type === 'refund' ? '-' : '+'}{formatPrice(amount)}
+                                                        </span>
+                                                    </div>
+                                                    <div className="mt-1 grid grid-cols-1 md:grid-cols-3 gap-1 text-xs text-gray-500">
+                                                        <span>{formatDate(entry.timestamp || entry.date)}</span>
+                                                        <span>{getPaymentMethodLabel(entry.method)}</span>
+                                                        {Number.isFinite(remainingAfter) && (
+                                                            <span className="md:text-right">Còn lại: {formatPrice(remainingAfter)}</span>
+                                                        )}
+                                                    </div>
+                                                    {Number.isFinite(paidAfter) && (
+                                                        <div className="mt-1 text-xs text-gray-500">
+                                                            Đã thanh toán lũy kế: {formatPrice(paidAfter)}
+                                                        </div>
+                                                    )}
+                                                    {entry.note && (
+                                                        <div className="mt-1 text-xs text-gray-500">{entry.note}</div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            )}
 
                             {/* Actions */}
                             <div className="flex flex-col md:flex-row items-center gap-3 pt-4 border-t sticky bottom-0 bg-white mt-auto">
@@ -731,12 +898,13 @@ export default function OrdersPage() {
 
                                         if (printTemplate === 'thermal') {
                                             const itemsHtml = selectedOrder.items?.map((item) => {
-                                                const it = item as Partial<{ name: string; product_name: string; quantity: number; price: number }>;
+                                                const it = item as PrintableOrderItem;
                                                 const qty = it.quantity || 0;
                                                 const price = it.price || 0;
+                                                const itemName = escapeReceiptHtml(getOrderItemDisplayName(it));
                                                 return `
                                                 <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-                                                    <div>${it.name || it.product_name}<br/><span style="color: #666;">SL: ${qty} x ${price.toLocaleString('vi-VN')}</span></div>
+                                                    <div>${itemName}<br/><span style="color: #666;">SL: ${qty} x ${price.toLocaleString('vi-VN')}</span></div>
                                                     <div>${(price * qty).toLocaleString('vi-VN')}</div>
                                                 </div>
                                             `;
@@ -862,13 +1030,14 @@ export default function OrdersPage() {
                                                         </thead>
                                                         <tbody>
                                                             ${selectedOrder.items?.map((item, i: number) => {
-                                                                const it = item as Partial<{ name: string; product_name: string; quantity: number; price: number }>;
+                                                                const it = item as PrintableOrderItem;
                                                                 const qty = it.quantity || 0;
                                                                 const price = it.price || 0;
+                                                                const itemName = escapeReceiptHtml(getOrderItemDisplayName(it));
                                                                 return `
                                                             <tr>
                                                                 <td class="text-center">${i + 1}</td>
-                                                                <td>${it.name || it.product_name}</td>
+                                                                <td>${itemName}</td>
                                                                 <td class="text-center">${qty}</td>
                                                                 <td class="text-right">${price.toLocaleString('vi-VN')}</td>
                                                                 <td class="text-right">${(price * qty).toLocaleString('vi-VN')}</td>

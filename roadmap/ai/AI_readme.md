@@ -2,7 +2,8 @@
 
 > [!IMPORTANT]
 > 🚀 DÀNH CHO AI MỚI BẮT ĐẦU ĐỌC DỰ ÁN NÀY:
-> Để hiểu toàn bộ kiến trúc Backend, **KHÔNG CẦN CRAWL MÃ NGUỒN**. Hãy mở ngay file `roadmap/ui/data/source_intelligence.json`! Đây là **Single Source of Truth** chứa 100% bản đồ Database Schema (TypeScript Interfaces) và toàn bộ các API Endpoints kèm giải thích nghiệp vụ chi tiết.
+> 1. Để hiểu toàn bộ kiến trúc Backend, **KHÔNG CẦN CRAWL MÃ NGUỒN**. Hãy mở ngay file `roadmap/ui/data/source_intelligence.json`! Đây là **Single Source of Truth** chứa 100% bản đồ Database Schema (TypeScript Interfaces) và toàn bộ các API Endpoints kèm giải thích nghiệp vụ chi tiết.
+> 2. Để nắm vững phong cách lập trình, design patterns (Firestore Transactions, ID Generation...) chuẩn của dự án, hãy đọc ngay [Codex Guidelines](CODEX_GUIDELINES.md).
 
 Bản đồ mã nguồn và kiến trúc này được quản lý tự động bằng Giao diện Roadmap SPA (`http://localhost:5500/roadmap/ui/`).
 Là một AI, bạn có trách nhiệm đọc, cập nhật và duy trì tính toàn vẹn của các tài liệu này. BẮT BUỘC tuân thủ các quy tắc sau:

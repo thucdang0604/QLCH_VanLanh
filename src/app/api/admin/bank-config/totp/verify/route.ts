@@ -14,13 +14,17 @@ export async function POST(request: NextRequest) {
         }
 
         const db = getAdminDb();
+        const existingConfigDoc = await db.collection('settings').doc('bank_config').get();
+        const existingConfig = existingConfigDoc.data();
+        if (secret && existingConfig?.totpEnabled && existingConfig?.totpSecret) {
+            return NextResponse.json({ success: false, error: 'Authenticator da duoc thiet lap.' }, { status: 409 });
+        }
         
         let secretToUse = secret;
 
         // Nếu không truyền secret (lúc Edit config), lấy từ DB
         if (!secretToUse) {
-            const configDoc = await db.collection('settings').doc('bank_config').get();
-            const configData = configDoc.data();
+            const configData = existingConfig;
             
             if (!configData?.totpEnabled || !configData?.totpSecret) {
                 return NextResponse.json({ success: false, error: 'Hệ thống chưa cấu hình TOTP.' }, { status: 400 });

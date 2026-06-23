@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import {
     Home, LayoutGrid, Headphones, ClipboardList, User,
-    X, Phone, MessageCircle, MapPin,
+    X, Phone, MessageCircle, MapPin, CalendarClock,
 } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
 import { useConfig } from '@/lib/ConfigContext';
@@ -82,6 +82,7 @@ export default function MobileBottomNav() {
         if (opt.id === 'map') return { ...opt, href: mapLink };
         return opt;
     });
+    const isAdminOrStaff = user && (user.role === 'admin' || user.role === 'staff');
 
     // Close menu when clicking outside
     useEffect(() => {
@@ -224,6 +225,18 @@ export default function MobileBottomNav() {
                         </button>
 
                         {/* 4. Tra cứu */}
+                        {!isAdminOrStaff && (
+                            <Link
+                                href="/#booking-section"
+                                className="flex flex-col items-center justify-center py-2 min-w-[56px] text-gray-500 transition-colors"
+                            >
+                                <CalendarClock size={22} />
+                                <span className="text-[10px] mt-1">
+                                    Đặt lịch
+                                </span>
+                            </Link>
+                        )}
+
                         <button
                             onClick={() => setIsTrackingModalOpen(true)}
                             className={`flex flex-col items-center justify-center py-2 min-w-[56px] transition-colors ${pathname?.startsWith('/tracking') ? 'text-copper' : 'text-gray-500'}`}
@@ -235,7 +248,7 @@ export default function MobileBottomNav() {
                         </button>
 
                         {/* 5. Quản trị — chỉ hiển thị khi là admin hoặc staff */}
-                        {user && (user.role === 'admin' || user.role === 'staff') && (
+                        {isAdminOrStaff && (
                             <Link
                                 href="/admin"
                                 className={`flex flex-col items-center justify-center py-2 min-w-[56px] transition-colors ${pathname?.startsWith('/admin') ? 'text-copper' : 'text-gray-500'}`}
