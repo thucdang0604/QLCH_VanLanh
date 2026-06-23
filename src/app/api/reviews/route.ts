@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { FieldValue } from 'firebase-admin/firestore';
 import { getAdminDb, isAdminAvailable } from '@/lib/firebaseAdmin';
 import { isRateLimited } from '@/lib/rateLimit';
+import { reserveSequentialDocumentId } from '@/lib/serverDocumentIds';
 
 // ── Haversine distance (meters) ──
 function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -186,11 +187,20 @@ export async function POST(request: NextRequest) {
             }),
         };
 
-        const docRef = await getAdminDb().collection('reviews').add(review);
+        const db = getAdminDb();
+        const reviewId = await db.runTransaction(async (tx) => {
+            const reviewAllocation = await reserveSequentialDocumentId(tx, db, {
+                collectionName: 'reviews',
+                prefix: 'RV',
+            });
+            reviewAllocation.commitCounter();
+            tx.set(reviewAllocation.ref, review);
+            return reviewAllocation.id;
+        });
 
         return NextResponse.json({
             success: true,
-            reviewId: docRef.id,
+            reviewId,
             message: 'Đánh giá đã được gửi thành công!',
         });
     } catch (error) {
