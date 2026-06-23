@@ -194,17 +194,31 @@ export function RepairDetailModal({ ticket, dynamicStatuses, onClose }: RepairDe
                         <p className="text-xs font-semibold text-gray-500 mb-2 flex items-center gap-1"><Clock size={12} /> Lịch sử trạng thái</p>
                         <div className="space-y-1">
                             {ticket.statusTimeline.map((entry, index) => (
-                                <div key={index} className="flex items-center gap-2 text-xs">
-                                    <div className="w-1.5 h-1.5 rounded-full bg-orange-400" />
-                                    <span className="font-medium text-gray-700">
-                                        {dynamicStatuses.find(item => item.id === entry.status)?.label || entry.status}
-                                    </span>
-                                    <span className="text-gray-400">
-                                        {new Date(entry.timestamp || Date.now()).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                                    </span>
-                                    {entry.durationInMinutes && (
-                                        <span className="text-gray-300">({entry.durationInMinutes} phút)</span>
-                                    )}
+                                <div key={index} className="flex items-start gap-2 text-xs">
+                                    <div className="mt-1.5 w-1.5 h-1.5 rounded-full bg-orange-400" />
+                                    <div className="min-w-0">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <span className="font-medium text-gray-700">
+                                                {entry.eventType === 'warranty_created'
+                                                    ? (entry.note || `Tạo phiếu bảo hành #${String((entry as { warrantyTicketId?: string }).warrantyTicketId || '').slice(-6).toUpperCase()}`)
+                                                    : dynamicStatuses.find(item => item.id === entry.status)?.label || entry.status}
+                                            </span>
+                                            <span className="text-gray-400">
+                                                {new Date(entry.timestamp || Date.now()).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                                            </span>
+                                            {entry.durationInMinutes && (
+                                                <span className="text-gray-300">({entry.durationInMinutes} phút)</span>
+                                            )}
+                                        </div>
+                                        {entry.eventType === 'warranty_created' && Array.isArray((entry as { claimedPartsSnapshot?: { productName?: string }[] }).claimedPartsSnapshot) && (
+                                            <div className="mt-0.5 text-[11px] text-gray-500">
+                                                {((entry as { claimedPartsSnapshot: { productName?: string }[] }).claimedPartsSnapshot)
+                                                    .map(part => part.productName)
+                                                    .filter(Boolean)
+                                                    .join(', ')}
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                             ))}
                         </div>

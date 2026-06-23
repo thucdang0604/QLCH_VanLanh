@@ -12,6 +12,13 @@ import {
 
 type RepairPrintMode = 'receipt' | 'invoice' | 'warranty' | null;
 
+function getDateMillis(value: unknown): number {
+    if (typeof value === 'number') return value;
+    return (value as { toDate?: () => Date; toMillis?: () => number } | undefined)?.toMillis?.()
+        || (value as { toDate?: () => Date } | undefined)?.toDate?.()?.getTime()
+        || 0;
+}
+
 interface RepairPrintTemplatesProps {
     ticket: RepairTicket | null;
     mode: RepairPrintMode;
@@ -44,24 +51,36 @@ export function RepairPrintTemplates({
     const warrantyConfig = getWarrantyConfigForType(warrantyType);
     if (!warrantyConfig) return null;
 
-    const warrantyPartNames = (ticket.parts || [])
+    const warrantyParts = (ticket.parts || [])
         .filter(part => {
             if (!isSelectedRepairPart(part) || !isWarrantyEligibleRepairPart(part)) return false;
             if (Number(part.warrantyMonths || 0) <= 0 || !part.warrantyExpiresAt) return false;
-            const expiresAt = typeof part.warrantyExpiresAt === 'number'
-                ? part.warrantyExpiresAt
-                : (part.warrantyExpiresAt as { toDate?: () => Date })?.toDate?.()?.getTime() || 0;
-            return expiresAt > Date.now();
-        })
-        .map(part => part.productName)
-        .filter(Boolean);
+            return getDateMillis(part.warrantyExpiresAt) > Date.now();
+        });
     const issueLabels = ticket.issues?.map(issue => issue.label).filter(Boolean) || [];
+    const serviceWarrantyExpiresAt = getDateMillis(ticket.serviceWarrantyExpiresAt);
+    const serviceWarrantyMonths = serviceWarrantyExpiresAt > Date.now()
+        ? Math.max(1, Math.round((serviceWarrantyExpiresAt - Date.now()) / (30 * 24 * 60 * 60 * 1000)))
+        : 0;
+    const warrantyLines = warrantyParts.map(part => ({
+        label: part.productName || part.name || part.partName || 'Linh kiện sửa chữa',
+        type: part.partType || part.quality || 'Linh kiện',
+        warrantyMonths: Number(part.warrantyMonths || 0),
+        expiresAt: part.warrantyExpiresAt,
+    }));
+    if (warrantyLines.length === 0 && serviceWarrantyExpiresAt > Date.now()) {
+        warrantyLines.push({
+            label: ticket.serviceName || issueLabels.join(', ') || ticket.issue?.description || 'Dịch vụ sửa chữa',
+            type: 'Dịch vụ',
+            warrantyMonths: serviceWarrantyMonths,
+            expiresAt: ticket.serviceWarrantyExpiresAt,
+        });
+    }
     const serviceLines = [
         ...issueLabels,
         ticket.issue?.description,
-        warrantyPartNames.length > 0 ? `Linh kiện bảo hành: ${warrantyPartNames.join(', ')}` : '',
+        warrantyLines.length > 0 ? `Bảo hành: ${warrantyLines.map(line => line.label).join(', ')}` : '',
     ].filter(Boolean);
-
     const payload = {
         customerName: ticket.customer.name,
         customerPhone: ticket.customer.phone,
@@ -72,6 +91,8 @@ export function RepairPrintTemplates({
         services: serviceLines.join(', '),
         totalCost: Number(ticket.payment?.amount || 0),
         createdAt: ticket.createdAt,
+        sourceCode: ticket.id.slice(-6).toUpperCase(),
+        warrantyLines,
     };
 
     return (

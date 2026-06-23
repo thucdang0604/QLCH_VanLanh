@@ -45,7 +45,7 @@ export interface StatusTimelineEntry {
     at?: FirestoreDateValue;
     durationInMinutes?: number;
     // Audit fields for tracking transition and assignments
-    eventType?: 'status_transition' | 'technician_assigned' | 'transfer_requested' | 'transfer_accepted' | 'transfer_rejected' | 'transfer_cancelled' | 'manager_override';
+    eventType?: 'status_transition' | 'technician_assigned' | 'transfer_requested' | 'transfer_accepted' | 'transfer_rejected' | 'transfer_cancelled' | 'manager_override' | 'warranty_created';
     fromStatus?: string;
     toStatus?: string;
     actorId?: string;
@@ -61,6 +61,13 @@ export interface StatusTimelineEntry {
     by?: string;
     note?: string | null;
     isOverride?: boolean;
+    warrantyTicketId?: string;
+    claimedPartsSnapshot?: {
+        productName?: string;
+        partType?: string;
+        warrantyMonths?: number;
+        warrantyExpiresAt?: FirestoreDateValue;
+    }[];
 }
 
 // Checklist kiểm tra đầu vào
@@ -196,7 +203,21 @@ export interface RepairTicket {
     // [WARRANTY] Chỉ tồn tại khi ticketType = 'warranty'
     warrantyClaim?: {
         originalTicketId: string;
+        originalTicketCode?: string;
+        originalDeviceModel?: string;
+        originalDeviceImei?: string;
         claimedPartIndexes: number[];
+        claimedPartsSnapshot?: {
+            originalPartIndex: number;
+            partLineId?: string | null;
+            productId?: string | null;
+            productName: string;
+            partType?: string;
+            quality?: string;
+            quantity?: number;
+            warrantyMonths?: number;
+            warrantyExpiresAt?: FirestoreDateValue | null;
+        }[];
         warrantyType?: 'warrantyDevice' | 'warrantyRepair' | 'warrantyAccessory' | null;
         refundedParts?: {
             originalPartIndex: number;

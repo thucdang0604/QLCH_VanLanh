@@ -5,7 +5,7 @@ import { Loader2 } from 'lucide-react';
 import {
     collection, query, where, getDocs, updateDoc,
     doc, serverTimestamp, orderBy, onSnapshot, Timestamp, getDoc,
-    limit, startAfter, DocumentSnapshot, runTransaction, type QueryConstraint
+    limit, startAfter, DocumentSnapshot, runTransaction, arrayUnion, type QueryConstraint
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
@@ -726,11 +726,32 @@ export default function RepairPage() {
                 setWarrantyCreating(false);
                 return;
             }
+            const claimedPartsSnapshot = claimedPartIndexes
+                .map(index => {
+                    const part = originalTicket.parts?.[index];
+                    if (!part) return null;
+                    return {
+                        originalPartIndex: index,
+                        partLineId: part.partLineId || null,
+                        productId: part.productId || null,
+                        productName: part.productName || part.name || part.partName || 'Linh kiện',
+                        partType: part.partType || '',
+                        quality: part.quality || '',
+                        quantity: Number(part.quantity) || 1,
+                        warrantyMonths: Number(part.warrantyMonths || 0),
+                        warrantyExpiresAt: part.warrantyExpiresAt || null,
+                    };
+                })
+                .filter(Boolean);
             const warrantyTicketData = {
                 ticketType: 'warranty' as const,
                 warrantyClaim: {
                     originalTicketId: originalTicket.id,
+                    originalTicketCode: originalTicket.id.slice(-6).toUpperCase(),
+                    originalDeviceModel: originalTicket.deviceInfo?.model || '',
+                    originalDeviceImei: originalTicket.deviceInfo?.imei || '',
                     claimedPartIndexes,
+                    claimedPartsSnapshot,
                     warrantyType: warrantyType || null,
                 },
                 categoryPath: originalTicket.categoryPath || [],
@@ -776,9 +797,39 @@ export default function RepairPage() {
                 },
                 body: JSON.stringify(warrantyTicketData)
             });
+            const createData = await res.json();
             if (!res.ok) {
-                const err = await res.json();
-                throw new Error(err.error || 'Lỗi khi tạo phiếu bảo hành');
+                throw new Error(createData.error || 'Lỗi khi tạo phiếu bảo hành');
+            }
+            const warrantyTicketId = String(createData.id || '');
+            if (warrantyTicketId) {
+                const warrantyLog = {
+                    warrantyTicketId,
+                    warrantyTicketCode: warrantyTicketId.slice(-6).toUpperCase(),
+                    warrantyType: warrantyType || null,
+                    claimedPartIndexes,
+                    claimedPartsSnapshot,
+                    createdAt: Date.now(),
+                    createdBy: user?.uid || '',
+                    createdByName: user?.displayName || 'Admin',
+                };
+                await updateDoc(doc(db, 'repairs', originalTicket.id), {
+                    statusTimeline: arrayUnion({
+                        eventType: 'warranty_created',
+                        status: originalTicket.status,
+                        timestamp: Date.now(),
+                        by: user?.uid || '',
+                        actorId: user?.uid || '',
+                        actorName: user?.displayName || 'Admin',
+                        actorRole: user?.role || 'admin',
+                        source: 'repairs',
+                        note: `Tạo phiếu bảo hành #${warrantyLog.warrantyTicketCode}`,
+                        warrantyTicketId,
+                        claimedPartsSnapshot,
+                    }),
+                    warrantyClaimHistory: arrayUnion(warrantyLog),
+                    updatedAt: serverTimestamp(),
+                });
             }
             toastSuccess('Đã tạo phiếu bảo hành thành công!');
             setWarrantyModal(null);
