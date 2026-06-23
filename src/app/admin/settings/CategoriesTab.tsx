@@ -13,6 +13,7 @@ import { toastSuccess, toastError, toastWarning } from '@/lib/toast';
 import { Plus, Edit, Trash2, Tag, Search, Image as ImageIcon, FolderTree, Sparkles, ChevronRight, ChevronDown, Package } from 'lucide-react';
 import Image from 'next/image';
 import { requestRevalidate } from '@/lib/requestRevalidate';
+import { getIcon } from '@/lib/icon-map';
 
 export default function CategoriesTab() {
     const [activeSubTab, setActiveSubTab] = useState<'categories' | 'brands'>('categories');
@@ -177,7 +178,16 @@ function CategoriesList() {
                     </div>
                     
                     {node.icon ? (
-                        <Image src={node.icon} alt={node.name} width={32} height={32} className="w-8 h-8 object-contain bg-white rounded p-1 border border-gray-100" />
+                        node.icon.startsWith('http') || node.icon.startsWith('/') || node.icon.startsWith('data:') ? (
+                            <Image src={node.icon} alt={node.name} width={32} height={32} className="w-8 h-8 object-contain bg-white rounded p-1 border border-gray-100" />
+                        ) : (
+                            <div className="w-8 h-8 bg-orange-50 rounded flex items-center justify-center border border-orange-100">
+                                {(() => {
+                                    const IconComp = getIcon(node.icon);
+                                    return <IconComp size={16} className="text-orange-500" />;
+                                })()}
+                            </div>
+                        )
                     ) : (
                         <div className="w-8 h-8 bg-gray-100 rounded flex items-center justify-center">
                             <FolderTree size={14} className="text-gray-400" />
@@ -364,7 +374,16 @@ function CategoryModal({ isOpen, onClose, initialData, onSave }: { isOpen: boole
                     <label className="text-sm font-medium text-gray-700">Icon / Hình đại diện</label>
                     <div className="flex items-center gap-4">
                         {formData.icon ? (
-                            <Image src={formData.icon} alt="Icon preview" width={48} height={48} className="w-12 h-12 object-contain bg-gray-50 border rounded p-1" />
+                            formData.icon.startsWith('http') || formData.icon.startsWith('/') || formData.icon.startsWith('data:') ? (
+                                <Image src={formData.icon} alt="Icon preview" width={48} height={48} className="w-12 h-12 object-contain bg-gray-50 border rounded p-1" />
+                            ) : (
+                                <div className="w-12 h-12 bg-orange-50 border border-orange-100 rounded flex items-center justify-center">
+                                    {(() => {
+                                        const IconComp = getIcon(formData.icon);
+                                        return <IconComp size={24} className="text-orange-500" />;
+                                    })()}
+                                </div>
+                            )
                         ) : (
                             <div className="w-12 h-12 bg-gray-50 border rounded flex items-center justify-center">
                                 <ImageIcon size={20} className="text-gray-400" />

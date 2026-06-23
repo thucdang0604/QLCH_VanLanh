@@ -28,7 +28,7 @@
 - [x] Tach stats grid sang component rieng.
 - [x] Tach filters va pagination/media/header UI sang component rieng.
 - [x] Tach editor/detail/handover/warranty/auxiliary/print UI sang component rieng.
-- [ ] Doi mutation phu hop sang repair API da co.
+- [x] Doi mutation phu hop sang repair API da co.
 - [x] Focused ESLint pass cho buoc helper dau tien.
 - [x] `pnpm typecheck` pass cho buoc helper dau tien.
 - [x] Focused ESLint pass cho repairs feature components.
@@ -38,7 +38,7 @@
 
 - [x] Tach header/search/view toggle sang component rieng.
 - [x] Tach workflow modals: chuyen KTV, confirm status, verify parts, tech note.
-- [ ] Tach ticket list/detail modal sau hon neu can tiep tuc giam complexity.
+- [x] Tach ticket list/detail modal sau hon neu can tiep tuc giam complexity.
 - [x] Giu transition/transfer qua API.
 - [x] Focused ESLint pass.
 - [x] `pnpm typecheck` pass.
@@ -47,11 +47,11 @@
 
 - [x] Tach POS shared types sang `src/features/pos/posTypes.ts`.
 - [x] Tach cart panel/checkout sidebar sang `src/features/pos/PosCartPanel.tsx`.
-- [ ] Tach product grid/scanner/repair lookup hooks neu can giam tiep.
+- [x] Tach product grid/scanner/repair lookup hooks neu can giam tiep.
 - [x] Focused ESLint pass.
 - [x] `pnpm typecheck` pass.
 
 ## Final
 
-- [ ] Cap nhat walkthrough tong ket.
-- [ ] Chay verification tong hop neu cac phase deu sach.
+- [x] Cap nhat walkthrough tong ket.
+- [x] Chay verification tong hop neu cac phase deu sach.

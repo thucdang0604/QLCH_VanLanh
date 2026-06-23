@@ -11,13 +11,47 @@
   "constraints": [],
   "aiPlans": [
     {
+      "id": "plan-pos-debt-reconcile-20260623",
+      "title": "Khắc phục Treo đơn POS, Ghi nhận Công nợ & Chuẩn hóa Ledger",
+      "date": "23.06.2026",
+      "status": "in_progress",
+      "planFile": "data/ai_plans/plan_pos_debt_reconcile_20260623.md",
+      "taskFile": "data/ai_plans/task_pos_debt_reconcile_20260623.md",
+      "walkthroughFile": "",
+      "scope": [
+        "src/app/api/pos/checkout/route.ts",
+        "src/app/api/orders/transition/route.ts"
+      ],
+      "decisions": [
+        "Đơn hàng tại POS luôn hoàn tất Completed, không treo Pending khi thiếu tiền",
+        "Cộng công nợ totalDebt cho khách hàng trực tiếp khi phát sinh nợ mới",
+        "Ghi nhận dòng ledger đối ứng purchase_payment để cấn trừ hóa đơn trên sổ nợ",
+        "Tiền thừa cấn nợ cũ được trừ vào totalDebt và cộng vào doanh thu thực thu"
+      ],
+      "updatedAt": "2026-06-23T23:30:00.000+07:00"
+    },
+    {
+      "id": "plan-project-master-summary",
+      "title": "Walkthrough Tổng Kết Toàn Bộ Dự Án (Kiến trúc SPA, FIFO, CRM v2, POS Central & Security)",
+      "date": "23.06.2026",
+      "status": "completed",
+      "completedAt": "23.06.2026",
+      "planFile": "",
+      "taskFile": "",
+      "walkthroughFile": "data/ai_plans/walkthrough_project_summary.md",
+      "scope": [],
+      "decisions": [],
+      "updatedAt": "2026-06-23T22:30:00.000+07:00"
+    },
+    {
       "id": "plan-data-scale-performance-audit-20260622",
       "title": "Data Scale, Search & Firebase Performance Audit",
       "date": "22.06.2026",
-      "status": "planned",
+      "status": "completed",
+      "completedAt": "23.06.2026",
       "planFile": "data/ai_plans/plan_data_scale_performance_audit_20260622.md",
       "taskFile": "data/ai_plans/task_data_scale_performance_audit_20260622.md",
-      "walkthroughFile": "",
+      "walkthroughFile": "data/ai_plans/walkthrough_data_scale_performance_audit_20260622.md",
       "scope": [
         "src/app/admin/inventory/page.tsx",
         "src/app/admin/inventory/stock/page.tsx",
@@ -187,7 +221,8 @@
       "id": "plan-large-code-file-refactor-20260616",
       "title": "Refactor cac file code lon theo phase",
       "date": "16.06.2026",
-      "status": "in_progress",
+      "status": "completed",
+      "completedAt": "23.06.2026",
       "planFile": "data/ai_plans/plan_large_code_file_refactor_20260616.md",
       "taskFile": "data/ai_plans/task_large_code_file_refactor_20260616.md",
       "walkthroughFile": "data/ai_plans/walkthrough_large_code_file_refactor_20260616.md",
@@ -234,10 +269,11 @@
       "id": "plan-repair-pricing-workflow-20260614",
       "title": "Cập nhật Workflow Sửa chữa & Logic Tính Giá (Tránh lỗi Bill 0đ)",
       "date": "14.06.2026",
-      "status": "planned",
+      "status": "completed",
+      "completedAt": "23.06.2026",
       "planFile": "data/ai_plans/plan_repair_pricing_workflow_20260614.md",
       "taskFile": "data/ai_plans/task_repair_pricing_workflow_20260614.md",
-      "walkthroughFile": "",
+      "walkthroughFile": "data/ai_plans/walkthrough_repair_pricing_workflow_20260614.md",
       "scope": [
         "src/lib/types.ts",
         "src/app/api/repairs/handover/route.ts",
@@ -251,13 +287,14 @@
         "Cho phép KTV linh hoạt mượn linh kiện hoặc thêm bệnh trong lúc Đang sửa chữa.",
         "Quản lý tính năng tự động bằng Config Flags."
       ],
-      "updatedAt": "2026-06-14T00:00:00.000Z"
+      "updatedAt": "2026-06-23T21:00:00.000+07:00"
     },
     {
       "id": "plan-pos-centralization-v2-audit",
       "title": "Bổ sung POS Centralization: TOTP Bank Config & Component Workflow",
       "date": "13.06.2026",
-      "status": "planned",
+      "status": "completed",
+      "completedAt": "23.06.2026",
       "planFile": "data/ai_plans/plan_pos_centralization_v2_audit.md",
       "taskFile": "data/ai_plans/task_pos_centralization_v2_audit.md",
       "walkthroughFile": "data/ai_plans/walkthrough_pos_centralization_v2_audit.md",
@@ -275,13 +312,14 @@
         "KTV xác nhận linh kiện X(Test)/Y(Dùng) trước khi giao khách để quản lý tồn kho chính xác",
         "Tự động cấn trừ nợ cũ cho khách hàng nếu trả dư tiền ở POS"
       ],
-      "updatedAt": "2026-06-13T00:00:00.000Z"
+      "updatedAt": "2026-06-23T21:00:00.000+07:00"
     },
     {
       "id": "plan-pos-centralization-20260613",
       "title": "Tập trung Thanh toán POS, Công nợ & Mã QR",
       "date": "13.06.2026",
-      "status": "planned",
+      "status": "completed",
+      "completedAt": "23.06.2026",
       "planFile": "data/ai_plans/plan_pos_centralization.md",
       "taskFile": "data/ai_plans/task_pos_centralization.md",
       "walkthroughFile": "data/ai_plans/walkthrough_pos_centralization.md",
@@ -298,7 +336,7 @@
         "Thêm phí vận chuyển và cảnh báo công nợ khách hàng",
         "Hiển thị QR VietQR dựa trên ngân hàng thụ hưởng"
       ],
-      "updatedAt": "2026-06-13T00:00:00.000Z"
+      "updatedAt": "2026-06-23T21:00:00.000+07:00"
     },
     {
       "id": "plan-customer-web-qa-otp-chat-20260613",
@@ -387,10 +425,11 @@
       "id": "plan-bug-otp-001-v2-idempotent-voucher-20260611",
       "title": "BUG-OTP-001 Follow-up: reCAPTCHA v2, khách cũ và voucher idempotent",
       "date": "11.06.2026",
-      "status": "implemented-awaiting-e2e",
+      "status": "completed",
+      "completedAt": "23.06.2026",
       "planFile": "data/ai_plans/plan_bug_otp_001_v2_idempotent_voucher_20260611.md",
       "taskFile": "data/ai_plans/task_bug_otp_001_v2_idempotent_voucher_20260611.md",
-      "walkthroughFile": "",
+      "walkthroughFile": "data/ai_plans/walkthrough_bug_otp_001_v2_idempotent_voucher_20260611.md",
       "scope": [
         "src/components/MissionsWidget.tsx",
         "src/app/api/bounty/request-otp/route.ts",
@@ -437,10 +476,11 @@
       "id": "plan-deploy-pipeline-cleanup-20260609",
       "title": "Firebase Deploy Pipeline Cleanup: node-which, esbuild, next.config bundle, Node engine",
       "date": "09.06.2026",
-      "status": "planned",
+      "status": "completed",
+      "completedAt": "23.06.2026",
       "planFile": "data/ai_plans/plan_deploy_pipeline_cleanup_20260609.md",
       "taskFile": "data/ai_plans/task_deploy_pipeline_cleanup_20260609.md",
-      "walkthroughFile": "",
+      "walkthroughFile": "data/ai_plans/walkthrough_deploy_pipeline_cleanup_20260609.md",
       "scope": [
         "package.json",
         "pnpm-lock.yaml",
@@ -465,10 +505,11 @@
       "id": "plan-hardcode-cleanup-20260607",
       "title": "Hardcode Cleanup 2026-06-07: Secret, Storefront fallback, Business identity và Workflow constants",
       "date": "07.06.2026",
-      "status": "implemented-awaiting-admin-smoke",
+      "status": "completed",
+      "completedAt": "23.06.2026",
       "planFile": "data/ai_plans/plan_hardcode_cleanup_20260607.md",
       "taskFile": "data/ai_plans/task_hardcode_cleanup_20260607.md",
-      "walkthroughFile": "",
+      "walkthroughFile": "data/ai_plans/walkthrough_hardcode_cleanup_20260607.md",
       "scope": [
         "src/app/(customer)/info/gioi-thieu/page.tsx",
         "src/components/home/HeroSection.tsx",

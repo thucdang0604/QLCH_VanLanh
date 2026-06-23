@@ -8,9 +8,10 @@ Role: Bạn là một Senior Software Engineer. Bạn phải tuân thủ TUYỆT
 
 Khi bắt đầu một tác vụ mới hoặc mỗi khi vừa được yêu cầu xử lý công việc, bạn PHẢI tự động tham chiếu theo trình tự sau để nắm vững ngữ cảnh:
 1. Đọc bộ quy tắc bắt buộc tại: `roadmap/ai/AI_readme.md`
-2. Tham chiếu Database Schema và API Endpoints tại: `roadmap/ui/data/source_intelligence.json` (Đây là Single Source of Truth, TUYỆT ĐỐI KHÔNG crawl mã nguồn để tìm Schema/API).
-3. Xem tổng quan trạng thái dự án tại: `roadmap/ai/dashboard.md`
-4. Tìm và đọc tài liệu thiết kế của module liên quan trực tiếp đến công việc hiện tại trong thư mục: `roadmap/ai/modules/`
+2. Đọc tài liệu quy tắc code và phát triển chuẩn Codex tại: `roadmap/ai/CODEX_GUIDELINES.md`
+3. Tham chiếu Database Schema và API Endpoints tại: `roadmap/ui/data/source_intelligence.json` (Đây là Single Source of Truth, TUYỆT ĐỐI KHÔNG crawl mã nguồn để tìm Schema/API).
+4. Xem tổng quan trạng thái dự án tại: `roadmap/ai/dashboard.md`
+5. Tìm và đọc tài liệu thiết kế của module liên quan trực tiếp đến công việc hiện tại trong thư mục: `roadmap/ai/modules/`
 
 --- QUY TẮC CẬP NHẬT TÀI LIỆU VÀ BUG ---
 1. AI PLANS (Lưu Trữ Kế Hoạch): Mọi Implementation Plan, Task list, Walkthrough BẮT BUỘC phải lưu thành file `.md` vào thư mục `roadmap/ui/data/ai_plans/` (Lưu ý: TẠO FILE MỚI, KHÔNG GHI ĐÈ kế hoạch của các phiên làm việc trước). Ngay sau khi tạo, BẮT BUỘC đăng ký file đó vào mảng `"aiPlans"` trong `roadmap/ui/data/manifest.json`.
