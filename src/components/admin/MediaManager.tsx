@@ -36,7 +36,8 @@ export const MEDIA_FOLDERS = [
     { id: 'reviews', name: 'Đánh giá' },
     { id: 'repairs', name: 'Sửa chữa' },
     { id: 'banners', name: 'Banner' },
-    { id: 'frames', name: 'Khung viền' }
+    { id: 'frames', name: 'Khung viền' },
+    { id: 'logo-brand', name: 'logo' }
 ];
 
 interface MediaManagerProps {
@@ -87,7 +88,7 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
     const [uploadError, setUploadError] = useState<string | null>(null);
     const [cleaning, setCleaning] = useState(false);
     const [cleanProgress, setCleanProgress] = useState('');
-    const [compressProgress, setCompressProgress] = useState<{name: string, ratio: number} | null>(null);
+    const [compressProgress, setCompressProgress] = useState<{ name: string, ratio: number } | null>(null);
     const [uploadFolder, setUploadFolder] = useState<string>(defaultFolder);
     const [filterFolder, setFilterFolder] = useState<string>('all');
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -141,11 +142,11 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                         setUploadError(`"${file.name}": ${validationError}`);
                         continue;
                     }
-                    
+
                     // Xác định cấu hình nén dựa trên thư mục
                     let maxWidth = 1200;
                     let quality = 0.75;
-                    
+
                     switch (uploadFolder) {
                         case 'general': // Logo...
                         case 'articles': // Ảnh bài viết
@@ -177,7 +178,7 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                     fileToUpload = optimized.file;
                     finalWidth = optimized.width;
                     finalHeight = optimized.height;
-                    
+
                     // Tạo thêm 1 bản Thumbnail siêu nhỏ (128px, 60% quality) làm phương án dự phòng
                     if (['products', 'services', 'articles', 'parts'].includes(uploadFolder)) {
                         const thumbOpt = await optimizeImage(file, 128, 128, 0.60);
@@ -190,11 +191,11 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                 const storagePath = `media/${uploadFolder}/${Date.now()}_${fileToUpload.name}`;
                 const storageRef = ref(storage, storagePath);
 
-                await uploadBytes(storageRef, fileToUpload, { 
-                    contentType: fileToUpload.type 
+                await uploadBytes(storageRef, fileToUpload, {
+                    contentType: fileToUpload.type
                 });
                 let url = await getDownloadURL(storageRef);
-                
+
                 // Upload bản Thumbnail (nếu có)
                 if (thumbFileToUpload) {
                     const thumbPath = storagePath.replace(/\.([a-zA-Z0-9]+)$/, '_thumb.$1');
@@ -334,7 +335,7 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                         <div className="space-y-4">
                             <div className="flex items-center gap-3 bg-gray-50 p-3 rounded-xl border">
                                 <label className="text-sm font-medium text-gray-700 min-w-max">Lưu vào thư mục:</label>
-                                <select 
+                                <select
                                     title="Lưu vào thư mục"
                                     value={uploadFolder}
                                     onChange={(e) => setUploadFolder(e.target.value)}
@@ -464,11 +465,12 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                                     </button>
                                 </div>
                             ) : (
-                                <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
+                                <div className="grid grid-cols-4 sm:grid-cols-5 gap-2.5">
                                     {filtered.map((item) => (
                                         <div
                                             key={item.id}
-                                            className={`relative group aspect-square rounded-lg overflow-hidden cursor-pointer border-2 transition-all data-[broken=true]:cursor-not-allowed data-[broken=true]:border-red-200 data-[broken=true]:bg-gray-50 ${selected.includes(item.url) ? 'border-orange-500 ring-2 ring-orange-200' : 'border-transparent hover:border-gray-300'}`}
+                                            className={`relative group aspect-square rounded-lg overflow-hidden cursor-pointer border-2 transition-all bg-[length:20px_20px] data-[broken=true]:cursor-not-allowed data-[broken=true]:border-red-200 data-[broken=true]:bg-gray-50 ${selected.includes(item.url) ? 'border-orange-500 ring-2 ring-orange-200' : 'border-gray-100 hover:border-gray-300'}`}
+                                            style={{ backgroundImage: 'linear-gradient(45deg, #f3f4f6 25%, transparent 25%), linear-gradient(-45deg, #f3f4f6 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #f3f4f6 75%), linear-gradient(-45deg, transparent 75%, #f3f4f6 75%)', backgroundPosition: '0 0, 0 10px, 10px -10px, -10px 0px' }}
                                             onClick={(e) => {
                                                 if (e.currentTarget.getAttribute('data-broken') === 'true') {
                                                     alert('Ảnh này đã bị xoá trên bộ nhớ gốc (Storage). Vui lòng nhấn biểu tượng 🗑️ thùng rác để dọn dẹp nó khỏi hệ thống.');
@@ -503,7 +505,7 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                                                 <img
                                                     src={item.url}
                                                     alt={item.name}
-                                                    className="w-full h-full object-cover data-[broken=true]:object-contain data-[broken=true]:p-8 data-[broken=true]:opacity-50"
+                                                    className="w-full h-full object-contain p-1.5 data-[broken=true]:p-8 data-[broken=true]:opacity-50"
                                                     onError={(e) => {
                                                         const target = e.target as HTMLImageElement;
                                                         target.onerror = null;

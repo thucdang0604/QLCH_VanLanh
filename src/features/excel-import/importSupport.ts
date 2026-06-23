@@ -1,4 +1,4 @@
-import { addDoc, collection, doc, getDoc, getDocs, limit, orderBy, query, runTransaction, serverTimestamp, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, limit, orderBy, query, runTransaction, serverTimestamp, setDoc, where } from 'firebase/firestore';
 import * as XLSX from 'xlsx';
 
 import { db, getStorageInstance } from '@/lib/firebase';
@@ -556,7 +556,7 @@ export async function uploadInitialImportImage(file: File, folder: LocalImageUpl
     await uploadBytes(thumbRef, thumb.file, { contentType: thumb.file.type });
     url = `${url}&hasThumb=true`;
 
-    await addDoc(collection(db, 'media_library'), {
+    await setDoc(doc(db, 'media_library', buildImportMediaDocumentId(folder, optimized.file.name)), {
         url,
         path: storagePath,
         name: optimized.file.name,
@@ -571,6 +571,11 @@ export async function uploadInitialImportImage(file: File, folder: LocalImageUpl
     });
 
     return url;
+}
+
+function buildImportMediaDocumentId(folder: LocalImageUploadFolder, fileName: string): string {
+    const slug = generateSlug(normalizeMediaBaseName(fileName)).slice(0, 70) || 'media';
+    return `MED-import-${folder}-${Date.now()}-${slug}`;
 }
 
 export async function findExistingImportImage(fileName: string, folder: LocalImageUploadFolder): Promise<UploadedMediaMatch | null> {
