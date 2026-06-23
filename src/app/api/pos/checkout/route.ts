@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
         const caller = await requirePermission(request, 'manage_orders');
 
         const body = await request.json();
-        const { idempotencyKey, repairTicketId, repairTicketIds, customer_info, items, discount_amount, total_amount, deposit_amount, payment_method, voucherCode } = body;
+        const { idempotencyKey, repairTicketId, repairTicketIds, customer_info, items, discount_amount, total_amount, deposit_amount, payment_method, voucherCode, use_surplus_to_pay_debt } = body;
 
         if (!items || items.length === 0) {
             return NextResponse.json({ error: 'Giỏ hàng trống' }, { status: 400 });
@@ -328,7 +328,7 @@ export async function POST(request: NextRequest) {
                 // In POS, we might accept client total or enforce server total. Let's enforce server total.
             }
 
-            const isPending = !isDebtCollectionOnly && !hasRepairPayment && Number(deposit_amount) > 0 && Number(deposit_amount) < serverTotal;
+            const isPending = false;
             if (orderPaymentSubtotal > 0 && paymentMethodCode === 'DEBT') {
                 throw new Error('Thu nợ đơn hàng phải thanh toán ngay bằng tiền mặt, chuyển khoản hoặc ví.');
             }
@@ -504,10 +504,36 @@ export async function POST(request: NextRequest) {
                 preferredLotCodes: Array.from(x.preferredLotCodes.entries()).map(([lotCode, quantity]) => ({ lotCode, quantity }))
             }));
             if (fifoDeductors.length > 0) {
-                fifoLogsDataMap = await fetchFifoLogsForDeduction(tx, db, fifoDeductors);
+                            fifoLogsDataMap = await fetchFifoLogsForDeduction(tx, db, fifoDeductors);
             }
 
             const stockProductIds = new Set([...preAggregatedForStock.keys(), ...repairAggregatedForStock.keys()]);
+            const oldDebt = (custSnap && custSnap.exists) ? (Number(custSnap.data()?.totalDebt) || 0) : 0;
+            const newDebt = !isDebtCollectionOnly ? Math.max(0, serverTotal - Number(deposit_amount)) : 0;
+            const surplus = !isDebtCollectionOnly ? Math.max(0, Number(deposit_amount) - serverTotal) : 0;
+            const debtPaymentAmount = (use_surplus_to_pay_debt === true && oldDebt > 0 && surplus > 0)
+                ? Math.min(surplus, oldDebt)
+                : 0;
+            const deltaDebt = isDebtCollectionOnly
+                ? -orderPaymentTotal
+                : (newDebt - debtPaymentAmount);
+
+            let customerLedgerCount = 0;
+            if (custRef) {
+                if (!isDebtCollectionOnly) {
+                    customerLedgerCount += 1; // purchase_order
+                    if (Number(deposit_amount) > 0) {
+                        customerLedgerCount += 1; // purchase_payment
+                    }
+                }
+                if (debtPaymentAmount > 0) {
+                    customerLedgerCount += 1; // cấn nợ cũ
+                }
+                if (orderPaymentTotal > 0) {
+                    customerLedgerCount += 1; // thu nợ đơn cũ
+                }
+            }
+
             const inventoryLogCount = isPending
                 ? 0
                 : Array.from(stockProductIds).reduce((count, productId) => {
@@ -515,12 +541,9 @@ export async function POST(request: NextRequest) {
                     const repairQty = repairAggregatedForStock.get(productId)?.quantity || 0;
                     return count + (retailQty > 0 ? 1 : 0) + (repairQty > 0 ? 1 : 0);
                 }, 0);
-            const customerSpendDelta = !isPending && !isDebtCollectionOnly ? Math.max(0, serverTotal - orderPaymentTotal) : 0;
-            const ledgerPurchaseAmount = isPending ? (Number(deposit_amount) || 0) : customerSpendDelta;
-            const customerLedgerCount = custRef
-                ? (ledgerPurchaseAmount > 0 ? 1 : 0) + (!isPending && orderPaymentTotal > 0 ? 1 : 0)
+            const customerTransactionCount = normalizedPhoneResult && (orderPaymentTotal > 0 || debtPaymentAmount > 0)
+                ? ((orderPaymentTotal > 0 ? 1 : 0) + (debtPaymentAmount > 0 ? 1 : 0))
                 : 0;
-            const customerTransactionCount = !isPending && normalizedPhoneResult && orderPaymentTotal > 0 ? 1 : 0;
             const inventoryLogAllocations = await reserveSequentialDocumentIds(tx, db, {
                 collectionName: 'inventory_logs',
                 prefix: 'IL',
@@ -566,7 +589,7 @@ export async function POST(request: NextRequest) {
                 deposit_amount: Number(deposit_amount) || 0,
                 total_amount: serverTotal,
                 ...(appliedVoucherCode ? { voucherCode: appliedVoucherCode, discountSource: 'voucher' } : {}),
-                status: isPending ? 'Pending' : 'Completed',
+                status: 'Completed',
                 source: 'pos',
                 containsRepairPayment: repairPaymentTotals.size > 0,
                 repairTicketIds: Array.from(repairPaymentTotals.keys()),
@@ -574,14 +597,17 @@ export async function POST(request: NextRequest) {
                 orderPaymentIds: Array.from(orderPaymentTotals.keys()),
                 is_vat_exported: false,
                 payment_method: payment_method || 'CASH',
+                paymentStatus: newDebt > 0 ? 'debt' : 'paid',
                 createdAt: FieldValue.serverTimestamp(),
                 updatedAt: FieldValue.serverTimestamp(),
-                completedAt: isPending ? null : FieldValue.serverTimestamp(),
+                completedAt: FieldValue.serverTimestamp(),
                 paymentHistory: [{
-                    type: isPending ? 'deposit' : 'full',
-                    amount: isPending ? Number(deposit_amount) || 0 : serverTotal,
+                    type: newDebt > 0 ? 'deposit' : 'full',
+                    amount: Math.min(Number(deposit_amount), serverTotal),
                     timestamp: Date.now(),
-                    note: isPending ? `Đặt cọc POS — ${payment_method}` : `Thanh toán POS — ${payment_method}`
+                    note: newDebt > 0
+                        ? `Thanh toán một phần POS (${Number(deposit_amount).toLocaleString('vi-VN')}đ) — nợ lại ${newDebt.toLocaleString('vi-VN')}đ — ${payment_method}`
+                        : `Thanh toán POS — ${payment_method}`
                 }],
                 createdBy: caller.uid,
                 createdByName
@@ -718,6 +744,9 @@ export async function POST(request: NextRequest) {
                         .length;
                     incrementRevenueAggregates(tx, db, { repairRevenue, repairCount });
                 }
+                if (debtPaymentAmount > 0) {
+                    incrementRevenueAggregates(tx, db, { orderRevenue: debtPaymentAmount });
+                }
             }
 
             // ── Increment Voucher Usage ──
@@ -740,15 +769,16 @@ export async function POST(request: NextRequest) {
                         updateData.name = incomingName;
                     }
 
+                    const customerSpendDelta = !isDebtCollectionOnly ? serverTotal : 0;
                     if (customerSpendDelta > 0) {
                         updateData.totalSpent = FieldValue.increment(customerSpendDelta);
                         updateData.totalOrders = FieldValue.increment(1);
                     }
-                    if (!isPending && orderPaymentTotal > 0) {
-                        updateData.totalDebt = FieldValue.increment(-orderPaymentTotal);
+                    if (deltaDebt !== 0) {
+                        updateData.totalDebt = FieldValue.increment(deltaDebt);
                     }
 
-                    if (appliedPersonalVoucher && appliedVoucherCode && !isPending) {
+                    if (appliedPersonalVoucher && appliedVoucherCode) {
                         updateData['missions.bounty_redeemed'] = true;
                         updateData['missions.bountyVoucherCode'] = appliedVoucherCode;
                         updateData['missions.redeemedAt'] = FieldValue.serverTimestamp();
@@ -757,6 +787,7 @@ export async function POST(request: NextRequest) {
 
                     tx.update(custRef, updateData);
                 } else {
+                    const customerSpendDelta = !isDebtCollectionOnly ? serverTotal : 0;
                     const newCust: Record<string, unknown> = {
                         phone: normalizedPhoneResult!.local,
                         name: incomingName || 'Khách lẻ',
@@ -765,35 +796,39 @@ export async function POST(request: NextRequest) {
                         totalOrders: customerSpendDelta > 0 ? 1 : 0,
                         totalRepairs: 0,
                         totalAppointments: 0,
-                        totalDebt: 0,
-                        createdAt: FieldValue.serverTimestamp(),
-                        updatedAt: FieldValue.serverTimestamp(),
-                        lastVisit: FieldValue.serverTimestamp(),
-                        tags: []
-                    };
-
-                    if (appliedPersonalVoucher && appliedVoucherCode && !isPending) {
-                        newCust.missions = {
-                            bounty_redeemed: true,
-                            bountyVoucherCode: appliedVoucherCode,
-                            redeemedAt: FieldValue.serverTimestamp(),
-                            redeemedOrderId: orderId,
-                        };
                     }
 
                     tx.set(custRef, newCust);
                 }
 
-                if (ledgerPurchaseAmount > 0) {
+                if (!isDebtCollectionOnly) {
                     tx.set(customerLedgerAllocations[customerLedgerAllocationIndex++].ref, {
                         customerId: normalizedPhoneResult!.local,
-                        type: isPending ? 'deposit_order' : 'purchase_order',
-                        amount: ledgerPurchaseAmount,
+                        type: 'purchase_order',
+                        amount: serverTotal,
+                        referenceId: orderId,
+                        date: FieldValue.serverTimestamp()
+                    });
+                    if (Number(deposit_amount) > 0) {
+                        tx.set(customerLedgerAllocations[customerLedgerAllocationIndex++].ref, {
+                            customerId: normalizedPhoneResult!.local,
+                            type: 'purchase_payment',
+                            amount: Math.min(Number(deposit_amount), serverTotal),
+                            referenceId: orderId,
+                            date: FieldValue.serverTimestamp()
+                        });
+                    }
+                }
+                if (debtPaymentAmount > 0) {
+                    tx.set(customerLedgerAllocations[customerLedgerAllocationIndex++].ref, {
+                        customerId: normalizedPhoneResult!.local,
+                        type: 'debt_payment',
+                        amount: debtPaymentAmount,
                         referenceId: orderId,
                         date: FieldValue.serverTimestamp()
                     });
                 }
-                if (!isPending && orderPaymentTotal > 0) {
+                if (orderPaymentTotal > 0) {
                     tx.set(customerLedgerAllocations[customerLedgerAllocationIndex++].ref, {
                         customerId: normalizedPhoneResult!.local,
                         type: 'debt_payment',
@@ -884,18 +919,34 @@ export async function POST(request: NextRequest) {
                     });
                 }
 
-                if (normalizedPhoneResult && orderPaymentTotal > 0) {
-                    tx.set(customerTransactionAllocations[0].ref, {
-                        customerId: normalizedPhoneResult.local,
-                        customerName: incomingName || customer_info?.name || 'Khách lẻ',
-                        type: 'PAYMENT',
-                        amount: orderPaymentTotal,
-                        orderIds: updatedOrderIds,
-                        note: 'Thu nợ tại POS',
-                        createdBy: caller.uid,
-                        createdByName,
-                        createdAt: FieldValue.serverTimestamp()
-                    });
+                let customerTransactionAllocationIndex = 0;
+                if (normalizedPhoneResult) {
+                    if (orderPaymentTotal > 0) {
+                        tx.set(customerTransactionAllocations[customerTransactionAllocationIndex++].ref, {
+                            customerId: normalizedPhoneResult.local,
+                            customerName: incomingName || customer_info?.name || 'Khách lẻ',
+                            type: 'PAYMENT',
+                            amount: orderPaymentTotal,
+                            orderIds: updatedOrderIds,
+                            note: 'Thu nợ tại POS',
+                            createdBy: caller.uid,
+                            createdByName,
+                            createdAt: FieldValue.serverTimestamp()
+                        });
+                    }
+                    if (debtPaymentAmount > 0) {
+                        tx.set(customerTransactionAllocations[customerTransactionAllocationIndex++].ref, {
+                            customerId: normalizedPhoneResult.local,
+                            customerName: incomingName || customer_info?.name || 'Khách lẻ',
+                            type: 'PAYMENT',
+                            amount: debtPaymentAmount,
+                            orderIds: [orderId],
+                            note: 'Cấn trừ nợ cũ bằng tiền thừa POS',
+                            createdBy: caller.uid,
+                            createdByName,
+                            createdAt: FieldValue.serverTimestamp()
+                        });
+                    }
                 }
             }
 

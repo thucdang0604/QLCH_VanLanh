@@ -106,10 +106,18 @@ export async function POST(request: NextRequest) {
                     (targetStatus === 'Cancelled' && oldStatus === 'Completed')
                 ),
             );
+            let customerLedgerCount = 0;
+            if (writesCustomerLedger) {
+                if (targetStatus === 'Completed') {
+                    customerLedgerCount = 1 + (Number(freshOrder.deposit_amount || 0) > 0 ? 1 : 0);
+                } else {
+                    customerLedgerCount = 1;
+                }
+            }
             const customerLedgerAllocations = await reserveSequentialDocumentIds(tx, db, {
                 collectionName: 'customer_ledger',
                 prefix: 'CL',
-                count: writesCustomerLedger ? 1 : 0,
+                count: customerLedgerCount,
             });
             const customerPhone = freshOrder.customer_info?.phone || '';
             const customerRef = customerPhone ? db.collection('customers').doc(customerPhone) : null;
@@ -143,6 +151,7 @@ export async function POST(request: NextRequest) {
                     logType = 'ORDER_COMPLETE';
                     stockChange = -group.totalQty;
                 } else if (oldStatus === 'Completed' && targetStatus === 'Cancelled') {
+
                     tx.update(p.ref, { stock: currentStock + group.totalQty });
                     logType = 'ORDER_CANCEL';
                     stockChange = group.totalQty;
@@ -192,19 +201,25 @@ export async function POST(request: NextRequest) {
             if (customerPhone && customerRef) {
                 const phone = customerPhone;
                 const grandTotal = freshOrder.items.reduce((sum, item) => sum + (item.price * item.quantity), 0) - (freshOrder.discount_amount || 0);
+                const isDebt = freshOrder.paymentStatus === 'debt' || freshOrder.payment_method === 'Debt';
+                const debtAmount = isDebt ? Math.max(0, grandTotal - (Number(freshOrder.deposit_amount || 0))) : 0;
 
                 if (targetStatus === 'Completed' && isActiveStatus(oldStatus)) {
                     if (custSnap?.exists) {
-                        tx.update(customerRef, {
+                        const customerUpdates: Record<string, unknown> = {
                             totalSpent: FieldValue.increment(grandTotal),
                             totalOrders: FieldValue.increment(1),
                             updatedAt: FieldValue.serverTimestamp()
-                        });
+                        };
+                        if (debtAmount > 0) {
+                            customerUpdates.totalDebt = FieldValue.increment(debtAmount);
+                        }
+                        tx.update(customerRef, customerUpdates);
                     }
                     
-                    // Add customer ledger
-                    const ledgerRef = customerLedgerAllocations[0].ref;
-                    tx.set(ledgerRef, {
+                    let customerLedgerAllocationIndex = 0;
+                    // Add customer ledger (purchase_order)
+                    tx.set(customerLedgerAllocations[customerLedgerAllocationIndex++].ref, {
                         customerId: phone,
                         type: 'purchase_order',
                         amount: grandTotal,
@@ -212,17 +227,32 @@ export async function POST(request: NextRequest) {
                         date: FieldValue.serverTimestamp()
                     });
 
+                    // Add customer ledger (purchase_payment) if deposited
+                    if (Number(freshOrder.deposit_amount || 0) > 0) {
+                        tx.set(customerLedgerAllocations[customerLedgerAllocationIndex++].ref, {
+                            customerId: phone,
+                            type: 'purchase_payment',
+                            amount: Number(freshOrder.deposit_amount),
+                            referenceId: orderId,
+                            date: FieldValue.serverTimestamp()
+                        });
+                    }
+
                     // Tính HOA HỒNG server-side (Decision 2)
                     await calculateAndSaveCommissionsServer(tx, { uid: caller.uid, displayName: '' }, 'order', docDataForCommission);
                     incrementRevenueAggregates(tx, db, buildCompletedOrderRevenueDelta(docDataForCommission));
 
                 } else if (targetStatus === 'Cancelled' && oldStatus === 'Completed') {
                     if (custSnap?.exists) {
-                        tx.update(customerRef, {
+                        const customerUpdates: Record<string, unknown> = {
                             totalSpent: FieldValue.increment(-grandTotal),
                             totalOrders: FieldValue.increment(-1),
                             updatedAt: FieldValue.serverTimestamp()
-                        });
+                        };
+                        if (debtAmount > 0) {
+                            customerUpdates.totalDebt = FieldValue.increment(-debtAmount);
+                        }
+                        tx.update(customerRef, customerUpdates);
                     }
                     
                     // Add customer ledger negative
