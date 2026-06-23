@@ -790,6 +790,57 @@ export default function RepairPage() {
             setWarrantyCreating(false);
         }
     };
+    const applyUpdatedTicket = (updatedTicket: RepairTicket) => {
+        setTickets(previous => previous.map(ticket => ticket.id === updatedTicket.id ? { ...ticket, ...updatedTicket } : ticket));
+        setViewingTicket(previous => previous?.id === updatedTicket.id ? { ...previous, ...updatedTicket } : previous);
+        setPrintTicket(previous => previous?.id === updatedTicket.id ? { ...previous, ...updatedTicket } : previous);
+    };
+
+    const shouldSyncRepairWarranty = (ticket: RepairTicket) => {
+        if (!isTerminal(ticket) || ticket.ticketType === 'warranty') return false;
+        return (ticket.parts || []).some(part =>
+            isSelectedRepairPart(part)
+            && isWarrantyEligibleRepairPart(part)
+            && (!part.warrantyExpiresAt || Number(part.warrantyMonths || 0) <= 0)
+        );
+    };
+
+    const handleOpenWarrantyModal = async (ticket: RepairTicket) => {
+        setWarrantySelectedIndexes([]);
+        if (!shouldSyncRepairWarranty(ticket)) {
+            setWarrantyModal(ticket);
+            return;
+        }
+
+        try {
+            const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
+            const res = await fetch('/api/repairs/sync-warranty', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${idToken}`,
+                },
+                body: JSON.stringify({
+                    ticketId: ticket.id,
+                    ticketVersion: ticket.version,
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                throw new Error(data.error || 'Không thể đồng bộ bảo hành phiếu sửa chữa.');
+            }
+
+            const syncedTicket = (data.ticket || ticket) as RepairTicket;
+            applyUpdatedTicket(syncedTicket);
+            if (data.stampedCount > 0) {
+                toastSuccess(`Đã đồng bộ ${data.stampedCount} linh kiện có bảo hành.`);
+            }
+            setWarrantyModal(syncedTicket);
+        } catch (error) {
+            console.error('Error syncing repair warranty:', error);
+            toastError(error instanceof Error ? error.message : 'Không thể đồng bộ bảo hành phiếu sửa chữa.');
+        }
+    };
     const handleOpenModal = (ticket?: RepairTicket) => {
         if (ticket) {
             const cl = ticket.deviceInfo?.checklist;
@@ -1149,7 +1200,7 @@ export default function RepairPage() {
                 openPrint={openPrint}
                 setViewingTicket={setViewingTicket}
                 setAssignModal={setAssignModal}
-                setWarrantyModal={setWarrantyModal}
+                setWarrantyModal={handleOpenWarrantyModal}
                 setWarrantySelectedIndexes={setWarrantySelectedIndexes}
                 onPageChange={setPage}
                 onPageSizeChange={setPageSize}

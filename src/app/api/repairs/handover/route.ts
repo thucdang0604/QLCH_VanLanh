@@ -8,18 +8,9 @@ import { REPAIR_STATUS, isSelectedRepairPart, isWarrantyEligibleRepairPart } fro
 import { getConfiguredWorkflow } from '@/lib/repairWorkflowConfig';
 import { fetchFifoLogsForDeduction, executeFifoDeductionsWrites, type FifoDeductionResult, type FifoDeductor } from '@/lib/inventoryFifo';
 import { incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
+import { stampRepairWarrantyOnParts } from '@/lib/repairWarrantyRules';
 
 const LEGACY_TERMINAL_STATUSES = [REPAIR_STATUS.DONE, REPAIR_STATUS.OUT, REPAIR_STATUS.REFUND, 'bh_hoan_tat', 'bh_tu_choi', 'bh_refund'];
-
-function normalizeWarrantyRuleKey(value: unknown) {
-    return String(value || '')
-        .trim()
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .replace(/đ/g, 'd')
-        .replace(/Đ/g, 'd');
-}
 
 function resolveServiceWarrantyMonths(taxonomy: unknown, categoryPath: string[] | undefined) {
     if (!Array.isArray(categoryPath) || categoryPath.length === 0) return 3;
@@ -239,41 +230,15 @@ export async function POST(request: NextRequest) {
                 }
 
                 if (ticket.parts && ticket.parts.length > 0) {
-                    const ruleMap = new Map<string, number>();
-                    for (const r of warrantyRules) {
-                        if (typeof r.partType === 'string') {
-                            ruleMap.set(normalizeWarrantyRuleKey(r.partType), Number(r.warrantyMonths) || 0);
-                        }
+                    const productDataById = new Map<string, Record<string, unknown> | null>();
+                    for (const [productId, productDoc] of productDocs.entries()) {
+                        productDataById.set(productId, productDoc.data);
                     }
-
-                    const nowMs = Date.now();
-                    ticket.parts = ticket.parts.map(p => {
-                        if (!isSelectedRepairPart(p) || !isWarrantyEligibleRepairPart(p)) return p;
-                        if (p.warrantyExpiresAt) return p;
-
-                        const pData = p.productId ? productDocs.get(p.productId)?.data : null;
-                        const rawPartType = String(p.partType || pData?.partType || '');
-                        const partType = normalizeWarrantyRuleKey(rawPartType);
-
-                        let months = ruleMap.get(partType) || 0;
-                        if (months === 0) months = ruleMap.get('khac') || 0;
-
-                        console.warn(`[Handover] Part: ${p.productName} | RawType: "${rawPartType}" | Mapped Months: ${months}`);
-
-                        if (months <= 0) return { ...p, warrantyMonths: 0 };
-
-                        const expiresAt = new Date(nowMs);
-                        expiresAt.setMonth(expiresAt.getMonth() + months);
-
-                        return {
-                            ...p,
-                            warrantyMonths: months,
-                            warrantyExpiresAt: expiresAt.getTime(),
-                            partType: rawPartType
-                        };
-                    });
-
-                    updateData.parts = ticket.parts;
+                    const stamped = stampRepairWarrantyOnParts(ticket.parts, productDataById, warrantyRules, Date.now());
+                    if (stamped.changed) {
+                        updateData.parts = stamped.parts;
+                        ticket.parts = stamped.parts;
+                    }
                 }
 
                 // Stock Deduction

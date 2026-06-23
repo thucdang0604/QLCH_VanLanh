@@ -49,6 +49,10 @@ function errorMessage(error: unknown): string {
     return error instanceof Error ? error.message : 'Internal server error';
 }
 
+function getProductPartType(product: ProductData): string {
+    return String(product.partType || '').trim();
+}
+
 export async function POST(request: NextRequest) {
     try {
         const caller = await requirePermission(request, 'manage_repairs');
@@ -191,6 +195,7 @@ export async function POST(request: NextRequest) {
                         reservedQuantity: quantity,
                         status: REPAIR_PART_STATUS.SELECTED,
                         quality: String(pData.quality || ''),
+                        partType: getProductPartType(pData),
                         unitPriceAtUse: Number(pData.price_promo) || Number(pData.price_original) || 0,
                         unitCostAtUse: Number(pData.costPrice) || 0,
                         priceConfirmedAt: arrayTimestampValue()
@@ -279,6 +284,7 @@ export async function POST(request: NextRequest) {
                                 reservedQuantity: delta,
                                 status: REPAIR_PART_STATUS.SELECTED,
                                 quality: String(pData.quality || ''),
+                                partType: line.partType || getProductPartType(pData),
                                 unitPriceAtUse: Number(pData.price_promo) || Number(pData.price_original) || 0,
                                 unitCostAtUse: Number(pData.costPrice) || 0,
                                 priceConfirmedAt: arrayTimestampValue()

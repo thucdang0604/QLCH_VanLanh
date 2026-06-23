@@ -38,7 +38,7 @@ interface RepairTicketBoardProps {
     openPrint: (ticket: RepairTicket, mode: 'receipt' | 'invoice' | 'warranty', warrantyType?: WarrantyPrintType | null) => void;
     setViewingTicket: (ticket: RepairTicket) => void;
     setAssignModal: (modal: { ticket: RepairTicket }) => void;
-    setWarrantyModal: (ticket: RepairTicket) => void;
+    setWarrantyModal: (ticket: RepairTicket) => void | Promise<void>;
     setWarrantySelectedIndexes: (indexes: number[]) => void;
     onPageChange: (page: number) => void;
     onPageSizeChange: (size: PageSize) => void;
@@ -56,6 +56,10 @@ function hasActiveWarrantyPart(ticket: RepairTicket) {
                 : (part.warrantyExpiresAt as { toDate?: () => Date })?.toDate?.()?.getTime() || 0
         ) > Date.now()
     );
+}
+
+function hasWarrantyCandidatePart(ticket: RepairTicket) {
+    return (ticket.parts || []).some(part => isSelectedRepairPart(part) && isWarrantyEligibleRepairPart(part));
 }
 
 export function RepairTicketBoard({
@@ -105,7 +109,7 @@ export function RepairTicketBoard({
                         && Boolean(warrantyConfig);
                     const canCreateWarranty = Boolean(st?.isTerminal)
                         && ticket.ticketType !== 'warranty'
-                        && (hasActiveWarrantyPart(ticket) || Boolean(warrantyConfig));
+                        && (hasActiveWarrantyPart(ticket) || hasWarrantyCandidatePart(ticket) || Boolean(warrantyConfig));
 
                     return (
                         <div key={ticket.id} className={`p-4 space-y-3 bg-white hover:bg-gray-50 transition-colors ${ticket.payment?.status === 'unpaid' ? 'bg-red-50/50' : ''}`}>
@@ -205,7 +209,7 @@ export function RepairTicketBoard({
                                         </button>
                                     )}
                                     {canCreateWarranty && (
-                                        <button onClick={() => { setWarrantyModal(ticket); setWarrantySelectedIndexes([]); }} className="w-full py-2 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-semibold rounded-lg flex items-center justify-center gap-1 mt-1">
+                                        <button onClick={() => { setWarrantySelectedIndexes([]); void setWarrantyModal(ticket); }} className="w-full py-2 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-semibold rounded-lg flex items-center justify-center gap-1 mt-1">
                                             <AlertCircle size={14} /> Kích hoạt bảo hành
                                         </button>
                                     )}
@@ -248,7 +252,7 @@ export function RepairTicketBoard({
                                 && Boolean(warrantyConfig);
                             const canCreateWarranty = Boolean(st?.isTerminal)
                                 && ticket.ticketType !== 'warranty'
-                                && (hasActiveWarrantyPart(ticket) || Boolean(warrantyConfig));
+                                && (hasActiveWarrantyPart(ticket) || hasWarrantyCandidatePart(ticket) || Boolean(warrantyConfig));
                             return (
                                 <tr key={ticket.id} className={`hover:bg-gray-50/50 transition-colors ${ticket.payment?.status === 'unpaid' ? 'bg-red-50' : ''}`}>
                                     <td className="px-4 py-3 font-mono text-xs text-gray-500">
@@ -365,7 +369,7 @@ export function RepairTicketBoard({
                                                 );
                                             })()}
                                             {canCreateWarranty && (
-                                                    <button onClick={() => { setWarrantyModal(ticket); setWarrantySelectedIndexes([]); }}
+                                                    <button onClick={() => { setWarrantySelectedIndexes([]); void setWarrantyModal(ticket); }}
                                                         className="flex items-center gap-1 px-2 py-1 text-[10px] font-semibold rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition-colors"
                                                         title="Tạo phiếu bảo hành">
                                                         <AlertCircle size={12} /> Bảo hành
