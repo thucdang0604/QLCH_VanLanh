@@ -8,7 +8,7 @@ import Modal from '@/components/admin/Modal';
 import CurrencyInput from '@/components/admin/CurrencyInput';
 import {
     collection, getDocs, addDoc, updateDoc, deleteDoc,
-    doc, serverTimestamp, query, orderBy, where, limit, Timestamp
+    doc, serverTimestamp, query, orderBy, where, limit, Timestamp, getDoc, setDoc
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
@@ -17,9 +17,33 @@ import type { CommissionRule, Commission, FirestoreWriteTimestamp } from '@/lib/
 import { toastError } from '@/lib/toast';
 import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
+import { generateSlug } from '@/lib/utils';
 
 const COMMISSION_HISTORY_LIMIT = 300;
 const COMMISSION_RULE_LIMIT = 100;
+
+function buildCommissionRuleBaseId(input: {
+    name: string;
+    type: string;
+    targetType: string;
+    targetValue: string;
+}) {
+    const slug = generateSlug([
+        input.name,
+        input.type,
+        input.targetType !== 'general' ? input.targetValue : '',
+    ].filter(Boolean).join('-')).slice(0, 90) || 'rule';
+    return `COMR-${slug}`;
+}
+
+async function getAvailableCommissionRuleId(baseId: string) {
+    for (let i = 0; i < 50; i += 1) {
+        const candidate = i === 0 ? baseId : `${baseId}-${i + 1}`;
+        const snap = await getDoc(doc(db, 'commission_rules', candidate));
+        if (!snap.exists()) return candidate;
+    }
+    throw new Error('Không thể tạo mã quy tắc hoa hồng không trùng.');
+}
 
 function getMonthRange(monthValue: string): { start: Timestamp; end: Timestamp } {
     const [yearRaw, monthRaw] = monthValue.split('-').map(Number);
@@ -150,8 +174,9 @@ export default function CommissionsPage() {
                 await updateDoc(doc(db, 'commission_rules', editingRule.id), data);
                 setRules(prev => prev.map(r => r.id === editingRule.id ? { ...r, ...data } : r));
             } else {
-                const ref = await addDoc(collection(db, 'commission_rules'), { ...data, createdAt: serverTimestamp() });
-                setRules(prev => [{ id: ref.id, ...data, createdAt: serverTimestamp() as FirestoreWriteTimestamp } as CommissionRule & { id: string }, ...prev]);
+                const ruleId = await getAvailableCommissionRuleId(buildCommissionRuleBaseId(data));
+                await setDoc(doc(db, 'commission_rules', ruleId), { ...data, createdAt: serverTimestamp() });
+                setRules(prev => [{ id: ruleId, ...data, createdAt: serverTimestamp() as FirestoreWriteTimestamp } as CommissionRule & { id: string }, ...prev]);
             }
             setShowRuleModal(false);
         } catch (err) {
