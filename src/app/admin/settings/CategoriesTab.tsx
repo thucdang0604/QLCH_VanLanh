@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useFirestoreCollection, updateDocument, deleteDocument, addDocument } from '@/lib/useFirestore';
+import { getDoc, doc } from 'firebase/firestore';
+import { useFirestoreCollection, updateDocument, deleteDocument, addDocumentWithId } from '@/lib/useFirestore';
+import { db } from '@/lib/firebase';
 import { Brand, TaxonomyNode } from '@/lib/types';
 import { useConfig } from '@/lib/ConfigContext';
 import Modal from '@/components/admin/Modal';
@@ -591,7 +593,7 @@ function BrandModal({ isOpen, onClose, initialData }: { isOpen: boolean, onClose
                 await updateDocument('brands', initialData.id, payload);
                 toastSuccess('Cập nhật thương hiệu thành công');
             } else {
-                await addDocument('brands', payload);
+                await addDocumentWithId('brands', await getAvailableBrandId(String(payload.name || 'brand')), payload);
                 toastSuccess('Thêm thương hiệu mới thành công');
             }
             void requestRevalidate(['layout'], ['categories', 'config']);
@@ -680,4 +682,14 @@ function BrandModal({ isOpen, onClose, initialData }: { isOpen: boolean, onClose
             </form>
         </Modal>
     );
+}
+
+async function getAvailableBrandId(name: string) {
+    const baseId = `BR-${generateSlug(name).slice(0, 90) || 'brand'}`;
+    for (let i = 0; i < 50; i += 1) {
+        const candidate = i === 0 ? baseId : `${baseId}-${i + 1}`;
+        const snap = await getDoc(doc(db, 'brands', candidate));
+        if (!snap.exists()) return candidate;
+    }
+    throw new Error('Không thể tạo mã thương hiệu không trùng.');
 }
