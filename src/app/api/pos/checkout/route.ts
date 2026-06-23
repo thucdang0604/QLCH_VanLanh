@@ -258,6 +258,9 @@ export async function POST(request: NextRequest) {
             const serverDiscount = Math.min(Number(discount_amount) || 0, discountableSubtotal);
             const serverTotal = serverSubtotal - serverDiscount;
             const isDebtCollectionOnly = orderPaymentSubtotal > 0 && discountableSubtotal === 0;
+            const hasRepairPayment = normalizedItems.some(item => item.isRepairTicket);
+            const paidNow = Number(deposit_amount) || 0;
+            const paymentMethodCode = String(payment_method || 'CASH').toUpperCase();
 
             if (orderPaymentSubtotal > 0 && discountableSubtotal > 0) {
                 throw new Error('Vui lòng tách thu nợ đơn cũ và bán hàng mới thành 2 lần thanh toán riêng.');
@@ -267,6 +270,16 @@ export async function POST(request: NextRequest) {
             }
 
             // ── Voucher Validation for POS ──
+            if (hasRepairPayment && !['CASH', 'BANK', 'MOMO'].includes(paymentMethodCode)) {
+                throw new Error('Thanh toán phiếu sửa chữa phải thu ngay bằng tiền mặt, chuyển khoản hoặc ví.');
+            }
+            if (hasRepairPayment && paidNow + 1 < serverTotal) {
+                throw new Error(`Thanh toán phiếu sửa chữa còn thiếu ${(serverTotal - paidNow).toLocaleString('vi-VN')}đ. Vui lòng thu đủ trước khi hoàn tất.`);
+            }
+            if (hasRepairPayment && paidNow - serverTotal > 1) {
+                throw new Error(`Số tiền thu vượt tổng cần thanh toán ${serverTotal.toLocaleString('vi-VN')}đ.`);
+            }
+
             let voucherRef: FirebaseFirestore.DocumentReference | null = null;
             let appliedVoucherCode: string | undefined;
             let appliedPersonalVoucher = false;
@@ -316,8 +329,8 @@ export async function POST(request: NextRequest) {
                 // In POS, we might accept client total or enforce server total. Let's enforce server total.
             }
 
-            const isPending = !isDebtCollectionOnly && Number(deposit_amount) > 0 && Number(deposit_amount) < serverTotal;
-            if (orderPaymentSubtotal > 0 && String(payment_method || '').toUpperCase() === 'DEBT') {
+            const isPending = !isDebtCollectionOnly && !hasRepairPayment && Number(deposit_amount) > 0 && Number(deposit_amount) < serverTotal;
+            if (orderPaymentSubtotal > 0 && paymentMethodCode === 'DEBT') {
                 throw new Error('Thu nợ đơn hàng phải thanh toán ngay bằng tiền mặt, chuyển khoản hoặc ví.');
             }
 

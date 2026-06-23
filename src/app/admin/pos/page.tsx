@@ -1020,6 +1020,23 @@ export default function POSPage() {
                 }
             }
 
+            const hasRepairPayment = cart.some(item => item.isRepairTicket);
+            if (hasRepairPayment && !['cash', 'bank', 'momo'].includes(paymentMethod)) {
+                toastError('Thanh toán phiếu sửa chữa phải thu ngay bằng tiền mặt, chuyển khoản hoặc ví.');
+                setIsProcessing(false);
+                return;
+            }
+            if (hasRepairPayment && deposit + 1 < total) {
+                toastError(`Thanh toán phiếu sửa chữa còn thiếu ${(total - deposit).toLocaleString('vi-VN')}đ. Vui lòng thu đủ trước khi hoàn tất.`);
+                setIsProcessing(false);
+                return;
+            }
+            if (hasRepairPayment && deposit - total > 1) {
+                toastError(`Số tiền thu vượt tổng cần thanh toán ${total.toLocaleString('vi-VN')}đ.`);
+                setIsProcessing(false);
+                return;
+            }
+
             const operationKey = crypto.randomUUID();
 
             const repairTicketIds = Array.from(new Set(
