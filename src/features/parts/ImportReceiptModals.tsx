@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import type React from 'react';
 import { Building2, CheckCircle2, ChevronDown, Loader2, PackagePlus, Plus, Save, Search, Trash2 } from 'lucide-react';
-import { addDoc, collection, doc, getDocs, query, serverTimestamp, where } from 'firebase/firestore';
+import { addDoc, collection, doc, getDoc, getDocs, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
 
 import CategoryTaxonomySelector from '@/components/admin/CategoryTaxonomySelector';
 import CurrencyInput from '@/components/admin/CurrencyInput';
@@ -14,6 +14,22 @@ import { buildProductCodeFromId } from '@/lib/productCodes';
 import { createProductWithCodes } from '@/lib/productCodeRegistry';
 import { toastError, toastSuccess } from '@/lib/toast';
 import type { ImportPreviewState, ImportReceiptItem, SupplierOption } from './importReceiptTypes';
+
+function buildImportReceiptBaseId() {
+    const now = new Date();
+    const dateKey = `${String(now.getFullYear()).slice(2)}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+    return `NH-${dateKey}-${Date.now().toString(36).toUpperCase()}`;
+}
+
+async function getAvailableImportReceiptId() {
+    const baseId = buildImportReceiptBaseId();
+    for (let i = 0; i < 20; i += 1) {
+        const candidate = i === 0 ? baseId : `${baseId}-${i + 1}`;
+        const snap = await getDoc(doc(db, 'import_receipts', candidate));
+        if (!snap.exists()) return candidate;
+    }
+    throw new Error('Không thể tạo mã phiếu nhập không trùng.');
+}
 
 interface ImportPreviewModalProps {
     importPreviewModal: ImportPreviewState;
@@ -423,7 +439,7 @@ export function CreateReceiptModal({ isOpen, onClose, parts, retailProducts, onC
         if (items.length === 0) return;
         setIsSubmitting(true);
         try {
-            await addDoc(collection(db, 'import_receipts'), {
+            await setDoc(doc(db, 'import_receipts', await getAvailableImportReceiptId()), {
                 note,
                 items,
                 totalAmount,
