@@ -2,7 +2,7 @@
 
 /* eslint-disable @next/next/no-img-element */
 import { useState, useEffect, useRef } from 'react';
-import { collection, addDoc, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, limit } from 'firebase/firestore';
+import { collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, limit, setDoc } from 'firebase/firestore';
 import { db, getStorageInstance } from '@/lib/firebase';
 import { X, Upload, Image as ImageIcon, Film, Trash2, Loader2, Check, Search, AlertTriangle } from 'lucide-react';
 import type { FirestoreDateValue } from '@/lib/types';
@@ -62,6 +62,18 @@ function normalizeMediaBaseName(value: string): string {
         .filter(Boolean)
         .pop() || value.trim();
     return fileName.replace(/\.[^.]+$/, '').toLowerCase();
+}
+
+function buildMediaDocumentId(folder: string, fileName: string): string {
+    const safeFolder = folder.replace(/[^a-z0-9_-]/gi, '-').toLowerCase() || 'general';
+    const safeName = normalizeMediaBaseName(fileName)
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9_-]/gi, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '')
+        .slice(0, 70) || 'media';
+    return `MED-${safeFolder}-${Date.now()}-${safeName}`;
 }
 
 export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultiple, multiple = false, title = 'Chọn media', defaultFolder = 'general' }: MediaManagerProps) {
@@ -194,7 +206,7 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                 }
 
                 // Save metadata to Firestore
-                await addDoc(collection(db, 'media_library'), {
+                await setDoc(doc(db, 'media_library', buildMediaDocumentId(uploadFolder, fileToUpload.name)), {
                     url,
                     path: storagePath,
                     name: fileToUpload.name,
