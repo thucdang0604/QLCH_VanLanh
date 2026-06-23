@@ -7,9 +7,10 @@ import { calculateAndSaveCommissionsServer } from '@/lib/commissionCalcServer';
 import type { Order, RepairTicket, WorkflowNode } from '@/lib/types';
 import { PRODUCT_STATUS, isProductArchived } from '@/lib/productLifecycle';
 import { normalizeVietnamPhone } from '@/lib/phone';
-import { fetchFifoLogsForDeduction, executeFifoDeductionsWrites, type FifoDeductionResult } from '@/lib/inventoryFifo';
+import { fetchFifoLogsForDeduction, executeFifoDeductionsWrites, type FifoDeductionResult, type FifoDeductor } from '@/lib/inventoryFifo';
 import { buildCompletedOrderRevenueDelta, incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 import { loadRepairWorkflow, requireWorkflowNode, workflowNodeHasFeature } from '@/lib/repairWorkflowServer';
+import { isSelectedRepairPart } from '@/lib/repairStatus';
 
 function resolvePaymentCompletionTarget(workflow: WorkflowNode[], currentStatus: string) {
     const currentNode = requireWorkflowNode(workflow, currentStatus);
@@ -84,8 +85,20 @@ export async function POST(request: NextRequest) {
 
             // Pre-aggregate for overall stock check
             const preAggregatedForStock = new Map<string, number>();
+            const repairAggregatedForStock = new Map<string, { quantity: number; reservedQuantity: number; productName: string }>();
             // Pre-aggregate for FIFO deduction
             const fifoMap = new Map<string, { productId: string; quantity: number; preferredLotCodes: Map<string, number> }>();
+            const addFifoDeduction = (productId: string, quantity: number, lotCode?: string) => {
+                let fifoItem = fifoMap.get(productId);
+                if (!fifoItem) {
+                    fifoItem = { productId, quantity: 0, preferredLotCodes: new Map<string, number>() };
+                    fifoMap.set(productId, fifoItem);
+                }
+                fifoItem.quantity += quantity;
+                if (lotCode) {
+                    fifoItem.preferredLotCodes.set(lotCode, (fifoItem.preferredLotCodes.get(lotCode) || 0) + quantity);
+                }
+            };
 
             for (const item of items) {
                 if (item.isRepairTicket || item.isOrderPayment) continue; // Bỏ qua check kho cho phiếu sửa chữa/thu nợ
@@ -95,27 +108,12 @@ export async function POST(request: NextRequest) {
                 
                 preAggregatedForStock.set(pid, (preAggregatedForStock.get(pid) || 0) + qty);
 
-                let fifoItem = fifoMap.get(pid);
-                if (!fifoItem) {
-                    fifoItem = { productId: pid, quantity: 0, preferredLotCodes: new Map<string, number>() };
-                    fifoMap.set(pid, fifoItem);
-                }
-                fifoItem.quantity += qty;
-                if (lot) {
-                    fifoItem.preferredLotCodes.set(lot, (fifoItem.preferredLotCodes.get(lot) || 0) + qty);
-                }
+                addFifoDeduction(pid, qty, lot);
             }
 
             let fifoResultsMap = new Map<string, FifoDeductionResult[]>();
             let fifoLogsDataMap: Awaited<ReturnType<typeof fetchFifoLogsForDeduction>> = new Map();
-            const fifoDeductors = Array.from(fifoMap.values()).map(x => ({ 
-                productId: x.productId, 
-                quantityToDeduct: x.quantity,
-                preferredLotCodes: Array.from(x.preferredLotCodes.entries()).map(([lotCode, quantity]) => ({ lotCode, quantity }))
-            }));
-            if (fifoDeductors.length > 0) {
-                fifoLogsDataMap = await fetchFifoLogsForDeduction(tx, db, fifoDeductors);
-            }
+            let fifoDeductors: FifoDeductor[] = [];
 
             // Fetch products
             const productDocs = new Map<string, { ref: FirebaseFirestore.DocumentReference; data: FirebaseFirestore.DocumentData }>();
@@ -458,10 +456,60 @@ export async function POST(request: NextRequest) {
                 if (!repairPaymentTotals.has(id)) continue;
                 const repairTicket = repairDoc.snap.data() as RepairTicket;
                 const workflow = await loadRepairWorkflow(tx, db, repairTicket);
-                repairCompletionTargets.set(id, resolvePaymentCompletionTarget(workflow, repairTicket.status));
+                const completionTarget = resolvePaymentCompletionTarget(workflow, repairTicket.status);
+                repairCompletionTargets.set(id, completionTarget);
+                if (!completionTarget.shouldCountCompletion) continue;
+
+                for (const part of repairTicket.parts || []) {
+                    if (!isSelectedRepairPart(part) || !part.productId) continue;
+                    const quantity = Math.max(0, Math.floor(Number(part.quantity) || 0));
+                    if (quantity <= 0) continue;
+                    const reservedQuantity = Math.max(0, Math.min(quantity, Number(part.reservedQuantity) || quantity));
+                    const existing = repairAggregatedForStock.get(part.productId) || {
+                        quantity: 0,
+                        reservedQuantity: 0,
+                        productName: part.productName || part.productId,
+                    };
+                    repairAggregatedForStock.set(part.productId, {
+                        quantity: existing.quantity + quantity,
+                        reservedQuantity: existing.reservedQuantity + reservedQuantity,
+                        productName: existing.productName || part.productName || part.productId,
+                    });
+                    addFifoDeduction(part.productId, quantity, part.lotCode);
+                }
             }
 
             // ── Construct Order Object ──
+            for (const productId of repairAggregatedForStock.keys()) {
+                if (productDocs.has(productId)) continue;
+                const pRef = db.collection('products').doc(productId);
+                const pSnap = await tx.get(pRef);
+                if (!pSnap.exists) {
+                    throw new Error(`Linh kiện sửa chữa (ID: ${productId}) không tồn tại.`);
+                }
+                productDocs.set(productId, { ref: pRef, data: (pSnap.data() || {}) as FirebaseFirestore.DocumentData });
+            }
+
+            for (const [productId, repairQty] of repairAggregatedForStock.entries()) {
+                const productDoc = productDocs.get(productId);
+                if (!productDoc) continue;
+                const currentStock = Number(productDoc.data.stock) || 0;
+                const retailQty = preAggregatedForStock.get(productId) || 0;
+                const totalDeduct = retailQty + repairQty.quantity;
+                if (currentStock < totalDeduct) {
+                    throw new Error(`Linh kiện "${repairQty.productName}" chỉ còn ${currentStock} tồn kho nhưng cần trừ ${totalDeduct}.`);
+                }
+            }
+
+            fifoDeductors = Array.from(fifoMap.values()).map(x => ({
+                productId: x.productId,
+                quantityToDeduct: x.quantity,
+                preferredLotCodes: Array.from(x.preferredLotCodes.entries()).map(([lotCode, quantity]) => ({ lotCode, quantity }))
+            }));
+            if (fifoDeductors.length > 0) {
+                fifoLogsDataMap = await fetchFifoLogsForDeduction(tx, db, fifoDeductors);
+            }
+
             const order: Record<string, unknown> = {
                 customer_info: {
                     name: customer_info?.name || 'Khách lẻ',
@@ -536,34 +584,56 @@ export async function POST(request: NextRequest) {
             }
 
             // Stock Deduction
-            for (const [productId, totalQty] of preAggregatedForStock.entries()) {
+            const stockProductIds = new Set([...preAggregatedForStock.keys(), ...repairAggregatedForStock.keys()]);
+            for (const productId of stockProductIds) {
                 const pSnap = productDocs.get(productId)!;
                 const d = pSnap.data;
                 const currentStock = Number(d.stock) || 0;
                 const currentHeld = Number(d.held) || 0;
+                const retailQty = preAggregatedForStock.get(productId) || 0;
+                const repairQty = repairAggregatedForStock.get(productId)?.quantity || 0;
+                const repairReservedQty = repairAggregatedForStock.get(productId)?.reservedQuantity || 0;
+                const totalQty = retailQty + repairQty;
 
                 if (isPending) {
                     tx.update(pSnap.ref, {
-                        held: currentHeld + totalQty
+                        held: currentHeld + retailQty
                     });
                 } else {
                     tx.update(pSnap.ref, {
-                        stock: currentStock - totalQty
+                        stock: currentStock - totalQty,
+                        held: Math.max(0, currentHeld - repairReservedQty)
                     });
 
-                    // Log inventory
-                    tx.set(db.collection('inventory_logs').doc(), {
-                        productId,
-                        productName: d.name,
-                        quantity: -totalQty,
-                        costPriceAtLog: Number(d.costPrice) || 0,
-                        type: 'POS_SALE',
-                        referenceType: 'order',
-                        referenceId: orderId,
-                        lotsDeducted: fifoResultsMap.get(productId) || [],
-                        createdBy: caller.uid,
-                        createdAt: FieldValue.serverTimestamp()
-                    });
+                    if (retailQty > 0) {
+                        tx.set(db.collection('inventory_logs').doc(), {
+                            productId,
+                            productName: d.name,
+                            quantity: -retailQty,
+                            costPriceAtLog: Number(d.costPrice) || 0,
+                            type: 'POS_SALE',
+                            referenceType: 'order',
+                            referenceId: orderId,
+                            lotsDeducted: fifoResultsMap.get(productId) || [],
+                            createdBy: caller.uid,
+                            createdAt: FieldValue.serverTimestamp()
+                        });
+                    }
+                    if (repairQty > 0) {
+                        tx.set(db.collection('inventory_logs').doc(), {
+                            productId,
+                            productName: repairAggregatedForStock.get(productId)?.productName || d.name,
+                            quantity: -repairQty,
+                            costPriceAtLog: Number(d.costPrice) || 0,
+                            type: 'REPAIR_POS_HANDOVER',
+                            referenceType: 'repair',
+                            referenceId: orderId,
+                            orderId,
+                            lotsDeducted: fifoResultsMap.get(productId) || [],
+                            createdBy: caller.uid,
+                            createdAt: FieldValue.serverTimestamp()
+                        });
+                    }
                 }
             }
 
