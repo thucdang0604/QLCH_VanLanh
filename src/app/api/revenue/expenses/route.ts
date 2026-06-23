@@ -3,6 +3,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { requirePermission } from '@/lib/apiAuth';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
+import { reserveSequentialDocumentId } from '@/lib/serverDocumentIds';
 
 const EXPENSE_CATEGORIES = new Set(['rent', 'utilities', 'supplies', 'salary', 'other']);
 
@@ -39,7 +40,11 @@ export async function POST(request: NextRequest) {
                     ? userData.name
                     : 'Admin';
 
-            const expenseRef = db.collection('expenses').doc();
+            const expenseAllocation = await reserveSequentialDocumentId(tx, db, {
+                collectionName: 'expenses',
+                prefix: 'CP',
+            });
+            const expenseRef = expenseAllocation.ref;
             const expense = {
                 category,
                 description,
@@ -50,11 +55,12 @@ export async function POST(request: NextRequest) {
                 createdAt: FieldValue.serverTimestamp(),
             };
 
+            expenseAllocation.commitCounter();
             tx.set(expenseRef, expense);
             incrementRevenueAggregates(tx, db, { manualExpenses: amount }, createdAt);
 
             return {
-                id: expenseRef.id,
+                id: expenseAllocation.id,
                 category,
                 description,
                 amount,
