@@ -24,6 +24,7 @@ import { useAuth } from '@/lib/AuthContext';
 import { useConfig } from '@/lib/ConfigContext';
 import { PART_CATEGORY_LABEL } from '@/lib/constants';
 import { buildProductCodeFromId, normalizeProductCode } from '@/lib/productCodes';
+import { reserveSupplierDocumentId } from '@/lib/supplierDocumentIds';
 import { generateSearchKeywords, generateSlug } from '@/lib/utils';
 import { triggerRevalidate } from '@/lib/revalidate';
 import {
@@ -1038,15 +1039,16 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
         const name = getValue(row.data, modeConfig.nameHeaders);
         if (!name) throw new Error('Thiếu tên nhà cung cấp.');
 
-        const supplierRef = doc(collection(db, 'suppliers'));
-        const supplierId = supplierRef.id;
+        const phone = normalizeImportPhone(getValue(row.data, ['SĐT', 'sdt', 'phone', 'Phone', 'Số điện thoại']));
+        const supplierId = await reserveSupplierDocumentId({ name, phone });
+        const supplierRef = doc(db, 'suppliers', supplierId);
         const totalDebt = getSignedNumber(row.data, ['Công nợ', 'Nợ', 'Debt']);
         const txRef = totalDebt !== 0 ? doc(collection(db, 'supplier_transactions')) : null;
 
         await runTransaction(db, async (transaction) => {
             transaction.set(supplierRef, {
                 name,
-                phone: normalizeImportPhone(getValue(row.data, ['SĐT', 'sdt', 'phone', 'Phone', 'Số điện thoại'])),
+                phone,
                 contactPerson: getValue(row.data, ['Người liên hệ', 'Contact']),
                 email: getValue(row.data, ['Email']),
                 address: getValue(row.data, ['Địa chỉ', 'Address']),
