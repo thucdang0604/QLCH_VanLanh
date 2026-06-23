@@ -11,7 +11,7 @@ import { fetchFifoLogsForDeduction, executeFifoDeductionsWrites, type FifoDeduct
 import { buildCompletedOrderRevenueDelta, incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 import { loadRepairWorkflow, requireWorkflowNode, workflowNodeHasFeature } from '@/lib/repairWorkflowServer';
 import { isSelectedRepairPart } from '@/lib/repairStatus';
-import { reserveSequentialDocumentId, type ReservedSequentialDocumentId } from '@/lib/serverDocumentIds';
+import { reserveSequentialDocumentId, reserveSequentialDocumentIds, type ReservedSequentialDocumentId } from '@/lib/serverDocumentIds';
 
 function resolvePaymentCompletionTarget(workflow: WorkflowNode[], currentStatus: string) {
     const currentNode = requireWorkflowNode(workflow, currentStatus);
@@ -507,6 +507,38 @@ export async function POST(request: NextRequest) {
                 fifoLogsDataMap = await fetchFifoLogsForDeduction(tx, db, fifoDeductors);
             }
 
+            const stockProductIds = new Set([...preAggregatedForStock.keys(), ...repairAggregatedForStock.keys()]);
+            const inventoryLogCount = isPending
+                ? 0
+                : Array.from(stockProductIds).reduce((count, productId) => {
+                    const retailQty = preAggregatedForStock.get(productId) || 0;
+                    const repairQty = repairAggregatedForStock.get(productId)?.quantity || 0;
+                    return count + (retailQty > 0 ? 1 : 0) + (repairQty > 0 ? 1 : 0);
+                }, 0);
+            const customerSpendDelta = !isPending && !isDebtCollectionOnly ? Math.max(0, serverTotal - orderPaymentTotal) : 0;
+            const ledgerPurchaseAmount = isPending ? (Number(deposit_amount) || 0) : customerSpendDelta;
+            const customerLedgerCount = custRef
+                ? (ledgerPurchaseAmount > 0 ? 1 : 0) + (!isPending && orderPaymentTotal > 0 ? 1 : 0)
+                : 0;
+            const customerTransactionCount = !isPending && normalizedPhoneResult && orderPaymentTotal > 0 ? 1 : 0;
+            const inventoryLogAllocations = await reserveSequentialDocumentIds(tx, db, {
+                collectionName: 'inventory_logs',
+                prefix: 'IL',
+                count: inventoryLogCount,
+            });
+            const customerLedgerAllocations = await reserveSequentialDocumentIds(tx, db, {
+                collectionName: 'customer_ledger',
+                prefix: 'CL',
+                count: customerLedgerCount,
+            });
+            const customerTransactionAllocations = await reserveSequentialDocumentIds(tx, db, {
+                collectionName: 'customer_transactions',
+                prefix: 'CT',
+                count: customerTransactionCount,
+            });
+            let inventoryLogAllocationIndex = 0;
+            let customerLedgerAllocationIndex = 0;
+
             let orderAllocation: ReservedSequentialDocumentId | null = null;
             if (!isDebtCollectionOnly) {
                 orderAllocation = await reserveSequentialDocumentId(tx, db, {
@@ -594,7 +626,6 @@ export async function POST(request: NextRequest) {
             }
 
             // Stock Deduction
-            const stockProductIds = new Set([...preAggregatedForStock.keys(), ...repairAggregatedForStock.keys()]);
             for (const productId of stockProductIds) {
                 const pSnap = productDocs.get(productId)!;
                 const d = pSnap.data;
@@ -616,7 +647,7 @@ export async function POST(request: NextRequest) {
                     });
 
                     if (retailQty > 0) {
-                        tx.set(db.collection('inventory_logs').doc(), {
+                        tx.set(inventoryLogAllocations[inventoryLogAllocationIndex++].ref, {
                             productId,
                             productName: d.name,
                             quantity: -retailQty,
@@ -630,7 +661,7 @@ export async function POST(request: NextRequest) {
                         });
                     }
                     if (repairQty > 0) {
-                        tx.set(db.collection('inventory_logs').doc(), {
+                        tx.set(inventoryLogAllocations[inventoryLogAllocationIndex++].ref, {
                             productId,
                             productName: repairAggregatedForStock.get(productId)?.productName || d.name,
                             quantity: -repairQty,
@@ -697,7 +728,6 @@ export async function POST(request: NextRequest) {
             }
 
             // Customer Aggregate
-            const customerSpendDelta = !isPending && !isDebtCollectionOnly ? Math.max(0, serverTotal - orderPaymentTotal) : 0;
             if (custRef && custSnap) {
                 if (custSnap.exists) {
                     const currentData = custSnap.data()!;
@@ -754,9 +784,8 @@ export async function POST(request: NextRequest) {
                     tx.set(custRef, newCust);
                 }
 
-                const ledgerPurchaseAmount = isPending ? (Number(deposit_amount) || 0) : customerSpendDelta;
                 if (ledgerPurchaseAmount > 0) {
-                    tx.set(db.collection('customer_ledger').doc(), {
+                    tx.set(customerLedgerAllocations[customerLedgerAllocationIndex++].ref, {
                         customerId: normalizedPhoneResult!.local,
                         type: isPending ? 'deposit_order' : 'purchase_order',
                         amount: ledgerPurchaseAmount,
@@ -765,7 +794,7 @@ export async function POST(request: NextRequest) {
                     });
                 }
                 if (!isPending && orderPaymentTotal > 0) {
-                    tx.set(db.collection('customer_ledger').doc(), {
+                    tx.set(customerLedgerAllocations[customerLedgerAllocationIndex++].ref, {
                         customerId: normalizedPhoneResult!.local,
                         type: 'debt_payment',
                         amount: orderPaymentTotal,
@@ -856,7 +885,7 @@ export async function POST(request: NextRequest) {
                 }
 
                 if (normalizedPhoneResult && orderPaymentTotal > 0) {
-                    tx.set(db.collection('customer_transactions').doc(), {
+                    tx.set(customerTransactionAllocations[0].ref, {
                         customerId: normalizedPhoneResult.local,
                         customerName: incomingName || customer_info?.name || 'Khách lẻ',
                         type: 'PAYMENT',
@@ -880,6 +909,9 @@ export async function POST(request: NextRequest) {
                     updatedOrderIds
                 });
             }
+            inventoryLogAllocations.at(-1)?.commitCounter();
+            customerLedgerAllocations.at(-1)?.commitCounter();
+            customerTransactionAllocations.at(-1)?.commitCounter();
 
             return {
                 success: true,
