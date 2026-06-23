@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { CalendarClock, Clock, Phone, User, CheckCircle2, X, Search, Loader2, MapPin, ArrowRight, History, XCircle, type LucideIcon } from 'lucide-react';
-import { collection, addDoc, serverTimestamp, query, where, getDocs } from 'firebase/firestore';
+import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useConfig } from '@/lib/ConfigContext';
 import type { FirestoreDateValue } from '@/lib/types';
@@ -139,20 +139,26 @@ export default function BookingSection() {
 
         setIsSubmitting(true);
         try {
-            await addDoc(collection(db, 'appointments'), {
-                fullName: formData.fullName,
-                phone: formData.phone,
-                date: formData.date,
-                timeSlot: formData.timeSlot,
-                store: formData.store,
-                status: 'pending',
-                createdAt: serverTimestamp(),
+            const res = await fetch('/api/appointments', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    fullName: formData.fullName,
+                    phone: formData.phone,
+                    date: formData.date,
+                    timeSlot: formData.timeSlot,
+                    store: formData.store,
+                }),
             });
+            const data = await res.json();
+            if (!res.ok) {
+                throw new Error(data.error || 'Không thể đặt lịch.');
+            }
             showToast('🎉 Đặt lịch thành công! Chúng tôi sẽ liên hệ bạn sớm.');
             resetForm();
         } catch (error) {
             console.error('Booking error:', error);
-            showToast('Có lỗi xảy ra. Vui lòng thử lại.');
+            showToast(error instanceof Error ? error.message : 'Có lỗi xảy ra. Vui lòng thử lại.');
         } finally {
             setIsSubmitting(false);
         }

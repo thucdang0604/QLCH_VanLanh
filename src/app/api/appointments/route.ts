@@ -3,6 +3,7 @@ import { getAdminDb } from '@/lib/firebaseAdmin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { isRateLimited } from '@/lib/rateLimit';
 import { normalizeVietnamPhone } from '@/lib/phone';
+import { reserveSequentialDocumentId } from '@/lib/serverDocumentIds';
 
 const RATE_LIMIT_MAX = 3;
 const RATE_LIMIT_WINDOW_MS = 60_000;
@@ -48,8 +49,9 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Validate phone format (Vietnamese: 0xxxxxxxxx, 10-11 digits)
-        if (!/^0\d{9,10}$/.test(phone.trim())) {
+        // Validate and normalize Vietnamese phone format.
+        const normalizedPhone = normalizeVietnamPhone(phone);
+        if (!normalizedPhone) {
             return NextResponse.json(
                 { error: 'Số điện thoại không hợp lệ (VD: 0901234567).' },
                 { status: 400 }
@@ -73,7 +75,7 @@ export async function POST(request: NextRequest) {
         // ── 4. Create appointment ──
         const appointment = {
             fullName: fullName.trim(),
-            phone: phone.trim(),
+            phone: normalizedPhone.local,
             date,
             timeSlot,
             store: (store || '').trim(),
@@ -81,49 +83,54 @@ export async function POST(request: NextRequest) {
             serviceId: (serviceId || '').trim(),
             status: 'pending',
             createdAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
         };
 
         const db = getAdminDb();
-        const docRef = await db.collection('appointments').add(appointment);
-
-        // --- Customer Sync ---
-        const normalizedPhone = normalizeVietnamPhone(phone);
-        if (normalizedPhone) {
+        let appointmentId = '';
+        await db.runTransaction(async (transaction) => {
+            const appointmentAllocation = await reserveSequentialDocumentId(transaction, db, {
+                collectionName: 'appointments',
+                prefix: 'DL',
+            });
             const customerRef = db.collection('customers').doc(normalizedPhone.local);
-            await db.runTransaction(async (transaction) => {
-                const customerSnap = await transaction.get(customerRef);
+            const customerSnap = await transaction.get(customerRef);
 
-                if (!customerSnap.exists) {
-                    transaction.set(customerRef, {
-                        phone: normalizedPhone.local,
-                        name: appointment.fullName || 'Khách lẻ',
-                        type: 'retail',
-                        totalSpent: 0,
-                        totalOrders: 0,
-                        totalRepairs: 0,
-                        totalAppointments: 0,
-                        createdAt: FieldValue.serverTimestamp(),
-                        updatedAt: FieldValue.serverTimestamp(),
-                        lastVisit: FieldValue.serverTimestamp(),
-                        tags: []
-                    });
-                } else {
-                    const currentData = customerSnap.data()!;
-                    const updateData: Record<string, unknown> = {
-                        updatedAt: FieldValue.serverTimestamp(),
-                        lastVisit: FieldValue.serverTimestamp(),
-                    };
-                    if (appointment.fullName && appointment.fullName !== 'Khách lẻ' && appointment.fullName !== currentData.name) {
-                        updateData.name = appointment.fullName;
-                    }
-                    transaction.update(customerRef, updateData);
+            appointmentAllocation.commitCounter();
+            transaction.set(appointmentAllocation.ref, appointment);
+            appointmentId = appointmentAllocation.id;
+
+            if (!customerSnap.exists) {
+                transaction.set(customerRef, {
+                    phone: normalizedPhone.local,
+                    name: appointment.fullName || 'Khách lẻ',
+                    type: 'retail',
+                    totalSpent: 0,
+                    totalOrders: 0,
+                    totalRepairs: 0,
+                    totalAppointments: 1,
+                    createdAt: FieldValue.serverTimestamp(),
+                    updatedAt: FieldValue.serverTimestamp(),
+                    lastVisit: FieldValue.serverTimestamp(),
+                    tags: []
+                });
+            } else {
+                const currentData = customerSnap.data()!;
+                const updateData: Record<string, unknown> = {
+                    updatedAt: FieldValue.serverTimestamp(),
+                    lastVisit: FieldValue.serverTimestamp(),
+                    totalAppointments: FieldValue.increment(1),
+                };
+                if (appointment.fullName && appointment.fullName !== 'Khách lẻ' && appointment.fullName !== currentData.name) {
+                    updateData.name = appointment.fullName;
                 }
-            }).catch(err => console.error('Failed to sync customer from appointment', err));
-        }
+                transaction.update(customerRef, updateData);
+            }
+        });
 
         return NextResponse.json({
             success: true,
-            appointmentId: docRef.id,
+            appointmentId,
             message: 'Đặt lịch thành công!',
         });
     } catch (error) {
