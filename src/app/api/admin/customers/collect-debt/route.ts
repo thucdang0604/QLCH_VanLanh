@@ -4,6 +4,7 @@ import { requirePermission } from '@/lib/apiAuth';
 import { FieldValue } from 'firebase-admin/firestore';
 import type { Order } from '@/lib/types';
 import { incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
+import { reserveSequentialDocumentId } from '@/lib/serverDocumentIds';
 
 export async function POST(request: NextRequest) {
     try {
@@ -46,6 +47,13 @@ export async function POST(request: NextRequest) {
 
             let remainingAmountToDistribute = numAmount;
             const updatedOrderIds: string[] = [];
+            const staffSnap = await tx.get(db.collection('users').doc(caller.uid));
+            const sData = staffSnap.data();
+            const createdByName = sData?.displayName || sData?.name || (caller as { email?: string }).email || caller.uid;
+            const transactionAllocation = await reserveSequentialDocumentId(tx, db, {
+                collectionName: 'customer_transactions',
+                prefix: 'CT',
+            });
 
             for (const doc of ordersSnap.docs) {
                 if (remainingAmountToDistribute <= 0) break;
@@ -92,12 +100,8 @@ export async function POST(request: NextRequest) {
             });
 
             // Ghi nhận transaction
-            const staffSnap = await tx.get(db.collection('users').doc(caller.uid));
-            const sData = staffSnap.data();
-            const createdByName = sData?.displayName || sData?.name || (caller as { email?: string }).email || caller.uid;
-
-            const txRef = db.collection('customer_transactions').doc();
-            tx.set(txRef, {
+            transactionAllocation.commitCounter();
+            tx.set(transactionAllocation.ref, {
                 customerId,
                 customerName: currentData.name || 'Khách lẻ',
                 type: 'PAYMENT',
