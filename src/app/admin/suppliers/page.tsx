@@ -1,13 +1,14 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { collection, query, orderBy, addDoc, updateDoc, doc, serverTimestamp, getDocs, where, limit } from 'firebase/firestore';
+import { collection, query, orderBy, updateDoc, doc, serverTimestamp, getDocs, where, limit, setDoc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
 import { Building2, Plus, Search, Phone, Mail, MapPin, CreditCard, Edit2, ChevronDown, ChevronUp, ArrowDownToLine, ArrowUpFromLine, X, Filter, Tags, Clock3 } from 'lucide-react';
 import { toast } from 'sonner';
 import CurrencyInput from '@/components/admin/CurrencyInput';
 import type { Supplier, SupplierTransaction } from '@/lib/types';
+import { generateSlug } from '@/lib/utils';
 
 // ── Format helpers ──
 const fmt = (n: number) => n.toLocaleString('vi-VN') + 'đ';
@@ -18,6 +19,25 @@ const fmtDate = (d: unknown) => {
 };
 
 // ── Supplier Form Modal ──
+function buildSupplierBaseId(data: Partial<Supplier>): string {
+    const slug = generateSlug(String(data.phone || data.name || 'supplier')).slice(0, 90) || 'supplier';
+    return `NCC-${slug}`;
+}
+
+async function getAvailableSupplierId(baseId: string) {
+    for (let i = 0; i < 50; i += 1) {
+        const candidate = i === 0 ? baseId : `${baseId}-${i + 1}`;
+        const snap = await getDoc(doc(db, 'suppliers', candidate));
+        if (!snap.exists()) return candidate;
+    }
+    throw new Error('Không thể tạo mã nhà cung cấp không trùng.');
+}
+
+function buildSupplierTransactionId(supplierId: string) {
+    const safeSupplierId = generateSlug(supplierId).slice(0, 60) || 'supplier';
+    return `ST-${safeSupplierId}-${Date.now()}`;
+}
+
 function SupplierModal({ supplier, onClose, onSave }: {
     supplier: Supplier | null;
     onClose: () => void;
@@ -371,7 +391,8 @@ export default function SuppliersPage() {
             await updateDoc(doc(db, 'suppliers', editSupplier.id), { ...data, updatedAt: serverTimestamp() });
             toast.success('Đã cập nhật NCC');
         } else {
-            await addDoc(collection(db, 'suppliers'), { ...data, totalDebt: 0, isActive: true, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+            const supplierId = await getAvailableSupplierId(buildSupplierBaseId(data));
+            await setDoc(doc(db, 'suppliers', supplierId), { ...data, totalDebt: 0, isActive: true, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
             toast.success('Đã thêm NCC mới');
         }
         await loadSuppliers();
@@ -380,7 +401,7 @@ export default function SuppliersPage() {
     // Pay debt
     const handlePay = async (supplier: Supplier, amount: number, method: string, note: string) => {
         // Create transaction
-        await addDoc(collection(db, 'supplier_transactions'), {
+        await setDoc(doc(db, 'supplier_transactions', buildSupplierTransactionId(supplier.id)), {
             supplierId: supplier.id,
             supplierName: supplier.name,
             type: 'PAYMENT',
