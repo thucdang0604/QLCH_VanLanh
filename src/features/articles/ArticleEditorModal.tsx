@@ -3,7 +3,7 @@
 import { useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import Image from 'next/image';
-import { addDoc, collection, doc, getDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 import { Image as ImageIcon, Loader2, RefreshCw, Save, Star, Upload, Video, Wand2, X } from 'lucide-react';
 import Modal from '@/components/admin/Modal';
 import MediaManager from '@/components/admin/MediaManager';
@@ -42,6 +42,11 @@ const quillFormats = [
     'color', 'background', 'list', 'align',
     'blockquote', 'code-block', 'link', 'image', 'video',
 ];
+
+function buildArticleMediaDocumentId(name: string) {
+    const slug = generateSlug(name).slice(0, 70) || 'media';
+    return `MED-articles-${Date.now()}-${slug}`;
+}
 
 export function ArticleModal({
     article,
@@ -285,7 +290,7 @@ export function ArticleModal({
                         const finalUrl = await getDownloadURL(storageRef);
 
                         // Register in Media Library
-                        await addDoc(collection(db, 'media_library'), {
+                        await setDoc(doc(db, 'media_library', buildArticleMediaDocumentId(`ai-img-${i + 1}-${ph}`)), {
                             url: finalUrl,
                             path: storagePath,
                             name: `AI Generated Article Image ${i + 1}`,
@@ -454,7 +459,7 @@ export function ArticleModal({
             const url = await getDownloadURL(storageRef);
 
             // Register in Media Library
-            await addDoc(collection(db, 'media_library'), {
+            await setDoc(doc(db, 'media_library', buildArticleMediaDocumentId(optimized.name)), {
                 url,
                 path: storagePath,
                 name: optimized.name,
