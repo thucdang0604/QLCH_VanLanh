@@ -16,6 +16,6 @@ export async function GET() {
       error: error.message,
       stdout: error.stdout,
       stderr: error.stderr
-    }, { status: 500 });
+    }, { status: 200 });
   }
 }
