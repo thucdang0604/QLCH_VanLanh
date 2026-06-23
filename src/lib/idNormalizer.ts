@@ -26,10 +26,11 @@ export async function normalizeDocId(
     const slug = generateSlug(name);
     const baseId = `${prefix}-${slug}`;
 
-    // Check for duplicates in Firestore
-    const existing = await getDoc(doc(db, 'products', baseId));
-    if (existing.exists()) {
-        return `${baseId}-${Math.floor(Math.random() * 10000)}`;
+    for (let i = 0; i < 50; i += 1) {
+        const candidate = i === 0 ? baseId : `${baseId}-${i + 1}`;
+        const existing = await getDoc(doc(db, 'products', candidate));
+        if (!existing.exists()) return candidate;
     }
-    return baseId;
+
+    throw new Error('Không thể tạo mã sản phẩm không trùng.');
 }

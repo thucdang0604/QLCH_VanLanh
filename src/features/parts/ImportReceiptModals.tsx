@@ -10,6 +10,7 @@ import CurrencyInput from '@/components/admin/CurrencyInput';
 import Modal from '@/components/admin/Modal';
 import { db } from '@/lib/firebase';
 import type { Product } from '@/lib/types';
+import { normalizeDocId } from '@/lib/idNormalizer';
 import { buildProductCodeFromId } from '@/lib/productCodes';
 import { createProductWithCodes } from '@/lib/productCodeRegistry';
 import { reserveSupplierDocumentId } from '@/lib/supplierDocumentIds';
@@ -394,9 +395,10 @@ export function CreateReceiptModal({ isOpen, onClose, parts, retailProducts, onC
             if (!proposedSnap.empty) {
                 newId = proposedSnap.docs[0].id;
             } else {
-                const newRef = doc(collection(db, 'products'));
-                const productCode = buildProductCodeFromId(newRef.id, receiptType === 'component' ? 'component' : 'product');
-                await createProductWithCodes(newRef.id, {
+                const productMode = receiptType === 'component' ? 'component' : 'retail';
+                newId = await normalizeDocId(exactName, productMode);
+                const productCode = buildProductCodeFromId(newId, receiptType === 'component' ? 'component' : 'product');
+                await createProductWithCodes(newId, {
                     sku: productCode,
                     barcode: productCode,
                     productCode,
@@ -411,7 +413,6 @@ export function CreateReceiptModal({ isOpen, onClose, parts, retailProducts, onC
                     price_original: 0,
                     costPrice: 0,
                 }, [productCode]);
-                newId = newRef.id;
             }
             setItems([...items, {
                 productId: newId,
