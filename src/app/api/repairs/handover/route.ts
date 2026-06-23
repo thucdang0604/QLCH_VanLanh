@@ -9,6 +9,7 @@ import { getConfiguredWorkflow } from '@/lib/repairWorkflowConfig';
 import { fetchFifoLogsForDeduction, executeFifoDeductionsWrites, type FifoDeductionResult, type FifoDeductor } from '@/lib/inventoryFifo';
 import { incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 import { stampRepairWarrantyOnParts } from '@/lib/repairWarrantyRules';
+import { reserveSequentialDocumentIds } from '@/lib/serverDocumentIds';
 
 const LEGACY_TERMINAL_STATUSES = [REPAIR_STATUS.DONE, REPAIR_STATUS.OUT, REPAIR_STATUS.REFUND, 'bh_hoan_tat', 'bh_tu_choi', 'bh_refund'];
 
@@ -199,6 +200,21 @@ export async function POST(request: NextRequest) {
             }
             // --- END READ PHASE ---
 
+            const partsToLog = !isWarranty
+                ? selectedParts.filter(part => part.productId && productDocs.has(part.productId))
+                : [];
+            const inventoryLogAllocations = await reserveSequentialDocumentIds(tx, db, {
+                collectionName: 'inventory_logs',
+                prefix: 'IL',
+                count: partsToLog.length,
+            });
+            const customerLedgerAllocations = await reserveSequentialDocumentIds(tx, db, {
+                collectionName: 'customer_ledger',
+                prefix: 'CL',
+                count: !isWarranty && custRef ? 1 : 0,
+            });
+            let inventoryLogAllocationIndex = 0;
+
             const checkoutWarnings: string[] = [];
 
             if (!isWarranty) {
@@ -268,7 +284,7 @@ export async function POST(request: NextRequest) {
                         pData.data.held = currentHeld - p.quantity;
 
                         // Log
-                        const logRef = db.collection('inventory_logs').doc();
+                        const logRef = inventoryLogAllocations[inventoryLogAllocationIndex++].ref;
                         tx.set(logRef, {
                             productId: p.productId,
                             productName: p.productName,
@@ -298,7 +314,7 @@ export async function POST(request: NextRequest) {
                         });
                     }
                     // Ledger
-                    const ledgerRef = db.collection('customer_ledger').doc();
+                    const ledgerRef = customerLedgerAllocations[0].ref;
                     tx.set(ledgerRef, {
                         customerId: ticket.customer?.phone,
                         type: 'repair_payment',
@@ -339,6 +355,8 @@ export async function POST(request: NextRequest) {
                     referenceId: ticketId
                 });
             }
+            inventoryLogAllocations.at(-1)?.commitCounter();
+            customerLedgerAllocations.at(-1)?.commitCounter();
 
             return { success: true, warnings: checkoutWarnings };
         });
