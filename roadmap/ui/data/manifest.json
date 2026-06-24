@@ -11,6 +11,28 @@
   "constraints": [],
   "aiPlans": [
     {
+      "id": "plan-pos-debt-crm-fix-20260624",
+      "title": "Sửa lỗi lưu khách hàng mới POS và hiển thị trạng thái Công nợ đơn hàng",
+      "date": "24.06.2026",
+      "status": "completed",
+      "completedAt": "24.06.2026",
+      "planFile": "data/ai_plans/plan_pos_debt_crm_fix_20260624.md",
+      "taskFile": "data/ai_plans/task_pos_debt_crm_fix_20260624.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_pos_debt_crm_fix_20260624.md",
+      "scope": [
+        "src/app/api/pos/checkout/route.ts",
+        "src/app/admin/orders/page.tsx",
+        "src/app/api/restore/route.ts"
+      ],
+      "decisions": [
+        "Khởi tạo trường createdAt, updatedAt, lastVisit cho khách hàng mới để hiển thị trong orderBy của CRM",
+        "Bổ sung trường totalDebt ban đầu cho khách hàng mới bằng deltaDebt khi có đơn nợ",
+        "Tự động tính toán số nợ còn lại dựa trên lịch sử thanh toán thực tế của đơn hàng",
+        "Đồng bộ hóa các mẫu in hóa đơn Thermal 80mm và A5 hiển thị dòng nợ và cọc chính xác"
+      ],
+      "updatedAt": "2026-06-24T08:30:00.000+07:00"
+    },
+    {
       "id": "plan-pos-debt-reconcile-20260623",
       "title": "Khắc phục Treo đơn POS, Ghi nhận Công nợ & Chuẩn hóa Ledger",
       "date": "23.06.2026",

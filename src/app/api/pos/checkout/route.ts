@@ -806,7 +806,11 @@ export async function POST(request: NextRequest) {
                         totalOrders: customerSpendDelta > 0 ? 1 : 0,
                         totalRepairs: 0,
                         totalAppointments: 0,
-                    }
+                        totalDebt: deltaDebt,
+                        createdAt: FieldValue.serverTimestamp(),
+                        updatedAt: FieldValue.serverTimestamp(),
+                        lastVisit: FieldValue.serverTimestamp(),
+                    };
 
                     tx.set(custRef, newCust);
                 }

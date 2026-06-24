@@ -5,7 +5,7 @@ import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
 import {
     Search, Eye, X, Package, Truck, CheckCircle,
-    XCircle, Clock, Loader2, ShoppingBag
+    XCircle, Clock, Loader2, ShoppingBag, AlertTriangle
 } from 'lucide-react';
 import Modal from '@/components/admin/Modal';
 import { collection, query, orderBy, onSnapshot, limit, startAfter, getDocs, DocumentSnapshot, where, doc, getDoc } from 'firebase/firestore';
@@ -74,7 +74,7 @@ type PrintableOrderItem = Partial<OrderItemWithRepair & {
     imei: string;
     serial: string;
     serials: string[];
-}>;
+ }>;
 
 type OrderWithRepairPayment = Order & {
     containsRepairPayment?: boolean;
@@ -89,6 +89,64 @@ function isRepairPaymentOrder(order: Order) {
             return line.isRepairTicket === true || Boolean(line.repairTicketId);
         });
 }
+
+const getOrderDebtInfo = (order: Order) => {
+    const totalAmount = Number(order.total_amount || 0);
+    const paymentHistory = Array.isArray(order.paymentHistory) ? order.paymentHistory : [];
+    const paidFromHistory = paymentHistory.reduce((sum, entry) => sum + (Number(entry?.amount) || 0), 0);
+    const paidAmount = Math.max(Number(order.deposit_amount || 0), paidFromHistory);
+    const remainingDebt = Math.max(0, totalAmount - paidAmount);
+    const isDebt = order.status !== 'Cancelled' && remainingDebt > 0;
+    return { isDebt, remainingDebt };
+};
+
+const getReceiptPaymentHtml = (order: Order, type: 'thermal' | 'a5') => {
+    const { isDebt, remainingDebt } = getOrderDebtInfo(order);
+    const totalAmount = Number(order.total_amount || 0);
+    const paidAmount = Math.max(0, totalAmount - remainingDebt);
+
+    if (type === 'thermal') {
+        if (isDebt) {
+            return `
+                <div style="display: flex; justify-content: space-between;">
+                    <span>Đã thanh toán/cọc:</span>
+                    <span>${paidAmount.toLocaleString('vi-VN')}đ</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; font-weight: bold; color: #dc2626;">
+                    <span>Còn nợ lại:</span>
+                    <span>${remainingDebt.toLocaleString('vi-VN')}đ</span>
+                </div>
+            `;
+        } else {
+            return `
+                <div style="display: flex; justify-content: space-between; font-weight: bold;">
+                    <span>Đã thanh toán:</span>
+                    <span>${totalAmount.toLocaleString('vi-VN')}đ</span>
+                </div>
+            `;
+        }
+    } else {
+        if (isDebt) {
+            return `
+                <div class="summary-row" style="margin-top: 5px;">
+                    <span>Đã thanh toán/cọc:</span>
+                    <span>${paidAmount.toLocaleString('vi-VN')} đ</span>
+                </div>
+                <div class="summary-row bold" style="color: red; font-size: 16px;">
+                    <span>Còn nợ lại:</span>
+                    <span>${remainingDebt.toLocaleString('vi-VN')} đ</span>
+                </div>
+            `;
+        } else {
+            return `
+                <div class="summary-row bold" style="margin-top: 5px;">
+                    <span>Đã thanh toán:</span>
+                    <span>${totalAmount.toLocaleString('vi-VN')} đ</span>
+                </div>
+            `;
+        }
+    }
+};
 
 function getOrderItemDisplayName(item: PrintableOrderItem) {
     return String(item.name || item.productName || item.product_name || item.productId || 'Sản phẩm').trim();
@@ -525,7 +583,10 @@ export default function OrdersPage() {
                             <p>Không có đơn hàng nào</p>
                         </div>
                     ) : paginatedOrders.map((order) => {
-                        const status = statusConfig[order.status] || statusConfig.Pending;
+                        const { isDebt, remainingDebt } = getOrderDebtInfo(order);
+                        const status = isDebt
+                            ? { color: 'bg-red-50 text-red-700 border border-red-100', icon: AlertTriangle, label: 'Ghi nợ - chờ thu' }
+                            : (statusConfig[order.status] || statusConfig.Pending);
                         const StIcon = status.icon;
                         const cName = order.customer?.name || order.customer_info?.name || 'Khách lẻ';
                         const cPhone = order.customer?.phone || order.customer_info?.phone || '—';
@@ -554,6 +615,9 @@ export default function OrdersPage() {
                                     <div>
                                         <p className="text-[11px] text-gray-500 uppercase font-medium">Tổng tiền</p>
                                         <p className="font-bold text-orange-600">{formatPrice(order.total_amount || 0)}</p>
+                                        {isDebt && (
+                                            <p className="text-[10px] text-red-600 font-semibold mt-0.5">(Còn nợ: {formatPrice(remainingDebt)})</p>
+                                        )}
                                     </div>
                                     <div className="text-right">
                                             <p className="text-[11px] text-gray-500 uppercase font-medium">Ngày tạo</p>
@@ -596,7 +660,10 @@ export default function OrdersPage() {
                                     </td>
                                 </tr>
                             ) : paginatedOrders.map((order) => {
-                                const status = statusConfig[order.status] || statusConfig.Pending;
+                                const { isDebt, remainingDebt } = getOrderDebtInfo(order);
+                                const status = isDebt
+                                    ? { color: 'bg-red-50 text-red-700 border border-red-100', icon: AlertTriangle, label: 'Ghi nợ - chờ thu' }
+                                    : (statusConfig[order.status] || statusConfig.Pending);
                                 const StIcon = status.icon;
                                 const cName = order.customer?.name || order.customer_info?.name || 'Khách lẻ';
                                 const cPhone = order.customer?.phone || order.customer_info?.phone || '—';
@@ -615,7 +682,12 @@ export default function OrdersPage() {
                                             <p className="text-sm font-medium text-gray-900">{cName}</p>
                                             <p className="text-xs text-gray-500">{cPhone}</p>
                                         </td>
-                                        <td className="px-6 py-4 font-medium text-gray-900">{formatPrice(order.total_amount || 0)}</td>
+                                        <td className="px-6 py-4 font-medium text-gray-900">
+                                            <div>{formatPrice(order.total_amount || 0)}</div>
+                                            {isDebt && (
+                                                <div className="text-[11px] text-red-600 font-semibold mt-0.5">(Còn nợ: {formatPrice(remainingDebt)})</div>
+                                            )}
+                                        </td>
                                         <td className="px-6 py-4 text-sm text-gray-600">{order.payment_method || '—'}</td>
                                         <td className="px-6 py-4">
                                             <span className={`inline-flex items-center gap-1 px-3 py-1 text-xs font-medium rounded-full ${status.color}`}>
@@ -684,7 +756,10 @@ export default function OrdersPage() {
                             {/* Status */}
                             <div className="flex items-center justify-between">
                                 {(() => {
-                                    const st = statusConfig[selectedOrder.status] || statusConfig.Pending;
+                                    const { isDebt } = getOrderDebtInfo(selectedOrder);
+                                    const st = isDebt
+                                        ? { color: 'bg-red-50 text-red-700 border border-red-100', icon: AlertTriangle, label: 'Ghi nợ - chờ thu' }
+                                        : (statusConfig[selectedOrder.status] || statusConfig.Pending);
                                     const StI = st.icon;
                                     return (
                                         <span className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-full ${st.color}`}>
@@ -811,25 +886,39 @@ export default function OrdersPage() {
                                     <span>Tổng cộng:</span>
                                     <span className="text-red-600">{formatPrice(selectedOrder.total_amount || 0)}</span>
                                 </div>
-                                {(selectedOrder.deposit_amount || 0) > 0 && (
-                                    selectedOrder.paymentStatus === 'paid' ? (
-                                        <div className="flex justify-between items-center pt-2 text-base font-semibold text-gray-700">
-                                            <span>Đã thanh toán:</span>
-                                            <span>{formatPrice(selectedOrder.total_amount || 0)}</span>
-                                        </div>
-                                    ) : (
-                                        <>
+                                {(() => {
+                                    const { isDebt, remainingDebt } = getOrderDebtInfo(selectedOrder);
+                                    const totalAmount = Number(selectedOrder.total_amount || 0);
+                                    const paidAmount = Math.max(0, totalAmount - remainingDebt);
+                                    if (isDebt) {
+                                        return (
+                                            <>
+                                                {paidAmount > 0 ? (
+                                                    <div className="flex justify-between items-center pt-2 text-base font-semibold text-gray-700">
+                                                        <span>Đã thanh toán / cọc:</span>
+                                                        <span>{formatPrice(paidAmount)}</span>
+                                                    </div>
+                                                ) : (
+                                                    <div className="flex justify-between items-center pt-2 text-base font-semibold text-gray-700">
+                                                        <span>Đã thanh toán:</span>
+                                                        <span>0đ</span>
+                                                    </div>
+                                                )}
+                                                <div className="flex justify-between items-center pt-2 text-lg font-bold text-red-600">
+                                                    <span>Còn nợ lại:</span>
+                                                    <span>{formatPrice(remainingDebt)}</span>
+                                                </div>
+                                            </>
+                                        );
+                                    } else {
+                                        return (
                                             <div className="flex justify-between items-center pt-2 text-base font-semibold text-gray-700">
-                                                <span>Đã cọc:</span>
-                                                <span>{formatPrice(selectedOrder.deposit_amount || 0)}</span>
+                                                <span>Đã thanh toán:</span>
+                                                <span>{formatPrice(totalAmount)}</span>
                                             </div>
-                                            <div className="flex justify-between items-center pt-2 text-lg font-bold text-orange-600">
-                                                <span>Còn lại:</span>
-                                                <span>{formatPrice(Math.max(0, (selectedOrder.total_amount || 0) - (selectedOrder.deposit_amount || 0)))}</span>
-                                            </div>
-                                        </>
-                                    )
-                                )}
+                                        );
+                                    }
+                                })()}
                             </div>
 
                             {(selectedOrder.paymentHistory || []).length > 0 && (
@@ -938,21 +1027,7 @@ export default function OrdersPage() {
                                                         <span>Tổng cộng:</span>
                                                         <span class="font-bold">${(selectedOrder.total_amount || 0).toLocaleString('vi-VN')}đ</span>
                                                     </div>
-                                                    ${(selectedOrder.deposit_amount || 0) > 0 ? (
-                                                        selectedOrder.status === 'Completed' ? `
-                                                        <div style="display: flex; justify-content: space-between;">
-                                                            <span>Đã thanh toán:</span>
-                                                            <span class="font-bold">${(selectedOrder.total_amount || 0).toLocaleString('vi-VN')}đ</span>
-                                                        </div>` : `
-                                                        <div style="display: flex; justify-content: space-between;">
-                                                            <span>Đã cọc:</span>
-                                                            <span>${(selectedOrder.deposit_amount || 0).toLocaleString('vi-VN')}đ</span>
-                                                        </div>
-                                                        <div style="display: flex; justify-content: space-between;" class="font-bold">
-                                                            <span>Còn lại:</span>
-                                                            <span>${Math.max(0, (selectedOrder.total_amount || 0) - (selectedOrder.deposit_amount || 0)).toLocaleString('vi-VN')}đ</span>
-                                                        </div>`
-                                                    ) : ''}
+                                                    ${getReceiptPaymentHtml(selectedOrder, 'thermal')}
                                                     <hr/>
                                                     <div class="text-center" style="margin-top: 16px;"><i>Cảm ơn quý khách!</i></div>
                                                 </body>
@@ -1053,12 +1128,7 @@ export default function OrdersPage() {
                                                         <div class="summary-row bold" style="font-size: 16px; margin-top: 5px; border-top: 1px dotted #ccc; padding-top: 5px;">
                                                             <span>Tổng thanh toán:</span><span>${(selectedOrder.total_amount || 0).toLocaleString('vi-VN')} đ</span>
                                                         </div>
-                                                        ${(selectedOrder.deposit_amount || 0) > 0 ? (
-                                                            selectedOrder.status === 'Completed' ? `
-                                                            <div class="summary-row" style="margin-top: 5px;"><span>Đã thanh toán:</span><span>${(selectedOrder.total_amount || 0).toLocaleString('vi-VN')} đ</span></div>` : `
-                                                            <div class="summary-row" style="margin-top: 5px;"><span>Đã cọc:</span><span>${(selectedOrder.deposit_amount || 0).toLocaleString('vi-VN')} đ</span></div>
-                                                            <div class="summary-row bold" style="color: red; font-size: 16px;"><span>Còn lại:</span><span>${Math.max(0, (selectedOrder.total_amount || 0) - (selectedOrder.deposit_amount || 0)).toLocaleString('vi-VN')} đ</span></div>`
-                                                        ) : ''}
+                                                        ${getReceiptPaymentHtml(selectedOrder, 'a5')}
                                                     </div>
 
                                                     <div class="signatures">
