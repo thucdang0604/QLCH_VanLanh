@@ -24,7 +24,7 @@ export const articleTypeColors: Record<string, string> = {
 };
 
 export const articleTypeLabels: Record<string, string> = {
-    News: 'Tin t?c',
-    Promo: 'Khuy?n m?i',
-    Tips: 'M?o hay',
+    News: 'Tin tức',
+    Promo: 'Khuyến mãi',
+    Tips: 'Mẹo hay',
 };

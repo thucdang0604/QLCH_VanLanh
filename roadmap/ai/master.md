@@ -17,6 +17,7 @@
 - [repair-workflow-v2](modules/repair_workflow_v2.md)
 - [finance-hr](modules/finance-hr.md)
 - [system-content](modules/system-content.md)
+- [security-and-monitoring](modules/security_and_monitoring.md)
 - [master](modules/master.md)
 - [agent-chat](modules/agent-chat.md)
 - [customer-web-qa](modules/customer-web-qa.md)

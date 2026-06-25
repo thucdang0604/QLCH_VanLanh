@@ -11,6 +11,95 @@
   "constraints": [],
   "aiPlans": [
     {
+      "id": "plan-security-defense-20260625",
+      "title": "Kế hoạch Thiết lập Giám sát An ninh & Phòng thủ Chủ động (Active Defense)",
+      "date": "25.06.2026",
+      "status": "in_progress",
+      "planFile": "data/ai_plans/plan_security_defense_20260625.md",
+      "taskFile": "data/ai_plans/task_security_defense_20260625.md",
+      "walkthroughFile": "",
+      "scope": [
+        "firebase.json",
+        "storage.rules",
+        "package.json",
+        "next.config.mjs",
+        "src/middleware.ts",
+        "src/lib/rateLimiter.ts",
+        "src/app/admin/security/page.tsx",
+        "src/app/api/admin/security/route.ts",
+        "src/app/api/media/upload-url/route.ts"
+      ],
+      "decisions": [
+        "Nâng bộ nhớ API/SSR Next.js lên 1GiB/2GiB và giảm maxInstances xuống 3 để bảo vệ chi phí trần tối đa",
+        "Tích hợp Next.js Middleware với Upstash Redis để làm tường lửa lọc và tự động block IP spam",
+        "Xây dựng Security Dashboard trong Admin panel phục vụ theo dõi realtime và chặn IP bằng tay",
+        "Thắt chặt storage.rules chặn người dùng vãng lai upload trực tiếp tệp lớn, chuyển sang cơ chế Presigned URL từ API"
+      ],
+      "updatedAt": "2026-06-25T11:45:00.000+07:00"
+    },
+    {
+      "id": "plan-codebase-refactor-cleanup-20260625",
+      "title": "Kế hoạch Khắc phục Lỗi Logic & Dọn dẹp Nợ Kỹ thuật (Refactor & Cleanup)",
+      "date": "25.06.2026",
+      "status": "in_progress",
+      "planFile": "data/ai_plans/plan_codebase_refactor_cleanup_20260625.md",
+      "taskFile": "data/ai_plans/task_codebase_refactor_cleanup_20260625.md",
+      "walkthroughFile": "",
+      "scope": [
+        "src/lib/commissionUtils.ts",
+        "src/lib/warrantyUtils.ts",
+        "src/lib/customerSync.ts",
+        "src/lib/sms.ts",
+        "src/lib/permissions.ts",
+        "src/components/common/Container.tsx",
+        "src/app/api/restore/route.ts",
+        "src/components/admin/ExportImportReportButton.tsx",
+        "src/components/MissionsWidget.tsx",
+        "package.json"
+      ],
+      "decisions": [
+        "Xóa bỏ hoàn toàn 7 tệp tin và 1 thư viện DevDependency dư thừa",
+        "Cập nhật trực tiếp import của 5 tệp tin liên quan trỏ về adminModules.ts",
+        "Sửa lỗi trùng lặp Firebase App 'bounty-otp' trong MissionsWidget.tsx",
+        "Tích hợp nút ExportImportReportButton vào trang quản lý linh kiện parts"
+      ],
+      "updatedAt": "2026-06-25T00:55:00.000+07:00"
+    },
+    {
+      "id": "plan-codebase-reading-journal-v3-20260625",
+      "title": "Nhật Ký Đọc Code V3: Đọc dòng đối dòng & Phân tích các Layouts, Common, Home và Admin Components còn lại",
+      "date": "25.06.2026",
+      "status": "completed",
+      "completedAt": "25.06.2026",
+      "planFile": "data/ai_plans/plan_codebase_reading_journal_20260625.md",
+      "taskFile": "data/ai_plans/task_codebase_reading_journal_20260625.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_codebase_reading_journal_20260625.md",
+      "scope": [
+        "src/components/layout/Header.tsx",
+        "src/components/layout/MobileBottomNav.tsx",
+        "src/components/common/Container.tsx",
+        "src/components/ui/LazyImage.tsx",
+        "src/components/ui/Skeleton.tsx",
+        "src/components/home/ArticleBlock.tsx",
+        "src/components/home/BookingSection.tsx",
+        "src/components/home/CategoriesSection.tsx",
+        "src/components/home/FlashSale.tsx",
+        "src/components/home/FloatingReviews.tsx",
+        "src/components/home/GoogleReviewsSection.tsx",
+        "src/components/home/HeroSection.tsx",
+        "src/components/home/PricingSection.tsx",
+        "src/components/home/ServiceBlock.tsx",
+        "src/components/home/ServiceCard.tsx",
+        "src/components/home/SuggestedSection.tsx"
+      ],
+      "decisions": [
+        "Phân tích thủ công 100% dòng đối dòng, tuyệt đối không dùng tool/script tự động",
+        "Ghi nhận chi tiết chức năng, cơ chế hoạt động, và đánh giá kỹ thuật chuyên sâu",
+        "Cập nhật khoa học vào codebase_reading_journal.md theo cấu trúc tăng dần, tránh xáo trộn"
+      ],
+      "updatedAt": "2026-06-25T00:34:00.000+07:00"
+    },
+    {
       "id": "plan-pos-debt-crm-fix-20260624",
       "title": "Sửa lỗi lưu khách hàng mới POS và hiển thị trạng thái Công nợ đơn hàng",
       "date": "24.06.2026",
