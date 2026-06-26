@@ -11,6 +11,46 @@
   "constraints": [],
   "aiPlans": [
     {
+      "id": "plan-large-image-preview-20260626",
+      "title": "Kế hoạch Nâng cấp Xem trước Ảnh Kích thước lớn trong Excel Importer",
+      "date": "26.06.2026",
+      "status": "completed",
+      "completedAt": "26.06.2026",
+      "planFile": "data/ai_plans/plan_large_image_preview_20260626.md",
+      "taskFile": "data/ai_plans/task_large_image_preview_20260626.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_large_image_preview_20260626.md",
+      "scope": [
+        "src/app/admin/initial-data/page.tsx"
+      ],
+      "decisions": [
+        "Phục hồi mã nguồn bị lỗi cú pháp trong ImageLinkTester",
+        "Thiết kế cột xem trước ảnh kích thước lớn ở phía bên phải trong chế độ duyệt thư mục ảnh",
+        "Bổ sung thông tin chi tiết của tệp tin cục bộ như dung lượng, định dạng và trạng thái đồng bộ"
+      ],
+      "updatedAt": "2026-06-26T12:20:00.000+07:00"
+    },
+    {
+      "id": "plan-excel-import-image-hash-dedup-20260626",
+      "title": "Kế hoạch Chống trùng lặp Ảnh Excel Importer bằng SHA-256 Hash",
+      "date": "26.06.2026",
+      "status": "completed",
+      "completedAt": "26.06.2026",
+      "planFile": "data/ai_plans/plan_excel_import_image_hash_dedup_20260626.md",
+      "taskFile": "data/ai_plans/task_excel_import_image_hash_dedup_20260626.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_excel_import_image_hash_dedup_20260626.md",
+      "scope": [
+        "src/features/excel-import/importSupport.ts",
+        "src/components/admin/ExcelImportModal.tsx"
+      ],
+      "decisions": [
+        "Tính toán mã SHA-256 hash của ảnh cục bộ ở client-side bằng Web Crypto API",
+        "Sử dụng mã hash làm Document ID Firestore (MED-import-[folder]-[hash]) để kiểm tra trùng lặp O(1)",
+        "Lưu đường dẫn vật lý trên Storage dạng media/[folder]/[hash].webp để chống trùng lặp vật lý",
+        "Triển khai cơ chế truy vấn Lai (Hybrid) đối với ảnh thô trong Excel: tự động map khi duy nhất, cảnh báo xung đột khi trùng tên khác hash"
+      ],
+      "updatedAt": "2026-06-26T12:00:00.000+07:00"
+    },
+    {
       "id": "plan-mediamanager-folder-config-20260626",
       "title": "Kế hoạch Đồng bộ Cấu hình Thư mục MediaManager",
       "date": "26.06.2026",

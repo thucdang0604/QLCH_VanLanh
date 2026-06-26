@@ -28,7 +28,7 @@ export default function Header() {
     const mainNav = (config.headerNav || [])
         .filter(i => i.visible)
         .sort((a, b) => a.order - b.order)
-        .map(i => ({ id: i.id, label: i.label, href: `/category/${i.slug}`, icon: getIcon(i.iconName) }));
+        .map(i => ({ id: i.id, label: i.label, href: i.isCustomLink ? i.slug : `/category/${i.slug}`, icon: getIcon(i.iconName) }));
 
 
     useEffect(() => {

@@ -27,8 +27,8 @@ export default function CategoriesSection({ ssrHomeServiceCategories }: { ssrHom
           <div className="grid grid-cols-2 min-[400px]:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 sm:gap-5">
             {visibleCategories.map((cat) => (
               <Link
-                key={cat.slug}
-                href={`/category/${cat.slug}`}
+                key={cat.id}
+                href={cat.isCustomLink ? cat.slug : `/category/${cat.slug}`}
                 className="group flex flex-col items-center p-4 sm:p-5 bg-white rounded-2xl shadow-sm hover:shadow-xl transition-all duration-300 border border-gray-100 hover:border-copper/40 hover:-translate-y-1.5 relative overflow-hidden"
               >
                 <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-copper to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />

@@ -34,7 +34,7 @@ Danh sách công việc chi tiết để thực hiện dọn dẹp nợ kỹ thu
 
 ### Pha 5: Khắc phục lỗi vận hành phát sinh trên Production
 - [x] Sửa lỗi 403 Google Reviews API bằng cách trích xuất và chuyển tiếp tiêu đề Referer từ client sang Google Places API
-- [x] Tích hợp cơ chế tự động quét, tối ưu (.webp) và upload ảnh Base64 trong bài viết lên Firebase Storage trước khi lưu để tránh giới hạn 1MB của Firestore
+- [x] Tích hợp cơ chế tự động quét, tối ưu (.webp), tính mã băm SHA-256 chống trùng lặp ảnh (Deduplication) và upload ảnh lên Storage trước khi lưu bài viết
 
 ### Pha 4: Xác minh Hệ thống
 - [ ] Chạy `pnpm lint` kiểm tra lỗi cú pháp

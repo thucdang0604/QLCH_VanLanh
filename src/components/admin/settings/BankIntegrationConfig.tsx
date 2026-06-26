@@ -1,4 +1,5 @@
 'use client';
+/* eslint-disable @next/next/no-img-element -- All <img> in this file use /api/proxy-image (internal proxy) or data-URLs (TOTP QR). next/image requires known width/height and doesn't support data URLs, so native <img> is the correct choice here. */
 
 import { useState, useEffect } from 'react';
 import { Loader2, Landmark, CheckCircle2, ShieldCheck, X } from 'lucide-react';

@@ -39,7 +39,6 @@ import {
     collectLocalImageRequirements,
     createInitialProductWithCodes,
     fileMatchesLocalReference,
-    findExistingImportImage,
     generateTemplate,
     getBoolean,
     getFileRelativePath,
@@ -58,6 +57,7 @@ import {
     normalizeLegacyImportDocId,
     normalizeText,
     normalizeLocalImageKey,
+    normalizeMediaBaseName,
     parseImages,
     parseDebtInput,
     parseNumberInput,
@@ -334,12 +334,83 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
                 const existingDocIds = await loadExistingDocIds(modeConfig.collectionName, targetIds);
                 const existingCodes = mode === 'service' || mode === 'customer' || mode === 'supplier' || mode === 'order' || mode === 'repair' ? new Set<string>() : await loadExistingProductCodes(expectedCodes);
 
+                // --------------------------------------------------------
+                // LUỒNG LAI (HYBRID RESOLUTION) - QUÉT ẢNH TRÙNG TÊN THÔ TRONG DB
+                // --------------------------------------------------------
+                const allImages = jsonRows.flatMap((row) => parseImages(row, IMAGE_MAIN_HEADERS, IMAGE_OTHER_HEADERS));
+                const localImageSources = Array.from(new Set(allImages.filter(isLocalImageReference)));
+                
+                const autoMappedUrls = new Map<string, string>();
+                const conflictedLocalKeys = new Set<string>();
+
+                if (localImageSources.length > 0) {
+                    const baseNameToSourceKeys = new Map<string, string[]>();
+                    localImageSources.forEach((source) => {
+                        const baseName = normalizeMediaBaseName(source);
+                        const key = normalizeLocalImageKey(source);
+                        const current = baseNameToSourceKeys.get(baseName) || [];
+                        current.push(key);
+                        baseNameToSourceKeys.set(baseName, current);
+                    });
+
+                    const baseNames = Array.from(baseNameToSourceKeys.keys());
+                    const dbMatches = new Map<string, { url: string; hash?: string }[]>();
+
+                    for (let index = 0; index < baseNames.length; index += FIRESTORE_QUERY_CHUNK_SIZE) {
+                        const chunk = baseNames.slice(index, index + FIRESTORE_QUERY_CHUNK_SIZE);
+                        const mediaQuery = query(
+                            collection(db, 'media_library'),
+                            where('normalizedBaseName', 'in', chunk)
+                        );
+                        const snapshot = await getDocs(mediaQuery);
+                        snapshot.forEach((item) => {
+                            const data = item.data();
+                            const normalized = typeof data.normalizedBaseName === 'string' ? data.normalizedBaseName : '';
+                            const url = typeof data.url === 'string' ? data.url : '';
+                            const hash = typeof data.hash === 'string' ? data.hash : undefined;
+                            if (normalized && url) {
+                                const current = dbMatches.get(normalized) || [];
+                                if (!current.some((x) => x.url === url || (hash && x.hash === hash))) {
+                                    current.push({ url, hash });
+                                }
+                                dbMatches.set(normalized, current);
+                            }
+                        });
+                    }
+
+                    baseNameToSourceKeys.forEach((keys, baseName) => {
+                        const matches = dbMatches.get(baseName) || [];
+                        keys.forEach((key) => {
+                            if (matches.length === 1) {
+                                autoMappedUrls.set(key, matches[0].url);
+                            } else if (matches.length > 1) {
+                                conflictedLocalKeys.add(key);
+                            }
+                        });
+                    });
+                }
+
                 const parsed = jsonRows.map((row, index) => {
                     const rowNum = index + 2;
-                    const name = getValue(row, modeConfig.nameHeaders);
-                    const categoryPath = getValue(row, ['Danh mục', 'Category']);
+                    
+                    // Tạo bản sao processedRow để thay thế URL đã được map tự động
+                    const processedRow = { ...row };
+                    [...IMAGE_MAIN_HEADERS, ...IMAGE_OTHER_HEADERS].forEach((header) => {
+                        const value = processedRow[header];
+                        if (typeof value !== 'string' || !value.trim()) return;
+                        const items = splitList(value);
+                        if (items.length === 0) return;
+                        const replaced = items.map((item) => {
+                            const key = normalizeLocalImageKey(item);
+                            return autoMappedUrls.get(key) || item;
+                        });
+                        processedRow[header] = replaced.join('; ');
+                    });
+
+                    const name = getValue(processedRow, modeConfig.nameHeaders);
+                    const categoryPath = getValue(processedRow, ['Danh mục', 'Category']);
                     const { categoryIds, category } = resolveCategoryPath(categoryPath, taxonomy);
-                    const targetDocId = resolveTargetDocId(mode, row, modeConfig, taxonomy);
+                    const targetDocId = resolveTargetDocId(mode, processedRow, modeConfig, taxonomy);
                     const checks: FieldCheck[] = [];
 
                     if (!name) {
@@ -358,15 +429,15 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
 
                     if (mode === 'customer') {
                         checks.length = 0;
-                        const phoneRaw = getValue(row, ['SĐT', 'sdt', 'phone', 'Phone', 'Số điện thoại']);
+                        const phoneRaw = getValue(processedRow, ['SĐT', 'sdt', 'phone', 'Phone', 'Số điện thoại']);
                         const phone = normalizeImportPhone(phoneRaw);
-                        const customerTypeRaw = getValue(row, ['Loại KH', 'Customer Type', 'Type']);
+                        const customerTypeRaw = getValue(processedRow, ['Loại KH', 'Customer Type', 'Type']);
                         const customerType = customerTypeRaw.toLowerCase();
-                        const email = getValue(row, ['Email']);
-                        const totalSpentInput = parseNumberInput(row, ['Chi tiêu', 'Spent', 'Tổng chi tiêu']);
-                        const totalOrdersInput = parseNumberInput(row, ['Đơn hàng', 'Orders', 'Tổng đơn hàng']);
-                        const totalRepairsInput = parseNumberInput(row, ['Sửa chữa', 'Repairs', 'Tổng sửa chữa']);
-                        const debtInput = parseDebtInput(row, ['Công nợ', 'Nợ', 'Debt']);
+                        const email = getValue(processedRow, ['Email']);
+                        const totalSpentInput = parseNumberInput(processedRow, ['Chi tiêu', 'Spent', 'Tổng chi tiêu']);
+                        const totalOrdersInput = parseNumberInput(processedRow, ['Đơn hàng', 'Orders', 'Tổng đơn hàng']);
+                        const totalRepairsInput = parseNumberInput(processedRow, ['Sửa chữa', 'Repairs', 'Tổng sửa chữa']);
+                        const debtInput = parseDebtInput(processedRow, ['Công nợ', 'Nợ', 'Debt']);
 
                         if (!name) {
                             checks.push(buildCheck('name', 'Tên', '', 'error', 'Thiếu tên khách hàng'));
@@ -415,22 +486,22 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
                             debtInput.isValid ? 'ok' : 'error',
                             debtInput.isValid ? 'Công nợ có thể import' : 'Công nợ không hợp lệ',
                         ));
-                        checks.push(buildCheck('details', 'Thông tin thêm', getValue(row, ['Tags', 'Ghi chú', 'Note']), 'ok', 'Thông tin phụ có thể import'));
+                        checks.push(buildCheck('details', 'Thông tin thêm', getValue(processedRow, ['Tags', 'Ghi chú', 'Note']), 'ok', 'Thông tin phụ có thể import'));
 
                         const errors = summarizeChecks(checks, 'error');
                         const warnings = summarizeChecks(checks, 'warning');
-                        return { rowNum, data: row, errors, warnings, checks, categoryIds: [], category: '' };
+                        return { rowNum, data: processedRow, errors, warnings, checks, categoryIds: [], category: '' };
                     }
 
                     if (mode === 'supplier') {
                         checks.length = 0;
-                        const phoneRaw = getValue(row, ['SĐT', 'sdt', 'phone', 'Phone', 'Số điện thoại']);
+                        const phoneRaw = getValue(processedRow, ['SĐT', 'sdt', 'phone', 'Phone', 'Số điện thoại']);
                         const phone = normalizeImportPhone(phoneRaw);
-                        const email = getValue(row, ['Email']);
-                        const contact = getValue(row, ['Người liên hệ', 'Contact']);
-                        const bank = [getValue(row, ['Số tài khoản', 'Bank Account']), getValue(row, ['Ngân hàng', 'Bank'])].filter(Boolean).join(' / ');
-                        const paymentTermsInput = parseNumberInput(row, ['Hạn thanh toán', 'Payment Terms']);
-                        const debtInput = parseDebtInput(row, ['Công nợ', 'Nợ', 'Debt']);
+                        const email = getValue(processedRow, ['Email']);
+                        const contact = getValue(processedRow, ['Người liên hệ', 'Contact']);
+                        const bank = [getValue(processedRow, ['Số tài khoản', 'Bank Account']), getValue(processedRow, ['Ngân hàng', 'Bank'])].filter(Boolean).join(' / ');
+                        const paymentTermsInput = parseNumberInput(processedRow, ['Hạn thanh toán', 'Payment Terms']);
+                        const debtInput = parseDebtInput(processedRow, ['Công nợ', 'Nợ', 'Debt']);
 
                         if (!name) {
                             checks.push(buildCheck('name', 'Tên', '', 'error', 'Thiếu tên nhà cung cấp'));
@@ -468,30 +539,30 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
                             debtInput.isValid ? 'ok' : 'error',
                             debtInput.isValid ? 'Công nợ có thể import' : 'Công nợ không hợp lệ',
                         ));
-                        checks.push(buildCheck('details', 'Thông tin thêm', getValue(row, ['Phân loại', 'Tags', 'Ghi chú', 'Note']), 'ok', 'Thông tin phụ có thể import'));
+                        checks.push(buildCheck('details', 'Thông tin thêm', getValue(processedRow, ['Phân loại', 'Tags', 'Ghi chú', 'Note']), 'ok', 'Thông tin phụ có thể import'));
 
                         const errors = summarizeChecks(checks, 'error');
                         const warnings = summarizeChecks(checks, 'warning');
-                        return { rowNum, data: row, errors, warnings, checks, categoryIds: [], category: '' };
+                        return { rowNum, data: processedRow, errors, warnings, checks, categoryIds: [], category: '' };
                     }
 
                     if (mode === 'order') {
                         checks.length = 0;
-                        const orderIdRaw = getValue(row, ORDER_ID_HEADERS);
+                        const orderIdRaw = getValue(processedRow, ORDER_ID_HEADERS);
                         const orderId = normalizeLegacyImportDocId(orderIdRaw);
-                        const customerName = getValue(row, CUSTOMER_NAME_HEADERS);
-                        const phoneRaw = getValue(row, PHONE_HEADERS);
+                        const customerName = getValue(processedRow, CUSTOMER_NAME_HEADERS);
+                        const phoneRaw = getValue(processedRow, PHONE_HEADERS);
                         const phone = normalizeImportPhone(phoneRaw);
-                        const productRaw = getValue(row, ['Dòng hàng', 'Items', 'Chi tiết sản phẩm', 'Sản phẩm', 'Tên SP', 'Product']);
-                        const totalInput = parseNumberInput(row, ['Tổng tiền', 'Total']);
-                        const subtotalInput = parseNumberInput(row, ['Tạm tính', 'Subtotal']);
-                        const discountInput = parseNumberInput(row, ['Giảm giá', 'Discount']);
-                        const paymentRaw = getValue(row, ['Thanh toán', 'Payment Status']);
-                        const methodRaw = getValue(row, ['Phương thức', 'Payment Method']);
-                        const statusRaw = getValue(row, ['Trạng thái', 'Status']);
-                        const createdAt = parseLegacyDate(row, ['Ngày tạo', 'Created At']);
-                        const completedAt = parseLegacyDate(row, ['Ngày hoàn thành', 'Completed At']);
-                        const warrantyExpiresAt = parseLegacyDate(row, ['Ngày hết BH', 'Warranty Expires At']);
+                        const productRaw = getValue(processedRow, ['Dòng hàng', 'Items', 'Chi tiết sản phẩm', 'Sản phẩm', 'Tên SP', 'Product']);
+                        const totalInput = parseNumberInput(processedRow, ['Tổng tiền', 'Total']);
+                        const subtotalInput = parseNumberInput(processedRow, ['Tạm tính', 'Subtotal']);
+                        const discountInput = parseNumberInput(processedRow, ['Giảm giá', 'Discount']);
+                        const paymentRaw = getValue(processedRow, ['Thanh toán', 'Payment Status']);
+                        const methodRaw = getValue(processedRow, ['Phương thức', 'Payment Method']);
+                        const statusRaw = getValue(processedRow, ['Trạng thái', 'Status']);
+                        const createdAt = parseLegacyDate(processedRow, ['Ngày tạo', 'Created At']);
+                        const completedAt = parseLegacyDate(processedRow, ['Ngày hoàn thành', 'Completed At']);
+                        const warrantyExpiresAt = parseLegacyDate(processedRow, ['Ngày hết BH', 'Warranty Expires At']);
 
                         if (!orderIdRaw) {
                             checks.push(buildCheck('name', 'Mã đơn', '', 'error', 'Thiếu mã đơn hàng từ hệ thống cũ'));
@@ -548,35 +619,35 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
                         checks.push(buildCheck(
                             'warranty',
                             'Bảo hành',
-                            [getValue(row, ['Bảo hành tháng', 'Warranty Months']), formatCheckDate(warrantyExpiresAt)].filter(Boolean).join(' / '),
-                            warrantyExpiresAt || getValue(row, ['Bảo hành tháng', 'Warranty Months']) ? 'ok' : 'warning',
-                            warrantyExpiresAt || getValue(row, ['Bảo hành tháng', 'Warranty Months']) ? 'Có thông tin bảo hành' : 'Thiếu thông tin bảo hành cho dòng hàng',
+                            [getValue(processedRow, ['Bảo hành tháng', 'Warranty Months']), formatCheckDate(warrantyExpiresAt)].filter(Boolean).join(' / '),
+                            warrantyExpiresAt || getValue(processedRow, ['Bảo hành tháng', 'Warranty Months']) ? 'ok' : 'warning',
+                            warrantyExpiresAt || getValue(processedRow, ['Bảo hành tháng', 'Warranty Months']) ? 'Có thông tin bảo hành' : 'Thiếu thông tin bảo hành cho dòng hàng',
                         ));
 
                         const errors = summarizeChecks(checks, 'error');
                         const warnings = summarizeChecks(checks, 'warning');
-                        return { rowNum, data: row, errors, warnings, checks, categoryIds: [], category: '' };
+                        return { rowNum, data: processedRow, errors, warnings, checks, categoryIds: [], category: '' };
                     }
 
                     if (mode === 'repair') {
                         checks.length = 0;
-                        const repairIdRaw = getValue(row, REPAIR_ID_HEADERS);
+                        const repairIdRaw = getValue(processedRow, REPAIR_ID_HEADERS);
                         const repairId = normalizeLegacyImportDocId(repairIdRaw);
-                        const customerName = getValue(row, CUSTOMER_NAME_HEADERS);
-                        const phoneRaw = getValue(row, PHONE_HEADERS);
+                        const customerName = getValue(processedRow, CUSTOMER_NAME_HEADERS);
+                        const phoneRaw = getValue(processedRow, PHONE_HEADERS);
                         const phone = normalizeImportPhone(phoneRaw);
-                        const device = getValue(row, ['Thiết bị', 'Dòng máy', 'Device']);
-                        const issuesRaw = getValue(row, ['Lỗi/Bệnh', 'Lỗi', 'Bệnh', 'Issue', 'Issues']);
-                        const partsRaw = getValue(row, ['Linh kiện', 'Parts']);
-                        const statusRaw = getValue(row, ['Trạng thái', 'Status']);
-                        const receivedAt = parseLegacyDate(row, ['Ngày nhận', 'Received At']);
-                        const completedAt = parseLegacyDate(row, ['Ngày hoàn thành', 'Completed At']);
-                        const warrantyExpiresAt = parseLegacyDate(row, ['Ngày hết BH dịch vụ', 'Service Warranty Expires At']);
-                        const amountInput = parseNumberInput(row, ['Tổng tiền', 'Total']);
-                        const partsCostInput = parseNumberInput(row, ['Tiền linh kiện', 'Parts Cost']);
-                        const laborCostInput = parseNumberInput(row, ['Phí sửa chữa', 'Labor Cost']);
-                        const additionalFeesInput = parseNumberInput(row, ['Phí phát sinh', 'Additional Fees']);
-                        const discountInput = parseNumberInput(row, ['Giảm giá', 'Discount']);
+                        const device = getValue(processedRow, ['Thiết bị', 'Dòng máy', 'Device']);
+                        const issuesRaw = getValue(processedRow, ['Lỗi/Bệnh', 'Lỗi', 'Bệnh', 'Issue', 'Issues']);
+                        const partsRaw = getValue(processedRow, ['Linh kiện', 'Parts']);
+                        const statusRaw = getValue(processedRow, ['Trạng thái', 'Status']);
+                        const receivedAt = parseLegacyDate(processedRow, ['Ngày nhận', 'Received At']);
+                        const completedAt = parseLegacyDate(processedRow, ['Ngày hoàn thành', 'Completed At']);
+                        const warrantyExpiresAt = parseLegacyDate(processedRow, ['Ngày hết BH dịch vụ', 'Service Warranty Expires At']);
+                        const amountInput = parseNumberInput(processedRow, ['Tổng tiền', 'Total']);
+                        const partsCostInput = parseNumberInput(processedRow, ['Tiền linh kiện', 'Parts Cost']);
+                        const laborCostInput = parseNumberInput(processedRow, ['Phí sửa chữa', 'Labor Cost']);
+                        const additionalFeesInput = parseNumberInput(processedRow, ['Phí phát sinh', 'Additional Fees']);
+                        const discountInput = parseNumberInput(processedRow, ['Giảm giá', 'Discount']);
 
                         if (!repairIdRaw) {
                             checks.push(buildCheck('name', 'Mã phiếu', '', 'error', 'Thiếu mã phiếu sửa chữa từ hệ thống cũ'));
@@ -615,10 +686,10 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
                             moneyIssues.length > 0 ? 'error' : 'ok',
                             moneyIssues.length > 0 ? `${moneyIssues.join(', ')} không hợp lệ` : 'Chi phí sửa chữa có thể import',
                         ));
-                        checks.push(buildCheck('payment', 'Thanh toán', getValue(row, ['Thanh toán', 'Payment Status']) || 'paid', 'ok', 'Trạng thái thanh toán sẽ được chuẩn hóa'));
+                        checks.push(buildCheck('payment', 'Thanh toán', getValue(processedRow, ['Thanh toán', 'Payment Status']) || 'paid', 'ok', 'Trạng thái thanh toán sẽ được chuẩn hóa'));
                         checks.push(buildCheck('status', 'Trạng thái', statusRaw, statusRaw ? 'ok' : 'error', statusRaw ? 'Giữ nguyên trạng thái phiếu từ Excel' : 'Thiếu trạng thái phiếu'));
-                        checks.push(buildCheck('warranty', 'Bảo hành', [getValue(row, ['Bảo hành dịch vụ tháng']), formatCheckDate(warrantyExpiresAt)].filter(Boolean).join(' / '), warrantyExpiresAt || getValue(row, ['Bảo hành dịch vụ tháng']) ? 'ok' : 'warning', warrantyExpiresAt || getValue(row, ['Bảo hành dịch vụ tháng']) ? 'Có thông tin bảo hành dịch vụ' : 'Thiếu bảo hành dịch vụ'));
-                        checks.push(buildCheck('details', 'Chi tiết', partsRaw || getValue(row, ['Ghi chú kỹ thuật', 'Ghi chú']), partsRaw ? 'ok' : 'warning', partsRaw ? 'Có linh kiện lịch sử' : 'Không có linh kiện, vẫn import được phiếu sửa không thay linh kiện'));
+                        checks.push(buildCheck('warranty', 'Bảo hành', [getValue(processedRow, ['Bảo hành dịch vụ tháng']), formatCheckDate(warrantyExpiresAt)].filter(Boolean).join(' / '), warrantyExpiresAt || getValue(processedRow, ['Bảo hành dịch vụ tháng']) ? 'ok' : 'warning', warrantyExpiresAt || getValue(processedRow, ['Bảo hành dịch vụ tháng']) ? 'Có thông tin bảo hành dịch vụ' : 'Thiếu bảo hành dịch vụ'));
+                        checks.push(buildCheck('details', 'Chi tiết', partsRaw || getValue(processedRow, ['Ghi chú kỹ thuật', 'Ghi chú']), partsRaw ? 'ok' : 'warning', partsRaw ? 'Có linh kiện lịch sử' : 'Không có linh kiện, vẫn import được phiếu sửa không thay linh kiện'));
 
                         checks.push(buildCheck(
                             'dates',
@@ -630,7 +701,7 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
 
                         const errors = summarizeChecks(checks, 'error');
                         const warnings = summarizeChecks(checks, 'warning');
-                        return { rowNum, data: row, errors, warnings, checks, categoryIds: [], category: '' };
+                        return { rowNum, data: processedRow, errors, warnings, checks, categoryIds: [], category: '' };
                     }
 
                     if (!categoryPath) {
@@ -645,9 +716,9 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
                         checks.push(buildCheck('category', 'Danh mục', categoryPath, 'ok', `Khớp ${categoryIds.length} cấp`));
                     }
 
-                    const priceOriginalInput = parseNumberInput(row, ['Giá gốc', 'Giá']);
-                    const pricePromoInput = parseNumberInput(row, ['Giá KM', 'Giá bán']);
-                    const costInput = parseNumberInput(row, ['Giá vốn', 'Cost']);
+                    const priceOriginalInput = parseNumberInput(processedRow, ['Giá gốc', 'Giá']);
+                    const pricePromoInput = parseNumberInput(processedRow, ['Giá KM', 'Giá bán']);
+                    const costInput = parseNumberInput(processedRow, ['Giá vốn', 'Cost']);
 
                     if (mode === 'part') {
                         if (!costInput.hasValue || !costInput.isValid || costInput.value <= 0) {
@@ -685,7 +756,7 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
                         }
                     }
 
-                    const stockInput = parseNumberInput(row, ['Tồn kho', 'Stock']);
+                    const stockInput = parseNumberInput(processedRow, ['Tồn kho', 'Stock']);
                     if (!stockInput.hasValue) {
                         checks.push(buildCheck('stock', 'Tồn kho', '', 'warning', 'Để trống sẽ nhập tồn kho 0'));
                     } else if (!stockInput.isValid) {
@@ -694,9 +765,9 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
                         checks.push(buildCheck('stock', 'Tồn kho', stockInput.raw, 'ok', 'Tồn kho hợp lệ'));
                     }
 
-                    const customCode = getValue(row, ['Mã hàng', 'SKU', 'Barcode']);
+                    const customCode = getValue(processedRow, ['Mã hàng', 'SKU', 'Barcode']);
                     const normalizedCode = normalizeProductCode(customCode);
-                    const expectedCode = resolveExpectedProductCode(mode, row, modeConfig, taxonomy);
+                    const expectedCode = resolveExpectedProductCode(mode, processedRow, modeConfig, taxonomy);
                     if (mode === 'service') {
                         checks.push(buildCheck('code', 'Mã hàng', '', 'ok', 'Dịch vụ không dùng mã QR/barcode'));
                     } else if (!customCode) {
@@ -719,13 +790,18 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
                         checks.push(buildCheck('code', 'Mã hàng', normalizedCode, 'ok', 'Mã hàng hợp lệ'));
                     }
 
-                    const images = parseImages(row, IMAGE_MAIN_HEADERS, IMAGE_OTHER_HEADERS);
+                    const images = parseImages(processedRow, IMAGE_MAIN_HEADERS, IMAGE_OTHER_HEADERS);
                     const invalidImages = images.filter((image) => !isValidHttpUrl(image) && !isLocalImageReference(image));
                     const localImages = images.filter(isLocalImageReference);
                     if (invalidImages.length > 0) {
                         checks.push(buildCheck('images', 'Ảnh', invalidImages[0], 'error', 'Ảnh phải là URL http/https hoặc đường dẫn file ảnh local'));
                     } else if (localImages.length > 0) {
-                        checks.push(buildCheck('images', 'Ảnh', localImages[0], 'error', `Có ${localImages.length} ảnh local cần chọn file để upload`));
+                        const hasConflict = localImages.some((image) => conflictedLocalKeys.has(normalizeLocalImageKey(image)));
+                        if (hasConflict) {
+                            checks.push(buildCheck('images', 'Ảnh', localImages[0], 'warning', `Xung đột ảnh: Có nhiều ảnh khác nhau cùng tên trên hệ thống. Vui lòng chọn file thực tế để phân giải.`));
+                        } else {
+                            checks.push(buildCheck('images', 'Ảnh', localImages[0], 'error', `Có ${localImages.length} ảnh local cần chọn file để upload`));
+                        }
                     } else {
                         checks.push(images.length > 0
                             ? buildCheck('images', 'Ảnh', `${images.length} URL`, 'ok', 'Có ảnh')
@@ -734,8 +810,8 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
                     }
 
                     if (mode === 'part') {
-                        const partType = getValue(row, ['Loại linh kiện', 'Part Type']);
-                        const quality = getValue(row, ['Chất lượng', 'Phân loại']);
+                        const partType = getValue(processedRow, ['Loại linh kiện', 'Part Type']);
+                        const quality = getValue(processedRow, ['Chất lượng', 'Phân loại']);
                         if (!partType) {
                             checks.push(buildCheck('details', 'Thông tin thêm', '', 'error', 'Thiếu loại linh kiện để tính bảo hành'));
                         } else if (quality && !QUALITY_OPTIONS.includes(quality)) {
@@ -746,17 +822,17 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
                             checks.push(buildCheck('details', 'Thông tin thêm', `${partType} / ${quality}`, 'ok', 'Thông tin linh kiện hợp lệ'));
                         }
                     } else if (mode === 'service') {
-                        const warranty = getValue(row, ['Bảo hành', 'Warranty']);
-                        const repairTime = getValue(row, ['Thời gian sửa', 'Repair Time']);
+                        const warranty = getValue(processedRow, ['Bảo hành', 'Warranty']);
+                        const repairTime = getValue(processedRow, ['Thời gian sửa', 'Repair Time']);
                         if (!warranty || !repairTime) {
                             checks.push(buildCheck('details', 'Thông tin thêm', [warranty, repairTime].filter(Boolean).join(' / '), 'warning', 'Nên có bảo hành và thời gian sửa'));
                         } else {
                             checks.push(buildCheck('details', 'Thông tin thêm', `${warranty} / ${repairTime}`, 'ok', 'Thông tin dịch vụ đủ'));
                         }
                     } else {
-                        const brand = getValue(row, ['Thương hiệu', 'Brand']);
-                        const specs = getValue(row, ['Thông số', 'Specs']);
-                        const rawCondition = getValue(row, ['Tình trạng', 'Condition']);
+                        const brand = getValue(processedRow, ['Thương hiệu', 'Brand']);
+                        const specs = getValue(processedRow, ['Thông số', 'Specs']);
+                        const rawCondition = getValue(processedRow, ['Tình trạng', 'Condition']);
                         const condition = normalizeConditionInput(rawCondition);
                         if (rawCondition && !condition) {
                             checks.push(buildCheck('details', 'Thông tin thêm', rawCondition, 'error', 'Tình trạng chỉ nhận new, like-new hoặc used'));
@@ -771,7 +847,7 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
 
                     const errors = summarizeChecks(checks, 'error');
                     const warnings = summarizeChecks(checks, 'warning');
-                    return { rowNum, data: row, errors, warnings, checks, categoryIds, category };
+                    return { rowNum, data: processedRow, errors, warnings, checks, categoryIds, category };
                 });
 
                 setRows(parsed);
@@ -785,6 +861,13 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
         };
 
         reader.readAsBinaryString(file);
+    };
+
+    const calculateHash = async (file: File): Promise<string> => {
+        const arrayBuffer = await file.arrayBuffer();
+        const hashBuffer = await window.crypto.subtle.digest('SHA-256', arrayBuffer);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
     };
 
     const handleLocalImages = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -819,17 +902,27 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
         let uploadedCount = 0;
 
         try {
+            const { getDoc, doc } = await import('firebase/firestore');
+
             for (const item of matched) {
                 const fileKey = normalizeLocalImageKey(getFileRelativePath(item.file));
+                const hash = await calculateHash(item.file);
+                const docId = `MED-import-${folder}-${hash}`;
+
                 if (!imageResolveCache.has(fileKey)) {
                     imageResolveCache.set(fileKey, (async () => {
-                        const existingImage = await findExistingImportImage(item.file.name, folder);
-                        if (existingImage) {
-                            return { url: existingImage.url, reused: true };
+                        const mediaDocRef = doc(db, 'media_library', docId);
+                        const mediaDocSnap = await getDoc(mediaDocRef);
+
+                        if (mediaDocSnap.exists()) {
+                            return { url: mediaDocSnap.data().url as string, reused: true };
                         }
-                        return { url: await uploadInitialImportImage(item.file, folder), reused: false };
+                        
+                        const newUrl = await uploadInitialImportImage(item.file, folder, hash);
+                        return { url: newUrl, reused: false };
                     })());
                 }
+
                 const resolvedImage = await imageResolveCache.get(fileKey)!;
                 replacements[item.requirement.key] = resolvedImage.url;
                 if (resolvedImage.reused) {

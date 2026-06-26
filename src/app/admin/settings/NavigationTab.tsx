@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 /* eslint-disable @next/next/no-img-element */
 import { useState, useCallback } from 'react';
@@ -426,12 +426,20 @@ export default function NavigationTab() {
                                 placeholder="Tên hiển thị"
                             />
                             <div className="flex items-center gap-1 text-xs text-gray-400">
-                                <span>/category/</span>
+                                <button
+                                    type="button"
+                                    onClick={() => updateHeaderItem(idx, { isCustomLink: !item.isCustomLink })}
+                                    className={`px-1.5 py-1 rounded border ${item.isCustomLink ? 'bg-orange-50 text-orange-600 border-orange-200' : 'bg-gray-50 text-gray-500 border-gray-200'}`}
+                                    title="Đổi loại link"
+                                >
+                                    {item.isCustomLink ? 'Link' : 'DMục'}
+                                </button>
+                                {!item.isCustomLink && <span>/category/</span>}
                                 <input
                                     value={item.slug}
                                     onChange={e => updateHeaderItem(idx, { slug: e.target.value })}
-                                    className="w-24 text-sm border rounded px-2 py-1 focus:ring-1 focus:ring-orange-300"
-                                    placeholder="slug"
+                                    className={`text-sm border rounded px-2 py-1 focus:ring-1 focus:ring-orange-300 ${item.isCustomLink ? 'w-40' : 'w-24'}`}
+                                    placeholder={item.isCustomLink ? "https://..." : "slug"}
                                 />
                             </div>
                             <button
@@ -504,12 +512,20 @@ export default function NavigationTab() {
                                         placeholder="Tên danh mục"
                                     />
                                     <div className="flex items-center gap-1 text-xs text-gray-400">
-                                        <span>/category/</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => updateSidebarItem(idx, { isCustomLink: !item.isCustomLink })}
+                                            className={`px-1.5 py-1 rounded border ${item.isCustomLink ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-gray-50 text-gray-500 border-gray-200'}`}
+                                            title="Đổi loại link"
+                                        >
+                                            {item.isCustomLink ? 'Link' : 'DMục'}
+                                        </button>
+                                        {!item.isCustomLink && <span>/category/</span>}
                                         <input
                                             value={item.slug}
                                             onChange={e => updateSidebarItem(idx, { slug: e.target.value })}
-                                            className="w-28 text-sm border rounded px-2 py-1 focus:ring-1 focus:ring-blue-300"
-                                            placeholder="slug"
+                                            className={`text-sm border rounded px-2 py-1 focus:ring-1 focus:ring-blue-300 ${item.isCustomLink ? 'w-40' : 'w-28'}`}
+                                            placeholder={item.isCustomLink ? "https://..." : "slug"}
                                         />
                                     </div>
                                     <button
@@ -616,12 +632,20 @@ export default function NavigationTab() {
                                 placeholder="Tên dịch vụ"
                             />
                             <div className="flex items-center gap-1 text-xs text-gray-400">
-                                <span>/category/</span>
+                                <button
+                                    type="button"
+                                    onClick={() => updateFooterItem(idx, { isCustomLink: !item.isCustomLink })}
+                                    className={`px-1.5 py-1 rounded border ${item.isCustomLink ? 'bg-green-50 text-green-600 border-green-200' : 'bg-gray-50 text-gray-500 border-gray-200'}`}
+                                    title="Đổi loại link"
+                                >
+                                    {item.isCustomLink ? 'Link' : 'DMục'}
+                                </button>
+                                {!item.isCustomLink && <span>/category/</span>}
                                 <input
                                     value={item.slug}
                                     onChange={e => updateFooterItem(idx, { slug: e.target.value })}
-                                    className="w-24 text-sm border rounded px-2 py-1 focus:ring-1 focus:ring-green-300"
-                                    placeholder="slug"
+                                    className={`text-sm border rounded px-2 py-1 focus:ring-1 focus:ring-green-300 ${item.isCustomLink ? 'w-40' : 'w-24'}`}
+                                    placeholder={item.isCustomLink ? "https://..." : "slug"}
                                 />
                             </div>
                             <button
@@ -696,12 +720,20 @@ export default function NavigationTab() {
                                 placeholder="Số lượng (vd: 200+)"
                             />
                             <div className="flex items-center gap-1 text-xs text-gray-400">
-                                <span>/category/</span>
+                                <button
+                                    type="button"
+                                    onClick={() => updateHomeServiceCategory(idx, { isCustomLink: !item.isCustomLink })}
+                                    className={`px-1.5 py-1 rounded border ${item.isCustomLink ? 'bg-purple-50 text-purple-600 border-purple-200' : 'bg-gray-50 text-gray-500 border-gray-200'}`}
+                                    title="Đổi loại link"
+                                >
+                                    {item.isCustomLink ? 'Link' : 'DMục'}
+                                </button>
+                                {!item.isCustomLink && <span>/category/</span>}
                                 <input
                                     value={item.slug}
                                     onChange={e => updateHomeServiceCategory(idx, { slug: e.target.value })}
-                                    className="w-24 text-sm border rounded px-2 py-1 focus:ring-1 focus:ring-purple-300"
-                                    placeholder="slug"
+                                    className={`text-sm border rounded px-2 py-1 focus:ring-1 focus:ring-purple-300 ${item.isCustomLink ? 'w-40' : 'w-24'}`}
+                                    placeholder={item.isCustomLink ? "https://..." : "slug"}
                                 />
                             </div>
                             <button

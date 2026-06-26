@@ -20,7 +20,7 @@ export type TaxonomyType = 'retail' | 'component' | 'service';
 export type PreviewFilter = 'all' | 'valid' | 'errors' | 'warnings';
 export type CheckSeverity = 'ok' | 'warning' | 'error';
 export type ProductCondition = 'new' | 'like-new' | 'used';
-export type LocalImageUploadFolder = 'products' | 'parts' | 'services';
+export type LocalImageUploadFolder = 'products' | 'parts' | 'services' | 'general';
 
 export interface FieldCheck {
     key: string;
@@ -538,7 +538,7 @@ export function refreshImageChecks(row: ParsedRow): ParsedRow {
     };
 }
 
-export async function uploadInitialImportImage(file: File, folder: LocalImageUploadFolder): Promise<string> {
+export async function uploadInitialImportImage(file: File, folder: LocalImageUploadFolder, hash?: string): Promise<string> {
     const validationError = validateImageFile(file);
     if (validationError) throw new Error(validationError);
 
@@ -546,7 +546,9 @@ export async function uploadInitialImportImage(file: File, folder: LocalImageUpl
     const thumb = await optimizeImage(file, 128, 128, 0.60);
     const storage = await getStorageInstance();
     const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
-    const storagePath = `media/${folder}/${Date.now()}_${optimized.file.name}`;
+    const storagePath = hash 
+        ? `media/${folder}/${hash}.webp` 
+        : `media/${folder}/${Date.now()}_${optimized.file.name}`;
     const storageRef = ref(storage, storagePath);
 
     await uploadBytes(storageRef, optimized.file, { contentType: optimized.file.type });
@@ -557,7 +559,11 @@ export async function uploadInitialImportImage(file: File, folder: LocalImageUpl
     await uploadBytes(thumbRef, thumb.file, { contentType: thumb.file.type });
     url = `${url}&hasThumb=true`;
 
-    await setDoc(doc(db, 'media_library', buildImportMediaDocumentId(folder, optimized.file.name)), {
+    const docId = hash 
+        ? `MED-import-${folder}-${hash}` 
+        : buildImportMediaDocumentId(folder, optimized.file.name);
+
+    await setDoc(doc(db, 'media_library', docId), {
         url,
         path: storagePath,
         name: optimized.file.name,
@@ -568,6 +574,7 @@ export async function uploadInitialImportImage(file: File, folder: LocalImageUpl
         folder,
         width: optimized.width,
         height: optimized.height,
+        hash: hash || null,
         createdAt: serverTimestamp(),
     });
 

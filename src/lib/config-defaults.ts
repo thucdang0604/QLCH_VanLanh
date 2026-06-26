@@ -94,7 +94,8 @@ export interface GeofenceConfig {
 export interface NavItem {
     id: string;
     label: string;
-    slug: string;       // → href = /category/{slug}
+    slug: string;       // → href = /category/{slug} OR custom url if isCustomLink is true
+    isCustomLink?: boolean;
     iconName: string;   // Lucide icon name (see icon-map.ts)
     order: number;
     visible: boolean;
@@ -106,6 +107,7 @@ export interface SidebarMenuItem {
     id: string;
     name: string;
     slug: string;
+    isCustomLink?: boolean;
     iconName: string;
     order: number;
     visible: boolean;
@@ -116,7 +118,8 @@ export interface SidebarMenuItem {
 export interface FooterServiceLink {
     id: string;
     name: string;
-    slug: string;       // → href = /category/{slug}
+    slug: string;       // → href = /category/{slug} OR custom
+    isCustomLink?: boolean;
     order: number;
     visible: boolean;
     taxonomyRef?: string; // ID of linked taxonomy node
@@ -126,6 +129,7 @@ export interface HomeServiceCategory {
     id: string;
     name: string;
     slug: string;
+    isCustomLink?: boolean;
     icon: string;
     count: string;
     order: number;
