@@ -99,7 +99,30 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
         setUploadFolder(defaultFolder);
         const q = query(collection(db, 'media_library'), orderBy('createdAt', 'desc'), limit(200));
         const unsub = onSnapshot(q, (snap) => {
-            setItems(snap.docs.map(d => ({ id: d.id, ...d.data() } as MediaItem)));
+            const rawItems = snap.docs.map(d => {
+                const data = d.data();
+                let folder = data.folder || '';
+                
+                // Auto-heal empty folders using Storage path
+                if (!folder && data.path) {
+                    const parts = data.path.split('/');
+                    if (parts.length > 1) {
+                        const folderCandidate = parts[parts.length - 2];
+                        if (MEDIA_FOLDERS.some(f => f.id === folderCandidate)) {
+                            folder = folderCandidate;
+                        } else if (parts[0] && MEDIA_FOLDERS.some(f => f.id === parts[0])) {
+                            folder = parts[0];
+                        }
+                    }
+                }
+                
+                return {
+                    id: d.id,
+                    ...data,
+                    folder: folder || 'general'
+                } as MediaItem;
+            });
+            setItems(rawItems);
             setLoading(false);
         }, () => setLoading(false));
         return () => unsub();
@@ -285,6 +308,8 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
     };
 
     // Filter items
+    const activeFolders = MEDIA_FOLDERS;
+
     const filtered = items.filter(i => {
         const matchSearch = i.name.toLowerCase().includes(searchQuery.toLowerCase());
         const matchFolder = filterFolder === 'all' || i.folder === filterFolder;
@@ -415,8 +440,10 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                                     className="py-2.5 px-3 border rounded-lg text-sm bg-gray-50 focus:outline-none focus:border-orange-400 font-medium text-gray-700"
                                 >
                                     <option value="all">Tất cả thư mục</option>
-                                    {MEDIA_FOLDERS.map(f => (
-                                        <option key={f.id} value={f.id}>{f.name}</option>
+                                    {activeFolders.map(f => (
+                                        <option key={f.id} value={f.id}>
+                                            {f.name} ({items.filter(i => i.folder === f.id).length})
+                                        </option>
                                     ))}
                                 </select>
                                 <div className="relative flex-1">
