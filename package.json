@@ -14,9 +14,7 @@
     "verify": "pnpm lint && pnpm typecheck && pnpm build",
     "start": "next start",
     "lint": "eslint",
-    "clean": "npx rimraf .next .firebase tsconfig.tsbuildinfo",
-    "graph": "node scripts/generate-graph.js",
-    "graph:serve": "node dev-tools/file-graph/serve.js"
+    "clean": "npx rimraf .next .firebase tsconfig.tsbuildinfo"
   },
   "dependencies": {
     "@ffmpeg/ffmpeg": "^0.12.15",
@@ -59,7 +57,6 @@
     "eslint": "^9",
     "eslint-config-next": "^15.5.14",
     "eslint-plugin-react-hooks": "5.2.0",
-    "puppeteer-core": "^25.0.4",
     "tailwindcss": "^4",
     "tsx": "^4.19.2",
     "typescript": "^5",

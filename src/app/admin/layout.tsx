@@ -5,8 +5,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ConfigProvider } from '@/lib/ConfigContext';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { canStaffAccess, findFirstAccessibleRoute } from '@/lib/permissions';
-import { ADMIN_BADGE_ROUTE_MAP, ADMIN_NAV_GROUPS, type AdminIconKey } from '@/lib/adminModules';
+import { canStaffAccess, findFirstAccessibleRoute, ADMIN_BADGE_ROUTE_MAP, ADMIN_NAV_GROUPS, type AdminIconKey } from '@/lib/adminModules';
 import {
     ArrowDownToLine,
     Award,

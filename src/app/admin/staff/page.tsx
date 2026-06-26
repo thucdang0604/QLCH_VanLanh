@@ -10,7 +10,7 @@ import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/fire
 import { db } from '@/lib/firebase';
 import { AppUser } from '@/lib/AuthContext';
 import { toastError, toastSuccess } from '@/lib/toast';
-import { ADMIN_ROLE_PRESETS, PERMISSIONS_REGISTRY as PERMISSIONS } from '@/lib/permissions';
+import { ADMIN_ROLE_PRESETS, PERMISSIONS_REGISTRY as PERMISSIONS } from '@/lib/adminModules';
 
 // Using centralized PERMISSIONS from @/lib/permissions
 export default function StaffPage() {

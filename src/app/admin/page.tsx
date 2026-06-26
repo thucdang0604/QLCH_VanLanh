@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/AuthContext';
-import { findFirstAccessibleRoute } from '@/lib/permissions';
+import { findFirstAccessibleRoute } from '@/lib/adminModules';
 import {
     Package,
     ShoppingCart,

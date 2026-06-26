@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { getAdminAuth, getAdminDb } from '@/lib/firebaseAdmin';
-import type { PermissionId } from '@/lib/permissions';
+import type { PermissionId } from '@/lib/adminModules';
 
 export type VerifiedUser = {
   uid: string;

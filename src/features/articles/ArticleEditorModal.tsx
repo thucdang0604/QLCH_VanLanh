@@ -48,6 +48,80 @@ function buildArticleMediaDocumentId(name: string) {
     return `MED-articles-${Date.now()}-${slug}`;
 }
 
+async function processBase64Images(htmlContent: string): Promise<string> {
+    if (!htmlContent) return '';
+    
+    const parser = new DOMParser();
+    const docNode = parser.parseFromString(htmlContent, 'text/html');
+    const images = docNode.querySelectorAll('img');
+    
+    const base64Images: HTMLImageElement[] = [];
+    images.forEach(img => {
+        if (img.src && img.src.startsWith('data:image/')) {
+            base64Images.push(img);
+        }
+    });
+
+    if (base64Images.length === 0) {
+        return htmlContent;
+    }
+
+    const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
+    const storage = await getStorageInstance();
+
+    const base64ToBlob = (dataURI: string) => {
+        const parts = dataURI.split(',');
+        const mime = parts[0].split(':')[1].split(';')[0];
+        const byteString = atob(parts[1]);
+        const ab = new ArrayBuffer(byteString.length);
+        const ia = new Uint8Array(ab);
+        for (let i = 0; i < byteString.length; i++) {
+            ia[i] = byteString.charCodeAt(i);
+        }
+        return new Blob([ab], { type: mime });
+    };
+
+    for (let i = 0; i < base64Images.length; i++) {
+        const img = base64Images[i];
+        try {
+            const blob = base64ToBlob(img.src);
+            const extension = blob.type.split('/')[1] || 'png';
+            const tempName = `article_embedded_${Date.now()}_${i}.${extension}`;
+            const file = new File([blob], tempName, { type: blob.type });
+            
+            // Optimize the image using optimization parameters matching the signature
+            const { file: optimized, width, height } = await optimizeImage(file, 1200, 1600, 0.8);
+
+            const storagePath = `media/articles/${Date.now()}_${optimized.name}`;
+            const storageRef = ref(storage, storagePath);
+            const buffer = await optimized.arrayBuffer();
+            const bytes = new Uint8Array(buffer);
+
+            await uploadBytes(storageRef, bytes, { contentType: 'image/webp' });
+            const url = await getDownloadURL(storageRef);
+
+            // Register in Media Library
+            await setDoc(doc(db, 'media_library', buildArticleMediaDocumentId(optimized.name)), {
+                url,
+                path: storagePath,
+                name: optimized.name,
+                type: 'image/webp',
+                size: optimized.size,
+                width,
+                height,
+                createdAt: serverTimestamp(),
+            });
+
+            // Replace the src
+            img.src = url;
+        } catch (err) {
+            console.error('Failed to process embedded image:', err);
+        }
+    }
+
+    return docNode.body.innerHTML;
+}
+
 export function ArticleModal({
     article,
     onClose,
@@ -487,11 +561,14 @@ export function ArticleModal({
         }
         setSaving(true);
         try {
+            // Pre-process content to optimize and upload base64 images to Storage
+            const processedContent = await processBase64Images(formData.content);
+
             const payload: Record<string, unknown> = {
                 title: formData.title.trim(),
                 type: formData.type,
                 status: formData.status,
-                content: formData.content,
+                content: processedContent,
                 excerpt: formData.excerpt.trim() || '',
                 thumbnail: formData.thumbnail || '',
                 videoEmbedUrl: formData.videoEmbedUrl.trim() || '',

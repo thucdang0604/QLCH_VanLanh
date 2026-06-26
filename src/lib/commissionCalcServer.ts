@@ -27,15 +27,18 @@ function findBestRule(rules: CommissionRule[], type: 'order' | 'repair', product
     // Filter rules matching the type (or 'all')
     const applicableRules = rules.filter(r => r.type === type || r.type === 'all');
 
+    const cleanProductId = productId ? String(productId).trim().toLowerCase() : '';
+    const cleanCategory = category ? String(category).trim().toLowerCase() : '';
+
     // 1. Try specific product
-    if (productId) {
-        const specificRule = applicableRules.find(r => r.hierarchyLevel === 3 && r.targetType === 'specific' && r.targetValue === productId);
+    if (cleanProductId) {
+        const specificRule = applicableRules.find(r => r.hierarchyLevel === 3 && r.targetType === 'specific' && String(r.targetValue || '').trim().toLowerCase() === cleanProductId);
         if (specificRule) return specificRule;
     }
 
     // 2. Try category
-    if (category) {
-        const categoryRule = applicableRules.find(r => r.hierarchyLevel === 2 && r.targetType === 'category' && r.targetValue === category);
+    if (cleanCategory) {
+        const categoryRule = applicableRules.find(r => r.hierarchyLevel === 2 && r.targetType === 'category' && String(r.targetValue || '').trim().toLowerCase() === cleanCategory);
         if (categoryRule) return categoryRule;
     }
 

@@ -19,6 +19,7 @@ import Modal from '@/components/admin/Modal';
 import PaginationBar from '@/components/admin/PaginationBar';
 import ProductQrLabelModal from '@/components/admin/ProductQrLabelModal';
 import UniversalProductModal from '@/components/admin/UniversalProductModal';
+import ExportImportReportButton from '@/components/admin/ExportImportReportButton';
 import { PART_CATEGORY_LABEL, isPartCategory } from '@/lib/constants';
 import { db } from '@/lib/firebase';
 import type { Product } from '@/lib/types';
@@ -139,6 +140,7 @@ export default function PartsPage() {
                     <p className="text-gray-500">{parts.length} linh kiện trong hệ thống</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
+                    <ExportImportReportButton />
                     <button
                         onClick={() => setIsLotTrackingOpen(true)}
                         className="flex items-center gap-2 bg-indigo-50 text-indigo-700 border border-indigo-200 px-4 py-2.5 rounded-lg font-medium hover:bg-indigo-100 transition-colors shadow-sm"

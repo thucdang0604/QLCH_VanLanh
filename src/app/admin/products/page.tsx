@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
+import firebaseImageLoader from '@/lib/imageLoader';
 import { useRouter } from 'next/navigation';
 import { Archive, Plus, Search, Edit, Package, Loader2, QrCode, AlertTriangle, PackagePlus } from 'lucide-react';
 import { useFirestoreCollection, updateDocument } from '@/lib/useFirestore';
@@ -252,6 +253,8 @@ export default function ProductsPage() {
                                                         src={product.imageUrl}
                                                         alt={product.name}
                                                         fill
+                                                        loader={firebaseImageLoader}
+                                                        sizes="48px"
                                                         className="object-cover"
                                                     />
                                                 ) : (
@@ -354,6 +357,8 @@ export default function ProductsPage() {
                                             src={product.imageUrl}
                                             alt={product.name}
                                             fill
+                                            loader={firebaseImageLoader}
+                                            sizes="64px"
                                             className="object-cover"
                                         />
                                     ) : (

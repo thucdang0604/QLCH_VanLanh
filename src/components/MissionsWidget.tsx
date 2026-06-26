@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useConfig } from '@/lib/ConfigContext';
-import { initializeApp, getApp } from 'firebase/app';
+import { initializeApp, getApps } from 'firebase/app';
 import { getAuth, RecaptchaVerifier, signInWithPhoneNumber, ConfirmationResult } from 'firebase/auth';
 import { normalizeVietnamPhone } from '@/lib/phone';
 
@@ -22,12 +22,8 @@ function getBountyAuth() {
         appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
         measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
     };
-    try {
-        return getAuth(getApp('bounty-otp'));
-    } catch {
-        const app = initializeApp(config, 'bounty-otp');
-        return getAuth(app);
-    }
+    const app = getApps().find(a => a.name === 'bounty-otp') || initializeApp(config, 'bounty-otp');
+    return getAuth(app);
 }
 
 type MissionStatusMap = Record<string, boolean>;
