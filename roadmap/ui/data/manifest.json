@@ -14,10 +14,11 @@
       "id": "plan-mediamanager-folder-config-20260626",
       "title": "Kế hoạch Đồng bộ Cấu hình Thư mục MediaManager",
       "date": "26.06.2026",
-      "status": "in_progress",
+      "status": "completed",
+      "completedAt": "26.06.2026",
       "planFile": "data/ai_plans/plan_mediamanager_folder_config_20260626.md",
       "taskFile": "",
-      "walkthroughFile": "",
+      "walkthroughFile": "data/ai_plans/walkthrough_mediamanager_folder_config_20260626.md",
       "scope": [
         "src/features/repairs/RepairMediaManagers.tsx",
         "src/features/articles/ArticleEditorModal.tsx",
