@@ -822,6 +822,7 @@ export default function ReceiptSettingsPanel() {
                 title="Chọn Logo Biên Nhận"
                 isOpen={showMediaManager}
                 onClose={() => setShowMediaManager(false)}
+                defaultFolder="logo-brand"
                 onSelect={(url) => {
                     setConfig(prev => ({ ...prev, logoUrl: url }));
                     setShowMediaManager(false);

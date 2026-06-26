@@ -220,6 +220,7 @@ function ImageLinkTester() {
     const [message, setMessage] = useState('');
     const [localObjectUrl, setLocalObjectUrl] = useState('');
     const [mediaOpen, setMediaOpen] = useState(false);
+    const [testFolder, setTestFolder] = useState('products');
 
     useEffect(() => () => {
         if (localObjectUrl) URL.revokeObjectURL(localObjectUrl);
@@ -288,6 +289,17 @@ function ImageLinkTester() {
                     </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
+                    <select
+                        title="Thư mục upload"
+                        value={testFolder}
+                        onChange={(e) => setTestFolder(e.target.value)}
+                        className="px-3 py-2 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 bg-white focus:outline-none focus:border-orange-400 focus:ring-1 focus:ring-orange-400"
+                    >
+                        <option value="products">Thư mục: Sản phẩm</option>
+                        <option value="parts">Thư mục: Linh kiện</option>
+                        <option value="services">Thư mục: Dịch vụ</option>
+                        <option value="general">Thư mục: Chung (Khác)</option>
+                    </select>
                     <button
                         type="button"
                         onClick={() => setMediaOpen(true)}
@@ -346,7 +358,7 @@ function ImageLinkTester() {
             onClose={() => setMediaOpen(false)}
             onSelect={handleMediaSelect}
             title="Upload hoặc chọn ảnh cho Excel"
-            defaultFolder="products"
+            defaultFolder={testFolder}
         />
         </>
     );

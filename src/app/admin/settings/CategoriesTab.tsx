@@ -329,6 +329,7 @@ function CategoryModal({ isOpen, onClose, initialData, onSave }: { isOpen: boole
                 <MediaManager
                     isOpen={true}
                     onClose={() => setShowMediaForIcon(false)}
+                    defaultFolder="general"
                     onSelect={(url) => {
                         setFormData(prev => ({ ...prev, icon: url }));
                         setShowMediaForIcon(false);
@@ -630,6 +631,7 @@ function BrandModal({ isOpen, onClose, initialData }: { isOpen: boolean, onClose
                 <MediaManager
                     isOpen={true}
                     onClose={() => setShowMediaForLogo(false)}
+                    defaultFolder="logo-brand"
                     onSelect={(url) => {
                         setFormData(prev => ({ ...prev, logoUrl: url }));
                         setShowMediaForLogo(false);

@@ -81,18 +81,41 @@ async function processBase64Images(htmlContent: string): Promise<string> {
         return new Blob([ab], { type: mime });
     };
 
+    // Helper to calculate SHA-256 hash of a Blob on client-side using Web Crypto API
+    const calculateHash = async (blob: Blob): Promise<string> => {
+        const arrayBuffer = await blob.arrayBuffer();
+        const hashBuffer = await window.crypto.subtle.digest('SHA-256', arrayBuffer);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    };
+
     for (let i = 0; i < base64Images.length; i++) {
         const img = base64Images[i];
         try {
             const blob = base64ToBlob(img.src);
+            const hash = await calculateHash(blob);
+            
+            // Document ID using hash for O(1) deduplication lookup
+            const mediaDocId = `MED-articles-${hash}`;
+            const mediaDocRef = doc(db, 'media_library', mediaDocId);
+            const mediaDocSnap = await getDoc(mediaDocRef);
+
+            if (mediaDocSnap.exists()) {
+                // Image already exists! Use the existing URL and bypass upload/optimization
+                const existingUrl = mediaDocSnap.data().url;
+                img.src = existingUrl;
+                continue;
+            }
+
             const extension = blob.type.split('/')[1] || 'png';
-            const tempName = `article_embedded_${Date.now()}_${i}.${extension}`;
+            const tempName = `article_embedded_${hash}.${extension}`;
             const file = new File([blob], tempName, { type: blob.type });
             
             // Optimize the image using optimization parameters matching the signature
             const { file: optimized, width, height } = await optimizeImage(file, 1200, 1600, 0.8);
 
-            const storagePath = `media/articles/${Date.now()}_${optimized.name}`;
+            // Use the hash in the Storage path to guarantee physical deduplication
+            const storagePath = `media/articles/${hash}.webp`;
             const storageRef = ref(storage, storagePath);
             const buffer = await optimized.arrayBuffer();
             const bytes = new Uint8Array(buffer);
@@ -100,8 +123,8 @@ async function processBase64Images(htmlContent: string): Promise<string> {
             await uploadBytes(storageRef, bytes, { contentType: 'image/webp' });
             const url = await getDownloadURL(storageRef);
 
-            // Register in Media Library
-            await setDoc(doc(db, 'media_library', buildArticleMediaDocumentId(optimized.name)), {
+            // Register in Media Library using the hash-based ID
+            await setDoc(mediaDocRef, {
                 url,
                 path: storagePath,
                 name: optimized.name,
@@ -109,6 +132,7 @@ async function processBase64Images(htmlContent: string): Promise<string> {
                 size: optimized.size,
                 width,
                 height,
+                folder: 'articles',
                 createdAt: serverTimestamp(),
             });
 
@@ -521,7 +545,7 @@ export function ArticleModal({
         try {
             // Optimize: resize & convert to WebP
             const { file: optimized, width, height } = await optimizeImage(file, 1200, 800, 0.8);
-            const storagePath = `media/${Date.now()}_${optimized.name}`;
+            const storagePath = `media/articles/${Date.now()}_${optimized.name}`;
             const storage = await getStorageInstance();
             const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
             const storageRef = ref(storage, storagePath);
@@ -541,6 +565,7 @@ export function ArticleModal({
                 size: optimized.size,
                 width,
                 height,
+                folder: 'articles',
                 createdAt: serverTimestamp(),
             });
 
@@ -836,6 +861,7 @@ export function ArticleModal({
                             onClose={() => setMediaPickerOpen(false)}
                             onSelect={(url) => setFormData({ ...formData, thumbnail: url })}
                             title="Chọn ảnh thumbnail"
+                            defaultFolder="articles"
                         />
                     </div>
 
