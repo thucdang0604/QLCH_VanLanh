@@ -13,7 +13,8 @@ import {
     DollarSign,
     Loader2
 } from 'lucide-react';
-import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
+import { collection, query, where, doc } from 'firebase/firestore';
+import { getDocs, getDoc } from '@/lib/firestoreLogger';
 import { db, getRtdbInstance } from '@/lib/firebase';
 import type { Order, RepairTicket } from '@/lib/types';
 

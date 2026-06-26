@@ -2,21 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import {
-    collection,
-    query,
-    orderBy,
-    onSnapshot,
-    doc,
-    updateDoc,
-    serverTimestamp,
-    where,
-
-    limit,
-    startAfter,
-    getDocs,
-    DocumentSnapshot
-} from 'firebase/firestore';
+import { collection, query, orderBy, doc, updateDoc, serverTimestamp, where, limit, startAfter, DocumentSnapshot } from 'firebase/firestore';
+import { onSnapshot, getDocs } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import {
     Clock,

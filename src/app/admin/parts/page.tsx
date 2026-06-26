@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { orderBy, onSnapshot, doc, serverTimestamp } from 'firebase/firestore';
+import { orderBy, doc, serverTimestamp } from 'firebase/firestore';
+import { onSnapshot } from '@/lib/firestoreLogger';
 import {
     AlertTriangle,
     Archive,

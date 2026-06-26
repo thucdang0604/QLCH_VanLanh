@@ -2,7 +2,8 @@
 
 /* eslint-disable @next/next/no-img-element */
 import { useState, useEffect, useRef } from 'react';
-import { collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, limit, setDoc } from 'firebase/firestore';
+import { collection, deleteDoc, doc, orderBy, query, serverTimestamp, limit, setDoc, type QuerySnapshot, type QueryDocumentSnapshot } from 'firebase/firestore';
+import { onSnapshot } from '@/lib/firestoreLogger';
 import { db, getStorageInstance } from '@/lib/firebase';
 import { X, Upload, Image as ImageIcon, Film, Trash2, Loader2, Check, Search, AlertTriangle } from 'lucide-react';
 import type { FirestoreDateValue } from '@/lib/types';
@@ -92,14 +93,13 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
     const [uploadFolder, setUploadFolder] = useState<string>(defaultFolder);
     const [filterFolder, setFilterFolder] = useState<string>('all');
     const fileInputRef = useRef<HTMLInputElement>(null);
-
     // Fetch media library from Firestore
     useEffect(() => {
         if (!isOpen) return;
         setUploadFolder(defaultFolder);
         const q = query(collection(db, 'media_library'), orderBy('createdAt', 'desc'), limit(200));
-        const unsub = onSnapshot(q, (snap) => {
-            const rawItems = snap.docs.map(d => {
+        const unsub = onSnapshot(q, (snap: QuerySnapshot) => {
+            const rawItems = snap.docs.map((d: QueryDocumentSnapshot) => {
                 const data = d.data();
                 let folder = data.folder || '';
                 

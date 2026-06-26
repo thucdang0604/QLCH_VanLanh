@@ -29,11 +29,15 @@ interface PricingService {
     slug?: string;
 }
 
-export default function PricingSection() {
+export default function PricingSection({ ssrPricingServices }: { ssrPricingServices?: PricingService[] }) {
     const { config } = useConfig();
     const pricing = config.homepagePricing;
-    const [services, setServices] = useState<PricingService[]>([]);
-    const [loading, setLoading] = useState(true);
+    
+    // Initialize services with SSR data or empty array
+    const [services, setServices] = useState<PricingService[]>(
+        Array.isArray(ssrPricingServices) ? ssrPricingServices : []
+    );
+    const [loading, setLoading] = useState(!Array.isArray(ssrPricingServices));
     const [activeTab, setActiveTab] = useState(pricing.categories[0]?.id || '');
     const activeCategory = pricing.categories.find(category => category.id === activeTab) || pricing.categories[0];
     const currentServices = activeCategory
@@ -52,6 +56,12 @@ export default function PricingSection() {
         : [];
 
     useEffect(() => {
+        // If we didn't get SSR data, fetch it (fallback)
+        if (Array.isArray(ssrPricingServices) && ssrPricingServices.length > 0) {
+            setLoading(false);
+            return;
+        }
+
         let cancelled = false;
         fetch('/api/services/homepage-pricing')
             .then(response => response.ok ? response.json() : Promise.reject(new Error('Pricing services request failed')))
@@ -63,7 +73,7 @@ export default function PricingSection() {
                 if (!cancelled) setLoading(false);
             });
         return () => { cancelled = true; };
-    }, []);
+    }, [ssrPricingServices]);
 
     useEffect(() => {
         if (!pricing.categories.some(category => category.id === activeTab)) {

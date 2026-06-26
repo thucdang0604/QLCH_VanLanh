@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc } from 'firebase/firestore';
+import { getDoc } from '@/lib/firestoreLogger';
 import { db, getAuthInstance } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
 import { Lock, Mail, Loader2, AlertCircle, ShieldCheck } from 'lucide-react';

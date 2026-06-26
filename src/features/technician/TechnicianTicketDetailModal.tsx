@@ -20,7 +20,7 @@ interface TechnicianTicketDetailModalProps {
     selectedTicket: RepairTicket | null;
     setSelectedTicket: (ticket: RepairTicket | null) => void;
     user: Pick<User, 'uid' | 'role'> | null | undefined;
-    userNamesMap: Record<string, string>;
+    // userNamesMap removed
     partSearchQuery: string;
     setPartSearchQuery: (value: string) => void;
     partSearchResults: Product[];
@@ -45,7 +45,7 @@ export function TechnicianTicketDetailModal({
     selectedTicket,
     setSelectedTicket,
     user,
-    userNamesMap,
+    // userNamesMap removed,
     partSearchQuery,
     setPartSearchQuery,
     partSearchResults,
@@ -424,7 +424,7 @@ export function TechnicianTicketDetailModal({
                                             </span>
                                         </div>
                                         {(entry.actorName || entry.actorId || entry.by) && (
-                                            <p className="mt-1 text-gray-600">Thực hiện: {entry.actorName || userNamesMap[(entry.actorId || entry.by) as string] || entry.actorId || entry.by} {entry.actorRole ? `(${entry.actorRole})` : ''}</p>
+                                            <p className="mt-1 text-gray-600">Thực hiện: {entry.actorName || entry.actorId || entry.by} {entry.actorRole ? `(${entry.actorRole})` : ''}</p>
                                         )}
                                         {(entry.reason || entry.note) && <p className="mt-1 text-gray-700">Lý do: {entry.reason || entry.note}</p>}
                                         {entry.requestId && <p className="mt-1 break-all text-[10px] text-gray-400">Mã đối soát: {entry.requestId}</p>}

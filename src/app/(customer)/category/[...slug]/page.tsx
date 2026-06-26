@@ -6,6 +6,8 @@ import { notFound, redirect } from 'next/navigation';
 import type { TaxonomyNode } from '@/lib/types';
 import { getBusinessIdentity } from '@/lib/businessIdentity';
 
+export const revalidate = 300;
+
 /* ── Resolve nav/taxonomy info for a given slug ── */
 type ResolvedInfo = {
     label: string;

@@ -5,10 +5,8 @@ import {
     Plus, Search, Edit, Trash2, FileText,
     Loader2, Video, MessageCircle
 } from 'lucide-react';
-import {
-    collection, query, orderBy, onSnapshot, limit,
-    deleteDoc, doc
-} from 'firebase/firestore';
+import { collection, query, orderBy, limit, deleteDoc, doc } from 'firebase/firestore';
+import { onSnapshot } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import Image from 'next/image';
 import { toastError } from '@/lib/toast';

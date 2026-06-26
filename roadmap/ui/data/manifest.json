@@ -11,6 +11,28 @@
   "constraints": [],
   "aiPlans": [
     {
+      "id": "plan-firebase-reads-optimization-20260626",
+      "title": "Kế hoạch Tối ưu số lượng Firebase Reads trên Trang Chủ",
+      "date": "26.06.2026",
+      "status": "in_progress",
+      "planFile": "data/ai_plans/firebase_reads_optimization.md",
+      "taskFile": "",
+      "walkthroughFile": "",
+      "scope": [
+        "src/app/api/services/homepage-pricing/route.ts",
+        "src/app/(customer)/page.tsx",
+        "src/app/(customer)/page.client.tsx",
+        "src/components/home/ArticleBlock.tsx",
+        "src/components/home/FloatingReviews.tsx"
+      ],
+      "decisions": [
+        "Thêm cache revalidate 300s vào /api/services/homepage-pricing",
+        "Fetch articles và reviews trên Server và đẩy xuống Client qua ssrLatestArticles, ssrLatestReviews",
+        "Gỡ bỏ getDocs trên client của ArticleBlock và FloatingReviews"
+      ],
+      "updatedAt": "2026-06-26T10:47:00.000+07:00"
+    },
+    {
       "id": "plan-large-image-preview-20260626",
       "title": "Kế hoạch Nâng cấp Xem trước Ảnh Kích thước lớn trong Excel Importer",
       "date": "26.06.2026",

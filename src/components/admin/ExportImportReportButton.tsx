@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { collection, query, where, orderBy, getDocs, Timestamp } from 'firebase/firestore';
+import { collection, query, where, orderBy, Timestamp } from 'firebase/firestore';
+import { getDocs } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import { FileDown, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';

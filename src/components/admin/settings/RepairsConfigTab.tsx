@@ -5,7 +5,8 @@ import {
     Settings, Plus, Trash2, GripVertical, Save, Loader2, ArrowRight, Eye, Shield, AlertTriangle
 } from 'lucide-react';
 import Modal from '@/components/admin/Modal';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { getDoc } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import { WORKFLOW_FEATURES } from '@/lib/workflowFeatures';
 import {

@@ -16,7 +16,8 @@ import {
     Wrench,
     X,
 } from 'lucide-react';
-import { collection, doc, getDocs, query, runTransaction, serverTimestamp, where } from 'firebase/firestore';
+import { collection, doc, query, runTransaction, serverTimestamp, where } from 'firebase/firestore';
+import { getDocs } from '@/lib/firestoreLogger';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
 import { db } from '@/lib/firebase';

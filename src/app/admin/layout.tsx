@@ -40,6 +40,7 @@ import { toastError } from '@/lib/toast';
 import { useAdminBadges } from '@/lib/useAdminBadges';
 import GlobalSearch from '@/components/admin/GlobalSearch';
 import PwaInstallPrompt from '@/components/admin/PwaInstallPrompt';
+import RefreshWebsiteButton from '@/components/admin/RefreshWebsiteButton';
 
 const iconMap: Record<AdminIconKey, LucideIcon> = {
     dashboard: LayoutDashboard,
@@ -465,6 +466,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                             </div>
 
                             <div className="flex items-center gap-3 md:hidden">
+                                <RefreshWebsiteButton />
                                 <NotificationBell badges={badges} activities={activities} />
                                 <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center overflow-hidden">
                                     {user.photoURL ? (
@@ -481,6 +483,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                         </div>
 
                         <div className="hidden md:flex items-center gap-3">
+                            <RefreshWebsiteButton />
                             <NotificationBell badges={badges} activities={activities} />
 
                             <div className="flex items-center gap-3 pl-3 border-l text-right">

@@ -8,7 +8,8 @@ import {
     XCircle, Clock, Loader2, ShoppingBag, AlertTriangle
 } from 'lucide-react';
 import Modal from '@/components/admin/Modal';
-import { collection, query, orderBy, onSnapshot, limit, startAfter, getDocs, DocumentSnapshot, where, doc, getDoc } from 'firebase/firestore';
+import { collection, query, orderBy, limit, startAfter, DocumentSnapshot, where, doc } from 'firebase/firestore';
+import { onSnapshot, getDocs, getDoc } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import PrintableWarranty, { WarrantyPrintPayload } from '@/components/admin/PrintableWarranty';
 import type { ReceiptConfig } from '@/components/admin/PrintableReceipt';

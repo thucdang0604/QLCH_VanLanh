@@ -8,7 +8,8 @@ import {
     Package, Loader2, CheckCircle2,
     AlertTriangle, Camera, Keyboard
 } from 'lucide-react';
-import { collection, doc, getDoc, getDocs, limit, query, where, orderBy as fbOrderBy } from 'firebase/firestore';
+import { collection, doc, limit, query, where, orderBy as fbOrderBy } from 'firebase/firestore';
+import { getDoc, getDocs } from '@/lib/firestoreLogger';
 
 import { useConfig } from '@/lib/ConfigContext';
 import Modal from '@/components/admin/Modal';

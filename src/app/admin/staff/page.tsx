@@ -6,7 +6,8 @@ import {
     Edit, Mail, Phone, Search
 } from 'lucide-react';
 import Modal from '@/components/admin/Modal';
-import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore';
+import { collection, query, where, doc, updateDoc } from 'firebase/firestore';
+import { getDocs } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import { AppUser } from '@/lib/AuthContext';
 import { toastError, toastSuccess } from '@/lib/toast';

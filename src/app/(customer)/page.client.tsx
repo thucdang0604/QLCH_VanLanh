@@ -125,6 +125,8 @@ export default function Home({ ssrConfig }: { ssrConfig: SSRHomeConfig }) {
                 {...(section.component === 'hero' ? { initialBanners: heroBanners, storeBranches } : {})}
                 {...(section.component === 'flash_sale' || section.component === 'suggested' ? { ssrLatestProducts: ssrConfig.ssrLatestProducts } : {})}
                 {...(section.component === 'categories' ? { ssrHomeServiceCategories: ssrConfig.homeServiceCategories } : {})}
+                {...(section.component === 'pricing_table' ? { ssrPricingServices: ssrConfig.ssrPricingServices } : {})}
+                {...(section.component === 'articles' ? { ssrArticles: ssrConfig.ssrArticles } : {})}
               />
             </div>
           </div>

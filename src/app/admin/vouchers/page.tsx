@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { collection, query, orderBy, getDocs, addDoc, updateDoc, doc, deleteDoc, serverTimestamp, limit } from 'firebase/firestore';
+import { collection, query, orderBy, addDoc, updateDoc, doc, deleteDoc, serverTimestamp, limit } from 'firebase/firestore';
+import { getDocs } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import { Ticket, Plus, Edit2, Trash2, ToggleLeft, ToggleRight, X, Copy, Check, Settings, Target } from 'lucide-react';
 import { toast } from 'sonner';

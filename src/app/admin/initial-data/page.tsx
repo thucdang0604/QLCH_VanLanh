@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { collection, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
+import { collection, limit, orderBy, query, where } from 'firebase/firestore';
+import { getDocs } from '@/lib/firestoreLogger';
 import { AlertTriangle, Building2, Cable, ClipboardList, Copy, FileSpreadsheet, FolderOpen, Image as ImageIcon, Link2, Loader2, Package, ShieldAlert, ShoppingBag, Upload, Users, Wrench, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/AuthContext';

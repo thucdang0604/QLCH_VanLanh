@@ -6,10 +6,8 @@ import {
 } from 'lucide-react';
 import Modal from '@/components/admin/Modal';
 import CurrencyInput from '@/components/admin/CurrencyInput';
-import {
-    collection, getDocs, addDoc, updateDoc, deleteDoc,
-    doc, serverTimestamp, query, orderBy, where, limit, Timestamp, getDoc, setDoc
-} from 'firebase/firestore';
+import { collection, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, query, orderBy, where, limit, Timestamp, setDoc } from 'firebase/firestore';
+import { getDocs, getDoc } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
 import { useRouter } from 'next/navigation';

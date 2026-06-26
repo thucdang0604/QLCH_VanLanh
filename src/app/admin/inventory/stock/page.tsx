@@ -2,17 +2,8 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import { Archive, Package, Search, Loader2, ArrowUpDown, TrendingDown, TrendingUp } from 'lucide-react';
-import {
-    collection,
-    getDocs,
-    limit,
-    orderBy,
-    query,
-    startAfter,
-    where,
-    type DocumentSnapshot,
-    type QueryConstraint,
-} from 'firebase/firestore';
+import { collection, limit, orderBy, query, startAfter, where, type DocumentSnapshot, type QueryConstraint } from 'firebase/firestore';
+import { getDocs } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import type { Product } from '@/lib/types';
 import { useClientPagination } from '@/lib/useClientPagination';

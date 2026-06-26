@@ -8,9 +8,8 @@ import {
 } from 'lucide-react';
 import Modal from '@/components/admin/Modal';
 import CurrencyInput from '@/components/admin/CurrencyInput';
-import {
-    collection, getDocs, limit, query, orderBy, where, Timestamp
-} from 'firebase/firestore';
+import { collection, limit, query, orderBy, where, Timestamp } from 'firebase/firestore';
+import { getDocs } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import type { Commission, Expense, ImportReceipt, Order, RepairTicket } from '@/lib/types';
 import {
@@ -162,13 +161,29 @@ export default function RevenuePage() {
             const canUseAggregates = isAggregateRangeAvailable(from);
 
             const loadSourceCollections = async () => {
-                const threeMonthsAgo = getMonthsAgoTimestamp(6);
+                const diffTime = to.getTime() - from.getTime();
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                
+                if (diffDays > 32) {
+                    setUseAggregateData(false);
+                    setAggregateDays([]);
+                    setOrders([]);
+                    setRepairs([]);
+                    setImportReceipts([]);
+                    setCommissions([]);
+                    setExpenses([]);
+                    return;
+                }
+
+                const fromTs = Timestamp.fromDate(from);
+                const toTs = Timestamp.fromDate(to);
+
                 const [oSnap, rSnap, iSnap, cSnap, eSnap] = await Promise.all([
-                    getDocs(query(collection(db, 'orders'), where('createdAt', '>=', threeMonthsAgo), orderBy('createdAt', 'desc'))),
-                    getDocs(query(collection(db, 'repairs'), where('createdAt', '>=', threeMonthsAgo), orderBy('createdAt', 'desc'))),
-                    getDocs(query(collection(db, 'import_receipts'), where('createdAt', '>=', threeMonthsAgo), orderBy('createdAt', 'desc'))),
-                    getDocs(query(collection(db, 'commissions'), where('createdAt', '>=', threeMonthsAgo), orderBy('createdAt', 'desc'))),
-                    getDocs(query(collection(db, 'expenses'), where('createdAt', '>=', threeMonthsAgo), orderBy('createdAt', 'desc'))),
+                    getDocs(query(collection(db, 'orders'), where('createdAt', '>=', fromTs), where('createdAt', '<=', toTs), orderBy('createdAt', 'desc'))),
+                    getDocs(query(collection(db, 'repairs'), where('createdAt', '>=', fromTs), where('createdAt', '<=', toTs), orderBy('createdAt', 'desc'))),
+                    getDocs(query(collection(db, 'import_receipts'), where('createdAt', '>=', fromTs), where('createdAt', '<=', toTs), orderBy('createdAt', 'desc'))),
+                    getDocs(query(collection(db, 'commissions'), where('createdAt', '>=', fromTs), where('createdAt', '<=', toTs), orderBy('createdAt', 'desc'))),
+                    getDocs(query(collection(db, 'expenses'), where('createdAt', '>=', fromTs), where('createdAt', '<=', toTs), orderBy('createdAt', 'desc'))),
                 ]);
                 if (cancelled) return;
                 setUseAggregateData(false);

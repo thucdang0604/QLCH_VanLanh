@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { collection, query, orderBy, updateDoc, doc, serverTimestamp, getDocs, where, limit, setDoc } from 'firebase/firestore';
+import { collection, query, orderBy, updateDoc, doc, serverTimestamp, where, limit, setDoc } from 'firebase/firestore';
+import { getDocs } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
 import { Building2, Plus, Search, Phone, Mail, MapPin, CreditCard, Edit2, ChevronDown, ChevronUp, ArrowDownToLine, ArrowUpFromLine, X, Filter, Tags, Clock3 } from 'lucide-react';

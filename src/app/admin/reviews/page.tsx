@@ -8,7 +8,8 @@ import {
     Search, Loader2,
     Eye, Store, Package
 } from 'lucide-react';
-import { collection, query, orderBy, onSnapshot, doc, updateDoc, deleteDoc, limit } from 'firebase/firestore';
+import { collection, query, orderBy, doc, updateDoc, deleteDoc, limit } from 'firebase/firestore';
+import { onSnapshot } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
 import type { FirestoreDateValue, Review, ProductReview } from '@/lib/types';

@@ -55,10 +55,14 @@ export default function Header() {
 
     return (
         <header className="sticky top-0 z-30 w-full transition-all duration-300">
+            <style dangerouslySetInnerHTML={{ __html: `
+                .dyn-header-bg { background-color: ${config.headerBg || '#ffffff'}; }
+                .dyn-nav-bg { background-color: ${config.headerBg || '#f9fafb'}; }
+            `}} />
+            
             {/* ── Main header bar — full width ── */}
             <div 
-                className={`w-full border-b border-gray-100 transition-all duration-300 ${scrolled ? 'shadow-md' : ''}`}
-                style={{ backgroundColor: config.headerBg || '#ffffff' }}
+                className={`w-full border-b border-gray-100 transition-all duration-300 dyn-header-bg ${scrolled ? 'shadow-md' : ''}`}
             >
                 <div className="max-w-[1200px] mx-auto">
                 <div className={`flex items-center gap-3 px-4 md:px-4 transition-all duration-300 ${scrolled ? 'h-14' : 'h-20'}`}>
@@ -73,8 +77,7 @@ export default function Header() {
                                 height={64}
                                 quality={80}
                                 priority
-                                style={{ width: 'auto' }}
-                                className={`object-contain transition-all duration-300 ${scrolled ? 'h-9' : 'h-16'}`}
+                                className={`w-auto object-contain transition-all duration-300 ${scrolled ? 'h-9' : 'h-16'}`}
                             />
                         ) : (
                             <span className={`font-bold text-copper whitespace-nowrap transition-all duration-300 ${scrolled ? 'text-base' : 'text-lg'}`}>
@@ -126,9 +129,8 @@ export default function Header() {
                             title={mobileMenuOpen ? 'Đóng menu' : 'Mở menu'}
                             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
                             aria-label={mobileMenuOpen ? 'Đóng menu' : 'Mở menu'}
-                            aria-expanded={mobileMenuOpen}
-                            className="md:hidden p-1.5 rounded-lg text-gray-600 hover:text-copper hover:bg-gray-50 transition-colors"
-                        >
+                            aria-expanded={mobileMenuOpen ? true : false}
+                            className="md:hidden p-1.5 rounded-lg text-gray-600 hover:text-copper hover:bg-gray-50 transition-colors">
                             {mobileMenuOpen ? <X size={18} /> : <Menu size={18} />}
                         </button>
                     </div>
@@ -138,8 +140,7 @@ export default function Header() {
 
             {/* ── Mobile Search Bar — Always visible ── */}
             <div 
-                className={`md:hidden w-full px-4 py-2.5 border-b border-gray-100 transition-all duration-300 ${scrolled ? 'shadow-md' : ''}`}
-                style={{ backgroundColor: config.headerBg || '#ffffff' }}
+                className={`md:hidden w-full px-4 py-2.5 border-b border-gray-100 transition-all duration-300 dyn-header-bg ${scrolled ? 'shadow-md' : ''}`}
             >
                 <form onSubmit={handleSearch} className="w-full">
                     <div className="relative w-full shadow-sm rounded-lg">
@@ -159,8 +160,7 @@ export default function Header() {
 
             {/* ── Desktop nav strip — full width bg, centered inner ── */}
             <nav 
-                className="hidden md:block w-full border-b border-gray-200"
-                style={{ backgroundColor: config.headerBg || '#f9fafb' }} // #f9fafb is gray-50
+                className="hidden md:block w-full border-b border-gray-200 dyn-nav-bg"
             >
                 <div className="max-w-[1200px] mx-auto">
                 <ul className="flex items-center h-10 px-4">
@@ -189,7 +189,7 @@ export default function Header() {
                 <>
                     <div className="fixed inset-0 top-[50px] bg-black/40 z-20 md:hidden" onClick={() => setMobileMenuOpen(false)} />
                     <div className="w-full relative z-30 md:hidden">
-                        <div className="shadow-xl overflow-hidden" style={{ backgroundColor: config.headerBg || '#ffffff' }}>
+                        <div className="shadow-xl overflow-hidden dyn-header-bg">
                             <ul className="py-1">
                                 {mainNav.map((item) => {
                                     const Icon = item.icon;

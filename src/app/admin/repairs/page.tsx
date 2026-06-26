@@ -2,11 +2,8 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
-import {
-    collection, query, where, getDocs, updateDoc,
-    doc, serverTimestamp, orderBy, onSnapshot, Timestamp, getDoc,
-    limit, startAfter, DocumentSnapshot, runTransaction, arrayUnion, type QueryConstraint
-} from 'firebase/firestore';
+import { collection, query, where, updateDoc, doc, serverTimestamp, orderBy, Timestamp, limit, startAfter, DocumentSnapshot, runTransaction, arrayUnion, type QueryConstraint } from 'firebase/firestore';
+import { getDocs, onSnapshot, getDoc } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
 import { useConfig } from '@/lib/ConfigContext';
@@ -385,21 +382,26 @@ export default function RepairPage() {
         setIsSearchingDB(false);
     };
     useEffect(() => {
+        if (!showModal && !assignModal && !managerOverrideModal) return;
+        if (staffs.length > 0) return; // already loaded
         (async () => {
             try {
                 const snap = await getDocs(query(collection(db, 'users'), where('role', 'in', ['staff', 'admin'])));
                 setStaffs(snap.docs.map(d => ({ uid: d.id, displayName: d.data().displayName || 'N/A' })));
             } catch (e) { console.error(e); }
         })();
-    }, []);
+    }, [showModal, assignModal, managerOverrideModal, staffs.length]);
     useEffect(() => {
+        const hasAppointment = !!searchParams.get('appointmentId');
+        if (!showModal && !hasAppointment) return;
+        if (services.length > 0) return; // already loaded
         (async () => {
             try {
-                const snap = await getDocs(query(collection(db, 'services'), orderBy('createdAt', 'desc')));
+                const snap = await getDocs(query(collection(db, 'services'), orderBy('createdAt', 'desc'), limit(50)));
                 setServices(snap.docs.map(d => ({ id: d.id, ...d.data() })));
             } catch (e) { console.error(e); }
         })();
-    }, []);
+    }, [showModal, searchParams, services.length]);
     useEffect(() => {
         const appointmentId = searchParams.get('appointmentId');
         if (!appointmentId) return;

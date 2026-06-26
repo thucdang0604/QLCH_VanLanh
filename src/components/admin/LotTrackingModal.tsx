@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import Modal from './Modal';
-import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
+import { collection, query, where, doc } from 'firebase/firestore';
+import { getDocs, getDoc } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import { Search, Loader2, Package, Building2, Calendar, FileText, ArrowDownRight, Tag } from 'lucide-react';
 import type { FirestoreDateValue } from '@/lib/types';

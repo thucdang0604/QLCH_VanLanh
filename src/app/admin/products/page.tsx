@@ -7,7 +7,8 @@ import { useRouter } from 'next/navigation';
 import { Archive, Plus, Search, Edit, Package, Loader2, QrCode, AlertTriangle, PackagePlus } from 'lucide-react';
 import { useFirestoreCollection, updateDocument } from '@/lib/useFirestore';
 
-import { collection, onSnapshot, orderBy, serverTimestamp } from 'firebase/firestore';
+import { collection, orderBy, serverTimestamp } from 'firebase/firestore';
+import { onSnapshot } from '@/lib/firestoreLogger';
 import { toastError } from '@/lib/toast';
 import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';

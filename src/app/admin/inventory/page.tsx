@@ -6,11 +6,8 @@ import {
     Loader2, ChevronDown, ChevronRight,
     ArrowDownToLine, ExternalLink, PackagePlus, Trash2
 } from 'lucide-react';
-import {
-    collection, getDocs, deleteDoc,
-    doc, serverTimestamp, query, orderBy, updateDoc, onSnapshot, setDoc,
-    limit, startAfter, type DocumentSnapshot, type QueryConstraint
-} from 'firebase/firestore';
+import { collection, deleteDoc, doc, serverTimestamp, query, orderBy, updateDoc, setDoc, limit, startAfter, getCountFromServer, where, type DocumentSnapshot, type QueryConstraint, type QuerySnapshot, type QueryDocumentSnapshot, type DocumentData } from 'firebase/firestore';
+import { getDocs, onSnapshot } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
 import type { ImportReceipt, Product } from '@/lib/types';
@@ -50,6 +47,7 @@ export default function InventoryPage() {
     const { user } = useAuth();
     const [receipts, setReceipts] = useState<(ImportReceipt & { id: string })[]>([]);
     const [products, setProducts] = useState<(Product & { id: string })[]>([]);
+    const [inStockCount, setInStockCount] = useState<number | null>(null);
     const [loading, setLoading] = useState(true);
     const [loadingMoreReceipts, setLoadingMoreReceipts] = useState(false);
     const [lastReceiptDoc, setLastReceiptDoc] = useState<DocumentSnapshot | null>(null);
@@ -107,8 +105,19 @@ export default function InventoryPage() {
     }, [buildReceiptQueryConstraints]);
 
     const refreshProducts = useCallback(async () => {
+        if (products.length > 0) return; // Lazy load: already loaded
         const snap = await getDocs(collection(db, 'products'));
         setProducts(snap.docs.map(d => ({ id: d.id, ...d.data() } as Product & { id: string })));
+    }, [products.length]);
+
+    const loadInStockCount = useCallback(async () => {
+        try {
+            const snap = await getCountFromServer(query(collection(db, 'products'), where('stock', '>', 0)));
+            setInStockCount(snap.data().count);
+        } catch (e) {
+            console.error('Error loading stock count:', e);
+            setInStockCount(0);
+        }
     }, []);
 
     const handlePrintLot = (receipt: ImportReceipt & { id: string }) => {
@@ -133,7 +142,7 @@ export default function InventoryPage() {
     useEffect(() => {
         const load = async () => {
             try {
-                await Promise.all([refreshReceipts(), refreshProducts()]);
+                await Promise.all([refreshReceipts(), loadInStockCount()]);
             } catch (err) {
                 console.error(err);
             } finally {
@@ -141,7 +150,7 @@ export default function InventoryPage() {
             }
         };
         load();
-    }, [refreshProducts, refreshReceipts]);
+    }, [refreshReceipts, loadInStockCount]);
 
     useEffect(() => {
         if (typeof window === 'undefined') return;
@@ -155,17 +164,23 @@ export default function InventoryPage() {
     useEffect(() => {
         const unsub = onSnapshot(
             query(collection(db, 'suppliers'), orderBy('name', 'asc')),
-            (snap) => setSupplierList(snap.docs.map(d => ({ id: d.id, ...d.data() } as SupplierOption)))
+            (snap: QuerySnapshot<DocumentData>) => setSupplierList(snap.docs.map((d: QueryDocumentSnapshot<DocumentData>) => ({ id: d.id, ...d.data() } as SupplierOption)))
         );
         return () => unsub();
     }, []);
 
     useEffect(() => {
-        const unsub = onSnapshot(doc(db, 'system_config', 'repairs'), (snap) => {
+        if (isCreateReceiptOpen || importPreviewModal.isOpen) {
+            refreshProducts();
+        }
+    }, [isCreateReceiptOpen, importPreviewModal.isOpen, refreshProducts]);
+
+    useEffect(() => {
+        const unsub = onSnapshot(doc(db, 'system_config', 'repairs'), (snap: DocumentSnapshot<DocumentData>) => {
             if (!snap.exists()) return;
             const data = snap.data();
             const rules = Array.isArray(data.warrantyRules) ? data.warrantyRules : [];
-            setPartTypeOptions(rules.map((rule: { partType?: string }) => rule.partType).filter((value): value is string => Boolean(value)));
+            setPartTypeOptions(rules.map((rule: { partType?: string }) => rule.partType).filter((value: string | undefined): value is string => Boolean(value)));
         });
         return () => unsub();
     }, []);
@@ -443,7 +458,7 @@ export default function InventoryPage() {
                 </div>
                 <div className="bg-white rounded-xl border p-4">
                     <p className="text-xs text-gray-500">Sản phẩm có tồn kho</p>
-                    <p className="text-2xl font-bold text-blue-600">{products.filter(p => (p.stock || 0) > 0).length}</p>
+                    <p className="text-2xl font-bold text-blue-600">{inStockCount !== null ? inStockCount : '-'}</p>
                 </div>
             </div>
 

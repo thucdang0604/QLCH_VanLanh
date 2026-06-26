@@ -6,7 +6,8 @@ import {
     CheckCircle2, Loader2, X,
     User as UserIcon, ArrowRightLeft, ShieldAlert
 } from 'lucide-react';
-import { collection, query, onSnapshot, doc, updateDoc, serverTimestamp, getDocs, where, orderBy, limit } from 'firebase/firestore';
+import { collection, query, doc, updateDoc, serverTimestamp, where, orderBy, limit } from 'firebase/firestore';
+import { onSnapshot, getDocs } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
 import { isChecklistComplete, areAllPartsReady } from '@/lib/workflowFeatures';
@@ -154,7 +155,7 @@ export default function TechnicianPage() {
     const [warrantyStatuses, setWarrantyStatuses] = useState<WorkflowNode[]>([]);
     const [statusConfigLoaded, setStatusConfigLoaded] = useState(false);
     const [technicians, setTechnicians] = useState<{ uid: string; displayName: string }[]>([]);
-    const [userNamesMap, setUserNamesMap] = useState<Record<string, string>>({});
+    // userNamesMap removed
     const [transferModal, setTransferModal] = useState<TechnicianTransferModal | null>(null);
     const [transferTechnicianId, setTransferTechnicianId] = useState('');
     const [transferReason, setTransferReason] = useState('');
@@ -410,16 +411,6 @@ export default function TechnicianPage() {
                 .filter(item => Array.isArray(item.data().permissions) && item.data().permissions.includes('manage_repairs'))
                 .map(item => ({ uid: item.id, displayName: item.data().displayName || 'Kỹ thuật viên' }))))
             .catch(error => console.error('Load technicians error:', error));
-
-        getDocs(collection(db, 'users'))
-            .then(snap => {
-                const map: Record<string, string> = {};
-                snap.docs.forEach(doc => {
-                    if (doc.data().displayName) map[doc.id] = doc.data().displayName;
-                });
-                setUserNamesMap(map);
-            })
-            .catch(error => console.error('Load users map error:', error));
     }, []);
 
     const executeStatusChange = async (ticketId: string, newStatus: string) => {
@@ -1189,7 +1180,7 @@ export default function TechnicianPage() {
                 selectedTicket={selectedTicket}
                 setSelectedTicket={setSelectedTicket}
                 user={user}
-                userNamesMap={userNamesMap}
+                // userNamesMap removed
                 partSearchQuery={partSearchQuery}
                 setPartSearchQuery={setPartSearchQuery}
                 partSearchResults={partSearchResults}

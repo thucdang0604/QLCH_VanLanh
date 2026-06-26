@@ -6,9 +6,10 @@ import {
     normalizeHomepageReviews,
     type SiteConfig
 } from "@/lib/config-defaults";
+import { unstable_cache } from 'next/cache';
 import CustomerLayoutShell from "./layout.shell";
 
-export const revalidate = 30;
+export const revalidate = 300;
 
 /**
  * Customer Layout — Server Component
@@ -18,7 +19,7 @@ export const revalidate = 30;
  * Config chỉ cập nhật khi admin bấm Lưu → trigger revalidate.
  */
 
-async function getServerConfig(): Promise<SiteConfig> {
+const fetchServerConfigData = async (): Promise<SiteConfig> => {
     if (!isAdminAvailable()) {
         return DEFAULT_CONFIG;
     }
@@ -92,6 +93,15 @@ async function getServerConfig(): Promise<SiteConfig> {
         return DEFAULT_CONFIG;
     }
 }
+
+const getServerConfig = unstable_cache(
+    async () => fetchServerConfigData(),
+    ['layout-config-data'],
+    {
+        revalidate: 300,
+        tags: ['layout']
+    }
+);
 
 import MissionsWidget from "@/components/MissionsWidget";
 
