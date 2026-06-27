@@ -177,3 +177,13 @@ graph TD
 - **Fix:** Dua nhanh `auth.uid === $roomId` len truoc trong `.read/.write`, deploy RTDB rules; dong bo Firebase identity truoc moi lenh ghi; chi chuyen sang chat sau khi room metadata duoc luu; giu lai noi dung khi gui loi va hien thong bao tai form; listener RTDB co error callback thay vi nem loi khong duoc xu ly.
 - **Verification:** Token anonymous moi doc/ghi duoc room cua chinh UID qua REST va du lieu probe da duoc don; `firebase deploy --only database` thanh cong. `pnpm typecheck`, targeted ESLint va `pnpm build` pass. Browser localhost dang ky phong va gui tin nhan thanh cong, message doc lai qua listener, khong con `PERMISSION_DENIED`, console error moi hoac framework overlay.
 - **Files:** `database.rules.json`, `src/components/ChatWidget.tsx`, `src/lib/realtimedb.ts`.
+
+## BUG-ARTICLES-PASTE-001: Paste noi dung bai viet lam mat anh va video
+
+- **Status:** fixed
+- **Severity:** medium
+- **Symptom:** Tai `/admin/articles`, khi copy noi dung tu nguon ngoai gom anh/video, editor hien shortcode caption hoac text alt thay vi media that.
+- **Root cause:** ReactQuill nhan HTML paste tu WordPress/nguon ngoai nhung khong chuan hoa lazy image attributes nhu `data-orig-file`, `data-large-file`, `srcset`/`data-srcset`, va khong chuyen video link/iframe ve embed URL. Ket qua la placeholder image hoac text caption/alt duoc chen vao noi dung thay vi media that.
+- **Fix:** Chuan hoa HTML truoc khi dua vao Quill: xoa shortcode caption trong text node, chon URL anh tot nhat tu lazy attributes/srcset, bo placeholder khong dung duoc, chuan hoa iframe/link video YouTube/Facebook thanh embed URL, va gan ref Quill co type ro rang.
+- **Files:** `src/features/articles/ArticleEditorModal.tsx`
+- **Verification:** `.\node_modules\.bin\eslint.CMD src/features/articles/ArticleEditorModal.tsx` pass. `.\node_modules\.bin\tsc.CMD --noEmit --pretty false --incremental false` bi chan boi cac loi implicit-any san co o nhieu trang admin khac, khong phai loi moi cua file paste.
