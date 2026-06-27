@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyPayload, COOKIE_NAME } from '@/lib/sessionCookie';
-import { getMatchedAdminRoute } from '@/lib/permissions';
+import { getMatchedAdminRoute } from '@/lib/adminModules';
 
 /**
  * Next.js Edge Middleware — Server-side RBAC for /admin/* routes.

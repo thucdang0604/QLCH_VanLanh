@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getDoc, doc } from 'firebase/firestore';
+import { doc } from 'firebase/firestore';
+import { getDoc } from '@/lib/firestoreLogger';
 import { useFirestoreCollection, updateDocument, deleteDocument, addDocumentWithId } from '@/lib/useFirestore';
 import { db } from '@/lib/firebase';
 import { Brand, TaxonomyNode } from '@/lib/types';
@@ -329,6 +330,7 @@ function CategoryModal({ isOpen, onClose, initialData, onSave }: { isOpen: boole
                 <MediaManager
                     isOpen={true}
                     onClose={() => setShowMediaForIcon(false)}
+                    defaultFolder="general"
                     onSelect={(url) => {
                         setFormData(prev => ({ ...prev, icon: url }));
                         setShowMediaForIcon(false);
@@ -630,6 +632,7 @@ function BrandModal({ isOpen, onClose, initialData }: { isOpen: boolean, onClose
                 <MediaManager
                     isOpen={true}
                     onClose={() => setShowMediaForLogo(false)}
+                    defaultFolder="logo-brand"
                     onSelect={(url) => {
                         setFormData(prev => ({ ...prev, logoUrl: url }));
                         setShowMediaForLogo(false);

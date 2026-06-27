@@ -2,7 +2,9 @@ import ClientPage from './page.client';
 import { isAdminAvailable, getAdminDb } from '@/lib/firebaseAdmin';
 import { DEFAULT_CONFIG, type HeroBanner, type HomeSectionItem, type StoreBranch, type HomeServiceCategory } from '@/lib/config-defaults';
 
-export const dynamic = 'force-dynamic';
+import { unstable_cache } from 'next/cache';
+
+export const revalidate = 300;
 
 /**
  * Dữ liệu config tối thiểu cần thiết cho SSR Homepage.
@@ -15,9 +17,11 @@ export interface SSRHomeConfig {
   store_branches: StoreBranch[];
   ssrLatestProducts?: Record<string, unknown>[]; // Cached initial products for FlashSale and Suggested
   homeServiceCategories: HomeServiceCategory[]; 
+  ssrArticles?: Record<string, unknown>[]; // Cached articles
+  ssrPricingServices?: Record<string, unknown>[]; // Cached pricing services
 }
 
-async function getHomeConfig(): Promise<SSRHomeConfig> {
+const fetchHomeConfigData = async (): Promise<SSRHomeConfig> => {
   const fallbackConfig = {
     hero_banners: DEFAULT_CONFIG.hero_banners,
     homeSections: DEFAULT_CONFIG.homeSections,
@@ -31,22 +35,29 @@ async function getHomeConfig(): Promise<SSRHomeConfig> {
     return fallbackConfig;
   }
 
-  // Fetch trực tiếp từ Firestore thay vì dùng unstable_cache.
-  // Lý do: Trên môi trường Serverless (Firebase/Cloud Run), Next.js data cache (.next/cache) 
-  // bị cô lập giữa các instance. Việc dùng unstable_cache kết hợp revalidateTag sẽ chỉ xoá 
-  // cache trên 1 instance nhận request, các instance khác vẫn phục vụ data cũ.
-  // Đọc trực tiếp Firestore (Admin SDK) đảm bảo 100% realtime và đồng nhất trên mọi domain (fixphone.vn).
+  // Dùng unstable_cache kết hợp revalidate: 300 (5 phút). 
+  // Cache sẽ được chia sẻ chéo giữa các người dùng.
+  // Khi Admin cập nhật, nút "Làm mới Website" sẽ xóa cache tag 'homepage'.
   try {
     const db = getAdminDb();
     const configDoc = db.collection('system_config').doc('main_settings');
 
-    // Fetch system_config and 15 latest products in parallel
-    const [configSnapshot, productsSnapshot] = await Promise.all([
+    // Fetch system_config, products, articles and services in parallel
+    const [configSnapshot, productsSnapshot, articlesSnapshot, servicesSnapshot] = await Promise.all([
       configDoc.get(),
       db.collection('products')
         .where('status', '==', 'active')
         .orderBy('createdAt', 'desc')
         .limit(15)
+        .get(),
+      db.collection('articles')
+        .where('status', '==', 'published')
+        .orderBy('createdAt', 'desc')
+        .limit(4)
+        .get(),
+      db.collection('services')
+        .where('isActive', '==', true)
+        .limit(200)
         .get()
     ]);
 
@@ -57,10 +68,26 @@ async function getHomeConfig(): Promise<SSRHomeConfig> {
     }));
     const ssrLatestProducts = JSON.parse(JSON.stringify(rawProducts));
 
+    // Parse articles
+    const rawArticles = articlesSnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+    const ssrArticles = JSON.parse(JSON.stringify(rawArticles));
+
+    // Parse services
+    const rawServices = servicesSnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+    const ssrPricingServices = JSON.parse(JSON.stringify(rawServices));
+
     if (!configSnapshot.exists) {
       return {
         ...fallbackConfig,
-        ssrLatestProducts
+        ssrLatestProducts,
+        ssrArticles,
+        ssrPricingServices
       };
     }
 
@@ -90,12 +117,23 @@ async function getHomeConfig(): Promise<SSRHomeConfig> {
       store_branches: rawBranches,
       ssrLatestProducts,
       homeServiceCategories: rawHomeServiceCategories,
+      ssrArticles,
+      ssrPricingServices
     };
   } catch (error) {
     console.error("Error fetching Home Config:", error);
     return fallbackConfig;
   }
 }
+
+const getHomeConfig = unstable_cache(
+  async () => fetchHomeConfigData(),
+  ['home-config-data'],
+  {
+    revalidate: 300,
+    tags: ['homepage', 'layout'] // Also tag with layout so it can be cleared easily
+  }
+);
 
 export default async function Page() {
   const ssrConfig = await getHomeConfig();

@@ -25,6 +25,7 @@ export function RepairMediaManagers({
                 onClose={() => setShowPreMediaManager(false)}
                 title="Chọn Ảnh/Video lúc nhận máy"
                 multiple={true}
+                defaultFolder="repairs"
                 onSelectMultiple={(urls) => {
                     setPreMediaFiles(prev => [...prev, ...urls]);
                 }}
@@ -34,6 +35,7 @@ export function RepairMediaManagers({
                 onClose={() => setShowPostMediaManager(false)}
                 title="Chọn Ảnh/Video sau sửa chữa"
                 multiple={true}
+                defaultFolder="repairs"
                 onSelectMultiple={(urls) => {
                     setPostMediaFiles(prev => [...prev, ...urls]);
                 }}

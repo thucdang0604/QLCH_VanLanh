@@ -7,7 +7,7 @@ import { filterFlashSaleProducts } from '@/lib/flashSale';
 /** Serialized Firestore document with guaranteed `id` field */
 export type SerializedDoc = { id: string } & Record<string, unknown>;
 
-export const revalidate = 30;
+export const revalidate = 300;
 
 export const fetchDynamicCategories = unstable_cache(
     async () => {
@@ -109,7 +109,7 @@ export const fetchCategoryItems = unstable_cache(
         return items;
     },
     ['category-items'],
-    { tags: ['products', 'services'], revalidate: 30 }
+    { tags: ['products', 'services'], revalidate: 300 }
 );
 
 export const fetchArticles = unstable_cache(
@@ -138,69 +138,77 @@ export const fetchArticles = unstable_cache(
         return items;
     },
     ['articles-list'],
-    { tags: ['articles'], revalidate: 30 }
+    { tags: ['articles'], revalidate: 300 }
 );
 
-export const fetchDetailItem = cache(async (id: string, type: 'products' | 'services') => {
-    if (!isAdminAvailable()) return null;
+export const fetchDetailItem = unstable_cache(
+    async (id: string, type: 'products' | 'services') => {
+        if (!isAdminAvailable()) return null;
 
-    const db = getAdminDb();
-    const doc = await db.collection(type).doc(id).get();
+        const db = getAdminDb();
+        const doc = await db.collection(type).doc(id).get();
 
-    if (!doc.exists) {
-        return null;
-    }
-
-    const data = doc.data() as Record<string, unknown>;
-    if (type === 'products' && data.status !== PRODUCT_STATUS.ACTIVE) {
-        return null;
-    }
-    const serialized: SerializedDoc = { ...data, id: doc.id };
-    if (serialized.createdAt && typeof (serialized.createdAt as { toDate?: unknown }).toDate === 'function') {
-        serialized.createdAt = (serialized.createdAt as { toDate: () => Date }).toDate().getTime();
-    }
-    if (serialized.updatedAt && typeof (serialized.updatedAt as { toDate?: unknown }).toDate === 'function') {
-        serialized.updatedAt = (serialized.updatedAt as { toDate: () => Date }).toDate().getTime();
-    }
-
-    return serialized;
-});
-
-export const fetchArticleDetail = cache(async (slug: string) => {
-    if (!isAdminAvailable()) return null;
-
-    const db = getAdminDb();
-
-    // First try by ID (slug is often the ID in this project for articles)
-    let doc = await db.collection('articles').doc(slug).get();
-
-    if (!doc.exists) {
-        // Fallback: try querying by slug field if it exists
-        const snapshot = await db.collection('articles')
-            .where('slug', '==', slug)
-            .limit(1)
-            .get();
-
-        if (snapshot.empty) {
+        if (!doc.exists) {
             return null;
         }
-        doc = snapshot.docs[0];
-    }
 
-    const data = doc.data() as Record<string, unknown>;
-    const serialized: SerializedDoc = { ...data, id: doc.id };
-    if (serialized.createdAt && typeof (serialized.createdAt as { toDate?: unknown }).toDate === 'function') {
-        serialized.createdAt = (serialized.createdAt as { toDate: () => Date }).toDate().getTime();
-    }
-    if (serialized.updatedAt && typeof (serialized.updatedAt as { toDate?: unknown }).toDate === 'function') {
-        serialized.updatedAt = (serialized.updatedAt as { toDate: () => Date }).toDate().getTime();
-    }
-    if (serialized.publishedAt && typeof (serialized.publishedAt as { toDate?: unknown }).toDate === 'function') {
-        serialized.publishedAt = (serialized.publishedAt as { toDate: () => Date }).toDate().getTime();
-    }
+        const data = doc.data() as Record<string, unknown>;
+        if (type === 'products' && data.status !== PRODUCT_STATUS.ACTIVE) {
+            return null;
+        }
+        const serialized: SerializedDoc = { ...data, id: doc.id };
+        if (serialized.createdAt && typeof (serialized.createdAt as { toDate?: unknown }).toDate === 'function') {
+            serialized.createdAt = (serialized.createdAt as { toDate: () => Date }).toDate().getTime();
+        }
+        if (serialized.updatedAt && typeof (serialized.updatedAt as { toDate?: unknown }).toDate === 'function') {
+            serialized.updatedAt = (serialized.updatedAt as { toDate: () => Date }).toDate().getTime();
+        }
 
-    return serialized;
-});
+        return serialized;
+    },
+    ['detail-item'],
+    { tags: ['products', 'services'], revalidate: 300 }
+);
+
+export const fetchArticleDetail = unstable_cache(
+    async (slug: string) => {
+        if (!isAdminAvailable()) return null;
+
+        const db = getAdminDb();
+
+        // First try by ID (slug is often the ID in this project for articles)
+        let doc = await db.collection('articles').doc(slug).get();
+
+        if (!doc.exists) {
+            // Fallback: try querying by slug field if it exists
+            const snapshot = await db.collection('articles')
+                .where('slug', '==', slug)
+                .limit(1)
+                .get();
+
+            if (snapshot.empty) {
+                return null;
+            }
+            doc = snapshot.docs[0];
+        }
+
+        const data = doc.data() as Record<string, unknown>;
+        const serialized: SerializedDoc = { ...data, id: doc.id };
+        if (serialized.createdAt && typeof (serialized.createdAt as { toDate?: unknown }).toDate === 'function') {
+            serialized.createdAt = (serialized.createdAt as { toDate: () => Date }).toDate().getTime();
+        }
+        if (serialized.updatedAt && typeof (serialized.updatedAt as { toDate?: unknown }).toDate === 'function') {
+            serialized.updatedAt = (serialized.updatedAt as { toDate: () => Date }).toDate().getTime();
+        }
+        if (serialized.publishedAt && typeof (serialized.publishedAt as { toDate?: unknown }).toDate === 'function') {
+            serialized.publishedAt = (serialized.publishedAt as { toDate: () => Date }).toDate().getTime();
+        }
+
+        return serialized;
+    },
+    ['article-detail'],
+    { tags: ['articles'], revalidate: 300 }
+);
 
 export const fetchFlashSaleProducts = unstable_cache(
     async () => {
@@ -228,7 +236,7 @@ export const fetchFlashSaleProducts = unstable_cache(
         return filterFlashSaleProducts(items);
     },
     ['flash-sale-products'],
-    { tags: ['products'], revalidate: 30 }
+    { tags: ['products'], revalidate: 300 }
 );
 
 export const fetchServices = unstable_cache(
@@ -257,123 +265,132 @@ export const fetchServices = unstable_cache(
         return items.filter((s) => s.isActive !== false);
     },
     ['services-list'],
-    { tags: ['services'], revalidate: 30 }
+    { tags: ['services'], revalidate: 300 }
 );
 
 /**
  * Fetch variant siblings by the product's deepest category node.
  * Admin no longer maintains a separate Series group for customer-facing variants.
  */
-export const fetchProductVariants = cache(async (categoryId: string, excludeId: string) => {
-    if (!categoryId) return [];
-    if (!isAdminAvailable()) return [];
+export const fetchProductVariants = unstable_cache(
+    async (categoryId: string, excludeId: string) => {
+        if (!categoryId) return [];
+        if (!isAdminAvailable()) return [];
 
-    const db = getAdminDb();
-    const snapshot = await db.collection('products')
-        .where('status', '==', 'active')
-        .limit(100)
-        .get();
+        const db = getAdminDb();
+        const snapshot = await db.collection('products')
+            .where('status', '==', 'active')
+            .where('categoryIds', 'array-contains', categoryId)
+            .limit(20)
+            .get();
 
-    return snapshot.docs
-        .filter(doc => {
-            if (doc.id === excludeId) return false;
-            const data = doc.data();
-            return Array.isArray(data.categoryIds) && data.categoryIds.includes(categoryId);
-        })
-        .map(doc => {
-            const data = doc.data();
-            return {
-                id: doc.id,
-                name: data.name || '',
-                slug: data.slug || doc.id,
-                color: data.color || '',
-                storageCapacity: data.storageCapacity || '',
-                conditionLabel: data.conditionLabel || '',
-                price_original: data.price_original || 0,
-                price_promo: data.price_promo || 0,
-                images: data.images || [],
-                imageUrl: data.imageUrl || '',
-            };
-        });
-});
+        return snapshot.docs
+            .filter(doc => doc.id !== excludeId)
+            .map(doc => {
+                const data = doc.data();
+                return {
+                    id: doc.id,
+                    name: data.name || '',
+                    slug: data.slug || doc.id,
+                    color: data.color || '',
+                    storageCapacity: data.storageCapacity || '',
+                    conditionLabel: data.conditionLabel || '',
+                    price_original: data.price_original || 0,
+                    price_promo: data.price_promo || 0,
+                    images: data.images || [],
+                    imageUrl: data.imageUrl || '',
+                };
+            });
+    },
+    ['product-variants'],
+    { tags: ['products'], revalidate: 300 }
+);
 
 /**
  * Fetch approved product reviews.
  */
-export const fetchProductReviews = cache(async (productId: string) => {
-    if (!productId) return [];
-    if (!isAdminAvailable()) return [];
+export const fetchProductReviews = unstable_cache(
+    async (productId: string) => {
+        if (!productId) return [];
+        if (!isAdminAvailable()) return [];
 
-    const db = getAdminDb();
-    const snapshot = await db.collection('product_reviews')
-        .where('productId', '==', productId)
-        .where('status', '==', 'approved')
-        .orderBy('createdAt', 'desc')
-        .limit(20)
-        .get();
+        const db = getAdminDb();
+        const snapshot = await db.collection('product_reviews')
+            .where('productId', '==', productId)
+            .where('status', '==', 'approved')
+            .orderBy('createdAt', 'desc')
+            .limit(20)
+            .get();
 
-    return snapshot.docs.map(doc => {
-        const data = doc.data();
-        return {
-            id: doc.id,
-            customerName: data.customerName || '',
-            rating: data.rating || 5,
-            content: data.content || '',
-            createdAt: data.createdAt?.toDate?.()?.getTime() || Date.now(),
-        };
-    });
-});
+        return snapshot.docs.map(doc => {
+            const data = doc.data();
+            return {
+                id: doc.id,
+                customerName: data.customerName || '',
+                rating: data.rating || 5,
+                content: data.content || '',
+                createdAt: data.createdAt?.toDate?.()?.getTime() || Date.now(),
+            };
+        });
+    },
+    ['product-reviews'],
+    { tags: ['reviews'], revalidate: 300 }
+);
 
 /**
  * Fetch related services and accessories for a product.
  */
-export const fetchRelatedItems = cache(async () => {
-    if (!isAdminAvailable()) return { services: [], accessories: [] };
+export const fetchRelatedItems = unstable_cache(
+    async () => {
+        if (!isAdminAvailable()) return { services: [], accessories: [] };
 
-    const db = getAdminDb();
-    
-    // Fetch some services
-    const servicesSnap = await db.collection('services')
-        .orderBy('createdAt', 'desc')
-        .limit(4)
-        .get();
+        const db = getAdminDb();
+        
+        // Fetch some services
+        const servicesSnap = await db.collection('services')
+            .orderBy('createdAt', 'desc')
+            .limit(4)
+            .get();
 
-    const services = servicesSnap.docs
-        .map(doc => {
-            const data = doc.data();
-            return {
-                id: doc.id,
-                _type: 'service',
-                name: data.name || '',
-                slug: data.slug || doc.id,
-                price_original: data.price_original || 0,
-                price_promo: data.price_promo || 0,
-                imageUrl: data.imageUrl || data.image || '',
-                brand: data.brand || '',
-            };
-        });
+        const services = servicesSnap.docs
+            .map(doc => {
+                const data = doc.data();
+                return {
+                    id: doc.id,
+                    _type: 'service',
+                    name: data.name || '',
+                    slug: data.slug || doc.id,
+                    price_original: data.price_original || 0,
+                    price_promo: data.price_promo || 0,
+                    imageUrl: data.imageUrl || data.image || '',
+                    brand: data.brand || '',
+                };
+            });
 
-    // Fetch some accessories (products with category = 'Phụ kiện' or similar)
-    const accessoriesSnap = await db.collection('products')
-        .where('status', '==', 'active')
-        .where('category', '==', 'Phụ kiện')
-        .limit(4)
-        .get();
+        // Fetch some accessories (products with category = 'Phụ kiện' or similar)
+        const accessoriesSnap = await db.collection('products')
+            .where('status', '==', 'active')
+            .where('category', '==', 'Phụ kiện')
+            .limit(4)
+            .get();
 
-    const accessories = accessoriesSnap.docs
-        .map(doc => {
-            const data = doc.data();
-            return {
-                id: doc.id,
-                _type: 'product',
-                name: data.name || '',
-                slug: data.slug || doc.id,
-                price_original: data.price_original || 0,
-                price_promo: data.price_promo || 0,
-                imageUrl: data.imageUrl || (data.images ? data.images[0] : ''),
-                brand: data.brand || '',
-            };
-        });
+        const accessories = accessoriesSnap.docs
+            .map(doc => {
+                const data = doc.data();
+                return {
+                    id: doc.id,
+                    _type: 'product',
+                    name: data.name || '',
+                    slug: data.slug || doc.id,
+                    price_original: data.price_original || 0,
+                    price_promo: data.price_promo || 0,
+                    imageUrl: data.imageUrl || (data.images ? data.images[0] : ''),
+                    brand: data.brand || '',
+                };
+            });
 
-    return { services, accessories };
-});
+        return { services, accessories };
+    },
+    ['related-items'],
+    { tags: ['products', 'services'], revalidate: 300 }
+);

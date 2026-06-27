@@ -1,12 +1,15 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { collection, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
-import { AlertTriangle, Building2, Cable, ClipboardList, FileSpreadsheet, Image as ImageIcon, Link2, Package, ShieldAlert, ShoppingBag, Upload, Users, Wrench } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { collection, limit, orderBy, query, where } from 'firebase/firestore';
+import { getDocs } from '@/lib/firestoreLogger';
+import { AlertTriangle, Building2, Cable, ClipboardList, Copy, FileSpreadsheet, FolderOpen, Image as ImageIcon, Link2, Loader2, Package, ShieldAlert, ShoppingBag, Upload, Users, Wrench, X } from 'lucide-react';
+import { toast } from 'sonner';
 import { useAuth } from '@/lib/AuthContext';
 import { db } from '@/lib/firebase';
 import ExcelImportModal, { type ExcelImportMode } from '@/components/admin/ExcelImportModal';
 import MediaManager from '@/components/admin/MediaManager';
+import { uploadInitialImportImage, type LocalImageUploadFolder } from '@/features/excel-import/importSupport';
 
 interface ImportOption {
     mode: ExcelImportMode;
@@ -214,16 +217,45 @@ async function findUploadedMediaByFileName(fileName: string): Promise<UploadedMe
     return preferMediaMatch(recentMatches);
 }
 
+interface TestedImage {
+    fileName: string;
+    url: string;
+    status: 'idle' | 'loading' | 'success' | 'error';
+    message: string;
+    isReused: boolean;
+    file?: File;
+    localPreviewUrl?: string;
+}
+
 function ImageLinkTester() {
     const [rawUrl, setRawUrl] = useState('');
     const [previewSrc, setPreviewSrc] = useState('');
     const [message, setMessage] = useState('');
     const [localObjectUrl, setLocalObjectUrl] = useState('');
     const [mediaOpen, setMediaOpen] = useState(false);
+    const [testFolder, setTestFolder] = useState<LocalImageUploadFolder>('products');
 
-    useEffect(() => () => {
-        if (localObjectUrl) URL.revokeObjectURL(localObjectUrl);
-    }, [localObjectUrl]);
+    // States cho tính năng chọn thư mục ảnh hàng loạt
+    const [processedImages, setProcessedImages] = useState<TestedImage[]>([]);
+    const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
+    const folderInputRef = useRef<HTMLInputElement>(null);
+
+    // Giải phóng Object URL để tránh rò rỉ bộ nhớ
+    useEffect(() => {
+        return () => {
+            if (localObjectUrl) URL.revokeObjectURL(localObjectUrl);
+            processedImages.forEach((img) => {
+                if (img.localPreviewUrl) URL.revokeObjectURL(img.localPreviewUrl);
+            });
+        };
+    }, [localObjectUrl, processedImages]);
+
+    const calculateHash = async (file: File): Promise<string> => {
+        const arrayBuffer = await file.arrayBuffer();
+        const hashBuffer = await window.crypto.subtle.digest('SHA-256', arrayBuffer);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+    };
 
     const handleUrlChange = (value: string) => {
         if (localObjectUrl) {
@@ -264,6 +296,109 @@ function ImageLinkTester() {
         }
     };
 
+    const clearProcessedImages = () => {
+        setSelectedImageIndex(null);
+        setProcessedImages((prev) => {
+            prev.forEach((img) => {
+                if (img.localPreviewUrl) URL.revokeObjectURL(img.localPreviewUrl);
+            });
+            return [];
+        });
+    };
+
+    const handleFolderUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const files = Array.from(event.target.files || []).filter((file) => file.type.startsWith('image/'));
+        if (files.length === 0) {
+            toast.info('Không tìm thấy tệp ảnh nào trong thư mục được chọn.');
+            return;
+        }
+
+        clearProcessedImages();
+
+        const list: TestedImage[] = files.map((file) => ({
+            fileName: file.name,
+            url: '',
+            status: 'idle',
+            message: 'Chưa upload',
+            isReused: false,
+            file,
+            localPreviewUrl: URL.createObjectURL(file),
+        }));
+
+        setProcessedImages(list);
+        if (list.length > 0) {
+            setSelectedImageIndex(0); // Tự động chọn ảnh đầu tiên để xem trước
+        }
+        toast.success(`Đã nhận diện ${files.length} ảnh trong thư mục cục bộ. Bạn có thể copy tên file hoặc bấm Upload từng ảnh.`);
+        event.target.value = '';
+    };
+
+    const handleCopyUrlWithUpload = async (index: number) => {
+        const item = processedImages[index];
+        if (!item) return;
+
+        if (item.status === 'success') {
+            copyToClipboard(item.url, 'url');
+            return;
+        }
+
+        if (!item.file) return;
+
+        // Bắt đầu upload
+        setProcessedImages((prev) => {
+            const next = [...prev];
+            next[index] = { ...next[index], status: 'loading', message: 'Đang upload...' };
+            return next;
+        });
+
+        try {
+            const folder = testFolder;
+            const hash = await calculateHash(item.file);
+            const docId = `MED-import-${folder}-${hash}`;
+            const { getDoc, doc } = await import('firebase/firestore');
+            const mediaDocRef = doc(db, 'media_library', docId);
+            const mediaDocSnap = await getDoc(mediaDocRef);
+
+            let url = '';
+            let isReused = false;
+
+            if (mediaDocSnap.exists()) {
+                url = mediaDocSnap.data().url as string;
+                isReused = true;
+            } else {
+                url = await uploadInitialImportImage(item.file, folder, hash);
+            }
+
+            setProcessedImages((prev) => {
+                const next = [...prev];
+                next[index] = {
+                    ...next[index],
+                    url,
+                    status: 'success',
+                    message: isReused ? 'Dùng lại ảnh cũ' : 'Upload mới thành công',
+                    isReused,
+                };
+                return next;
+            });
+
+            // Copy vào clipboard
+            navigator.clipboard.writeText(url);
+            toast.success('Đã tự động upload và copy URL ảnh vào clipboard!');
+        } catch (err) {
+            console.error('Error uploading on copy:', err);
+            setProcessedImages((prev) => {
+                const next = [...prev];
+                next[index] = {
+                    ...next[index],
+                    status: 'error',
+                    message: err instanceof Error ? err.message : 'Lỗi upload',
+                };
+                return next;
+            });
+            toast.error(`Lỗi khi upload ${item.fileName}`);
+        }
+    };
+
     const handleMediaSelect = (url: string) => {
         if (localObjectUrl) {
             URL.revokeObjectURL(localObjectUrl);
@@ -273,6 +408,13 @@ function ImageLinkTester() {
         setPreviewSrc(url);
         setMessage('Đã chọn ảnh từ MediaManager. URL này có thể dùng trong Excel.');
     };
+
+    const copyToClipboard = (text: string, type: 'name' | 'url') => {
+        navigator.clipboard.writeText(text);
+        toast.success(type === 'name' ? 'Đã copy tên file vào clipboard!' : 'Đã copy URL ảnh vào clipboard!');
+    };
+
+    const activeImg = selectedImageIndex !== null ? processedImages[selectedImageIndex] : null;
 
     return (
         <>
@@ -288,6 +430,17 @@ function ImageLinkTester() {
                     </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
+                    <select
+                        title="Thư mục upload"
+                        value={testFolder}
+                        onChange={(e) => setTestFolder(e.target.value as LocalImageUploadFolder)}
+                        className="px-3 py-2 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 bg-white focus:outline-none focus:border-orange-400 focus:ring-1 focus:ring-orange-400"
+                    >
+                        <option value="products">Thư mục: Sản phẩm</option>
+                        <option value="parts">Thư mục: Linh kiện</option>
+                        <option value="services">Thư mục: Dịch vụ</option>
+                        <option value="general">Thư mục: Chung (Khác)</option>
+                    </select>
                     <button
                         type="button"
                         onClick={() => setMediaOpen(true)}
@@ -301,10 +454,28 @@ function ImageLinkTester() {
                         Chọn file local
                         <input type="file" accept="image/*" className="hidden" onChange={handleLocalFile} />
                     </label>
+                    <button
+                        type="button"
+                        onClick={() => folderInputRef.current?.click()}
+                        className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-orange-500 text-sm font-medium text-white hover:bg-orange-600"
+                    >
+                        <FolderOpen size={16} />
+                        Chọn thư mục ảnh
+                    </button>
+                    <input
+                        ref={folderInputRef}
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        className="hidden"
+                        onChange={handleFolderUpload}
+                        title="Chọn thư mục ảnh"
+                        {...({ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>)}
+                    />
                 </div>
             </div>
 
-            <div className="relative">
+            <div className="relative mb-4">
                 <Link2 size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
                     type="text"
@@ -316,37 +487,299 @@ function ImageLinkTester() {
             </div>
 
             {message && (
-                <div className={`mt-3 rounded-lg border px-3 py-2 text-sm ${previewSrc ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-amber-50 border-amber-200 text-amber-700'}`}>
+                <div className={`mb-4 rounded-lg border px-3 py-2 text-sm ${previewSrc ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-amber-50 border-amber-200 text-amber-700'}`}>
                     {message}
                 </div>
             )}
 
-            <div className="mt-4 rounded-lg border border-dashed border-gray-200 bg-gray-50 min-h-[260px] flex items-center justify-center overflow-hidden">
-                {previewSrc ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                        src={previewSrc}
-                        alt="Xem trước ảnh"
-                        className="max-h-[360px] w-full object-contain bg-white"
-                        onLoad={() => {
-                            if (!localObjectUrl && !message) setMessage('Ảnh tải được. Có thể dùng link này trong Excel.');
-                        }}
-                        onError={() => setMessage('Không tải được ảnh từ link này. Hãy kiểm tra quyền truy cập, định dạng URL hoặc CORS.')}
-                    />
-                ) : (
-                    <div className="text-center text-sm text-gray-400 px-6">
-                        <ImageIcon size={38} className="mx-auto mb-2 text-gray-300" />
-                        Ảnh preview sẽ hiển thị tại đây
+            {!processedImages.length && (
+                <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 min-h-[260px] flex items-center justify-center overflow-hidden">
+                    {previewSrc ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                            src={previewSrc}
+                            alt="Xem trước ảnh"
+                            className="max-h-[360px] w-full object-contain bg-white"
+                            onLoad={() => {
+                                if (!localObjectUrl && !message) setMessage('Ảnh tải được. Có thể dùng link này trong Excel.');
+                            }}
+                            onError={() => setMessage('Không tải được ảnh từ link này. Hãy kiểm tra quyền truy cập, định dạng URL hoặc CORS.')}
+                        />
+                    ) : (
+                        <div className="text-center text-sm text-gray-400 px-6">
+                            <ImageIcon size={38} className="mx-auto mb-2 text-gray-300" />
+                            Ảnh preview sẽ hiển thị tại đây
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {processedImages.length > 0 && (
+                <div className="mt-5 border-t border-gray-100 pt-5">
+                    <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                        <ImageIcon size={16} className="text-orange-500" />
+                        Danh sách ảnh trong thư mục cục bộ ({processedImages.length} file)
+                    </h3>
+                    <p className="text-xs text-gray-500 mb-4">
+                        Nhấp vào bất kỳ dòng nào để xem trước ảnh kích thước lớn ở bên phải. Copy **Tên file thô** dán vào Excel, và bấm **Upload & Lấy URL** khi cần lấy link thật.
+                    </p>
+                    
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+                        {/* Cột trái: Danh sách bảng ảnh */}
+                        <div className="lg:col-span-2 overflow-x-auto border border-gray-200 rounded-lg max-h-[450px] overflow-y-auto">
+                            <table className="w-full text-xs text-left text-gray-700">
+                                <thead className="bg-gray-50 text-gray-600 uppercase font-semibold border-b border-gray-200 sticky top-0 z-10">
+                                    <tr>
+                                        <th className="px-4 py-2.5 w-16 text-center">Ảnh</th>
+                                        <th className="px-4 py-2.5 min-w-[180px]">Tên file thô</th>
+                                        <th className="px-4 py-2.5 w-28 text-center">Trạng thái</th>
+                                        <th className="px-4 py-2.5 min-w-[200px]">Đường dẫn URL thật</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100 bg-white">
+                                    {processedImages.map((img, idx) => (
+                                        <tr 
+                                            key={idx} 
+                                            onClick={() => setSelectedImageIndex(idx)}
+                                            className={`hover:bg-gray-50/70 cursor-pointer transition-colors ${
+                                                selectedImageIndex === idx ? 'bg-orange-50/50 font-medium border-l-2 border-l-orange-500' : ''
+                                            }`}
+                                        >
+                                            <td className="px-4 py-2 text-center">
+                                                {img.url || img.localPreviewUrl ? (
+                                                    // eslint-disable-next-line @next/next/no-img-element
+                                                    <img
+                                                        src={img.url || img.localPreviewUrl}
+                                                        alt="thumb"
+                                                        className="h-10 w-10 object-cover rounded border border-gray-200 bg-gray-50 mx-auto"
+                                                    />
+                                                ) : (
+                                                    <div className="h-10 w-10 rounded border border-dashed border-gray-300 bg-gray-50 flex items-center justify-center text-gray-400 mx-auto">
+                                                        <X size={16} />
+                                                    </div>
+                                                )}
+                                            </td>
+                                            <td className="px-4 py-2 font-mono text-[11px] text-gray-900">
+                                                <div className="flex items-center justify-between gap-2 bg-gray-50 px-2 py-1.5 rounded border border-gray-100">
+                                                    <span className="truncate max-w-[160px]" title={img.fileName}>{img.fileName}</span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            copyToClipboard(img.fileName, 'name');
+                                                        }}
+                                                        className="p-1 text-orange-600 hover:bg-orange-50 rounded transition-colors"
+                                                        title="Copy tên file để dán vào Excel"
+                                                    >
+                                                        <Copy size={13} />
+                                                    </button>
+                                                </div>
+                                            </td>
+                                            <td className="px-4 py-2 text-center">
+                                                {img.status === 'loading' ? (
+                                                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-blue-50 text-blue-700 font-medium text-[11px] border border-blue-100">
+                                                        <Loader2 className="h-3 w-3 animate-spin text-blue-500" />
+                                                        Đang upload
+                                                    </span>
+                                                ) : img.status === 'success' ? (
+                                                    <span className={`inline-flex items-center px-2 py-1 rounded font-medium text-[11px] border ${
+                                                        img.isReused 
+                                                            ? 'bg-emerald-50 text-emerald-700 border-emerald-100' 
+                                                            : 'bg-orange-50 text-orange-700 border-orange-100'
+                                                    }`}>
+                                                        {img.isReused ? 'Dùng lại' : 'Đã upload'}
+                                                    </span>
+                                                ) : img.status === 'error' ? (
+                                                    <span className="inline-flex items-center px-2 py-1 rounded bg-red-50 text-red-700 font-medium text-[11px] border border-red-100" title={img.message}>
+                                                        Lỗi upload
+                                                    </span>
+                                                ) : (
+                                                    <span className="inline-flex items-center px-2 py-1 rounded bg-gray-50 text-gray-500 font-medium text-[11px] border border-gray-100">
+                                                        Chưa upload
+                                                    </span>
+                                                )}
+                                            </td>
+                                            <td className="px-4 py-2">
+                                                {img.status === 'success' ? (
+                                                    <div className="flex items-center justify-between gap-2 bg-gray-50 px-2 py-1.5 rounded border border-gray-100">
+                                                        <span className="font-mono text-[11px] text-gray-600 truncate max-w-[180px]" title={img.url}>
+                                                            {img.url}
+                                                        </span>
+                                                        <button
+                                                            type="button"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                copyToClipboard(img.url, 'url');
+                                                            }}
+                                                            className="p-1 text-orange-600 hover:bg-orange-50 rounded transition-colors"
+                                                            title="Copy URL ảnh"
+                                                        >
+                                                            <Copy size={13} />
+                                                        </button>
+                                                    </div>
+                                                ) : (
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleCopyUrlWithUpload(idx);
+                                                        }}
+                                                        disabled={img.status === 'loading'}
+                                                        className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded bg-orange-50 hover:bg-orange-100 text-orange-700 border border-orange-200 text-[11px] font-medium transition-colors disabled:opacity-50"
+                                                    >
+                                                        <Upload size={12} />
+                                                        Upload & Lấy URL
+                                                    </button>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        {/* Cột phải: Xem trước hình ảnh lớn */}
+                        <div className="lg:col-span-1">
+                            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 sticky top-4">
+                                <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
+                                    Chi tiết & Xem trước
+                                </h4>
+
+                                {activeImg ? (
+                                    <div className="space-y-4">
+                                        {/* Khung ảnh lớn với nền Grid caro chống trôi suốt (transparent) */}
+                                        <div className="relative rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden flex items-center justify-center aspect-video lg:aspect-square max-h-[280px] group">
+                                            {/* Nền Grid Pattern */}
+                                            <div 
+                                                className="absolute inset-0 opacity-[0.04]"
+                                                style={{
+                                                    backgroundImage: 'radial-gradient(#000 20%, transparent 20%), radial-gradient(#000 20%, transparent 20%)',
+                                                    backgroundPosition: '0 0, 8px 8px',
+                                                    backgroundSize: '16px 16px'
+                                                }}
+                                            />
+                                            
+                                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                                            <img
+                                                src={activeImg.url || activeImg.localPreviewUrl}
+                                                alt={activeImg.fileName}
+                                                className="relative z-10 max-h-full max-w-full object-contain p-2 transition-transform duration-200 group-hover:scale-105"
+                                            />
+                                        </div>
+
+                                        {/* Thông số kỹ thuật tệp tin */}
+                                        <div className="bg-white border border-gray-150 rounded-lg p-3 space-y-2 text-xs">
+                                            <div className="flex justify-between gap-2">
+                                                <span className="text-gray-400">Tên tệp:</span>
+                                                <span className="font-mono text-gray-800 break-all text-right max-w-[180px]" title={activeImg.fileName}>
+                                                    {activeImg.fileName}
+                                                </span>
+                                            </div>
+                                            {activeImg.file && (
+                                                <div className="flex justify-between">
+                                                    <span className="text-gray-400">Dung lượng:</span>
+                                                    <span className="text-gray-800 font-medium">
+                                                        {(activeImg.file.size / 1024).toFixed(1)} KB
+                                                    </span>
+                                                </div>
+                                            )}
+                                            {activeImg.file?.type && (
+                                                <div className="flex justify-between">
+                                                    <span className="text-gray-400">Định dạng:</span>
+                                                    <span className="text-gray-800 font-mono">{activeImg.file.type}</span>
+                                                </div>
+                                            )}
+                                            <div className="flex justify-between">
+                                                <span className="text-gray-400">Đồng bộ:</span>
+                                                <span className={`font-semibold ${
+                                                    activeImg.status === 'success' ? 'text-emerald-600' : 'text-amber-600'
+                                                }`}>
+                                                    {activeImg.status === 'success' ? (activeImg.isReused ? 'Dùng lại ảnh cũ' : 'Đã upload thành công') : 'Chưa đồng bộ'}
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        {/* Diễn giải trạng thái */}
+                                        <p className="text-[11px] text-gray-500 leading-relaxed bg-orange-50/40 border border-orange-100/50 rounded-lg p-2.5">
+                                            {activeImg.status === 'success' ? (
+                                                <span>Ảnh này đã được đồng bộ hóa. Đường dẫn URL thật đã sẵn sàng, bạn có thể bấm sao chép và dán trực tiếp vào file Excel.</span>
+                                            ) : (
+                                                <span>Ảnh này chưa được đồng bộ hóa lên máy chủ. Bạn có thể copy tên file này dán vào Excel, hoặc bấm nút upload phía dưới để đồng bộ và lấy URL thật ngay lập tức.</span>
+                                            )}
+                                        </p>
+
+                                        {/* Phím tắt hành động nhanh */}
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => copyToClipboard(activeImg.fileName, 'name')}
+                                                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium transition-colors"
+                                            >
+                                                <Copy size={13} />
+                                                Copy tên file
+                                            </button>
+                                            {activeImg.status === 'success' ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => copyToClipboard(activeImg.url, 'url')}
+                                                    className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded bg-orange-500 hover:bg-orange-600 text-white text-xs font-medium transition-colors"
+                                                >
+                                                    <Copy size={13} />
+                                                    Copy URL thật
+                                                </button>
+                                            ) : (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => selectedImageIndex !== null && handleCopyUrlWithUpload(selectedImageIndex)}
+                                                    disabled={activeImg.status === 'loading'}
+                                                    className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded bg-orange-500 hover:bg-orange-600 text-white text-xs font-medium transition-colors disabled:opacity-50"
+                                                >
+                                                    {activeImg.status === 'loading' ? (
+                                                        <>
+                                                            <Loader2 size={13} className="animate-spin" />
+                                                            Đang upload...
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <Upload size={13} />
+                                                            Upload ảnh
+                                                        </>
+                                                    )}
+                                                </button>
+                                            )}
+                                        </div>
+
+                                        {activeImg.status === 'success' && (
+                                            <a
+                                                href={activeImg.url}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="block text-center text-[11px] text-orange-600 hover:underline font-medium"
+                                            >
+                                                Xem ảnh gốc trên tab mới &rarr;
+                                            </a>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <div className="flex flex-col items-center justify-center py-16 px-4 text-center border border-dashed border-gray-200 bg-white rounded-lg min-h-[280px]">
+                                        <ImageIcon size={32} className="text-gray-300 mb-2" />
+                                        <p className="text-xs text-gray-400 max-w-[180px] leading-relaxed">
+                                            Chọn một hình ảnh bên danh sách để xem trước kích thước lớn và chi tiết tệp
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
                     </div>
-                )}
-            </div>
+                </div>
+            )}
         </div>
         <MediaManager
             isOpen={mediaOpen}
             onClose={() => setMediaOpen(false)}
             onSelect={handleMediaSelect}
             title="Upload hoặc chọn ảnh cho Excel"
-            defaultFolder="products"
+            defaultFolder={testFolder}
         />
         </>
     );

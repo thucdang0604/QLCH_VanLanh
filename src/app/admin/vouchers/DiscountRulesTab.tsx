@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { collection, query, orderBy, onSnapshot, updateDoc, doc, deleteDoc, serverTimestamp, setDoc, limit, getDocs, getDoc } from 'firebase/firestore';
+import { collection, query, orderBy, updateDoc, doc, deleteDoc, serverTimestamp, setDoc, limit } from 'firebase/firestore';
+import { onSnapshot, getDocs, getDoc } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import { Percent, Plus, Edit2, Trash2, ToggleLeft, ToggleRight, X, Tag, Medal, Users, ChevronDown, Search, ArrowDown, Zap, ShoppingBag } from 'lucide-react';
 import { toast } from 'sonner';
@@ -504,7 +505,7 @@ export default function DiscountRulesTab() {
     }, []);
 
     const loadServiceLinkSuggestions = useCallback(async () => {
-        const snap = await getDocs(collection(db, 'services'));
+        const snap = await getDocs(query(collection(db, 'services'), limit(20)));
         setServiceLinkSuggestions(snap.docs
             .map(docSnap => {
                 const data = docSnap.data() as Partial<ServiceLinkSuggestion>;

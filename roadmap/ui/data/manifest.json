@@ -11,6 +11,203 @@
   "constraints": [],
   "aiPlans": [
     {
+      "id": "plan-firebase-reads-optimization-20260626",
+      "title": "Kế hoạch Tối ưu số lượng Firebase Reads trên Trang Chủ",
+      "date": "26.06.2026",
+      "status": "in_progress",
+      "planFile": "data/ai_plans/firebase_reads_optimization.md",
+      "taskFile": "",
+      "walkthroughFile": "",
+      "scope": [
+        "src/app/api/services/homepage-pricing/route.ts",
+        "src/app/(customer)/page.tsx",
+        "src/app/(customer)/page.client.tsx",
+        "src/components/home/ArticleBlock.tsx",
+        "src/components/home/FloatingReviews.tsx"
+      ],
+      "decisions": [
+        "Thêm cache revalidate 300s vào /api/services/homepage-pricing",
+        "Fetch articles và reviews trên Server và đẩy xuống Client qua ssrLatestArticles, ssrLatestReviews",
+        "Gỡ bỏ getDocs trên client của ArticleBlock và FloatingReviews"
+      ],
+      "updatedAt": "2026-06-26T10:47:00.000+07:00"
+    },
+    {
+      "id": "plan-large-image-preview-20260626",
+      "title": "Kế hoạch Nâng cấp Xem trước Ảnh Kích thước lớn trong Excel Importer",
+      "date": "26.06.2026",
+      "status": "completed",
+      "completedAt": "26.06.2026",
+      "planFile": "data/ai_plans/plan_large_image_preview_20260626.md",
+      "taskFile": "data/ai_plans/task_large_image_preview_20260626.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_large_image_preview_20260626.md",
+      "scope": [
+        "src/app/admin/initial-data/page.tsx"
+      ],
+      "decisions": [
+        "Phục hồi mã nguồn bị lỗi cú pháp trong ImageLinkTester",
+        "Thiết kế cột xem trước ảnh kích thước lớn ở phía bên phải trong chế độ duyệt thư mục ảnh",
+        "Bổ sung thông tin chi tiết của tệp tin cục bộ như dung lượng, định dạng và trạng thái đồng bộ"
+      ],
+      "updatedAt": "2026-06-26T12:20:00.000+07:00"
+    },
+    {
+      "id": "plan-excel-import-image-hash-dedup-20260626",
+      "title": "Kế hoạch Chống trùng lặp Ảnh Excel Importer bằng SHA-256 Hash",
+      "date": "26.06.2026",
+      "status": "completed",
+      "completedAt": "26.06.2026",
+      "planFile": "data/ai_plans/plan_excel_import_image_hash_dedup_20260626.md",
+      "taskFile": "data/ai_plans/task_excel_import_image_hash_dedup_20260626.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_excel_import_image_hash_dedup_20260626.md",
+      "scope": [
+        "src/features/excel-import/importSupport.ts",
+        "src/components/admin/ExcelImportModal.tsx"
+      ],
+      "decisions": [
+        "Tính toán mã SHA-256 hash của ảnh cục bộ ở client-side bằng Web Crypto API",
+        "Sử dụng mã hash làm Document ID Firestore (MED-import-[folder]-[hash]) để kiểm tra trùng lặp O(1)",
+        "Lưu đường dẫn vật lý trên Storage dạng media/[folder]/[hash].webp để chống trùng lặp vật lý",
+        "Triển khai cơ chế truy vấn Lai (Hybrid) đối với ảnh thô trong Excel: tự động map khi duy nhất, cảnh báo xung đột khi trùng tên khác hash"
+      ],
+      "updatedAt": "2026-06-26T12:00:00.000+07:00"
+    },
+    {
+      "id": "plan-mediamanager-folder-config-20260626",
+      "title": "Kế hoạch Đồng bộ Cấu hình Thư mục MediaManager",
+      "date": "26.06.2026",
+      "status": "completed",
+      "completedAt": "26.06.2026",
+      "planFile": "data/ai_plans/plan_mediamanager_folder_config_20260626.md",
+      "taskFile": "",
+      "walkthroughFile": "data/ai_plans/walkthrough_mediamanager_folder_config_20260626.md",
+      "scope": [
+        "src/features/repairs/RepairMediaManagers.tsx",
+        "src/features/articles/ArticleEditorModal.tsx",
+        "src/app/admin/settings/ReceiptSettingsPanel.tsx",
+        "src/app/admin/settings/CategoriesTab.tsx",
+        "src/app/admin/appearance/page.tsx",
+        "src/app/admin/initial-data/page.tsx"
+      ],
+      "decisions": [
+        "Cấu hình defaultFolder cho repairs, articles, logo-brand, frames, banners trong MediaManager",
+        "Động hóa defaultFolder trong ImageLinkTester của Excel Importer bằng select box",
+        "Động hóa defaultFolder trong Appearance page dựa trên mediaTarget hiện tại"
+      ],
+      "updatedAt": "2026-06-26T09:31:00.000+07:00"
+    },
+    {
+      "id": "plan-security-defense-20260625",
+      "title": "Kế hoạch Thiết lập Giám sát An ninh & Phòng thủ Chủ động (Active Defense)",
+      "date": "25.06.2026",
+      "status": "in_progress",
+      "planFile": "data/ai_plans/plan_security_defense_20260625.md",
+      "taskFile": "data/ai_plans/task_security_defense_20260625.md",
+      "walkthroughFile": "",
+      "scope": [
+        "firebase.json",
+        "storage.rules",
+        "package.json",
+        "next.config.mjs",
+        "src/middleware.ts",
+        "src/lib/rateLimiter.ts",
+        "src/app/admin/security/page.tsx",
+        "src/app/api/admin/security/route.ts",
+        "src/app/api/media/upload-url/route.ts"
+      ],
+      "decisions": [
+        "Nâng bộ nhớ API/SSR Next.js lên 1GiB/2GiB và giảm maxInstances xuống 3 để bảo vệ chi phí trần tối đa",
+        "Tích hợp Next.js Middleware với Upstash Redis để làm tường lửa lọc và tự động block IP spam",
+        "Xây dựng Security Dashboard trong Admin panel phục vụ theo dõi realtime và chặn IP bằng tay",
+        "Thắt chặt storage.rules chặn người dùng vãng lai upload trực tiếp tệp lớn, chuyển sang cơ chế Presigned URL từ API"
+      ],
+      "updatedAt": "2026-06-25T11:45:00.000+07:00"
+    },
+    {
+      "id": "plan-codebase-refactor-cleanup-20260625",
+      "title": "Kế hoạch Khắc phục Lỗi Logic & Dọn dẹp Nợ Kỹ thuật (Refactor & Cleanup)",
+      "date": "25.06.2026",
+      "status": "in_progress",
+      "planFile": "data/ai_plans/plan_codebase_refactor_cleanup_20260625.md",
+      "taskFile": "data/ai_plans/task_codebase_refactor_cleanup_20260625.md",
+      "walkthroughFile": "",
+      "scope": [
+        "src/lib/commissionUtils.ts",
+        "src/lib/warrantyUtils.ts",
+        "src/lib/customerSync.ts",
+        "src/lib/sms.ts",
+        "src/lib/permissions.ts",
+        "src/components/common/Container.tsx",
+        "src/app/api/restore/route.ts",
+        "src/components/admin/ExportImportReportButton.tsx",
+        "src/components/MissionsWidget.tsx",
+        "package.json"
+      ],
+      "decisions": [
+        "Xóa bỏ hoàn toàn 7 tệp tin và 1 thư viện DevDependency dư thừa",
+        "Cập nhật trực tiếp import của 5 tệp tin liên quan trỏ về adminModules.ts",
+        "Sửa lỗi trùng lặp Firebase App 'bounty-otp' trong MissionsWidget.tsx",
+        "Tích hợp nút ExportImportReportButton vào trang quản lý linh kiện parts"
+      ],
+      "updatedAt": "2026-06-25T00:55:00.000+07:00"
+    },
+    {
+      "id": "plan-codebase-reading-journal-v3-20260625",
+      "title": "Nhật Ký Đọc Code V3: Đọc dòng đối dòng & Phân tích các Layouts, Common, Home và Admin Components còn lại",
+      "date": "25.06.2026",
+      "status": "completed",
+      "completedAt": "25.06.2026",
+      "planFile": "data/ai_plans/plan_codebase_reading_journal_20260625.md",
+      "taskFile": "data/ai_plans/task_codebase_reading_journal_20260625.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_codebase_reading_journal_20260625.md",
+      "scope": [
+        "src/components/layout/Header.tsx",
+        "src/components/layout/MobileBottomNav.tsx",
+        "src/components/common/Container.tsx",
+        "src/components/ui/LazyImage.tsx",
+        "src/components/ui/Skeleton.tsx",
+        "src/components/home/ArticleBlock.tsx",
+        "src/components/home/BookingSection.tsx",
+        "src/components/home/CategoriesSection.tsx",
+        "src/components/home/FlashSale.tsx",
+        "src/components/home/FloatingReviews.tsx",
+        "src/components/home/GoogleReviewsSection.tsx",
+        "src/components/home/HeroSection.tsx",
+        "src/components/home/PricingSection.tsx",
+        "src/components/home/ServiceBlock.tsx",
+        "src/components/home/ServiceCard.tsx",
+        "src/components/home/SuggestedSection.tsx"
+      ],
+      "decisions": [
+        "Phân tích thủ công 100% dòng đối dòng, tuyệt đối không dùng tool/script tự động",
+        "Ghi nhận chi tiết chức năng, cơ chế hoạt động, và đánh giá kỹ thuật chuyên sâu",
+        "Cập nhật khoa học vào codebase_reading_journal.md theo cấu trúc tăng dần, tránh xáo trộn"
+      ],
+      "updatedAt": "2026-06-25T00:34:00.000+07:00"
+    },
+    {
+      "id": "plan-pos-debt-crm-fix-20260624",
+      "title": "Sửa lỗi lưu khách hàng mới POS và hiển thị trạng thái Công nợ đơn hàng",
+      "date": "24.06.2026",
+      "status": "completed",
+      "completedAt": "24.06.2026",
+      "planFile": "data/ai_plans/plan_pos_debt_crm_fix_20260624.md",
+      "taskFile": "data/ai_plans/task_pos_debt_crm_fix_20260624.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_pos_debt_crm_fix_20260624.md",
+      "scope": [
+        "src/app/api/pos/checkout/route.ts",
+        "src/app/admin/orders/page.tsx",
+        "src/app/api/restore/route.ts"
+      ],
+      "decisions": [
+        "Khởi tạo trường createdAt, updatedAt, lastVisit cho khách hàng mới để hiển thị trong orderBy của CRM",
+        "Bổ sung trường totalDebt ban đầu cho khách hàng mới bằng deltaDebt khi có đơn nợ",
+        "Tự động tính toán số nợ còn lại dựa trên lịch sử thanh toán thực tế của đơn hàng",
+        "Đồng bộ hóa các mẫu in hóa đơn Thermal 80mm và A5 hiển thị dòng nợ và cọc chính xác"
+      ],
+      "updatedAt": "2026-06-24T08:30:00.000+07:00"
+    },
+    {
       "id": "plan-pos-debt-reconcile-20260623",
       "title": "Khắc phục Treo đơn POS, Ghi nhận Công nợ & Chuẩn hóa Ledger",
       "date": "23.06.2026",
@@ -379,7 +576,6 @@
         "src/app/api/repairs/transition/route.ts",
         "src/lib/repairWorkflowConfig.ts",
         "src/lib/repairWorkflowConfig.test.ts",
-        "scripts/migrate-repair-workflow-v2.ts",
         "src/lib/repairWorkflowServer.ts",
         "src/lib/workflowFeatures.ts",
         "src/lib/types.ts",

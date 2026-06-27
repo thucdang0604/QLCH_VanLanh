@@ -539,7 +539,7 @@ Sau clean code, <code>scripts/migrate-active-orders.ts</code> khong ton tai nhun
 ### Cause
 Cleanup da xoa script nhung chua xoa/cap nhat package script va roadmap.
 ### Solution
-Đã xóa command chết <code>migrate:inventory</code> khỏi <code>package.json</code>. Repo không có implementation hoặc caller nào cho migration cũ; các migration/backfill hiện hành dùng script có version và mục tiêu rõ ràng như <code>backfill-crm-aggregates.ts</code> và <code>migrate-repair-workflow-v2.ts</code>.
+Đã xóa command chết <code>migrate:inventory</code> khỏi <code>package.json</code>. Production hardening 2026-06-27 đã gỡ các script migration/backfill Firestore còn lại khỏi repo để tránh chạy nhầm sau go-live.
 ### Verification
 2026-06-13: <code>package.json</code> parse hợp lệ, không còn tham chiếu tới <code>scripts/migrate-active-orders.ts</code> và tìm kiếm toàn repo chỉ còn tài liệu lịch sử của bug.
 ## Lỗi thuộc Module: encoding

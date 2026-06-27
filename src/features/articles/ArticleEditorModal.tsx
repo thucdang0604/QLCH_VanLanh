@@ -48,7 +48,7 @@ const quillModules = {
         ['blockquote', 'code-block'],
         ['link', 'image', 'video'],
         ['clean'],
-    ],
+    ]
 };
 
 const quillFormats = [
@@ -224,6 +224,104 @@ function normalizePastedArticleHtml(html: string): string {
         iframe.setAttribute('allowfullscreen', 'true');
         link.replaceWith(iframe);
     });
+
+    return docNode.body.innerHTML;
+}
+
+async function processBase64Images(htmlContent: string): Promise<string> {
+    if (!htmlContent) return '';
+    
+    const parser = new DOMParser();
+    const docNode = parser.parseFromString(htmlContent, 'text/html');
+    const images = docNode.querySelectorAll('img');
+    
+    const base64Images: HTMLImageElement[] = [];
+    images.forEach(img => {
+        if (img.src && img.src.startsWith('data:image/')) {
+            base64Images.push(img);
+        }
+    });
+
+    if (base64Images.length === 0) {
+        return htmlContent;
+    }
+
+    const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
+    const storage = await getStorageInstance();
+
+    const base64ToBlob = (dataURI: string) => {
+        const parts = dataURI.split(',');
+        const mime = parts[0].split(':')[1].split(';')[0];
+        const byteString = atob(parts[1]);
+        const ab = new ArrayBuffer(byteString.length);
+        const ia = new Uint8Array(ab);
+        for (let i = 0; i < byteString.length; i++) {
+            ia[i] = byteString.charCodeAt(i);
+        }
+        return new Blob([ab], { type: mime });
+    };
+
+    // Helper to calculate SHA-256 hash of a Blob on client-side using Web Crypto API
+    const calculateHash = async (blob: Blob): Promise<string> => {
+        const arrayBuffer = await blob.arrayBuffer();
+        const hashBuffer = await window.crypto.subtle.digest('SHA-256', arrayBuffer);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    };
+
+    for (let i = 0; i < base64Images.length; i++) {
+        const img = base64Images[i];
+        try {
+            const blob = base64ToBlob(img.src);
+            const hash = await calculateHash(blob);
+            
+            // Document ID using hash for O(1) deduplication lookup
+            const mediaDocId = `MED-articles-${hash}`;
+            const mediaDocRef = doc(db, 'media_library', mediaDocId);
+            const mediaDocSnap = await getDoc(mediaDocRef);
+
+            if (mediaDocSnap.exists()) {
+                // Image already exists! Use the existing URL and bypass upload/optimization
+                const existingUrl = mediaDocSnap.data().url;
+                img.src = existingUrl;
+                continue;
+            }
+
+            const extension = blob.type.split('/')[1] || 'png';
+            const tempName = `article_embedded_${hash}.${extension}`;
+            const file = new File([blob], tempName, { type: blob.type });
+            
+            // Optimize the image using optimization parameters matching the signature
+            const { file: optimized, width, height } = await optimizeImage(file, 1200, 1600, 0.8);
+
+            // Use the hash in the Storage path to guarantee physical deduplication
+            const storagePath = `media/articles/${hash}.webp`;
+            const storageRef = ref(storage, storagePath);
+            const buffer = await optimized.arrayBuffer();
+            const bytes = new Uint8Array(buffer);
+
+            await uploadBytes(storageRef, bytes, { contentType: 'image/webp' });
+            const url = await getDownloadURL(storageRef);
+
+            // Register in Media Library using the hash-based ID
+            await setDoc(mediaDocRef, {
+                url,
+                path: storagePath,
+                name: optimized.name,
+                type: 'image/webp',
+                size: optimized.size,
+                width,
+                height,
+                folder: 'articles',
+                createdAt: serverTimestamp(),
+            });
+
+            // Replace the src
+            img.src = url;
+        } catch (err) {
+            console.error('Failed to process embedded image:', err);
+        }
+    }
 
     return docNode.body.innerHTML;
 }
@@ -643,7 +741,7 @@ export function ArticleModal({
         try {
             // Optimize: resize & convert to WebP
             const { file: optimized, width, height } = await optimizeImage(file, 1200, 800, 0.8);
-            const storagePath = `media/${Date.now()}_${optimized.name}`;
+            const storagePath = `media/articles/${Date.now()}_${optimized.name}`;
             const storage = await getStorageInstance();
             const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
             const storageRef = ref(storage, storagePath);
@@ -663,6 +761,7 @@ export function ArticleModal({
                 size: optimized.size,
                 width,
                 height,
+                folder: 'articles',
                 createdAt: serverTimestamp(),
             });
 
@@ -683,11 +782,14 @@ export function ArticleModal({
         }
         setSaving(true);
         try {
+            // Pre-process content to optimize and upload base64 images to Storage
+            const processedContent = await processBase64Images(formData.content);
+
             const payload: Record<string, unknown> = {
                 title: formData.title.trim(),
                 type: formData.type,
                 status: formData.status,
-                content: formData.content,
+                content: processedContent,
                 excerpt: formData.excerpt.trim() || '',
                 thumbnail: formData.thumbnail || '',
                 videoEmbedUrl: formData.videoEmbedUrl.trim() || '',
@@ -955,6 +1057,7 @@ export function ArticleModal({
                             onClose={() => setMediaPickerOpen(false)}
                             onSelect={(url) => setFormData({ ...formData, thumbnail: url })}
                             title="Chọn ảnh thumbnail"
+                            defaultFolder="articles"
                         />
                     </div>
 

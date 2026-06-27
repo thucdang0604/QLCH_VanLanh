@@ -2,11 +2,13 @@
 
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
+import firebaseImageLoader from '@/lib/imageLoader';
 import { useRouter } from 'next/navigation';
 import { Archive, Plus, Search, Edit, Package, Loader2, QrCode, AlertTriangle, PackagePlus } from 'lucide-react';
 import { useFirestoreCollection, updateDocument } from '@/lib/useFirestore';
 
-import { collection, onSnapshot, orderBy, serverTimestamp } from 'firebase/firestore';
+import { collection, orderBy, serverTimestamp } from 'firebase/firestore';
+import { onSnapshot } from '@/lib/firestoreLogger';
 import { toastError } from '@/lib/toast';
 import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
@@ -252,6 +254,8 @@ export default function ProductsPage() {
                                                         src={product.imageUrl}
                                                         alt={product.name}
                                                         fill
+                                                        loader={firebaseImageLoader}
+                                                        sizes="48px"
                                                         className="object-cover"
                                                     />
                                                 ) : (
@@ -354,6 +358,8 @@ export default function ProductsPage() {
                                             src={product.imageUrl}
                                             alt={product.name}
                                             fill
+                                            loader={firebaseImageLoader}
+                                            sizes="64px"
                                             className="object-cover"
                                         />
                                     ) : (

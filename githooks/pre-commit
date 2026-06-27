@@ -1,0 +1,4 @@
+#!/bin/sh
+
+echo "Running AI safety pre-commit guard..."
+node scripts/ai-guard.mjs --staged

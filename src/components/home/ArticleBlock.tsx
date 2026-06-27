@@ -45,9 +45,11 @@ function ArticleSkeleton() {
     );
 }
 
-export default function ArticleBlock() {
-    const [articles, setArticles] = useState<ArticleDoc[]>([]);
-    const [loading, setLoading] = useState(true);
+export default function ArticleBlock({ ssrArticles }: { ssrArticles?: ArticleDoc[] }) {
+    const [articles, setArticles] = useState<ArticleDoc[]>(
+        Array.isArray(ssrArticles) ? ssrArticles : []
+    );
+    const [loading, setLoading] = useState(!Array.isArray(ssrArticles));
 
     const constraints = useMemo(() => [
         where('status', '==', 'published'),
@@ -56,6 +58,12 @@ export default function ArticleBlock() {
     ], []);
 
     useEffect(() => {
+        // If we received SSR data, we don't need to fetch from Firebase on the client
+        if (Array.isArray(ssrArticles) && ssrArticles.length > 0) {
+            setLoading(false);
+            return;
+        }
+
         let isMounted = true;
         const fetchArticles = async () => {
             try {
@@ -81,7 +89,7 @@ export default function ArticleBlock() {
         return () => {
             isMounted = false;
         };
-    }, [constraints]);
+    }, [constraints, ssrArticles]);
 
     // Don't render section if no articles and not loading
     if (!loading && articles.length === 0) return null;

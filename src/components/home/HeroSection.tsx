@@ -37,7 +37,7 @@ function BannerSkeleton() {
 }
 
 // ===== Sidebar Flyout Menu Item =====
-function SidebarItem({ item }: { item: { name: string; slug: string; iconName: string; subGroups: Array<{ group: string; items: string[] }> } }) {
+function SidebarItem({ item }: { item: { name: string; slug: string; iconName: string; isCustomLink?: boolean; subGroups: Array<{ group: string; items: string[] }> } }) {
     const [showFlyout, setShowFlyout] = useState(false);
     const timeoutRef = useRef<NodeJS.Timeout | null>(null);
     const Icon = getIcon(item.iconName);
@@ -58,7 +58,7 @@ function SidebarItem({ item }: { item: { name: string; slug: string; iconName: s
             onMouseLeave={handleMouseLeave}
         >
             <Link
-                href={`/category/${item.slug}`}
+                href={item.isCustomLink ? item.slug : `/category/${item.slug}`}
                 className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-gray-700 hover:bg-copper/5 hover:text-copper transition-colors group"
             >
                 <span className="text-gray-400 group-hover:text-copper transition-colors flex-shrink-0"><Icon size={18} /></span>
@@ -95,7 +95,7 @@ function SidebarItem({ item }: { item: { name: string; slug: string; iconName: s
                     {/* CTA */}
                     <div className="mt-4 pt-3 border-t border-gray-100">
                         <Link
-                            href={`/category/${item.slug}`}
+                            href={item.isCustomLink ? item.slug : `/category/${item.slug}`}
                             className="text-sm font-semibold text-copper hover:text-copper-dark transition-colors"
                         >
                             Xem tất cả {item.name} →

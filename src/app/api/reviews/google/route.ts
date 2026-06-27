@@ -43,7 +43,7 @@ interface GoogleApiError {
     };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
     try {
         const apiKey = process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_MAPS_API_KEY;
         const placeId = await getConfiguredPlaceId();
@@ -52,12 +52,20 @@ export async function GET() {
             return NextResponse.json({ configured: false, reviews: [], providerStatus: 'unconfigured' });
         }
 
+        // Forward the client's referer to bypass Google API Key HTTP Referrer restrictions
+        const clientReferer = request.headers.get('referer') || '';
+        const host = request.headers.get('host') || '';
+        const protocol = host.includes('localhost') || host.includes('127.0.0.1') ? 'http' : 'https';
+        const fallbackReferer = host ? `${protocol}://${host}/` : '';
+        const refererUrl = clientReferer || fallbackReferer;
+
         const url = new URL(`https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}`);
         const res = await fetch(url, {
             headers: {
                 'X-Goog-Api-Key': apiKey,
                 'X-Goog-FieldMask': 'rating,userRatingCount,reviews',
                 'Accept-Language': 'vi',
+                ...(refererUrl ? { 'Referer': refererUrl } : {}),
             },
             next: { revalidate: 86400 } // Cache for one day.
         });
@@ -82,12 +90,22 @@ export async function GET() {
             rating: data.rating || 0,
             total_ratings: data.userRatingCount || 0,
             reviews
+        }, {
+            headers: {
+                'Cache-Control': 'public, max-age=86400, s-maxage=86400, stale-while-revalidate=600'
+            }
         });
 
     } catch (error: unknown) {
-        console.error('Google Reviews Error:', (error as Error).message);
+        const errMsg = (error as Error).message;
+        console.error('Google Reviews Error:', errMsg);
         return NextResponse.json(
-            { configured: true, reviews: [], providerStatus: 'provider_error' },
+            { 
+                configured: true, 
+                reviews: [], 
+                providerStatus: 'provider_error',
+                errorDetails: errMsg 
+            },
             { status: 503 }
         );
     }

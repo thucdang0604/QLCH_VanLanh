@@ -191,7 +191,18 @@ export default function AdminAppearancePage() {
     return (
         <div className="space-y-6">
             {toast && <Toast message={toast} onClose={() => setToast(null)} />}
-            <MediaManager isOpen={mediaOpen} onClose={() => setMediaOpen(false)} onSelect={handleMediaSelect} />
+            <MediaManager
+                isOpen={mediaOpen}
+                onClose={() => setMediaOpen(false)}
+                onSelect={handleMediaSelect}
+                defaultFolder={
+                    mediaTarget === 'logo' ? 'logo-brand' :
+                    mediaTarget === 'banner' ? 'banners' :
+                    mediaTarget?.startsWith('section_frame_') ? 'frames' :
+                    mediaTarget?.startsWith('section_bg_') ? 'banners' :
+                    'general'
+                }
+            />
 
             {/* Page Header */}
             <div className="flex items-center justify-between">

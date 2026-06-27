@@ -8,7 +8,8 @@ import {
     Package, Loader2, CheckCircle2,
     AlertTriangle, Camera, Keyboard
 } from 'lucide-react';
-import { collection, doc, getDoc, getDocs, limit, query, where, orderBy as fbOrderBy } from 'firebase/firestore';
+import { collection, doc, limit, query, where, orderBy as fbOrderBy } from 'firebase/firestore';
+import { getDoc, getDocs } from '@/lib/firestoreLogger';
 
 import { useConfig } from '@/lib/ConfigContext';
 import Modal from '@/components/admin/Modal';
@@ -985,9 +986,32 @@ export default function POSPage() {
         }
     };
 
+    // Auto-switch payment method to 'debt' if paying a portion
+    useEffect(() => {
+        if (deposit > 0 && deposit < total && paymentMethod !== 'debt') {
+            setPaymentMethod('debt');
+            toastWarning('Số tiền khách trả nhỏ hơn tổng tiền. Hệ thống tự động chuyển sang hình thức Ghi nợ.');
+        }
+    }, [deposit, total, paymentMethod]);
+
     // ── Checkout ──
     const handleCheckout = async () => {
         if (cart.length === 0) return;
+
+        // Validation for debt/partial payments
+        const isDebtPayment = paymentMethod === 'debt' || (deposit > 0 && deposit < total);
+        if (isDebtPayment) {
+            const phoneClean = customerPhone.trim();
+            if (!phoneClean) {
+                toastError('Đơn hàng ghi nợ hoặc thanh toán thiếu bắt buộc phải nhập Số điện thoại khách hàng.');
+                return;
+            }
+            const digits = phoneClean.replace(/[^0-9]/g, '');
+            if (digits.length < 9 || digits.length > 11) {
+                toastError('Số điện thoại khách hàng không hợp lệ (yêu cầu từ 9 đến 11 chữ số).');
+                return;
+            }
+        }
 
         setIsProcessing(true);
         try {

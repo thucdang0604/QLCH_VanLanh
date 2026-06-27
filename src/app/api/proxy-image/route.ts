@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
             status: 200,
             headers,
         });
-    } catch (error) {
+    } catch {
         return new NextResponse('Error proxying image', { status: 500 });
     }
 }

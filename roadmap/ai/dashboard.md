@@ -103,6 +103,16 @@ Dọn dẹp kỹ thuật dư thừa phát hiện trong audit.
 
 ## Changelog
 
+### 2026-06-26 - EXCEL IMPORT IMAGE HASH DEDUPLICATION & FOLDER UPLOAD
+- **Color:** success
+- **Summary:** Triển khai hoàn tất cơ chế chống trùng lặp hình ảnh bằng SHA-256 hash và Web Crypto API ở client-side trong luồng Import Excel, cùng với việc nâng cấp cấu phần chọn thư mục ảnh hàng loạt tại trang soạn thảo dữ liệu.
+- <b>Đã code:</b> Tích hợp tính toán SHA-256 hash cho file ảnh cục bộ, tự động dùng lại URL ảnh cũ nếu trùng hash (O(1)) hoặc upload WebP mới lên Storage dạng `media/${folder}/${hash}.webp` và Firestore Document dạng `MED-import-${folder}-${hash}`.
+- <b>Đã code:</b> Bổ sung cơ chế Lai (Hybrid Resolution) trong preview Excel: tự động map khi tên ảnh là duy nhất, cảnh báo vàng khi trùng tên khác hash, báo lỗi đỏ khi chưa tồn tại.
+- <b>Đã code:</b> Nâng cấp tính năng chọn cả thư mục ảnh cục bộ tại trang soạn thảo `/admin/initial-data`, đọc và tạo xem trước tức thì (0ms) ở client-side, hỗ trợ copy tên file thô ngay lập tức và chỉ băm/upload một cách lười (lazy on-demand) khi bấm **Upload & Lấy URL** kế bên từng ảnh.
+- <b>Đã code:</b> Khắc phục triệt để lỗi cú pháp biên dịch bảng danh sách ảnh cục bộ, tích hợp thêm khu vực xem trước hình ảnh kích thước lớn (Large Preview Card) ở cột bên phải, hiển thị thông số chi tiết của tệp tin (dung lượng KB, định dạng MIME, trạng thái băm) và phím tắt thao tác một chạm.
+- <b>Đã sửa:</b> Khắc phục triệt để các lỗi thiếu import (`useRef`, `toast` từ `sonner`, `Loader2` và `X` từ `lucide-react`, `uploadInitialImportImage`).
+- <b>Đã verify:</b> Biên dịch thành công 100% không còn lỗi cú pháp Next.js/Webpack, đã chuẩn bị sẵn kịch bản nghiệm thu tại walkthrough.
+
 ### 2026-06-23 - FIRESTORE DOCUMENT ID STANDARDIZATION
 - **Color:** success
 - **Summary:** Chốt nhịp chuẩn hóa ID tài liệu Firestore cho 19 collection nghiệp vụ người dùng đã nêu, giảm auto-ID ngẫu nhiên để dễ đọc, dễ truy vết, và ổn định hơn khi dữ liệu tăng lớn.

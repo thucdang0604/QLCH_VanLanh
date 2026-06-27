@@ -102,7 +102,7 @@ export default function Footer() {
                                         .sort((a, b) => a.order - b.order)
                                         .map((service) => (
                                         <li key={service.name}>
-                                            <Link href={`/category/${service.slug}`} className="text-sm text-gray-300 hover:text-white transition-colors flex items-center gap-1.5">
+                                            <Link href={service.isCustomLink ? service.slug : `/category/${service.slug}`} className="text-sm text-gray-300 hover:text-white transition-colors flex items-center gap-1.5">
                                                 <ChevronRight size={12} /> {service.name}
                                             </Link>
                                         </li>

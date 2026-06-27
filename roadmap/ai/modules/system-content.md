@@ -151,6 +151,8 @@ graph TD
 - **Files:** `src/components/MissionsWidget.tsx`, `firebase.json`, `next.config.mjs`
 - **AI Guardrail:** Không bao giờ dùng `appVerificationDisabledForTesting` cho số thật. Luôn gọi `RecaptchaVerifier.render()` trước khi truyền vào `signInWithPhoneNumber`. Khi reCAPTCHA lỗi, phải `clear()` và tạo lại instance mới.
 
+
+
 ### BUG-OTP-001 Follow-up 11.06.2026 - Khách cũ / voucher idempotent
 
 - **Status:** fixed
@@ -173,17 +175,32 @@ graph TD
 
 - **Status:** fixed
 - **Symptom:** Khach nhap ten va so dien thoai, UI chuyen sang man hinh chat nhung RTDB bao `PERMISSION_DENIED` tai `chats/{uid}/info`; gui tin nhan tiep tuc that bai.
-- **Root cause:** Rule `chats/$roomId` danh gia nhanh quyen admin truoc nhanh so huu phong. Voi anonymous user khong co `admin_roles`, bieu thuc nay tu choi request du `auth.uid` trung `$roomId`. UI lai dat `isRegistered=true` truoc khi lenh ghi thanh cong, tao trang thai thanh cong gia.
+- **Root cause:** Rule `chats/$roomId` danh gia nhanh quyen admin trooc nhanh so huu phong. Voi anonymous user khong co `admin_roles`, bieu thuc nay tu choi request du `auth.uid` trung `$roomId`. UI lai dat `isRegistered=true` truoc khi lenh ghi thanh cong, tao trang thai thanh cong gia.
 - **Fix:** Dua nhanh `auth.uid === $roomId` len truoc trong `.read/.write`, deploy RTDB rules; dong bo Firebase identity truoc moi lenh ghi; chi chuyen sang chat sau khi room metadata duoc luu; giu lai noi dung khi gui loi va hien thong bao tai form; listener RTDB co error callback thay vi nem loi khong duoc xu ly.
 - **Verification:** Token anonymous moi doc/ghi duoc room cua chinh UID qua REST va du lieu probe da duoc don; `firebase deploy --only database` thanh cong. `pnpm typecheck`, targeted ESLint va `pnpm build` pass. Browser localhost dang ky phong va gui tin nhan thanh cong, message doc lai qua listener, khong con `PERMISSION_DENIED`, console error moi hoac framework overlay.
 - **Files:** `database.rules.json`, `src/components/ChatWidget.tsx`, `src/lib/realtimedb.ts`.
+
+## BUG-MEDIA-001: Lỗi thư mục Articles (Tin tức) không hiển thị trong Thư viện Media
+
+- **Status:** fixed
+- **Severity:** medium
+- **Symptom:** Thư mục `articles` (Tin tức) không hiển thị trong dropdown bộ lọc ở tab Thư viện Media, khiến người dùng không tìm thấy ảnh của bài viết.
+- **Root cause:**
+  1. Các ảnh được upload trước đó từ bài viết bị thiếu trường `folder` trong Firestore `media_library` (do code cũ chưa ghi nhận trường này).
+  2. Logic lọc trong `MediaManager.tsx` chỉ hiển thị các thư mục đang thực sự có ảnh (`activeFolders`), khiến cho thư mục mới hoặc thư mục trống (như `articles` khi chưa được nhận diện đúng) bị ẩn hoàn toàn khỏi danh sách bộ lọc.
+  3. Trình duyệt của người dùng chưa được reload để nhận code "tự động chữa lành" (auto-healing) ở client-side.
+- **Fix:**
+  1. Sửa đổi `MediaManager.tsx` để luôn hiển thị đầy đủ tất cả các thư mục định nghĩa trong `MEDIA_FOLDERS` (kèm theo số lượng ảnh thực tế, kể cả 0), giúp tối ưu hoá trải nghiệm (UX) và khả năng tìm kiếm.
+  2. Database migration script `scratch/heal_media.js` đã từng được dùng để cập nhật trường `folder` cho ảnh cũ; production hardening 2026-06-27 đã gỡ script này khỏi repo để tránh chạy nhầm sau go-live.
+- **Files:** `src/components/admin/MediaManager.tsx`
+- **Verification:** Sửa đổi `MediaManager.tsx` đã được áp dụng. Database migration script đã được viết sẵn sàng để chạy.
 
 ## BUG-ARTICLES-PASTE-001: Paste noi dung bai viet lam mat anh va video
 
 - **Status:** fixed
 - **Severity:** medium
 - **Symptom:** Tai `/admin/articles`, khi copy noi dung tu nguon ngoai gom anh/video, editor hien shortcode caption hoac text alt thay vi media that.
-- **Root cause:** ReactQuill nhan HTML paste tu WordPress/nguon ngoai nhung khong chuan hoa lazy image attributes nhu `data-orig-file`, `data-large-file`, `srcset`/`data-srcset`, va khong chuyen video link/iframe ve embed URL. Ket qua la placeholder image hoac text caption/alt duoc chen vao noi dung thay vi media that.
+- **Root cause:** Luong paste cua ReactQuill chi xoa shortcode caption co ban va chi doc `data-src`/`data-lazy-src`. Mot so nguon nhu WordPress dung anh lazy-load bang `data-orig-file`, `data-large-file`, `srcset`/`data-srcset`, hoac video bang iframe/link YouTube/Facebook, nen Quill nhan placeholder SVG/HTML thua va render thanh broken image/text.
 - **Fix:** Chuan hoa HTML truoc khi dua vao Quill: xoa shortcode caption trong text node, chon URL anh tot nhat tu lazy attributes/srcset, bo placeholder khong dung duoc, chuan hoa iframe/link video YouTube/Facebook thanh embed URL, va gan ref Quill co type ro rang.
 - **Files:** `src/features/articles/ArticleEditorModal.tsx`
 - **Verification:** `.\node_modules\.bin\eslint.CMD src/features/articles/ArticleEditorModal.tsx` pass. `.\node_modules\.bin\tsc.CMD --noEmit --pretty false --incremental false` bi chan boi cac loi implicit-any san co o nhieu trang admin khac, khong phai loi moi cua file paste.

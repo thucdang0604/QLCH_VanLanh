@@ -177,13 +177,15 @@ export default function ServiceBlock() {
                         </p>
                     </div>
                     <div className="flex items-center gap-3">
-                        <a
-                            href={mainPhone ? `tel:${mainPhone}` : '#'}
-                            aria-disabled={!mainPhone}
-                            className="px-6 py-3 bg-white text-orange-600 font-bold rounded-xl hover:bg-orange-50 transition-colors"
-                        >
-                            📞 {mainPhone ? formatHotline(mainPhone) : 'Liên hệ'}
-                        </a>
+                        {mainPhone ? (
+                            <a href={`tel:${mainPhone}`} className="px-6 py-3 bg-white text-orange-600 font-bold rounded-xl hover:bg-orange-50 transition-colors">
+                                📞 {formatHotline(mainPhone)}
+                            </a>
+                        ) : (
+                            <span aria-disabled="true" className="px-6 py-3 bg-white/70 text-orange-300 font-bold rounded-xl cursor-not-allowed">
+                                📞 Liên hệ
+                            </span>
+                        )}
                         <Link
                             href="/services/booking"
                             className="px-6 py-3 bg-white/20 backdrop-blur-sm text-white font-bold rounded-xl hover:bg-white/30 transition-colors"
