@@ -355,17 +355,17 @@ export function ArticleModal({
 
     const handlePasteCapture = (e: React.ClipboardEvent<HTMLDivElement>) => {
         const html = e.clipboardData.getData('text/html');
-        if (html) {
-            e.preventDefault();
-            e.stopPropagation();
+        if (!html) return;
 
-            const editor = quillRef.current?.getEditor();
-            if (editor) {
-                const range = editor.getSelection(true);
-                const index = range ? range.index : editor.getLength();
-                editor.clipboard.dangerouslyPasteHTML(index, normalizePastedArticleHtml(html));
-            }
-        }
+        e.preventDefault();
+        e.stopPropagation();
+
+        const editor = quillRef.current?.getEditor();
+        if (!editor) return;
+
+        const range = editor.getSelection(true);
+        const index = range ? range.index : editor.getLength();
+        editor.clipboard.dangerouslyPasteHTML(index, normalizePastedArticleHtml(html));
     };
 
 
