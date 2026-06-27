@@ -469,8 +469,7 @@
         "settings/repairs/page.tsx",
         "useCustomerActivity.ts",
         "repairWorkflowConfig.ts",
-        "repairWorkflowServer.ts",
-        "migrate-repair-workflow-v2.ts"
+        "repairWorkflowServer.ts"
       ]
     },
     "system_config.receipt": {

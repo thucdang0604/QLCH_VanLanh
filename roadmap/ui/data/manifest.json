@@ -576,7 +576,6 @@
         "src/app/api/repairs/transition/route.ts",
         "src/lib/repairWorkflowConfig.ts",
         "src/lib/repairWorkflowConfig.test.ts",
-        "scripts/migrate-repair-workflow-v2.ts",
         "src/lib/repairWorkflowServer.ts",
         "src/lib/workflowFeatures.ts",
         "src/lib/types.ts",

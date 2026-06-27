@@ -12,6 +12,7 @@
     "typegen": "next typegen",
     "typecheck": "next typegen && tsc --noEmit",
     "verify": "pnpm lint && pnpm typecheck && pnpm build",
+    "ai:guard": "node scripts/ai-guard.mjs",
     "start": "next start",
     "lint": "eslint",
     "clean": "npx rimraf .next .firebase tsconfig.tsbuildinfo"

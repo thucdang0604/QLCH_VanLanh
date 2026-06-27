@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import type React from 'react';
 import dynamic from 'next/dynamic';
 import Image from 'next/image';
 import { doc, getDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
@@ -18,11 +19,24 @@ import 'react-quill-new/dist/quill.snow.css';
 const ReactQuill = dynamic(() => import('react-quill-new'), { ssr: false }) as unknown as React.ComponentType<{
     value: string;
     onChange: (value: string) => void;
+    ref?: React.Ref<ReactQuillHandle>;
     theme?: string;
     modules?: unknown;
     formats?: string[];
     placeholder?: string;
 }>;
+
+type QuillRange = { index: number; length: number };
+type QuillEditor = {
+    getLength: () => number;
+    getSelection: (focus?: boolean) => QuillRange | null;
+    clipboard: {
+        dangerouslyPasteHTML: (index: number, html: string) => void;
+    };
+};
+type ReactQuillHandle = {
+    getEditor: () => QuillEditor;
+};
 
 const quillModules = {
     toolbar: [
@@ -34,7 +48,7 @@ const quillModules = {
         ['blockquote', 'code-block'],
         ['link', 'image', 'video'],
         ['clean'],
-    ],
+    ]
 };
 
 const quillFormats = [
@@ -46,6 +60,172 @@ const quillFormats = [
 function buildArticleMediaDocumentId(name: string) {
     const slug = generateSlug(name).slice(0, 70) || 'media';
     return `MED-articles-${Date.now()}-${slug}`;
+}
+
+function stripWordPressCaptionShortcodes(html: string): string {
+    return html
+        .replace(/\[caption[^\]]*\]/gi, '')
+        .replace(/\[\/caption\]/gi, '');
+}
+
+function normalizeUrl(value: string | null | undefined): string {
+    const raw = (value || '').trim();
+    if (!raw) return '';
+    if (raw.startsWith('//')) return `https:${raw}`;
+    return raw;
+}
+
+function getLargestSrcSetUrl(srcset: string | null | undefined): string {
+    if (!srcset) return '';
+
+    return srcset
+        .split(',')
+        .map((candidate) => {
+            const [url = '', descriptor = ''] = candidate.trim().split(/\s+/);
+            const size = Number(descriptor.replace(/[^\d.]/g, '')) || 0;
+            return { url: normalizeUrl(url), size };
+        })
+        .filter((candidate) => candidate.url)
+        .sort((a, b) => b.size - a.size)[0]?.url || '';
+}
+
+function isUsableImageSrc(src: string): boolean {
+    if (!src) return false;
+    if (/^data:image\/svg\+xml/i.test(src)) return false;
+    if (/^(about:blank|blob:)/i.test(src)) return false;
+    return true;
+}
+
+function getBestImageSource(img: HTMLImageElement): string {
+    const directCandidates = [
+        img.getAttribute('data-src'),
+        img.getAttribute('data-lazy-src'),
+        img.getAttribute('data-original'),
+        img.getAttribute('data-orig-file'),
+        img.getAttribute('data-large-file'),
+        img.getAttribute('data-medium-file'),
+        img.getAttribute('src'),
+    ].map(normalizeUrl);
+
+    const srcsetCandidates = [
+        getLargestSrcSetUrl(img.getAttribute('data-srcset')),
+        getLargestSrcSetUrl(img.getAttribute('srcset')),
+    ];
+
+    return [...directCandidates, ...srcsetCandidates].find(isUsableImageSrc) || '';
+}
+
+function toEmbeddableVideoUrl(url: string): string {
+    const normalized = normalizeUrl(url);
+    if (!normalized) return '';
+
+    try {
+        const parsed = new URL(normalized);
+        const host = parsed.hostname.replace(/^www\./, '');
+
+        if (host === 'youtube.com' || host === 'm.youtube.com') {
+            const watchId = parsed.searchParams.get('v');
+            const shortsId = parsed.pathname.match(/^\/shorts\/([^/?#]+)/)?.[1];
+            const embedId = parsed.pathname.match(/^\/embed\/([^/?#]+)/)?.[1];
+            const id = watchId || shortsId || embedId;
+            return id ? `https://www.youtube.com/embed/${id}` : normalized;
+        }
+
+        if (host === 'youtu.be') {
+            const id = parsed.pathname.replace(/^\/+/, '').split('/')[0];
+            return id ? `https://www.youtube.com/embed/${id}` : normalized;
+        }
+
+        if ((host === 'facebook.com' || host === 'web.facebook.com') && !parsed.pathname.includes('/plugins/video.php')) {
+            return `https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(normalized)}&show_text=false&width=734`;
+        }
+    } catch {
+        return normalized;
+    }
+
+    return normalized;
+}
+
+function normalizePastedArticleHtml(html: string): string {
+    const parser = new DOMParser();
+    const docNode = parser.parseFromString(stripWordPressCaptionShortcodes(html), 'text/html');
+
+    const textWalker = docNode.createTreeWalker(docNode.body, NodeFilter.SHOW_TEXT);
+    const textNodes: Text[] = [];
+    while (textWalker.nextNode()) {
+        textNodes.push(textWalker.currentNode as Text);
+    }
+    textNodes.forEach((node) => {
+        node.textContent = stripWordPressCaptionShortcodes(node.textContent || '');
+    });
+
+    docNode.querySelectorAll('img').forEach((img) => {
+        const bestSrc = getBestImageSource(img);
+        if (!bestSrc) {
+            img.remove();
+            return;
+        }
+
+        img.setAttribute('src', bestSrc);
+        img.removeAttribute('srcset');
+        img.removeAttribute('data-srcset');
+        img.removeAttribute('data-src');
+        img.removeAttribute('data-lazy-src');
+        img.removeAttribute('data-original');
+        img.removeAttribute('data-orig-file');
+        img.removeAttribute('data-large-file');
+        img.removeAttribute('data-medium-file');
+    });
+
+    docNode.querySelectorAll('iframe').forEach((iframe) => {
+        const src = toEmbeddableVideoUrl(
+            iframe.getAttribute('data-src') ||
+            iframe.getAttribute('data-lazy-src') ||
+            iframe.getAttribute('src') ||
+            ''
+        );
+
+        if (!src) {
+            iframe.remove();
+            return;
+        }
+
+        iframe.setAttribute('src', src);
+        iframe.setAttribute('class', 'ql-video');
+        iframe.setAttribute('frameborder', '0');
+        iframe.setAttribute('allowfullscreen', 'true');
+    });
+
+    docNode.querySelectorAll('video').forEach((video) => {
+        const source = video.getAttribute('src') || video.querySelector('source[src]')?.getAttribute('src') || '';
+        const src = normalizeUrl(source);
+        if (!src) {
+            video.remove();
+            return;
+        }
+
+        const iframe = docNode.createElement('iframe');
+        iframe.setAttribute('src', src);
+        iframe.setAttribute('class', 'ql-video');
+        iframe.setAttribute('frameborder', '0');
+        iframe.setAttribute('allowfullscreen', 'true');
+        video.replaceWith(iframe);
+    });
+
+    docNode.querySelectorAll('a[href]').forEach((link) => {
+        const href = link.getAttribute('href') || '';
+        const embedUrl = toEmbeddableVideoUrl(href);
+        if (!/youtube\.com\/embed\/|facebook\.com\/plugins\/video\.php/i.test(embedUrl)) return;
+
+        const iframe = docNode.createElement('iframe');
+        iframe.setAttribute('src', embedUrl);
+        iframe.setAttribute('class', 'ql-video');
+        iframe.setAttribute('frameborder', '0');
+        iframe.setAttribute('allowfullscreen', 'true');
+        link.replaceWith(iframe);
+    });
+
+    return docNode.body.innerHTML;
 }
 
 async function processBase64Images(htmlContent: string): Promise<string> {
@@ -171,6 +351,22 @@ export function ArticleModal({
     const [refineProgress, setRefineProgress] = useState<string[]>([]);
     const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
     const fileRef = useRef<HTMLInputElement>(null);
+    const quillRef = useRef<ReactQuillHandle>(null);
+
+    const handlePasteCapture = (e: React.ClipboardEvent<HTMLDivElement>) => {
+        const html = e.clipboardData.getData('text/html');
+        if (html) {
+            e.preventDefault();
+            e.stopPropagation();
+
+            const editor = quillRef.current?.getEditor();
+            if (editor) {
+                const range = editor.getSelection(true);
+                const index = range ? range.index : editor.getLength();
+                editor.clipboard.dangerouslyPasteHTML(index, normalizePastedArticleHtml(html));
+            }
+        }
+    };
 
 
     // --- AUTO-PILOT STATES ---
@@ -932,8 +1128,12 @@ export function ArticleModal({
 
                         </div>
 
-                        <div className="border rounded-lg overflow-hidden [&_.ql-container]:min-h-[250px] [&_.ql-editor]:min-h-[250px] [&_.ql-toolbar]:border-b [&_.ql-toolbar]:border-t-0 [&_.ql-toolbar]:border-x-0 [&_.ql-container]:border-0">
+                        <div
+                            className="border rounded-lg overflow-hidden [&_.ql-container]:min-h-[250px] [&_.ql-editor]:min-h-[250px] [&_.ql-toolbar]:border-b [&_.ql-toolbar]:border-t-0 [&_.ql-toolbar]:border-x-0 [&_.ql-container]:border-0"
+                            onPasteCapture={handlePasteCapture}
+                        >
                             <ReactQuill
+                                ref={quillRef}
                                 theme="snow"
                                 value={formData.content}
                                 onChange={(val: string) => setFormData(prev => ({ ...prev, content: val }))}

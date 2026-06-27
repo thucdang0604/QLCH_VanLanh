@@ -11,6 +11,12 @@
 
 - [Dashboard](dashboard.md)
 - [Codex Guidelines](CODEX_GUIDELINES.md)
+- [AI Safety Checklist](AI_SAFETY_CHECKLIST.md)
+- [Safe Code Edit Workflow](workflows/safe-code-edit.md)
+- [Bugfix Workflow](workflows/bugfix-with-roadmap-update.md)
+- [Feature Workflow](workflows/feature-with-ai-plan.md)
+- [Firestore Transaction Workflow](workflows/firestore-transaction-change.md)
+- [Roadmap Docs Update Workflow](workflows/roadmap-docs-update.md)
 - [inventory](modules/inventory.md)
 - [pos-orders](modules/pos-orders.md)
 - [repair](modules/repair.md)
