@@ -389,14 +389,28 @@ export default function SuppliersPage() {
 
     // Pay debt
     const handlePay = async (supplier: Supplier, amount: number, method: string, note: string) => {
-        // Create transaction
-        await setDoc(doc(db, 'supplier_transactions', buildSupplierTransactionId(supplier.id)), {
+        const txId = buildSupplierTransactionId(supplier.id);
+        // Create supplier transaction
+        await setDoc(doc(db, 'supplier_transactions', txId), {
             supplierId: supplier.id,
             supplierName: supplier.name,
             type: 'PAYMENT',
             amount,
             paymentMethod: method,
             note,
+            createdBy: user?.uid || '',
+            createdByName: user?.displayName || '',
+            createdAt: serverTimestamp(),
+        });
+        // Write-time enrichment: create expenses doc so revenue page picks it up (0 extra reads)
+        await setDoc(doc(db, 'expenses', `supplier-pay-${txId}`), {
+            category: 'supplier_payment',
+            description: `Trả nợ NCC: ${supplier.name}${note ? ` – ${note}` : ''}`,
+            amount,
+            paymentMethod: method,
+            supplierId: supplier.id,
+            supplierTransactionId: txId,
+            date: serverTimestamp(),
             createdBy: user?.uid || '',
             createdByName: user?.displayName || '',
             createdAt: serverTimestamp(),

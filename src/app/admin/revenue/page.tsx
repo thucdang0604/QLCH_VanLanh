@@ -26,6 +26,7 @@ const expenseCategories = [
     { key: 'utilities', label: 'Điện/Nước/Internet', icon: '💡' },
     { key: 'supplies', label: 'Vật tư', icon: '📦' },
     { key: 'salary', label: 'Lương NV (thêm)', icon: '👤' },
+    { key: 'supplier_payment', label: 'Trả nợ NCC', icon: '💸' },
     { key: 'other', label: 'Khác', icon: '📝' },
 ];
 
@@ -272,6 +273,7 @@ export default function RevenuePage() {
                 importDebt: totals.importDebt,
                 commissionCost: totals.commissionCost,
                 manualExpenses: totals.manualExpenses,
+                supplierPaymentCost: totals.supplierPaymentCost ?? 0,
                 cashExpenses: totals.cashExpenses,
                 bankExpenses: totals.bankExpenses,
                 debtExpenses: totals.debtExpenses,
@@ -386,8 +388,12 @@ export default function RevenuePage() {
             .filter(c => inRange(c.createdAt))
             .reduce((s, c) => s + (c.amount || 0), 0);
 
-        const manualExpenses = expenses
-            .filter(e => inRange(e.createdAt))
+        const filteredExpenses = expenses.filter(e => inRange(e.createdAt));
+        const supplierPaymentCost = filteredExpenses
+            .filter(e => (e as { category?: string }).category === 'supplier_payment')
+            .reduce((s, e) => s + (e.amount || 0), 0);
+        const manualExpenses = filteredExpenses
+            .filter(e => (e as { category?: string }).category !== 'supplier_payment')
             .reduce((s, e) => s + (e.amount || 0), 0);
         const cashExpenses = importReceipts
             .filter(i => i.status === 'completed' && !isImportDebt(i) && getPaymentChannel(i.paymentMethod) === 'cash' && inRange(i.completedAt || i.createdAt))
@@ -397,7 +403,7 @@ export default function RevenuePage() {
             .reduce((s, i) => s + (i.totalAmount || 0), 0);
         const debtExpenses = importDebt;
 
-        const totalExpenses = importCost + commissionCost + manualExpenses;
+        const totalExpenses = importCost + commissionCost + manualExpenses + supplierPaymentCost;
 
         // NET PROFIT (trừ quà tặng)
         const netProfit = totalRevenue - totalExpenses - totalGiftDiscount;
@@ -409,7 +415,7 @@ export default function RevenuePage() {
 
         return {
             orderRevenue, repairRevenue, cashRevenue, bankRevenue, otherRevenue, debtRevenue, totalRevenue, totalGiftDiscount,
-            importCost, importDebt, commissionCost, manualExpenses, cashExpenses, bankExpenses, debtExpenses, totalExpenses,
+            importCost, importDebt, commissionCost, manualExpenses, supplierPaymentCost, cashExpenses, bankExpenses, debtExpenses, totalExpenses,
             netProfit,
             webOrderCount: webOrders.length,
             posOrderCount: posOrders.length,
@@ -647,6 +653,9 @@ export default function RevenuePage() {
                             <div className="flex justify-between text-orange-100"><span>Công nợ NCC</span><span>{formatPrice(calculations.importDebt)}</span></div>
                         )}
                         <div className="flex justify-between"><span>🏆 Hoa hồng</span><span>{formatPrice(calculations.commissionCost)}</span></div>
+                        {calculations.supplierPaymentCost > 0 && (
+                            <div className="flex justify-between"><span>💸 Trả nợ NCC</span><span>{formatPrice(calculations.supplierPaymentCost)}</span></div>
+                        )}
                         <div className="flex justify-between"><span>📝 Chi phí khác</span><span>{formatPrice(calculations.manualExpenses)}</span></div>
                         {calculations.totalGiftDiscount > 0 && (
                             <div className="flex justify-between"><span>🎁 Quà tặng</span><span>{formatPrice(calculations.totalGiftDiscount)}</span></div>
@@ -799,7 +808,7 @@ export default function RevenuePage() {
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Danh mục</label>
                                 <select title="Chọn danh mục" value={expCategory} onChange={e => setExpCategory(e.target.value)}
                                     className="w-full px-4 py-2 border rounded-lg bg-white">
-                                    {expenseCategories.map(c => (
+                                    {expenseCategories.filter(c => c.key !== 'supplier_payment').map(c => (
                                         <option key={c.key} value={c.key}>{c.icon} {c.label}</option>
                                     ))}
                                 </select>
