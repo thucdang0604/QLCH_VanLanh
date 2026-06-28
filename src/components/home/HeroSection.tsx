@@ -177,9 +177,9 @@ export default function HeroSection({ initialBanners }: HeroSectionProps) {
                         </div>
 
                         {/* ── Banner Slider (75%) ── */}
-                        <div className="flex-1 min-w-0 relative bg-dark overflow-hidden rounded-tr-xl">
+                        <div className="flex-1 min-w-0 relative bg-dark overflow-hidden rounded-t-xl lg:rounded-tl-none lg:rounded-tr-xl">
                             <div className="px-0">
-                                <div className="relative h-[280px] sm:h-[380px]">
+                                <div className="relative aspect-[16/9] w-full overflow-hidden">
                                         {heroBanners.map((banner, i) => {
                                             const isFirst = i === 0;
                                             // SSR: render first slide only.
@@ -203,9 +203,9 @@ export default function HeroSection({ initialBanners }: HeroSectionProps) {
                                                                     alt={banner.alt || 'Banner Văn Lành Service'}
                                                                     width={banner.width}
                                                                     height={banner.height}
-                                                                    priority={isFirst}
-                                                                    fetchPriority={isFirst ? "high" : "auto"}
-                                                                    sizes="(max-width: 768px) 100vw, (max-width: 1200px) 75vw, 867px"
+                                                                    priority={isFirst || i === current}
+                                                                    fetchPriority={isFirst || i === current ? "high" : "auto"}
+                                                                    sizes="(max-width: 1024px) 100vw, (max-width: 1200px) calc(100vw - 292px), 908px"
                                                                     quality={60}
                                                                     unoptimized={isFirst}
                                                                     style={{ width: '100%', height: '100%', objectFit: 'cover' }}
@@ -217,9 +217,9 @@ export default function HeroSection({ initialBanners }: HeroSectionProps) {
                                                                 src={finalSrc}
                                                                 alt={banner.alt || 'Banner Văn Lành Service'}
                                                                 fill
-                                                                priority={isFirst}
-                                                                fetchPriority={isFirst ? "high" : "auto"}
-                                                                sizes="(max-width: 768px) 100vw, (max-width: 1200px) 75vw, 867px"
+                                                                priority={isFirst || i === current}
+                                                                fetchPriority={isFirst || i === current ? "high" : "auto"}
+                                                                sizes="(max-width: 1024px) 100vw, (max-width: 1200px) calc(100vw - 292px), 908px"
                                                                 quality={60}
                                                                 unoptimized={isFirst}
                                                                 className="object-cover"
@@ -237,9 +237,9 @@ export default function HeroSection({ initialBanners }: HeroSectionProps) {
                                                             alt={banner.alt || 'Banner Văn Lành Service'}
                                                             width={banner.width}
                                                             height={banner.height}
-                                                            priority={isFirst}
-                                                            fetchPriority={isFirst ? "high" : "auto"}
-                                                            sizes="(max-width: 768px) 100vw, (max-width: 1200px) 75vw, 867px"
+                                                            priority={isFirst || i === current}
+                                                            fetchPriority={isFirst || i === current ? "high" : "auto"}
+                                                            sizes="(max-width: 1024px) 100vw, (max-width: 1200px) calc(100vw - 292px), 908px"
                                                             quality={60}
                                                             unoptimized={isFirst}
                                                             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
@@ -251,9 +251,9 @@ export default function HeroSection({ initialBanners }: HeroSectionProps) {
                                                             src={finalSrc}
                                                             alt={banner.alt || 'Banner Văn Lành Service'}
                                                             fill
-                                                            priority={isFirst}
-                                                            fetchPriority={isFirst ? "high" : "auto"}
-                                                            sizes="(max-width: 768px) 100vw, (max-width: 1200px) 75vw, 867px"
+                                                            priority={isFirst || i === current}
+                                                            fetchPriority={isFirst || i === current ? "high" : "auto"}
+                                                            sizes="(max-width: 1024px) 100vw, (max-width: 1200px) calc(100vw - 292px), 908px"
                                                             quality={60}
                                                             unoptimized={isFirst}
                                                             className="object-cover"
@@ -268,15 +268,15 @@ export default function HeroSection({ initialBanners }: HeroSectionProps) {
                                         {/* Arrows */}
                                         {heroBanners.length > 1 && (
                                             <>
-                                                <button onClick={prev} aria-label="Ảnh trước" className="absolute left-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/20 hover:bg-white/30 text-white rounded-full flex items-center justify-center z-20"><ChevronLeft size={20} /></button>
-                                                <button onClick={next} aria-label="Ảnh tiếp theo" className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/20 hover:bg-white/30 text-white rounded-full flex items-center justify-center z-20"><ChevronRight size={20} /></button>
+                                                <button onClick={prev} aria-label="Ảnh trước" className="absolute left-2 top-1/2 z-20 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full bg-black/25 text-white transition-colors hover:bg-black/40 md:h-9 md:w-9"><ChevronLeft size={18} /></button>
+                                                <button onClick={next} aria-label="Ảnh tiếp theo" className="absolute right-2 top-1/2 z-20 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full bg-black/25 text-white transition-colors hover:bg-black/40 md:h-9 md:w-9"><ChevronRight size={18} /></button>
                                             </>
                                         )}
                                         {/* Dots */}
                                         {heroBanners.length > 1 && (
-                                            <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-2 z-20">
+                                            <div className="absolute bottom-3 left-0 right-0 z-20 flex justify-center gap-1.5">
                                                 {heroBanners.map((_, i) => (
-                                                    <button key={i} onClick={() => setCurrent(i)} aria-label={`Chuyển đến slide ${i + 1}`} className={`w-3 h-3 p-2 box-content rounded-full transition-[transform,opacity] duration-300 ${i === current ? 'scale-x-[2.5] opacity-100 bg-copper' : 'scale-100 opacity-50 bg-white hover:opacity-70'}`} />
+                                                    <button key={i} onClick={() => setCurrent(i)} aria-label={`Chuyển đến slide ${i + 1}`} className={`h-1.5 rounded-full transition-[width,opacity,background-color] duration-300 ${i === current ? 'w-5 bg-copper opacity-100' : 'w-1.5 bg-white/85 opacity-70 hover:opacity-100'}`} />
                                                 ))}
                                             </div>
                                         )}

@@ -205,6 +205,20 @@ graph TD
 - **Files:** `src/components/admin/MediaManager.tsx`
 - **Verification:** Sửa đổi `MediaManager.tsx` đã được áp dụng. Database migration script đã được viết sẵn sàng để chạy.
 
+## BUG-MEDIA-002: Upload media trung hash bi im lang khi file Storage da mat
+
+- **Status:** fixed
+- **Severity:** high
+- **Symptom:** Neu anh trong `media_library` van con ban ghi Firestore nhung file goc tren Firebase Storage da bi xoa truc tiep, upload lai cung mot file co the khong tao file moi va khong hien thong bao ro rang trong modal.
+- **Root cause:**
+  1. `MediaManager.tsx` dung document ID theo hash de chong trung, nhung nhanh trung lap chi kiem tra Firestore doc ma khong xac minh file Storage con ton tai.
+  2. Loi upload chi render trong tab Upload, trong khi handler luon chuyen sang tab Thu vien sau khi xu ly, nen loi co the bi che.
+  3. Cau hinh toi uu banner truoc do co the cat vat ly anh truoc khi upload, khien file tren Storage khong con nguyen ven.
+  4. Rule 2MB ap dung truoc buoc nen anh lam banner lon hon 2MB bi reject truoc khi toi uu dung luong.
+- **Fix:** Khi gap media trung hash, he thong kiem tra `getMetadata()` tren Storage; neu file con ton tai thi dua item len dau danh sach va bao ro, neu file da mat thi upload lai vao dung path hash va cap nhat Firestore. Loi/notice upload render o vung chung cua modal; banner chi resize/nen, khong crop noi dung anh. Rieng folder Banner cho phep anh nguon toi da 12MB de di qua buoc nen client-side truoc khi upload; cac khu vuc anh khac dung gioi han mac dinh 4MB.
+- **Files:** `src/components/admin/MediaManager.tsx`, `src/lib/imageOptimizer.ts`, `src/lib/validateImage.ts`, `src/app/admin/appearance/page.tsx`
+- **Verification:** Targeted lint/type/build va test upload tren Chrome ngoai.
+
 ## BUG-ARTICLES-PASTE-001: Paste noi dung bai viet lam mat anh va video
 
 - **Status:** fixed

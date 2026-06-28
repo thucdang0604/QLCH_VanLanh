@@ -57,11 +57,12 @@ function SaveBtn({ onClick, saving, label = 'Lưu' }: { onClick: () => void; sav
     );
 }
 
+const HOMEPAGE_BANNER_ASPECT_RATIO = 16 / 9;
+
 function getBannerRatioStatus(width?: number, height?: number) {
     if (!width || !height) return null;
     const ratio = width / height;
-    const expected = 16 / 9;
-    const diff = Math.abs(ratio - expected);
+    const diff = Math.abs(ratio - HOMEPAGE_BANNER_ASPECT_RATIO);
     return {
         isValid: diff <= 0.03,
         label: `${width}x${height}`,
@@ -326,7 +327,7 @@ export default function AdminAppearancePage() {
             <SectionCard title="Banner trang chủ (Hero)" icon={<ImageIcon size={20} />}>
                 <div className="space-y-4">
                     <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
-                        Kich thuoc banner chuan: ty le 16:9. Nen dung 1920x1080, 1600x900 hoac 1280x720 de anh khong bi crop lech tren desktop, tablet va mobile.
+                        Khung banner trang chu dung ty le rong:cao 16:9 (cao:rong 9:16). Anh upload moi trong thu muc Banner se duoc toi uu dung luong nhung giu nguyen noi dung anh; hay dung anh gan 1920x1080, 1600x900 hoac 1280x720 de khong bi crop khi hien thi.
                     </div>
                     <button title="Chọn ảnh từ thư viện" onClick={() => openMediaFor('banner')} className="flex items-center gap-2 px-4 py-2.5 border-2 border-dashed border-gray-300 rounded-lg hover:border-orange-400 hover:bg-orange-50 text-gray-600 transition-colors w-full justify-center">
                         <Plus size={16} /> Chọn ảnh từ thư viện
@@ -347,11 +348,11 @@ export default function AdminAppearancePage() {
                                         {(() => {
                                             const status = getBannerRatioStatus(b.width, b.height);
                                             if (!status) {
-                                                return <p className="text-[11px] font-medium text-amber-700">Chua co thong tin kich thuoc anh. Hay dam bao file goc dung ty le 16:9.</p>;
+                                                return <p className="text-[11px] font-medium text-amber-700">Anh cu chua co thong tin kich thuoc. Hay upload lai vao thu muc Banner de he thong doc lai metadata.</p>;
                                             }
                                             return (
                                                 <p className={`text-[11px] font-medium ${status.isValid ? 'text-green-700' : 'text-red-600'}`}>
-                                                    {status.isValid ? 'Dung ty le 16:9' : 'Lech ty le 16:9'} - {status.label}
+                                                    {status.isValid ? 'Dung khung 16:9' : 'Lech khung 16:9'} - {status.label}
                                                 </p>
                                             );
                                         })()}
