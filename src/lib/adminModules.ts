@@ -125,7 +125,7 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
         id: 'inventory',
         label: 'Kho hàng',
         items: [
-            { label: 'Sản phẩm bán lẻ', href: '/admin/products', iconKey: 'products', permission: 'manage_products' },
+            { label: 'Thiết bị / Phụ kiện', href: '/admin/products', iconKey: 'products', permission: 'manage_products' },
             { label: 'Kho linh kiện', href: '/admin/parts', iconKey: 'parts', permission: 'manage_inventory' },
             { label: 'Tồn kho', href: '/admin/inventory/stock', iconKey: 'stock', permission: 'manage_inventory' },
             { label: 'Nhập hàng', href: '/admin/inventory', iconKey: 'inventoryImport', permission: 'manage_inventory' },

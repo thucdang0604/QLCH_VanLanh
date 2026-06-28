@@ -744,9 +744,33 @@ export function ArticleModal({
         if (!file) return;
         setUploading(true);
         try {
+            const calculateHash = async (f: File): Promise<string> => {
+                const arrayBuffer = await f.arrayBuffer();
+                const hashBuffer = await window.crypto.subtle.digest('SHA-256', arrayBuffer);
+                const hashArray = Array.from(new Uint8Array(hashBuffer));
+                return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+            };
+
+            const hash = await calculateHash(file);
+            const docId = `MED-articles-${hash}`;
+            const { getDoc, doc, updateDoc } = await import('firebase/firestore');
+            const mediaDocRef = doc(db, 'media_library', docId);
+            const mediaDocSnap = await getDoc(mediaDocRef);
+
+            if (mediaDocSnap.exists()) {
+                const existingUrl = mediaDocSnap.data().url;
+                await updateDoc(mediaDocRef, {
+                    createdAt: serverTimestamp(),
+                });
+                setFormData(prev => ({ ...prev, thumbnail: existingUrl }));
+                setUploading(false);
+                return;
+            }
+
             // Optimize: resize & convert to WebP
             const { file: optimized, width, height } = await optimizeImage(file, 1200, 800, 0.8);
-            const storagePath = `media/articles/${Date.now()}_${optimized.name}`;
+
+            const storagePath = `media/articles/${hash}.webp`;
             const storage = await getStorageInstance();
             const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
             const storageRef = ref(storage, storagePath);
@@ -758,7 +782,7 @@ export function ArticleModal({
             const url = await getDownloadURL(storageRef);
 
             // Register in Media Library
-            await setDoc(doc(db, 'media_library', buildArticleMediaDocumentId(optimized.name)), {
+            await setDoc(mediaDocRef, {
                 url,
                 path: storagePath,
                 name: optimized.name,

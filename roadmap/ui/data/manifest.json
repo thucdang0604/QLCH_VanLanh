@@ -14,10 +14,11 @@
       "id": "plan-media-manager-hash-dedup-20260628",
       "title": "Kế hoạch Đồng bộ Hóa Cơ chế Chống trùng lặp Ảnh bằng Hash cho Toàn bộ Hệ thống (MediaManager)",
       "date": "28.06.2026",
-      "status": "in_progress",
+      "status": "completed",
+      "completedAt": "28.06.2026",
       "planFile": "data/ai_plans/plan_media_manager_hash_dedup_20260628.md",
       "taskFile": "data/ai_plans/task_media_manager_hash_dedup_20260628.md",
-      "walkthroughFile": "",
+      "walkthroughFile": "data/ai_plans/walkthrough_media_manager_hash_dedup_20260628.md",
       "scope": [
         "src/components/admin/MediaManager.tsx"
       ],

@@ -103,6 +103,14 @@ Dọn dẹp kỹ thuật dư thừa phát hiện trong audit.
 
 ## Changelog
 
+### 2026-06-28 - SYSTEM-WIDE IMAGE HASH DEDUPLICATION (MEDIAMANAGER & STORAGE)
+- **Color:** success
+- **Summary:** Đồng bộ hóa cơ chế chống trùng lặp hình ảnh bằng băm SHA-256 cho toàn bộ hệ thống (bao gồm MediaManager, ảnh đại diện bài viết và tiện ích tải lên chung).
+- <b>Đã code:</b> Tích hợp tính toán hash SHA-256 vào `MediaManager.tsx`. Kiểm tra trùng lặp trên Firestore (đối chiếu cả ID thường và ID từ Excel Importer). Nếu trùng, tự động đẩy ảnh lên đầu danh sách thư viện và bỏ qua bước tải lên Storage.
+- <b>Đã code:</b> Nâng cấp hàm `handleThumbnailUpload` trong `ArticleEditorModal.tsx` để chống trùng lặp ảnh đại diện bài viết dựa trên mã hash.
+- <b>Đã code:</b> Cập nhật tiện ích tải tệp chung `uploadMedia` trong `storage.ts` để sử dụng tên file dạng hash trên Storage, tự động kiểm tra sự tồn tại vật lý bằng `getMetadata` nhằm tối ưu hóa 100% dung lượng và băng thông mạng đối với các tệp ảnh sửa chữa và đánh giá trùng lặp.
+- <b>Đã verify:</b> Biên dịch thành công 100% không còn lỗi cú pháp Next.js/Webpack, đã chuẩn bị sẵn kịch bản nghiệm thu tại walkthrough.
+
 ### 2026-06-27 - SERVICE VARIANT SELECTOR
 - **Color:** success
 - **Summary:** Thêm selector biến thể cho dịch vụ sửa chữa theo taxonomy danh mục, không cần cấu hình ID biến thể riêng.
