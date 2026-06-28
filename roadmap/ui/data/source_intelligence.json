@@ -1,9 +1,10 @@
 {
   "_meta": {
     "description": "Bản đồ trí tuệ mã nguồn — tự động tích lũy khi AI đọc/sửa code. Giúp AI sau chỉ cần đọc file này là hiểu ngay cấu trúc, liên kết, và cách sửa.",
-    "lastUpdated": "2026-06-18T00:25:59.823Z",
-    "version": 22,
+    "lastUpdated": "2026-06-28T00:00:00.000+07:00",
+    "version": 24,
     "changelog": [
+      "v24: Retail ops commission/revenue/POS plan - commission_rules support calculationMode and priceRanges; revenue aggregates split cash/bank/other/debt channels; inventory imports paid by debt increment importDebt/debtExpenses without increasing importCost until actual payment.",
       "v1: Initial creation — mapped collections, key files, cross-links",
       "v2: Phase 4/6/8 completed — supplier dropdown+debt, variant+review UI, POS repair lookup+auto-discount",
       "v3: CurrencyInput refactor completed. Planned: Import v3 (NCC per-item + payment method paid/debt)",
@@ -25,7 +26,8 @@
       "v19: QR/Barcode label print fit optimization — ProductQrLabelModal now supports smaller paper presets, custom mm size, two-labels-per-row stock, column gap tuning, configured shop-name branding, compact barcode aliases, text density, content scale, and safe margins without changing product code schema or checkout behavior.",
       "v20: Repair workflow Firestore v2 — repairStatuses is the only repair runtime source, require* features use exit-gate semantics, config validation is shared, and legacy statuses remains preserved but unused.",
       "v21: Roadmap status reconciliation — merged/completed plans were normalized, residual production/device/role checks were separated from code completion, and the obsolete migrate:inventory package command was removed.",
-      "v22: Read source code one by one and merged accurate Database Schema & API Endpoints."
+      "v22: Read source code one by one and merged accurate Database Schema & API Endpoints.",
+      "v23: Service variants — /service/[id] derives variants from the current service's deepest categoryIds and renders active sibling services via fetchServiceVariants above the booking form; booking date selection uses an inline calendar instead of a 7-day dropdown."
     ]
   },
   "collections": {
@@ -365,8 +367,10 @@
       "description": "Cấu hình tỷ lệ hoa hồng (phần trăm theo sản phẩm hoặc cố định).",
       "keyFields": [
         "targetCategory",
+        "calculationMode",
         "percentage",
         "fixedAmount",
+        "priceRanges",
         "isActive"
       ],
       "usedIn": [
@@ -614,7 +618,7 @@
     "src/app/(customer)/product/[id]/page.tsx": {
       "lines": "~178",
       "purpose": "Server component fetch product detail + variants + reviews in parallel.",
-      "dataFlow": "fetchDetailItem → fetchProductVariants(seriesId) + fetchProductReviews(id) → pass to ProductDetailClient"
+      "dataFlow": "fetchDetailItem → deepest categoryIds → fetchProductVariants(categoryId) + fetchProductReviews(id) → pass to ProductDetailClient"
     },
     "src/app/(customer)/_lib/server-queries.ts": {
       "lines": "~302",
@@ -625,7 +629,8 @@
         "fetchArticles": "Fetch blog articles",
         "fetchFlashSaleProducts": "Fetch flash sale items",
         "fetchServices": "Fetch active services",
-        "fetchProductVariants": "Fetch products with same seriesId (excluding current). Uses cache().",
+        "fetchProductVariants": "Fetch products with same deepest categoryIds (excluding current). Uses cache().",
+        "fetchServiceVariants": "Fetch active services with same deepest categoryIds (excluding current). Uses cache().",
         "fetchProductReviews": "Fetch approved reviews for productId from product_reviews collection. Uses cache()."
       }
     },
@@ -670,7 +675,7 @@
     },
     "src/app/admin/services/page.tsx": {
       "lines": "~740",
-      "purpose": "Quản lý dịch vụ sửa chữa. CRUD + modal form.",
+      "purpose": "Quản lý dịch vụ sửa chữa. CRUD + modal form. Taxonomy categoryIds also drive storefront service variants.",
       "currencyInputs": [
         "price_original",
         "price_promo — both use CurrencyInput since v3"
@@ -725,7 +730,8 @@
   "crossFileLinks": {
     "import_receipt_to_repair": "parts/page.tsx executeFinalImport → repairs collection (if repairTicketId exists)",
     "pos_to_repairs": "pos/page.tsx lookupRepairByPhone() → queries repairs by customerPhone → auto-fill name + show ticket info + calculate discount",
-    "product_to_variants": "page.tsx (server) fetchProductVariants(seriesId) → ProductDetailClient variants prop → render variant cards with links",
+    "product_to_variants": "page.tsx (server) deepest categoryIds → fetchProductVariants(categoryId) → ProductDetailClient variants prop → render variant cards with links",
+    "service_to_variants": "service/[id]/page.tsx (server) deepest categoryIds → fetchServiceVariants(categoryId) → ServiceDetailClient variants prop → render active service variant cards with links",
     "product_to_reviews": "page.tsx (server) fetchProductReviews(productId) → ProductDetailClient reviews prop → render + inline submit form",
     "import_to_supplier_debt": "executeFinalImport → groups items by supplierId → per-supplier: debt (increment totalDebt + IMPORT tx) or paid (IMPORT_PAID tx, no debt). Atomic runTransaction.",
     "discount_rules_to_pos": "discountRuleUtils.ts calculateAccessoryDiscounts() called in pos/page.tsx useEffect when linkedRepair + cart changes",
@@ -750,6 +756,11 @@
       "status": "COMPLETED",
       "date": "2026-05-19",
       "summary": "fetchProductVariants + fetchProductReviews queries. ProductDetailClient renders variants + reviews + inline submit form."
+    },
+    "service_variants": {
+      "status": "COMPLETED",
+      "date": "2026-06-27",
+      "summary": "service detail pages derive variants from deepest taxonomy categoryIds and render active sibling services."
     },
     "phase8_pos_repair_discount": {
       "status": "COMPLETED",

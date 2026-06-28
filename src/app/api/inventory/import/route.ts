@@ -536,7 +536,14 @@ export async function POST(request: NextRequest) {
                     version: (receipt.version || 0) + 1,
                     updatedAt: FieldValue.serverTimestamp()
                 });
-                incrementRevenueAggregates(tx, db, { importCost: totalAmount });
+                if (paymentMethod === 'debt') {
+                    incrementRevenueAggregates(tx, db, { importDebt: totalAmount, debtExpenses: totalAmount });
+                } else {
+                    const paidImportDelta = paymentMethod === 'bank'
+                        ? { importCost: totalAmount, bankExpenses: totalAmount }
+                        : { importCost: totalAmount, cashExpenses: totalAmount };
+                    incrementRevenueAggregates(tx, db, paidImportDelta);
+                }
 
                 // Add Supplier Transaction if debt
                 if (paymentMethod === 'debt') {

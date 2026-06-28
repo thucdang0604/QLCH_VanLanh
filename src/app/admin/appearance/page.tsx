@@ -57,6 +57,18 @@ function SaveBtn({ onClick, saving, label = 'Lưu' }: { onClick: () => void; sav
     );
 }
 
+const HOMEPAGE_BANNER_ASPECT_RATIO = 16 / 9;
+
+function getBannerRatioStatus(width?: number, height?: number) {
+    if (!width || !height) return null;
+    const ratio = width / height;
+    const diff = Math.abs(ratio - HOMEPAGE_BANNER_ASPECT_RATIO);
+    return {
+        isValid: diff <= 0.03,
+        label: `${width}x${height}`,
+    };
+}
+
 // ========= Main Page =========
 export default function AdminAppearancePage() {
     const { config, updateConfig } = useConfig();
@@ -314,6 +326,9 @@ export default function AdminAppearancePage() {
             {/* 3. Hero Banners */}
             <SectionCard title="Banner trang chủ (Hero)" icon={<ImageIcon size={20} />}>
                 <div className="space-y-4">
+                    <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+                        Khung banner trang chu dung ty le rong:cao 16:9 (cao:rong 9:16). Anh upload moi trong thu muc Banner se duoc toi uu dung luong nhung giu nguyen noi dung anh; hay dung anh gan 1920x1080, 1600x900 hoac 1280x720 de khong bi crop khi hien thi.
+                    </div>
                     <button title="Chọn ảnh từ thư viện" onClick={() => openMediaFor('banner')} className="flex items-center gap-2 px-4 py-2.5 border-2 border-dashed border-gray-300 rounded-lg hover:border-orange-400 hover:bg-orange-50 text-gray-600 transition-colors w-full justify-center">
                         <Plus size={16} /> Chọn ảnh từ thư viện
                     </button>
@@ -323,9 +338,24 @@ export default function AdminAppearancePage() {
                         <div className="space-y-3">
                             {/* eslint-disable-next-line @typescript-eslint/no-unused-vars */}
                             {local.hero_banners.map((b, _i) => (
-                                <div key={b.id} className="flex gap-4 p-3 border rounded-lg bg-gray-50 items-center">
-                                    <img src={b.imageUrl} alt={b.alt} className="w-36 h-20 object-cover rounded-lg flex-shrink-0" onError={(e) => { (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><rect fill="%23eee" width="200" height="100"/><text fill="%23999" x="50%" y="50%" text-anchor="middle" dy=".3em" font-size="14">No Image</text></svg>'; }} />
+                                <div key={b.id} className="flex flex-col gap-3 p-3 border rounded-lg bg-gray-50 md:flex-row md:items-center">
+                                    <div className="w-full md:w-40 flex-shrink-0">
+                                        <div className="aspect-video overflow-hidden rounded-lg bg-gray-100">
+                                            <img src={b.imageUrl} alt={b.alt} className="h-full w-full object-cover" onError={(e) => { (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><rect fill="%23eee" width="200" height="100"/><text fill="%23999" x="50%" y="50%" text-anchor="middle" dy=".3em" font-size="14">No Image</text></svg>'; }} />
+                                        </div>
+                                    </div>
                                     <div className="flex-1 space-y-1.5">
+                                        {(() => {
+                                            const status = getBannerRatioStatus(b.width, b.height);
+                                            if (!status) {
+                                                return <p className="text-[11px] font-medium text-amber-700">Anh cu chua co thong tin kich thuoc. Hay upload lai vao thu muc Banner de he thong doc lai metadata.</p>;
+                                            }
+                                            return (
+                                                <p className={`text-[11px] font-medium ${status.isValid ? 'text-green-700' : 'text-red-600'}`}>
+                                                    {status.isValid ? 'Dung khung 16:9' : 'Lech khung 16:9'} - {status.label}
+                                                </p>
+                                            );
+                                        })()}
                                         <input type="text" value={b.alt} onChange={(e) => { const u = local.hero_banners.map(x => x.id === b.id ? { ...x, alt: e.target.value } : x); setLocal({ ...local, hero_banners: u }); }} placeholder="Mô tả banner" className="w-full px-3 py-1.5 border rounded text-sm" />
                                         <input type="text" value={b.link || ''} onChange={(e) => { const u = local.hero_banners.map(x => x.id === b.id ? { ...x, link: e.target.value } : x); setLocal({ ...local, hero_banners: u }); }} placeholder="Link khi click (tùy chọn)" className="w-full px-3 py-1.5 border rounded text-sm" />
                                     </div>

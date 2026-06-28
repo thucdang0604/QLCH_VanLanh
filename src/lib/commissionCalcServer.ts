@@ -10,6 +10,42 @@ function getSafePercentage(rule: CommissionRule): number | null {
     return pct;
 }
 
+function getRuleCalculationMode(rule: CommissionRule): 'percentage' | 'fixed' | 'fixed_by_price_range' {
+    return rule.calculationMode || (rule.fixedAmount ? 'fixed' : 'percentage');
+}
+
+function getFixedAmountForRange(rule: CommissionRule, baseAmount: number): number | null {
+    const ranges = Array.isArray(rule.priceRanges) ? rule.priceRanges : [];
+    const matched = ranges.find((range) => {
+        const min = safeNumber(range.min);
+        const max = range.max === undefined || range.max === null || range.max === 0
+            ? Number.POSITIVE_INFINITY
+            : safeNumber(range.max);
+        return baseAmount >= min && baseAmount <= max;
+    });
+    if (!matched) return null;
+    const amount = safeNumber(matched.amount);
+    return amount > 0 ? Math.round(amount) : null;
+}
+
+function calculateCommissionAmount(rule: CommissionRule, baseAmount: number): number | null {
+    if (baseAmount <= 0) return null;
+    const mode = getRuleCalculationMode(rule);
+
+    if (mode === 'fixed_by_price_range') {
+        return getFixedAmountForRange(rule, baseAmount);
+    }
+
+    if (mode === 'fixed') {
+        const amount = safeNumber(rule.fixedAmount);
+        return amount > 0 ? Math.round(amount) : null;
+    }
+
+    const pct = getSafePercentage(rule);
+    if (pct === null) return null;
+    return Math.round((baseAmount * pct) / 100);
+}
+
 function safeNumber(value: unknown): number {
     const n = typeof value === 'number' ? value : Number(value);
     return Number.isFinite(n) ? n : 0;
@@ -93,13 +129,17 @@ export async function calculateAndSaveCommissionsServer(
 
         if (docType === 'order') {
             const order = docData as Order;
+            const orderItems = order.items.filter((item) => {
+                const line = item as typeof item & { isRepairTicket?: boolean; isOrderPayment?: boolean };
+                return line.isRepairTicket !== true && line.isOrderPayment !== true;
+            });
 
             // Dùng getCommissionRecipient để xác định người nhận
             const recipient = getCommissionRecipient(order);
             if (!recipient) return; // Không có người nhận hợp lệ -> Không tính HH
 
             // Fetch product categories for order items
-            const productIds = order.items.map(i => i.productId).filter(Boolean);
+            const productIds = orderItems.map(i => i.productId).filter(Boolean);
             const productMap: Record<string, Product> = {};
             
             for (const pid of productIds) {
@@ -112,16 +152,17 @@ export async function calculateAndSaveCommissionsServer(
             }
 
             const totalDiscount = safeNumber(order.discount_amount);
-            const grandTotal = order.items.reduce((sum, i) => sum + safeNumber(i.price) * safeNumber(i.quantity), 0);
+            const grandTotal = orderItems.reduce((sum, i) => sum + safeNumber(i.price) * safeNumber(i.quantity), 0);
 
-            for (const item of order.items) {
+            for (const item of orderItems) {
                 const product = productMap[item.productId];
-                const rule = findBestRule(rules, 'order', item.productId, product?.category);
+                const categoryIds = Array.isArray((product as Product & { categoryIds?: string[] })?.categoryIds)
+                    ? ((product as Product & { categoryIds?: string[] }).categoryIds || [])
+                    : [];
+                const matchCategory = product?.category || categoryIds[categoryIds.length - 1] || categoryIds[0] || '';
+                const rule = findBestRule(rules, 'order', item.productId, matchCategory);
 
                 if (rule) {
-                    const pct = getSafePercentage(rule);
-                    if (pct === null) continue;
-
                     const itemTotal = safeNumber(item.price) * safeNumber(item.quantity);
                     let baseAmount = itemTotal;
                     
@@ -130,8 +171,8 @@ export async function calculateAndSaveCommissionsServer(
                         baseAmount = Math.max(0, itemTotal - itemDiscount);
                     }
 
-                    const commissionAmount = Math.round((baseAmount * pct) / 100);
-                    if (commissionAmount !== 0) {
+                    const commissionAmount = calculateCommissionAmount(rule, baseAmount);
+                    if (commissionAmount && commissionAmount !== 0) {
                         commissionsToSave.push({
                             staffId: recipient.uid,
                             staffName: recipient.displayName,
@@ -155,15 +196,12 @@ export async function calculateAndSaveCommissionsServer(
             if (!techUid) return;
             
             if (rule) {
-                const pct = getSafePercentage(rule);
-                if (pct === null) return;
-
                 const baseAmount = safeNumber(repair.payment?.amount) - safeNumber(repair.payment?.giftDiscount);
                 if (baseAmount <= 0) return;
 
-                const commissionAmount = Math.round((baseAmount * pct) / 100);
+                const commissionAmount = calculateCommissionAmount(rule, baseAmount);
 
-                if (commissionAmount !== 0) {
+                if (commissionAmount && commissionAmount !== 0) {
                     commissionsToSave.push({
                         staffId: techUid,
                         staffName: techName || '',

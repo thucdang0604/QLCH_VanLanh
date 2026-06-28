@@ -10,6 +10,22 @@ const MAX_VIDEO_SIZE_BYTES = MAX_VIDEO_SIZE_MB * 1024 * 1024;
  * @param path - Storage path (e.g., 'products', 'services', 'banners')
  * @returns Download URL of uploaded file
  */
+async function calculateFileHash(file: File): Promise<string> {
+    if (typeof window === 'undefined') {
+        return `${Date.now()}_${file.name}`;
+    }
+    const arrayBuffer = await file.arrayBuffer();
+    const hashBuffer = await window.crypto.subtle.digest('SHA-256', arrayBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Upload a media file (image or video) to Firebase Storage
+ * @param file - File object from input
+ * @param path - Storage path (e.g., 'products', 'services', 'banners')
+ * @returns Download URL of uploaded file
+ */
 export async function uploadMedia(file: File, path: string = 'products'): Promise<string> {
     // Validate video size
     if (file.type.includes('video') && file.size > MAX_VIDEO_SIZE_BYTES) {
@@ -18,13 +34,22 @@ export async function uploadMedia(file: File, path: string = 'products'): Promis
 
     try {
         const storage = await getStorageInstance();
-        const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
+        const { ref, uploadBytes, getDownloadURL, getMetadata } = await import('firebase/storage');
 
-        const timestamp = Date.now();
-        const cleanName = file.name.replace(/[^a-zA-Z0-9.]/g, '_');
-        const fileName = `${timestamp}_${cleanName}`;
+        const hash = await calculateFileHash(file);
+        const extension = file.name.split('.').pop() || 'png';
         const folder = file.type.includes('video') ? 'videos' : 'images';
-        const storageRef = ref(storage, `${folder}/${path}/${fileName}`);
+        const storagePath = `${folder}/${path}/${hash}.${extension}`;
+        const storageRef = ref(storage, storagePath);
+
+        try {
+            // Kiểm tra xem file đã tồn tại trên Storage chưa
+            await getMetadata(storageRef);
+            const downloadURL = await getDownloadURL(storageRef);
+            return downloadURL;
+        } catch {
+            // File chưa tồn tại, tiến hành upload
+        }
 
         const snapshot = await uploadBytes(storageRef, file, {
             contentType: file.type,
@@ -47,12 +72,20 @@ export async function uploadMedia(file: File, path: string = 'products'): Promis
 export async function uploadImage(file: File, path: string = 'products'): Promise<string> {
     try {
         const storage = await getStorageInstance();
-        const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
+        const { ref, uploadBytes, getDownloadURL, getMetadata } = await import('firebase/storage');
 
-        const timestamp = Date.now();
-        const cleanName = file.name.replace(/[^a-zA-Z0-9.]/g, '_');
-        const fileName = `${timestamp}_${cleanName}`;
-        const storageRef = ref(storage, `images/${path}/${fileName}`);
+        const hash = await calculateFileHash(file);
+        const extension = file.name.split('.').pop() || 'png';
+        const storagePath = `images/${path}/${hash}.${extension}`;
+        const storageRef = ref(storage, storagePath);
+
+        try {
+            await getMetadata(storageRef);
+            const downloadURL = await getDownloadURL(storageRef);
+            return downloadURL;
+        } catch {
+            // File chưa tồn tại
+        }
 
         const snapshot = await uploadBytes(storageRef, file, {
             contentType: file.type,

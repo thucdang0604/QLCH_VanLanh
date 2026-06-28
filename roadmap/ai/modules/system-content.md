@@ -56,6 +56,16 @@ graph TD
 
 # 🐛 Bugs
 
+## BUG-ADMIN-MOBILE-001: Mobile admin missing logout, hidden taxonomy row actions, and stale menu suggestions
+
+- **Status:** fixed
+- **Severity:** medium
+- **Symptom:** Mobile admin header/menu did not expose logout; taxonomy category rows hid add/edit/delete actions behind desktop hover; Navigation menu "Gợi ý từ Danh mục" could keep DEFAULT_CONFIG menu/taxonomy state after the real Firestore config loaded.
+- **Root cause:** Mobile admin layout only rendered account avatar in the compact header; category row actions used `opacity-0 group-hover:opacity-100` for all viewports; `NavigationTab` initialized local state from config once during the DEFAULT_CONFIG phase and did not sync after config loading completed.
+- **Fix:** Added explicit mobile logout buttons, made category row actions always visible on mobile and hover-only from `sm` upward, synchronized NavigationTab local menu state from loaded config, and scoped footer/home suggestions to the live service taxonomy.
+- **Files:** `src/app/admin/layout.tsx`, `src/app/admin/settings/CategoriesTab.tsx`, `src/app/admin/settings/NavigationTab.tsx`
+- **Verification:** Targeted lint/type/smoke checks in current fix session.
+
 ## BUG-HARDCODE-001: Hardcode cleanup cho secret, storefront fallback và business identity
 
 - **Status:** fixed
@@ -194,6 +204,20 @@ graph TD
   2. Database migration script `scratch/heal_media.js` đã từng được dùng để cập nhật trường `folder` cho ảnh cũ; production hardening 2026-06-27 đã gỡ script này khỏi repo để tránh chạy nhầm sau go-live.
 - **Files:** `src/components/admin/MediaManager.tsx`
 - **Verification:** Sửa đổi `MediaManager.tsx` đã được áp dụng. Database migration script đã được viết sẵn sàng để chạy.
+
+## BUG-MEDIA-002: Upload media trung hash bi im lang khi file Storage da mat
+
+- **Status:** fixed
+- **Severity:** high
+- **Symptom:** Neu anh trong `media_library` van con ban ghi Firestore nhung file goc tren Firebase Storage da bi xoa truc tiep, upload lai cung mot file co the khong tao file moi va khong hien thong bao ro rang trong modal.
+- **Root cause:**
+  1. `MediaManager.tsx` dung document ID theo hash de chong trung, nhung nhanh trung lap chi kiem tra Firestore doc ma khong xac minh file Storage con ton tai.
+  2. Loi upload chi render trong tab Upload, trong khi handler luon chuyen sang tab Thu vien sau khi xu ly, nen loi co the bi che.
+  3. Cau hinh toi uu banner truoc do co the cat vat ly anh truoc khi upload, khien file tren Storage khong con nguyen ven.
+  4. Rule 2MB ap dung truoc buoc nen anh lam banner lon hon 2MB bi reject truoc khi toi uu dung luong.
+- **Fix:** Khi gap media trung hash, he thong kiem tra `getMetadata()` tren Storage; neu file con ton tai thi dua item len dau danh sach va bao ro, neu file da mat thi upload lai vao dung path hash va cap nhat Firestore. Loi/notice upload render o vung chung cua modal; banner chi resize/nen, khong crop noi dung anh. Rieng folder Banner cho phep anh nguon toi da 12MB de di qua buoc nen client-side truoc khi upload; cac khu vuc anh khac dung gioi han mac dinh 4MB.
+- **Files:** `src/components/admin/MediaManager.tsx`, `src/lib/imageOptimizer.ts`, `src/lib/validateImage.ts`, `src/app/admin/appearance/page.tsx`
+- **Verification:** Targeted lint/type/build va test upload tren Chrome ngoai.
 
 ## BUG-ARTICLES-PASTE-001: Paste noi dung bai viet lam mat anh va video
 

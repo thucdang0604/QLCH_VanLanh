@@ -6,6 +6,7 @@ import { ExternalLink, Loader2, ShoppingBag, Wrench, X, Calendar } from 'lucide-
 import { useAuth } from '@/lib/AuthContext';
 import { useCustomerActivity } from '@/lib/useCustomerActivity';
 import { collection, query, where, orderBy, limit } from 'firebase/firestore';
+import type { DocumentData, QueryDocumentSnapshot, QuerySnapshot } from 'firebase/firestore';
 import { onSnapshot } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import { getAuthInstance } from '@/lib/firebase';
@@ -93,8 +94,8 @@ export default function CustomerDetailDrawer({ customer, isOpen, onClose }: Prop
         if (isOpen && activeTab === 'appointments' && customer?.phone) {
             setLoadingAppointments(true);
             const q = query(collection(db, 'appointments'), where('phone', '==', customer.phone), orderBy('createdAt', 'desc'));
-            const unsub = onSnapshot(q, (snap) => {
-                setAppointments(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+            const unsub = onSnapshot(q, (snap: QuerySnapshot<DocumentData>) => {
+                setAppointments(snap.docs.map((d: QueryDocumentSnapshot<DocumentData>) => ({ id: d.id, ...d.data() })));
                 setLoadingAppointments(false);
             }, () => {
                 setLoadingAppointments(false);
@@ -112,8 +113,8 @@ export default function CustomerDetailDrawer({ customer, isOpen, onClose }: Prop
                 orderBy('createdAt', 'desc'),
                 limit(20)
             );
-            const unsub = onSnapshot(q, (snap) => {
-                setTransactions(snap.docs.map(d => ({ id: d.id, ...d.data() } as CustomerTransaction)));
+            const unsub = onSnapshot(q, (snap: QuerySnapshot<DocumentData>) => {
+                setTransactions(snap.docs.map((d: QueryDocumentSnapshot<DocumentData>) => ({ id: d.id, ...d.data() } as CustomerTransaction)));
                 setLoadingTransactions(false);
             }, () => {
                 setLoadingTransactions(false);

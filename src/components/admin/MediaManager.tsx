@@ -2,7 +2,7 @@
 
 /* eslint-disable @next/next/no-img-element */
 import { useState, useEffect, useRef } from 'react';
-import { collection, deleteDoc, doc, orderBy, query, serverTimestamp, limit, setDoc, type QuerySnapshot, type QueryDocumentSnapshot } from 'firebase/firestore';
+import { collection, deleteDoc, doc, orderBy, query, serverTimestamp, limit, setDoc, getDoc, updateDoc, type QuerySnapshot, type QueryDocumentSnapshot, type DocumentReference, type DocumentData } from 'firebase/firestore';
 import { onSnapshot } from '@/lib/firestoreLogger';
 import { db, getStorageInstance } from '@/lib/firebase';
 import { X, Upload, Image as ImageIcon, Film, Trash2, Loader2, Check, Search, AlertTriangle } from 'lucide-react';
@@ -14,6 +14,8 @@ import { compressVideo } from '@/lib/videoOptimizer';
 
 const MAX_VIDEO_SIZE_MB = 50;
 const MAX_VIDEO_SIZE_BYTES = MAX_VIDEO_SIZE_MB * 1024 * 1024;
+const MAX_BANNER_SOURCE_IMAGE_SIZE_MB = 12;
+const MAX_BANNER_SOURCE_IMAGE_SIZE_BYTES = MAX_BANNER_SOURCE_IMAGE_SIZE_MB * 1024 * 1024;
 
 export interface MediaItem {
     id: string;
@@ -66,16 +68,11 @@ function normalizeMediaBaseName(value: string): string {
     return fileName.replace(/\.[^.]+$/, '').toLowerCase();
 }
 
-function buildMediaDocumentId(folder: string, fileName: string): string {
-    const safeFolder = folder.replace(/[^a-z0-9_-]/gi, '-').toLowerCase() || 'general';
-    const safeName = normalizeMediaBaseName(fileName)
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .replace(/[^a-z0-9_-]/gi, '-')
-        .replace(/-+/g, '-')
-        .replace(/^-|-$/g, '')
-        .slice(0, 70) || 'media';
-    return `MED-${safeFolder}-${Date.now()}-${safeName}`;
+async function calculateFileHash(file: File): Promise<string> {
+    const arrayBuffer = await file.arrayBuffer();
+    const hashBuffer = await window.crypto.subtle.digest('SHA-256', arrayBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultiple, multiple = false, title = 'Chọn media', defaultFolder = 'general' }: MediaManagerProps) {
@@ -87,12 +84,14 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
     const [searchQuery, setSearchQuery] = useState('');
     const [selected, setSelected] = useState<string[]>([]);
     const [uploadError, setUploadError] = useState<string | null>(null);
+    const [uploadNotice, setUploadNotice] = useState<string | null>(null);
     const [cleaning, setCleaning] = useState(false);
     const [cleanProgress, setCleanProgress] = useState('');
     const [compressProgress, setCompressProgress] = useState<{ name: string, ratio: number } | null>(null);
     const [uploadFolder, setUploadFolder] = useState<string>(defaultFolder);
     const [filterFolder, setFilterFolder] = useState<string>('all');
     const fileInputRef = useRef<HTMLInputElement>(null);
+
     // Fetch media library from Firestore
     useEffect(() => {
         if (!isOpen) return;
@@ -128,15 +127,56 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
         return () => unsub();
     }, [isOpen, defaultFolder]);
 
-    // Upload handler
     const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = e.target.files;
         if (!files || files.length === 0) return;
         setUploading(true);
         setUploadError(null);
+        setUploadNotice(null);
+        let completedAny = false;
+        let failedAny = false;
 
         for (const file of Array.from(files)) {
             try {
+                // Tính toán mã hash SHA-256 từ tệp tin gốc để đảm bảo tính nhất quán 100% và tốc độ xử lý
+                const hash = await calculateFileHash(file);
+                const docId = `MED-${uploadFolder}-${hash}`;
+                const importDocId = `MED-import-${uploadFolder}-${hash}`;
+
+                let docSnap = await getDoc(doc(db, 'media_library', docId));
+                let targetDocRef: DocumentReference<DocumentData> = doc(db, 'media_library', docId);
+                let replacingBrokenEntry = false;
+
+                // Kiểm tra trùng lặp trên cả ID thông thường và ID từ Excel Importer
+                if (!docSnap.exists()) {
+                    const importDocSnap = await getDoc(doc(db, 'media_library', importDocId));
+                    if (importDocSnap.exists()) {
+                        docSnap = importDocSnap;
+                        targetDocRef = doc(db, 'media_library', importDocId);
+                    }
+                }
+
+                if (docSnap.exists()) {
+                    const existingPath = docSnap.data().path;
+                    if (typeof existingPath === 'string' && existingPath) {
+                        try {
+                            const storage = await getStorageInstance();
+                            const { ref, getMetadata } = await import('firebase/storage');
+                            await getMetadata(ref(storage, existingPath));
+                            await updateDoc(targetDocRef, {
+                                createdAt: serverTimestamp(),
+                            });
+                            setUploadNotice(`"${file.name}" da co trong thu vien, da dua len dau danh sach.`);
+                            completedAny = true;
+                            continue;
+                        } catch {
+                            replacingBrokenEntry = true;
+                        }
+                    } else {
+                        replacingBrokenEntry = true;
+                    }
+                }
+
                 let fileToUpload = file;
                 let finalWidth = undefined;
                 let finalHeight = undefined;
@@ -160,9 +200,15 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                         setCompressProgress(null);
                     }
                 } else if (file.type.startsWith('image/')) {
-                    const validationError = validateImageFile(file);
+                    const validationError = validateImageFile(file, uploadFolder === 'banners'
+                        ? {
+                            maxFileSize: MAX_BANNER_SOURCE_IMAGE_SIZE_BYTES,
+                            maxFileSizeLabel: `${MAX_BANNER_SOURCE_IMAGE_SIZE_MB} MB`,
+                        }
+                        : undefined);
                     if (validationError) {
                         setUploadError(`"${file.name}": ${validationError}`);
+                        failedAny = true;
                         continue;
                     }
 
@@ -197,7 +243,14 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                             quality = 0.75;
                     }
 
-                    const optimized = await optimizeImage(file, maxWidth, 1600, quality);
+                    if (uploadFolder === 'banners') {
+                        maxWidth = 1600;
+                        quality = 0.84;
+                    }
+
+                    const optimized = uploadFolder === 'banners'
+                        ? await optimizeImage(file, maxWidth, 900, quality)
+                        : await optimizeImage(file, maxWidth, 1600, quality);
                     fileToUpload = optimized.file;
                     finalWidth = optimized.width;
                     finalHeight = optimized.height;
@@ -211,7 +264,8 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
 
                 const storage = await getStorageInstance();
                 const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
-                const storagePath = `media/${uploadFolder}/${Date.now()}_${fileToUpload.name}`;
+                const extension = fileToUpload.name.split('.').pop() || 'webp';
+                const storagePath = `media/${uploadFolder}/${hash}.${extension}`;
                 const storageRef = ref(storage, storagePath);
 
                 await uploadBytes(storageRef, fileToUpload, {
@@ -230,7 +284,7 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                 }
 
                 // Save metadata to Firestore
-                await setDoc(doc(db, 'media_library', buildMediaDocumentId(uploadFolder, fileToUpload.name)), {
+                await setDoc(targetDocRef, {
                     url,
                     path: storagePath,
                     name: fileToUpload.name,
@@ -243,14 +297,19 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                     ...(finalHeight !== undefined && { height: finalHeight }),
                     createdAt: serverTimestamp(),
                 });
+                setUploadNotice(replacingBrokenEntry
+                    ? `"${file.name}" da bi mat file tren Storage, da upload lai thanh cong.`
+                    : `Da upload "${file.name}" thanh cong.`);
+                completedAny = true;
             } catch (err) {
                 console.error('Upload error:', err);
+                failedAny = true;
                 setUploadError(`Lỗi upload "${file.name}". Vui lòng thử lại.`);
             }
         }
 
         setUploading(false);
-        setTab('library');
+        setTab(completedAny && !failedAny ? 'library' : 'upload');
         if (fileInputRef.current) fileInputRef.current.value = '';
     };
 
@@ -355,6 +414,18 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
 
                 {/* Content */}
                 <div className="flex-1 overflow-y-auto p-6">
+                    {uploadNotice && (
+                        <div className="mb-4 flex items-start gap-2 rounded-lg border border-green-200 bg-green-50 p-3">
+                            <Check size={16} className="mt-0.5 flex-shrink-0 text-green-600" />
+                            <p className="text-xs text-green-700">{uploadNotice}</p>
+                        </div>
+                    )}
+                    {uploadError && (
+                        <div className="mb-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3">
+                            <AlertTriangle size={16} className="mt-0.5 flex-shrink-0 text-red-500" />
+                            <p className="text-xs text-red-700">{uploadError}</p>
+                        </div>
+                    )}
                     {tab === 'upload' ? (
                         /* Upload Tab */
                         <div className="space-y-4">
@@ -403,7 +474,7 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                                     <>
                                         <Upload size={32} />
                                         <span className="text-sm font-medium">Kéo thả hoặc click để chọn file</span>
-                                        <span className="text-xs text-gray-400">Hỗ trợ JPG, PNG, WebP • MP4, WebM (Video tối đa {MAX_VIDEO_SIZE_MB}MB)</span>
+                                        <span className="text-xs text-gray-400">Hỗ trợ JPG, PNG, WebP • Banner tối đa {MAX_BANNER_SOURCE_IMAGE_SIZE_MB}MB • MP4, WebM (Video tối đa {MAX_VIDEO_SIZE_MB}MB)</span>
                                     </>
                                 )}
                             </button>
@@ -419,14 +490,6 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                                     <li><strong>Video:</strong> Tự động nén nhẹ trực tiếp trên thiết bị của bạn trước khi tải lên (CRF 28). Việc nén video có thể mất thêm từ 5 - 20 giây tuỳ thuộc cấu hình thiết bị. File gốc giới hạn tối đa {MAX_VIDEO_SIZE_MB}MB.</li>
                                 </ul>
                             </div>
-
-                            {/* Upload Error */}
-                            {uploadError && (
-                                <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
-                                    <AlertTriangle size={16} className="text-red-500 mt-0.5 flex-shrink-0" />
-                                    <p className="text-xs text-red-700">{uploadError}</p>
-                                </div>
-                            )}
                         </div>
                     ) : (
                         /* Library Tab */

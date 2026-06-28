@@ -11,6 +11,14 @@ function safeNumber(value: unknown): number {
     return Number.isFinite(n) ? n : 0;
 }
 
+function getPaymentChannel(value: unknown): 'cash' | 'bank' | 'other' | 'debt' {
+    const raw = String(value || '').trim().toUpperCase();
+    if (raw === 'CASH' || raw === 'TIEN_MAT') return 'cash';
+    if (raw === 'BANK' || raw === 'QR' || raw === 'CARD' || raw.includes('CHUYEN')) return 'bank';
+    if (raw === 'DEBT') return 'debt';
+    return 'other';
+}
+
 function buildIncrementPayload(delta: RevenueAggregateDelta, period: 'daily' | 'monthly', id: string, monthId: string) {
     const payload: Record<string, unknown> = {
         period,
@@ -79,22 +87,40 @@ export function buildCompletedOrderRevenueDelta(order: Order, multiplier = 1): R
 
     let orderRevenue = 0;
     let debtRevenue = 0;
+    let cashRevenue = 0;
+    let bankRevenue = 0;
+    let otherRevenue = 0;
 
     if (hasPaymentHistory) {
         orderRevenue = paidSoFar;
         if (isDebt) {
             debtRevenue = Math.max(0, orderTotal - paidSoFar);
         }
+        for (const payment of order.paymentHistory || []) {
+            if (payment.type === 'refund' || payment.type === 'debt_payment') continue;
+            const amount = Math.max(0, safeNumber(payment.amount));
+            const channel = getPaymentChannel(payment.method || order.payment_method);
+            if (channel === 'cash') cashRevenue += amount;
+            else if (channel === 'bank') bankRevenue += amount;
+            else if (channel !== 'debt') otherRevenue += amount;
+        }
     } else if (isDebt) {
         debtRevenue = orderTotal;
     } else {
         orderRevenue = orderTotal;
+        const channel = getPaymentChannel(order.payment_method);
+        if (channel === 'cash') cashRevenue = orderTotal;
+        else if (channel === 'bank') bankRevenue = orderTotal;
+        else otherRevenue = orderTotal;
     }
 
     const isPos = order.source === 'pos';
 
     return {
         orderRevenue: orderRevenue * multiplier,
+        cashRevenue: cashRevenue * multiplier,
+        bankRevenue: bankRevenue * multiplier,
+        otherRevenue: otherRevenue * multiplier,
         debtRevenue: debtRevenue * multiplier,
         webOrderCount: isPos ? 0 : multiplier,
         posOrderCount: isPos ? multiplier : 0,

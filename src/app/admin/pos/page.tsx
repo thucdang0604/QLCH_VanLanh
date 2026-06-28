@@ -6,7 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import {
     Search, ShoppingCart, Plus, Receipt, X,
     Package, Loader2, CheckCircle2,
-    AlertTriangle, Camera, Keyboard
+    AlertTriangle, Camera, Keyboard, Banknote
 } from 'lucide-react';
 import { collection, doc, limit, query, where, orderBy as fbOrderBy } from 'firebase/firestore';
 import { getDoc, getDocs } from '@/lib/firestoreLogger';
@@ -42,7 +42,10 @@ const CAMERA_BARCODE_FORMATS = ['qr_code', 'code_128'];
 const POS_DEFAULT_PRODUCT_LIMIT = 120;
 const POS_SEARCH_PRODUCT_LIMIT = 60;
 const POS_LEGACY_SCAN_FALLBACK_LIMIT = 500;
+const POS_OPENING_CASH_KEY = 'qlch-pos-opening-cash-v1';
+const CASH_DENOMINATIONS = [500000, 200000, 100000, 50000, 20000, 10000, 5000, 2000, 1000] as const;
 type PosProduct = Product & { id: string };
+type PosTab = 'sales' | 'cashier';
 
 function getProductCategoryPathIds(product: Product) {
     if (Array.isArray(product.categoryIds) && product.categoryIds.length > 0) {
@@ -246,6 +249,11 @@ export default function POSPage() {
     const [lastOrder, setLastOrder] = useState<LastOrderData | null>(null);
     const [showProductModal, setShowProductModal] = useState(false);
     const [bankConfig, setBankConfig] = useState<BankConfig | null>(null);
+    const [posTab, setPosTab] = useState<PosTab>('sales');
+    const [openingBankAmount, setOpeningBankAmount] = useState(0);
+    const [openingCashCounts, setOpeningCashCounts] = useState<Record<number, number>>(() => (
+        Object.fromEntries(CASH_DENOMINATIONS.map((amount) => [amount, 0])) as Record<number, number>
+    ));
 
     useEffect(() => {
         async function fetchBankConfig() {
@@ -261,6 +269,35 @@ export default function POSPage() {
         }
         fetchBankConfig();
     }, []);
+
+    useEffect(() => {
+        try {
+            const raw = localStorage.getItem(POS_OPENING_CASH_KEY);
+            if (!raw) return;
+            const saved = JSON.parse(raw) as { bankAmount?: number; cashCounts?: Record<string, number> };
+            setOpeningBankAmount(Math.max(0, Number(saved.bankAmount) || 0));
+            setOpeningCashCounts(prev => {
+                const next = { ...prev };
+                for (const denomination of CASH_DENOMINATIONS) {
+                    next[denomination] = Math.max(0, Number(saved.cashCounts?.[String(denomination)]) || 0);
+                }
+                return next;
+            });
+        } catch (err) {
+            console.error('Loi tai so dau ca POS:', err);
+        }
+    }, []);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem(POS_OPENING_CASH_KEY, JSON.stringify({
+                bankAmount: openingBankAmount,
+                cashCounts: openingCashCounts,
+            }));
+        } catch (err) {
+            console.error('Loi luu so dau ca POS:', err);
+        }
+    }, [openingBankAmount, openingCashCounts]);
 
     const [linkedRepairs, setLinkedRepairs] = useState<RepairTicketInfo[]>([]);
     const [payableOrders, setPayableOrders] = useState<PayableOrderInfo[]>([]);
@@ -959,6 +996,16 @@ export default function POSPage() {
     const total = Math.max(0, subtotal - effectiveDiscount - voucherDiscountAmount + (shippingFee || 0));
 
     const formatPrice = (n: number) => n.toLocaleString('vi-VN') + 'đ';
+    const openingCashTotal = CASH_DENOMINATIONS.reduce((sum, denomination) => (
+        sum + denomination * (openingCashCounts[denomination] || 0)
+    ), 0);
+    const openingShiftTotal = openingCashTotal + openingBankAmount;
+    const setOpeningCashCount = (denomination: number, value: number) => {
+        setOpeningCashCounts(prev => ({
+            ...prev,
+            [denomination]: Math.max(0, Math.floor(Number(value) || 0)),
+        }));
+    };
 
     const handleApplyVoucher = async () => {
         if (!voucherCode.trim()) {
@@ -1220,10 +1267,107 @@ export default function POSPage() {
         />
     );
 
+    const cashierSection = (
+        <div className="md:flex-1 md:overflow-y-auto">
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+                <div className="rounded-2xl border bg-white p-4 shadow-sm">
+                    <div className="mb-4 flex items-center justify-between gap-3">
+                        <div>
+                            <h2 className="text-base font-bold text-gray-900">Số đầu ca</h2>
+                            <p className="text-xs text-gray-500">Tiền mặt theo mệnh giá và số chuyển khoản hiện có.</p>
+                        </div>
+                        <Banknote className="text-emerald-600" size={24} />
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                        {CASH_DENOMINATIONS.map((denomination) => (
+                            <label key={denomination} className="rounded-xl border border-gray-100 bg-gray-50 p-3">
+                                <span className="mb-1 block text-xs font-semibold text-gray-600">{formatPrice(denomination)}</span>
+                                <input
+                                    type="number"
+                                    min={0}
+                                    inputMode="numeric"
+                                    value={openingCashCounts[denomination] || ''}
+                                    onChange={(event) => setOpeningCashCount(denomination, Number(event.target.value))}
+                                    className="h-10 w-full rounded-lg border bg-white px-3 text-right text-sm font-semibold focus:border-orange-400 focus:outline-none focus:ring-2 focus:ring-orange-500/20"
+                                    placeholder="0"
+                                />
+                                <span className="mt-1 block text-right text-xs text-gray-500">
+                                    {formatPrice(denomination * (openingCashCounts[denomination] || 0))}
+                                </span>
+                            </label>
+                        ))}
+                    </div>
+                </div>
+
+                <div className="rounded-2xl border bg-white p-4 shadow-sm">
+                    <h2 className="mb-4 text-base font-bold text-gray-900">Tổng đầu ca</h2>
+                    <div className="space-y-3">
+                        <div className="rounded-xl bg-emerald-50 p-3">
+                            <div className="text-xs font-semibold text-emerald-700">Tiền mặt</div>
+                            <div className="text-xl font-bold text-emerald-900">{formatPrice(openingCashTotal)}</div>
+                        </div>
+                        <label className="block rounded-xl border border-gray-100 p-3">
+                            <span className="mb-2 block text-xs font-semibold text-gray-600">Chuyển khoản</span>
+                            <input
+                                type="number"
+                                min={0}
+                                inputMode="numeric"
+                                value={openingBankAmount || ''}
+                                onChange={(event) => setOpeningBankAmount(Math.max(0, Number(event.target.value) || 0))}
+                                className="h-10 w-full rounded-lg border bg-white px-3 text-right text-sm font-semibold focus:border-orange-400 focus:outline-none focus:ring-2 focus:ring-orange-500/20"
+                                placeholder="0"
+                            />
+                        </label>
+                        <div className="rounded-xl bg-orange-50 p-3">
+                            <div className="text-xs font-semibold text-orange-700">Tổng quỹ đầu ca</div>
+                            <div className="text-2xl font-black text-orange-700">{formatPrice(openingShiftTotal)}</div>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setOpeningBankAmount(0);
+                                setOpeningCashCounts(Object.fromEntries(CASH_DENOMINATIONS.map((amount) => [amount, 0])) as Record<number, number>);
+                            }}
+                            className="w-full rounded-xl border border-gray-200 px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-50"
+                        >
+                            Xóa số đầu ca
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+
     return (
         <div className="min-h-[calc(100vh-220px)] md:h-[calc(100vh-80px)] flex gap-4 p-4">
             {/* ═══ LEFT: Product Grid ═══ */}
             <div className="flex-1 flex flex-col min-w-0">
+                <div className="mb-4 flex w-full gap-2 rounded-2xl border bg-white p-1 shadow-sm sm:w-fit">
+                    <button
+                        type="button"
+                        onClick={() => setPosTab('sales')}
+                        className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-bold transition-all sm:flex-none ${posTab === 'sales'
+                            ? 'bg-orange-500 text-white shadow-sm'
+                            : 'text-gray-600 hover:bg-gray-50'
+                            }`}
+                    >
+                        <ShoppingCart size={16} />
+                        Bán hàng
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setPosTab('cashier')}
+                        className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-bold transition-all sm:flex-none ${posTab === 'cashier'
+                            ? 'bg-emerald-600 text-white shadow-sm'
+                            : 'text-gray-600 hover:bg-gray-50'
+                            }`}
+                    >
+                        <Banknote size={16} />
+                        Thu ngân
+                    </button>
+                </div>
+                {posTab === 'sales' ? (
+                    <>
                 {/* Search + Category Filter + Quick Add */}
                 <div className="flex gap-3 mb-4">
                     <div className="relative flex-1">
@@ -1315,15 +1459,19 @@ export default function POSPage() {
                         )}
                     </div>
                 </div>
+                    </>
+                ) : cashierSection}
             </div>
 
             {/* ═══ RIGHT: Cart & Checkout (Desktop) ═══ */}
-            <div className="hidden md:flex w-[380px] flex-shrink-0 bg-white rounded-2xl border shadow-sm flex-col">
-                {cartSection}
-            </div>
+            {posTab === 'sales' && (
+                <div className="hidden md:flex w-[380px] flex-shrink-0 bg-white rounded-2xl border shadow-sm flex-col">
+                    {cartSection}
+                </div>
+            )}
 
             {/* ═══ Mobile: Sticky Bottom Bar ═══ */}
-            {!showMobileCart && (
+            {posTab === 'sales' && !showMobileCart && (
                 <div className="md:hidden fixed left-0 right-0 bottom-[calc(env(safe-area-inset-bottom)+76px)] bg-white border-t shadow-lg px-4 py-3 z-40">
                     <button onClick={() => setShowMobileCart(true)}
                         className="w-full py-3 rounded-xl font-bold text-white bg-gradient-to-r from-orange-500 to-orange-600 flex items-center justify-center gap-2 shadow-lg shadow-orange-200/50 active:scale-[0.98]">
@@ -1334,7 +1482,7 @@ export default function POSPage() {
             )}
 
             {/* ═══ Mobile: Full-screen Cart Sheet ═══ */}
-            {showMobileCart && (
+            {posTab === 'sales' && showMobileCart && (
                 <div className="md:hidden fixed inset-0 bg-white z-50 flex flex-col pb-[env(safe-area-inset-bottom)]">
                     {cartSection}
                 </div>

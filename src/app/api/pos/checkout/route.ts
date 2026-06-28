@@ -742,6 +742,7 @@ export async function POST(request: NextRequest) {
                             paymentHistory: retailTotal > 0 ? [{
                                 type: 'full',
                                 amount: retailTotal,
+                                method: payment_method || 'CASH',
                                 timestamp: Date.now(),
                                 note: `Doanh thu POS retail - ${payment_method || 'CASH'}`
                             }] : [],

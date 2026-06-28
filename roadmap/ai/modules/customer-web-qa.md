@@ -1,5 +1,18 @@
 # Customer Web QA
 
+## FEATURE-WEB-SERVICE-VARIANTS: Bien the dich vu tren trang khach
+- **Status:** implemented
+- **Severity:** medium
+- **Module:** CustomerWeb
+- **Files:** `src/app/admin/services/page.tsx`, `src/app/(customer)/service/[id]/page.tsx`, `src/app/(customer)/service/[id]/ServiceDetailClient.tsx`, `src/app/(customer)/_lib/server-queries.ts`, `src/lib/types/catalog.ts`
+
+### Scope
+Trang `/service/[id]` lay deepest `categoryIds` cua dich vu hien tai, fetch cac dich vu active cung taxonomy category bang `fetchServiceVariants` va hien selector bien the, tuong tu luong product variant hien dang derive tu danh muc.
+UI 27.06: selector bien the nam o cot phai ngay tren form dat lich; duoi anh dich vu la card thong tin dich vu. Form dat lich dung calendar thang thay dropdown 7 ngay.
+
+### Verification
+2026-06-27: Targeted ESLint cho file da cham pass; typecheck loc theo file da cham khong con loi. Full typecheck van bi chan boi cac loi `TS7006 implicit any` san co o nhieu page admin ngoai scope.
+
 ## BUG-WEB-CHAT-001: Bot tre 30 giay va che giau loi Gemini 403
 - **Status:** fixed
 - **Severity:** high

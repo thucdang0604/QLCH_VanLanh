@@ -120,9 +120,26 @@ export default function InventoryPage() {
         }
     }, []);
 
-    const handlePrintLot = (receipt: ImportReceipt & { id: string }) => {
+    const handlePrintLot = async (receipt: ImportReceipt & { id: string }) => {
+        let pool = products;
+        // If products not yet loaded, fetch only the ones we need (1 query, not full collection)
+        if (pool.length === 0) {
+            const neededIds = [...new Set(receipt.items.map(i => i.productId).filter(Boolean))];
+            if (neededIds.length > 0) {
+                // Firestore 'in' supports up to 30 values
+                const chunks: string[][] = [];
+                for (let i = 0; i < neededIds.length; i += 30) chunks.push(neededIds.slice(i, i + 30));
+                const fetched: (Product & { id: string })[] = [];
+                for (const chunk of chunks) {
+                    const snap = await getDocs(query(collection(db, 'products'), where('__name__', 'in', chunk)));
+                    snap.docs.forEach(d => fetched.push({ id: d.id, ...d.data() } as Product & { id: string }));
+                }
+                pool = fetched;
+            }
+        }
+
         const batchItems: PrintBatchItem[] = receipt.items.map(item => {
-            const prod = products.find(p => p.id === item.productId);
+            const prod = pool.find(p => p.id === item.productId);
             if (!prod) return null;
             return {
                 product: prod,

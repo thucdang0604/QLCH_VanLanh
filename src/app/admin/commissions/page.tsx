@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import {
-    Award, Plus, Percent, Save, Loader2, FileText
+    Award, Plus, Percent, Save, Loader2, FileText, Trash2
 } from 'lucide-react';
 import Modal from '@/components/admin/Modal';
 import CurrencyInput from '@/components/admin/CurrencyInput';
@@ -11,7 +11,7 @@ import { getDocs, getDoc } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
 import { useRouter } from 'next/navigation';
-import type { CommissionRule, Commission, FirestoreWriteTimestamp } from '@/lib/types';
+import type { CommissionRule, Commission, CommissionPriceRange, FirestoreWriteTimestamp } from '@/lib/types';
 import { toastError } from '@/lib/toast';
 import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
@@ -53,6 +53,23 @@ function getMonthRange(monthValue: string): { start: Timestamp; end: Timestamp }
     };
 }
 
+function normalizePriceRanges(ranges: CommissionPriceRange[]) {
+    return ranges
+        .map((range) => ({
+            min: Math.max(0, Math.round(Number(range.min) || 0)),
+            max: range.max ? Math.max(0, Math.round(Number(range.max) || 0)) : undefined,
+            amount: Math.max(0, Math.round(Number(range.amount) || 0)),
+        }))
+        .filter((range) => range.amount > 0)
+        .sort((a, b) => a.min - b.min);
+}
+
+function getRuleDisplayValue(rule: CommissionRule) {
+    if (rule.calculationMode === 'fixed_by_price_range') return 'Bậc giá';
+    if (rule.calculationMode === 'fixed' || rule.fixedAmount) return `${(rule.fixedAmount || 0).toLocaleString('vi-VN')}đ`;
+    return `${rule.percentage}%`;
+}
+
 export default function CommissionsPage() {
     const { user } = useAuth();
     const router = useRouter();
@@ -74,7 +91,14 @@ export default function CommissionsPage() {
     const [editingRule, setEditingRule] = useState<(CommissionRule & { id: string }) | null>(null);
     const [ruleName, setRuleName] = useState('');
     const [ruleType, setRuleType] = useState<'repair' | 'order' | 'all'>('all');
+    const [ruleCalculationMode, setRuleCalculationMode] = useState<'percentage' | 'fixed' | 'fixed_by_price_range'>('percentage');
     const [rulePercentage, setRulePercentage] = useState(5);
+    const [ruleFixedAmount, setRuleFixedAmount] = useState(0);
+    const [rulePriceRanges, setRulePriceRanges] = useState<CommissionPriceRange[]>([
+        { min: 0, max: 5000000, amount: 50000 },
+        { min: 5000001, max: 10000000, amount: 100000 },
+        { min: 10000001, amount: 150000 },
+    ]);
     const [ruleActive, setRuleActive] = useState(true);
     const [ruleHierarchy, setRuleHierarchy] = useState<1 | 2 | 3>(1);
     const [ruleTargetType, setRuleTargetType] = useState<'general' | 'category' | 'specific'>('general');
@@ -160,7 +184,10 @@ export default function CommissionsPage() {
             const data = {
                 name: ruleName,
                 type: ruleType,
+                calculationMode: ruleCalculationMode,
                 percentage: rulePercentage,
+                fixedAmount: ruleCalculationMode === 'fixed' ? ruleFixedAmount : 0,
+                priceRanges: ruleCalculationMode === 'fixed_by_price_range' ? normalizePriceRanges(rulePriceRanges) : [],
                 isActive: ruleActive,
                 hierarchyLevel: ruleHierarchy,
                 targetType: ruleTargetType,
@@ -198,7 +225,10 @@ export default function CommissionsPage() {
             setEditingRule(rule);
             setRuleName(rule.name);
             setRuleType(rule.type);
+            setRuleCalculationMode(rule.calculationMode || (rule.fixedAmount ? 'fixed' : 'percentage'));
             setRulePercentage(rule.percentage);
+            setRuleFixedAmount(rule.fixedAmount || 0);
+            setRulePriceRanges(rule.priceRanges?.length ? rule.priceRanges : [{ min: 0, max: 0, amount: 0 }]);
             setRuleActive(rule.isActive);
             setRuleHierarchy(rule.hierarchyLevel || 1);
             setRuleTargetType(rule.targetType || 'general');
@@ -208,7 +238,14 @@ export default function CommissionsPage() {
             setEditingRule(null);
             setRuleName('');
             setRuleType('all');
+            setRuleCalculationMode('percentage');
             setRulePercentage(5);
+            setRuleFixedAmount(0);
+            setRulePriceRanges([
+                { min: 0, max: 5000000, amount: 50000 },
+                { min: 5000001, max: 10000000, amount: 100000 },
+                { min: 10000001, amount: 150000 },
+            ]);
             setRuleActive(true);
             setRuleHierarchy(1);
             setRuleTargetType('general');
@@ -326,7 +363,7 @@ export default function CommissionsPage() {
                     {rules.map(rule => (
                         <div key={rule.id} className={`bg-white rounded-xl border p-4 flex items-center gap-4 ${!rule.isActive ? 'opacity-50' : ''}`}>
                             <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-lg font-bold ${rule.isActive ? 'bg-orange-100 text-orange-600' : 'bg-gray-100 text-gray-400'}`}>
-                                {rule.percentage}%
+                                {getRuleDisplayValue(rule)}
                             </div>
                             <div className="flex-1">
                                 <div className="flex items-center gap-2">
@@ -479,7 +516,16 @@ export default function CommissionsPage() {
                                         value={ruleType}
                                         onChange={(e) => {
                                             const v = e.target.value;
-                                            if (v === 'all' || v === 'repair' || v === 'order') setRuleType(v);
+                                            if (v === 'all' || v === 'repair' || v === 'order') {
+                                                setRuleType(v);
+                                                if (!editingRule && v === 'repair') {
+                                                    setRuleCalculationMode('percentage');
+                                                    setRulePercentage(2);
+                                                }
+                                                if (!editingRule && v === 'order' && ruleCalculationMode === 'percentage') {
+                                                    setRuleCalculationMode('fixed_by_price_range');
+                                                }
+                                            }
                                         }}
                                         className="w-full px-4 py-2 border rounded-lg bg-white">
                                         <option value="all">Tất cả</option>
@@ -493,6 +539,86 @@ export default function CommissionsPage() {
                                         min={0} max={100}
                                         className="w-full px-4 py-2 border rounded-lg" />
                                 </div>
+                            </div>
+
+                            <div className="bg-gray-50 rounded-xl p-3 space-y-3 border border-gray-200">
+                                <label className="block text-xs font-semibold text-gray-700">Cach tinh hoa hong</label>
+                                <select
+                                    title="Chon cach tinh hoa hong"
+                                    value={ruleCalculationMode}
+                                    onChange={(e) => {
+                                        const value = e.target.value;
+                                        if (value === 'percentage' || value === 'fixed' || value === 'fixed_by_price_range') {
+                                            setRuleCalculationMode(value);
+                                        }
+                                    }}
+                                    className="w-full px-3 py-2 text-sm border rounded-lg bg-white"
+                                >
+                                    <option value="percentage">Phan tram theo doanh thu</option>
+                                    <option value="fixed">So tien co dinh</option>
+                                    <option value="fixed_by_price_range">So tien co dinh theo khoang gia ban may</option>
+                                </select>
+
+                                {ruleCalculationMode === 'fixed' && (
+                                    <div>
+                                        <label className="block text-xs font-medium text-gray-600 mb-1">Tien hoa hong co dinh</label>
+                                        <CurrencyInput
+                                            value={ruleFixedAmount || ''}
+                                            onChange={setRuleFixedAmount}
+                                            placeholder="0"
+                                            className="w-full px-3 py-2 text-sm border rounded-lg bg-white"
+                                        />
+                                    </div>
+                                )}
+
+                                {ruleCalculationMode === 'fixed_by_price_range' && (
+                                    <div className="space-y-2">
+                                        <div className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2 text-[11px] font-semibold text-gray-500">
+                                            <span>Tu gia</span>
+                                            <span>Den gia</span>
+                                            <span>HH co dinh</span>
+                                            <span />
+                                        </div>
+                                        {rulePriceRanges.map((range, index) => (
+                                            <div key={index} className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2">
+                                                <CurrencyInput
+                                                    value={range.min || ''}
+                                                    onChange={(value) => setRulePriceRanges(prev => prev.map((item, i) => i === index ? { ...item, min: value } : item))}
+                                                    placeholder="0"
+                                                    className="w-full px-2 py-1.5 text-sm border rounded bg-white"
+                                                />
+                                                <CurrencyInput
+                                                    value={range.max || ''}
+                                                    onChange={(value) => setRulePriceRanges(prev => prev.map((item, i) => i === index ? { ...item, max: value || undefined } : item))}
+                                                    placeholder="Khong gioi han"
+                                                    className="w-full px-2 py-1.5 text-sm border rounded bg-white"
+                                                />
+                                                <CurrencyInput
+                                                    value={range.amount || ''}
+                                                    onChange={(value) => setRulePriceRanges(prev => prev.map((item, i) => i === index ? { ...item, amount: value } : item))}
+                                                    placeholder="0"
+                                                    className="w-full px-2 py-1.5 text-sm border rounded bg-white"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    title="Xoa khoang gia"
+                                                    onClick={() => setRulePriceRanges(prev => prev.filter((_, i) => i !== index))}
+                                                    className="px-2 text-red-500 hover:bg-red-50 rounded"
+                                                >
+                                                    <Trash2 size={14} />
+                                                </button>
+                                            </div>
+                                        ))}
+                                        <button
+                                            type="button"
+                                            onClick={() => setRulePriceRanges(prev => [...prev, { min: 0, amount: 0 }])}
+                                            className="text-xs font-semibold text-blue-600 hover:text-blue-700"
+                                        >
+                                            + Them khoang gia
+                                        </button>
+                                        <p className="text-[10px] text-gray-500">Dung cho hoa hong ban may: he thong so khop theo gia ban tung dong san pham.</p>
+                                    </div>
+                                )}
                             </div>
 
                             {/* Hierarchy Level */}

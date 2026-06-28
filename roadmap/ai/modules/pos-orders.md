@@ -1,5 +1,20 @@
 # 🧩 Workflows
 ## pos-orders
+
+### Feature POS-CASHIER-001: Tab thu ngan va so dau ca
+- **Status:** partial-implemented-local-state
+- **Date:** 2026-06-28
+- **Files:** `src/app/admin/pos/page.tsx`
+- **Summary:** POS co tab `Ban hang`/`Thu ngan`. Tab thu ngan cho nhap tien mat dau ca theo menh gia va so chuyen khoan dau ca, tinh tong theo thiet bi.
+- **Guardrail:** Du lieu dau ca hien luu cuc bo bang `localStorage`; chua tao schema Firestore cho ca lam viec/dong ca.
+
+### Feature POS-REV-001: Dong tien POS va phi ship
+- **Status:** in-progress
+- **Date:** 2026-06-28
+- **Files:** `src/app/admin/pos/page.tsx`, `src/app/api/pos/checkout/route.ts`, `src/lib/revenueAggregateServer.ts`, `src/lib/commissionCalcServer.ts`
+- **Summary:** Checkout dua `paymentHistory.method` vao aggregate de tach thuc thu tien mat/chuyen khoan/khac. `shipping_fee` van nam tren don hang, khong nam trong line item tinh hoa hong san pham.
+- **Guardrail:** Phi ship la chi phi phat sinh cua cua hang va khong duoc dua vao base hoa hong nhan vien. Mua may cu cua khach can schema/luong rieng trong plan ops 2026-06-28.
+
 - **Title:** POS & Đơn hàng
 - **Icon:** 🛍️
 ### 📁 Target Files (Các file đích)
