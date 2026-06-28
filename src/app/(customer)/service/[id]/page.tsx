@@ -2,7 +2,7 @@ import { Metadata } from 'next';
 import Link from 'next/link';
 import { ChevronRight, Wrench } from 'lucide-react';
 import { SITE_URL } from "@/lib/constants";
-import { fetchDetailItem } from '../../_lib/server-queries';
+import { fetchDetailItem, fetchServiceVariants } from '../../_lib/server-queries';
 import ServiceDetailClient, { type ServiceData } from './ServiceDetailClient';
 import { getBusinessIdentity } from '@/lib/businessIdentity';
 
@@ -68,6 +68,11 @@ export default async function ServiceDetailPage({ params }: { params: Promise<{ 
         areaServed: { '@type': 'City', name: 'Hồ Chí Minh' },
         url,
     };
+    const categoryIds = Array.isArray(service.categoryIds)
+        ? service.categoryIds.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+        : [];
+    const variantCategoryId = categoryIds[categoryIds.length - 1] || '';
+    const variants = variantCategoryId ? await fetchServiceVariants(variantCategoryId, String(service.id || id)) : [];
 
     return (
         <div className="min-h-screen max-w-[1200px] mx-auto px-2 md:px-4 py-2">
@@ -86,7 +91,7 @@ export default async function ServiceDetailPage({ params }: { params: Promise<{ 
                     <span className="text-gray-800 font-medium line-clamp-1">{String(service.name ?? '')}</span>
                 </nav>
 
-                <ServiceDetailClient service={service as unknown as ServiceData} />
+                <ServiceDetailClient service={service as unknown as ServiceData} variants={variants} />
             </div>
         </div>
     );

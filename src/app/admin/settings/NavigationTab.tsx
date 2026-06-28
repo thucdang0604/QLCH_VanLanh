@@ -1,7 +1,7 @@
 'use client';
 
 /* eslint-disable @next/next/no-img-element */
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import { useConfig, DEFAULT_CONFIG } from '@/lib/ConfigContext';
 import type { NavItem, SidebarMenuItem, FooterServiceLink, HomeServiceCategory } from '@/lib/config-defaults';
@@ -177,7 +177,7 @@ function TaxonomySuggestPopup({ trees, onSelect, onClose }: {
 // ║  NavigationTab — Main Component     ║
 // ═══════════════════════════════════════
 export default function NavigationTab() {
-    const { config, updateConfig } = useConfig();
+    const { config, loading, updateConfig } = useConfig();
     const [saving, setSaving] = useState(false);
     const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -201,6 +201,15 @@ export default function NavigationTab() {
         () => (config.homeServiceCategories?.length ? config.homeServiceCategories : DEFAULT_CONFIG.homeServiceCategories).map((item, i) => ({ ...item, order: i }))
     );
 
+    useEffect(() => {
+        if (loading) return;
+
+        setHeaderNav((config.headerNav?.length ? config.headerNav : DEFAULT_CONFIG.headerNav).map((item, i) => ({ ...item, order: i })));
+        setSidebarMenu((config.sidebarMenu?.length ? config.sidebarMenu : DEFAULT_CONFIG.sidebarMenu).map((item, i) => ({ ...item, order: i })));
+        setFooterServices((config.footerServices?.length ? config.footerServices : DEFAULT_CONFIG.footerServices).map((item, i) => ({ ...item, order: i })));
+        setHomeServiceCategories((config.homeServiceCategories?.length ? config.homeServiceCategories : DEFAULT_CONFIG.homeServiceCategories).map((item, i) => ({ ...item, order: i })));
+    }, [loading, config.headerNav, config.sidebarMenu, config.footerServices, config.homeServiceCategories]);
+
 
     // ── Which sidebar item is expanded for sub-group editing ──
     const [expandedSidebar, setExpandedSidebar] = useState<string | null>(null);
@@ -215,11 +224,13 @@ export default function NavigationTab() {
         config.taxonomy?.service || [],
         config.taxonomy?.component || [],
     ];
-    const taxonomyTreesForPopup = [
-        { label: 'Sản phẩm', nodes: config.taxonomy?.retail || [] },
-        { label: 'Dịch vụ', nodes: config.taxonomy?.service || [] },
-        { label: 'Linh kiện', nodes: config.taxonomy?.component || [] },
-    ];
+    const taxonomyTreesForPopup = showTaxonomySuggest === 'footer' || showTaxonomySuggest === 'home'
+        ? [{ label: 'Dịch vụ', nodes: config.taxonomy?.service || [] }]
+        : [
+            { label: 'Sản phẩm', nodes: config.taxonomy?.retail || [] },
+            { label: 'Dịch vụ', nodes: config.taxonomy?.service || [] },
+            { label: 'Linh kiện', nodes: config.taxonomy?.component || [] },
+        ];
 
     const handleTaxonomySuggest = (node: TaxonomyNode, parentIcon?: string) => {
         if (showTaxonomySuggest === 'header') {

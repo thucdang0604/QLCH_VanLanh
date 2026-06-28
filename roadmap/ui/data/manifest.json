@@ -11,6 +11,76 @@
   "constraints": [],
   "aiPlans": [
     {
+      "id": "plan-media-manager-hash-dedup-20260628",
+      "title": "Kế hoạch Đồng bộ Hóa Cơ chế Chống trùng lặp Ảnh bằng Hash cho Toàn bộ Hệ thống (MediaManager)",
+      "date": "28.06.2026",
+      "status": "in_progress",
+      "planFile": "data/ai_plans/plan_media_manager_hash_dedup_20260628.md",
+      "taskFile": "data/ai_plans/task_media_manager_hash_dedup_20260628.md",
+      "walkthroughFile": "",
+      "scope": [
+        "src/components/admin/MediaManager.tsx"
+      ],
+      "decisions": [
+        "Tích hợp hàm tính toán SHA-256 băm tệp cục bộ ở client-side trong MediaManager",
+        "Kiểm tra trùng lặp trên Firestore đối với cả 2 định dạng ID của MediaManager và Excel Importer",
+        "Đồng bộ lưu đường dẫn vật lý trên Storage dạng media/[folder]/[hash].[ext] để chống trùng lặp"
+      ],
+      "updatedAt": "2026-06-28T10:05:00.000+07:00"
+    },
+    {
+      "id": "plan-retail-ops-commission-revenue-pos-20260628",
+      "title": "Retail ops: commission, revenue, POS cashier, banner and bounty flow",
+      "date": "28.06.2026",
+      "status": "in_progress",
+      "planFile": "data/ai_plans/plan_retail_ops_commission_revenue_pos_20260628_ops.md",
+      "taskFile": "data/ai_plans/task_retail_ops_commission_revenue_pos_20260628_ops.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_retail_ops_commission_revenue_pos_20260628_ops.md",
+      "scope": [
+        "src/app/admin/appearance/page.tsx",
+        "src/app/admin/commissions/page.tsx",
+        "src/app/admin/revenue/page.tsx",
+        "src/app/admin/pos/page.tsx",
+        "src/app/api/pos/checkout/route.ts",
+        "src/app/api/inventory/import/route.ts",
+        "src/components/MissionsWidget.tsx",
+        "src/lib/commissionCalcServer.ts",
+        "src/lib/revenueAggregate.ts",
+        "src/lib/revenueAggregateServer.ts",
+        "src/lib/types/finance.ts"
+      ],
+      "decisions": [
+        "Doanh thu thuc thu tach rieng tien mat, chuyen khoan va cong no",
+        "Nhap hang ghi no nha cung cap khong duoc tinh vao tong chi thuc chi cua cua hang",
+        "Hoa hong ban may dung fixed amount theo khoang gia do admin cau hinh",
+        "Phi ship do cua hang chiu la chi phi phat sinh va khong tru vao base hoa hong nhan vien"
+      ],
+      "updatedAt": "2026-06-28T00:00:00.000+07:00"
+    },
+    {
+      "id": "plan-service-variants-20260627",
+      "title": "Kế hoạch Biến thể Dịch vụ trên Trang Khách",
+      "date": "27.06.2026",
+      "status": "completed",
+      "completedAt": "27.06.2026",
+      "planFile": "data/ai_plans/plan_service_variants_20260627_svcvar.md",
+      "taskFile": "data/ai_plans/task_service_variants_20260627_svcvar.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_service_variants_20260627_svcvar.md",
+      "scope": [
+        "src/app/admin/services/page.tsx",
+        "src/app/(customer)/service/[id]/page.tsx",
+        "src/app/(customer)/service/[id]/ServiceDetailClient.tsx",
+        "src/app/(customer)/_lib/server-queries.ts",
+        "src/lib/types/catalog.ts"
+      ],
+      "decisions": [
+        "Dùng taxonomy categoryIds làm khóa gom biến thể dịch vụ giống storefront product hiện tại",
+        "Không thêm ID biến thể hoặc nhãn biến thể riêng cho service",
+        "Chỉ fetch và hiển thị dịch vụ active cùng deepest categoryIds"
+      ],
+      "updatedAt": "2026-06-27T00:00:00.000+07:00"
+    },
+    {
       "id": "plan-firebase-reads-optimization-20260626",
       "title": "Kế hoạch Tối ưu số lượng Firebase Reads trên Trang Chủ",
       "date": "26.06.2026",

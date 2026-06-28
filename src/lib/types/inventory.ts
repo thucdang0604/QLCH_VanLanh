@@ -30,6 +30,7 @@ export interface ImportReceipt {
     note?: string;
     receiptType?: 'component' | 'retail';
     status: 'draft' | 'ordered' | 'completed';
+    paymentMethod?: 'cash' | 'bank' | 'debt' | string;
     paymentStatus?: 'paid' | 'partial' | 'unpaid'; // Trạng thái thanh toán NCC
     paidAmount?: number;         // Số tiền đã trả NCC
     createdBy: string;

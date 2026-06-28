@@ -200,7 +200,7 @@ function CategoriesList() {
                         <span className="text-xs text-gray-400 font-mono truncate">/{node.slug}</span>
                     </div>
                     
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex items-center gap-1">
                         {canAddChild && (
                             <button title="Thêm danh mục con" onClick={() => handleOpenModal(undefined, currentPath, indexPath)} className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors">
                                 <Plus size={15} />
@@ -560,7 +560,7 @@ function BrandsList() {
                                         {brand.name}
                                     </h3>
                                     {/* Hover overlay */}
-                                    <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <div className="absolute top-2 right-2">
                                         <button
                                             onClick={(e) => { e.stopPropagation(); handleDelete(brand.id); }}
                                             className="p-1.5 bg-white/90 text-gray-400 hover:text-red-600 rounded-lg shadow-sm border border-gray-100 transition-colors"

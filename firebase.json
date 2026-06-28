@@ -8,7 +8,7 @@
         ],
         "frameworksBackend": {
             "region": "asia-southeast1",
-            "memory": "512MiB",
+            "memory": "1GiB",
             "maxInstances": 10
         },
         "headers": [

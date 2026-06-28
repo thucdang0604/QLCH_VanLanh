@@ -1,5 +1,13 @@
 # 🧩 Workflows
 ## inventory
+
+### Fix INV-REV-001: Nhap hang ghi no khong tinh vao chi thuc
+- **Status:** implemented-awaiting-verification
+- **Date:** 2026-06-28
+- **Files:** `src/app/api/inventory/import/route.ts`, `src/app/admin/revenue/page.tsx`, `src/lib/revenueAggregate.ts`, `src/lib/revenueAggregateServer.ts`
+- **Summary:** Phieu nhap completed voi `paymentMethod=debt` tang `importDebt/debtExpenses` de hien cong no NCC, nhung khong tang `importCost`/`totalExpenses` cho den khi co dong tien chi thuc.
+- **Guardrail:** Bao cao doanh thu phai tach `Tien mat`, `Chuyen khoan`, `Ghi no`; khong gom cong no NCC vao loi nhuan rong nhu chi da tra.
+
 - **Title:** Kho hàng
 - **Icon:** 📦
 ### 📁 Target Files (Các file đích)

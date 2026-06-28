@@ -13,14 +13,19 @@ import {
     Clock,
     Shield,
     Wrench,
+    Star,
+    ChevronLeft,
+    ChevronRight,
 } from 'lucide-react';
 import Image from 'next/image';
+import Link from 'next/link';
 import { useConfig } from '@/lib/ConfigContext';
 import VideoEmbed from '@/components/VideoEmbed';
 
 export interface ServiceData {
     id: string;
     name: string;
+    slug?: string;
     price?: number;
     price_original?: number;
     price_promo?: number;
@@ -29,10 +34,23 @@ export interface ServiceData {
     imageUrl?: string;
     images?: string[];
     videoEmbedUrl?: string;
+    device_model?: string;
     repair_time?: string;
     warranty_text?: string;
     description?: string;
     tags?: string[];
+}
+
+interface ServiceVariantItem {
+    id: string;
+    name: string;
+    slug: string;
+    device_model?: string;
+    repair_time?: string;
+    warranty_text?: string;
+    hidePrice?: boolean;
+    price_original: number;
+    price_promo?: number;
 }
 
 /* ── Inline Toast ── */
@@ -56,10 +74,41 @@ const formatPrice = (p: number) => {
     return new Intl.NumberFormat('vi-VN').format(p) + 'đ';
 };
 
-export default function ServiceDetailClient({ service }: { service: ServiceData }) {
+const formatDateValue = (date: Date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
+const startOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+const buildCalendarDays = (monthDate: Date) => {
+    const firstOfMonth = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
+    const mondayBasedOffset = (firstOfMonth.getDay() + 6) % 7;
+    const startDate = new Date(firstOfMonth);
+    startDate.setDate(firstOfMonth.getDate() - mondayBasedOffset);
+
+    return Array.from({ length: 42 }, (_, index) => {
+        const date = new Date(startDate);
+        date.setDate(startDate.getDate() + index);
+        return {
+            date,
+            value: formatDateValue(date),
+            inMonth: date.getMonth() === monthDate.getMonth(),
+        };
+    });
+};
+
+export default function ServiceDetailClient({ service, variants = [] }: { service: ServiceData; variants?: ServiceVariantItem[] }) {
     const { config } = useConfig();
     const branches = config.store_branches || [];
     const [activeImage, setActiveImage] = useState(0);
+    const [calendarOpen, setCalendarOpen] = useState(false);
+    const [calendarMonth, setCalendarMonth] = useState(() => {
+        const today = new Date();
+        return new Date(today.getFullYear(), today.getMonth(), 1);
+    });
 
     // Booking form
     const [formData, setFormData] = useState({
@@ -156,6 +205,18 @@ export default function ServiceDetailClient({ service }: { service: ServiceData 
         ? service.images
         : (service.imageUrl ? [service.imageUrl] : (service.image ? [service.image] : []));
     const displayImage = images[activeImage] || '';
+    const today = startOfDay(new Date());
+    const selectedDateLabel = formData.date
+        ? new Date(`${formData.date}T00:00:00`).toLocaleDateString('vi-VN', {
+            weekday: 'long',
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+        })
+        : '';
+    const canGoPreviousMonth = calendarMonth.getFullYear() > today.getFullYear()
+        || (calendarMonth.getFullYear() === today.getFullYear() && calendarMonth.getMonth() > today.getMonth());
+    const calendarDays = buildCalendarDays(calendarMonth);
 
     return (
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
@@ -287,7 +348,47 @@ export default function ServiceDetailClient({ service }: { service: ServiceData 
             </div>
 
             {/* ── RIGHT: Booking Form (2/5) ── */}
-            <div className="lg:col-span-2">
+            <div className="lg:col-span-2 space-y-4">
+                {variants.length > 0 && (
+                    <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+                        <p className="mb-3 font-semibold text-gray-900">Tùy chọn biến thể:</p>
+                        <div className="grid grid-cols-1 gap-3">
+                            {[service, ...variants].map((item) => {
+                                const isActive = item.id === service.id;
+                                const label = item.device_model || item.name;
+                                const itemOriginalPrice = item.price_original || 0;
+                                const itemPromoPrice = item.price_promo || 0;
+                                const itemDisplayPrice = item.hidePrice ? 0 : (itemPromoPrice > 0 ? itemPromoPrice : itemOriginalPrice);
+                                return (
+                                    <Link
+                                        key={item.id}
+                                        href={`/service/${item.slug || item.id}`}
+                                        className={`relative rounded-xl border-2 p-3 transition-all ${
+                                            isActive
+                                                ? 'border-copper bg-copper/10 shadow-sm'
+                                                : 'border-gray-200 bg-white hover:border-copper/50'
+                                        }`}
+                                    >
+                                        {isActive && (
+                                            <span className="absolute right-2 top-2 rounded-full bg-copper p-1 text-white">
+                                                <Star size={12} className="fill-white" />
+                                            </span>
+                                        )}
+                                        <span className={`block pr-6 text-sm font-semibold ${isActive ? 'text-copper' : 'text-gray-900'}`}>
+                                            {label}
+                                        </span>
+                                        <span className="mt-1 block text-sm font-bold text-accent">
+                                            {item.hidePrice ? 'Liên hệ báo giá' : formatPrice(itemDisplayPrice)}
+                                        </span>
+                                        {item.repair_time && (
+                                            <span className="mt-1 block text-xs text-gray-500">Thời gian: {item.repair_time}</span>
+                                        )}
+                                    </Link>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
                 <div className="sticky top-28 bg-dark rounded-2xl shadow-lg overflow-hidden">
                     {/* Header */}
                     <div className="px-6 pt-6 pb-4">
@@ -330,14 +431,90 @@ export default function ServiceDetailClient({ service }: { service: ServiceData 
                         </div>
 
                         {/* Date */}
-                        <div className="relative">
+                        <div className="space-y-2">
+                            <button
+                                type="button"
+                                onClick={() => setCalendarOpen(open => !open)}
+                                aria-expanded={calendarOpen}
+                                aria-label="Chọn ngày hẹn"
+                                className={`flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left text-sm transition-colors ${
+                                    calendarOpen || formData.date
+                                        ? 'border-copper bg-dark-light text-white'
+                                        : 'border-gray-700 bg-dark-light text-gray-400 hover:border-gray-500'
+                                }`}
+                            >
+                                <CalendarClock size={16} className="shrink-0 text-gray-400" />
+                                <span className="min-w-0 truncate">{selectedDateLabel || 'Chọn ngày *'}</span>
+                            </button>
+
+                            {calendarOpen && (
+                                <div className="rounded-2xl border border-copper/40 bg-dark-light p-3 shadow-xl shadow-copper/10">
+                                    <div className="mb-3 flex items-center justify-between gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => setCalendarMonth(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}
+                                            disabled={!canGoPreviousMonth}
+                                            aria-label="Tháng trước"
+                                            className="flex h-9 w-9 items-center justify-center rounded-lg border border-gray-700 text-gray-300 transition-colors hover:border-copper hover:text-copper disabled:cursor-not-allowed disabled:opacity-30"
+                                        >
+                                            <ChevronLeft size={16} />
+                                        </button>
+                                        <p className="text-sm font-bold text-white">
+                                            {calendarMonth.toLocaleDateString('vi-VN', { month: 'long', year: 'numeric' })}
+                                        </p>
+                                        <button
+                                            type="button"
+                                            onClick={() => setCalendarMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}
+                                            aria-label="Tháng sau"
+                                            className="flex h-9 w-9 items-center justify-center rounded-lg border border-gray-700 text-gray-300 transition-colors hover:border-copper hover:text-copper"
+                                        >
+                                            <ChevronRight size={16} />
+                                        </button>
+                                    </div>
+
+                                    <div className="mb-1 grid grid-cols-7 gap-1 text-center text-[11px] font-semibold text-gray-500">
+                                        {['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'].map(day => (
+                                            <span key={day} className="py-1">{day}</span>
+                                        ))}
+                                    </div>
+                                    <div className="grid grid-cols-7 gap-1">
+                                        {calendarDays.map(({ date, value, inMonth }) => {
+                                            const isPast = startOfDay(date) < today;
+                                            const isSelected = formData.date === value;
+                                            return (
+                                                <button
+                                                    key={value}
+                                                    type="button"
+                                                    disabled={isPast}
+                                                    onClick={() => {
+                                                        setFormData({ ...formData, date: value });
+                                                        setCalendarOpen(false);
+                                                    }}
+                                                    className={`flex aspect-square min-h-9 items-center justify-center rounded-lg text-sm font-semibold transition-colors ${
+                                                        isSelected
+                                                            ? 'bg-copper text-white shadow-lg shadow-copper/20'
+                                                            : isPast
+                                                                ? 'cursor-not-allowed text-gray-700'
+                                                                : inMonth
+                                                                    ? 'text-white hover:bg-copper/20 hover:text-copper'
+                                                                    : 'text-gray-600 hover:bg-gray-800'
+                                                    }`}
+                                                >
+                                                    {date.getDate()}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                        <div className="hidden">
                             <CalendarClock size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
                             <select
                                 value={formData.date}
                                 onChange={(e) => setFormData({ ...formData, date: e.target.value })}
                                 aria-label="Chọn ngày hẹn"
                                 className="w-full pl-10 pr-4 py-3 bg-dark-light border border-gray-700 rounded-xl text-white text-sm appearance-none focus:outline-none focus:border-copper transition-colors"
-                                required
                             >
                                 <option value="" className="text-gray-500">Chọn ngày *</option>
                                 {getDateOptions().map((d) => (

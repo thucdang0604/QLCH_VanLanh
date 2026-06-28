@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { collection, query, orderBy, doc, updateDoc, serverTimestamp, where, limit, startAfter, DocumentSnapshot } from 'firebase/firestore';
+import { collection, query, orderBy, doc, updateDoc, serverTimestamp, where, limit, startAfter, DocumentSnapshot, QuerySnapshot, DocumentData } from 'firebase/firestore';
 import { onSnapshot, getDocs } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import {
@@ -75,7 +75,7 @@ export default function AppointmentsPage() {
     // Fetch appointments (Real-time with limit)
     useEffect(() => {
         const q = query(collection(db, 'appointments'), orderBy('createdAt', 'desc'), limit(50));
-        const unsubscribe = onSnapshot(q, (snapshot) => {
+        const unsubscribe = onSnapshot(q, (snapshot: QuerySnapshot<DocumentData>) => {
             const data = snapshot.docs.map((doc) => ({
                 id: doc.id,
                 ...doc.data(),

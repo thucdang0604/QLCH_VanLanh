@@ -620,6 +620,13 @@ export default function MissionsWidget() {
                                     </button>
                                 </div>
                                 <p className="text-xs text-gray-500">Nhập mã này ở bước Thanh toán cùng với Số điện thoại đã nhận voucher.</p>
+                                <button
+                                    type="button"
+                                    onClick={resetIdentity}
+                                    className="mt-4 w-full text-xs bg-gray-100 text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-200 transition-colors"
+                                >
+                                    Nhập SĐT mới
+                                </button>
                             </>
                         ) : (
                             <button

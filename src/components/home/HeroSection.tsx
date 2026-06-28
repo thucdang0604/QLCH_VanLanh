@@ -169,8 +169,8 @@ export default function HeroSection({ initialBanners }: HeroSectionProps) {
                                     {(config.sidebarMenu || [])
                                         .filter(i => i.visible)
                                         .sort((a, b) => a.order - b.order)
-                                        .map((cat) => (
-                                        <SidebarItem key={cat.slug} item={cat} />
+                                        .map((cat, index) => (
+                                        <SidebarItem key={`${cat.slug}-${cat.order}-${index}`} item={cat} />
                                     ))}
                                 </nav>
                             </div>

@@ -1,5 +1,4 @@
 import { getAdminDb, isAdminAvailable } from '@/lib/firebaseAdmin';
-import { cache } from 'react';
 import { unstable_cache } from 'next/cache';
 import { PRODUCT_STATUS } from '@/lib/productLifecycle';
 import { filterFlashSaleProducts } from '@/lib/flashSale';
@@ -132,6 +131,12 @@ export const fetchArticles = unstable_cache(
             if (serialized.updatedAt && typeof (serialized.updatedAt as { toDate?: unknown }).toDate === 'function') {
                 serialized.updatedAt = (serialized.updatedAt as { toDate: () => Date }).toDate().getTime();
             }
+            if (serialized.publishedAt && typeof (serialized.publishedAt as { toDate?: unknown }).toDate === 'function') {
+                serialized.publishedAt = (serialized.publishedAt as { toDate: () => Date }).toDate().getTime();
+            }
+            if (serialized.viewsUpdatedAt && typeof (serialized.viewsUpdatedAt as { toDate?: unknown }).toDate === 'function') {
+                serialized.viewsUpdatedAt = (serialized.viewsUpdatedAt as { toDate: () => Date }).toDate().getTime();
+            }
             return serialized;
         });
 
@@ -202,6 +207,9 @@ export const fetchArticleDetail = unstable_cache(
         }
         if (serialized.publishedAt && typeof (serialized.publishedAt as { toDate?: unknown }).toDate === 'function') {
             serialized.publishedAt = (serialized.publishedAt as { toDate: () => Date }).toDate().getTime();
+        }
+        if (serialized.viewsUpdatedAt && typeof (serialized.viewsUpdatedAt as { toDate?: unknown }).toDate === 'function') {
+            serialized.viewsUpdatedAt = (serialized.viewsUpdatedAt as { toDate: () => Date }).toDate().getTime();
         }
 
         return serialized;
@@ -304,6 +312,44 @@ export const fetchProductVariants = unstable_cache(
     },
     ['product-variants'],
     { tags: ['products'], revalidate: 300 }
+);
+
+/**
+ * Fetch active service siblings by the service's deepest category node.
+ */
+export const fetchServiceVariants = unstable_cache(
+    async (categoryId: string, excludeId: string) => {
+        if (!categoryId) return [];
+        if (!isAdminAvailable()) return [];
+
+        const db = getAdminDb();
+        const snapshot = await db.collection('services')
+            .where('isActive', '==', true)
+            .where('categoryIds', 'array-contains', categoryId)
+            .limit(20)
+            .get();
+
+        return snapshot.docs
+            .filter(doc => doc.id !== excludeId)
+            .map(doc => {
+                const data = doc.data();
+                return {
+                    id: doc.id,
+                    name: data.name || '',
+                    slug: data.slug || doc.id,
+                    device_model: data.device_model || '',
+                    repair_time: data.repair_time || '',
+                    warranty_text: data.warranty_text || '',
+                    hidePrice: data.hidePrice === true,
+                    price_original: data.price_original || 0,
+                    price_promo: data.price_promo || 0,
+                    images: data.images || [],
+                    imageUrl: data.imageUrl || data.image || '',
+                };
+            });
+    },
+    ['service-variants'],
+    { tags: ['services'], revalidate: 300 }
 );
 
 /**

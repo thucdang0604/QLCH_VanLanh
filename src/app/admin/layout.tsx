@@ -444,6 +444,16 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                                 </section>
                             ))}
                         </div>
+                        <div className="border-t border-gray-100 px-4 py-3">
+                            <button
+                                type="button"
+                                onClick={handleLogout}
+                                className="w-full flex items-center justify-center gap-2 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-semibold text-red-600"
+                            >
+                                <LogOut size={18} />
+                                Đăng xuất
+                            </button>
+                        </div>
                     </div>
                 )}
 
@@ -468,6 +478,15 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                             <div className="flex items-center gap-3 md:hidden">
                                 <RefreshWebsiteButton />
                                 <NotificationBell badges={badges} activities={activities} />
+                                <button
+                                    type="button"
+                                    onClick={handleLogout}
+                                    className="w-10 h-10 flex items-center justify-center rounded-full bg-red-50 text-red-500 border border-red-100"
+                                    aria-label="Đăng xuất"
+                                    title="Đăng xuất"
+                                >
+                                    <LogOut size={18} />
+                                </button>
                                 <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center overflow-hidden">
                                     {user.photoURL ? (
                                         <img src={user.photoURL} alt="" className="w-full h-full object-cover" />

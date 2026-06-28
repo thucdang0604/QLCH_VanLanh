@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 import { 
     getDocs as originalGetDocs, 
     getDoc as originalGetDoc, 
@@ -7,7 +8,8 @@ import {
     QuerySnapshot,
     DocumentSnapshot,
     DocumentData,
-    Unsubscribe
+    Unsubscribe,
+    FirestoreError
 } from 'firebase/firestore';
 
 /**
@@ -29,7 +31,7 @@ function extractCollectionName(queryOrRef: unknown): string {
             }
         }
         return 'Unknown_Collection';
-    } catch (e) {
+    } catch {
         return 'Unknown_Collection';
     }
 }
@@ -76,33 +78,47 @@ export async function getDoc<T = DocumentData, R extends DocumentData = Document
     return snapshot;
 }
 
+// ── onSnapshot overloads ──
+// Provide typed signatures so callers get proper inference on snapshot & error callbacks.
+
 export function onSnapshot<T = DocumentData, R extends DocumentData = DocumentData>(
-    query: Query<T, R> | DocumentReference<T, R>,
+    reference: Query<T, R>,
+    onNext: (snapshot: QuerySnapshot<T, R>) => void,
+    onError?: (error: FirestoreError) => void,
+): Unsubscribe;
+export function onSnapshot<T = DocumentData, R extends DocumentData = DocumentData>(
+    reference: DocumentReference<T, R>,
+    onNext: (snapshot: DocumentSnapshot<T, R>) => void,
+    onError?: (error: FirestoreError) => void,
+): Unsubscribe;
+export function onSnapshot(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    reference: any,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ...args: any[]
 ): Unsubscribe {
     if (process.env.NODE_ENV === 'development') {
-        const coll = extractCollectionName(query);
-        
-        // Wrap the callback to log changes
+        const coll = extractCollectionName(reference);
+
+        // Wrap the first function argument to log changes
         const callbackIndex = args.findIndex(arg => typeof arg === 'function');
         if (callbackIndex !== -1) {
             const originalCallback = args[callbackIndex];
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             args[callbackIndex] = (snapshot: any) => {
                 const size = snapshot.size ?? (snapshot.exists && snapshot.exists() ? 1 : 0);
-                
+
                 console.groupCollapsed(`%c🚨 [FIRESTORE REALTIME] onSnapshot: ${coll}`, logStyle);
                 console.log(`Cập nhật dữ liệu - Số document kéo về: %c${size}`, countStyle);
                 console.trace('Nguồn gọi listener (Stack trace):');
                 console.groupEnd();
-                
+
                 originalCallback(snapshot);
             };
         }
     }
-    
+
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
     // @ts-ignore
-    return originalOnSnapshot(query, ...args);
+    return originalOnSnapshot(reference, ...args);
 }

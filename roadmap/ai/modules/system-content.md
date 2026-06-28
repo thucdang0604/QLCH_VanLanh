@@ -56,6 +56,16 @@ graph TD
 
 # 🐛 Bugs
 
+## BUG-ADMIN-MOBILE-001: Mobile admin missing logout, hidden taxonomy row actions, and stale menu suggestions
+
+- **Status:** fixed
+- **Severity:** medium
+- **Symptom:** Mobile admin header/menu did not expose logout; taxonomy category rows hid add/edit/delete actions behind desktop hover; Navigation menu "Gợi ý từ Danh mục" could keep DEFAULT_CONFIG menu/taxonomy state after the real Firestore config loaded.
+- **Root cause:** Mobile admin layout only rendered account avatar in the compact header; category row actions used `opacity-0 group-hover:opacity-100` for all viewports; `NavigationTab` initialized local state from config once during the DEFAULT_CONFIG phase and did not sync after config loading completed.
+- **Fix:** Added explicit mobile logout buttons, made category row actions always visible on mobile and hover-only from `sm` upward, synchronized NavigationTab local menu state from loaded config, and scoped footer/home suggestions to the live service taxonomy.
+- **Files:** `src/app/admin/layout.tsx`, `src/app/admin/settings/CategoriesTab.tsx`, `src/app/admin/settings/NavigationTab.tsx`
+- **Verification:** Targeted lint/type/smoke checks in current fix session.
+
 ## BUG-HARDCODE-001: Hardcode cleanup cho secret, storefront fallback và business identity
 
 - **Status:** fixed

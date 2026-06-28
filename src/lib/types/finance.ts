@@ -1,9 +1,17 @@
 import type { FirestoreDateValue } from './common';
 
+export interface CommissionPriceRange {
+    min: number;
+    max?: number;
+    amount: number;
+}
+
 export interface CommissionRule {
     id: string;
     name: string;
     type: 'repair' | 'order' | 'all';
+    calculationMode?: 'percentage' | 'fixed' | 'fixed_by_price_range';
+    priceRanges?: CommissionPriceRange[];
     percentage: number; // % hoa hồng
     fixedAmount?: number; // Số tiền cố định (nếu có)
     hierarchyLevel: 1 | 2 | 3; // 1=Chung, 2=Danh mục, 3=SP cụ thể

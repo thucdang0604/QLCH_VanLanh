@@ -30,7 +30,8 @@ const expenseCategories = [
 ];
 
 // Get Firestore Timestamp for N months ago (used to limit query scope)
-function getMonthsAgoTimestamp(months: number): Timestamp {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function _getMonthsAgoTimestamp(months: number): Timestamp {
     const d = new Date();
     d.setMonth(d.getMonth() - months);
     d.setDate(1);
@@ -72,6 +73,19 @@ function getRetailOrderTotal(order: Order) {
         .reduce((sum, item) => sum + (Number(item.price) || 0) * (Number(item.quantity) || 1), 0);
     const retailDiscount = Math.min(Number(order.discount_amount) || 0, retailSubtotal);
     return Math.max(0, retailSubtotal - retailDiscount);
+}
+
+function getPaymentChannel(value: unknown): 'cash' | 'bank' | 'other' | 'debt' {
+    const raw = String(value || '').trim().toUpperCase();
+    if (raw === 'CASH' || raw === 'TIEN_MAT') return 'cash';
+    if (raw === 'BANK' || raw === 'QR' || raw === 'CARD' || raw.includes('CHUYEN')) return 'bank';
+    if (raw === 'DEBT') return 'debt';
+    return 'other';
+}
+
+function isImportDebt(receipt: ImportReceipt) {
+    const method = String(receipt.paymentMethod || '').trim().toLowerCase();
+    return method === 'debt' || receipt.paymentStatus === 'unpaid';
 }
 
 function isFirestorePermissionError(error: unknown) {
@@ -248,12 +262,19 @@ export default function RevenuePage() {
             return {
                 orderRevenue: totals.orderRevenue,
                 repairRevenue: totals.repairRevenue,
+                cashRevenue: totals.cashRevenue,
+                bankRevenue: totals.bankRevenue,
+                otherRevenue: totals.otherRevenue,
                 debtRevenue: totals.debtRevenue,
                 totalRevenue: totals.totalRevenue,
                 totalGiftDiscount: totals.totalGiftDiscount,
                 importCost: totals.importCost,
+                importDebt: totals.importDebt,
                 commissionCost: totals.commissionCost,
                 manualExpenses: totals.manualExpenses,
+                cashExpenses: totals.cashExpenses,
+                bankExpenses: totals.bankExpenses,
+                debtExpenses: totals.debtExpenses,
                 totalExpenses: totals.totalExpenses,
                 netProfit: totals.netProfit,
                 webOrderCount: totals.webOrderCount,
@@ -268,6 +289,9 @@ export default function RevenuePage() {
         // REVENUE (THU THỰC TẾ)
         let orderRevenue = 0;
         let debtRevenue = 0; // TỔNG GHI NỢ
+        let cashRevenue = 0;
+        let bankRevenue = 0;
+        let otherRevenue = 0;
 
         orders.forEach(o => {
             if (inRange(o.completedAt || o.updatedAt || o.createdAt)) {
@@ -277,6 +301,14 @@ export default function RevenuePage() {
                     const retailTotal = getRetailOrderTotal(o);
                     const paidRetail = Math.min(paidSoFar, retailTotal);
                     orderRevenue += paidRetail;
+                    (o.paymentHistory || []).forEach((payment) => {
+                        if (payment.type === 'refund' || payment.type === 'debt_payment') return;
+                        const amount = Math.max(0, payment.amount || 0);
+                        const channel = getPaymentChannel(payment.method || o.payment_method);
+                        if (channel === 'cash') cashRevenue += amount;
+                        else if (channel === 'bank') bankRevenue += amount;
+                        else if (channel !== 'debt') otherRevenue += amount;
+                    });
 
                     if (o.paymentStatus === 'debt') {
                         debtRevenue += Math.max(0, retailTotal - paidRetail);
@@ -286,7 +318,12 @@ export default function RevenuePage() {
                     if (o.paymentStatus === 'debt' || o.payment_method === 'Debt') {
                         debtRevenue += getRetailOrderTotal(o);
                     } else {
-                        orderRevenue += getRetailOrderTotal(o);
+                        const retailTotal = getRetailOrderTotal(o);
+                        orderRevenue += retailTotal;
+                        const channel = getPaymentChannel(o.payment_method);
+                        if (channel === 'cash') cashRevenue += retailTotal;
+                        else if (channel === 'bank') bankRevenue += retailTotal;
+                        else otherRevenue += retailTotal;
                     }
                 }
             }
@@ -315,6 +352,21 @@ export default function RevenuePage() {
                 }
             }, 0);
 
+        repairs
+            .filter(r => r.ticketType !== 'warranty')
+            .forEach((r) => {
+                if (r.paymentHistory && r.paymentHistory.length > 0) {
+                    r.paymentHistory.forEach((payment) => {
+                        if (!inRange(payment.timestamp || r.createdAt) || payment.type === 'refund') return;
+                        const amount = Math.max(0, payment.amount || 0);
+                        const channel = getPaymentChannel(payment.method);
+                        if (channel === 'cash') cashRevenue += amount;
+                        else if (channel === 'bank') bankRevenue += amount;
+                        else if (channel !== 'debt') otherRevenue += amount;
+                    });
+                }
+            });
+
         // Khấu trừ quà tặng khỏi doanh thu ròng (Plan §3 + §5.4b)
         const totalGiftDiscount = repairs
             .filter(r => r.ticketType !== 'warranty' && r.status === 'done' && inRange(r.timing?.completedAt || r.createdAt))
@@ -324,7 +376,10 @@ export default function RevenuePage() {
 
         // EXPENSES (CHI)
         const importCost = importReceipts
-            .filter(i => i.status === 'completed' && inRange(i.completedAt || i.createdAt))
+            .filter(i => i.status === 'completed' && !isImportDebt(i) && inRange(i.completedAt || i.createdAt))
+            .reduce((s, i) => s + (i.totalAmount || 0), 0);
+        const importDebt = importReceipts
+            .filter(i => i.status === 'completed' && isImportDebt(i) && inRange(i.completedAt || i.createdAt))
             .reduce((s, i) => s + (i.totalAmount || 0), 0);
 
         const commissionCost = commissions
@@ -334,6 +389,13 @@ export default function RevenuePage() {
         const manualExpenses = expenses
             .filter(e => inRange(e.createdAt))
             .reduce((s, e) => s + (e.amount || 0), 0);
+        const cashExpenses = importReceipts
+            .filter(i => i.status === 'completed' && !isImportDebt(i) && getPaymentChannel(i.paymentMethod) === 'cash' && inRange(i.completedAt || i.createdAt))
+            .reduce((s, i) => s + (i.totalAmount || 0), 0) + manualExpenses;
+        const bankExpenses = importReceipts
+            .filter(i => i.status === 'completed' && !isImportDebt(i) && getPaymentChannel(i.paymentMethod) === 'bank' && inRange(i.completedAt || i.createdAt))
+            .reduce((s, i) => s + (i.totalAmount || 0), 0);
+        const debtExpenses = importDebt;
 
         const totalExpenses = importCost + commissionCost + manualExpenses;
 
@@ -346,8 +408,8 @@ export default function RevenuePage() {
         const posOrders = completedRetailOrders.filter(o => o.source === 'pos');
 
         return {
-            orderRevenue, repairRevenue, debtRevenue, totalRevenue, totalGiftDiscount,
-            importCost, commissionCost, manualExpenses, totalExpenses,
+            orderRevenue, repairRevenue, cashRevenue, bankRevenue, otherRevenue, debtRevenue, totalRevenue, totalGiftDiscount,
+            importCost, importDebt, commissionCost, manualExpenses, cashExpenses, bankExpenses, debtExpenses, totalExpenses,
             netProfit,
             webOrderCount: webOrders.length,
             posOrderCount: posOrders.length,
@@ -430,7 +492,7 @@ export default function RevenuePage() {
             });
             rev += repairRev;
 
-            const exp = importReceipts.filter(i => i.status === 'completed' && isInDay(i.completedAt || i.createdAt)).reduce((s, i) => s + (i.totalAmount || 0), 0)
+            const exp = importReceipts.filter(i => i.status === 'completed' && !isImportDebt(i) && isInDay(i.completedAt || i.createdAt)).reduce((s, i) => s + (i.totalAmount || 0), 0)
                 + commissions.filter(c => isInDay(c.createdAt)).reduce((s, c) => s + (c.amount || 0), 0)
                 + expenses.filter(e => isInDay(e.createdAt)).reduce((s, e) => s + (e.amount || 0), 0);
 
@@ -557,6 +619,11 @@ export default function RevenuePage() {
                         )}
                     </div>
                     <div className="mt-3 space-y-1 text-xs text-green-100">
+                        <div className="flex justify-between"><span>Tien mat</span><span>{formatPrice(calculations.cashRevenue)}</span></div>
+                        <div className="flex justify-between"><span>Chuyen khoan/QR</span><span>{formatPrice(calculations.bankRevenue)}</span></div>
+                        {calculations.otherRevenue > 0 && (
+                            <div className="flex justify-between"><span>Khac</span><span>{formatPrice(calculations.otherRevenue)}</span></div>
+                        )}
                         <div className="flex justify-between"><span>🌐 Web ({calculations.webOrderCount})</span><span>{formatPrice(calculations.webOrderRevenue)}</span></div>
                         <div className="flex justify-between"><span>🏪 POS ({calculations.posOrderCount})</span><span>{formatPrice(calculations.posOrderRevenue)}</span></div>
                         <div className="flex justify-between"><span>🔧 Sửa chữa ({calculations.repairCount})</span><span>{formatPrice(calculations.repairRevenue)}</span></div>
@@ -570,7 +637,15 @@ export default function RevenuePage() {
                     </div>
                     <p className="text-3xl font-bold">{formatPrice(calculations.totalExpenses)}</p>
                     <div className="mt-3 space-y-1 text-xs text-red-100">
-                        <div className="flex justify-between"><span>📦 Nhập hàng</span><span>{formatPrice(calculations.importCost)}</span></div>
+                        <div className="flex justify-between"><span>Tien mat</span><span>{formatPrice(calculations.cashExpenses)}</span></div>
+                        <div className="flex justify-between"><span>Chuyen khoan</span><span>{formatPrice(calculations.bankExpenses)}</span></div>
+                        {calculations.debtExpenses > 0 && (
+                            <div className="flex justify-between text-orange-100"><span>Ghi no</span><span>{formatPrice(calculations.debtExpenses)}</span></div>
+                        )}
+                        <div className="flex justify-between"><span>📦 Nhập hàng đã trả</span><span>{formatPrice(calculations.importCost)}</span></div>
+                        {calculations.importDebt > 0 && (
+                            <div className="flex justify-between text-orange-100"><span>Công nợ NCC</span><span>{formatPrice(calculations.importDebt)}</span></div>
+                        )}
                         <div className="flex justify-between"><span>🏆 Hoa hồng</span><span>{formatPrice(calculations.commissionCost)}</span></div>
                         <div className="flex justify-between"><span>📝 Chi phí khác</span><span>{formatPrice(calculations.manualExpenses)}</span></div>
                         {calculations.totalGiftDiscount > 0 && (
