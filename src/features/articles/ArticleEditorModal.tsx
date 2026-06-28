@@ -72,6 +72,7 @@ function normalizeUrl(value: string | null | undefined): string {
     const raw = (value || '').trim();
     if (!raw) return '';
     if (raw.startsWith('//')) return `https:${raw}`;
+    if (raw.startsWith('http://')) return `https://${raw.slice('http://'.length)}`;
     return raw;
 }
 
@@ -97,22 +98,26 @@ function isUsableImageSrc(src: string): boolean {
 }
 
 function getBestImageSource(img: HTMLImageElement): string {
-    const directCandidates = [
+    const lazyCandidates = [
         img.getAttribute('data-src'),
         img.getAttribute('data-lazy-src'),
         img.getAttribute('data-original'),
         img.getAttribute('data-orig-file'),
         img.getAttribute('data-large-file'),
         img.getAttribute('data-medium-file'),
-        img.getAttribute('src'),
     ].map(normalizeUrl);
 
     const srcsetCandidates = [
+        normalizeUrl(img.currentSrc),
         getLargestSrcSetUrl(img.getAttribute('data-srcset')),
         getLargestSrcSetUrl(img.getAttribute('srcset')),
     ];
 
-    return [...directCandidates, ...srcsetCandidates].find(isUsableImageSrc) || '';
+    const fallbackCandidates = [
+        img.getAttribute('src'),
+    ].map(normalizeUrl);
+
+    return [...lazyCandidates, ...srcsetCandidates, ...fallbackCandidates].find(isUsableImageSrc) || '';
 }
 
 function toEmbeddableVideoUrl(url: string): string {
