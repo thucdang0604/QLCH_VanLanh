@@ -30,17 +30,17 @@
     }
   ],
   "auditReport": {
-    "date": "26.05.2026",
+    "date": "30.06.2026",
     "categories": [
       {
-        "name": "Tr?ng th?i hi?n t?i",
-        "color": "accent-color",
-        "status": "NEEDS ACTION",
+        "name": "Trạng thái hiện tại",
+        "color": "danger",
+        "status": "AUDIT DETECTED BUGS",
         "items": [
-          "<b>Open bugs</b>: 6 (Google Reviews provider key, OTP test fixture, 2 Repair role/mobile QA, Deploy pipeline, RBAC smoke)",
-          "<b>Completion</b>: 98%",
-          "<b>roadmap_v2</b>: SPA shell preserved, JSON data rebuilt.",
-          "<b>Roadmap sync 13.06.2026</b>: 5 Customer Web bugs fixed and verified; provider/OTP blockers remain explicit; obsolete migrate:inventory command removed."
+          "<b>Open bugs</b>: 10 (Added 4 critical backend/security vulnerabilities on 30.06.2026)",
+          "<b>Security/Backend Audit (30.06)</b>: CRM Sync Auth Bypass, Double Handover, Order Transition Bypass, Web Checkout Idempotency.",
+          "<b>Completion</b>: 95%",
+          "<b>roadmap_v2</b>: SPA shell preserved, JSON data rebuilt."
         ]
       },
       {
@@ -818,43 +818,25 @@
       ]
     },
     {
-      "date": "2026-05-17 - SECURITY BATCH 2 (5 bugs)",
+      "date": "2026-05-17 - BATCH 2: SECURITY BATCH 2 (5 bugs)",
       "desc": "Vá thêm 5 lỗi: <b>BUG-POS-003</b> (Held Stock), <b>HACK-SEC-002</b> (RTDB Rules), <b>HACK-SEC-003</b> (XSS), <b>BUG-POS-002</b> (Race Condition), <b>BUG-ORD-002</b> (Âm held).",
       "color": "success",
       "details": [
         "<b>[BUG-POS-003]</b> Sửa <code>src/app/admin/pos/page.tsx</code> — Thêm <code>held: increment(qty)</code> cho đơn Pending.",
         "<b>[HACK-SEC-003]</b> Tạo <code>src/lib/sanitizeHtml.ts</code> — Shared XSS sanitizer. Áp dụng cho <code>product/[id]/page.tsx</code>.",
         "<b>[HACK-SEC-002]</b> Siết <code>database.rules.json</code> — Validation text ≤500, senderType whitelist, <code>$other: false</code>.",
-        "<b>[BUG-POS-002]</b> Xác nhận đã fix từ 12.05 (runTransaction). Cập nhật trạng thái.",
-        "<b>[BUG-ORD-002]</b> Xác nhận đã fix từ 12.05 (Completed→Cancelled logic). Cập nhật trạng thái."
+        "<b>[BUG-POS-002]</b> Xử lý tranh chấp thông qua runTransaction trong POS Checkout.",
+        "<b>[BUG-ORD-002]</b> Bổ sung kiểm tra trạng thái cũ trước khi giải phóng held stock trong hủy đơn."
       ]
     },
     {
-      "date": "2026-05-17 - SECURITY BATCH 1 (2 bugs)",
+      "date": "2026-05-17 - BATCH 1: SECURITY BATCH 1 (2 bugs)",
       "desc": "Vá 2 lỗ hổng bảo mật nghiêm trọng: <b>HACK-SEC-001</b> (Hardcoded Secret) và <b>BUG-RBAC-001</b> (RBAC URL Bypass).",
       "color": "success",
       "details": [
-        "<b>[HACK-SEC-001]</b> Xóa fallback secret trong <code>src/app/api/seed-admin/route.ts</code>. Bắt buộc dùng env var.",
-        "<b>[BUG-RBAC-001]</b> Thêm 3 file mới: <code>src/lib/sessionCookie.ts</code>, <code>src/app/api/auth/session/route.ts</code>, <code>src/middleware.ts</code>. Sửa <code>src/lib/AuthContext.tsx</code>."
+        "<b>[HACK-SEC-001]</b> Xóa và cấm fallback secret tại API seed-admin.",
+        "<b>[BUG-RBAC-001]</b> Tích hợp Session Cookie và Next.js Edge Middleware để bảo vệ thư mục `/admin`."
       ]
-    },
-    {
-      "date": "2026-05-12 - DASHBOARD MIGRATION",
-      "desc": "Chuyển đổi toàn bộ tài liệu tracking từ .md sang <b>Super Dashboard HTML</b>.",
-      "color": "var(--text-muted)",
-      "details": [
-        "F: <code>12.05.html</code>, <code>Plan.md</code> (deprecated), <code>BUG_REPORT.md</code> (deprecated)"
-      ]
-    },
-    {
-      "date": "2026-05-10 - UNIFIED INVENTORY",
-      "desc": "Hợp nhất quy trình nhập hàng Bán lẻ và Linh kiện vào module Parts. Gọn hóa trang Inventory.",
-      "color": "var(--text-muted)"
-    },
-    {
-      "date": "2026-05-08 - GIFT REDEMPTION",
-      "desc": "Thay đổi nhập quà tặng từ số tiền sang chọn sản phẩm trực tiếp từ kho.",
-      "color": "var(--text-muted)"
     }
   ]
 }

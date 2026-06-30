@@ -164,8 +164,46 @@
         ["1", "<b>Customer CRM Schema</b> — Tạo <code>customers/{phone}</code> + sync logic", "~8h", "⭐⭐⭐", {"text": "PENDING", "class": "status-warn"}],
         ["2", "<b>Firestore Rules</b> — Customers rules đã siết quyền; services duplicate đã stale/resolved", "~30min", "⭐⭐", {"text": "DONE", "class": "status-pass"}],
         ["3", "<b>k6 Load Test</b> — Script stress test cho <code>fixphone.vn</code>", "~2h", "⭐⭐⭐", {"text": "PENDING", "class": "status-warn"}],
-        ["4", "<b>LazyImage Decision</b> — Giữ component orphan có chủ đích để tái sử dụng skeleton/error fallback", "~15min", "⭐", {"text": "DONE", "class": "status-pass"}],
+        ["4", "<b>LazyImage Decision</b> — Giữ component orphan có chủ đích để tái sử dụng skeleton/error fallback khi adopt storefront; không import đại trà để tránh churn UI.", "~15min", "⭐", {"text": "DONE", "class": "status-pass"}],
         ["5", "<b>SEO Audit</b> — Verify meta tags trên production domain", "~1h", "⭐⭐", {"text": "PENDING", "class": "status-warn"}]
+      ]
+    },
+    {
+      "id": "backend-audit-3006",
+      "title": "🔍 Security & Backend Audit (30.06.2026)",
+      "color": "danger",
+      "desc": "Kết quả rà soát bảo mật toàn diện các luồng API Backend (POS, Sửa chữa, Đơn hàng, CRM).",
+      "type": "table",
+      "headers": ["ID", "Vấn đề / Lỗ hổng", "Mức độ", "Trạng thái", "Chi tiết phát hiện & Khắc phục"],
+      "rows": [
+        [
+          "<b>BUG-SEC-004</b>",
+          "CRM Customer Sync Auth Bypass & Stored XSS",
+          {"text": "🚨 CRITICAL", "class": "status-danger"},
+          {"text": "RECORDED", "class": "status-warn"},
+          "API <code>/api/customers/sync</code> công khai không check auth, cho phép <code>forceUpdateName</code> ghi đè tên bất kỳ khách hàng nào bằng SĐT. Nguy cơ Stored XSS khi hiển thị trên Admin CRM."
+        ],
+        [
+          "<b>BUG-REP-015</b>",
+          "Double Handover Stock Deduction & Double Accounting",
+          {"text": "🚨 CRITICAL", "class": "status-danger"},
+          {"text": "RECORDED", "class": "status-warn"},
+          "API <code>/api/repairs/handover</code> không chặn nếu phiếu đã terminal. Gọi trùng lặp gây trừ đúp kho linh kiện, nhân đôi doanh thu CRM, nhân đôi nợ khách hàng và nhân đôi hoa hồng nhân viên."
+        ],
+        [
+          "<b>BUG-ORD-006</b>",
+          "Order Transition State Bypass & Double Deduction",
+          {"text": "🚨 CRITICAL", "class": "status-danger"},
+          {"text": "RECORDED", "class": "status-warn"},
+          "API <code>/api/orders/transition</code> thiếu validation ma trận trạng thái. Chuyển ngược <code>Completed</code> -> <code>Pending</code> -> <code>Completed</code> gây trừ đúp kho. Chuyển <code>Cancelled</code> -> <code>Completed</code> bypass hoàn toàn trừ kho."
+        ],
+        [
+          "<b>BUG-ORD-007</b>",
+          "Web Storefront Checkout Lack of Idempotency",
+          {"text": "🔴 HIGH", "class": "status-danger"},
+          {"text": "RECORDED", "class": "status-warn"},
+          "API <code>/api/checkout</code> của Web Storefront thiếu <code>idempotencyKey</code>. Gửi trùng request tạo nhiều đơn hàng giống hệt nhau, chiếm giữ kho ảo (held) và trừ đúp lượt dùng voucher."
+        ]
       ]
     }
   ]

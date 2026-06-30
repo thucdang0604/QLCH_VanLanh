@@ -182,6 +182,18 @@ window.toggleAuditDetails = function () {
     }
 };
 
+window.toggleAllFixedBugs = function () {
+    const el = document.getElementById('fixed-bugs-grid');
+    const btn = document.getElementById('btn-toggle-fixed-bugs');
+    if (el.style.display === 'none') {
+        el.style.display = 'grid';
+        btn.innerHTML = '🔼 Thu gọn';
+    } else {
+        el.style.display = 'none';
+        btn.innerHTML = '🔽 Xem thêm';
+    }
+};
+
 window.toggleFixedBugs = function (moduleId) {
     const el = document.getElementById(`fixed-bugs-${moduleId}`);
     const btn = document.getElementById(`btn-fixed-bugs-${moduleId}`);
@@ -891,8 +903,13 @@ function renderBugsView() {
     }
 
     if (fixedBugs.length > 0) {
-        html += `<h3 style="color: var(--success); margin-top: 30px; margin-bottom: 15px;">✅ Bugs Đã Vá (${fixedBugs.length})</h3>
-                 <div class="grid">`;
+        html += `
+            <div style="margin-top: 30px; margin-bottom: 15px; display: flex; align-items: center; gap: 15px;">
+                <h3 style="color: var(--success); margin: 0;">✅ Bugs Đã Vá (${fixedBugs.length})</h3>
+                <button id="btn-toggle-fixed-bugs" class="btn" style="background: rgba(34, 197, 94, 0.1); color: var(--success); border: 1px solid var(--success); cursor: pointer;" onclick="toggleAllFixedBugs()">🔽 Xem thêm</button>
+            </div>
+            <div id="fixed-bugs-grid" class="grid" style="display: none;">
+        `;
         fixedBugs.forEach(bug => {
             html += `
                 <div class="card" onclick="navigateTo('bug', '${bug.id}')" style="cursor: pointer; opacity: 0.7; transition: 0.2s; border-left: 4px solid var(--success);" onmouseover="this.style.background='rgba(255,255,255,0.05)'" onmouseout="this.style.background='transparent'">

@@ -1,9 +1,8 @@
 'use client';
 
 /* eslint-disable @next/next/no-img-element */
-import { useState, useEffect, useRef } from 'react';
-import { collection, deleteDoc, doc, orderBy, query, serverTimestamp, limit, setDoc, getDoc, updateDoc, type QuerySnapshot, type QueryDocumentSnapshot, type DocumentReference, type DocumentData } from 'firebase/firestore';
-import { onSnapshot } from '@/lib/firestoreLogger';
+import { useState, useEffect, useRef, useCallback, useId } from 'react';
+import { collection, deleteDoc, doc, getDoc, getDocs, limit, orderBy, query, serverTimestamp, setDoc, startAfter, updateDoc, where, type QueryDocumentSnapshot, type QuerySnapshot, type DocumentReference, type DocumentData } from 'firebase/firestore';
 import { db, getStorageInstance } from '@/lib/firebase';
 import { X, Upload, Image as ImageIcon, Film, Trash2, Loader2, Check, Search, AlertTriangle } from 'lucide-react';
 import type { FirestoreDateValue } from '@/lib/types';
@@ -16,6 +15,7 @@ const MAX_VIDEO_SIZE_MB = 50;
 const MAX_VIDEO_SIZE_BYTES = MAX_VIDEO_SIZE_MB * 1024 * 1024;
 const MAX_BANNER_SOURCE_IMAGE_SIZE_MB = 12;
 const MAX_BANNER_SOURCE_IMAGE_SIZE_BYTES = MAX_BANNER_SOURCE_IMAGE_SIZE_MB * 1024 * 1024;
+const MEDIA_PAGE_SIZE = 20;
 
 export interface MediaItem {
     id: string;
@@ -75,10 +75,40 @@ async function calculateFileHash(file: File): Promise<string> {
     return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+function resolveMediaFolder(data: DocumentData): string {
+    let folder = typeof data.folder === 'string' ? data.folder : '';
+
+    if (!folder && typeof data.path === 'string') {
+        const parts = data.path.split('/');
+        if (parts.length > 1) {
+            const folderCandidate = parts[parts.length - 2];
+            if (MEDIA_FOLDERS.some(f => f.id === folderCandidate)) {
+                folder = folderCandidate;
+            } else if (parts[0] && MEDIA_FOLDERS.some(f => f.id === parts[0])) {
+                folder = parts[0];
+            }
+        }
+    }
+
+    return folder || 'general';
+}
+
+function mapMediaDocument(d: QueryDocumentSnapshot<DocumentData>): MediaItem {
+    const data = d.data();
+    return {
+        id: d.id,
+        ...data,
+        folder: resolveMediaFolder(data),
+    } as MediaItem;
+}
+
 export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultiple, multiple = false, title = 'Chọn media', defaultFolder = 'general' }: MediaManagerProps) {
-    const [tab, setTab] = useState<'upload' | 'library'>('library');
+    const uploadInputId = useId();
+    const [tab, setTab] = useState<'upload' | 'library'>('upload');
     const [items, setItems] = useState<MediaItem[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(false);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [hasMore, setHasMore] = useState(false);
     const [uploading, setUploading] = useState(false);
     const [deleting, setDeleting] = useState<string | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
@@ -91,41 +121,80 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
     const [uploadFolder, setUploadFolder] = useState<string>(defaultFolder);
     const [filterFolder, setFilterFolder] = useState<string>('all');
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const lastDocRef = useRef<QueryDocumentSnapshot<DocumentData> | null>(null);
+    const loadedFolderRef = useRef<string | null>(null);
 
-    // Fetch media library from Firestore
+    const loadMedia = useCallback(async (folder: string, mode: 'replace' | 'append' = 'replace') => {
+        const isAppend = mode === 'append';
+        if (isAppend) {
+            setLoadingMore(true);
+        } else {
+            setLoading(true);
+            setItems([]);
+            lastDocRef.current = null;
+            setHasMore(false);
+        }
+
+        try {
+            const constraints = folder === 'all'
+                ? [orderBy('createdAt', 'desc'), limit(MEDIA_PAGE_SIZE)]
+                : [where('folder', '==', folder), orderBy('createdAt', 'desc'), limit(MEDIA_PAGE_SIZE)];
+            const q = query(
+                collection(db, 'media_library'),
+                ...(isAppend && lastDocRef.current ? [...constraints.slice(0, -1), startAfter(lastDocRef.current), limit(MEDIA_PAGE_SIZE)] : constraints)
+            );
+            let snap: QuerySnapshot<DocumentData>;
+            try {
+                snap = await getDocs(q);
+            } catch (err) {
+                if (folder === 'all') throw err;
+                console.warn('Media ordered query failed, falling back to folder-only query:', err);
+                const fallbackQ = query(
+                    collection(db, 'media_library'),
+                    where('folder', '==', folder),
+                    ...(isAppend && lastDocRef.current ? [startAfter(lastDocRef.current), limit(MEDIA_PAGE_SIZE)] : [limit(MEDIA_PAGE_SIZE)])
+                );
+                snap = await getDocs(fallbackQ);
+            }
+            const nextItems = snap.docs.map(mapMediaDocument);
+            setItems(prev => isAppend ? [...prev, ...nextItems] : nextItems);
+            lastDocRef.current = snap.docs[snap.docs.length - 1] ?? null;
+            setHasMore(snap.docs.length === MEDIA_PAGE_SIZE);
+            loadedFolderRef.current = folder;
+        } catch (err) {
+            console.error('Media load error:', err);
+            loadedFolderRef.current = null;
+            setUploadError('Không thể tải thư viện media. Vui lòng thử lại.');
+        } finally {
+            setLoading(false);
+            setLoadingMore(false);
+        }
+    }, []);
+
     useEffect(() => {
         if (!isOpen) return;
+        setTab('upload');
         setUploadFolder(defaultFolder);
-        const q = query(collection(db, 'media_library'), orderBy('createdAt', 'desc'), limit(200));
-        const unsub = onSnapshot(q, (snap: QuerySnapshot) => {
-            const rawItems = snap.docs.map((d: QueryDocumentSnapshot) => {
-                const data = d.data();
-                let folder = data.folder || '';
-                
-                // Auto-heal empty folders using Storage path
-                if (!folder && data.path) {
-                    const parts = data.path.split('/');
-                    if (parts.length > 1) {
-                        const folderCandidate = parts[parts.length - 2];
-                        if (MEDIA_FOLDERS.some(f => f.id === folderCandidate)) {
-                            folder = folderCandidate;
-                        } else if (parts[0] && MEDIA_FOLDERS.some(f => f.id === parts[0])) {
-                            folder = parts[0];
-                        }
-                    }
-                }
-                
-                return {
-                    id: d.id,
-                    ...data,
-                    folder: folder || 'general'
-                } as MediaItem;
-            });
-            setItems(rawItems);
-            setLoading(false);
-        }, () => setLoading(false));
-        return () => unsub();
+        setFilterFolder(defaultFolder);
+        setSearchQuery('');
+        setSelected([]);
+        setUploadError(null);
+        setUploadNotice(null);
+        setItems([]);
+        setLoading(false);
+        setLoadingMore(false);
+        setHasMore(false);
+        lastDocRef.current = null;
+        loadedFolderRef.current = null;
     }, [isOpen, defaultFolder]);
+
+    const handleShowLibrary = () => {
+        setTab('library');
+        setUploadError(null);
+        if (loadedFolderRef.current !== filterFolder) {
+            void loadMedia(filterFolder, 'replace');
+        }
+    };
 
     const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = e.target.files;
@@ -297,6 +366,23 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                     ...(finalHeight !== undefined && { height: finalHeight }),
                     createdAt: serverTimestamp(),
                 });
+                const uploadedItem: MediaItem = {
+                    id: targetDocRef.id,
+                    url,
+                    path: storagePath,
+                    name: fileToUpload.name,
+                    originalName: file.name,
+                    normalizedBaseName: normalizeMediaBaseName(file.name),
+                    type: fileToUpload.type,
+                    size: fileToUpload.size,
+                    folder: uploadFolder,
+                    ...(finalWidth !== undefined && { width: finalWidth }),
+                    ...(finalHeight !== undefined && { height: finalHeight }),
+                    createdAt: new Date(),
+                } as MediaItem;
+                if (filterFolder === 'all' || filterFolder === uploadFolder) {
+                    setItems(prev => [uploadedItem, ...prev.filter(item => item.id !== uploadedItem.id)]);
+                }
                 setUploadNotice(replacingBrokenEntry
                     ? `"${file.name}" da bi mat file tren Storage, da upload lai thanh cong.`
                     : `Da upload "${file.name}" thanh cong.`);
@@ -309,7 +395,14 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
         }
 
         setUploading(false);
-        setTab(completedAny && !failedAny ? 'library' : 'upload');
+        if (completedAny && !failedAny) {
+            setFilterFolder(uploadFolder);
+            setTab('library');
+            loadedFolderRef.current = null;
+            void loadMedia(uploadFolder, 'replace');
+        } else {
+            setTab('upload');
+        }
         if (fileInputRef.current) fileInputRef.current.value = '';
     };
 
@@ -323,6 +416,7 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
             const storageRef = ref(storage, item.path);
             await deleteObject(storageRef).catch(() => { });
             await deleteDoc(doc(db, 'media_library', item.id));
+            setItems(prev => prev.filter(current => current.id !== item.id));
         } catch (err) {
             console.error('Delete error:', err);
         }
@@ -375,13 +469,10 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
         return matchSearch && matchFolder;
     });
 
-    const videoCount = items.filter(i => isVideoType(i.type)).length;
-    const imageCount = items.length - videoCount;
-
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50" onClick={onClose}>
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50">
             <div
                 className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-in-out]"
                 onClick={(e) => e.stopPropagation()}
@@ -389,7 +480,7 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                 {/* Header */}
                 <div className="flex items-center justify-between px-6 py-4 border-b">
                     <h2 className="text-lg font-bold text-gray-800">{title}</h2>
-                    <button title="Đóng" onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1">
+                    <button type="button" title="Đóng" onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1">
                         <X size={20} />
                     </button>
                 </div>
@@ -397,18 +488,20 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                 {/* Tabs */}
                 <div className="flex border-b px-6">
                     <button
-                        onClick={() => setTab('library')}
-                        className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${tab === 'library' ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-                    >
-                        <ImageIcon size={16} className="inline mr-1.5 -mt-0.5" />
-                        Thư viện media ({imageCount} ảnh{videoCount > 0 ? `, ${videoCount} video` : ''})
-                    </button>
-                    <button
+                        type="button"
                         onClick={() => { setTab('upload'); setUploadError(null); }}
                         className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${tab === 'upload' ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
                     >
                         <Upload size={16} className="inline mr-1.5 -mt-0.5" />
                         Upload mới
+                    </button>
+                    <button
+                        type="button"
+                        onClick={handleShowLibrary}
+                        className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${tab === 'library' ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+                    >
+                        <ImageIcon size={16} className="inline mr-1.5 -mt-0.5" />
+                        Thư viện media
                     </button>
                 </div>
 
@@ -446,18 +539,19 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                             <input
                                 title="Chọn file"
                                 ref={fileInputRef}
+                                id={uploadInputId}
                                 type="file"
                                 accept="image/*,video/mp4,video/webm"
                                 multiple
                                 onChange={handleUpload}
-                                className="hidden"
+                                className="sr-only"
                             />
-                            <button
+                            <label
                                 title="Kéo thả hoặc click để chọn file"
-                                type="button"
-                                onClick={() => fileInputRef.current?.click()}
-                                disabled={uploading}
-                                className="w-full h-48 border-2 border-dashed border-gray-300 rounded-xl hover:border-orange-400 hover:bg-orange-50 transition-colors flex flex-col items-center justify-center gap-3 text-gray-500"
+                                htmlFor={uploadInputId}
+                                aria-disabled={uploading}
+                                data-disabled={uploading}
+                                className={`w-full h-48 border-2 border-dashed border-gray-300 rounded-xl transition-colors flex flex-col items-center justify-center gap-3 text-gray-500 ${uploading ? 'cursor-not-allowed opacity-70' : 'cursor-pointer hover:border-orange-400 hover:bg-orange-50'}`}
                             >
                                 {compressProgress ? (
                                     <>
@@ -477,7 +571,7 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                                         <span className="text-xs text-gray-400">Hỗ trợ JPG, PNG, WebP • Banner tối đa {MAX_BANNER_SOURCE_IMAGE_SIZE_MB}MB • MP4, WebM (Video tối đa {MAX_VIDEO_SIZE_MB}MB)</span>
                                     </>
                                 )}
-                            </button>
+                            </label>
 
                             {/* Upload warning */}
                             <div className="flex flex-col gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
@@ -499,14 +593,17 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                                 <select
                                     title="Chọn thư mục"
                                     value={filterFolder}
-                                    onChange={(e) => setFilterFolder(e.target.value)}
+                                    onChange={(e) => {
+                                        const nextFolder = e.target.value;
+                                        setFilterFolder(nextFolder);
+                                        setSearchQuery('');
+                                        void loadMedia(nextFolder, 'replace');
+                                    }}
                                     className="py-2.5 px-3 border rounded-lg text-sm bg-gray-50 focus:outline-none focus:border-orange-400 font-medium text-gray-700"
                                 >
                                     <option value="all">Tất cả thư mục</option>
                                     {activeFolders.map(f => (
-                                        <option key={f.id} value={f.id}>
-                                            {f.name} ({items.filter(i => i.folder === f.id).length})
-                                        </option>
+                                        <option key={f.id} value={f.id}>{f.name}</option>
                                     ))}
                                 </select>
                                 <div className="relative flex-1">
@@ -550,13 +647,14 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                                 <div className="text-center py-12 text-gray-400">
                                     <ImageIcon size={48} className="mx-auto mb-3 opacity-30" />
                                     <p>Chưa có file nào trong thư viện</p>
-                                    <button onClick={() => setTab('upload')} className="mt-2 text-sm text-orange-500 hover:underline">
+                                    <button type="button" onClick={() => setTab('upload')} className="mt-2 text-sm text-orange-500 hover:underline">
                                         Upload file đầu tiên →
                                     </button>
                                 </div>
                             ) : (
-                                <div className="grid grid-cols-4 sm:grid-cols-5 gap-2.5">
-                                    {filtered.map((item) => (
+                                <>
+                                    <div className="grid grid-cols-4 sm:grid-cols-5 gap-2.5">
+                                        {filtered.map((item) => (
                                         <div
                                             key={item.id}
                                             className={`relative group aspect-square rounded-lg overflow-hidden cursor-pointer border-2 transition-all bg-[length:20px_20px] data-[broken=true]:cursor-not-allowed data-[broken=true]:border-red-200 data-[broken=true]:bg-gray-50 ${selected.includes(item.url) ? 'border-orange-500 ring-2 ring-orange-200' : 'border-gray-100 hover:border-gray-300'}`}
@@ -614,6 +712,7 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                                             )}
                                             {/* Delete button */}
                                             <button
+                                                type="button"
                                                 onClick={(e) => { e.stopPropagation(); handleDelete(item); }}
                                                 disabled={deleting === item.id}
                                                 className="absolute bottom-2 right-2 w-7 h-7 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
@@ -625,8 +724,22 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                                                 {item.name}
                                             </div>
                                         </div>
-                                    ))}
-                                </div>
+                                        ))}
+                                    </div>
+                                    {hasMore && (
+                                        <div className="flex justify-center pt-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => void loadMedia(filterFolder, 'append')}
+                                                disabled={loadingMore}
+                                                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-600 transition-colors hover:border-orange-300 hover:bg-orange-50 hover:text-orange-600 disabled:opacity-50"
+                                            >
+                                                {loadingMore && <Loader2 size={14} className="animate-spin" />}
+                                                Tải thêm
+                                            </button>
+                                        </div>
+                                    )}
+                                </>
                             )}
                         </div>
                     )}
@@ -638,10 +751,11 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                         {selected.length > 0 ? `${selected.length} file đã chọn` : 'Chọn từ thư viện hoặc upload mới'}
                     </span>
                     <div className="flex gap-2">
-                        <button onClick={() => { onClose(); setSelected([]); }} className="px-4 py-2 text-sm border rounded-lg hover:bg-gray-100 text-gray-600">
+                        <button type="button" onClick={() => { onClose(); setSelected([]); }} className="px-4 py-2 text-sm border rounded-lg hover:bg-gray-100 text-gray-600">
                             Hủy
                         </button>
                         <button
+                            type="button"
                             onClick={handleConfirm}
                             disabled={selected.length === 0}
                             className="px-5 py-2 text-sm bg-orange-500 text-white rounded-lg hover:bg-orange-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"

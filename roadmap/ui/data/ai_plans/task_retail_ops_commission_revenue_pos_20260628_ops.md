@@ -23,8 +23,9 @@
 
 - [x] Design shipping fee fields for orders/repairs and expense treatment.
 - [ ] Design old-device buyback fields and inventory/expense treatment.
-- [x] Add cashier shift opening form with denominations and bank opening amount.
-- [ ] Add API/transaction and reporting hooks after schema is confirmed.
+- [x] Add cashier shift opening form with locked cash/bank opening amount.
+- [x] Add API/transaction hooks so POS cash/bank payments update the active cashier shift.
+- [x] Unify POS old-debt collection and surplus debt offset into one checkout transaction path.
 
 ## Phase 5 - Tablet Upload
 

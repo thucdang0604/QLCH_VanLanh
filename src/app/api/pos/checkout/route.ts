@@ -13,6 +13,13 @@ import { loadRepairWorkflow, requireWorkflowNode, workflowNodeHasFeature } from 
 import { isSelectedRepairPart } from '@/lib/repairStatus';
 import { reserveSequentialDocumentId, reserveSequentialDocumentIds, type ReservedSequentialDocumentId } from '@/lib/serverDocumentIds';
 
+function getCashierShiftChannel(paymentMethodCode: string): 'cash' | 'bank' | 'none' {
+    const normalized = paymentMethodCode.trim().toUpperCase();
+    if (normalized === 'CASH') return 'cash';
+    if (normalized === 'BANK' || normalized === 'QR' || normalized === 'CARD' || normalized === 'MOMO') return 'bank';
+    return 'none';
+}
+
 function resolvePaymentCompletionTarget(workflow: WorkflowNode[], currentStatus: string) {
     const currentNode = requireWorkflowNode(workflow, currentStatus);
     if (currentNode.isTerminal) {
@@ -255,16 +262,18 @@ export async function POST(request: NextRequest) {
 
             const discountableSubtotal = Math.max(0, serverSubtotal - orderPaymentSubtotal);
             const serverDiscount = Math.min(Number(discount_amount) || 0, discountableSubtotal);
-            const serverTotal = serverSubtotal - serverDiscount;
+            const currentOrderTotal = Math.max(0, discountableSubtotal - serverDiscount);
+            const serverTotal = currentOrderTotal + orderPaymentSubtotal;
             const isDebtCollectionOnly = orderPaymentSubtotal > 0 && discountableSubtotal === 0;
             const hasRepairPayment = normalizedItems.some(item => item.isRepairTicket);
             const paymentMethodCode = String(payment_method || 'CASH').toUpperCase();
-            // If payment method is not DEBT, and deposit is not provided/0, treat as fully paid.
-            const paidNow = (paymentMethodCode !== 'DEBT' && (deposit_amount === undefined || deposit_amount === null || Number(deposit_amount) === 0))
+            // If payment method is not DEBT, and deposit is not provided/0, treat as fully paid for the whole POS receipt.
+            const paymentReceived = (paymentMethodCode !== 'DEBT' && (deposit_amount === undefined || deposit_amount === null || Number(deposit_amount) === 0))
                 ? serverTotal
                 : Number(deposit_amount) || 0;
+            const paidNow = !isDebtCollectionOnly ? Math.min(paymentReceived, currentOrderTotal) : 0;
 
-            if (orderPaymentSubtotal > 0 && discountableSubtotal > 0) {
+            if (paymentMethodCode === 'DEBT' && orderPaymentSubtotal > 0 && discountableSubtotal > 0) {
                 throw new Error('Vui lòng tách thu nợ đơn cũ và bán hàng mới thành 2 lần thanh toán riêng.');
             }
             if (isDebtCollectionOnly && voucherCode) {
@@ -275,11 +284,8 @@ export async function POST(request: NextRequest) {
             if (hasRepairPayment && !['CASH', 'BANK', 'MOMO'].includes(paymentMethodCode)) {
                 throw new Error('Thanh toán phiếu sửa chữa phải thu ngay bằng tiền mặt, chuyển khoản hoặc ví.');
             }
-            if (hasRepairPayment && paidNow + 1 < serverTotal) {
-                throw new Error(`Thanh toán phiếu sửa chữa còn thiếu ${(serverTotal - paidNow).toLocaleString('vi-VN')}đ. Vui lòng thu đủ trước khi hoàn tất.`);
-            }
-            if (hasRepairPayment && paidNow - serverTotal > 1) {
-                throw new Error(`Số tiền thu vượt tổng cần thanh toán ${serverTotal.toLocaleString('vi-VN')}đ.`);
+            if (hasRepairPayment && paidNow + 1 < currentOrderTotal) {
+                throw new Error(`Thanh toán phiếu sửa chữa còn thiếu ${(currentOrderTotal - paidNow).toLocaleString('vi-VN')}đ. Vui lòng thu đủ trước khi hoàn tất.`);
             }
 
             let voucherRef: FirebaseFirestore.DocumentReference | null = null;
@@ -415,7 +421,7 @@ export async function POST(request: NextRequest) {
 
             const collectedDebtAmount = isDebtCollectionOnly
                 ? (Number(deposit_amount) > 0 ? Number(deposit_amount) : orderPaymentSubtotal)
-                : orderPaymentSubtotal;
+                : Math.max(0, paymentReceived - currentOrderTotal);
             if (isDebtCollectionOnly && collectedDebtAmount <= 0) {
                 throw new Error('Vui lòng nhập số tiền khách thanh toán.');
             }
@@ -424,15 +430,54 @@ export async function POST(request: NextRequest) {
             }
 
             const orderPaymentTotals = new Map<string, number>();
+            const getRemainingOrderPayment = (data: FirebaseFirestore.DocumentData) => {
+                const totalOrderAmount = Number(data.total_amount) || 0;
+                return Math.max(0, totalOrderAmount - getPaidAmount(data));
+            };
+            const debtCandidateDocs: { ref: FirebaseFirestore.DocumentReference; snap: FirebaseFirestore.DocumentSnapshot }[] = [];
+            if (use_surplus_to_pay_debt === true && normalizedPhoneResult && paymentMethodCode !== 'DEBT') {
+                const rawCustomerPhone = String(customer_info?.phone || '').trim();
+                if (rawCustomerPhone) {
+                    const debtOrderSnap = await tx.get(
+                        db.collection('orders')
+                            .where('customer_info.phone', '==', rawCustomerPhone)
+                            .limit(20)
+                    );
+                    for (const docSnap of debtOrderSnap.docs) {
+                        if (orderPaymentDocs.has(docSnap.id)) continue;
+                        if (getRemainingOrderPayment(docSnap.data()) <= 0) continue;
+                        debtCandidateDocs.push({ ref: docSnap.ref, snap: docSnap });
+                    }
+                }
+            }
             let remainingDebtCollectionAmount = collectedDebtAmount;
             for (const [id, requestedAmount] of orderPaymentRequestedTotals.entries()) {
-                const paymentAmount = isDebtCollectionOnly
-                    ? Math.min(requestedAmount, Math.max(0, remainingDebtCollectionAmount))
-                    : requestedAmount;
+                const orderPaymentDoc = orderPaymentDocs.get(id);
+                const remainingAmount = getRemainingOrderPayment(orderPaymentDoc?.snap.data() || {});
+                const paymentAmount = Math.min(requestedAmount, remainingAmount, Math.max(0, remainingDebtCollectionAmount));
                 if (paymentAmount > 0) {
                     orderPaymentTotals.set(id, paymentAmount);
                     remainingDebtCollectionAmount -= paymentAmount;
                 }
+            }
+
+            if (use_surplus_to_pay_debt === true && remainingDebtCollectionAmount > 0) {
+                for (const debtDoc of debtCandidateDocs) {
+                    const remainingAmount = getRemainingOrderPayment(debtDoc.snap.data() || {});
+                    const paymentAmount = Math.min(remainingAmount, remainingDebtCollectionAmount);
+                    if (paymentAmount <= 0) continue;
+                    orderPaymentDocs.set(debtDoc.snap.id, debtDoc);
+                    orderPaymentTotals.set(debtDoc.snap.id, paymentAmount);
+                    remainingDebtCollectionAmount -= paymentAmount;
+                    if (remainingDebtCollectionAmount <= 0) break;
+                }
+            }
+
+            if (isDebtCollectionOnly && orderPaymentTotals.size === 0) {
+                throw new Error('Không còn khoản nợ hợp lệ để ghi nhận thanh toán.');
+            }
+            if (orderPaymentSubtotal > 0 && paymentMethodCode !== 'DEBT' && paymentReceived + 1 < currentOrderTotal) {
+                throw new Error('Số tiền khách trả chưa đủ để vừa thanh toán đơn mới vừa thu nợ đã chọn.');
             }
 
             for (const [id, paymentAmount] of orderPaymentTotals.entries()) {
@@ -450,6 +495,24 @@ export async function POST(request: NextRequest) {
 
             const orderPaymentTotal = Array.from(orderPaymentTotals.values()).reduce((sum, amount) => sum + amount, 0);
             const updatedOrderIds = Array.from(orderPaymentTotals.keys());
+            const cashierShiftChannel = getCashierShiftChannel(paymentMethodCode);
+            const cashierShiftCollectedAmount = cashierShiftChannel === 'none'
+                ? 0
+                : (paidNow + orderPaymentTotal);
+            let cashierShiftRef: FirebaseFirestore.DocumentReference | null = null;
+
+            if (cashierShiftCollectedAmount > 0) {
+                const activeShiftSnap = await tx.get(
+                    db.collection('cashier_shifts')
+                        .where('status', '==', 'open')
+                        .limit(1)
+                );
+                const activeShiftDoc = activeShiftSnap.docs[0];
+                if (!activeShiftDoc) {
+                    throw new Error('Vui lòng mở ca thu ngân trước khi thanh toán tiền mặt hoặc chuyển khoản tại POS.');
+                }
+                cashierShiftRef = activeShiftDoc.ref;
+            }
 
             const repairCompletionTargets = new Map<string, { targetStatus: string; shouldCountCompletion: boolean }>();
             for (const [id, repairDoc] of repairDocs.entries()) {
@@ -511,9 +574,7 @@ export async function POST(request: NextRequest) {
             }
 
             const stockProductIds = new Set([...preAggregatedForStock.keys(), ...repairAggregatedForStock.keys()]);
-            const oldDebt = (custSnap && custSnap.exists) ? (Number(custSnap.data()?.totalDebt) || 0) : 0;
-            const newDebt = !isDebtCollectionOnly ? Math.max(0, serverTotal - paidNow) : 0;
-            const surplus = !isDebtCollectionOnly ? Math.max(0, paidNow - serverTotal) : 0;
+            const newDebt = !isDebtCollectionOnly ? Math.max(0, currentOrderTotal - paidNow) : 0;
 
             // Strict Backend Validation: Debt orders or partial payments MUST have a customer phone number.
             const isDebt = paymentMethodCode === 'DEBT' || newDebt > 0;
@@ -521,12 +582,9 @@ export async function POST(request: NextRequest) {
                 throw new Error('Đơn hàng ghi nợ hoặc thanh toán thiếu bắt buộc phải có số điện thoại khách hàng hợp lệ để ghi nhận công nợ.');
             }
 
-            const debtPaymentAmount = (use_surplus_to_pay_debt === true && oldDebt > 0 && surplus > 0)
-                ? Math.min(surplus, oldDebt)
-                : 0;
             const deltaDebt = isDebtCollectionOnly
                 ? -orderPaymentTotal
-                : (newDebt - debtPaymentAmount);
+                : (newDebt - orderPaymentTotal);
 
             let customerLedgerCount = 0;
             if (custRef) {
@@ -536,11 +594,8 @@ export async function POST(request: NextRequest) {
                         customerLedgerCount += 1; // purchase_payment
                     }
                 }
-                if (debtPaymentAmount > 0) {
-                    customerLedgerCount += 1; // cấn nợ cũ
-                }
                 if (orderPaymentTotal > 0) {
-                    customerLedgerCount += 1; // thu nợ đơn cũ
+                    customerLedgerCount += 1; // thu nợ đơn cũ / cấn tiền dư
                 }
             }
 
@@ -551,8 +606,8 @@ export async function POST(request: NextRequest) {
                     const repairQty = repairAggregatedForStock.get(productId)?.quantity || 0;
                     return count + (retailQty > 0 ? 1 : 0) + (repairQty > 0 ? 1 : 0);
                 }, 0);
-            const customerTransactionCount = normalizedPhoneResult && (orderPaymentTotal > 0 || debtPaymentAmount > 0)
-                ? ((orderPaymentTotal > 0 ? 1 : 0) + (debtPaymentAmount > 0 ? 1 : 0))
+            const customerTransactionCount = normalizedPhoneResult && orderPaymentTotal > 0
+                ? 1
                 : 0;
             const inventoryLogAllocations = await reserveSequentialDocumentIds(tx, db, {
                 collectionName: 'inventory_logs',
@@ -584,6 +639,7 @@ export async function POST(request: NextRequest) {
             const debtPaymentReferenceId = updatedOrderIds.length === 1
                 ? updatedOrderIds[0]
                 : (idempotencyKey || orderId || `DEBT-${updatedOrderIds.map(id => id.slice(-6)).join('-')}`);
+            const orderItems = normalizedItems.filter((item) => !item.isOrderPayment);
 
             const order: Record<string, unknown> = {
                 customer_info: {
@@ -593,11 +649,11 @@ export async function POST(request: NextRequest) {
                     address: customer_info?.address || '',
                     note: customer_info?.note || '',
                 },
-                items: normalizedItems,
-                subtotal_amount: serverSubtotal,
+                items: orderItems,
+                subtotal_amount: discountableSubtotal,
                 discount_amount: serverDiscount,
                 deposit_amount: paidNow,
-                total_amount: serverTotal,
+                total_amount: currentOrderTotal,
                 ...(appliedVoucherCode ? { voucherCode: appliedVoucherCode, discountSource: 'voucher' } : {}),
                 status: 'Completed',
                 source: 'pos',
@@ -613,7 +669,7 @@ export async function POST(request: NextRequest) {
                 completedAt: FieldValue.serverTimestamp(),
                 paymentHistory: [{
                     type: newDebt > 0 ? 'deposit' : 'full',
-                    amount: Math.min(paidNow, serverTotal),
+                    amount: Math.min(paidNow, currentOrderTotal),
                     timestamp: Date.now(),
                     note: newDebt > 0
                         ? `Thanh toán một phần POS (${paidNow.toLocaleString('vi-VN')}đ) — nợ lại ${newDebt.toLocaleString('vi-VN')}đ — ${payment_method}`
@@ -624,14 +680,14 @@ export async function POST(request: NextRequest) {
             };
 
             // ── Commission Server-Side Calculation (Reads inside) ──
-            const commissionableItems = normalizedItems.filter((item) => !item.isOrderPayment);
-            const commissionableTotal = Math.max(0, serverTotal - orderPaymentTotal);
+            const commissionableItems = orderItems;
+            const commissionableTotal = currentOrderTotal;
             if (!isDebtCollectionOnly && !isPending && commissionableItems.length > 0 && commissionableTotal > 0) {
                 await calculateAndSaveCommissionsServer(tx, { uid: caller.uid, displayName: createdByName as string }, 'order', {
                     id: orderId,
                     ...order,
                     items: commissionableItems,
-                    subtotal_amount: Math.max(0, serverSubtotal - orderPaymentTotal),
+                    subtotal_amount: discountableSubtotal,
                     total_amount: commissionableTotal,
                 } as unknown as Order);
             }
@@ -755,9 +811,22 @@ export async function POST(request: NextRequest) {
                         .length;
                     incrementRevenueAggregates(tx, db, { repairRevenue, repairCount });
                 }
-                if (debtPaymentAmount > 0) {
-                    incrementRevenueAggregates(tx, db, { orderRevenue: debtPaymentAmount });
-                }
+            }
+            if (!isPending && orderPaymentTotal > 0) {
+                incrementRevenueAggregates(tx, db, { orderRevenue: orderPaymentTotal });
+            }
+
+            if (cashierShiftRef && cashierShiftCollectedAmount > 0) {
+                tx.update(cashierShiftRef, {
+                    ...(cashierShiftChannel === 'cash'
+                        ? { cashSalesAmount: FieldValue.increment(cashierShiftCollectedAmount) }
+                        : { bankSalesAmount: FieldValue.increment(cashierShiftCollectedAmount) }),
+                    lastPaymentAmount: cashierShiftCollectedAmount,
+                    lastPaymentMethod: paymentMethodCode,
+                    lastOrderId: isDebtCollectionOnly ? debtPaymentReferenceId : orderId,
+                    lastPaymentAt: FieldValue.serverTimestamp(),
+                    updatedAt: FieldValue.serverTimestamp(),
+                });
             }
 
             // ── Increment Voucher Usage ──
@@ -780,7 +849,7 @@ export async function POST(request: NextRequest) {
                         updateData.name = incomingName;
                     }
 
-                    const customerSpendDelta = !isDebtCollectionOnly ? serverTotal : 0;
+                    const customerSpendDelta = !isDebtCollectionOnly ? currentOrderTotal : 0;
                     if (customerSpendDelta > 0) {
                         updateData.totalSpent = FieldValue.increment(customerSpendDelta);
                         updateData.totalOrders = FieldValue.increment(1);
@@ -798,7 +867,7 @@ export async function POST(request: NextRequest) {
 
                     tx.update(custRef, updateData);
                 } else {
-                    const customerSpendDelta = !isDebtCollectionOnly ? serverTotal : 0;
+                    const customerSpendDelta = !isDebtCollectionOnly ? currentOrderTotal : 0;
                     const newCust: Record<string, unknown> = {
                         phone: normalizedPhoneResult!.local,
                         name: incomingName || 'Khách lẻ',
@@ -820,7 +889,7 @@ export async function POST(request: NextRequest) {
                     tx.set(customerLedgerAllocations[customerLedgerAllocationIndex++].ref, {
                         customerId: normalizedPhoneResult!.local,
                         type: 'purchase_order',
-                        amount: serverTotal,
+                        amount: currentOrderTotal,
                         referenceId: orderId,
                         date: FieldValue.serverTimestamp()
                     });
@@ -828,20 +897,11 @@ export async function POST(request: NextRequest) {
                         tx.set(customerLedgerAllocations[customerLedgerAllocationIndex++].ref, {
                             customerId: normalizedPhoneResult!.local,
                             type: 'purchase_payment',
-                            amount: Math.min(Number(deposit_amount), serverTotal),
+                            amount: paidNow,
                             referenceId: orderId,
                             date: FieldValue.serverTimestamp()
                         });
                     }
-                }
-                if (debtPaymentAmount > 0) {
-                    tx.set(customerLedgerAllocations[customerLedgerAllocationIndex++].ref, {
-                        customerId: normalizedPhoneResult!.local,
-                        type: 'debt_payment',
-                        amount: debtPaymentAmount,
-                        referenceId: orderId,
-                        date: FieldValue.serverTimestamp()
-                    });
                 }
                 if (orderPaymentTotal > 0) {
                     tx.set(customerLedgerAllocations[customerLedgerAllocationIndex++].ref, {
@@ -944,19 +1004,6 @@ export async function POST(request: NextRequest) {
                             amount: orderPaymentTotal,
                             orderIds: updatedOrderIds,
                             note: 'Thu nợ tại POS',
-                            createdBy: caller.uid,
-                            createdByName,
-                            createdAt: FieldValue.serverTimestamp()
-                        });
-                    }
-                    if (debtPaymentAmount > 0) {
-                        tx.set(customerTransactionAllocations[customerTransactionAllocationIndex++].ref, {
-                            customerId: normalizedPhoneResult.local,
-                            customerName: incomingName || customer_info?.name || 'Khách lẻ',
-                            type: 'PAYMENT',
-                            amount: debtPaymentAmount,
-                            orderIds: [orderId],
-                            note: 'Cấn trừ nợ cũ bằng tiền thừa POS',
                             createdBy: caller.uid,
                             createdByName,
                             createdAt: FieldValue.serverTimestamp()

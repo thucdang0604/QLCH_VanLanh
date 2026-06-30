@@ -323,6 +323,48 @@ if (available < quantity) {
 - TypeScript typecheck: pass.
 - Thử duyệt phiếu `draft` chỉ nhảy sang `approved` trong DB mà UI vẫn báo có hàng. Màn hình KTV không bị ảo `in_stock` tồn kho khả dụng.
 
+## BUG-INV-014: Xung đột Tạm Giữ và Kiểm Kho (Negative Stock Race Condition)
+- **Status:** open
+- **Severity:** critical
+- **Module:** INV
+- **Files:** `src/lib/inventoryFifo.ts`
+### Cause
+<b>Phân tích</b>: Khi đơn hàng được tạo, hệ thống tăng `held` nhưng chưa trừ `stock`. Nếu nhân viên kiểm kho giảm `stock` về 0 do thất thoát lúc đơn đang pending, khi duyệt đơn thành `Completed` hệ thống trừ `stock` thêm lần nữa khiến kho rơi vào số âm. Hậu quả là làm sập thuật toán xuất kho FIFO.
+### Solution
+<b>Giải pháp đề xuất</b>: Khi điều chỉnh kiểm kho (Inventory Adjustment), phải kiểm tra và cảnh báo nếu `stock` điều chỉnh thấp hơn `held` hiện tại, ngăn chặn việc giảm kho vật lý xuống dưới mức đã hứa hẹn cấp phát.
+
+## BUG-INV-015: Rác Phiếu Nhập Nháp & Gãy Luồng Giữ Chỗ (Draft Import Allocation Conflict)
+- **Status:** open
+- **Severity:** high
+- **Module:** INV
+- **Files:** `src/app/api/repairs/confirm-parts/route.ts`, `src/lib/inventoryImportAllocation.ts`
+### Cause
+<b>Phân tích</b>: Yêu cầu linh kiện không có sẵn tự động tạo Phiếu Nhập Kho Nháp. Nếu gộp các yêu cầu cùng loại linh kiện từ nhiều KTV thành 1 dòng, dòng đó có thể mất thông tin `ticketId` ưu tiên. Khi hàng về, `planRepairImportAllocation` không biết cấp phát `held` cho ai trước, gây đứt gãy luồng giữ chỗ.
+### Solution
+<b>Giải pháp đề xuất</b>: Giữ thông tin chi tiết từng `ticketId` yêu cầu (dạng mảng các yêu cầu bên trong dòng phiếu nhập hoặc các sub-lines) để duy trì tính liên kết.
+
+## BUG-INV-016: Lỗ hổng Xóa Phiếu Nhập Bypass Tồn Kho & Công Nợ
+- **Status:** open
+- **Severity:** critical
+- **Module:** INV
+- **Files:** `firestore.rules`
+### Cause
+<b>Phân tích</b>: `firestore.rules` cấp quyền `allow write: if hasPermission('manage_inventory')` cho `import_receipts`. Điều này cho phép nhân viên trực tiếp sửa đổi hoặc xóa (delete) Phiếu Nhập Kho đã "Hoàn tất" (Completed) bằng Client SDK. Khi xóa thủ công như vậy, số lượng `stock` đã cộng không bị trừ đi, và `debt` (công nợ) của nhà cung cấp không được cấn trừ lại, dẫn đến tình trạng kho ảo và sổ nợ sai lệch nghiêm trọng.
+### Solution
+<b>Giải pháp đề xuất</b>: Giới hạn quyền trong `firestore.rules` đối với `import_receipts`. Khi sửa đổi (`update`), không cho phép sửa nếu bản ghi cũ đã ở trạng thái `completed`. Đối với `delete`, chỉ cho phép nếu bản ghi chưa hoàn tất (`resource.data.status != 'completed'`). Bất kỳ thao tác hoàn/trả kho nào sau khi đã chốt phiếu đều phải thực hiện qua luồng Trả Hàng (Return) thay vì xóa thẳng dữ liệu.
+
+## BUG-INV-017: Lỗ hổng thao túng công nợ và quỹ tiền qua giá trị âm trong Phiếu Nhập Kho (Negative Import Exploit)
+- **Status:** open
+- **Severity:** critical
+- **Module:** INV
+- **Files:** `src/app/api/inventory/import/route.ts`
+### Cause
+<b>Phân tích</b>: Khi hoàn tất phiếu nhập kho (`complete_import`), hệ thống tính tổng tiền phiếu nhập bằng công thức `importedItems.reduce((sum, i) => sum + ((i.importPrice || 0) * i.quantity), 0);`. Tuy nhiên, API không hề kiểm tra tính hợp lệ của `importPrice` và `quantity`. Kẻ gian có thể chặn bắt request để sửa `importPrice` hoặc `quantity` của một mặt hàng thành số âm (ví dụ: `importPrice: -50000000`). Điều này dẫn đến:
+1. `totalAmount` của phiếu nhập trở thành số âm.
+2. Nếu nhập ghi nợ (`paymentMethod === 'debt'`), `debtBySupplier` trở thành số âm, hệ thống sẽ thực hiện `FieldValue.increment(-50000000)` lên `totalDebt` của nhà cung cấp, trực tiếp xóa nợ một cách bất hợp pháp.
+3. Đồng thời, `incrementRevenueAggregates` sẽ cộng khoản âm này vào `importDebt` hoặc `importCost`, làm sai lệch toàn bộ báo cáo thu chi của cửa hàng, tạo ra lợi nhuận giả hoặc che giấu các khoản biển thủ.
+### Solution
+<b>Giải pháp đề xuất</b>: Bổ sung xác thực đầu vào nghiêm ngặt trước vòng lặp xử lý hoặc tính `totalAmount`: `if (i.importPrice < 0 || i.quantity <= 0) throw new Error('Giá nhập và số lượng phải lớn hơn 0.');`. Cần chặn mọi giao dịch chứa giá trị tiền tệ và số lượng âm ở cấp độ API.
 # 🚀 Planned Features
 
 ## FEAT-INV-001: Quản lý tồn kho theo Lô (Batch Tracking) kết hợp FIFO sổ sách

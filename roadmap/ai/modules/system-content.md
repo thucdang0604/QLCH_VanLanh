@@ -219,6 +219,20 @@ graph TD
 - **Files:** `src/components/admin/MediaManager.tsx`, `src/lib/imageOptimizer.ts`, `src/lib/validateImage.ts`, `src/app/admin/appearance/page.tsx`
 - **Verification:** Targeted lint/type/build va test upload tren Chrome ngoai.
 
+## BUG-MEDIA-003: Media library dong modal tren tablet va doc qua nhieu Firestore
+
+- **Status:** fixed
+- **Severity:** high
+- **Symptom:** Tren viewport ngang khoang 768-1024px, khi mo `media_library` roi bam Upload moi, popup co the bien mat, file picker van mo, chon file xong khong upload va click co the roi xuong nut revalidate phia sau. Moi lan mo media library cung doc toi da theo so anh dang co, lam tang Firestore reads.
+- **Root cause:**
+  1. Vung upload dung button goi `.click()` vao input file `display:none`; tren mot so viewport/thiet bi, file picker native lam modal mat focus/dong va su kien tiep theo roi xuong trang phia sau.
+  2. Backdrop click dong modal qua de kich hoat trong luong chon file native.
+  3. `MediaManager.tsx` dung realtime `onSnapshot` voi query toan bo `media_library limit(200)`, nen mo modal la doc hang loat document.
+  4. Cac nut trong `MediaManager` khong khai bao `type="button"`, nen khi component nam trong form sua service/part, bam tab `Thu vien media` co the submit form cha va dong popup.
+- **Fix:** Doi upload control sang label/input file native, bo dong modal bang backdrop de tranh click roi xuong page sau, them `type="button"` cho cac nut trong modal, modal mo mac dinh vao tab Upload moi, chi doc Firestore khi bam Thu vien media, thay realtime listener bang `getDocs` theo folder hien tai voi page size 20 va nut `Tai them`.
+- **Files:** `src/components/admin/MediaManager.tsx`
+- **Verification:** Targeted lint/type/build va responsive media modal QA.
+
 ## BUG-ARTICLES-PASTE-001: Paste noi dung bai viet lam mat anh va video
 
 - **Status:** fixed
