@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const { name, phone, note, items, voucherCode } = body;
+        const { idempotencyKey, name, phone, note, items, voucherCode } = body;
 
         // ── 3. Validate required fields ──
         if (!name || typeof name !== 'string' || name.trim().length < 2) {
@@ -80,7 +80,21 @@ export async function POST(request: NextRequest) {
         const db = getAdminDb();
         let orderRefId = '';
         
-        await db.runTransaction(async (transaction) => {
+        const result = await db.runTransaction(async (transaction) => {
+            if (idempotencyKey) {
+                const opRef = db.collection('operation_requests').doc(String(idempotencyKey));
+                const opSnap = await transaction.get(opRef);
+                if (opSnap.exists) {
+                    const data = opSnap.data();
+                    if (data?.status === 'completed' && data.referenceId) {
+                        return { orderId: String(data.referenceId), fromCache: true };
+                    }
+                    if (data?.type && data.type !== 'web_checkout') {
+                        throw new Error('Ma chong gui trung da duoc dung cho thao tac khac.');
+                    }
+                }
+            }
+
             const normalizedItems = [];
             let subtotal_amount = 0;
 
@@ -422,11 +436,23 @@ export async function POST(request: NextRequest) {
                     transaction.update(customerRef, updateData);
                 }
             }
+
+            if (idempotencyKey) {
+                transaction.set(db.collection('operation_requests').doc(String(idempotencyKey)), {
+                    status: 'completed',
+                    completedAt: FieldValue.serverTimestamp(),
+                    type: 'web_checkout',
+                    referenceId: orderRefId,
+                });
+            }
+
+            return { orderId: orderRefId, fromCache: false };
         });
 
         return NextResponse.json({
             success: true,
-            orderId: orderRefId,
+            orderId: result.orderId,
+            fromCache: result.fromCache,
             message: 'Đặt hàng thành công!',
         });
     } catch (error) {

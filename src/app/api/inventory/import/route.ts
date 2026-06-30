@@ -7,7 +7,7 @@ import { buildProductCodeFromId, getProductCodeKind, normalizeProductCode } from
 import { PART_CATEGORY_LABEL } from '@/lib/constants';
 import { REPAIR_PART_STATUS, isRepairPartStatus, isSelectedRepairPart } from '@/lib/repairStatus';
 import { buildReactivateOnImportUpdate } from '@/lib/productLifecycle';
-import { applyProductImport, planRepairImportAllocation } from '@/lib/inventoryImportAllocation';
+import { applyProductImport, assertStockCoversHeld, planRepairImportAllocation } from '@/lib/inventoryImportAllocation';
 import { incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 import { reserveSequentialDocumentIds } from '@/lib/serverDocumentIds';
 
@@ -391,6 +391,11 @@ export async function POST(request: NextRequest) {
                             costPrice: Number(pData.costPrice) || 0,
                             updateData: {},
                         };
+                        assertStockCoversHeld({
+                            stock: workingProduct.stock,
+                            held: workingProduct.held,
+                            label: String(pData.name || item.productName || targetProductId),
+                        });
                         workingProducts.set(targetProductId, workingProduct);
                     }
 
@@ -425,6 +430,11 @@ export async function POST(request: NextRequest) {
                     workingProduct.stock = nextProductState.stock;
                     workingProduct.held = nextProductState.held;
                     workingProduct.costPrice = nextProductState.costPrice;
+                    assertStockCoversHeld({
+                        stock: workingProduct.stock,
+                        held: workingProduct.held,
+                        label: String(pData.name || item.productName || targetProductId),
+                    });
                     const newStock = nextProductState.stock;
                     const newCostPrice = nextProductState.costPrice;
 

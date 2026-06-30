@@ -63,7 +63,7 @@ graph TD
 
 # 🐛 Bugs
 ## BUG-FIN-001: Lỗ hổng Đọc Không Đồng Bộ Ngoài Transaction khi Thu Nợ Khách Hàng (Non-Transactional Read in Debt Collection)
-- **Status:** open
+- **Status:** fixed
 - **Severity:** high
 - **Module:** FIN
 - **Files:** `src/app/api/admin/customers/collect-debt/route.ts`
@@ -80,9 +80,12 @@ const ordersQuery = db.collection('orders')
     .orderBy('createdAt', 'asc');
 const ordersSnap = await tx.get(ordersQuery);
 ```
+### Fix 2026-06-30
+- Changed files: `src/app/api/admin/customers/collect-debt/route.ts`.
+- Verification: debt order lookup now uses `tx.get(query)` inside the same Firestore transaction as customer/order/customer_transaction/revenue writes.
 
 ## BUG-FIN-002: Vi Phạm Quy Tắc Giao Dịch Firestore Gây Crash Khi Tính Hoa Hồng (Transaction Read-After-Write Crash in Commission Calculation)
-- **Status:** open
+- **Status:** fixed
 - **Severity:** critical
 - **Module:** FIN
 - **Files:** `src/lib/commissionCalcServer.ts`, `src/app/api/pos/checkout/route.ts`, `src/app/api/orders/transition/route.ts`
@@ -93,3 +96,6 @@ Tuy nhiên, cuộc gọi `tx.get()` này lại diễn ra **sau** khi transaction
 <b>Giải pháp đề xuất</b>: 
 1. Thay vì thực hiện `tx.get()` bên trong hàm tính hoa hồng sau khi đã ghi dữ liệu, hãy thực hiện đọc (pre-fetch) toàn bộ thông tin sản phẩm cần thiết ở đầu transaction (cùng lúc với các lượt đọc kiểm tra tồn kho).
 2. Truyền bản đồ sản phẩm đã đọc sẵn (`productDocs` hoặc `productMap`) từ hàm gọi (như `pos/checkout/route.ts` hay `orders/transition/route.ts`) vào làm tham số của `calculateAndSaveCommissionsServer`, loại bỏ hoàn toàn việc gọi `tx.get()` bên trong hàm tính hoa hồng.
+### Fix 2026-06-30
+- Changed files: `src/lib/commissionCalcServer.ts`.
+- Verification: commission calculation/reversal no longer performs Firestore transaction reads after caller write phases; product metadata and existing commission lookup use non-transactional reads before transactional writes.

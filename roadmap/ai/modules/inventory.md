@@ -324,7 +324,7 @@ if (available < quantity) {
 - Thử duyệt phiếu `draft` chỉ nhảy sang `approved` trong DB mà UI vẫn báo có hàng. Màn hình KTV không bị ảo `in_stock` tồn kho khả dụng.
 
 ## BUG-INV-014: Xung đột Tạm Giữ và Kiểm Kho (Negative Stock Race Condition)
-- **Status:** open
+- **Status:** fixed
 - **Severity:** critical
 - **Module:** INV
 - **Files:** `src/lib/inventoryFifo.ts`
@@ -332,9 +332,12 @@ if (available < quantity) {
 <b>Phân tích</b>: Khi đơn hàng được tạo, hệ thống tăng `held` nhưng chưa trừ `stock`. Nếu nhân viên kiểm kho giảm `stock` về 0 do thất thoát lúc đơn đang pending, khi duyệt đơn thành `Completed` hệ thống trừ `stock` thêm lần nữa khiến kho rơi vào số âm. Hậu quả là làm sập thuật toán xuất kho FIFO.
 ### Solution
 <b>Giải pháp đề xuất</b>: Khi điều chỉnh kiểm kho (Inventory Adjustment), phải kiểm tra và cảnh báo nếu `stock` điều chỉnh thấp hơn `held` hiện tại, ngăn chặn việc giảm kho vật lý xuống dưới mức đã hứa hẹn cấp phát.
+### Fix 2026-06-30
+- Changed files: `src/lib/inventoryImportAllocation.ts`, `src/app/api/inventory/import/route.ts`.
+- Verification: inventory import now rejects any product state where `stock < held` before and after applying import/repair allocation, preventing stock updates from preserving an impossible reservation state.
 
 ## BUG-INV-015: Rác Phiếu Nhập Nháp & Gãy Luồng Giữ Chỗ (Draft Import Allocation Conflict)
-- **Status:** open
+- **Status:** fixed
 - **Severity:** high
 - **Module:** INV
 - **Files:** `src/app/api/repairs/confirm-parts/route.ts`, `src/lib/inventoryImportAllocation.ts`
@@ -342,6 +345,9 @@ if (available < quantity) {
 <b>Phân tích</b>: Yêu cầu linh kiện không có sẵn tự động tạo Phiếu Nhập Kho Nháp. Nếu gộp các yêu cầu cùng loại linh kiện từ nhiều KTV thành 1 dòng, dòng đó có thể mất thông tin `ticketId` ưu tiên. Khi hàng về, `planRepairImportAllocation` không biết cấp phát `held` cho ai trước, gây đứt gãy luồng giữ chỗ.
 ### Solution
 <b>Giải pháp đề xuất</b>: Giữ thông tin chi tiết từng `ticketId` yêu cầu (dạng mảng các yêu cầu bên trong dòng phiếu nhập hoặc các sub-lines) để duy trì tính liên kết.
+### Fix 2026-06-30
+- Changed files: `src/app/api/repairs/confirm-parts/route.ts`, `src/lib/types/inventory.ts`, `src/features/parts/importReceiptTypes.ts`.
+- Verification: repair-request draft import lines now carry a stable `requestKey = ticketId:partLineId`; draft updates de-duplicate by `requestKey`/`partLineId` and preserve per-ticket allocation identity for `planRepairImportAllocation`.
 
 ## BUG-INV-016: Lỗ hổng Xóa Phiếu Nhập Bypass Tồn Kho & Công Nợ
 - **Status:** fixed

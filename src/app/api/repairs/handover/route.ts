@@ -75,6 +75,7 @@ export async function POST(request: NextRequest) {
             if (ticket.status === targetStatus) return { success: true };
 
             // Terminal Guard & Warranty Rules Config
+            let isCurrentTerminal = false;
             let isTargetTerminal = false;
             let warrantyRules: Record<string, unknown>[] = [];
             let serviceWarrantyMonths = 3;
@@ -85,7 +86,11 @@ export async function POST(request: NextRequest) {
                 const workflow = getConfiguredWorkflow(configData ?? {}, ticket.ticketType);
 
                 if (Array.isArray(workflow)) {
+                    const currentNode = workflow.find((n: { id?: string; isTerminal?: boolean }) => n.id === ticket.status);
                     const targetNode = workflow.find((n: { id?: string; isTerminal?: boolean }) => n.id === targetStatus);
+                    if (currentNode?.isTerminal) {
+                        isCurrentTerminal = true;
+                    }
                     if (targetNode?.isTerminal) {
                         isTargetTerminal = true;
                     }
@@ -98,6 +103,13 @@ export async function POST(request: NextRequest) {
 
             if (!isTargetTerminal && LEGACY_TERMINAL_STATUSES.includes(targetStatus)) {
                 isTargetTerminal = true;
+            }
+            if (!isCurrentTerminal && LEGACY_TERMINAL_STATUSES.includes(ticket.status)) {
+                isCurrentTerminal = true;
+            }
+
+            if (isCurrentTerminal) {
+                throw new Error(`Phieu sua chua da o trang thai ket thuc (${ticket.status}), khong the ban giao lai.`);
             }
 
             if (!isTargetTerminal) {

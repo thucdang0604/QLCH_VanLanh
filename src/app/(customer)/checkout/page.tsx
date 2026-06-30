@@ -97,10 +97,12 @@ export default function CheckoutPage() {
 
         setIsSubmitting(true);
         try {
+            const idempotencyKey = crypto.randomUUID();
             const res = await fetch('/api/checkout', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
+                    idempotencyKey,
                     name: name.trim(),
                     phone: phone.trim(),
                     note: note.trim(),

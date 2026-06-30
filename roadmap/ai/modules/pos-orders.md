@@ -293,7 +293,7 @@ if (item.sellingPrice < item.costPrice) {
 <b>Giải pháp đã áp dụng</b>: Chuyển target query sang field `customer.phone`. Đơn giản hóa query Firestore (chỉ lọc theo `customer.phone` để tránh yêu cầu index composite phức tạp) và thực hiện lọc trạng thái (`unpaid` / `partial`) cùng với sắp xếp theo ngày giảm dần trực tiếp trên bộ nhớ client (in-memory). Thêm fallbacks an toàn cho dữ liệu khách hàng từ nested object.
 
 ## BUG-ORD-008: Mất mã giảm giá (Voucher Burn) khi Hủy Đơn
-- **Status:** open
+- **Status:** fixed
 - **Severity:** high
 - **Module:** POS
 - **Files:** `src/app/api/orders/transition/route.ts`
@@ -301,9 +301,12 @@ if (item.sellingPrice < item.costPrice) {
 <b>Phân tích</b>: Khi đơn hàng bị hủy (chuyển sang trạng thái `cancelled`), hệ thống không có logic hoàn lại lượt sử dụng (`usedCount`) của mã giảm giá (Voucher) đã áp dụng. Điều này khiến khách hàng mất mã giảm giá vĩnh viễn dù giao dịch chưa thành công.
 ### Solution
 <b>Giải pháp đề xuất</b>: Trong `orders/transition/route.ts`, nếu `targetStatus` là `cancelled` (hoặc `refunded`) và đơn hàng có `appliedVoucherCode`, cần decrement `usedCount` của voucher đó trong cơ sở dữ liệu.
+### Fix 2026-06-30
+- Changed files: `src/app/api/orders/transition/route.ts`.
+- Verification: cancelling an order with `voucherCode` now decrements the matching voucher `usedCount` in the same transaction, clamped at zero.
 
 ## BUG-ORD-006: Xung đột Trạng thái Đơn hàng và Lỗi Cập nhật Kho (State Transition Bypass)
-- **Status:** open
+- **Status:** fixed
 - **Severity:** critical
 - **Module:** POS
 - **Files:** `src/app/api/orders/transition/route.ts`
@@ -311,9 +314,12 @@ if (item.sellingPrice < item.costPrice) {
 <b>Phân tích</b>: API chuyển trạng thái đơn hàng `/api/orders/transition` không kiểm tra tính hợp lệ của luồng chuyển trạng thái (State Transition Matrix). Nhân viên hoặc kẻ gian có thể chuyển đơn hàng từ `Completed` quay lại `Pending` (không thay đổi kho), sau đó duyệt từ `Pending` sang `Completed` lần nữa (khiến kho bị trừ đúp). Ngược lại, chuyển đơn từ `Cancelled` thẳng sang `Completed` sẽ làm `needsStockChange` bằng `false`, dẫn đến đơn hoàn tất mà không hề trừ kho vật lý.
 ### Solution
 <b>Giải pháp đề xuất</b>: Thiết lập ma trận trạng thái cho phép (ví dụ: `Pending` -> `Confirmed` -> `Shipping` -> `Completed`), chặn tất cả các luồng chuyển ngược không hợp lệ (như từ trạng thái terminal quay lại active) và ném lỗi trực tiếp trên API.
+### Fix 2026-06-30
+- Changed files: `src/app/api/orders/transition/route.ts`.
+- Verification: order transitions now use an allow-list matrix and reject terminal-to-active, reverse, and `Cancelled -> Completed` bypass paths before stock/customer/revenue writes.
 
 ## BUG-ORD-007: Thiếu Cơ chế Chống Gửi Trùng (Idempotency) ở Web Storefront Checkout
-- **Status:** open
+- **Status:** fixed
 - **Severity:** high
 - **Module:** POS
 - **Files:** `src/app/api/checkout/route.ts`
@@ -321,6 +327,9 @@ if (item.sellingPrice < item.costPrice) {
 <b>Phân tích</b>: API đặt hàng của Web Storefront không hỗ trợ `idempotencyKey` hay kiểm tra giao dịch trùng lặp. Nếu khách hàng nhấn nút "Đặt hàng" nhiều lần do mạng chậm hoặc trình duyệt tự động gửi lại request, hệ thống sẽ tạo nhiều đơn hàng giống hệt nhau, làm tăng lượng hàng tạm giữ (`held`) ảo và trừ đúp số lượt sử dụng voucher.
 ### Solution
 <b>Giải pháp đề xuất</b>: Sinh `idempotencyKey` tại client trước khi submit form và truyền lên API `/api/checkout`. Sử dụng bảng `operation_requests` trong Transaction để kiểm tra chống trùng lặp tương tự như luồng POS checkout.
+### Fix 2026-06-30
+- Changed files: `src/app/(customer)/checkout/page.tsx`, `src/app/api/checkout/route.ts`.
+- Verification: storefront checkout now sends an `idempotencyKey`; the API stores completed `web_checkout` requests in `operation_requests` and returns the original order id on duplicate submission.
 
 ## BUG-POS-012: POS Checkout Chấp nhận Giá Âm (Negative Price Exploit)
 - **Status:** fixed
@@ -336,7 +345,7 @@ if (item.sellingPrice < item.costPrice) {
 - Verification: POS checkout now validates every line `price >= 0` and `quantity > 0` before subtotal, stock, debt, repair, or order-payment calculations.
 
 ## BUG-POS-013: Race Condition khi Mở Ca Thu Ngân (Multiple Active Shifts)
-- **Status:** open
+- **Status:** fixed
 - **Severity:** high
 - **Module:** POS
 - **Files:** `src/app/api/pos/cashier-shift/route.ts`
@@ -344,6 +353,9 @@ if (item.sellingPrice < item.costPrice) {
 <b>Phân tích</b>: Khi thu ngân mở ca, API kiểm tra các ca đang mở bằng lệnh đọc truy vấn (query) bên trong Transaction: `tx.get(db.collection('cashier_shifts').where('status', '==', 'open').limit(1))`. Firebase Firestore Transactions không hỗ trợ khóa cấp truy vấn (Predicate Lock/Phantom Read protection) khi truy vấn rỗng. Nếu hai yêu cầu mở ca diễn ra cùng một mili-giây, cả hai giao dịch đều thấy `activeSnap.empty` là true và cùng chèn một bản ghi ca mới. Hậu quả là hệ thống có nhiều ca mở cùng lúc, làm hỏng luồng cập nhật tiền của `pos/checkout` (nó chỉ query limit 1 ca mở đầu tiên để cộng tiền).
 ### Solution
 <b>Giải pháp đề xuất</b>: Sử dụng mô hình Single-Document Lock. Tạo một tài liệu cấu hình duy nhất (ví dụ: `system_counters/active_cashier_shift`) lưu ID của ca đang mở. Khi mở ca, transaction sẽ `tx.get` tài liệu này, kiểm tra ID, nếu trống thì tạo ca mới và cập nhật ID vào tài liệu đó. Điều này đảm bảo tính độc quyền thông qua khóa tài liệu (Document Lock).
+### Fix 2026-06-30
+- Changed files: `src/app/api/pos/cashier-shift/route.ts`.
+- Verification: opening a cashier shift now uses the single document lock `system_counters/active_cashier_shift`; closing a shift clears the lock in the same transaction, with fallback support for legacy open shifts.
 
 ## BUG-ORD-008: Lỗ hổng Xóa & Sửa Đơn Hàng Bypass Luồng Hoàn Tiền/Trả Kho
 - **Status:** fixed

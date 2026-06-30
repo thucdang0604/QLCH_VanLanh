@@ -13,6 +13,9 @@ type CashierShiftData = FirebaseFirestore.DocumentData & {
     openedByName?: string;
 };
 
+const ACTIVE_SHIFT_LOCK_COLLECTION = 'system_counters';
+const ACTIVE_SHIFT_LOCK_ID = 'active_cashier_shift';
+
 function asAmount(value: unknown) {
     const amount = Math.round(Number(value) || 0);
     return Number.isFinite(amount) ? Math.max(0, amount) : 0;
@@ -88,15 +91,19 @@ export async function POST(request: NextRequest) {
         const db = getAdminDb();
 
         const result = await db.runTransaction(async (tx) => {
-            const activeQuery = db.collection('cashier_shifts')
-                .where('status', '==', 'open')
-                .limit(1);
+            const lockRef = db.collection(ACTIVE_SHIFT_LOCK_COLLECTION).doc(ACTIVE_SHIFT_LOCK_ID);
             const [activeSnap, userSnap] = await Promise.all([
-                tx.get(activeQuery),
+                tx.get(lockRef),
                 tx.get(db.collection('users').doc(caller.uid)),
             ]);
-            if (!activeSnap.empty) {
-                throw new Error('Đang có ca thu ngân mở. Vui lòng chốt ca hiện tại trước khi mở ca mới.');
+            const activeShiftId = typeof activeSnap.data()?.activeShiftId === 'string'
+                ? String(activeSnap.data()?.activeShiftId)
+                : '';
+            if (activeShiftId) {
+                const activeShiftSnap = await tx.get(db.collection('cashier_shifts').doc(activeShiftId));
+                if (activeShiftSnap.exists && activeShiftSnap.data()?.status === 'open') {
+                    throw new Error('Dang co ca thu ngan mo. Vui long chot ca hien tai truoc khi mo ca moi.');
+                }
             }
 
             const userData = userSnap.data();
@@ -119,6 +126,11 @@ export async function POST(request: NextRequest) {
                 openedAt: FieldValue.serverTimestamp(),
                 updatedAt: FieldValue.serverTimestamp(),
             });
+            tx.set(lockRef, {
+                activeShiftId: shiftRef.id,
+                openedBy: caller.uid,
+                updatedAt: FieldValue.serverTimestamp(),
+            }, { merge: true });
 
             return {
                 id: shiftRef.id,
@@ -140,7 +152,7 @@ export async function POST(request: NextRequest) {
     } catch (error: unknown) {
         console.error('Open cashier shift API error:', error);
         const message = error instanceof Error ? error.message : 'Internal server error';
-        const status = message.includes('Forbidden') ? 403 : message.includes('Đang có ca') ? 409 : 500;
+        const status = message.includes('Forbidden') ? 403 : message.includes('Ă„Âang cÄ‚Â³ ca') ? 409 : 500;
         return NextResponse.json({ error: message }, { status });
     }
 }
@@ -155,16 +167,30 @@ export async function PATCH(request: NextRequest) {
 
         const db = getAdminDb();
         const result = await db.runTransaction(async (tx) => {
-            const activeQuery = db.collection('cashier_shifts')
-                .where('status', '==', 'open')
-                .limit(1);
-            const [activeSnap, userSnap] = await Promise.all([
-                tx.get(activeQuery),
+            const lockRef = db.collection(ACTIVE_SHIFT_LOCK_COLLECTION).doc(ACTIVE_SHIFT_LOCK_ID);
+            const [lockSnap, userSnap] = await Promise.all([
+                tx.get(lockRef),
                 tx.get(db.collection('users').doc(caller.uid)),
             ]);
-            const activeDoc = activeSnap.docs[0];
+            const activeShiftId = typeof lockSnap.data()?.activeShiftId === 'string'
+                ? String(lockSnap.data()?.activeShiftId)
+                : '';
+            let activeDoc: FirebaseFirestore.DocumentSnapshot | null = null;
+            if (activeShiftId) {
+                const lockedShiftSnap = await tx.get(db.collection('cashier_shifts').doc(activeShiftId));
+                if (lockedShiftSnap.exists && lockedShiftSnap.data()?.status === 'open') {
+                    activeDoc = lockedShiftSnap;
+                }
+            }
             if (!activeDoc) {
-                throw new Error('Không có ca thu ngân đang mở.');
+                const activeQuery = db.collection('cashier_shifts')
+                    .where('status', '==', 'open')
+                    .limit(1);
+                const activeSnap = await tx.get(activeQuery);
+                activeDoc = activeSnap.docs[0] || null;
+            }
+            if (!activeDoc) {
+                throw new Error('Khong co ca thu ngan dang mo.');
             }
 
             const shiftData = activeDoc.data() as CashierShiftData;
@@ -188,6 +214,12 @@ export async function PATCH(request: NextRequest) {
                 closedAt: FieldValue.serverTimestamp(),
                 updatedAt: FieldValue.serverTimestamp(),
             });
+            tx.set(lockRef, {
+                activeShiftId: null,
+                closedShiftId: activeDoc.id,
+                closedBy: caller.uid,
+                updatedAt: FieldValue.serverTimestamp(),
+            }, { merge: true });
 
             return {
                 ...serializeShift(activeDoc.id, {

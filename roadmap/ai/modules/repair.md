@@ -240,7 +240,7 @@ UI hiển thị nút xóa cho mọi người có thể mở modal dù Firestore 
 Chỉ render nút xóa cho role admin, thêm guard trong handler và giữ rule delete admin-only.
 
 ## BUG-INV-009: Lỗi hiển thị tồn kho ảo khi trùng lặp ID
-- **Status:** open
+- **Status:** fixed
 - **Severity:** medium
 - **Module:** INV
 - **Files:** src/lib/inventory.ts
@@ -248,6 +248,9 @@ Chỉ render nút xóa cho role admin, thêm guard trong handler và giữ rule 
 <b>Phân tích</b>: Do trùng lặp Product ID trong kho, hàm tính tổng tồn bị đè key.
 ### Solution
 <b>Giải pháp</b>: Làm sạch dữ liệu đầu vào, nhóm theo SKU trước khi cộng dồn.
+### Fix 2026-06-30
+- Changed files: `src/app/admin/inventory/stock/page.tsx`.
+- Verification: roadmap path `src/lib/inventory.ts` is stale; the current stock view now groups products by `sku`/`productCode`/`barcode` before totals and falls back to document id only when no product code exists.
 
 ## BUG-REP-003: Sản phẩm ma (Custom ID Mapping) — By-Design
 - **Status:** fixed
@@ -388,7 +391,7 @@ transaction.update(productRef, { stock: increment(-qty), held: increment(-qty) }
 <b>Giải pháp đã áp dụng</b>: Xóa bỏ toàn bộ phần rác (dangling JSX) sau dòng đóng `}` của component cuối cùng. Đảm bảo cấu trúc file hợp lệ.
 
 ## BUG-REP-013: Rò rỉ Tồn kho Giữ chỗ (Held Stock Leak) khi Hủy Phiếu Sửa Chữa
-- **Status:** open
+- **Status:** fixed
 - **Severity:** critical
 - **Module:** REP
 - **Files:** `src/app/api/repairs/transition/route.ts`
@@ -396,6 +399,9 @@ transaction.update(productRef, { stock: increment(-qty), held: increment(-qty) }
 <b>Phân tích</b>: Khi phiếu sửa chữa chuyển sang trạng thái kết thúc không thành công (như `cancelled`), hệ thống không giải phóng số lượng tồn kho đã được giữ chỗ (`held`) cho các linh kiện trong phiếu. Điều này gây rò rỉ `held` vĩnh viễn, ngăn cản việc bán linh kiện đó cho khách hàng khác trừ khi chạy script rebuild.
 ### Solution
 <b>Giải pháp đề xuất</b>: Trong `repairs/transition/route.ts`, nếu trạng thái đích là trạng thái hủy (terminal + cancelled), duyệt qua danh sách linh kiện (`parts`) và giảm trừ `held` tương ứng với số lượng đang chiếm giữ.
+### Fix 2026-06-30
+- Changed files: `src/app/api/repairs/transition/route.ts`.
+- Verification: when a repair moves into a cancel/refund terminal status, reserved selected parts release product `held` and clear `reservedQuantity` in the same transaction.
 
 ## BUG-REP-014: Mất Hoa Hồng KTV (Lost Commission) khi Phiếu Sửa Chữa Thanh Toán Sau (Post-paid)
 - **Status:** fixed
@@ -413,7 +419,7 @@ transaction.update(productRef, { stock: increment(-qty), held: increment(-qty) }
 - Verification: POS repair-ticket payment now calls `calculateAndSaveCommissionsServer(..., 'repair', ...)` with paid server amount so KTV commission is created when post-paid repairs are collected through POS.
 
 ## BUG-REP-015: Lỗi Trừ Kho Đúp và Nhân Đôi Giao Dịch Khi Bàn Giao Nhiều Lần (Double Handover Vulnerability)
-- **Status:** open
+- **Status:** fixed
 - **Severity:** critical
 - **Module:** REP
 - **Files:** `src/app/api/repairs/handover/route.ts`
@@ -421,9 +427,12 @@ transaction.update(productRef, { stock: increment(-qty), held: increment(-qty) }
 <b>Phân tích</b>: API bàn giao `/api/repairs/handover` không kiểm tra xem phiếu sửa chữa đã ở trạng thái kết thúc (terminal status) hay chưa. Nó chỉ kiểm tra xem trạng thái đích `targetStatus` có phải là trạng thái kết thúc hay không. Điều này cho phép một phiếu đã kết thúc (ví dụ: `hoan_tat`) được bàn giao lại sang một trạng thái kết thúc khác (ví dụ: `da_tra_may`), dẫn đến việc hệ thống chạy lại toàn bộ logic trừ kho linh kiện lần 2, ghi đúp lịch sử kho (`inventory_logs`), nhân đôi doanh thu tích lũy CRM, nhân đôi giao dịch sổ nợ khách hàng (`customer_ledger`), tính thêm hoa hồng lần 2 cho nhân viên và nhân đôi doanh số trong `revenue_daily_aggregates`.
 ### Solution
 <b>Giải pháp đề xuất</b>: Thêm kiểm tra `isCurrentTerminal` của trạng thái hiện tại (`ticket.status`) tương tự như trong API `/api/repairs/transition`. Nếu trạng thái hiện tại của phiếu đã là terminal, chặn ngay lập tức và ném lỗi. (Bảo toàn nguyên tắc lũy đẳng của trạng thái terminal).
+### Fix 2026-06-30
+- Changed files: `src/app/api/repairs/handover/route.ts`.
+- Verification: handover now detects current workflow/legacy terminal statuses and rejects repeat terminal handover attempts before stock, ledger, commission, or revenue writes.
 
 ## BUG-REP-016: Lỗ hổng thao túng doanh thu sửa chữa qua paymentHistory âm
-- **Status:** open
+- **Status:** fixed
 - **Severity:** critical
 - **Module:** REP
 - **Files:** `src/app/api/repairs/create/route.ts`
@@ -431,3 +440,6 @@ transaction.update(productRef, { stock: increment(-qty), held: increment(-qty) }
 <b>Phân tích</b>: Khi tạo phiếu sửa chữa (Repair Ticket) qua API `/api/repairs/create/route.ts`, client được phép truyền vào mảng `paymentHistory`. Hệ thống tự động tính tổng doanh thu từ mảng này thông qua lệnh `reduce` (`sum + amount`). Tuy nhiên, không có validation nào ngăn cản việc truyền biến `amount` mang giá trị âm. Kẻ gian (hoặc nhân viên có quyền quản lý sửa chữa) có thể chủ đích gửi payload chứa `[{ amount: -5000000, type: "deposit" }]`. Điều này khiến biến `depositRevenue` trở thành số âm, dẫn tới việc gọi hàm `incrementRevenueAggregates(tx, db, { repairRevenue: -5000000 })`, trực tiếp làm giảm doanh thu sửa chữa trong báo cáo tài chính (`revenue_daily_aggregates`) mà hệ thống không hề nghi ngờ, tạo điều kiện cho hành vi rút ruột hoặc thao túng báo cáo doanh thu.
 ### Solution
 <b>Giải pháp đề xuất</b>: Bên trong vòng lặp hoặc reduce của `paymentHistory`, bổ sung kiểm tra bắt buộc `if (amount < 0) throw new Error('Số tiền trong lịch sử thanh toán không được nhỏ hơn 0.');`. Tương tự, cần kiểm tra tính hợp lệ của mọi khoản tiền được truyền từ client trong tất cả các module sửa chữa.
+### Fix 2026-06-30
+- Changed files: `src/app/api/repairs/create/route.ts`.
+- Verification: repair create now normalizes `paymentHistory`, rejects negative/non-finite amounts and invalid types, and computes deposit revenue only from validated entries.

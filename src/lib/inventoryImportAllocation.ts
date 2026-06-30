@@ -25,6 +25,12 @@ export type ProductImportState = {
     costPrice: number;
 };
 
+export type ProductStockReservationState = {
+    stock: number;
+    held: number;
+    label?: string;
+};
+
 function positiveInteger(value: unknown, label: string): number {
     const numberValue = Number(value);
     if (!Number.isInteger(numberValue) || numberValue <= 0) {
@@ -108,4 +114,13 @@ export function applyProductImport(
         held: current.held + heldQuantity,
         costPrice: Math.round(totalValue / stock) || 0,
     };
+}
+
+export function assertStockCoversHeld(state: ProductStockReservationState): void {
+    const stock = Number(state.stock) || 0;
+    const held = Number(state.held) || 0;
+    if (stock < held) {
+        const label = state.label ? ` "${state.label}"` : '';
+        throw new Error(`Ton kho${label} khong du de bao toan hang da giu cho (stock ${stock}, held ${held}).`);
+    }
 }
