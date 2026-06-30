@@ -6,7 +6,7 @@ import { Phone, Save, ShoppingCart, UserRound, Wrench } from 'lucide-react';
 import Modal from '@/components/admin/Modal';
 import { getAuthInstance } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
-import { storeChatWorkflowHandoff } from '@/lib/chatWorkflowHandoff';
+import { buildHandoffUrl } from '@/lib/chatWorkflowHandoff';
 import { toastError, toastSuccess, toastWarning } from '@/lib/toast';
 import type { ChatChannel } from '@/lib/chatChannels';
 
@@ -163,12 +163,13 @@ export default function ChatCustomerProfileModal({ isOpen, room, onClose }: Prop
         if (!room) return;
         const customer = await saveCustomer();
         if (!customer) return;
-        storeChatWorkflowHandoff({
+        // BUG-CHAT-001: pass handoff data via URL query params (tab-isolated)
+        const handoffUrl = buildHandoffUrl(path, {
             roomId: room.odId,
             customerName: customer.name,
             customerPhone: customer.phone,
         });
-        router.push(`${path}?source=chat`);
+        router.push(handoffUrl);
         onClose();
     };
 

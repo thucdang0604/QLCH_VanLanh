@@ -375,7 +375,7 @@ export default function POSPage() {
 
     useEffect(() => {
         if (chatPrefillApplied.current || searchParams.get('source') !== 'chat') return;
-        const handoff = consumeChatWorkflowHandoff();
+        const handoff = consumeChatWorkflowHandoff(searchParams);
         if (!handoff) return;
         setCustomerName(handoff.customerName);
         setCustomerPhone(handoff.customerPhone);

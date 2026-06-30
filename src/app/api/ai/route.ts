@@ -13,6 +13,26 @@ type RAGProduct = {
     [key: string]: unknown;
 };
 
+// ── BUG-CHAT-002: In-memory cache for RAG products (15 min TTL).
+// Prevents N×250 Firestore reads per minute from concurrent chat messages.
+let ragCache: { data: RAGProduct[]; expiry: number } | null = null;
+const RAG_CACHE_TTL_MS = 15 * 60 * 1000;
+
+async function getRAGProducts(): Promise<RAGProduct[]> {
+    if (ragCache && Date.now() < ragCache.expiry) {
+        return ragCache.data;
+    }
+    const snapshot = await getAdminDb()
+        .collection('products')
+        .where('status', '==', 'active')
+        .select('name', 'price', 'stock')
+        .limit(200)
+        .get();
+    const products = snapshot.docs.map(doc => doc.data() as RAGProduct);
+    ragCache = { data: products, expiry: Date.now() + RAG_CACHE_TTL_MS };
+    return products;
+}
+
 export async function POST(request: NextRequest) {
     const correlationId = request.headers.get('x-request-id') || crypto.randomUUID();
     try {
@@ -46,18 +66,9 @@ export async function POST(request: NextRequest) {
             const keywords = pLower.split(' ').filter((word: string) => word.length > 2);
 
             if (isAdminAvailable() && (pLower.includes('giá') || pLower.includes('bao nhiêu') || pLower.includes('thay') || pLower.includes('sửa') || pLower.includes('mua') || pLower.includes('bán') || pLower.includes('có') || pLower.includes('không') || keywords.length > 0)) {
-                const snapshot = await getAdminDb()
-                    .collection('products')
-                    .where('status', '==', 'active')
-                    .limit(250)
-                    .get();
+                const allProducts = await getRAGProducts();
 
-                if (!snapshot.empty) {
-                    const allProducts: RAGProduct[] = [];
-                    snapshot.forEach((doc) => {
-                        allProducts.push(doc.data() as RAGProduct);
-                    });
-
+                if (allProducts.length > 0) {
                     const scoredProducts = allProducts.map((product) => {
                         let score = 0;
                         const productNameLower = (product.name || '').toLowerCase();
