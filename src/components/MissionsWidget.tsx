@@ -119,6 +119,8 @@ export default function MissionsWidget() {
     const [claimInitiated, setClaimInitiated] = useState(false);
     const [secondsLeft, setSecondsLeft] = useState(0);
     const [recaptchaResetKey, setRecaptchaResetKey] = useState(0);
+    const [isDismissed, setIsDismissed] = useState(false);
+    const [mounted, setMounted] = useState(false);
 
     const activeBountyMissions = useMemo(
         () => config.bountyMissions?.filter((mission) => mission.isActive) || [],
@@ -126,6 +128,11 @@ export default function MissionsWidget() {
     );
 
     useEffect(() => {
+        setMounted(true);
+        if (sessionStorage.getItem('bounty_dismissed') === 'true') {
+            setIsDismissed(true);
+        }
+
         const savedCode = localStorage.getItem('bounty_code');
         const savedPhone = localStorage.getItem('bounty_phone');
         const token = localStorage.getItem('bounty_token');
@@ -448,15 +455,30 @@ export default function MissionsWidget() {
         }
     }, [missions, step, activeBountyMissions, claimInitiated, claimVoucher]);
 
+    if (!mounted || isDismissed) return null;
+
     if (!isOpen) {
         return (
-            <button
-                onClick={() => setIsOpen(true)}
-                className="fixed bottom-28 left-6 z-50 bg-rose-600 text-white p-4 rounded-full shadow-xl hover:bg-rose-700 transition-transform hover:scale-110 flex items-center justify-center animate-bounce md:bottom-6"
-                title="Nhận quà tặng"
-            >
-                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v13m0-13V6a2 2 0 112 2h-2zm0 0V5.5A2.5 2.5 0 109.5 8H12zm-7 4h14M5 12a2 2 0 110-4h14a2 2 0 110 4M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7"></path></svg>
-            </button>
+            <div className="fixed bottom-28 left-6 z-50 md:bottom-6 animate-bounce group">
+                <button
+                    onClick={() => setIsOpen(true)}
+                    className="bg-rose-600 text-white p-4 rounded-full shadow-xl hover:bg-rose-700 transition-transform hover:scale-110 flex items-center justify-center relative"
+                    title="Nhận quà tặng"
+                >
+                    <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v13m0-13V6a2 2 0 112 2h-2zm0 0V5.5A2.5 2.5 0 109.5 8H12zm-7 4h14M5 12a2 2 0 110-4h14a2 2 0 110 4M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7"></path></svg>
+                </button>
+                <button
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        setIsDismissed(true);
+                        sessionStorage.setItem('bounty_dismissed', 'true');
+                    }}
+                    className="absolute -top-1 -right-1 bg-white text-gray-500 hover:text-gray-800 p-1.5 rounded-full shadow-md border border-gray-200 z-10 opacity-80 hover:opacity-100 transition-opacity duration-200"
+                    title="Ẩn"
+                >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+            </div>
         );
     }
 
