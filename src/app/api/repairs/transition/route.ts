@@ -1,11 +1,11 @@
 import { NextResponse, NextRequest } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requirePermission } from '@/lib/apiAuth';
-import { FieldValue } from 'firebase-admin/firestore';
+import { FieldValue, type DocumentReference } from 'firebase-admin/firestore';
 import type { RepairTicket } from '@/lib/types';
 import { loadRepairWorkflow, requireWorkflowNode, workflowNodeHasFeature } from '@/lib/repairWorkflowServer';
 import { isChecklistComplete } from '@/lib/workflowFeatures';
-import { isPendingRepairPart } from '@/lib/repairStatus';
+import { REPAIR_STATUS, isPendingRepairPart, isSelectedRepairPart } from '@/lib/repairStatus';
 import { isRepairManager } from '@/lib/repairAccess';
 
 interface RepairTransitionRequest {
@@ -16,6 +16,19 @@ interface RepairTransitionRequest {
     idempotencyKey?: string;
     source?: 'repairs' | 'technician';
 }
+
+type RepairPartLine = NonNullable<RepairTicket['parts']>[number];
+
+const CANCEL_TERMINAL_STATUSES = new Set([
+    REPAIR_STATUS.REFUND,
+    'cancelled',
+    'canceled',
+    'huy',
+    'da_huy',
+    'tu_choi',
+    'bh_tu_choi',
+    'bh_refund',
+]);
 
 function normalizeRepairNote(value: string) {
     return value
@@ -30,6 +43,17 @@ function hasExistingRepairNote(existingNotes: string | undefined, note: string) 
     return (existingNotes || '')
         .split(/\r?\n/)
         .some(line => normalizeRepairNote(line) === normalizedNote);
+}
+
+function isCancelTerminalStatus(status: string) {
+    return CANCEL_TERMINAL_STATUSES.has(status);
+}
+
+function getReservedReleaseQuantity(part: RepairPartLine) {
+    const selectedQuantity = isSelectedRepairPart(part) ? Math.max(0, Math.floor(Number(part.quantity) || 0)) : 0;
+    const reservedQuantity = Math.max(0, Math.floor(Number(part.reservedQuantity) || 0));
+    if (reservedQuantity > 0) return reservedQuantity;
+    return selectedQuantity;
 }
 
 export async function POST(request: NextRequest) {
@@ -84,6 +108,7 @@ export async function POST(request: NextRequest) {
             const targetNode = requireWorkflowNode(workflow, targetStatus);
             const isCurrentTerminal = !!currentNode.isTerminal;
             const isTargetTerminal = !!targetNode.isTerminal;
+            const isTargetCancelTerminal = isTargetTerminal && isCancelTerminalStatus(targetStatus);
             const isAllowed = currentNode.allowedNext?.includes(targetStatus) ?? false;
             const requireChecklist = workflowNodeHasFeature(currentNode, 'requireChecklist');
             const requirePartsReady = workflowNodeHasFeature(currentNode, 'requirePartsReady');
@@ -98,7 +123,7 @@ export async function POST(request: NextRequest) {
                 throw new Error(`Phiếu đã ở trạng thái kết thúc (${ticket.status}), không thể thay đổi.`);
             }
 
-            if (isTargetTerminal) {
+            if (isTargetTerminal && !isTargetCancelTerminal) {
                 throw new Error(`Trạng thái ${targetStatus} là trạng thái kết thúc/bàn giao. Vui lòng dùng chức năng Bàn giao (handover).`);
             }
 
@@ -142,6 +167,31 @@ export async function POST(request: NextRequest) {
 
             if (requireAssignedTechnician && !ticket.staff?.assignedTechnician) {
                 throw new Error('Trạng thái này yêu cầu phải phân công Kỹ thuật viên phụ trách. Vui lòng gán KTV trước khi chuyển trạng thái.');
+            }
+
+            const shouldReleaseHeldParts = isTargetCancelTerminal;
+            const releaseParts = shouldReleaseHeldParts
+                ? (ticket.parts || [])
+                    .map((part, index) => ({
+                        part,
+                        index,
+                        releaseQuantity: getReservedReleaseQuantity(part),
+                    }))
+                    .filter(entry => entry.part.productId && entry.releaseQuantity > 0)
+                : [];
+            const releaseProductDocs = new Map<string, { ref: DocumentReference; held: number }>();
+            for (const entry of releaseParts) {
+                const productId = entry.part.productId;
+                if (!productId || releaseProductDocs.has(productId)) continue;
+                const productRef = db.collection('products').doc(productId);
+                const productSnap = await tx.get(productRef);
+                if (!productSnap.exists) {
+                    throw new Error(`Linh kien "${entry.part.productName}" khong con ton tai.`);
+                }
+                releaseProductDocs.set(productId, {
+                    ref: productRef,
+                    held: Math.max(0, Number(productSnap.data()?.held) || 0),
+                });
             }
 
             // Calculate duration
@@ -200,6 +250,32 @@ export async function POST(request: NextRequest) {
                             : technicianNoteText
                     };
                 }
+            }
+
+            if (releaseParts.length > 0) {
+                const releaseByProduct = new Map<string, number>();
+                const updatedParts = [...(ticket.parts || [])];
+                for (const entry of releaseParts) {
+                    const productId = entry.part.productId;
+                    if (!productId) continue;
+                    releaseByProduct.set(productId, (releaseByProduct.get(productId) || 0) + entry.releaseQuantity);
+                    updatedParts[entry.index] = {
+                        ...updatedParts[entry.index],
+                        reservedQuantity: 0,
+                    };
+                }
+
+                for (const [productId, releaseQuantity] of releaseByProduct.entries()) {
+                    const productDoc = releaseProductDocs.get(productId);
+                    if (!productDoc) continue;
+                    tx.update(productDoc.ref, {
+                        held: Math.max(0, productDoc.held - releaseQuantity),
+                        updatedAt: FieldValue.serverTimestamp(),
+                    });
+                }
+
+                updateData.parts = updatedParts;
+                updateData.partsReleasedAt = FieldValue.serverTimestamp();
             }
 
             tx.update(ticketRef, updateData);

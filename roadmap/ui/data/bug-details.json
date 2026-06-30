@@ -4,7 +4,7 @@
   "stats": {
     "completionPercent": 98,
     "openP0": 0,
-    "openBugs": 1
+    "openBugs": 4
   },
   "bugs": [
     {
@@ -403,7 +403,7 @@
       "title": "Gọi tính hoa hồng ngoài Transaction",
       "workflowId": "pos-orders",
       "affectedFiles": [],
-      "description": "<b>Hiện tượng</b>: Hàm <code>calculateAndSaveCommissions</code> được gọi ngoài transaction của đơn hàng (dòng 360).<br><b>Hệ lụy</b>: Nếu transaction thành công nhưng hàm tính hoa hồng lỗi, nhân viên không nhận được hoa hồng.<br><br>✅ <b>Đã xác minh ngày 17.05.2026</b>: Cùng pattern với REP-001. <code>commissionUtils.ts</code> có guard: <code>status !== 'Completed'</code> → skip, và idempotency check. Commission chạy fire-and-forget với <code>.catch(console.error)</code>. Thiết kế chấp nhận được vì commission có cơ chế tự bảo vệ.",
+      "description": "<b>Hiện tượng</b>: Hàm <code>calculateAndSaveCommissions</code> được gọi ngoài transaction của đơn hàng (dòng 360).<br><b>Hệ lụy</b>: Nếu transaction thành công nhưng hàm tính hoa hồng lỗi, nhân viên không nhận được hoa hồng.<br><br>✅ <b>Đã xác minh ngày 17.05.2026</b>: Cùng pattern with REP-001. <code>commissionUtils.ts</code> có guard: <code>status !== 'Completed'</code> → skip, và idempotency check. Commission chạy fire-and-forget với <code>.catch(console.error)</code>. Thiết kế chấp nhận được vì commission có cơ chế tự bảo vệ.",
       "cause": "<b>Phân tích</b>: Commission logic tách rời khỏi transaction nhưng có cơ chế bảo vệ riêng.",
       "solution": "<b>Giải pháp đã áp dụng</b>: Giữ commission ngoài Tx (thiết kế chấp nhận được). Guard <code>status === 'Completed'</code> + idempotency đã có sẵn.",
       "code": "// ✅ Fire-and-forget pattern (pos/page.tsx dòng 358-364)\ncalculateAndSaveCommissions(staff, 'order', orderData).catch(console.error);\n// commissionUtils.ts đã có guard:\nif (orderStatus !== 'Completed') return; // Skip",
@@ -798,6 +798,57 @@
       "verificationNotes": "Source verified 2026-06-13: package.json không còn tham chiếu file thiếu; JSON parse hợp lệ.",
       "discoveredAt": "2026-05-23",
       "fixedAt": "2026-06-13"
+    },
+    {
+      "id": "BUG-SEC-002",
+      "module": "Security",
+      "severity": "critical",
+      "status": "fixed",
+      "workflowId": "system-content",
+      "title": "Lỗ hổng Ghi Dữ liệu Không kiểm soát (DoS & Chi phí)",
+      "affectedFiles": [
+        "firestore.rules"
+      ],
+      "symptom": "Bất kỳ ai cũng có thể ghi dữ liệu tùy ý vào /appointments và /subscribers, gây tăng chi phí và rác database.",
+      "description": "Rules cho /appointments và /subscribers đang để allow create: if true mà không có validate schema hay data size.",
+      "cause": "Thiếu validation rules cho các public collections.",
+      "solution": "Thêm schema validation: chỉ allow các field cho phép, giới hạn string length, dùng request.time.",
+      "verificationNotes": "Fixed 2026-06-30: firestore.rules now validates public /appointments and /subscribers creates with key whitelists, string length limits, fixed status values, and request.time timestamps.",
+      "discoveredAt": "2026-06-29",
+      "fixedAt": "2026-06-30"
+    },
+    {
+      "id": "BUG-SEC-003",
+      "module": "Security",
+      "severity": "high",
+      "status": "open",
+      "workflowId": "pos-orders",
+      "title": "Rủi ro Data Loss và sai số doanh thu do Xóa Đơn Hàng",
+      "affectedFiles": [
+        "firestore.rules",
+        "src/app/admin/orders/page.tsx"
+      ],
+      "symptom": "Nhân viên có thể xóa thẳng tài liệu Order, làm mất lịch sử doanh thu và tồn kho không được khôi phục.",
+      "description": "Lỗi thiết kế cho phép staff xóa (delete) Order thay vì chỉ hủy (cancel) bằng soft-delete.",
+      "cause": "firestore.rules cho phép delete order với quyền manage_orders.",
+      "solution": "Đổi sang Soft Delete (chuyển status thành cancelled) hoặc chặn quyền delete ở mức Firestore Rules.",
+      "discoveredAt": "2026-06-29"
+    },
+    {
+      "id": "BUG-CHAT-002",
+      "module": "Chat",
+      "severity": "medium",
+      "status": "open",
+      "workflowId": "system-content",
+      "title": "Rò rỉ ID Handoff qua sessionStorage",
+      "affectedFiles": [
+        "src/lib/chatWorkflowHandoff.ts"
+      ],
+      "symptom": "Khi dùng webview in-app của Zalo hoặc Facebook, PII của khách có thể bị lộ nếu sessionStorage bị cross-origin truy cập sai lệch.",
+      "description": "Sử dụng sessionStorage để truyền handoff ID giữa chat và các modules nghiệp vụ (POS, Repair).",
+      "cause": "Truyền dữ liệu nhạy cảm qua Web Storage có thể rủi ro trong một số môi trường embedded.",
+      "solution": "Truyền handoff ID qua query parameter (URL ?handoff=roomId) thay vì sessionStorage.",
+      "discoveredAt": "2026-06-29"
     }
   ]
 }

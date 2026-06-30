@@ -36,6 +36,7 @@ type RequestedReceiptItem = {
     quality: string;
     importPrice: number;
     ticketId: string;
+    requestKey: string;
 };
 
 function documentTimestampValue(): FirestoreDateValue {
@@ -235,7 +236,8 @@ export async function POST(request: NextRequest) {
                         quantity,
                         quality,
                         importPrice: 0,
-                        ticketId: ticketId
+                        ticketId,
+                        requestKey: `${ticketId}:${partLineId}`
                     });
                     // Note: We don't hold stock for requested parts
 
@@ -408,10 +410,17 @@ export async function POST(request: NextRequest) {
                     throw new Error('Khong the tao ma phieu nhap tu dong.');
                 }
 
+                const newRequestKeys = new Set(newRequestedItems.map((item) => item.requestKey));
+                const newPartLineIds = new Set(newRequestedItems.map((item) => item.partLineId));
                 draftData.items = [
                     ...(draftData.items || []).filter((item) => {
                         const partLineId = typeof item.partLineId === 'string' ? item.partLineId : '';
-                        return !partLineIdsToUnlink.has(partLineId);
+                        const requestKey = typeof item.requestKey === 'string'
+                            ? item.requestKey
+                            : `${typeof item.ticketId === 'string' ? item.ticketId : ''}:${partLineId}`;
+                        return !partLineIdsToUnlink.has(partLineId)
+                            && !newRequestKeys.has(requestKey)
+                            && !newPartLineIds.has(partLineId);
                     }),
                     ...newRequestedItems,
                 ];

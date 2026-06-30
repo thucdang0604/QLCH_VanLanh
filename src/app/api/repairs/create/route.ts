@@ -7,6 +7,7 @@ import { Timestamp } from 'firebase-admin/firestore';
 import { isTechnicianUser } from '@/lib/repairAccess';
 import { incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 import { reserveSequentialDocumentId } from '@/lib/serverDocumentIds';
+import type { PaymentHistoryEntry } from '@/lib/types';
 
 type CreateRepairBody = Record<string, unknown> & {
     ticketType?: 'repair' | 'warranty';
@@ -19,6 +20,35 @@ function parseClientTimestamp(value: unknown): Timestamp | null {
     const raw = value as { seconds?: unknown; nanoseconds?: unknown };
     if (typeof raw.seconds !== 'number') return null;
     return new Timestamp(raw.seconds, typeof raw.nanoseconds === 'number' ? raw.nanoseconds : 0);
+}
+
+function normalizePaymentHistory(value: unknown): PaymentHistoryEntry[] | undefined {
+    if (value === undefined) return undefined;
+    if (!Array.isArray(value)) {
+        throw new Error('Lich su thanh toan khong hop le.');
+    }
+
+    return value.map((entry, index) => {
+        if (!entry || typeof entry !== 'object') {
+            throw new Error(`Dong thanh toan #${index + 1} khong hop le.`);
+        }
+        const data = entry as Record<string, unknown>;
+        const amount = typeof data.amount === 'number' ? data.amount : Number(data.amount);
+        if (!Number.isFinite(amount) || amount < 0) {
+            throw new Error(`So tien thanh toan #${index + 1} khong hop le.`);
+        }
+        const type = typeof data.type === 'string' && data.type.trim()
+            ? data.type
+            : 'payment';
+        if (!['deposit', 'payment', 'full', 'additional', 'refund', 'debt_payment'].includes(type)) {
+            throw new Error(`Loai thanh toan #${index + 1} khong hop le.`);
+        }
+        return {
+            ...data,
+            type,
+            amount,
+        } as PaymentHistoryEntry;
+    });
 }
 
 export async function POST(request: NextRequest) {
@@ -56,6 +86,7 @@ export async function POST(request: NextRequest) {
             }
 
             const estimatedReturnAt = parseClientTimestamp(body.timing?.estimatedReturnAt);
+            const paymentHistory = normalizePaymentHistory(body.paymentHistory);
             const safeBody = { ...body };
             delete safeBody.createdAt;
             delete safeBody.updatedAt;
@@ -63,6 +94,10 @@ export async function POST(request: NextRequest) {
             delete safeBody.statusTimeline;
             delete safeBody.version;
             delete safeBody.pendingTechnicianTransfer;
+            delete safeBody.paymentHistory;
+            if (paymentHistory) {
+                safeBody.paymentHistory = paymentHistory;
+            }
 
             // Ép trạng thái về entry node
             const finalData = {
@@ -102,12 +137,9 @@ export async function POST(request: NextRequest) {
             const newTicketRef = ticketAllocation.ref;
             ticketAllocation.commitCounter();
             tx.set(newTicketRef, finalData);
-            if (body.ticketType !== 'warranty' && Array.isArray(body.paymentHistory)) {
-                const depositRevenue = body.paymentHistory.reduce((sum, entry) => {
-                    if (!entry || typeof entry !== 'object') return sum;
-                    const data = entry as { amount?: unknown; type?: unknown };
-                    const amount = Number(data.amount) || 0;
-                    return data.type === 'refund' ? sum - amount : sum + amount;
+            if (body.ticketType !== 'warranty' && paymentHistory) {
+                const depositRevenue = paymentHistory.reduce((sum, entry) => {
+                    return entry.type === 'refund' ? sum - entry.amount : sum + entry.amount;
                 }, 0);
                 if (depositRevenue !== 0) {
                     incrementRevenueAggregates(tx, db, { repairRevenue: depositRevenue });

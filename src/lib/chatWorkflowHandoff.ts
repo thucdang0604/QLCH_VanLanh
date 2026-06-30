@@ -4,31 +4,39 @@ export interface ChatWorkflowHandoff {
   customerPhone: string;
 }
 
-const STORAGE_KEY = 'vanlanh_chat_workflow_handoff';
-
-export function storeChatWorkflowHandoff(input: ChatWorkflowHandoff): void {
-  if (typeof window === 'undefined') return;
-  sessionStorage.setItem(STORAGE_KEY, JSON.stringify(input));
+/**
+ * Build a handoff URL with query params instead of sessionStorage.
+ * Each tab navigates to its own URL, so data is tab-isolated (BUG-CHAT-001).
+ */
+export function buildHandoffUrl(
+  basePath: '/admin/repairs' | '/admin/pos',
+  input: ChatWorkflowHandoff,
+): string {
+  const params = new URLSearchParams({
+    source: 'chat',
+    handoffRoom: input.roomId.slice(0, 220),
+    handoffName: input.customerName.trim().slice(0, 100),
+    handoffPhone: input.customerPhone.replace(/[^0-9]/g, '').slice(0, 15),
+  });
+  return `${basePath}?${params.toString()}`;
 }
 
-export function consumeChatWorkflowHandoff(): ChatWorkflowHandoff | null {
-  if (typeof window === 'undefined') return null;
+/**
+ * Read handoff data from URL search params (one-shot: returns null if absent).
+ * Replaces the old sessionStorage-based consumeChatWorkflowHandoff().
+ */
+export function consumeChatWorkflowHandoff(
+  searchParams: URLSearchParams,
+): ChatWorkflowHandoff | null {
+  const roomId = searchParams.get('handoffRoom');
+  const customerName = searchParams.get('handoffName') || '';
+  const customerPhone = searchParams.get('handoffPhone') || '';
 
-  const raw = sessionStorage.getItem(STORAGE_KEY);
-  sessionStorage.removeItem(STORAGE_KEY);
-  if (!raw) return null;
+  if (!roomId || (!customerName && !customerPhone)) return null;
 
-  try {
-    const value = JSON.parse(raw) as Partial<ChatWorkflowHandoff>;
-    const roomId = typeof value.roomId === 'string' ? value.roomId.slice(0, 220) : '';
-    const customerName = typeof value.customerName === 'string' ? value.customerName.trim().slice(0, 100) : '';
-    const customerPhone = typeof value.customerPhone === 'string'
-      ? value.customerPhone.replace(/[^0-9]/g, '').slice(0, 15)
-      : '';
-
-    if (!roomId || (!customerName && !customerPhone)) return null;
-    return { roomId, customerName, customerPhone };
-  } catch {
-    return null;
-  }
+  return {
+    roomId: roomId.slice(0, 220),
+    customerName: customerName.trim().slice(0, 100),
+    customerPhone: customerPhone.replace(/[^0-9]/g, '').slice(0, 15),
+  };
 }

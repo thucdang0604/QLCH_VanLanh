@@ -39,6 +39,14 @@ service cloud.firestore {
       return hasPermission('view_revenue');
     }
 
+    function productStockCoversHeld() {
+      return (!('stock' in request.resource.data) || request.resource.data.stock is number)
+        && (!('held' in request.resource.data) || request.resource.data.held is number)
+        && (!('stock' in request.resource.data)
+          || !('held' in request.resource.data)
+          || request.resource.data.stock >= request.resource.data.held);
+    }
+
     // Helper: Owner
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
@@ -47,9 +55,12 @@ service cloud.firestore {
     // Products - public read, catalog maintenance for product and inventory workflows
     match /products/{productId} {
       allow read: if true;
-      allow create: if hasPermission('manage_products') || hasPermission('manage_inventory')
-        || (hasPermission('manage_repairs') && request.resource.data.isProposed == true && request.resource.data.stock == 0);
-      allow update, delete: if hasPermission('manage_products') || hasPermission('manage_inventory');
+      allow create: if productStockCoversHeld()
+        && (hasPermission('manage_products') || hasPermission('manage_inventory')
+          || (hasPermission('manage_repairs') && request.resource.data.isProposed == true && request.resource.data.stock == 0));
+      allow update: if (hasPermission('manage_products') || hasPermission('manage_inventory'))
+        && productStockCoversHeld();
+      allow delete: if hasPermission('manage_products') || hasPermission('manage_inventory');
     }
 
     // Unique product-code claims used by QR, barcode and SKU flows
@@ -132,7 +143,10 @@ service cloud.firestore {
     // Customers
     match /customers/{phone} {
       allow read: if canManageCustomerData();
-      allow create, update: if canManageCustomerData() && request.resource.data.phone == phone;
+      allow create: if canManageCustomerData() && request.resource.data.phone == phone;
+      allow update: if canManageCustomerData()
+        && request.resource.data.phone == phone
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['totalSpent', 'totalOrders', 'totalRepairs', 'totalAppointments', 'missions']);
       allow delete: if isAdmin();
     }
 
@@ -141,13 +155,13 @@ service cloud.firestore {
       allow read: if hasPermission('manage_orders') || canViewRevenueSources();
       allow create: if false;
       allow update: if hasPermission('manage_orders')
-        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'assignedSellerId', 'assignedSellerName', 'assignedSellerAt', 'assignedBy']);
-      allow delete: if hasPermission('manage_orders');
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'assignedSellerId', 'assignedSellerName', 'assignedSellerAt', 'assignedBy', 'items', 'total_amount', 'subtotal_amount', 'discount_amount', 'shipping_fee', 'voucherCode', 'voucherDiscount']);
+      allow delete: if false;
     }
     
     // Appointments
     match /appointments/{appointmentId} {
-      allow create: if true; // Public can create appointments
+      allow create: if false;
       allow read: if hasPermission('manage_orders');
       allow update, delete: if hasPermission('manage_orders');
     }
@@ -183,7 +197,18 @@ service cloud.firestore {
 
     // Subscribers
     match /subscribers/{subscriberId} {
-      allow create: if true;
+      function isValidPublicSubscriberCreate() {
+        return request.resource.data.status == 'active'
+          && request.resource.data.subscribedAt == request.time
+          && request.resource.data.keys().hasAll(['email', 'subscribedAt', 'status'])
+          && request.resource.data.keys().hasOnly(['email', 'subscribedAt', 'status'])
+          && request.resource.data.email is string
+          && request.resource.data.email.size() >= 5
+          && request.resource.data.email.size() <= 254
+          && request.resource.data.email.matches('^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$');
+      }
+
+      allow create: if isValidPublicSubscriberCreate();
       allow read, update, delete: if isAdmin();
     }
 
@@ -192,7 +217,9 @@ service cloud.firestore {
     // Inventory
     match /import_receipts/{receiptId} {
       allow read: if hasPermission('manage_inventory') || canViewRevenueSources();
-      allow write: if hasPermission('manage_inventory');
+      allow create: if hasPermission('manage_inventory');
+      allow update: if hasPermission('manage_inventory') && resource.data.status != 'completed';
+      allow delete: if hasPermission('manage_inventory') && resource.data.status != 'completed';
     }
     match /inventory_logs/{logId} {
       allow read, write: if hasPermission('manage_inventory');
@@ -248,13 +275,13 @@ service cloud.firestore {
     // Vouchers (Mã giảm giá) — public read để storefront validate mã
     // usedCount chỉ được tăng qua Admin SDK (checkout API server-side)
     match /vouchers/{voucherId} {
-      allow read: if true;
+      allow read: if hasPermission('manage_discounts');
       allow create, update, delete: if hasPermission('manage_discounts');
     }
 
     // Customer Reviews — public create ép pending, whitelist fields, validate types
     match /reviews/{reviewId} {
-      allow create: if true
+      allow create: if false
         && request.resource.data.status == 'pending'
         && request.resource.data.createdAt == request.time
         && request.resource.data.keys().hasAll(['customerName', 'phone', 'rating', 'content', 'status', 'createdAt'])
@@ -280,7 +307,7 @@ service cloud.firestore {
 
     // Product Reviews — public create ép pending, whitelist fields
     match /product_reviews/{reviewId} {
-      allow create: if true
+      allow create: if false
         && request.resource.data.status == 'pending'
         && request.resource.data.createdAt == request.time
         && request.resource.data.keys().hasAll(['productId', 'customerName', 'rating', 'content', 'status', 'createdAt'])
@@ -302,7 +329,7 @@ service cloud.firestore {
 
     // Article Comments — public create ép pending, whitelist fields
     match /article_comments/{commentId} {
-      allow create: if true
+      allow create: if false
         && request.resource.data.status == 'pending'
         && request.resource.data.createdAt == request.time
         && request.resource.data.keys().hasAll(['articleId', 'rating', 'name', 'content', 'status', 'createdAt'])

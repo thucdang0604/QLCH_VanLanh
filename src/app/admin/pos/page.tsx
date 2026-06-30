@@ -28,6 +28,7 @@ import { PRODUCT_STATUS, isProductSellable } from '@/lib/productLifecycle';
 import { generateSearchKeywords } from '@/lib/utils';
 import { PosCartPanel } from '@/features/pos/PosCartPanel';
 import type { AppliedVoucher, CartItem, DiscountDetail, LastOrderData, OrderLineItem, PayableOrderInfo, RepairTicketInfo, VoucherStatus } from '@/features/pos/posTypes';
+import CurrencyInput from '@/components/admin/CurrencyInput';
 
 type BarcodeDetectionResult = { rawValue?: string };
 type BrowserBarcodeDetector = {
@@ -42,8 +43,6 @@ const CAMERA_BARCODE_FORMATS = ['qr_code', 'code_128'];
 const POS_DEFAULT_PRODUCT_LIMIT = 120;
 const POS_SEARCH_PRODUCT_LIMIT = 60;
 const POS_LEGACY_SCAN_FALLBACK_LIMIT = 500;
-const POS_OPENING_CASH_KEY = 'qlch-pos-opening-cash-v1';
-const CASH_DENOMINATIONS = [500000, 200000, 100000, 50000, 20000, 10000, 5000, 2000, 1000] as const;
 type PosProduct = Product & { id: string };
 type PosTab = 'sales' | 'cashier';
 
@@ -208,6 +207,21 @@ interface BankConfig {
     accountName?: string;
 }
 
+interface CashierShiftView {
+    id: string;
+    status: 'open' | 'closed' | string;
+    openingCashAmount: number;
+    openingBankAmount: number;
+    cashSalesAmount: number;
+    bankSalesAmount: number;
+    otherSalesAmount?: number;
+    expectedCashAmount: number;
+    expectedBankAmount: number;
+    openedByName?: string;
+    openedAt?: string | null;
+    closedAt?: string | null;
+}
+
 export default function POSPage() {
     const { config } = useConfig();
     const searchParams = useSearchParams();
@@ -250,10 +264,11 @@ export default function POSPage() {
     const [showProductModal, setShowProductModal] = useState(false);
     const [bankConfig, setBankConfig] = useState<BankConfig | null>(null);
     const [posTab, setPosTab] = useState<PosTab>('sales');
+    const [cashierShift, setCashierShift] = useState<CashierShiftView | null>(null);
+    const [cashierLoading, setCashierLoading] = useState(true);
+    const [cashierSaving, setCashierSaving] = useState(false);
+    const [openingCashAmount, setOpeningCashAmount] = useState(0);
     const [openingBankAmount, setOpeningBankAmount] = useState(0);
-    const [openingCashCounts, setOpeningCashCounts] = useState<Record<number, number>>(() => (
-        Object.fromEntries(CASH_DENOMINATIONS.map((amount) => [amount, 0])) as Record<number, number>
-    ));
 
     useEffect(() => {
         async function fetchBankConfig() {
@@ -270,34 +285,87 @@ export default function POSPage() {
         fetchBankConfig();
     }, []);
 
-    useEffect(() => {
+    const loadCashierShift = useCallback(async () => {
+        setCashierLoading(true);
         try {
-            const raw = localStorage.getItem(POS_OPENING_CASH_KEY);
-            if (!raw) return;
-            const saved = JSON.parse(raw) as { bankAmount?: number; cashCounts?: Record<string, number> };
-            setOpeningBankAmount(Math.max(0, Number(saved.bankAmount) || 0));
-            setOpeningCashCounts(prev => {
-                const next = { ...prev };
-                for (const denomination of CASH_DENOMINATIONS) {
-                    next[denomination] = Math.max(0, Number(saved.cashCounts?.[String(denomination)]) || 0);
-                }
-                return next;
+            const auth = await getAuthInstance();
+            const idToken = await auth.currentUser?.getIdToken();
+            if (!idToken) {
+                setCashierShift(null);
+                return;
+            }
+            const res = await fetch('/api/pos/cashier-shift', {
+                headers: { Authorization: `Bearer ${idToken}` },
             });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Không thể tải ca thu ngân');
+            setCashierShift(data.shift || null);
         } catch (err) {
-            console.error('Loi tai so dau ca POS:', err);
+            console.error(err);
+            toastError(err instanceof Error ? err.message : 'Không thể tải ca thu ngân');
+        } finally {
+            setCashierLoading(false);
         }
     }, []);
 
     useEffect(() => {
+        void loadCashierShift();
+    }, [loadCashierShift]);
+
+    const handleOpenCashierShift = async () => {
+        if (cashierSaving) return;
+        setCashierSaving(true);
         try {
-            localStorage.setItem(POS_OPENING_CASH_KEY, JSON.stringify({
-                bankAmount: openingBankAmount,
-                cashCounts: openingCashCounts,
-            }));
+            const auth = await getAuthInstance();
+            const idToken = await auth.currentUser?.getIdToken();
+            const res = await fetch('/api/pos/cashier-shift', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${idToken}`,
+                },
+                body: JSON.stringify({ openingCashAmount, openingBankAmount }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Không thể mở ca thu ngân');
+            setCashierShift(data.shift);
+            setOpeningCashAmount(0);
+            setOpeningBankAmount(0);
+            toastSuccess('Đã mở ca thu ngân.');
         } catch (err) {
-            console.error('Loi luu so dau ca POS:', err);
+            console.error(err);
+            toastError(err instanceof Error ? err.message : 'Không thể mở ca thu ngân');
+        } finally {
+            setCashierSaving(false);
         }
-    }, [openingBankAmount, openingCashCounts]);
+    };
+
+    const handleCloseCashierShift = async () => {
+        if (cashierSaving || !cashierShift) return;
+        if (!confirm('Chốt ca thu ngân hiện tại? Sau khi chốt, POS sẽ cần mở ca mới để tiếp tục thu tiền mặt/chuyển khoản.')) return;
+        setCashierSaving(true);
+        try {
+            const auth = await getAuthInstance();
+            const idToken = await auth.currentUser?.getIdToken();
+            const res = await fetch('/api/pos/cashier-shift', {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${idToken}`,
+                },
+                body: JSON.stringify({ action: 'close' }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Không thể chốt ca thu ngân');
+            setCashierShift(null);
+            toastSuccess('Đã chốt ca thu ngân.');
+        } catch (err) {
+            console.error(err);
+            toastError(err instanceof Error ? err.message : 'Không thể chốt ca thu ngân');
+        } finally {
+            setCashierSaving(false);
+        }
+    };
 
     const [linkedRepairs, setLinkedRepairs] = useState<RepairTicketInfo[]>([]);
     const [payableOrders, setPayableOrders] = useState<PayableOrderInfo[]>([]);
@@ -307,7 +375,7 @@ export default function POSPage() {
 
     useEffect(() => {
         if (chatPrefillApplied.current || searchParams.get('source') !== 'chat') return;
-        const handoff = consumeChatWorkflowHandoff();
+        const handoff = consumeChatWorkflowHandoff(searchParams);
         if (!handoff) return;
         setCustomerName(handoff.customerName);
         setCustomerPhone(handoff.customerPhone);
@@ -996,15 +1064,19 @@ export default function POSPage() {
     const total = Math.max(0, subtotal - effectiveDiscount - voucherDiscountAmount + (shippingFee || 0));
 
     const formatPrice = (n: number) => n.toLocaleString('vi-VN') + 'đ';
-    const openingCashTotal = CASH_DENOMINATIONS.reduce((sum, denomination) => (
-        sum + denomination * (openingCashCounts[denomination] || 0)
-    ), 0);
-    const openingShiftTotal = openingCashTotal + openingBankAmount;
-    const setOpeningCashCount = (denomination: number, value: number) => {
-        setOpeningCashCounts(prev => ({
-            ...prev,
-            [denomination]: Math.max(0, Math.floor(Number(value) || 0)),
-        }));
+    const activeCashierShift = cashierShift?.status === 'open' ? cashierShift : null;
+    const currentCashAmount = activeCashierShift
+        ? activeCashierShift.openingCashAmount + activeCashierShift.cashSalesAmount
+        : openingCashAmount;
+    const currentBankAmount = activeCashierShift
+        ? activeCashierShift.openingBankAmount + activeCashierShift.bankSalesAmount
+        : openingBankAmount;
+    const openingShiftTotal = openingCashAmount + openingBankAmount;
+    const formatDateTime = (value?: string | null) => {
+        if (!value) return '';
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return '';
+        return date.toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' });
     };
 
     const handleApplyVoucher = async () => {
@@ -1033,11 +1105,14 @@ export default function POSPage() {
         }
     };
 
-    // Auto-switch payment method to 'debt' if paying a portion
+    // Auto-switch between debt and immediate payment based on the amount entered.
     useEffect(() => {
         if (deposit > 0 && deposit < total && paymentMethod !== 'debt') {
             setPaymentMethod('debt');
             toastWarning('Số tiền khách trả nhỏ hơn tổng tiền. Hệ thống tự động chuyển sang hình thức Ghi nợ.');
+        }
+        if (deposit >= total && paymentMethod === 'debt') {
+            setPaymentMethod('cash');
         }
     }, [deposit, total, paymentMethod]);
 
@@ -1102,12 +1177,6 @@ export default function POSPage() {
                 setIsProcessing(false);
                 return;
             }
-            if (hasRepairPayment && deposit - total > 1) {
-                toastError(`Số tiền thu vượt tổng cần thanh toán ${total.toLocaleString('vi-VN')}đ.`);
-                setIsProcessing(false);
-                return;
-            }
-
             const operationKey = crypto.randomUUID();
 
             const repairTicketIds = Array.from(new Set(
@@ -1186,10 +1255,12 @@ export default function POSPage() {
             setLinkedRepairs([]);
             setDiscount(0);
             setDeposit(0);
+            setUseSurplusToPayDebt(false);
             setShippingFee(0);
             setVoucherCode('');
             setAppliedVoucher(null);
             setVoucherStatus(null);
+            void loadCashierShift();
         } catch (err: unknown) {
             console.error(err);
             toastError(err instanceof Error ? err.message : 'Lỗi khi tạo đơn hàng!');
@@ -1269,68 +1340,131 @@ export default function POSPage() {
 
     const cashierSection = (
         <div className="md:flex-1 md:overflow-y-auto">
-            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
                 <div className="rounded-2xl border bg-white p-4 shadow-sm">
                     <div className="mb-4 flex items-center justify-between gap-3">
                         <div>
-                            <h2 className="text-base font-bold text-gray-900">Số đầu ca</h2>
-                            <p className="text-xs text-gray-500">Tiền mặt theo mệnh giá và số chuyển khoản hiện có.</p>
+                            <h2 className="text-base font-bold text-gray-900">Két thu ngân</h2>
+                            <p className="text-xs font-medium text-gray-500">
+                                {activeCashierShift ? 'Số đầu ca đã khóa, POS tự cập nhật phát sinh.' : 'Nhập số đầu ca một lần để bắt đầu theo dõi két.'}
+                            </p>
                         </div>
-                        <Banknote className="text-emerald-600" size={24} />
+                        <div className="rounded-full bg-emerald-50 p-2 text-emerald-700">
+                            <Banknote size={22} />
+                        </div>
                     </div>
-                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                        {CASH_DENOMINATIONS.map((denomination) => (
-                            <label key={denomination} className="rounded-xl border border-gray-100 bg-gray-50 p-3">
-                                <span className="mb-1 block text-xs font-semibold text-gray-600">{formatPrice(denomination)}</span>
-                                <input
-                                    type="number"
+
+                    {cashierLoading ? (
+                        <div className="flex min-h-48 items-center justify-center rounded-2xl bg-gray-50">
+                            <Loader2 className="animate-spin text-emerald-600" size={28} />
+                        </div>
+                    ) : activeCashierShift ? (
+                        <div className="space-y-4">
+                            <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-3">
+                                <div className="flex items-center justify-between gap-3">
+                                    <div>
+                                        <div className="text-xs font-bold uppercase tracking-wide text-emerald-700">Ca đang mở</div>
+                                        <div className="text-sm font-semibold text-emerald-950">
+                                            {activeCashierShift.openedByName || 'Nhân viên'}{activeCashierShift.openedAt ? ` - ${formatDateTime(activeCashierShift.openedAt)}` : ''}
+                                        </div>
+                                    </div>
+                                    <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-emerald-700 shadow-sm">Đã khóa</span>
+                                </div>
+                            </div>
+
+                            <div className="grid gap-3 sm:grid-cols-2">
+                                <div className="rounded-2xl border border-gray-100 bg-gray-50 p-3">
+                                    <div className="text-xs font-bold uppercase tracking-wide text-gray-500">Tiền mặt hiện có</div>
+                                    <div className="mt-1 text-2xl font-black text-gray-950">{formatPrice(currentCashAmount)}</div>
+                                    <div className="mt-2 text-xs font-medium text-gray-500">
+                                        Đầu ca {formatPrice(activeCashierShift.openingCashAmount)} + POS {formatPrice(activeCashierShift.cashSalesAmount)}
+                                    </div>
+                                </div>
+                                <div className="rounded-2xl border border-blue-100 bg-blue-50 p-3">
+                                    <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Chuyển khoản trong ca</div>
+                                    <div className="mt-1 text-2xl font-black text-blue-900">{formatPrice(currentBankAmount)}</div>
+                                    <div className="mt-2 text-xs font-medium text-blue-600">
+                                        Đầu ca {formatPrice(activeCashierShift.openingBankAmount)} + POS {formatPrice(activeCashierShift.bankSalesAmount)}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="rounded-2xl border border-gray-100 p-3">
+                                <div className="mb-2 text-xs font-bold uppercase tracking-wide text-gray-500">Phát sinh POS</div>
+                                <div className="grid grid-cols-2 gap-2 text-sm">
+                                    <div className="rounded-xl bg-gray-50 p-3">
+                                        <div className="text-xs text-gray-500">Tiền mặt</div>
+                                        <div className="font-black text-gray-900">{formatPrice(activeCashierShift.cashSalesAmount)}</div>
+                                    </div>
+                                    <div className="rounded-xl bg-gray-50 p-3">
+                                        <div className="text-xs text-gray-500">Chuyển khoản</div>
+                                        <div className="font-black text-gray-900">{formatPrice(activeCashierShift.bankSalesAmount)}</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="space-y-3">
+                            <label className="block rounded-2xl border border-gray-100 bg-gray-50 p-3">
+                                <span className="mb-2 block text-xs font-bold uppercase tracking-wide text-gray-500">Tiền mặt đầu ca</span>
+                                <CurrencyInput
+                                    value={openingCashAmount || ''}
+                                    onChange={setOpeningCashAmount}
                                     min={0}
-                                    inputMode="numeric"
-                                    value={openingCashCounts[denomination] || ''}
-                                    onChange={(event) => setOpeningCashCount(denomination, Number(event.target.value))}
-                                    className="h-10 w-full rounded-lg border bg-white px-3 text-right text-sm font-semibold focus:border-orange-400 focus:outline-none focus:ring-2 focus:ring-orange-500/20"
+                                    className="h-12 w-full rounded-xl border bg-white px-3 text-right text-lg font-black text-gray-950 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
                                     placeholder="0"
                                 />
-                                <span className="mt-1 block text-right text-xs text-gray-500">
-                                    {formatPrice(denomination * (openingCashCounts[denomination] || 0))}
-                                </span>
                             </label>
-                        ))}
-                    </div>
+                            <label className="block rounded-2xl border border-gray-100 bg-gray-50 p-3">
+                                <span className="mb-2 block text-xs font-bold uppercase tracking-wide text-gray-500">Chuyển khoản đầu ca</span>
+                                <CurrencyInput
+                                    value={openingBankAmount || ''}
+                                    onChange={setOpeningBankAmount}
+                                    min={0}
+                                    className="h-12 w-full rounded-xl border bg-white px-3 text-right text-lg font-black text-gray-950 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                                    placeholder="0"
+                                />
+                            </label>
+                            <div className="rounded-2xl bg-orange-50 p-3">
+                                <div className="text-xs font-bold uppercase tracking-wide text-orange-700">Tổng đầu ca</div>
+                                <div className="text-2xl font-black text-orange-700">{formatPrice(openingShiftTotal)}</div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={handleOpenCashierShift}
+                                disabled={cashierSaving}
+                                className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 text-sm font-black text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60"
+                            >
+                                {cashierSaving && <Loader2 className="animate-spin" size={16} />}
+                                Mở ca và khóa số đầu ca
+                            </button>
+                        </div>
+                    )}
                 </div>
 
                 <div className="rounded-2xl border bg-white p-4 shadow-sm">
-                    <h2 className="mb-4 text-base font-bold text-gray-900">Tổng đầu ca</h2>
+                    <h2 className="mb-4 text-base font-bold text-gray-900">Chốt ca</h2>
                     <div className="space-y-3">
                         <div className="rounded-xl bg-emerald-50 p-3">
-                            <div className="text-xs font-semibold text-emerald-700">Tiền mặt</div>
-                            <div className="text-xl font-bold text-emerald-900">{formatPrice(openingCashTotal)}</div>
+                            <div className="text-xs font-semibold text-emerald-700">Tiền mặt dự kiến</div>
+                            <div className="text-xl font-bold text-emerald-900">{formatPrice(currentCashAmount)}</div>
                         </div>
-                        <label className="block rounded-xl border border-gray-100 p-3">
-                            <span className="mb-2 block text-xs font-semibold text-gray-600">Chuyển khoản</span>
-                            <input
-                                type="number"
-                                min={0}
-                                inputMode="numeric"
-                                value={openingBankAmount || ''}
-                                onChange={(event) => setOpeningBankAmount(Math.max(0, Number(event.target.value) || 0))}
-                                className="h-10 w-full rounded-lg border bg-white px-3 text-right text-sm font-semibold focus:border-orange-400 focus:outline-none focus:ring-2 focus:ring-orange-500/20"
-                                placeholder="0"
-                            />
-                        </label>
-                        <div className="rounded-xl bg-orange-50 p-3">
-                            <div className="text-xs font-semibold text-orange-700">Tổng quỹ đầu ca</div>
-                            <div className="text-2xl font-black text-orange-700">{formatPrice(openingShiftTotal)}</div>
+                        <div className="rounded-xl bg-blue-50 p-3">
+                            <div className="text-xs font-semibold text-blue-700">Chuyển khoản dự kiến</div>
+                            <div className="text-xl font-bold text-blue-900">{formatPrice(currentBankAmount)}</div>
+                        </div>
+                        <div className="rounded-xl bg-gray-50 p-3">
+                            <div className="text-xs font-semibold text-gray-600">Tổng dự kiến</div>
+                            <div className="text-2xl font-black text-gray-950">{formatPrice(currentCashAmount + currentBankAmount)}</div>
                         </div>
                         <button
                             type="button"
-                            onClick={() => {
-                                setOpeningBankAmount(0);
-                                setOpeningCashCounts(Object.fromEntries(CASH_DENOMINATIONS.map((amount) => [amount, 0])) as Record<number, number>);
-                            }}
-                            className="w-full rounded-xl border border-gray-200 px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-50"
+                            onClick={handleCloseCashierShift}
+                            disabled={!activeCashierShift || cashierSaving}
+                            className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-gray-200 px-4 text-sm font-bold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                         >
-                            Xóa số đầu ca
+                            {cashierSaving && <Loader2 className="animate-spin" size={16} />}
+                            Chốt ca
                         </button>
                     </div>
                 </div>

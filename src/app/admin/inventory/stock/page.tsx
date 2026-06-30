@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { Archive, Package, Search, Loader2, ArrowUpDown, TrendingDown, TrendingUp } from 'lucide-react';
 import { collection, limit, orderBy, query, startAfter, where, type DocumentSnapshot, type QueryConstraint } from 'firebase/firestore';
 import { getDocs } from '@/lib/firestoreLogger';
@@ -19,6 +19,31 @@ const isComponent = (p: Product) => {
     const cat = p.category?.toLowerCase() || '';
     const firstCatId = p.categoryIds?.[0] || '';
     return cat === 'linh kiện' || cat === 'component' || firstCatId.startsWith('linh-kien') || firstCatId === 'component';
+};
+
+const getStockGroupKey = (p: Product & { id: string }) => {
+    const code = [p.sku, p.productCode, p.barcode]
+        .find(value => typeof value === 'string' && value.trim().length > 0);
+    return (code || p.id).trim().toLowerCase();
+};
+
+const mergeStockProduct = (
+    current: Product & { id: string },
+    next: Product & { id: string },
+): Product & { id: string } => {
+    const currentStock = Number(current.stock) || 0;
+    const nextStock = Number(next.stock) || 0;
+    const totalStock = currentStock + nextStock;
+    const currentValue = currentStock * (Number(current.costPrice) || 0);
+    const nextValue = nextStock * (Number(next.costPrice) || 0);
+    return {
+        ...current,
+        stock: totalStock,
+        held: (Number(current.held) || 0) + (Number(next.held) || 0),
+        costPrice: totalStock > 0
+            ? Math.round((currentValue + nextValue) / totalStock)
+            : Number(current.costPrice) || Number(next.costPrice) || 0,
+    };
 };
 
 export default function StockPage() {
@@ -91,7 +116,17 @@ export default function StockPage() {
         loadProducts('reset');
     }, [loadProducts]);
 
-    const tabFiltered = products.filter(p => {
+    const stockProducts = useMemo(() => {
+        const grouped = new Map<string, Product & { id: string }>();
+        for (const product of products) {
+            const key = getStockGroupKey(product);
+            const existing = grouped.get(key);
+            grouped.set(key, existing ? mergeStockProduct(existing, product) : product);
+        }
+        return [...grouped.values()];
+    }, [products]);
+
+    const tabFiltered = stockProducts.filter(p => {
         if (p.isProposed) return false;
         if (stockTab === 'component') return isComponent(p);
         if (stockTab === 'retail') return !isComponent(p);

@@ -4,13 +4,16 @@ import { useState, useEffect, useRef } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import {
-    Home, LayoutGrid, Headphones, ClipboardList, User,
+    LayoutGrid, Headphones, ClipboardList, User,
     X, Phone, MessageCircle, MapPin, CalendarClock,
+    Newspaper, ChevronRight
 } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
 import { useConfig } from '@/lib/ConfigContext';
 import { getBusinessIdentity } from '@/lib/businessIdentity';
 import TrackingModal from '@/components/TrackingModal';
+import { getIcon } from '@/lib/icon-map';
+import type { SidebarMenuItem } from '@/lib/config-defaults';
 
 // Zalo SVG icon - compact inline
 function ZaloIcon({ size = 22 }: { size?: number }) {
@@ -68,8 +71,15 @@ export default function MobileBottomNav() {
     const { user } = useAuth();
     const { config } = useConfig();
     const [showContactMenu, setShowContactMenu] = useState(false);
+    const [showCategoryMenu, setShowCategoryMenu] = useState(false);
     const [isTrackingModalOpen, setIsTrackingModalOpen] = useState(false);
     const menuRef = useRef<HTMLDivElement>(null);
+    const categoryMenuRef = useRef<HTMLDivElement>(null);
+    const [activeCategoryId, setActiveCategoryId] = useState<string>('');
+
+    // Extract categories for sidebar
+    const categories = config.sidebarMenu || [];
+    const visibleCategories = categories.filter((cat: SidebarMenuItem) => cat.visible !== false);
 
     // Update contact options dynamically from config
     const identity = getBusinessIdentity(config);
@@ -86,20 +96,23 @@ export default function MobileBottomNav() {
 
     // Close menu when clicking outside
     useEffect(() => {
-        if (!showContactMenu) return;
         const handleClickOutside = (e: MouseEvent) => {
-            if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+            if (showContactMenu && menuRef.current && !menuRef.current.contains(e.target as Node)) {
                 setShowContactMenu(false);
+            }
+            if (showCategoryMenu && categoryMenuRef.current && !categoryMenuRef.current.contains(e.target as Node)) {
+                setShowCategoryMenu(false);
             }
         };
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, [showContactMenu]);
+    }, [showContactMenu, showCategoryMenu]);
 
     // Close menu on route change
     useEffect(() => {
         // We intentionally close a local UI menu when the route changes.
         setShowContactMenu(false);
+        setShowCategoryMenu(false);
     }, [pathname]);
 
     const handleContactOptionClick = (optId: string) => {
@@ -114,16 +127,124 @@ export default function MobileBottomNav() {
 
     return (
         <>
+            {/* Category Sidebar Backdrop */}
+            {showCategoryMenu && (
+                <div
+                    className="fixed inset-0 bg-black/50 z-40 lg:hidden animate-[fadeIn_0.2s_ease]"
+                    onClick={() => setShowCategoryMenu(false)}
+                />
+            )}
+
+            {/* Category Sidebar (Right to Left) */}
+            <div
+                ref={categoryMenuRef}
+                className={`fixed top-0 right-0 h-full w-[90vw] md:w-[500px] bg-white z-50 shadow-2xl lg:hidden transform transition-transform duration-300 flex flex-col ${
+                    showCategoryMenu ? 'translate-x-0' : 'translate-x-full'
+                }`}
+            >
+                {/* Header */}
+                <div className="px-4 py-4 border-b flex items-center justify-between bg-white z-10">
+                    <div className="flex items-center gap-2">
+                        <span className="text-copper">🔧</span>
+                        <span className="font-bold text-dark text-lg">Danh mục dịch vụ</span>
+                    </div>
+                    <button
+                        onClick={() => setShowCategoryMenu(false)}
+                        className="p-1.5 hover:bg-gray-200 rounded-full transition-colors"
+                    >
+                        <X size={20} className="text-gray-500" />
+                    </button>
+                </div>
+
+                {/* 2-Pane Body */}
+                <div className="flex flex-1 overflow-hidden">
+                    {/* Left Pane (Parent Categories) */}
+                    <div className="w-[100px] md:w-[140px] bg-gray-50 overflow-y-auto flex-shrink-0 border-r border-gray-100">
+                        {visibleCategories.map((cat: SidebarMenuItem) => {
+                            const Icon = getIcon(cat.iconName);
+                            const isActiveCat = (activeCategoryId || visibleCategories[0]?.id) === cat.id;
+                            return (
+                                <button
+                                    key={cat.id}
+                                    onClick={() => setActiveCategoryId(cat.id)}
+                                    className={`w-full flex flex-col items-center gap-1.5 p-3 text-center transition-colors border-b border-gray-100 last:border-0 ${
+                                        isActiveCat ? 'bg-white border-l-4 border-l-copper' : 'hover:bg-gray-100 border-l-4 border-l-transparent'
+                                    }`}
+                                >
+                                    <span className={`text-lg flex-shrink-0 ${isActiveCat ? 'text-copper' : 'text-gray-500'}`}>
+                                        <Icon size={24} />
+                                    </span>
+                                    <span className={`text-[11px] md:text-xs leading-tight ${isActiveCat ? 'font-semibold text-copper' : 'text-gray-600'}`}>
+                                        {cat.name}
+                                    </span>
+                                </button>
+                            );
+                        })}
+                    </div>
+
+                    {/* Right Pane (SubGroups) */}
+                    <div className="flex-1 overflow-y-auto bg-white p-4">
+                        {(() => {
+                            const activeCat = visibleCategories.find(c => c.id === (activeCategoryId || visibleCategories[0]?.id));
+                            if (!activeCat) return null;
+
+                            return (
+                                <div className="space-y-6">
+                                    {/* View All Header */}
+                                    <div className="flex items-center justify-between pb-2 border-b border-gray-100">
+                                        <h3 className="font-bold text-gray-800 text-sm md:text-base">{activeCat.name}</h3>
+                                        <Link 
+                                            href={activeCat.isCustomLink ? activeCat.slug : `/category/${activeCat.slug}`}
+                                            onClick={() => setShowCategoryMenu(false)}
+                                            className="text-xs text-copper font-medium hover:underline flex items-center"
+                                        >
+                                            Xem tất cả <ChevronRight size={14} />
+                                        </Link>
+                                    </div>
+
+                                    {/* Sub Groups */}
+                                    {activeCat.subGroups && activeCat.subGroups.length > 0 ? (
+                                        <div className="space-y-5">
+                                            {activeCat.subGroups.map((group, gi: number) => (
+                                                <div key={gi}>
+                                                    <h4 className="text-xs font-bold text-gray-800 uppercase mb-3">{group.group}</h4>
+                                                    <div className="grid grid-cols-2 gap-2">
+                                                        {group.items.map((sub: string, si: number) => (
+                                                            <Link
+                                                                key={si}
+                                                                href={activeCat.isCustomLink ? activeCat.slug : `/category/${activeCat.slug}`}
+                                                                onClick={() => setShowCategoryMenu(false)}
+                                                                className="text-[13px] text-gray-600 hover:text-copper border border-gray-200 rounded-lg px-2 py-2 text-center truncate hover:border-copper transition-colors bg-gray-50/50"
+                                                            >
+                                                                {sub}
+                                                            </Link>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <div className="text-center py-10 text-gray-500 text-sm">
+                                            Đang cập nhật...
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })()}
+                    </div>
+                </div>
+            </div>
+
             {/* Contact Action Sheet Backdrop */}
             {showContactMenu && (
                 <div
-                    className="fixed inset-0 bg-black/50 z-40 md:hidden animate-[fadeIn_0.2s_ease]"
+                    className="fixed inset-0 bg-black/50 z-40 lg:hidden animate-[fadeIn_0.2s_ease]"
                     onClick={() => setShowContactMenu(false)}
                 />
             )}
 
             {/* Contact Action Sheet */}
-            <div ref={menuRef} className="fixed bottom-0 left-0 right-0 z-40 md:hidden">
+            <div ref={menuRef} className="fixed bottom-0 left-0 right-0 z-40 lg:hidden">
                 {showContactMenu && (
                     <div className="mx-4 mb-20 animate-[slideUp_0.3s_ease]">
                         <div className="bg-white rounded-2xl shadow-2xl overflow-hidden border border-gray-100">
@@ -182,83 +303,83 @@ export default function MobileBottomNav() {
                 {/* Bottom Nav Bar */}
                 <nav className="bg-white border-t border-gray-200 shadow-[0_-2px_10px_rgba(0,0,0,0.1)]">
                     <div className="flex items-center justify-around h-16">
-                        {/* 1. Trang chủ */}
-                        <Link
-                            href="/"
-                            className={`flex flex-col items-center justify-center py-2 min-w-[56px] transition-colors ${isActive('/') ? 'text-copper' : 'text-gray-500'}`}
-                        >
-                            <Home size={22} />
-                            <span className={`text-[10px] mt-1 ${isActive('/') ? 'font-semibold' : ''}`}>
-                                Trang chủ
-                            </span>
-                        </Link>
-
-                        {/* 2. Danh mục */}
-                        <Link
-                            href="/category/all"
-                            className={`flex flex-col items-center justify-center py-2 min-w-[56px] transition-colors ${pathname?.startsWith('/category') ? 'text-copper' : 'text-gray-500'}`}
+                        {/* 1. Danh mục (Sidebar) */}
+                        <button
+                            onClick={() => setShowCategoryMenu(!showCategoryMenu)}
+                            className={`flex flex-col items-center justify-center py-2 min-w-[56px] transition-colors ${showCategoryMenu ? 'text-copper' : 'text-gray-500'}`}
                         >
                             <LayoutGrid size={22} />
-                            <span className={`text-[10px] mt-1 ${pathname?.startsWith('/category') ? 'font-semibold' : ''}`}>
+                            <span className={`text-[10px] mt-1 ${showCategoryMenu ? 'font-semibold' : ''}`}>
                                 Danh mục
+                            </span>
+                        </button>
+
+                        {/* 2. Bài viết */}
+                        <Link
+                            href="/tin-tuc"
+                            className={`flex flex-col items-center justify-center py-2 min-w-[56px] transition-colors ${isActive('/tin-tuc') ? 'text-copper' : 'text-gray-500'}`}
+                        >
+                            <Newspaper size={22} />
+                            <span className={`text-[10px] mt-1 ${isActive('/tin-tuc') ? 'font-semibold' : ''}`}>
+                                Bài viết
                             </span>
                         </Link>
 
-                        {/* 3. CENTER BUTTON - Liên hệ */}
-                        <button
-                            onClick={() => setShowContactMenu(!showContactMenu)}
-                            aria-label={showContactMenu ? 'Đóng liên hệ' : 'Mở liên hệ'}
-                            className="flex flex-col items-center justify-center -mt-5 relative"
-                        >
-                            <div className={`w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 ${showContactMenu
-                                ? 'bg-gray-700 rotate-45 scale-95'
-                                : 'bg-gradient-to-br from-copper to-copper-dark scale-100'
-                                }`}>
-                                {showContactMenu ?
-                                    <X size={26} className="text-white" /> :
-                                    <Headphones size={26} className="text-white" />
-                                }
-                            </div>
-                            <span className={`text-[10px] font-medium mt-1 ${showContactMenu ? 'text-gray-700' : 'text-copper'}`}>
-                                {showContactMenu ? 'Đóng' : 'Liên hệ'}
-                            </span>
-                        </button>
-
-                        {/* 4. Tra cứu */}
-                        {!isAdminOrStaff && (
-                            <Link
-                                href="/#booking-section"
-                                className="flex flex-col items-center justify-center py-2 min-w-[56px] text-gray-500 transition-colors"
+                        {/* 3. CENTER BUTTON - Liên hệ or Quản trị */}
+                        {!isAdminOrStaff ? (
+                            <button
+                                onClick={() => setShowContactMenu(!showContactMenu)}
+                                aria-label={showContactMenu ? 'Đóng liên hệ' : 'Mở liên hệ'}
+                                className="flex flex-col items-center justify-center -mt-5 relative"
                             >
-                                <CalendarClock size={22} />
-                                <span className="text-[10px] mt-1">
-                                    Đặt lịch
+                                <div className={`w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 ${showContactMenu
+                                    ? 'bg-gray-700 rotate-45 scale-95'
+                                    : 'bg-gradient-to-br from-copper to-copper-dark scale-100'
+                                    }`}>
+                                    {showContactMenu ?
+                                        <X size={26} className="text-white" /> :
+                                        <Headphones size={26} className="text-white" />
+                                    }
+                                </div>
+                                <span className={`text-[10px] font-medium mt-1 ${showContactMenu ? 'text-gray-700' : 'text-copper'}`}>
+                                    {showContactMenu ? 'Đóng' : 'Liên hệ'}
                                 </span>
-                            </Link>
-                        )}
-
-                        <button
-                            onClick={() => setIsTrackingModalOpen(true)}
-                            className={`flex flex-col items-center justify-center py-2 min-w-[56px] transition-colors ${pathname?.startsWith('/tracking') ? 'text-copper' : 'text-gray-500'}`}
-                        >
-                            <ClipboardList size={22} />
-                            <span className={`text-[10px] mt-1 ${pathname?.startsWith('/tracking') ? 'font-semibold' : ''}`}>
-                                Tra cứu
-                            </span>
-                        </button>
-
-                        {/* 5. Quản trị — chỉ hiển thị khi là admin hoặc staff */}
-                        {isAdminOrStaff && (
+                            </button>
+                        ) : (
                             <Link
                                 href="/admin"
-                                className={`flex flex-col items-center justify-center py-2 min-w-[56px] transition-colors ${pathname?.startsWith('/admin') ? 'text-copper' : 'text-gray-500'}`}
+                                className="flex flex-col items-center justify-center -mt-5 relative"
                             >
-                                <User size={22} />
-                                <span className={`text-[10px] mt-1 ${pathname?.startsWith('/admin') ? 'font-semibold' : ''}`}>
+                                <div className={`w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 ${pathname?.startsWith('/admin') ? 'bg-copper-dark scale-95' : 'bg-gradient-to-br from-copper to-copper-dark scale-100'}`}>
+                                    <User size={26} className="text-white" />
+                                </div>
+                                <span className={`text-[10px] font-medium mt-1 ${pathname?.startsWith('/admin') ? 'text-gray-700' : 'text-copper'}`}>
                                     Quản trị
                                 </span>
                             </Link>
                         )}
+
+                        {/* 4. Đặt lịch */}
+                        <Link
+                            href="/#booking-section"
+                            className="flex flex-col items-center justify-center py-2 min-w-[56px] text-gray-500 transition-colors"
+                        >
+                            <CalendarClock size={22} />
+                            <span className="text-[10px] mt-1">
+                                Đặt lịch
+                            </span>
+                        </Link>
+
+                        {/* 5. Tra cứu */}
+                        <button
+                            onClick={() => setIsTrackingModalOpen(true)}
+                            className={`flex flex-col items-center justify-center py-2 min-w-[56px] transition-colors ${isTrackingModalOpen ? 'text-copper' : 'text-gray-500'}`}
+                        >
+                            <ClipboardList size={22} />
+                            <span className={`text-[10px] mt-1 ${isTrackingModalOpen ? 'font-semibold' : ''}`}>
+                                Tra cứu
+                            </span>
+                        </button>
                     </div>
                 </nav>
             </div>

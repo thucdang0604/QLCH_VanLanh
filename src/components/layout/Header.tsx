@@ -77,7 +77,8 @@ export default function Header() {
                                 height={64}
                                 quality={80}
                                 priority
-                                className={`w-auto object-contain transition-all duration-300 ${scrolled ? 'h-9' : 'h-16'}`}
+                                style={{ width: 'auto' }}
+                                className={`object-contain transition-all duration-300 ${scrolled ? 'h-9' : 'h-16'}`}
                             />
                         ) : (
                             <span className={`font-bold text-copper whitespace-nowrap transition-all duration-300 ${scrolled ? 'text-base' : 'text-lg'}`}>
@@ -87,7 +88,7 @@ export default function Header() {
                     </Link>
 
                     {/* Search — desktop */}
-                    <form onSubmit={handleSearch} className="hidden md:flex flex-1 max-w-lg mx-4">
+                    <form onSubmit={handleSearch} className="hidden lg:flex flex-1 max-w-lg mx-4">
                         <div className="relative w-full">
                             <input
                                 type="text"
@@ -130,7 +131,7 @@ export default function Header() {
                             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
                             aria-label={mobileMenuOpen ? 'Đóng menu' : 'Mở menu'}
                             aria-expanded={mobileMenuOpen ? true : false}
-                            className="md:hidden p-1.5 rounded-lg text-gray-600 hover:text-copper hover:bg-gray-50 transition-colors">
+                            className="lg:hidden p-1.5 rounded-lg text-gray-600 hover:text-copper hover:bg-gray-50 transition-colors">
                             {mobileMenuOpen ? <X size={18} /> : <Menu size={18} />}
                         </button>
                     </div>
@@ -140,7 +141,7 @@ export default function Header() {
 
             {/* ── Mobile Search Bar — Always visible ── */}
             <div 
-                className={`md:hidden w-full px-4 py-2.5 border-b border-gray-100 transition-all duration-300 dyn-header-bg ${scrolled ? 'shadow-md' : ''}`}
+                className={`lg:hidden w-full px-4 py-2.5 border-b border-gray-100 transition-all duration-300 dyn-header-bg ${scrolled ? 'shadow-md' : ''}`}
             >
                 <form onSubmit={handleSearch} className="w-full">
                     <div className="relative w-full shadow-sm rounded-lg">
@@ -160,18 +161,18 @@ export default function Header() {
 
             {/* ── Desktop nav strip — full width bg, centered inner ── */}
             <nav 
-                className="hidden md:block w-full border-b border-gray-200 dyn-nav-bg"
+                className="w-full border-b border-gray-200 dyn-nav-bg overflow-x-auto scrollbar-hide"
             >
                 <div className="max-w-[1200px] mx-auto">
-                <ul className="flex items-center h-10 px-4">
+                <ul className="flex items-center h-10 px-2 md:px-4 min-w-max lg:min-w-0">
                     {mainNav.map((item) => {
                         const Icon = item.icon;
                         const active = isActive(item.href);
                         return (
-                            <li key={item.id} className="flex-1">
+                            <li key={item.id} className="flex-1 flex-shrink-0">
                                 <Link
                                     href={item.href}
-                                    className={`flex items-center justify-center gap-1.5 h-10 text-[13px] font-medium transition-colors
+                                    className={`flex items-center justify-center gap-1.5 h-10 text-[13px] font-medium transition-colors px-3 lg:px-0
                                         ${active ? 'text-copper bg-copper/5 border-b-2 border-copper' : 'text-gray-600 hover:text-copper hover:bg-gray-100'}`}
                                 >
                                     <Icon size={14} />
@@ -187,8 +188,8 @@ export default function Header() {
             {/* ── Mobile menu ── */}
             {mobileMenuOpen && (
                 <>
-                    <div className="fixed inset-0 top-[50px] bg-black/40 z-20 md:hidden" onClick={() => setMobileMenuOpen(false)} />
-                    <div className="w-full relative z-30 md:hidden">
+                    <div className="fixed inset-0 top-[50px] bg-black/40 z-20 lg:hidden" onClick={() => setMobileMenuOpen(false)} />
+                    <div className="w-full relative z-30 lg:hidden">
                         <div className="shadow-xl overflow-hidden dyn-header-bg">
                             <ul className="py-1">
                                 {mainNav.map((item) => {

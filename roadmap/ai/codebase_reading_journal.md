@@ -2432,3 +2432,38 @@ Tệp tin này được lưu trữ trực tiếp trong thư mục `roadmap/ai/` 
     *   **Phân loại Badge:** Hiển thị badge phân loại trên ảnh thu nhỏ tùy theo trường `type` của bài viết (Khuyến mãi `Promo`, Tin tức `News`, Mẹo hay `Tips`) với các tông màu nền và màu chữ được thiết kế riêng biệt.
 *   **Đánh giá:** Thiết kế tối giản, trực quan, xử lý date format rất tốt giúp trang chủ hoạt động ổn định và tin cậy.
 
+---
+
+### 29. Logic Ngầm & Khớp Nối Kiến Trúc Hệ Thống (Implicit & Bridge Logic)
+
+Đây là tổng hợp các luồng logic ngầm liên kết nhiều module lại với nhau, tạo thành các "cây cầu" nghiệp vụ xuyên suốt ứng dụng. Việc nắm vững các khớp nối này là đặc biệt quan trọng để không làm gãy vỡ kiến trúc khi bảo trì.
+
+#### 🌉 1. Cầu nối Chat CSKH ➔ POS / Sửa chữa (Workflow Handoff)
+*   **Cơ chế:** Khi nhân viên đang chat với khách trên `src/app/admin/chat` và cần lên đơn/tạo phiếu sửa, họ bấm nút tạo giao dịch. Hàm `storeChatWorkflowHandoff` lưu tạm thông tin khách (Tên, SĐT, ID phòng chat) vào `sessionStorage`.
+*   **Tiếp nhận:** Màn hình POS hoặc Tạo Phiếu Sửa tự động đọc thông qua `consumeChatWorkflowHandoff`, điền sẵn dữ liệu vào form, sau đó **lập tức xóa sạch khỏi bộ nhớ**. Nhờ đó, nhân viên không cần gõ lại SĐT khách, và đơn hàng tự động gắn `roomId` để gửi tin nhắn tự động khi xong đơn.
+
+#### 🌉 2. Cầu nối Yêu cầu Linh kiện ➔ Nhập Kho ➔ Tự động Giữ chỗ (Repair to Import Allocation)
+*   **Cơ chế Yêu cầu:** KTV yêu cầu linh kiện không có sẵn trong API `repairs/confirm-parts`. Hệ thống không chỉ ghi nhận vào phiếu sửa mà còn **tự động sinh một Phiếu Nhập Kho Nháp (Draft Import Receipt)** gom chung các yêu cầu lại.
+*   **Cơ chế Phân bổ:** Khi Thủ kho chốt phiếu nhập (API `inventory/import`), hàm `planRepairImportAllocation` sẽ tự động tính toán. Linh kiện nhập về không vào thẳng kho tự do mà bị **tạm giữ (held)** cho đúng ID phiếu sửa yêu cầu. Phiếu sửa tự động chuyển trạng thái linh kiện sang `SELECTED` (sẵn sàng), KTV ngay lập tức được báo để lắp ráp.
+
+#### 🌉 3. Cầu nối Client Auth ➔ Server Middleware (Session Sync)
+*   **Cơ chế:** Firebase Auth chạy ở client, nhưng Next.js Middleware chạy ở server. Để bảo vệ các route `/admin/*`, `AuthContext` chứa logic ngầm: Ngay khi đăng nhập client thành công, nó gửi ID Token qua `/api/auth/session` để server set HTTP-only cookie. Middleware sau đó dùng cookie này để chặn/cho phép truy cập mà không cần load thư viện Firebase Admin nặng nề ở Edge.
+
+#### 🌉 4. Cầu nối Cấu hình Động ➔ UI Realtime (Config Injection)
+*   **Cơ chế:** Quản trị viên đổi màu chủ đạo hoặc ảnh nền trong cài đặt. `ConfigContext` lắng nghe stream Firestore, lấy giá trị mới và tiêm (inject) trực tiếp vào các biến CSS toàn cục (`document.body.style.setProperty('--primary', ...)`). Giao diện toàn hệ thống đổi màu ngay lập tức mà không cần reload hay chờ build lại cache.
+
+#### 🌉 5. Cầu nối Đơn Hàng / Sửa Chữa ➔ Hồ sơ CRM (Customer Activity Timeline)
+*   **Cơ chế Server:** Các API chốt đơn hàng, chốt sửa chữa không lưu mảng lịch sử vào CRM để tránh nghẽn transaction. Chúng chỉ gọi hàm `customerSync` để tạo profile cơ bản nếu chưa có.
+*   **Cơ chế Client:** Hook `useCustomerActivity` đóng vai trò cầu nối nội suy. Nó query song song collections `orders` và `repairs` theo SĐT, tự động gộp (merge) và sắp xếp realtime, tạo ra một Timeline thống nhất cho tư vấn viên xem trên màn hình Chat mà không cần join data phức tạp trên server.
+
+#### 🌉 6. Cầu nối Split Line bảo toàn Giá Vốn (Inventory Cost Preservation)
+*   **Cơ chế:** Khi linh kiện đã được KTV chốt với khách ở mức giá vốn A, nhưng sau đó KTV cần tăng số lượng. Hệ thống không cho phép sửa số lượng dòng cũ (vì kho có thể đã nhập lô mới giá B). Hệ thống tự động **tách dòng (Split Line)** trong API `repairs/confirm-parts`: Giữ nguyên dòng số 1 với giá A, tạo thêm dòng số 2 (số lượng tăng thêm) lấy theo giá vốn bình quân (WAC) mới nhất. Điều này bảo vệ tính đúng đắn của Báo cáo Lợi nhuận.
+
+#### 🌉 7. Cầu nối Admin UI ➔ Trải nghiệm Storefront (Silent Revalidation)
+*   **Cơ chế:** Khi Admin sửa bài viết, thêm sản phẩm, hệ thống gọi ngầm `requestRevalidate` gửi POST fetch tới `/api/revalidate`. Cầu nối này tách biệt hoàn toàn React Render Tree, đảm bảo Storefront được làm mới cache ISR ngay lập tức trên máy chủ, nhưng UI Admin của nhân viên không bị chớp hay mất state đang nhập dở.
+
+#### 🌉 8. Cầu nối Dữ liệu Excel ➔ ID Tuần tự (Excel Import Identity Bridge)
+*   **Cơ chế:** Dữ liệu Excel thô được parse trong `importSupport.ts`, làm sạch qua `idNormalizer.ts` để chống trùng lặp. Tuy nhiên đối với các chứng từ quan trọng (Phiếu nhập, đơn hàng), hệ thống bắt buộc gọi qua `serverDocumentIds.ts` trong Transaction nguyên tử để đảm bảo cấp số thứ tự tuyệt đối không va chạm (Sequence Auto-Increment) bất chấp tốc độ load hàng ngàn dòng.
+
+#### 🌉 9. Cầu nối Hủy Đơn Hàng ➔ Khôi phục Hoa hồng (Commission Reversal)
+*   **Cơ chế:** Khi hủy đơn hàng (API `orders/transition`), hệ thống không xóa dữ liệu hoa hồng của nhân viên mà gọi lệnh đảo ngược (`reversal`). Nó sinh ra một bản ghi hoa hồng mang giá trị âm để đối ứng với khoản đã ghi nhận, đảm bảo vết kiểm toán (Audit Trail) tài chính nguyên vẹn 100%.

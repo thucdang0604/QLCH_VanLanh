@@ -311,9 +311,9 @@ export default function CategoryClient({
                 </nav>
 
                 {/* ── Unified Premium Sidebar Layout ── */}
-                <div className="flex flex-col md:flex-row gap-6">
-                    {/* Sidebar */}
-                    <aside className="w-full md:w-60 flex-shrink-0">
+                <div className="flex flex-col lg:flex-row gap-6">
+                    {/* Sidebar (Desktop Only) */}
+                    <aside className="hidden lg:block w-60 flex-shrink-0">
                         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 sticky top-28 space-y-6">
                             <div className="flex items-center justify-between border-b pb-3">
                                 <h3 className="font-semibold text-gray-800 flex items-center gap-2"><Filter size={18} /> Bộ lọc</h3>
@@ -423,6 +423,89 @@ export default function CategoryClient({
 
                     {/* Main content */}
                     <div className="flex-1 min-w-0">
+                        {/* Mobile/Tablet Compact Filters */}
+                        <div className="lg:hidden mb-5 space-y-3">
+                            <div className="flex items-center justify-between">
+                                <h3 className="font-semibold text-gray-800 flex items-center gap-2 text-sm"><Filter size={16} /> Bộ lọc nhanh</h3>
+                                {hasActiveFilters && (
+                                    <button onClick={clearAllFilters} className="text-xs text-copper hover:underline flex items-center gap-1 font-medium">
+                                        <X size={14} /> Xóa lọc
+                                    </button>
+                                )}
+                            </div>
+                            
+                            {/* Horizontal scrollable brands */}
+                            {displayBrands.length > 0 && (
+                                <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1">
+                                    {displayBrands.map(b => (
+                                        <button
+                                            key={b}
+                                            onClick={() => toggleBrand(b)}
+                                            className={`flex-shrink-0 px-3 py-1.5 text-xs font-medium rounded-full border whitespace-nowrap transition-colors
+                                                ${sidebarBrands.includes(b) ? 'bg-copper text-white border-copper shadow-sm' : 'bg-white text-gray-600 border-gray-200 hover:border-copper hover:text-copper'}`}
+                                        >
+                                            {b}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+
+                            {/* Horizontal scrollable parts (Repairs only) */}
+                            {isRepair && repairParts.length > 0 && (
+                                <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1">
+                                    {repairParts.map(p => (
+                                        <button
+                                            key={p.key}
+                                            onClick={() => togglePart(p.key)}
+                                            className={`flex-shrink-0 px-3 py-1.5 text-xs font-medium rounded-full border whitespace-nowrap transition-colors
+                                                ${sidebarParts.includes(p.key) ? 'bg-copper text-white border-copper shadow-sm' : 'bg-white text-gray-600 border-gray-200 hover:border-copper hover:text-copper'}`}
+                                        >
+                                            {p.label}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+
+                            {/* Dropdowns for Price & Condition */}
+                            <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1">
+                                <select
+                                    value={filterPrice}
+                                    onChange={e => setFilterPrice(e.target.value)}
+                                    className="flex-shrink-0 h-8 px-2 text-xs font-medium bg-white border border-gray-200 rounded-md focus:outline-none focus:border-copper focus:ring-1 focus:ring-copper"
+                                >
+                                    <option value="">Mức giá</option>
+                                    <option value="0-5">Dưới 5 triệu</option>
+                                    <option value="5-10">5 - 10 triệu</option>
+                                    <option value="10-20">10 - 20 triệu</option>
+                                    <option value="20+">Trên 20 triệu</option>
+                                </select>
+
+                                {!isRepair && productConditions.length > 1 && (
+                                    <select
+                                        value={filterCondition}
+                                        onChange={e => setFilterCondition(e.target.value)}
+                                        className="flex-shrink-0 h-8 px-2 text-xs font-medium bg-white border border-gray-200 rounded-md focus:outline-none focus:border-copper focus:ring-1 focus:ring-copper"
+                                    >
+                                        <option value="">Tình trạng</option>
+                                        {productConditions.includes('new') && <option value="new">Mới 100%</option>}
+                                        {productConditions.includes('like-new') && <option value="like-new">Cũ 99%</option>}
+                                        {productConditions.includes('used') && <option value="used">Hàng cũ</option>}
+                                    </select>
+                                )}
+                                
+                                {!isRepair && productCategories.length > 1 && (
+                                    <select
+                                        value={sidebarCategory}
+                                        onChange={e => setSidebarCategory(e.target.value)}
+                                        className="flex-shrink-0 h-8 px-2 text-xs font-medium bg-white border border-gray-200 rounded-md focus:outline-none focus:border-copper focus:ring-1 focus:ring-copper max-w-[120px]"
+                                    >
+                                        <option value="">Danh mục</option>
+                                        {productCategories.map(c => <option key={c} value={c}>{c}</option>)}
+                                    </select>
+                                )}
+                            </div>
+                        </div>
+
                         {/* Subcategory filter chips for Phụ kiện */}
                         {navInfo?.isAccessory && (
                             <div className="flex flex-wrap gap-2 mb-5">

@@ -7,6 +7,11 @@ import { normalizeVietnamPhone } from '@/lib/phone';
 const RATE_LIMIT_MAX = 5;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 
+/** Strip HTML tags to prevent Stored XSS (BUG-SEC-004). */
+function stripHtml(str: string): string {
+    return str.replace(/<[^>]*>/g, '').trim();
+}
+
 export async function POST(request: NextRequest) {
     try {
         const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || request.headers.get('x-real-ip') || 'unknown';
@@ -15,7 +20,9 @@ export async function POST(request: NextRequest) {
         }
 
         const body = await request.json().catch(() => ({}));
-        const { name, phone, forceUpdateName } = body;
+        // BUG-SEC-004: forceUpdateName removed — public API must not allow
+        // arbitrary name overwrite. Only update name when current is empty/generic.
+        const { name, phone } = body;
 
         if (!phone || typeof phone !== 'string') {
             return NextResponse.json({ error: 'Thiếu thông tin số điện thoại.' }, { status: 400 });
@@ -26,7 +33,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Số điện thoại không hợp lệ.' }, { status: 400 });
         }
 
-        const customerName = typeof name === 'string' ? name.trim() : '';
+        const customerName = typeof name === 'string' ? stripHtml(name).slice(0, 100) : '';
         const db = getAdminDb();
         const customerRef = db.collection('customers').doc(normalizedPhone.local);
 
@@ -54,13 +61,12 @@ export async function POST(request: NextRequest) {
                     lastVisit: FieldValue.serverTimestamp(),
                 };
 
-                // Chỉ cập nhật tên nếu:
-                // 1. Tên mới hợp lệ
-                // 2. VÀ (Có flag forceUpdateName từ Admin HOẶC tên cũ đang là Khách lẻ / rỗng)
+                // Only update name when current name is empty or generic.
+                // forceUpdateName is intentionally removed (BUG-SEC-004).
                 const isRealName = customerName && customerName !== 'Khách lẻ' && customerName !== currentData.name;
                 const isCurrentNameEmptyOrGeneric = !currentData.name || currentData.name === 'Khách lẻ';
 
-                if (isRealName && (forceUpdateName || isCurrentNameEmptyOrGeneric)) {
+                if (isRealName && isCurrentNameEmptyOrGeneric) {
                     updateData.name = customerName;
                 }
 
@@ -74,3 +80,4 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Lỗi hệ thống khi đồng bộ khách hàng.' }, { status: 500 });
     }
 }
+

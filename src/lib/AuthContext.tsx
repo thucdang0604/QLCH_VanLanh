@@ -83,38 +83,70 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return newUser;
     }, []);
 
-    // Listen to auth state changes — lazily load firebase/auth only when needed
+    // Listen to auth state AND token refresh — lazily load firebase/auth only when needed.
+    // Uses onIdTokenChanged (superset of onAuthStateChanged) so session cookie
+    // auto-refreshes when Firebase token refreshes (~every 55 min). Fixes BUG-SEC-001.
     useEffect(() => {
         if (!shouldInitializeAuth) return;
 
         let unsubscribe: (() => void) | undefined;
         let isMounted = true;
+        let initialAuthResolved = false;
 
         (async () => {
             try {
                 const auth = await getAuthInstance();
-                const { onAuthStateChanged } = await import('firebase/auth');
+                const { onIdTokenChanged } = await import('firebase/auth');
 
                 if (!isMounted) return;
 
-                const localUnsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+                const localUnsubscribe = onIdTokenChanged(auth, async (firebaseUser) => {
                     if (firebaseUser) {
                         if (firebaseUser.isAnonymous) {
                             if (isMounted) {
                                 setUser(null);
                                 setLoading(false);
                             }
+                            initialAuthResolved = true;
                             return;
                         }
                         localStorage.setItem('has_logged_in', 'true');
-                        try {
-                            const appUser = await fetchUserData(firebaseUser);
-                            if (isMounted) setUser(appUser);
-                            if (isMounted) setLoading(false);
 
-                            // Sync server-side session cookie for middleware RBAC.
-                            // This must not block rendering the admin UI.
-                            if (appUser.role === 'admin' || appUser.role === 'staff') {
+                        // On first auth resolve, fetch user data + sync session.
+                        // On subsequent token refreshes, only re-sync session cookie.
+                        if (!initialAuthResolved) {
+                            try {
+                                const appUser = await fetchUserData(firebaseUser);
+                                if (isMounted) setUser(appUser);
+                                if (isMounted) setLoading(false);
+
+                                // Sync server-side session cookie for middleware RBAC.
+                                // This must not block rendering the admin UI.
+                                if (appUser.role === 'admin' || appUser.role === 'staff') {
+                                    const idToken = await firebaseUser.getIdToken();
+                                    const controller = new AbortController();
+                                    const timeout = window.setTimeout(() => controller.abort(), 5000);
+                                    fetch('/api/auth/session', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ idToken }),
+                                        signal: controller.signal,
+                                    })
+                                        .then(async (sessionRes) => {
+                                            if (!sessionRes.ok) {
+                                                console.warn('Admin session sync failed:', await sessionRes.text().catch(() => ''));
+                                            }
+                                        })
+                                        .catch((error) => console.warn('Admin session sync failed:', error))
+                                        .finally(() => window.clearTimeout(timeout));
+                                }
+                            } catch (error) {
+                                console.error('Error fetching user data:', error);
+                                if (isMounted) setUser(null);
+                            }
+                        } else {
+                            // Token refresh — re-sync session cookie only (no Firestore read).
+                            try {
                                 const idToken = await firebaseUser.getIdToken();
                                 const controller = new AbortController();
                                 const timeout = window.setTimeout(() => controller.abort(), 5000);
@@ -124,22 +156,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                                     body: JSON.stringify({ idToken }),
                                     signal: controller.signal,
                                 })
-                                    .then(async (sessionRes) => {
-                                        if (!sessionRes.ok) {
-                                            console.warn('Admin session sync failed:', await sessionRes.text().catch(() => ''));
-                                        }
-                                    })
-                                    .catch((error) => console.warn('Admin session sync failed:', error))
+                                    .catch((error) => console.warn('Session refresh failed:', error))
                                     .finally(() => window.clearTimeout(timeout));
+                            } catch (error) {
+                                console.warn('Token refresh session sync error:', error);
                             }
-                        } catch (error) {
-                            console.error('Error fetching user data:', error);
-                            if (isMounted) setUser(null);
                         }
                     } else {
                         if (isMounted) setUser(null);
                     }
                     if (isMounted) setLoading(false);
+                    initialAuthResolved = true;
                 });
 
                 if (!isMounted) {

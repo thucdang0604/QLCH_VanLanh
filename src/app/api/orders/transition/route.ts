@@ -14,9 +14,29 @@ type OrderUpdate = {
     updatedAt: FieldValue;
     completedAt?: FieldValue;
 };
+const ORDER_STATUSES = ['Pending', 'Confirmed', 'Shipping', 'Completed', 'Cancelled'] as const;
+const ORDER_TRANSITIONS: Record<string, string[]> = {
+    Pending: ['Confirmed', 'Cancelled'],
+    Confirmed: ['Shipping', 'Completed', 'Cancelled'],
+    Shipping: ['Completed', 'Cancelled'],
+    Completed: ['Cancelled'],
+    Cancelled: [],
+};
 
 function errorMessage(error: unknown): string {
     return error instanceof Error ? error.message : 'Internal server error';
+}
+
+function isValidOrderStatus(status: unknown): status is Order['status'] {
+    return typeof status === 'string' && ORDER_STATUSES.includes(status as Order['status']);
+}
+
+function assertAllowedOrderTransition(oldStatus: Order['status'], targetStatus: Order['status']) {
+    if (oldStatus === targetStatus) return;
+    const allowedNext = ORDER_TRANSITIONS[oldStatus] || [];
+    if (!allowedNext.includes(targetStatus)) {
+        throw new Error(`Khong cho phep chuyen don hang tu ${oldStatus} sang ${targetStatus}.`);
+    }
 }
 
 export async function POST(request: NextRequest) {
@@ -57,13 +77,16 @@ export async function POST(request: NextRequest) {
             const oldStatus = freshOrder.status;
 
             if (oldStatus === targetStatus) return; // double-submit
+            if (!isValidOrderStatus(oldStatus) || !isValidOrderStatus(targetStatus)) {
+                throw new Error('Trang thai don hang khong hop le.');
+            }
+            assertAllowedOrderTransition(oldStatus, targetStatus);
 
             // Stock & Held Changes
             const needsStockChange = 
                 (isActiveStatus(oldStatus) && targetStatus === 'Cancelled') ||
                 (isActiveStatus(oldStatus) && targetStatus === 'Completed') ||
-                (oldStatus === 'Completed' && targetStatus === 'Cancelled') ||
-                (oldStatus === 'Cancelled' && isActiveStatus(targetStatus));
+                (oldStatus === 'Completed' && targetStatus === 'Cancelled');
 
             const productDocs = new Map<string, ProductDoc>();
             if (needsStockChange && freshOrder.items) {
@@ -94,6 +117,22 @@ export async function POST(request: NextRequest) {
             const writesInventoryLog =
                 (isActiveStatus(oldStatus) && targetStatus === 'Completed') ||
                 (oldStatus === 'Completed' && targetStatus === 'Cancelled');
+            const voucherCode = typeof freshOrder.voucherCode === 'string' ? freshOrder.voucherCode.trim().toUpperCase() : '';
+            const shouldReturnVoucher = targetStatus === 'Cancelled' && Boolean(voucherCode);
+            let voucherRef: DocumentReference | null = null;
+            let voucherUsedCount = 0;
+            if (shouldReturnVoucher) {
+                const voucherSnap = await tx.get(
+                    db.collection('vouchers')
+                        .where('code', '==', voucherCode)
+                        .limit(1)
+                );
+                const voucherDoc = voucherSnap.docs[0];
+                if (voucherDoc) {
+                    voucherRef = voucherDoc.ref;
+                    voucherUsedCount = Math.max(0, Number(voucherDoc.data()?.usedCount) || 0);
+                }
+            }
             const inventoryLogAllocations = await reserveSequentialDocumentIds(tx, db, {
                 collectionName: 'inventory_logs',
                 prefix: 'IL',
@@ -151,16 +190,9 @@ export async function POST(request: NextRequest) {
                     logType = 'ORDER_COMPLETE';
                     stockChange = -group.totalQty;
                 } else if (oldStatus === 'Completed' && targetStatus === 'Cancelled') {
-
                     tx.update(p.ref, { stock: currentStock + group.totalQty });
                     logType = 'ORDER_CANCEL';
                     stockChange = group.totalQty;
-                } else if (oldStatus === 'Cancelled' && isActiveStatus(targetStatus)) {
-                    const available = currentStock - currentHeld;
-                    if (available < group.totalQty) {
-                        throw new Error(`SP "${group.productName}" không đủ khả dụng để kích hoạt lại đơn (Còn ${available}, cần ${group.totalQty}).`);
-                    }
-                    tx.update(p.ref, { held: currentHeld + group.totalQty });
                 }
 
                 if (logType && stockChange !== 0) {
@@ -190,6 +222,12 @@ export async function POST(request: NextRequest) {
             }
 
             tx.update(orderRef, updateData);
+            if (voucherRef) {
+                tx.update(voucherRef, {
+                    usedCount: Math.max(0, voucherUsedCount - 1),
+                    updatedAt: FieldValue.serverTimestamp(),
+                });
+            }
 
             // Fake update data for calculateAndSaveCommissionsServer
             const docDataForCommission = {

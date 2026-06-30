@@ -32,7 +32,7 @@ Bo khoang cho hardcode hoac chuyen thanh cau hinh ngan; hien typing indicator ng
 2026-06-13: Da bo delay 30 giay, typing indicator bat ngay, API tra `503` kem `providerStatus=forbidden`, `retryable=false` va correlation ID khi Gemini bi chan. Tin nhan van duoc luu, UI hien fallback chuyen nhan vien. Quyen truy cap Gemini project van la cau hinh nha cung cap, khong con bi che giau thanh ket qua thanh cong.
 
 ## BUG-WEB-REVIEWS-001: Google Reviews bi chan va link danh gia dan den 404
-- **Status:** in_progress
+- **Status:** fixed
 - **Severity:** high
 - **Module:** CustomerWeb
 - **Files:** `src/app/api/reviews/google/route.ts`, `src/components/home/GoogleReviewsSection.tsx`, `src/components/home/FloatingReviews.tsx`
@@ -63,6 +63,16 @@ Chon mot route canonical cho moi taxonomy node, tao redirect tu alias cu, bo `/c
 
 ### Verification
 2026-06-13: Browser production local pass `/category/all`, `/lien-he`; `/category/sua-iphone` chuyen ve `/category/sua-chua-dien-thoai/sua-iphone`. Resolver alias khong con tra cung mot tap du lieu cho cac danh muc khac nhau.
+
+## BUG-WEB-CATALOG-001: Du lieu homepage va trang danh sach mau thuan
+- **Status:** fixed
+- **Severity:** medium
+- **Module:** CustomerWeb
+- **Files:** `src/components/home/FlashSaleSection.tsx`, `src/app/(customer)/flash-sale/page.tsx`, `src/components/home/CategorySection.tsx`
+
+### Symptom
+Homepage hien 2 san pham Flash Sale nhung `/flash-sale` bao chua co san pham. Nhan danh muc bi lap hau to nhu `200+ dich vu dich vu` va `300+ san pham dich vu`.
+
 
 ## BUG-WEB-CATALOG-001: Du lieu homepage va trang danh sach mau thuan
 - **Status:** fixed
@@ -107,10 +117,10 @@ So `+1 0366666666` bi UI tu choi `So dien thoai khong hop le` truoc khi goi Fire
 Thay bang so test +1 dung cu phap NANP va giu OTP test co dinh. Them danh sach test case cho valid/invalid/region-blocked/idempotent voucher.
 
 ## BUG-WEB-OBS-001: Canh bao image va khoi dong widget cham
-- **Status:** open
+- **Status:** fixed
 - **Severity:** low
 - **Module:** CustomerWeb
-- **Files:** customer image components, `src/components/ChatWidget.tsx`, `src/components/layout/MobileBottomNav.tsx`
+- **Files:** customer image components, `src/components/ChatWidget.tsx`, `src/components/layout/MobileBottomNav.tsx`, `src/components/layout/Header.tsx`
 
 ### Symptom
 Console canh bao Next Image quality 80 chua khai bao, logo thay doi mot chieu khong giu `auto`, anh LCP thieu `priority`. Chat va mobile bottom navigation xuat hien muon khoang 2-3 giay, de nguoi dung tuong tinh nang lien he khong ton tai.
@@ -120,6 +130,12 @@ Chuan hoa image config/dimensions/LCP priority; render shell/skeleton cho contac
 
 ### Verification
 2026-06-13: `images.qualities` da khai bao 60/75/80; Footer, ChatWidget va MobileBottomNav duoc render trong customer shell thay vi cho dynamic mount. Browser snapshot mobile co navigation va nut lien he ngay trong DOM ban dau; production build pass.
+
+### Fix 2026-06-30
+- Root cause: Header logo dung Tailwind `w-auto` className thay vi `style={{ width: 'auto' }}`, gay Next.js Image warning ve dimension override. HeroSection va Header logo da co `priority` prop.
+- Changed files: `src/components/layout/Header.tsx`.
+- Fix: Thay `w-auto` className bang `style={{ width: 'auto' }}` tren Header logo Image component de tuong thich voi Next.js Image optimization API.
+- Verification: Header logo Image co `priority`, `width`, `height`, va `style={{ width: 'auto' }}`; HeroSection co `priority`; `images.qualities` da khai bao.
 
 ## QA-20260613: Trang va luong da kiem tra
 - Viewport mobile: 390 x 844.

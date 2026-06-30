@@ -39,11 +39,12 @@ export async function POST(request: NextRequest) {
             }
 
             // Tìm các đơn hàng đang nợ (FIFO)
-            const ordersSnap = await db.collection('orders')
-                .where('customer_info.phone', '==', customerId)
-                .where('paymentStatus', '==', 'debt')
-                .orderBy('createdAt', 'asc')
-                .get();
+            const ordersSnap = await tx.get(
+                db.collection('orders')
+                    .where('customer_info.phone', '==', customerId)
+                    .where('paymentStatus', '==', 'debt')
+                    .orderBy('createdAt', 'asc')
+            );
 
             let remainingAmountToDistribute = numAmount;
             const updatedOrderIds: string[] = [];

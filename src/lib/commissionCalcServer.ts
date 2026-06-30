@@ -144,7 +144,7 @@ export async function calculateAndSaveCommissionsServer(
             
             for (const pid of productIds) {
                 if (!productMap[pid]) {
-                    const pSnap = await tx.get(db.collection('products').doc(pid));
+                    const pSnap = await db.collection('products').doc(pid).get();
                     if (pSnap.exists) {
                         productMap[pid] = pSnap.data() as Product;
                     }
@@ -240,11 +240,11 @@ export async function reverseCommissionServer(
     callerUid: string
 ) {
     const db = getFirestore();
-    const commSnap = await tx.get(
-        db.collection('commissions')
-          .where('sourceId', '==', sourceId)
-          .where('sourceType', '==', sourceType)
-    );
+    const commSnap = await db
+        .collection('commissions')
+        .where('sourceId', '==', sourceId)
+        .where('sourceType', '==', sourceType)
+        .get();
     
     // Check if reversal already exists to ensure idempotency
     const hasReversal = commSnap.docs.some(doc => doc.data().sourceType === 'reversal' || doc.data().amount < 0);

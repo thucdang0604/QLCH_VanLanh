@@ -126,7 +126,7 @@ graph TD
 
 ## BUG-DEPLOY-007: Firebase CLI Windows warning node-which/esbuild khi bundle next.config
 
-- **Status:** in_progress
+- **Status:** fixed
 - **Symptom:** Trong deploy Firebase Hosting/Frameworks ngày 2026-06-09, CLI báo `'node-which' is not recognized` khi tìm `esbuild` bằng `npx which esbuild`, fallback `npm install esbuild@^0.19.2 --no-save` fail, và tiếp tục với warning `Unable to bundle next.config.mjs for use in Cloud Functions`. Log cũng có `@zxing/library@0.22.0` yêu cầu Node `>=24` trong khi runtime hiện tại là Node 22.
 - **Root cause:** Đây là lỗi deploy toolchain/Firebase CLI trên Windows và dependency engine drift, khác với bug sharp/npm ci đã fixed. Rủi ro chính là `next.config.mjs` không được bundle đầy đủ vào SSR Cloud Function, ảnh hưởng headers/redirects/security config.
 - **Plan:** Theo `roadmap/ui/data/ai_plans/plan_deploy_pipeline_cleanup_20260609.md`: reproduce bằng debug deploy, thêm direct `esbuild`/lookup helper nếu cần, validate `.firebase/qlch-vanlanh/functions` bằng `npm ci --dry-run`, xử lý ZXing Node engine warning bằng pin/downgrade hoặc runtime upgrade sau khi verify Firebase hỗ trợ, rồi deploy + smoke production.
@@ -218,6 +218,20 @@ graph TD
 - **Fix:** Khi gap media trung hash, he thong kiem tra `getMetadata()` tren Storage; neu file con ton tai thi dua item len dau danh sach va bao ro, neu file da mat thi upload lai vao dung path hash va cap nhat Firestore. Loi/notice upload render o vung chung cua modal; banner chi resize/nen, khong crop noi dung anh. Rieng folder Banner cho phep anh nguon toi da 12MB de di qua buoc nen client-side truoc khi upload; cac khu vuc anh khac dung gioi han mac dinh 4MB.
 - **Files:** `src/components/admin/MediaManager.tsx`, `src/lib/imageOptimizer.ts`, `src/lib/validateImage.ts`, `src/app/admin/appearance/page.tsx`
 - **Verification:** Targeted lint/type/build va test upload tren Chrome ngoai.
+
+## BUG-MEDIA-003: Media library dong modal tren tablet va doc qua nhieu Firestore
+
+- **Status:** fixed
+- **Severity:** high
+- **Symptom:** Tren viewport ngang khoang 768-1024px, khi mo `media_library` roi bam Upload moi, popup co the bien mat, file picker van mo, chon file xong khong upload va click co the roi xuong nut revalidate phia sau. Moi lan mo media library cung doc toi da theo so anh dang co, lam tang Firestore reads.
+- **Root cause:**
+  1. Vung upload dung button goi `.click()` vao input file `display:none`; tren mot so viewport/thiet bi, file picker native lam modal mat focus/dong va su kien tiep theo roi xuong trang phia sau.
+  2. Backdrop click dong modal qua de kich hoat trong luong chon file native.
+  3. `MediaManager.tsx` dung realtime `onSnapshot` voi query toan bo `media_library limit(200)`, nen mo modal la doc hang loat document.
+  4. Cac nut trong `MediaManager` khong khai bao `type="button"`, nen khi component nam trong form sua service/part, bam tab `Thu vien media` co the submit form cha va dong popup.
+- **Fix:** Doi upload control sang label/input file native, bo dong modal bang backdrop de tranh click roi xuong page sau, them `type="button"` cho cac nut trong modal, modal mo mac dinh vao tab Upload moi, chi doc Firestore khi bam Thu vien media, thay realtime listener bang `getDocs` theo folder hien tai voi page size 20 va nut `Tai them`.
+- **Files:** `src/components/admin/MediaManager.tsx`
+- **Verification:** Targeted lint/type/build va responsive media modal QA.
 
 ## BUG-ARTICLES-PASTE-001: Paste noi dung bai viet lam mat anh va video
 

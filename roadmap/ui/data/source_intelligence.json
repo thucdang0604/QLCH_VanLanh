@@ -1,9 +1,11 @@
 {
   "_meta": {
     "description": "Bản đồ trí tuệ mã nguồn — tự động tích lũy khi AI đọc/sửa code. Giúp AI sau chỉ cần đọc file này là hiểu ngay cấu trúc, liên kết, và cách sửa.",
-    "lastUpdated": "2026-06-28T00:00:00.000+07:00",
-    "version": 24,
+    "lastUpdated": "2026-06-30T00:00:00.000+07:00",
+    "version": 26,
     "changelog": [
+      "v26: POS debt collection sync - /api/pos/checkout unifies selected old-order payments and surplus debt offset through orderPaymentTotals, updates old order paymentHistory/customer_transactions/revenue/cashier shift, and POS payment UI shows remaining amount/change due.",
+      "v25: POS cashier shifts - cashier_shifts stores locked opening cash/bank amounts, POS cash/bank payments increment active shift totals in checkout transaction, and cashier tab opens/closes the active shift through /api/pos/cashier-shift.",
       "v24: Retail ops commission/revenue/POS plan - commission_rules support calculationMode and priceRanges; revenue aggregates split cash/bank/other/debt channels; inventory imports paid by debt increment importDebt/debtExpenses without increasing importCost until actual payment.",
       "v1: Initial creation — mapped collections, key files, cross-links",
       "v2: Phase 4/6/8 completed — supplier dropdown+debt, variant+review UI, POS repair lookup+auto-discount",
@@ -31,6 +33,31 @@
     ]
   },
   "collections": {
+    "cashier_shifts": {
+      "description": "Ca thu ngan POS. Staff/admin mo ca voi so tien mat/chuyen khoan dau ca da khoa; POS checkout tu dong cong phat sinh tien mat/chuyen khoan vao ca dang mo; chot ca luu expected totals.",
+      "keyFields": [
+        "status",
+        "openingCashAmount",
+        "openingBankAmount",
+        "cashSalesAmount",
+        "bankSalesAmount",
+        "expectedCashAmount",
+        "expectedBankAmount",
+        "openedBy",
+        "openedAt",
+        "closedBy",
+        "closedAt"
+      ],
+      "usedIn": [
+        "pos/page.tsx",
+        "api/pos/cashier-shift/route.ts",
+        "api/pos/checkout/route.ts"
+      ],
+      "changeLog": [
+        "v26: Checkout increments cash/bank shift totals with the retained amount from current order plus old-debt payment, excluding change due.",
+        "v25: Added active cashier shift tracking. Cash/bank/Momo POS payments require an open shift and increment shift totals in checkout transaction."
+      ]
+    },
     "products": {
       "description": "Sản phẩm (linh kiện + bán lẻ + proposed). isProposed=true = chưa nhập kho.",
       "keyFields": [
@@ -304,6 +331,9 @@
         "orders/page.tsx",
         "revenue/page.tsx",
         "useCustomerActivity.ts"
+      ],
+      "changeLog": [
+        "v26: POS old-debt collection updates existing order deposit_amount/paymentStatus/paymentHistory in checkout transaction. New POS orders exclude order-payment cart lines from items/subtotal/commission base."
       ]
     },
     "appointments": {
@@ -1619,7 +1649,8 @@
       "/api/orders/transition": "POST: Cập nhật trạng thái đơn hàng (VD: Pending -> Confirmed -> Shipping)."
     },
     "pos": {
-      "/api/pos/checkout": "POST: Bán hàng tại quầy (POS). Tạo Order, trừ kho, ghi nhận doanh thu và dòng tiền (PaymentHistory)."
+      "/api/pos/checkout": "POST: Bán hàng tại quầy (POS). Tạo Order, trừ kho, ghi nhận doanh thu và dòng tiền (PaymentHistory).",
+      "/api/pos/cashier-shift": "GET/POST/PATCH: Lay ca thu ngan dang mo, mo ca voi so dau ca da khoa, va chot ca. POS checkout cong cash/bank vao ca dang mo."
     },
     "products": {
       "/api/products": "GET: Fetch danh sách sản phẩm nhanh."

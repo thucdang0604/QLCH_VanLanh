@@ -13,6 +13,7 @@ export interface ImportReceiptItem {
     supplierId?: string;
     ticketId?: string;
     partLineId?: string;
+    requestKey?: string;
     allocatedHeldQuantity?: number;
     surplusQuantity?: number;
     unlinkedReason?: 'missing_line' | 'inactive_line' | 'already_allocated';

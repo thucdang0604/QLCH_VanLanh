@@ -101,6 +101,18 @@ export function PosCartPanel({
     formatPrice,
 }: PosCartPanelProps) {
     const itemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
+    const selectedDebtTotal = cart
+        .filter(item => item.isOrderPayment)
+        .reduce((sum, item) => sum + item.sellingPrice * item.quantity, 0);
+    const saleTotal = Math.max(0, total - selectedDebtTotal);
+    const selectedDebtCovered = Math.min(selectedDebtTotal, Math.max(0, deposit - saleTotal));
+    const surplusAfterSelectedDebt = Math.max(0, deposit - saleTotal - selectedDebtTotal);
+    const remainingDebtAfterSelected = Math.max(0, customerDebt - selectedDebtTotal);
+    const autoDebtOffset = useSurplusToPayDebt
+        ? Math.min(surplusAfterSelectedDebt, remainingDebtAfterSelected)
+        : 0;
+    const changeDue = Math.max(0, surplusAfterSelectedDebt - autoDebtOffset);
+    const remainingCurrentPayment = deposit > 0 ? Math.max(0, total - deposit) : 0;
     const [showRepairsList, setShowRepairsList] = useState(true);
 
     // Auto-expand repair list when a new set of repairs is loaded
@@ -384,15 +396,15 @@ export function PosCartPanel({
                     )}
                 </div>
                 <div className="flex items-center gap-2 text-sm">
-                    <span className="text-gray-500">Khách trả / Cọc:</span>
+                    <span className="text-gray-500">Khách đưa:</span>
                     <CurrencyInput value={deposit || ''} onChange={value => setDeposit(value)} placeholder="0" className="flex-1 px-3 py-1.5 border rounded-lg text-right text-sm" />
                 </div>
-                {customerDebt > 0 && deposit > total && (
+                {remainingDebtAfterSelected > 0 && surplusAfterSelectedDebt > 0 && (
                     <div className="flex items-start gap-2 bg-blue-50 p-2 rounded-lg mt-2 border border-blue-200">
                         <input type="checkbox" id="useSurplusDebt" className="mt-0.5 w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer" checked={useSurplusToPayDebt} onChange={(event) => setUseSurplusToPayDebt(event.target.checked)} />
                         <label htmlFor="useSurplusDebt" className="text-xs text-blue-800 flex-1 cursor-pointer leading-tight">
                             <b>Khách có nợ cũ: {formatPrice(customerDebt)}</b><br />
-                            Dùng số tiền thừa <b>{formatPrice(deposit - total)}</b> để cấn trừ nợ
+                            Dùng số tiền dư <b>{formatPrice(Math.min(surplusAfterSelectedDebt, remainingDebtAfterSelected))}</b> để cấn trừ nợ
                         </label>
                     </div>
                 )}
@@ -407,8 +419,12 @@ export function PosCartPanel({
                         <span>TỔNG</span>
                         <span>{formatPrice(total)}</span>
                     </div>
-                    {deposit > 0 && <div className="flex justify-between text-blue-600 pt-1"><span>Đã cọc</span><span>{formatPrice(deposit)}</span></div>}
-                    {deposit > 0 && <div className="flex justify-between font-bold text-red-600 pt-1"><span>CÒN LẠI</span><span>{formatPrice(Math.max(0, total - deposit))}</span></div>}
+                    {selectedDebtTotal > 0 && <div className="flex justify-between text-amber-600"><span>Thu nợ đã chọn</span><span>{formatPrice(selectedDebtTotal)}</span></div>}
+                    {deposit > 0 && <div className="flex justify-between text-blue-600 pt-1"><span>Đã nhận</span><span>{formatPrice(deposit)}</span></div>}
+                    {selectedDebtCovered > 0 && <div className="flex justify-between text-amber-700"><span>Đã phân bổ thu nợ</span><span>{formatPrice(selectedDebtCovered)}</span></div>}
+                    {autoDebtOffset > 0 && <div className="flex justify-between text-blue-700"><span>Cấn nợ cũ</span><span>{formatPrice(autoDebtOffset)}</span></div>}
+                    {deposit > 0 && remainingCurrentPayment > 0 && <div className="flex justify-between font-bold text-red-600 pt-1"><span>CÒN LẠI</span><span>{formatPrice(remainingCurrentPayment)}</span></div>}
+                    {deposit > 0 && changeDue > 0 && <div className="flex justify-between font-bold text-green-600 pt-1"><span>Tiền thối lại</span><span>{formatPrice(changeDue)}</span></div>}
                 </div>
                 <button onClick={onCheckout} disabled={cart.length === 0 || isProcessing} className="w-full py-3 rounded-xl font-bold text-white bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-orange-200/50 transition-all active:scale-[0.98]">
                     {isProcessing ? (
