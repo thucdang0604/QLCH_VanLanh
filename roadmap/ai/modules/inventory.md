@@ -344,7 +344,7 @@ if (available < quantity) {
 <b>Giải pháp đề xuất</b>: Giữ thông tin chi tiết từng `ticketId` yêu cầu (dạng mảng các yêu cầu bên trong dòng phiếu nhập hoặc các sub-lines) để duy trì tính liên kết.
 
 ## BUG-INV-016: Lỗ hổng Xóa Phiếu Nhập Bypass Tồn Kho & Công Nợ
-- **Status:** open
+- **Status:** fixed
 - **Severity:** critical
 - **Module:** INV
 - **Files:** `firestore.rules`
@@ -352,9 +352,12 @@ if (available < quantity) {
 <b>Phân tích</b>: `firestore.rules` cấp quyền `allow write: if hasPermission('manage_inventory')` cho `import_receipts`. Điều này cho phép nhân viên trực tiếp sửa đổi hoặc xóa (delete) Phiếu Nhập Kho đã "Hoàn tất" (Completed) bằng Client SDK. Khi xóa thủ công như vậy, số lượng `stock` đã cộng không bị trừ đi, và `debt` (công nợ) của nhà cung cấp không được cấn trừ lại, dẫn đến tình trạng kho ảo và sổ nợ sai lệch nghiêm trọng.
 ### Solution
 <b>Giải pháp đề xuất</b>: Giới hạn quyền trong `firestore.rules` đối với `import_receipts`. Khi sửa đổi (`update`), không cho phép sửa nếu bản ghi cũ đã ở trạng thái `completed`. Đối với `delete`, chỉ cho phép nếu bản ghi chưa hoàn tất (`resource.data.status != 'completed'`). Bất kỳ thao tác hoàn/trả kho nào sau khi đã chốt phiếu đều phải thực hiện qua luồng Trả Hàng (Return) thay vì xóa thẳng dữ liệu.
+### Fix 2026-06-30
+- Changed files: `firestore.rules`.
+- Verification: `import_receipts` create/update/delete are split; update/delete are denied once the existing receipt status is `completed`.
 
 ## BUG-INV-017: Lỗ hổng thao túng công nợ và quỹ tiền qua giá trị âm trong Phiếu Nhập Kho (Negative Import Exploit)
-- **Status:** open
+- **Status:** fixed
 - **Severity:** critical
 - **Module:** INV
 - **Files:** `src/app/api/inventory/import/route.ts`
@@ -365,6 +368,10 @@ if (available < quantity) {
 3. Đồng thời, `incrementRevenueAggregates` sẽ cộng khoản âm này vào `importDebt` hoặc `importCost`, làm sai lệch toàn bộ báo cáo thu chi của cửa hàng, tạo ra lợi nhuận giả hoặc che giấu các khoản biển thủ.
 ### Solution
 <b>Giải pháp đề xuất</b>: Bổ sung xác thực đầu vào nghiêm ngặt trước vòng lặp xử lý hoặc tính `totalAmount`: `if (i.importPrice < 0 || i.quantity <= 0) throw new Error('Giá nhập và số lượng phải lớn hơn 0.');`. Cần chặn mọi giao dịch chứa giá trị tiền tệ và số lượng âm ở cấp độ API.
+### Fix 2026-06-30
+- Changed files: `src/app/api/inventory/import/route.ts`.
+- Verification: Import completion and availability recalculation now reject `importPrice < 0` and `quantity <= 0` before totalAmount, inventory lot, inventory log, supplier debt, expense, or revenue aggregate writes.
+
 # 🚀 Planned Features
 
 ## FEAT-INV-001: Quản lý tồn kho theo Lô (Batch Tracking) kết hợp FIFO sổ sách

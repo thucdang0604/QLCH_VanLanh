@@ -72,7 +72,7 @@
     "online_users": {
       ".read": "auth != null",
       "$sessionId": {
-        ".write": true,
+        ".write": "auth != null",
         ".validate": "!newData.exists() || (newData.hasChild('timestamp') && newData.child('timestamp').isNumber())",
         "timestamp": { ".validate": "newData.isNumber()" },
         "page": { ".validate": "newData.isString() && newData.val().length <= 200" },

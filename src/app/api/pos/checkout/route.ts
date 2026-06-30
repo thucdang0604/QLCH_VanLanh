@@ -13,6 +13,20 @@ import { loadRepairWorkflow, requireWorkflowNode, workflowNodeHasFeature } from 
 import { isSelectedRepairPart } from '@/lib/repairStatus';
 import { reserveSequentialDocumentId, reserveSequentialDocumentIds, type ReservedSequentialDocumentId } from '@/lib/serverDocumentIds';
 
+type CheckoutItemInput = Record<string, unknown> & {
+    isRepairTicket?: boolean;
+    isOrderPayment?: boolean;
+    productId?: unknown;
+    quantity?: unknown;
+    price?: unknown;
+    lotCode?: unknown;
+    repairTicketId?: unknown;
+    orderPaymentId?: unknown;
+    productName?: unknown;
+    id?: unknown;
+    imeis?: unknown;
+};
+
 function getCashierShiftChannel(paymentMethodCode: string): 'cash' | 'bank' | 'none' {
     const normalized = paymentMethodCode.trim().toUpperCase();
     if (normalized === 'CASH') return 'cash';
@@ -43,6 +57,40 @@ function resolvePaymentCompletionTarget(workflow: WorkflowNode[], currentStatus:
     return { targetStatus: targetNode.id, shouldCountCompletion: true };
 }
 
+function readNonNegativeAmount(value: unknown, label: string): number {
+    const amount = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(amount) || amount < 0) {
+        throw new Error(`${label} khong hop le.`);
+    }
+    return amount;
+}
+
+function readOptionalNonNegativeAmount(value: unknown, label: string): number {
+    if (value === undefined || value === null || value === '') return 0;
+    return readNonNegativeAmount(value, label);
+}
+
+function readPositiveQuantity(value: unknown, label: string): number {
+    if (value === undefined || value === null || value === '') return 1;
+    const quantity = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+        throw new Error(`${label} khong hop le.`);
+    }
+    const normalizedQuantity = Math.floor(quantity);
+    if (normalizedQuantity <= 0) {
+        throw new Error(`${label} khong hop le.`);
+    }
+    return normalizedQuantity;
+}
+
+function getRepairPaymentAmount(ticket: RepairTicket, ticketId: string): number {
+    const amount = readNonNegativeAmount(ticket.payment?.amount, `So tien phieu sua chua #${ticketId.slice(-6)}`);
+    if (amount <= 0) {
+        throw new Error(`Phieu sua chua #${ticketId.slice(-6)} khong co so tien can thu hop le.`);
+    }
+    return amount;
+}
+
 export async function POST(request: NextRequest) {
     try {
         const caller = await requirePermission(request, 'manage_orders');
@@ -50,9 +98,21 @@ export async function POST(request: NextRequest) {
         const body = await request.json();
         const { idempotencyKey, repairTicketId, repairTicketIds, customer_info, items, discount_amount, total_amount, deposit_amount, payment_method, voucherCode, use_surplus_to_pay_debt } = body;
 
-        if (!items || items.length === 0) {
+        if (!Array.isArray(items) || items.length === 0) {
             return NextResponse.json({ error: 'Giỏ hàng trống' }, { status: 400 });
         }
+
+        const checkoutItems = items.map((item: unknown, index: number) => {
+            if (!item || typeof item !== 'object') {
+                throw new Error(`Dong hang #${index + 1} khong hop le.`);
+            }
+            return item as CheckoutItemInput;
+        });
+        const submittedDiscountAmount = readOptionalNonNegativeAmount(discount_amount, 'Giam gia');
+        const submittedDepositAmount = readOptionalNonNegativeAmount(deposit_amount, 'So tien khach tra');
+        const submittedTotalAmount = total_amount === undefined || total_amount === null || total_amount === ''
+            ? null
+            : readNonNegativeAmount(total_amount, 'Tong tien');
 
         const db = getAdminDb();
         const normalizeRepairTicketId = (value: unknown) => {
@@ -108,10 +168,10 @@ export async function POST(request: NextRequest) {
                 }
             };
 
-            for (const item of items) {
+            for (const item of checkoutItems) {
                 if (item.isRepairTicket || item.isOrderPayment) continue; // Bỏ qua check kho cho phiếu sửa chữa/thu nợ
                 const pid = String(item.productId || '');
-                const qty = Math.max(1, Math.floor(Number(item.quantity) || 1));
+                const qty = readPositiveQuantity(item.quantity, `So luong san pham ${pid || 'khong ro'}`);
                 const lot = item.lotCode ? String(item.lotCode) : undefined;
                 
                 preAggregatedForStock.set(pid, (preAggregatedForStock.get(pid) || 0) + qty);
@@ -186,10 +246,10 @@ export async function POST(request: NextRequest) {
             let serverSubtotal = 0;
             let orderPaymentSubtotal = 0;
 
-            for (const item of items) {
+            for (const item of checkoutItems) {
                 const pid = String(item.productId);
-                const qty = Math.max(1, Math.floor(Number(item.quantity) || 1));
-                const price = Number(item.price) || 0;
+                const qty = readPositiveQuantity(item.quantity, `So luong san pham ${pid || 'khong ro'}`);
+                const price = readNonNegativeAmount(item.price, `Gia dong hang ${pid || 'khong ro'}`);
 
                 if (item.isRepairTicket) {
                     const itemRepairTicketId = normalizeRepairTicketId(item.repairTicketId || item.productId);
@@ -261,16 +321,16 @@ export async function POST(request: NextRequest) {
             }
 
             const discountableSubtotal = Math.max(0, serverSubtotal - orderPaymentSubtotal);
-            const serverDiscount = Math.min(Number(discount_amount) || 0, discountableSubtotal);
+            const serverDiscount = Math.min(submittedDiscountAmount, discountableSubtotal);
             const currentOrderTotal = Math.max(0, discountableSubtotal - serverDiscount);
             const serverTotal = currentOrderTotal + orderPaymentSubtotal;
             const isDebtCollectionOnly = orderPaymentSubtotal > 0 && discountableSubtotal === 0;
             const hasRepairPayment = normalizedItems.some(item => item.isRepairTicket);
             const paymentMethodCode = String(payment_method || 'CASH').toUpperCase();
             // If payment method is not DEBT, and deposit is not provided/0, treat as fully paid for the whole POS receipt.
-            const paymentReceived = (paymentMethodCode !== 'DEBT' && (deposit_amount === undefined || deposit_amount === null || Number(deposit_amount) === 0))
+            const paymentReceived = (paymentMethodCode !== 'DEBT' && submittedDepositAmount === 0)
                 ? serverTotal
-                : Number(deposit_amount) || 0;
+                : submittedDepositAmount;
             const paidNow = !isDebtCollectionOnly ? Math.min(paymentReceived, currentOrderTotal) : 0;
 
             if (paymentMethodCode === 'DEBT' && orderPaymentSubtotal > 0 && discountableSubtotal > 0) {
@@ -332,7 +392,7 @@ export async function POST(request: NextRequest) {
             }
 
             // Total cost guard
-            if (Math.abs(serverTotal - Number(total_amount)) > 1) {
+            if (submittedTotalAmount !== null && Math.abs(serverTotal - submittedTotalAmount) > 1) {
                 console.warn(`POS Checkout mismatch: Client total ${total_amount}, Server total ${serverTotal}`);
                 // In POS, we might accept client total or enforce server total. Let's enforce server total.
             }
@@ -367,7 +427,7 @@ export async function POST(request: NextRequest) {
                     if (normalized) repairIdSet.add(normalized);
                 });
             }
-            for (const item of items) {
+            for (const item of checkoutItems) {
                 if (!item.isRepairTicket) continue;
                 const normalized = normalizeRepairTicketId(item.repairTicketId || item.productId);
                 if (normalized) repairIdSet.add(normalized);
@@ -377,23 +437,40 @@ export async function POST(request: NextRequest) {
             for (const id of repairIdSet) {
                 const ref = db.collection('repairs').doc(id);
                 const snap = await tx.get(ref);
-                if (snap.exists) {
-                    repairDocs.set(id, { ref, snap });
+                if (!snap.exists) {
+                    throw new Error(`Phieu sua chua #${id.slice(-6)} khong ton tai.`);
                 }
+                repairDocs.set(id, { ref, snap });
             }
 
+            const repairPaymentRequestedTotals = new Map<string, number>();
             const repairPaymentTotals = new Map<string, number>();
-            for (const item of items) {
+            for (const item of checkoutItems) {
                 if (!item.isRepairTicket) continue;
                 const itemRepairTicketId = normalizeRepairTicketId(item.repairTicketId || item.productId);
-                if (!itemRepairTicketId || !repairDocs.has(itemRepairTicketId)) continue;
-                const qty = Math.max(1, Math.floor(Number(item.quantity) || 1));
-                const price = Number(item.price) || 0;
-                repairPaymentTotals.set(itemRepairTicketId, (repairPaymentTotals.get(itemRepairTicketId) || 0) + price * qty);
+                if (!itemRepairTicketId || !repairDocs.has(itemRepairTicketId)) {
+                    throw new Error('Phieu sua chua trong gio hang khong hop le.');
+                }
+                const qty = readPositiveQuantity(item.quantity, `So luong phieu sua #${itemRepairTicketId.slice(-6)}`);
+                const price = readNonNegativeAmount(item.price, `Tien phieu sua #${itemRepairTicketId.slice(-6)}`);
+                repairPaymentRequestedTotals.set(itemRepairTicketId, (repairPaymentRequestedTotals.get(itemRepairTicketId) || 0) + price * qty);
+            }
+            for (const [id, requestedAmount] of repairPaymentRequestedTotals.entries()) {
+                const repairDoc = repairDocs.get(id);
+                if (!repairDoc) continue;
+                const repairTicket = repairDoc.snap.data() as RepairTicket;
+                if (repairTicket.payment?.status === 'paid') {
+                    throw new Error(`Phieu sua chua #${id.slice(-6)} da thanh toan.`);
+                }
+                const expectedAmount = getRepairPaymentAmount(repairTicket, id);
+                if (Math.abs(requestedAmount - expectedAmount) > 1) {
+                    throw new Error(`So tien phieu sua chua #${id.slice(-6)} khong khop he thong.`);
+                }
+                repairPaymentTotals.set(id, expectedAmount);
             }
 
             const orderPaymentIdSet = new Set<string>();
-            for (const item of items) {
+            for (const item of checkoutItems) {
                 if (!item.isOrderPayment) continue;
                 const normalized = normalizeOrderPaymentId(item.orderPaymentId || item.productId);
                 if (normalized) orderPaymentIdSet.add(normalized);
@@ -410,17 +487,17 @@ export async function POST(request: NextRequest) {
             }
 
             const orderPaymentRequestedTotals = new Map<string, number>();
-            for (const item of items) {
+            for (const item of checkoutItems) {
                 if (!item.isOrderPayment) continue;
                 const itemOrderPaymentId = normalizeOrderPaymentId(item.orderPaymentId || item.productId);
                 if (!itemOrderPaymentId || !orderPaymentDocs.has(itemOrderPaymentId)) continue;
-                const qty = Math.max(1, Math.floor(Number(item.quantity) || 1));
-                const price = Number(item.price) || 0;
+                const qty = readPositiveQuantity(item.quantity, `So luong thu no #${itemOrderPaymentId.slice(-6)}`);
+                const price = readNonNegativeAmount(item.price, `Tien thu no #${itemOrderPaymentId.slice(-6)}`);
                 orderPaymentRequestedTotals.set(itemOrderPaymentId, (orderPaymentRequestedTotals.get(itemOrderPaymentId) || 0) + price * qty);
             }
 
             const collectedDebtAmount = isDebtCollectionOnly
-                ? (Number(deposit_amount) > 0 ? Number(deposit_amount) : orderPaymentSubtotal)
+                ? (submittedDepositAmount > 0 ? submittedDepositAmount : orderPaymentSubtotal)
                 : Math.max(0, paymentReceived - currentOrderTotal);
             if (isDebtCollectionOnly && collectedDebtAmount <= 0) {
                 throw new Error('Vui lòng nhập số tiền khách thanh toán.');
@@ -691,6 +768,24 @@ export async function POST(request: NextRequest) {
                     total_amount: commissionableTotal,
                 } as unknown as Order);
             }
+            if (!isPending && repairPaymentTotals.size > 0) {
+                for (const [id, repairPrice] of repairPaymentTotals.entries()) {
+                    const repairDoc = repairDocs.get(id);
+                    const completionTarget = repairCompletionTargets.get(id);
+                    if (!repairDoc || !completionTarget) continue;
+                    const repairTicket = repairDoc.snap.data() as RepairTicket;
+                    await calculateAndSaveCommissionsServer(tx, { uid: caller.uid, displayName: createdByName as string }, 'repair', {
+                        ...repairTicket,
+                        id,
+                        status: completionTarget.targetStatus,
+                        payment: {
+                            ...repairTicket.payment,
+                            status: 'paid',
+                            amount: repairPrice,
+                        },
+                    } as RepairTicket);
+                }
+            }
 
             // ==========================================
             // ── ALL WRITES START HERE ──
@@ -779,7 +874,7 @@ export async function POST(request: NextRequest) {
             }
             if (!isDebtCollectionOnly && !isPending) {
                 const retailItems = normalizedItems.filter((item) => !item.isRepairTicket && !item.isOrderPayment);
-                const retailSubtotal = retailItems.reduce((sum, item) => sum + (Number(item.price) || 0) * (Number(item.quantity) || 1), 0);
+                const retailSubtotal = retailItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
                 const retailDiscount = Math.min(serverDiscount, retailSubtotal);
                 const retailTotal = Math.max(0, retailSubtotal - retailDiscount);
                 const repairRevenue = Array.from(repairPaymentTotals.values()).reduce((sum, amount) => sum + amount, 0);
@@ -893,7 +988,7 @@ export async function POST(request: NextRequest) {
                         referenceId: orderId,
                         date: FieldValue.serverTimestamp()
                     });
-                    if (Number(deposit_amount) > 0) {
+                    if (submittedDepositAmount > 0) {
                         tx.set(customerLedgerAllocations[customerLedgerAllocationIndex++].ref, {
                             customerId: normalizedPhoneResult!.local,
                             type: 'purchase_payment',

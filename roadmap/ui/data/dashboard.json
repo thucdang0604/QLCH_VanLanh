@@ -37,7 +37,7 @@
         "color": "danger",
         "status": "AUDIT DETECTED BUGS",
         "items": [
-          "<b>Open bugs</b>: 10 (Added 4 critical backend/security vulnerabilities on 30.06.2026)",
+          "<b>Open bugs</b>: 9 (BUG-SEC-002 fixed on 30.06.2026; remaining backend/security vulnerabilities still tracked)",
           "<b>Security/Backend Audit (30.06)</b>: CRM Sync Auth Bypass, Double Handover, Order Transition Bypass, Web Checkout Idempotency.",
           "<b>Completion</b>: 95%",
           "<b>roadmap_v2</b>: SPA shell preserved, JSON data rebuilt."

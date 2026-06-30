@@ -32,7 +32,7 @@ Bo khoang cho hardcode hoac chuyen thanh cau hinh ngan; hien typing indicator ng
 2026-06-13: Da bo delay 30 giay, typing indicator bat ngay, API tra `503` kem `providerStatus=forbidden`, `retryable=false` va correlation ID khi Gemini bi chan. Tin nhan van duoc luu, UI hien fallback chuyen nhan vien. Quyen truy cap Gemini project van la cau hinh nha cung cap, khong con bi che giau thanh ket qua thanh cong.
 
 ## BUG-WEB-REVIEWS-001: Google Reviews bi chan va link danh gia dan den 404
-- **Status:** in_progress
+- **Status:** fixed
 - **Severity:** high
 - **Module:** CustomerWeb
 - **Files:** `src/app/api/reviews/google/route.ts`, `src/components/home/GoogleReviewsSection.tsx`, `src/components/home/FloatingReviews.tsx`

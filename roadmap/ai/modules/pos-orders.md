@@ -292,8 +292,8 @@ if (item.sellingPrice < item.costPrice) {
 ### Solution
 <b>Giải pháp đã áp dụng</b>: Chuyển target query sang field `customer.phone`. Đơn giản hóa query Firestore (chỉ lọc theo `customer.phone` để tránh yêu cầu index composite phức tạp) và thực hiện lọc trạng thái (`unpaid` / `partial`) cùng với sắp xếp theo ngày giảm dần trực tiếp trên bộ nhớ client (in-memory). Thêm fallbacks an toàn cho dữ liệu khách hàng từ nested object.
 
-## BUG-ORD-004: Mất mã giảm giá (Voucher Burn) khi Hủy Đơn
-- **Status:** recorded
+## BUG-ORD-008: Mất mã giảm giá (Voucher Burn) khi Hủy Đơn
+- **Status:** open
 - **Severity:** high
 - **Module:** POS
 - **Files:** `src/app/api/orders/transition/route.ts`
@@ -323,7 +323,7 @@ if (item.sellingPrice < item.costPrice) {
 <b>Giải pháp đề xuất</b>: Sinh `idempotencyKey` tại client trước khi submit form và truyền lên API `/api/checkout`. Sử dụng bảng `operation_requests` trong Transaction để kiểm tra chống trùng lặp tương tự như luồng POS checkout.
 
 ## BUG-POS-012: POS Checkout Chấp nhận Giá Âm (Negative Price Exploit)
-- **Status:** open
+- **Status:** fixed
 - **Severity:** critical
 - **Module:** POS
 - **Files:** `src/app/api/pos/checkout/route.ts`
@@ -331,7 +331,9 @@ if (item.sellingPrice < item.costPrice) {
 <b>Phân tích</b>: Tại API Checkout của POS, giá trị `item.price` gửi từ client được parse trực tiếp `Number(item.price) || 0` mà không hề có validation `price >= 0`. Thu ngân gian lận có thể truyền một sản phẩm hoặc một khoản thanh toán đơn hàng (order payment) với giá âm (ví dụ: `-5,000,000`). Điều này sẽ làm giảm tổng tiền đơn hàng, tạo ra số dư "tiền thừa" (surplus) ảo lớn. Lợi dụng tính năng `use_surplus_to_pay_debt`, kẻ gian có thể dùng số tiền ảo này để xóa sạch công nợ thật của khách hàng, hoặc rút bòn tiền mặt từ ca thu ngân (cập nhật âm vào `cashierShiftCollectedAmount`). Đồng thời có thể chèn thêm các sản phẩm đắt tiền khác để mang về với giá 0 đồng (do tổng tiền bị cấn trừ về 0).
 ### Solution
 <b>Giải pháp đề xuất</b>: Bổ sung validation cực kỳ nghiêm ngặt tại backend: tất cả `item.price` (bán lẻ, sửa chữa, trả nợ) đều phải `>= 0`. Nếu có nhu cầu giảm giá, phải sử dụng đúng luồng `discount_amount` hoặc voucher, tuyệt đối không chấp nhận giá item âm.
-
+### Fix 2026-06-30
+- Changed files: `src/app/api/pos/checkout/route.ts`.
+- Verification: POS checkout now validates every line `price >= 0` and `quantity > 0` before subtotal, stock, debt, repair, or order-payment calculations.
 
 ## BUG-POS-013: Race Condition khi Mở Ca Thu Ngân (Multiple Active Shifts)
 - **Status:** open
@@ -344,7 +346,7 @@ if (item.sellingPrice < item.costPrice) {
 <b>Giải pháp đề xuất</b>: Sử dụng mô hình Single-Document Lock. Tạo một tài liệu cấu hình duy nhất (ví dụ: `system_counters/active_cashier_shift`) lưu ID của ca đang mở. Khi mở ca, transaction sẽ `tx.get` tài liệu này, kiểm tra ID, nếu trống thì tạo ca mới và cập nhật ID vào tài liệu đó. Điều này đảm bảo tính độc quyền thông qua khóa tài liệu (Document Lock).
 
 ## BUG-ORD-008: Lỗ hổng Xóa & Sửa Đơn Hàng Bypass Luồng Hoàn Tiền/Trả Kho
-- **Status:** open
+- **Status:** fixed
 - **Severity:** critical
 - **Module:** POS
 - **Files:** `firestore.rules`
@@ -352,9 +354,12 @@ if (item.sellingPrice < item.costPrice) {
 <b>Phân tích</b>: Trong `firestore.rules`, `orders` cho phép `delete: if hasPermission('manage_orders')` và cho phép `update` nhưng không chặn các trường nhạy cảm như `items`, `total_amount`, `subtotal_amount`, `discount_amount`. Nhân viên có thể sử dụng Client SDK để xóa (delete) hoặc sửa đổi tổng tiền, số lượng sản phẩm của một đơn hàng đã hoàn tất (`Completed`). Điều này làm hỏng tính toàn vẹn dữ liệu: kho không được hoàn trả (vì logic hoàn kho nằm ở API hủy đơn), và doanh thu không khớp, dẫn đến thất thoát tiền bạc mà hệ thống không tự động phát hiện được.
 ### Solution
 <b>Giải pháp đề xuất</b>: 1. Đổi `allow delete` thành `if isAdmin()`. Yêu cầu hủy đơn phải thông qua luồng đổi/trả hoặc API. 2. Cập nhật `allow update` để chặn thay đổi các trường tài chính/hàng hóa: bổ sung `['items', 'total_amount', 'subtotal_amount', 'discount_amount', 'shipping_fee']` vào block list `affectedKeys()`.
+### Fix 2026-06-30
+- Changed files: `firestore.rules`.
+- Verification: `/orders` delete now requires `isAdmin()` and direct client updates cannot change item, total, discount, shipping, or voucher fields.
 
 ## BUG-POS-015: Thiếu kiểm tra số tiền trả trước (deposit_amount) gây lạm phát công nợ và bypass kiểm tra thu ngân
-- **Status:** open
+- **Status:** fixed
 - **Severity:** critical
 - **Module:** POS
 - **Files:** `src/app/api/pos/checkout/route.ts`
@@ -362,9 +367,12 @@ if (item.sellingPrice < item.costPrice) {
 <b>Phân tích</b>: Khi thu ngân thanh toán đơn POS bằng hình thức 'Debt' (Ghi nợ), hệ thống không kiểm tra giá trị của biến `paidNow` (được gán bằng `deposit_amount` truyền từ client). Thu ngân có thể truyền một số tiền âm. Điều này giúp bypass điều kiện kiểm tra thanh toán không đủ `paidNow < serverTotal` (chỉ ném lỗi khi không phải ghi nợ). Hậu quả là `newDebt` được tính bằng `Math.max(0, serverTotal - paidNow)` sẽ bị đội lên rất cao, dẫn tới công nợ của khách hàng bị làm giả tăng vọt. Hơn nữa, vì số tiền đưa vào ca thu ngân `cashierShiftCollectedAmount` mang giá trị âm, hệ thống sẽ bỏ qua đoạn mã cập nhật ca thu ngân (`if (cashierShiftCollectedAmount > 0)`), che xử hành vi gian lận và gây sai lệch toàn bộ báo cáo doanh thu và công nợ.
 ### Solution
 <b>Giải pháp đề xuất</b>: Cần bổ sung kiểm tra bắt buộc `if (Number(deposit_amount) < 0) throw new Error('Số tiền thanh toán trước không được nhỏ hơn 0.');` đối với tất cả các giao dịch POS. Ngoài ra, cần chặn hoàn toàn việc nhận một giá trị âm cho bất kỳ tham số tiền tệ (payment amount) nào trong hệ thống.
+### Fix 2026-06-30
+- Changed files: `src/app/api/pos/checkout/route.ts`.
+- Verification: POS now rejects negative or non-finite `deposit_amount`, `discount_amount`, `total_amount`, item prices, and payment amounts before debt/cashier-shift math.
 
 ## BUG-POS-017: Lỗ hổng Sửa đổi Giá Trị Thanh Toán Phiếu Sửa Chữa (Repair Payment Price Bypass)
-- **Status:** open
+- **Status:** fixed
 - **Severity:** critical
 - **Module:** POS
 - **Files:** `src/app/api/pos/checkout/route.ts`
@@ -372,9 +380,12 @@ if (item.sellingPrice < item.costPrice) {
 <b>Phân tích</b>: Khi thanh toán gộp Phiếu sửa chữa tại POS, hệ thống tính toán `repairPaymentTotals` dựa trên `item.price` trực tiếp do Client gửi lên: `const price = Number(item.price) || 0;`. Sau đó, API cập nhật trực tiếp `repairTicket.payment.amount = repairPrice` và đổi trạng thái thanh toán thành `paid` cùng trạng thái phiếu thành hoàn tất. Hệ thống KHÔNG HỀ so sánh số tiền Client gửi lên (`repairPrice`) với số tiền thực tế cần thanh toán của Phiếu sửa chữa (`repairTicket.payment.amount` trong database). Thu ngân có thể dùng Postman hoặc chặn bắt request gửi `price: 1` cho một phiếu sửa chữa trị giá 5.000.000đ. Hệ thống sẽ ghi nhận thu 1đ và đóng phiếu thành công mà không báo thiếu nợ.
 ### Solution
 <b>Giải pháp đề xuất</b>: Tại `src/app/api/pos/checkout/route.ts`, trước khi tính toán `serverSubtotal`, cần đối chiếu số tiền sửa chữa với `repairTicket.payment.amount`. Tránh tin tưởng giá trị `price` truyền từ Client đối với các item thuộc loại `isRepairTicket` và `isOrderPayment`.
+### Fix 2026-06-30
+- Changed files: `src/app/api/pos/checkout/route.ts`.
+- Verification: POS aggregates submitted repair-payment lines, compares the request total against `repairTicket.payment.amount`, and records only the server-side expected amount.
 
 ## BUG-POS-018: Lỗ hổng Thanh Toán Kép Phiếu Sửa Chữa tại POS (Double Billing/Revenue Duplication)
-- **Status:** open
+- **Status:** fixed
 - **Severity:** high
 - **Module:** POS
 - **Files:** `src/app/api/pos/checkout/route.ts`
@@ -382,3 +393,6 @@ if (item.sellingPrice < item.costPrice) {
 <b>Phân tích</b>: Khi tính toán phiếu sửa chữa trong đơn hàng POS, hệ thống bỏ qua việc kiểm tra xem phiếu sửa chữa đó đã được thanh toán trước đó hay chưa (`payment.status === 'paid'`). Nếu một phiếu sửa chữa ở trạng thái hoàn tất (terminal) bị đẩy lại vào luồng thanh toán POS, hệ thống sẽ bỏ qua việc trừ kho (`shouldCountCompletion = false`), nhưng VẪN tiếp tục cộng số tiền thu được vào `repairPaymentTotals` và cập nhật lại `payment.status = 'paid'`. Điều này dẫn đến doanh thu sửa chữa (`repairRevenue`) bị tính đúp (Double Revenue) vào Báo cáo doanh thu tài chính và làm sai lệch nghiêm trọng tiền quỹ trong Ca Thu Ngân.
 ### Solution
 <b>Giải pháp đề xuất</b>: Trước khi xử lý thanh toán bất kỳ phiếu sửa chữa nào trong POS Checkout (`api/pos/checkout/route.ts`), cần ném lỗi `throw new Error(...)` ngay lập tức nếu `repairTicket.payment?.status === 'paid'`, ngăn chặn hoàn toàn việc thanh toán đúp một phiếu đã hoàn tất.
+### Fix 2026-06-30
+- Changed files: `src/app/api/pos/checkout/route.ts`.
+- Verification: POS now rejects repair tickets whose `payment.status` is already `paid` before completion, revenue, cashier-shift, or payment-history writes.

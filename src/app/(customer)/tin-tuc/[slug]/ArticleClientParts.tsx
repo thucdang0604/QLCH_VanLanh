@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { collection, addDoc, serverTimestamp, query, where, orderBy, limit, getDocs } from 'firebase/firestore';
+import { collection, query, where, orderBy, limit, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Timestamp } from 'firebase/firestore';
 import { Star, Loader2, Send } from 'lucide-react';
@@ -115,15 +115,21 @@ export default function ArticleClientParts({ slug }: { slug: string }) {
 
         setSubmitLoading(true);
         try {
-            await addDoc(collection(db, 'article_comments'), {
-                articleId: slug,
-                rating: Math.min(5, Math.max(1, Number(rating) || 5)),
-                name: cleanName,
-                phone: cleanPhone,
-                content: cleanContent,
-                status: 'pending',
-                createdAt: serverTimestamp(),
+            const res = await fetch('/api/articles/comments', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    articleId: slug,
+                    rating: Math.min(5, Math.max(1, Number(rating) || 5)),
+                    name: cleanName,
+                    phone: cleanPhone,
+                    content: cleanContent,
+                }),
             });
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}));
+                throw new Error(data.error || 'Không thể gửi bình luận.');
+            }
             setSubmitDone(true);
             setName('');
             setPhone('');

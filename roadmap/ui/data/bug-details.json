@@ -803,7 +803,7 @@
       "id": "BUG-SEC-002",
       "module": "Security",
       "severity": "critical",
-      "status": "open",
+      "status": "fixed",
       "workflowId": "system-content",
       "title": "Lỗ hổng Ghi Dữ liệu Không kiểm soát (DoS & Chi phí)",
       "affectedFiles": [
@@ -813,7 +813,9 @@
       "description": "Rules cho /appointments và /subscribers đang để allow create: if true mà không có validate schema hay data size.",
       "cause": "Thiếu validation rules cho các public collections.",
       "solution": "Thêm schema validation: chỉ allow các field cho phép, giới hạn string length, dùng request.time.",
-      "discoveredAt": "2026-06-29"
+      "verificationNotes": "Fixed 2026-06-30: firestore.rules now validates public /appointments and /subscribers creates with key whitelists, string length limits, fixed status values, and request.time timestamps.",
+      "discoveredAt": "2026-06-29",
+      "fixedAt": "2026-06-30"
     },
     {
       "id": "BUG-SEC-003",

@@ -18,6 +18,10 @@ type ReceiptItem = ImportReceiptItem & {
     status?: 'requested' | 'approved' | 'ordered' | 'in_stock' | 'unavailable' | 'selected';
     supplier?: string;
 };
+type ValidatedReceiptItem = ReceiptItem & {
+    importPrice: number;
+    quantity: number;
+};
 type ReceiptData = Omit<Partial<ImportReceipt>, 'items'> & {
     items?: ReceiptItem[];
     version?: number;
@@ -48,6 +52,36 @@ type WorkingProduct = {
 
 function errorMessage(error: unknown): string {
     return error instanceof Error ? error.message : 'Internal server error';
+}
+
+function readNonNegativeImportPrice(value: unknown, itemName: string): number {
+    const price = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(price) || price < 0) {
+        throw new Error(`Gia nhap cua "${itemName}" khong hop le.`);
+    }
+    return price;
+}
+
+function readPositiveImportQuantity(value: unknown, itemName: string): number {
+    const quantity = typeof value === 'number' ? value : Number(value);
+    const normalizedQuantity = Math.floor(quantity);
+    if (!Number.isFinite(quantity) || normalizedQuantity <= 0) {
+        throw new Error(`So luong nhap cua "${itemName}" khong hop le.`);
+    }
+    return normalizedQuantity;
+}
+
+function validateImportItemValues(item: ReceiptItem): ValidatedReceiptItem {
+    const itemName = item.productName || item.productId || item.partLineId || 'mat hang';
+    return {
+        ...item,
+        importPrice: readNonNegativeImportPrice(item.importPrice, String(itemName)),
+        quantity: readPositiveImportQuantity(item.quantity, String(itemName)),
+    };
+}
+
+function calculateImportTotal(items: ValidatedReceiptItem[]): number {
+    return items.reduce((sum, item) => sum + item.importPrice * item.quantity, 0);
 }
 
 export async function POST(request: NextRequest) {
@@ -216,9 +250,10 @@ export async function POST(request: NextRequest) {
 
                 if (!foundItem) throw new Error('Không tìm thấy linh kiện trong phiếu nhập.');
 
-                const totalAmount = newItems.reduce(
-                    (sum, item) => sum + (item.status === 'unavailable' ? 0 : (item.importPrice || 0) * item.quantity),
-                    0,
+                const totalAmount = calculateImportTotal(
+                    newItems
+                        .filter((item) => item.status !== 'unavailable')
+                        .map(validateImportItemValues),
                 );
                 tx.update(receiptRef, {
                     items: newItems,
@@ -254,12 +289,15 @@ export async function POST(request: NextRequest) {
                 }
 
                 // Calculate actual imported items
-                const importedItems = (receipt.items || []).filter((i) => i.status !== 'unavailable');
+                const completedReceiptItems = (receipt.items || []).map((item) =>
+                    item.status === 'unavailable' ? item : validateImportItemValues(item),
+                );
+                const importedItems = completedReceiptItems.filter((i): i is ValidatedReceiptItem => i.status !== 'unavailable');
                 if (importedItems.length === 0) {
                     throw new Error('Không có linh kiện nào để nhập kho (tất cả đều không khả dụng).');
                 }
 
-                const totalAmount = importedItems.reduce((sum, i) => sum + ((i.importPrice || 0) * i.quantity), 0);
+                const totalAmount = calculateImportTotal(importedItems);
                 const newProductPartKeys = importedItems
                     .map((item) => item.productId ? '' : (item.productId || item.partLineId || ''))
                     .filter((partKey) => partKey && newParts?.[partKey]);
@@ -528,7 +566,7 @@ export async function POST(request: NextRequest) {
                 tx.update(receiptRef, {
                     status: 'completed',
                     lotCode: lotCode,
-                    items: receipt.items,
+                    items: completedReceiptItems,
                     completedAt: FieldValue.serverTimestamp(),
                     completedBy: caller.uid,
                     totalAmount,

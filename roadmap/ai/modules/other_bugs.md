@@ -499,7 +499,7 @@ Giu du an dung pnpm: root <code>package.json</code> phai co <code>packageManager
 ### Guardrail
 Khong commit <code>package-lock.json</code> hoac artifact <code>.firebase/</code> trong repo pnpm. Khi deploy fail sau build local pass, doc dung stage log: neu fail tai Cloud Build <code>npm ci</code>, kiem tra generated function lock, package manager, va peer conflict <code>firebase-frameworks</code>/<code>sharp</code> truoc khi sua source UI/TypeScript.
 ## BUG-DEPLOY-007: Firebase CLI Windows deploy warning node-which/esbuild khi bundle next.config
-- **Status:** in_progress
+- **Status:** fixed
 - **Severity:** medium
 - **Module:** Build
 - **Files:** package.json, pnpm-lock.yaml, next.config.mjs, firebase.json, .firebase/qlch-vanlanh/functions/package.json (generated), .firebase/qlch-vanlanh/functions/package-lock.json (generated)
@@ -574,7 +574,7 @@ Cleanup da xoa script nhung chua xoa/cap nhat package script va roadmap.
 ## Lỗi thuộc Module: rbac
 # 🐛 Bugs
 ## BUG-RBAC-002: Admin layout và permission map phân tán gây rối UI/cấp quyền
-- **Status:** in_progress
+- **Status:** fixed
 - **Severity:** medium
 - **Module:** RBAC
 - **Files:** src/lib/adminModules.ts, src/lib/permissions.ts, src/app/admin/layout.tsx, src/app/admin/staff/page.tsx, src/middleware.ts, src/app/admin/reviews/page.tsx
