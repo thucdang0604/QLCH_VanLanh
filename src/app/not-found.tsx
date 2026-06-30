@@ -1,90 +1,211 @@
 import Link from 'next/link';
-import { Metadata } from 'next';
-import { Home, Search, PackageSearch, Smartphone, Laptop, Newspaper } from 'lucide-react';
-import Header from "@/components/layout/Header";
-import Footer from "@/components/layout/Footer";
-import MobileBottomNav from "@/components/layout/MobileBottomNav";
-import { CartProvider } from "@/lib/CartContext";
-import { ServerConfigProvider, DEFAULT_CONFIG } from "@/lib/ConfigContext";
+import Image from 'next/image';
+import type { Metadata } from 'next';
+import { ArrowRight, Home, PackageSearch, Phone, Search } from 'lucide-react';
+import CustomerLayoutShell from '@/app/(customer)/layout.shell';
+import MissionsWidget from '@/components/MissionsWidget';
+import { ServerConfigProvider } from '@/lib/ConfigContext';
+import { getBusinessIdentity } from '@/lib/businessIdentity';
+import type { FooterServiceLink, HomeServiceCategory, NavItem, SiteConfig } from '@/lib/config-defaults';
+import { getCachedServerConfig } from '@/lib/serverConfig';
 
-export const metadata: Metadata = {
-  title: '404 - Không tìm thấy trang | Văn Lành Service',
-  description: 'Rất tiếc, trang bạn đang tìm kiếm không tồn tại hoặc đã bị gỡ bỏ. Vui lòng quay lại trang chủ.',
-  robots: {
-    index: false,
-    follow: true,
-  }
+export const revalidate = 300;
+
+type SuggestedLink = {
+  id: string;
+  label: string;
+  href: string;
+  meta?: string;
+  marker?: string;
 };
 
-export default function NotFound() {
+type ConfiguredLink =
+  | Pick<NavItem, 'id' | 'label' | 'slug' | 'isCustomLink'>
+  | Pick<FooterServiceLink, 'id' | 'name' | 'slug' | 'isCustomLink'>
+  | Pick<HomeServiceCategory, 'id' | 'name' | 'slug' | 'isCustomLink' | 'count' | 'icon'>;
+
+function resolveHref(item: ConfiguredLink) {
+  const slug = item.slug?.trim();
+  if (!slug) return null;
+  if (item.isCustomLink) return slug;
+  return `/category/${slug.replace(/^\/+/, '')}`;
+}
+
+function uniqueByHref(items: SuggestedLink[]) {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    if (seen.has(item.href)) return false;
+    seen.add(item.href);
+    return true;
+  });
+}
+
+function isSuggestedLink(item: SuggestedLink | null): item is SuggestedLink {
+  return item !== null;
+}
+
+function isImageMarker(value: string | undefined) {
+  return Boolean(value && (value.startsWith('http') || value.startsWith('/')));
+}
+
+function buildSuggestions(config: SiteConfig): SuggestedLink[] {
+  const homeCategories: SuggestedLink[] = (config.homeServiceCategories || [])
+    .filter((item) => item.visible)
+    .sort((a, b) => a.order - b.order)
+    .map<SuggestedLink | null>((item) => {
+      const href = resolveHref(item);
+      if (!href) return null;
+      return {
+        id: `home-${item.id}`,
+        label: item.name,
+        href,
+        meta: item.count,
+        marker: item.icon,
+      };
+    })
+    .filter(isSuggestedLink);
+
+  const headerLinks: SuggestedLink[] = (config.headerNav || [])
+    .filter((item) => item.visible)
+    .sort((a, b) => a.order - b.order)
+    .map<SuggestedLink | null>((item) => {
+      const href = resolveHref(item);
+      if (!href) return null;
+      return {
+        id: `nav-${item.id}`,
+        label: item.label,
+        href,
+      };
+    })
+    .filter(isSuggestedLink);
+
+  const footerServices: SuggestedLink[] = (config.footerServices || [])
+    .filter((item) => item.visible)
+    .sort((a, b) => a.order - b.order)
+    .map<SuggestedLink | null>((item) => {
+      const href = resolveHref(item);
+      if (!href) return null;
+      return {
+        id: `footer-${item.id}`,
+        label: item.name,
+        href,
+      };
+    })
+    .filter(isSuggestedLink);
+
+  return uniqueByHref([...homeCategories, ...headerLinks, ...footerServices]).slice(0, 6);
+}
+
+export async function generateMetadata(): Promise<Metadata> {
+  const config = await getCachedServerConfig();
+  const identity = getBusinessIdentity(config);
+
+  return {
+    title: `Không tìm thấy trang | ${identity.siteName}`,
+    description: `Trang bạn đang tìm không tồn tại hoặc đã được di chuyển. Quay lại ${identity.siteName} để tiếp tục tìm sản phẩm, dịch vụ hoặc tra cứu đơn hàng.`,
+    robots: {
+      index: false,
+      follow: true,
+    },
+  };
+}
+
+export default async function NotFound() {
+  const config = await getCachedServerConfig();
+  const identity = getBusinessIdentity(config);
+  const suggestions = buildSuggestions(config);
+
   return (
-    <ServerConfigProvider initialConfig={DEFAULT_CONFIG}>
-    <CartProvider>
-      <div className="flex flex-col min-h-screen w-full">
-        <Header />
-        
-        <main className="flex-1 flex flex-col items-center justify-center bg-gray-50 px-4 py-20">
-          <div className="text-center max-w-3xl mx-auto w-full">
-            {/* Visual 404 Section */}
-            <div className="relative mb-10 w-full flex justify-center items-center">
-               <h1 className="text-[12rem] font-black leading-none text-transparent bg-clip-text bg-gradient-to-br from-copper/20 via-orange-500/10 to-transparent select-none">
-                 404
-               </h1>
-               <div className="absolute inset-0 flex flex-col items-center justify-center">
-                 <div className="w-20 h-20 bg-copper/10 rounded-full flex items-center justify-center mb-4">
-                    <Search className="text-copper w-10 h-10" />
-                 </div>
-                 <h2 className="text-3xl sm:text-4xl font-extrabold text-gray-900 tracking-tight">Ối! Lạc đường rồi 😥</h2>
-               </div>
+    <ServerConfigProvider initialConfig={config}>
+      <CustomerLayoutShell>
+        <section className="min-h-[calc(100vh-12rem)] bg-gray-50 px-4 py-10 sm:py-14">
+          <div className="mx-auto flex w-full max-w-5xl flex-col items-center text-center">
+            <div className="mb-6 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-copper/10 text-copper">
+              <Search size={30} aria-hidden="true" />
             </div>
-            
-            <p className="text-lg text-gray-600 mb-10 max-w-xl mx-auto">
-              Rất tiếc, đường dẫn bạn đang tìm kiếm không tồn tại, có thể đã bị thay đổi hoặc đã bị gỡ bỏ. Đừng lo lắng, hãy để chúng tôi đưa bạn về đúng hướng.
+
+            <p className="mb-3 text-sm font-semibold uppercase tracking-wide text-copper">404</p>
+            <h1 className="max-w-3xl text-3xl font-extrabold leading-tight text-gray-950 sm:text-5xl">
+              Trang này không còn khả dụng
+            </h1>
+            <p className="mt-5 max-w-2xl text-base leading-7 text-gray-600 sm:text-lg">
+              Đường dẫn có thể đã đổi hoặc nội dung đã được gỡ khỏi hệ thống của {identity.siteName}. Bạn có thể quay về trang chủ, tra cứu đơn hàng hoặc mở nhanh một nhóm dịch vụ đang được cấu hình trên website.
             </p>
 
-            {/* Action Buttons */}
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-              <Link 
-                href="/" 
-                className="flex items-center justify-center gap-2 w-full sm:w-auto px-8 py-3.5 bg-copper text-white rounded-xl font-semibold hover:bg-copper-dark transition-all duration-300 hover:shadow-lg hover:shadow-copper/30 hover:-translate-y-0.5"
+            <div className="mt-8 flex w-full max-w-2xl flex-col gap-3 sm:flex-row sm:justify-center">
+              <Link
+                href="/"
+                className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-copper px-6 text-sm font-semibold text-white shadow-sm transition hover:bg-copper-dark focus:outline-none focus:ring-2 focus:ring-copper/40"
               >
-                <Home size={20} />
-                Trở Về Trang Chủ
+                <Home size={18} aria-hidden="true" />
+                Về trang chủ
               </Link>
-              <Link 
+              <Link
                 href="/tracking"
-                className="flex items-center justify-center gap-2 w-full sm:w-auto px-8 py-3.5 bg-white text-gray-700 border border-gray-200 rounded-xl font-semibold hover:border-copper hover:text-copper transition-all duration-300 shadow-sm hover:shadow-md"
+                className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-6 text-sm font-semibold text-gray-800 shadow-sm transition hover:border-copper hover:text-copper focus:outline-none focus:ring-2 focus:ring-copper/30"
               >
-                <PackageSearch size={20} />
-                Tra Cứu Đơn Hàng
+                <PackageSearch size={18} aria-hidden="true" />
+                Tra cứu đơn hàng
               </Link>
+              <a
+                href={`tel:${identity.mainPhone}`}
+                className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-6 text-sm font-semibold text-gray-800 shadow-sm transition hover:border-copper hover:text-copper focus:outline-none focus:ring-2 focus:ring-copper/30"
+              >
+                <Phone size={18} aria-hidden="true" />
+                {identity.formattedPhone}
+              </a>
             </div>
 
-            {/* Quick Suggestions */}
-            <div className="mt-16 pt-8 border-t border-gray-200">
-                <p className="text-sm font-medium text-gray-500 mb-5 uppercase tracking-wider">Hoặc khám phá các dịch vụ nổi bật</p>
-                <div className="flex flex-wrap justify-center gap-3">
-                   <Link href="/category/dien-thoai" className="flex items-center gap-2 text-sm px-5 py-2.5 bg-white border border-gray-200 rounded-full hover:border-copper hover:text-copper transition-colors shadow-sm">
-                     <Smartphone size={16} /> Điện thoại
-                   </Link>
-                   <Link href="/category/laptop" className="flex items-center gap-2 text-sm px-5 py-2.5 bg-white border border-gray-200 rounded-full hover:border-copper hover:text-copper transition-colors shadow-sm">
-                     <Laptop size={16} /> Laptop
-                   </Link>
-                   <Link href="/search" className="flex items-center gap-2 text-sm px-5 py-2.5 bg-white border border-gray-200 rounded-full hover:border-copper hover:text-copper transition-colors shadow-sm">
-                     <Search size={16} /> Tìm kiếm sản phẩm
-                   </Link>
-                   <Link href="/tin-tuc" className="flex items-center gap-2 text-sm px-5 py-2.5 bg-white border border-gray-200 rounded-full hover:border-copper hover:text-copper transition-colors shadow-sm">
-                     <Newspaper size={16} /> Tin tức công nghệ
-                   </Link>
+            {suggestions.length > 0 && (
+              <div className="mt-12 w-full text-left">
+                <div className="mb-4 flex items-end justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-semibold uppercase tracking-wide text-gray-500">Gợi ý từ cấu hình website</p>
+                    <h2 className="mt-1 text-xl font-bold text-gray-950">Mở nhanh danh mục đang hiển thị</h2>
+                  </div>
                 </div>
-            </div>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {suggestions.map((item) => (
+                    <Link
+                      key={item.id}
+                      href={item.href}
+                      className="group flex min-h-24 items-center justify-between gap-4 rounded-lg border border-gray-200 bg-white p-4 text-left shadow-sm transition hover:border-copper hover:shadow-md"
+                    >
+                      <span className="flex min-w-0 items-center gap-3">
+                        {isImageMarker(item.marker) ? (
+                          <span className="relative h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-gray-100" aria-hidden="true">
+                            <Image
+                              src={item.marker || ''}
+                              alt=""
+                              fill
+                              sizes="40px"
+                              className="object-contain p-1"
+                            />
+                          </span>
+                        ) : item.marker ? (
+                          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-lg" aria-hidden="true">
+                            {item.marker}
+                          </span>
+                        ) : (
+                          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-copper/10 text-copper" aria-hidden="true">
+                            <Search size={18} />
+                          </span>
+                        )}
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-semibold text-gray-900 group-hover:text-copper">{item.label}</span>
+                          {item.meta && <span className="mt-1 block text-xs text-gray-500">{item.meta}</span>}
+                        </span>
+                      </span>
+                      <ArrowRight size={17} className="shrink-0 text-gray-400 transition group-hover:translate-x-0.5 group-hover:text-copper" aria-hidden="true" />
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
-        </main>
-
-        <Footer />
-        <MobileBottomNav />
-      </div>
-    </CartProvider>
+        </section>
+      </CustomerLayoutShell>
+      <MissionsWidget />
     </ServerConfigProvider>
   );
 }

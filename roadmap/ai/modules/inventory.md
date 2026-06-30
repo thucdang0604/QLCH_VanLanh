@@ -335,6 +335,9 @@ if (available < quantity) {
 ### Fix 2026-06-30
 - Changed files: `src/lib/inventoryImportAllocation.ts`, `src/app/api/inventory/import/route.ts`.
 - Verification: inventory import now rejects any product state where `stock < held` before and after applying import/repair allocation, preventing stock updates from preserving an impossible reservation state.
+### Follow-up Fix 2026-06-30
+- Changed files: `firestore.rules`.
+- Verification: direct client `products` create/update now also enforces the dynamic invariant `stock >= held` whenever both fields are present, so stocktake/direct inventory edits cannot bypass the server import guard.
 
 ## BUG-INV-015: Rác Phiếu Nhập Nháp & Gãy Luồng Giữ Chỗ (Draft Import Allocation Conflict)
 - **Status:** fixed

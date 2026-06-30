@@ -402,6 +402,9 @@ transaction.update(productRef, { stock: increment(-qty), held: increment(-qty) }
 ### Fix 2026-06-30
 - Changed files: `src/app/api/repairs/transition/route.ts`.
 - Verification: when a repair moves into a cancel/refund terminal status, reserved selected parts release product `held` and clear `reservedQuantity` in the same transaction.
+### Follow-up Fix 2026-06-30
+- Changed files: `src/app/api/repairs/transition/route.ts`.
+- Verification: terminal handover statuses still require the handover API, but configured cancel/refund terminal statuses can now pass the transition guard and execute the held-stock release branch.
 
 ## BUG-REP-014: Mất Hoa Hồng KTV (Lost Commission) khi Phiếu Sửa Chữa Thanh Toán Sau (Post-paid)
 - **Status:** fixed

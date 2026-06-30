@@ -433,9 +433,7 @@ export default function MissionsWidget() {
 
             // Dọn dẹp trạng thái tạm thời sau khi nhận voucher thành công
             localStorage.removeItem('bounty_missions');
-            localStorage.removeItem('bounty_phone');
             localStorage.removeItem('bounty_name');
-            localStorage.removeItem('bounty_token');
 
             setStep(3);
         } catch (error) {

@@ -15,6 +15,7 @@ type CashierShiftData = FirebaseFirestore.DocumentData & {
 
 const ACTIVE_SHIFT_LOCK_COLLECTION = 'system_counters';
 const ACTIVE_SHIFT_LOCK_ID = 'active_cashier_shift';
+const CASHIER_SHIFT_ALREADY_OPEN_MESSAGE = 'Dang co ca thu ngan mo. Vui long chot ca hien tai truoc khi mo ca moi.';
 
 function asAmount(value: unknown) {
     const amount = Math.round(Number(value) || 0);
@@ -102,7 +103,7 @@ export async function POST(request: NextRequest) {
             if (activeShiftId) {
                 const activeShiftSnap = await tx.get(db.collection('cashier_shifts').doc(activeShiftId));
                 if (activeShiftSnap.exists && activeShiftSnap.data()?.status === 'open') {
-                    throw new Error('Dang co ca thu ngan mo. Vui long chot ca hien tai truoc khi mo ca moi.');
+                    throw new Error(CASHIER_SHIFT_ALREADY_OPEN_MESSAGE);
                 }
             }
 
@@ -152,7 +153,7 @@ export async function POST(request: NextRequest) {
     } catch (error: unknown) {
         console.error('Open cashier shift API error:', error);
         const message = error instanceof Error ? error.message : 'Internal server error';
-        const status = message.includes('Forbidden') ? 403 : message.includes('Ă„Âang cÄ‚Â³ ca') ? 409 : 500;
+        const status = message.includes('Forbidden') ? 403 : message === CASHIER_SHIFT_ALREADY_OPEN_MESSAGE ? 409 : 500;
         return NextResponse.json({ error: message }, { status });
     }
 }

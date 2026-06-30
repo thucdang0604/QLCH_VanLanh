@@ -330,6 +330,9 @@ if (item.sellingPrice < item.costPrice) {
 ### Fix 2026-06-30
 - Changed files: `src/app/(customer)/checkout/page.tsx`, `src/app/api/checkout/route.ts`.
 - Verification: storefront checkout now sends an `idempotencyKey`; the API stores completed `web_checkout` requests in `operation_requests` and returns the original order id on duplicate submission.
+### Follow-up Fix 2026-06-30
+- Changed files: `src/app/(customer)/checkout/page.tsx`.
+- Verification: the checkout page now keeps one `idempotencyKey` per submit attempt and only resets it after success, so manual retry after a timeout reuses the same `operation_requests` key instead of creating a duplicate order.
 
 ## BUG-POS-012: POS Checkout Chấp nhận Giá Âm (Negative Price Exploit)
 - **Status:** fixed
@@ -356,6 +359,9 @@ if (item.sellingPrice < item.costPrice) {
 ### Fix 2026-06-30
 - Changed files: `src/app/api/pos/cashier-shift/route.ts`.
 - Verification: opening a cashier shift now uses the single document lock `system_counters/active_cashier_shift`; closing a shift clears the lock in the same transaction, with fallback support for legacy open shifts.
+### Follow-up Fix 2026-06-30
+- Changed files: `src/app/api/pos/cashier-shift/route.ts`.
+- Verification: duplicate active-shift attempts now throw and compare the same ASCII constant, returning HTTP 409 instead of falling through to 500 because of mojibake string matching.
 
 ## BUG-ORD-008: Lỗ hổng Xóa & Sửa Đơn Hàng Bypass Luồng Hoàn Tiền/Trả Kho
 - **Status:** fixed
@@ -369,6 +375,9 @@ if (item.sellingPrice < item.costPrice) {
 ### Fix 2026-06-30
 - Changed files: `firestore.rules`.
 - Verification: `/orders` delete now requires `isAdmin()` and direct client updates cannot change item, total, discount, shipping, or voucher fields.
+### Follow-up Fix 2026-06-30
+- Changed files: `firestore.rules`.
+- Verification: direct client delete for `/orders` is now denied for every role; all delete/cancel/refund behavior must go through server-controlled transition flows.
 
 ## BUG-POS-015: Thiếu kiểm tra số tiền trả trước (deposit_amount) gây lạm phát công nợ và bypass kiểm tra thu ngân
 - **Status:** fixed

@@ -1,8 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
+import { getApps, initializeApp } from 'firebase/app';
+import { getAuth, onAuthStateChanged, type Auth, type User as FirebaseUser } from 'firebase/auth';
 import {
     ChevronLeft,
     ShoppingBag,
@@ -25,11 +27,52 @@ const formatPrice = (price: number) =>
     new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' })
         .format(price).replace('₫', 'đ');
 
+async function getBountyVoucherProofToken() {
+    if (typeof window === 'undefined') return undefined;
+
+    const config = {
+        apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+        authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+        projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+        storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+        messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+        appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+        measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
+    };
+    const bountyApp = getApps().find((app) => app.name === 'bounty-otp') || initializeApp(config, 'bounty-otp');
+    const auth = getAuth(bountyApp);
+    const bountyUser = await getCurrentBountyUser(auth);
+    if (bountyUser) {
+        const token = await bountyUser.getIdToken();
+        localStorage.setItem('bounty_token', token);
+        return token;
+    }
+
+    return localStorage.getItem('bounty_token') || undefined;
+}
+
+function getCurrentBountyUser(auth: Auth) {
+    if (auth.currentUser) return Promise.resolve(auth.currentUser);
+
+    return new Promise<FirebaseUser | null>((resolve) => {
+        const timeoutId = window.setTimeout(() => {
+            unsubscribe();
+            resolve(null);
+        }, 500);
+        const unsubscribe = onAuthStateChanged(auth, (user) => {
+            window.clearTimeout(timeoutId);
+            unsubscribe();
+            resolve(user);
+        });
+    });
+}
+
 export default function CheckoutPage() {
     const seoTitle = 'Đặt hàng | Văn Lành Service';
     const seoDescription = 'Xác nhận đơn hàng và liên hệ mua hàng tại Văn Lành Service.';
     const canonicalUrl = `${SITE_URL}/checkout`;
     const { items: cartItems, updateQuantity, removeItem, clearCart, totalAmount } = useCart();
+    const checkoutAttemptKeyRef = useRef<string | null>(null);
 
     const [name, setName] = useState('');
     const [phone, setPhone] = useState('');
@@ -97,17 +140,21 @@ export default function CheckoutPage() {
 
         setIsSubmitting(true);
         try {
-            const idempotencyKey = crypto.randomUUID();
+            if (!checkoutAttemptKeyRef.current) {
+                checkoutAttemptKeyRef.current = crypto.randomUUID();
+            }
+            const voucherProofToken = voucherApplied ? await getBountyVoucherProofToken() : undefined;
             const res = await fetch('/api/checkout', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    idempotencyKey,
+                    idempotencyKey: checkoutAttemptKeyRef.current,
                     name: name.trim(),
                     phone: phone.trim(),
                     note: note.trim(),
                     website: honeypot, // Honeypot — server rejects if filled
                     voucherCode: voucherApplied || undefined,
+                    voucherProofToken,
                     items: cartItems.map(item => ({
                         id: item.id,
                         name: item.name,
@@ -128,6 +175,7 @@ export default function CheckoutPage() {
             }
 
             setSuccessOrderId(data.orderId);
+            checkoutAttemptKeyRef.current = null;
             clearCart();
         } catch {
             setError('Không thể kết nối máy chủ. Vui lòng thử lại.');

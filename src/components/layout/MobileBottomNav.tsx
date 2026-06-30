@@ -3,7 +3,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
-import Image from 'next/image';
 import {
     LayoutGrid, Headphones, ClipboardList, User,
     X, Phone, MessageCircle, MapPin, CalendarClock,
@@ -14,6 +13,7 @@ import { useConfig } from '@/lib/ConfigContext';
 import { getBusinessIdentity } from '@/lib/businessIdentity';
 import TrackingModal from '@/components/TrackingModal';
 import { getIcon } from '@/lib/icon-map';
+import type { SidebarMenuItem } from '@/lib/config-defaults';
 
 // Zalo SVG icon - compact inline
 function ZaloIcon({ size = 22 }: { size?: number }) {
@@ -79,7 +79,7 @@ export default function MobileBottomNav() {
 
     // Extract categories for sidebar
     const categories = config.sidebarMenu || [];
-    const visibleCategories = categories.filter((cat: any) => cat.visible !== false);
+    const visibleCategories = categories.filter((cat: SidebarMenuItem) => cat.visible !== false);
 
     // Update contact options dynamically from config
     const identity = getBusinessIdentity(config);
@@ -160,7 +160,7 @@ export default function MobileBottomNav() {
                 <div className="flex flex-1 overflow-hidden">
                     {/* Left Pane (Parent Categories) */}
                     <div className="w-[100px] md:w-[140px] bg-gray-50 overflow-y-auto flex-shrink-0 border-r border-gray-100">
-                        {visibleCategories.map((cat: any) => {
+                        {visibleCategories.map((cat: SidebarMenuItem) => {
                             const Icon = getIcon(cat.iconName);
                             const isActiveCat = (activeCategoryId || visibleCategories[0]?.id) === cat.id;
                             return (
@@ -205,7 +205,7 @@ export default function MobileBottomNav() {
                                     {/* Sub Groups */}
                                     {activeCat.subGroups && activeCat.subGroups.length > 0 ? (
                                         <div className="space-y-5">
-                                            {activeCat.subGroups.map((group: any, gi: number) => (
+                                            {activeCat.subGroups.map((group, gi: number) => (
                                                 <div key={gi}>
                                                     <h4 className="text-xs font-bold text-gray-800 uppercase mb-3">{group.group}</h4>
                                                     <div className="grid grid-cols-2 gap-2">

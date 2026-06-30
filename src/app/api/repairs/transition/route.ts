@@ -108,6 +108,7 @@ export async function POST(request: NextRequest) {
             const targetNode = requireWorkflowNode(workflow, targetStatus);
             const isCurrentTerminal = !!currentNode.isTerminal;
             const isTargetTerminal = !!targetNode.isTerminal;
+            const isTargetCancelTerminal = isTargetTerminal && isCancelTerminalStatus(targetStatus);
             const isAllowed = currentNode.allowedNext?.includes(targetStatus) ?? false;
             const requireChecklist = workflowNodeHasFeature(currentNode, 'requireChecklist');
             const requirePartsReady = workflowNodeHasFeature(currentNode, 'requirePartsReady');
@@ -122,7 +123,7 @@ export async function POST(request: NextRequest) {
                 throw new Error(`Phiếu đã ở trạng thái kết thúc (${ticket.status}), không thể thay đổi.`);
             }
 
-            if (isTargetTerminal) {
+            if (isTargetTerminal && !isTargetCancelTerminal) {
                 throw new Error(`Trạng thái ${targetStatus} là trạng thái kết thúc/bàn giao. Vui lòng dùng chức năng Bàn giao (handover).`);
             }
 
@@ -168,7 +169,7 @@ export async function POST(request: NextRequest) {
                 throw new Error('Trạng thái này yêu cầu phải phân công Kỹ thuật viên phụ trách. Vui lòng gán KTV trước khi chuyển trạng thái.');
             }
 
-            const shouldReleaseHeldParts = isTargetTerminal && isCancelTerminalStatus(targetStatus);
+            const shouldReleaseHeldParts = isTargetCancelTerminal;
             const releaseParts = shouldReleaseHeldParts
                 ? (ticket.parts || [])
                     .map((part, index) => ({

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminDb } from '@/lib/firebaseAdmin';
+import { getAdminAuth, getAdminDb } from '@/lib/firebaseAdmin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { isRateLimited } from '@/lib/rateLimit';
 import { PRODUCT_STATUS, isProductArchived } from '@/lib/productLifecycle';
@@ -9,6 +9,29 @@ import { reserveSequentialDocumentId } from '@/lib/serverDocumentIds';
 
 const RATE_LIMIT_MAX = 3;
 const RATE_LIMIT_WINDOW_MS = 60_000; // 1 phút
+
+async function verifyVoucherProofPhone(token: unknown, expectedPhone: string) {
+    if (!token || typeof token !== 'string') {
+        throw new Error('Personal voucher requires OTP phone verification before checkout.');
+    }
+
+    let decodedToken;
+    try {
+        decodedToken = await getAdminAuth().verifyIdToken(token);
+    } catch (error) {
+        console.error('Checkout voucher proof token error:', error);
+        throw new Error('Personal voucher verification expired. Please verify the phone number again.');
+    }
+
+    const tokenPhone = typeof decodedToken.phone_number === 'string'
+        ? normalizeVietnamPhone(decodedToken.phone_number)
+        : null;
+    if (!tokenPhone || tokenPhone.local !== expectedPhone) {
+        throw new Error('Personal voucher verification does not match the checkout phone number.');
+    }
+
+    return tokenPhone.local;
+}
 
 export async function POST(request: NextRequest) {
     try {
@@ -35,7 +58,7 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const { idempotencyKey, name, phone, note, items, voucherCode } = body;
+        const { idempotencyKey, name, phone, note, items, voucherCode, voucherProofToken } = body;
 
         // ── 3. Validate required fields ──
         if (!name || typeof name !== 'string' || name.trim().length < 2) {
@@ -79,6 +102,26 @@ export async function POST(request: NextRequest) {
         // ── 4. Server-Side Data Fetching & Transaction ──
         const db = getAdminDb();
         let orderRefId = '';
+        let verifiedVoucherProofPhone: string | null = null;
+
+        if (voucherCode && typeof voucherCode === 'string') {
+            const voucherPreviewQuery = await db.collection('vouchers')
+                .where('code', '==', voucherCode.trim().toUpperCase())
+                .where('isActive', '==', true)
+                .limit(1)
+                .get();
+            const voucherOwnerId = voucherPreviewQuery.docs[0]?.data()?.ownerId;
+            if (voucherOwnerId) {
+                const voucherOwnerPhone = normalizeVietnamPhone(String(voucherOwnerId));
+                if (!voucherOwnerPhone || voucherOwnerPhone.local !== normalizedPhone) {
+                    throw new Error('Personal voucher can only be used by the verified owner phone number.');
+                }
+                verifiedVoucherProofPhone = await verifyVoucherProofPhone(voucherProofToken, normalizedPhone);
+                if (verifiedVoucherProofPhone !== voucherOwnerPhone.local) {
+                    throw new Error('Personal voucher verification does not match the voucher owner.');
+                }
+            }
+        }
         
         const result = await db.runTransaction(async (transaction) => {
             if (idempotencyKey) {
@@ -252,8 +295,11 @@ export async function POST(request: NextRequest) {
                 // Validate personal bounty voucher owner on the server, not only in preview API.
                 if (voucherData.ownerId) {
                     const voucherOwnerPhone = normalizeVietnamPhone(String(voucherData.ownerId));
-                    if (!voucherOwnerPhone || voucherOwnerPhone.local !== normalizedPhone) {
-                        throw new Error('Voucher này là phần thưởng cá nhân. Vui lòng nhập đúng Số điện thoại đã nhận voucher.');
+                    if (!voucherOwnerPhone
+                        || voucherOwnerPhone.local !== normalizedPhone
+                        || verifiedVoucherProofPhone !== normalizedPhone
+                        || verifiedVoucherProofPhone !== voucherOwnerPhone.local) {
+                        throw new Error('Personal voucher requires verified phone ownership at checkout.');
                     }
                     appliedPersonalVoucher = true;
                 }

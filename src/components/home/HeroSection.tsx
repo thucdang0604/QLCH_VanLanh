@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
-import { ChevronLeft, ChevronRight, ChevronRight as ChevronR, Shield, Clock, Award, Wrench } from 'lucide-react';
+import { ChevronRight as ChevronR, Shield, Clock, Award, Wrench } from 'lucide-react';
 import { useConfig } from '@/lib/ConfigContext';
 import type { HeroBanner, StoreBranch } from '@/lib/ConfigContext';
 import { getIcon } from '@/lib/icon-map';
@@ -143,8 +143,13 @@ export default function HeroSection({ initialBanners }: HeroSectionProps) {
         };
     }, [totalSlides]);
 
-    const prev = () => setCurrent((c) => (c - 1 + totalSlides) % totalSlides);
-    const next = () => setCurrent((c) => (c + 1) % totalSlides);
+    useEffect(() => {
+        if (current >= totalSlides) setCurrent(0);
+    }, [current, totalSlides]);
+
+    const getBannerLabel = (banner: HeroBanner, index: number) => {
+        return banner.alt?.trim() || `Banner ${index + 1}`;
+    };
 
     // Chỉ hiện skeleton nếu KHÔNG có initialBanners (SSR) VÀ client config đang loading
     if (!initialBanners?.length && loading) return <BannerSkeleton />;
@@ -177,9 +182,9 @@ export default function HeroSection({ initialBanners }: HeroSectionProps) {
                         </div>
 
                         {/* ── Banner Slider (75%) ── */}
-                        <div className="flex-1 min-w-0 relative bg-dark overflow-hidden rounded-t-xl lg:rounded-tl-none lg:rounded-tr-xl">
+                        <div className="flex-1 min-w-0 relative bg-white overflow-hidden rounded-t-xl lg:rounded-tl-none lg:rounded-tr-xl">
                             <div className="px-0">
-                                <div className="relative aspect-[16/9] w-full overflow-hidden">
+                                <div className="relative aspect-[16/9] w-full overflow-hidden bg-dark">
                                         {heroBanners.map((banner, i) => {
                                             const isFirst = i === 0;
                                             // SSR: render first slide only.
@@ -265,22 +270,32 @@ export default function HeroSection({ initialBanners }: HeroSectionProps) {
                                             </div>
                                             );
                                         })}
-                                        {/* Arrows */}
-                                        {heroBanners.length > 1 && (
-                                            <>
-                                                <button onClick={prev} aria-label="Ảnh trước" className="absolute left-2 top-1/2 z-20 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full bg-black/25 text-white transition-colors hover:bg-black/40 md:h-9 md:w-9"><ChevronLeft size={18} /></button>
-                                                <button onClick={next} aria-label="Ảnh tiếp theo" className="absolute right-2 top-1/2 z-20 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full bg-black/25 text-white transition-colors hover:bg-black/40 md:h-9 md:w-9"><ChevronRight size={18} /></button>
-                                            </>
-                                        )}
-                                        {/* Dots */}
-                                        {heroBanners.length > 1 && (
-                                            <div className="absolute bottom-3 left-0 right-0 z-20 flex justify-center gap-1.5">
-                                                {heroBanners.map((_, i) => (
-                                                    <button key={i} onClick={() => setCurrent(i)} aria-label={`Chuyển đến slide ${i + 1}`} className={`h-1.5 rounded-full transition-[width,opacity,background-color] duration-300 ${i === current ? 'w-5 bg-copper opacity-100' : 'w-1.5 bg-white/85 opacity-70 hover:opacity-100'}`} />
-                                                ))}
-                                            </div>
-                                        )}
                                 </div>
+                                {heroBanners.length > 1 && (
+                                    <div className="border-t border-gray-100 bg-white">
+                                        <div
+                                            className="grid"
+                                            style={{ gridTemplateColumns: `repeat(${heroBanners.length}, minmax(0, 1fr))` }}
+                                        >
+                                            {heroBanners.map((banner, i) => {
+                                                const isActive = i === current;
+                                                return (
+                                                    <button
+                                                        key={banner.id}
+                                                        type="button"
+                                                        aria-current={isActive ? 'true' : undefined}
+                                                        aria-label={`Chuyển đến banner ${i + 1}: ${getBannerLabel(banner, i)}`}
+                                                        onClick={() => setCurrent(i)}
+                                                        className={`relative min-w-0 px-2 py-3 text-center text-[10px] font-semibold uppercase leading-snug transition-colors sm:px-3 ${isActive ? 'text-dark' : 'text-gray-600 hover:text-copper'}`}
+                                                    >
+                                                        <span className="block line-clamp-2">{getBannerLabel(banner, i)}</span>
+                                                        <span className={`absolute bottom-0 left-3 right-3 h-0.5 rounded-full transition-colors ${isActive ? 'bg-copper' : 'bg-transparent'}`} />
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>{/* end 2-column flex */}
