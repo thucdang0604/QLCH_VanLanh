@@ -116,7 +116,8 @@ export function buildContactSearchKeywords(input: ContactIdentityInput, methods 
 export function buildContactlessDocumentBaseId(prefix: 'KH' | 'NCC', input: ContactIdentityInput): string {
     const methods = buildContactMethods(input);
     const primary = getPrimaryContact(methods);
-    const base = compact(input.phone)
+    const phone = methods.find(method => method.type === 'phone')?.normalizedValue;
+    const base = compact(phone)
         || compact(primary?.normalizedValue)
         || compact(primary?.value)
         || compact(input.name)

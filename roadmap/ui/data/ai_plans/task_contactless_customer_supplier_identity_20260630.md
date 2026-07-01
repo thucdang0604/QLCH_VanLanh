@@ -20,11 +20,11 @@
 
 ## Phase 1 - Backward-compatible CRM
 
-- [ ] Sua `CustomerFormModal`: SDT optional, them contact method Zalo/Facebook/Khac.
-- [ ] Sua `customers/page.tsx`: tao doc bang `customerId`, khong dung `phone` lam doc ID cho khach moi khong SDT.
-- [ ] Sua search/filter CRM theo `customerId`, `phone`, `primaryContactValue`, `searchKeywords`, `tags`.
+- [x] Sua `CustomerFormModal`: SDT optional, them contact method Zalo/Facebook/Khac.
+- [x] Sua `customers/page.tsx`: tao doc bang `customerId`, khong dung `phone` lam doc ID cho khach moi khong SDT.
+- [x] Sua search/filter CRM theo `customerId`, `phone`, `primaryContactValue`, `searchKeywords`, `tags`.
 - [ ] Sua customer detail/history de uu tien `customerId`, fallback phone.
-- [ ] Cap nhat export/import report neu hien cot SDT la dinh danh duy nhat.
+- [x] Cap nhat export CRM them Ma KH va contact chinh.
 
 ## Phase 2 - POS, thu no va customer ledger
 

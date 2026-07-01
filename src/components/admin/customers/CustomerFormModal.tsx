@@ -3,11 +3,17 @@
 import { useState, useEffect } from 'react';
 import { X, Save, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
+import type { ContactMethod, ContactMethodType } from '@/lib/types/contact';
 
 export interface CustomerFormData {
     phone: string;
     name: string;
     type: 'retail' | 'wholesale';
+    primaryContactType?: ContactMethodType;
+    zalo?: string;
+    facebook?: string;
+    otherContact?: string;
+    contactMethods?: ContactMethod[];
     tags?: string[];
     note?: string;
     address?: string;
@@ -28,6 +34,11 @@ export default function CustomerFormModal({ isOpen, onClose, onSave, initialData
         phone: '',
         name: '',
         type: 'retail',
+        primaryContactType: 'phone',
+        zalo: '',
+        facebook: '',
+        otherContact: '',
+        contactMethods: [],
         tags: [],
         note: '',
         address: '',
@@ -38,11 +49,18 @@ export default function CustomerFormModal({ isOpen, onClose, onSave, initialData
 
     useEffect(() => {
         if (isOpen) {
+            const contactMethods = initialData?.contactMethods || [];
+            const contactValue = (type: ContactMethodType) => contactMethods.find(method => method.type === type)?.value || '';
             if (initialData) {
                 setForm({
                     phone: initialData.phone || '',
                     name: initialData.name || '',
                     type: initialData.type || 'retail',
+                    primaryContactType: initialData.primaryContactType || contactMethods.find(method => method.isPrimary)?.type || (initialData.phone ? 'phone' : 'zalo'),
+                    zalo: initialData.zalo || contactValue('zalo'),
+                    facebook: initialData.facebook || contactValue('facebook'),
+                    otherContact: initialData.otherContact || contactValue('other'),
+                    contactMethods,
                     tags: initialData.tags || [],
                     note: initialData.note || '',
                     address: initialData.address || '',
@@ -53,6 +71,11 @@ export default function CustomerFormModal({ isOpen, onClose, onSave, initialData
                     phone: '',
                     name: '',
                     type: 'retail',
+                    primaryContactType: 'phone',
+                    zalo: '',
+                    facebook: '',
+                    otherContact: '',
+                    contactMethods: [],
                     tags: [],
                     note: '',
                     address: '',
@@ -66,10 +89,22 @@ export default function CustomerFormModal({ isOpen, onClose, onSave, initialData
     if (!isOpen) return null;
 
     const handleSave = async () => {
-        if (!form.phone.trim()) { toast.error('Vui lòng nhập SĐT'); return; }
         if (!form.name.trim()) { toast.error('Vui lòng nhập tên KH'); return; }
-        if (!/^0\d{9,10}$/.test(form.phone.trim())) {
+        if (form.phone.trim() && !/^0\d{9,10}$/.test(form.phone.trim())) {
             toast.error('SĐT không hợp lệ (VD: 0901234567)'); return;
+        }
+        const hasContact = [
+            form.phone,
+            form.zalo,
+            form.facebook,
+            form.email,
+            form.address,
+            form.otherContact,
+            form.note,
+        ].some(value => Boolean(value?.trim()));
+        if (!hasContact) {
+            toast.error('Vui lòng nhập ít nhất một kênh liên hệ hoặc ghi chú nhận diện');
+            return;
         }
 
         setSaving(true);
@@ -108,7 +143,7 @@ export default function CustomerFormModal({ isOpen, onClose, onSave, initialData
                 <div className="p-5 space-y-4">
                     {/* Phone (Immutable if edit mode) */}
                     <div>
-                        <label className="text-sm font-medium text-gray-700 mb-1 block">Số điện thoại *</label>
+                        <label className="text-sm font-medium text-gray-700 mb-1 block">Số điện thoại</label>
                         <input 
                             title="Số điện thoại"
                             value={form.phone} 
@@ -117,7 +152,60 @@ export default function CustomerFormModal({ isOpen, onClose, onSave, initialData
                             placeholder="VD: 0901234567"
                             className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none disabled:bg-gray-100 disabled:text-gray-500" 
                         />
-                        {isEditMode && <p className="text-xs text-gray-400 flex items-center gap-1 mt-1"><AlertCircle size={12} /> Số điện thoại không thể thay đổi</p>}
+                        {isEditMode && <p className="text-xs text-gray-400 flex items-center gap-1 mt-1"><AlertCircle size={12} /> SĐT legacy tạm thời chưa đổi trong bước này</p>}
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="text-sm font-medium text-gray-700 mb-1 block">Zalo</label>
+                            <input
+                                title="Zalo"
+                                value={form.zalo}
+                                onChange={e => setForm(p => ({ ...p, zalo: e.target.value }))}
+                                placeholder="Tên Zalo hoặc link"
+                                className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                            />
+                        </div>
+                        <div>
+                            <label className="text-sm font-medium text-gray-700 mb-1 block">Facebook</label>
+                            <input
+                                title="Facebook"
+                                value={form.facebook}
+                                onChange={e => setForm(p => ({ ...p, facebook: e.target.value }))}
+                                placeholder="Link/profile Facebook"
+                                className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                            />
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="text-sm font-medium text-gray-700 mb-1 block">Kênh liên hệ chính</label>
+                            <select
+                                title="Kênh liên hệ chính"
+                                value={form.primaryContactType || 'phone'}
+                                onChange={e => setForm(p => ({ ...p, primaryContactType: e.target.value as ContactMethodType }))}
+                                className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none bg-white"
+                            >
+                                <option value="phone">SĐT</option>
+                                <option value="zalo">Zalo</option>
+                                <option value="facebook">Facebook</option>
+                                <option value="email">Email</option>
+                                <option value="address">Địa chỉ</option>
+                                <option value="other">Khác</option>
+                                <option value="note">Ghi chú</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label className="text-sm font-medium text-gray-700 mb-1 block">Liên hệ khác</label>
+                            <input
+                                title="Liên hệ khác"
+                                value={form.otherContact}
+                                onChange={e => setForm(p => ({ ...p, otherContact: e.target.value }))}
+                                placeholder="VD: chỉ nhận Messenger, người giới thiệu..."
+                                className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                            />
+                        </div>
                     </div>
 
                     {/* Name */}

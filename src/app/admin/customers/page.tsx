@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
 import { Search, Users, Loader2, Star, TrendingUp, Plus, Download, Filter } from 'lucide-react';
-import { collection, query, orderBy, limit, startAfter, DocumentSnapshot, doc, setDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { collection, query, orderBy, limit, startAfter, DocumentSnapshot, doc, setDoc, serverTimestamp, updateDoc, where } from 'firebase/firestore';
 import { onSnapshot, getDocs, getDoc } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import CustomerDetailDrawer from '@/components/admin/customers/CustomerDetailDrawer';
@@ -13,6 +13,10 @@ import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 import { TierConfig } from '@/lib/customerTiers';
 import type { Customer } from '@/lib/types';
+import { buildContactMethods, buildContactSearchKeywords, buildContactlessDocumentBaseId, getPrimaryContact } from '@/lib/contactIdentity';
+import { normalizeVietnamPhone } from '@/lib/phone';
+import { generateSearchKeywords } from '@/lib/utils';
+import type { ContactMethod } from '@/lib/types/contact';
 
 const formatPrice = (price: number) => new Intl.NumberFormat('vi-VN').format(price) + 'đ';
 const formatDate = (ts: unknown) => {
@@ -21,6 +25,39 @@ const formatDate = (ts: unknown) => {
     const d = typeof obj.toDate === 'function' ? obj.toDate() : new Date(ts as string | number | Date);
     return d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
 };
+
+function firstContactValue(methods: ContactMethod[] | undefined, type: ContactMethod['type']): string {
+    return methods?.find(method => method.type === type)?.value || '';
+}
+
+function customerContactLabel(customer: Customer): string {
+    const primary = customer.contactMethods?.find(method => method.isPrimary) || customer.contactMethods?.[0];
+    return customer.phone || customer.primaryContactValue || primary?.value || customer.id;
+}
+
+async function reserveCustomerDocumentId(data: CustomerFormData): Promise<string> {
+    const normalizedPhone = data.phone ? normalizeVietnamPhone(data.phone) : null;
+    if (normalizedPhone) return normalizedPhone.local;
+
+    const baseId = buildContactlessDocumentBaseId('KH', {
+        name: data.name,
+        zalo: data.zalo,
+        facebook: data.facebook,
+        email: data.email,
+        address: data.address,
+        note: data.note,
+        other: data.otherContact,
+        primaryType: data.primaryContactType,
+        source: 'manual',
+    });
+
+    for (let i = 0; i < 50; i += 1) {
+        const candidate = i === 0 ? baseId : `${baseId}-${i + 1}`;
+        const snap = await getDoc(doc(db, 'customers', candidate));
+        if (!snap.exists()) return candidate;
+    }
+    throw new Error('Không thể tạo mã khách hàng không trùng.');
+}
 
 export default function CustomersPage() {
     const [customers, setCustomers] = useState<Customer[]>([]);
@@ -94,17 +131,26 @@ export default function CustomersPage() {
 
     const searchInDatabase = async () => {
         if (!searchQuery.trim()) {
-            toast.error('Vui lòng nhập SĐT để tìm kiếm trên Server');
+            toast.error('Vui lòng nhập từ khóa để tìm kiếm trên Server');
             return;
         }
         setIsSearchingDB(true);
         try {
-            const phone = searchQuery.replace(/[^0-9]/g, '').trim();
-            const docRef = doc(db, 'customers', phone);
-            const docSnap = await getDoc(docRef);
-            
-            if (docSnap.exists()) {
-                const foundCustomer = { id: docSnap.id, ...docSnap.data() } as Customer;
+            const keyword = searchQuery.trim();
+            const phone = keyword.replace(/[^0-9]/g, '').trim();
+            const docCandidates = Array.from(new Set([keyword, phone].filter(Boolean)));
+            let docSnap: Awaited<ReturnType<typeof getDoc>> | null = null;
+
+            for (const candidate of docCandidates) {
+                const candidateSnap = await getDoc(doc(db, 'customers', candidate));
+                if (candidateSnap.exists()) {
+                    docSnap = candidateSnap;
+                    break;
+                }
+            }
+
+            if (docSnap?.exists()) {
+                const foundCustomer = { id: docSnap.id, ...(docSnap.data() as Record<string, unknown>) } as Customer;
                 setCustomers(prev => {
                     const exists = prev.find(p => p.id === foundCustomer.id);
                     if (exists) return prev;
@@ -112,7 +158,19 @@ export default function CustomersPage() {
                 });
                 toast.success('Đã tìm thấy KH từ Server!');
             } else {
-                toast.error('Không tìm thấy dữ liệu trên máy chủ cho SĐT này.');
+                const searchKeyword = generateSearchKeywords(keyword)[0] || keyword.toLowerCase();
+                const q = query(collection(db, 'customers'), where('searchKeywords', 'array-contains', searchKeyword), limit(10));
+                const snap = await getDocs(q);
+                if (snap.empty) {
+                    toast.error('Không tìm thấy dữ liệu trên máy chủ cho từ khóa này.');
+                    return;
+                }
+                const foundCustomers = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Customer[];
+                setCustomers(prev => {
+                    const existingIds = new Set(prev.map(p => p.id));
+                    return [...foundCustomers.filter(customer => !existingIds.has(customer.id)), ...prev];
+                });
+                toast.success(`Đã tìm thấy ${foundCustomers.length} khách hàng từ Server`);
             }
         } catch (error) {
             console.error("Lỗi khi tìm kiếm trên database", error);
@@ -124,8 +182,15 @@ export default function CustomersPage() {
 
     const filteredCustomers = customers.filter((c) => {
         const q = searchQuery.toLowerCase();
+        const contactValues = [
+            c.phone,
+            c.primaryContactValue,
+            ...(c.contactMethods || []).flatMap(method => [method.value, method.normalizedValue]),
+            ...(c.searchKeywords || []),
+        ].filter(Boolean).join(' ').toLowerCase();
         const matchesSearch = !q ||
             c.id.includes(q) ||
+            contactValues.includes(q) ||
             (c.name || '').toLowerCase().includes(q) ||
             (c.tags || []).some(t => t.toLowerCase().includes(q));
         const matchesType = !typeFilter || c.type === typeFilter;
@@ -154,14 +219,35 @@ export default function CustomersPage() {
 
     // Save Customer
     const handleSaveCustomer = async (data: CustomerFormData) => {
-        const phoneId = data.phone;
-        const ref = doc(db, 'customers', phoneId);
+        const contactInput = {
+            name: data.name,
+            phone: data.phone,
+            zalo: data.zalo,
+            facebook: data.facebook,
+            email: data.email,
+            address: data.address,
+            note: data.note,
+            other: data.otherContact,
+            primaryType: data.primaryContactType,
+            source: 'manual' as const,
+        };
+        const contactMethods = buildContactMethods(contactInput);
+        const primaryContact = getPrimaryContact(contactMethods);
+        const normalizedPhone = data.phone ? normalizeVietnamPhone(data.phone) : null;
+        const customerId = editingCustomer?.id || await reserveCustomerDocumentId(data);
+        const ref = doc(db, 'customers', customerId);
         
         if (editingCustomer) {
             // Update
             await updateDoc(ref, {
                 name: data.name,
                 type: data.type,
+                phone: normalizedPhone?.local || data.phone || '',
+                primaryPhone: normalizedPhone?.local || '',
+                primaryContactType: primaryContact?.type || null,
+                primaryContactValue: primaryContact?.value || '',
+                contactMethods,
+                searchKeywords: buildContactSearchKeywords(contactInput, contactMethods),
                 tags: data.tags || [],
                 note: data.note || '',
                 address: data.address || '',
@@ -173,13 +259,20 @@ export default function CustomersPage() {
             // Check existence
             const snap = await getDoc(ref);
             if (snap.exists()) {
-                throw new Error('Số điện thoại này đã tồn tại trong hệ thống!');
+                throw new Error('Khách hàng này đã tồn tại trong hệ thống!');
             }
             // Create
             await setDoc(ref, {
-                phone: data.phone,
+                code: customerId,
+                legacyPhoneId: normalizedPhone?.local || '',
+                phone: normalizedPhone?.local || data.phone || '',
+                primaryPhone: normalizedPhone?.local || '',
                 name: data.name,
                 type: data.type,
+                primaryContactType: primaryContact?.type || null,
+                primaryContactValue: primaryContact?.value || '',
+                contactMethods,
+                searchKeywords: buildContactSearchKeywords(contactInput, contactMethods),
                 tags: data.tags || [],
                 note: data.note || '',
                 address: data.address || '',
@@ -214,7 +307,11 @@ export default function CustomersPage() {
         }
         
         const data = filteredCustomers.map(c => ({
+            'Mã KH': c.id,
             'SĐT': c.phone,
+            'Liên hệ chính': customerContactLabel(c),
+            'Zalo': firstContactValue(c.contactMethods, 'zalo'),
+            'Facebook': firstContactValue(c.contactMethods, 'facebook'),
             'Tên KH': c.name,
             'Loại KH': c.type === 'wholesale' ? 'Khách sỉ' : 'Khách lẻ',
             'Tags': c.tags?.join(', ') || '',
@@ -305,7 +402,7 @@ export default function CustomersPage() {
                     <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                     <input
                         type="text"
-                        placeholder="Tìm SĐT, Tên hoặc Tag..."
+                        placeholder="Tìm SĐT, tên, Zalo, Facebook hoặc Tag..."
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         className="w-full h-11 pl-10 pr-4 border rounded-lg focus:border-orange-500 focus:outline-none"
@@ -369,7 +466,7 @@ export default function CustomersPage() {
                                         <p className="text-sm font-bold text-gray-900 group-hover:text-orange-600">
                                             {customer.name || 'Khách lẻ'}
                                         </p>
-                                        <p className="text-xs text-gray-500 font-mono mt-0.5">{customer.phone}</p>
+                                        <p className="text-xs text-gray-500 font-mono mt-0.5">{customerContactLabel(customer)}</p>
                                         {customer.tags && customer.tags.length > 0 && (
                                             <div className="mt-2 flex flex-wrap gap-1">
                                                 {customer.tags.map(tag => (
