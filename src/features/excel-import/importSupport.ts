@@ -6,6 +6,8 @@ import type { ProductSpecs, TaxonomyNode } from '@/lib/types';
 import { buildProductCodeFromId, getProductCodeKind, normalizeProductCode, type ProductCodeKind } from '@/lib/productCodes';
 import { assertProductCodesAvailable } from '@/lib/productCodeRegistry';
 import { buildClientDocumentId } from '@/lib/clientDocumentIds';
+import { buildContactlessDocumentBaseId } from '@/lib/contactIdentity';
+import type { ContactMethodType } from '@/lib/types/contact';
 import { generateSlug } from '@/lib/utils';
 import { optimizeImage } from '@/lib/imageOptimizer';
 import { validateImageFile } from '@/lib/validateImage';
@@ -202,6 +204,16 @@ export function getSignedNumber(row: ExcelRow, headers: string[]): number {
 export const FIRESTORE_QUERY_CHUNK_SIZE = 10;
 export const IMAGE_MAIN_HEADERS = ['Ảnh chính', 'Ảnh', 'Image'];
 export const IMAGE_OTHER_HEADERS = ['Ảnh phụ', 'Images'];
+export const PHONE_HEADERS = ['SĐT', 'sdt', 'phone', 'Phone', 'Số điện thoại'];
+export const CUSTOMER_CODE_HEADERS = ['Mã KH', 'Mã khách hàng', 'Customer ID', 'customerId'];
+export const SUPPLIER_CODE_HEADERS = ['Mã NCC', 'Mã nhà cung cấp', 'Supplier ID', 'supplierId'];
+export const ZALO_HEADERS = ['Zalo', 'zalo'];
+export const FACEBOOK_HEADERS = ['Facebook', 'facebook', 'Messenger'];
+export const PRIMARY_CONTACT_HEADERS = ['Kênh liên hệ chính', 'Primary Contact', 'primaryContactType'];
+export const OTHER_CONTACT_HEADERS = ['Liên hệ khác', 'Khác', 'Other Contact'];
+export const EMAIL_HEADERS = ['Email'];
+export const ADDRESS_HEADERS = ['Địa chỉ', 'Address'];
+export const NOTE_HEADERS = ['Ghi chú', 'Note'];
 
 export function normalizeText(value: string): string {
     return value
@@ -232,6 +244,56 @@ export function normalizeLegacyImportDocId(value: string): string {
         .replace(/[\/\\#?\[\]]+/g, '-')
         .replace(/\s+/g, '-')
         .slice(0, 120);
+}
+
+export function normalizeImportContactType(value: string): ContactMethodType | undefined {
+    const normalized = normalizeText(value);
+    if (!normalized) return undefined;
+    if (['sdt', 'phone', 'dien thoai', 'so dien thoai'].includes(normalized)) return 'phone';
+    if (normalized === 'zalo') return 'zalo';
+    if (['facebook', 'messenger', 'fb'].includes(normalized)) return 'facebook';
+    if (normalized === 'email') return 'email';
+    if (['dia chi', 'address'].includes(normalized)) return 'address';
+    if (['ghi chu', 'note'].includes(normalized)) return 'note';
+    if (['khac', 'other', 'lien he khac'].includes(normalized)) return 'other';
+    return undefined;
+}
+
+export function buildImportContactInput(row: ExcelRow, name: string) {
+    return {
+        name,
+        phone: normalizeImportPhone(getValue(row, PHONE_HEADERS)),
+        zalo: getValue(row, ZALO_HEADERS),
+        facebook: getValue(row, FACEBOOK_HEADERS),
+        email: getValue(row, EMAIL_HEADERS),
+        address: getValue(row, ADDRESS_HEADERS),
+        note: getValue(row, NOTE_HEADERS),
+        other: getValue(row, OTHER_CONTACT_HEADERS),
+        primaryType: normalizeImportContactType(getValue(row, PRIMARY_CONTACT_HEADERS)),
+        source: 'excel' as const,
+    };
+}
+
+function hasImportContactInput(input: ReturnType<typeof buildImportContactInput>): boolean {
+    return Boolean(input.phone || input.zalo || input.facebook || input.email || input.address || input.note || input.other);
+}
+
+export function resolveCustomerImportDocId(row: ExcelRow, name: string): string {
+    const phone = normalizeImportPhone(getValue(row, PHONE_HEADERS));
+    if (phone) return phone;
+    const explicitId = normalizeLegacyImportDocId(getValue(row, CUSTOMER_CODE_HEADERS));
+    if (explicitId) return explicitId;
+    const contactInput = buildImportContactInput(row, name);
+    if (!hasImportContactInput(contactInput)) return '';
+    return buildContactlessDocumentBaseId('KH', contactInput);
+}
+
+export function resolveSupplierImportDocId(row: ExcelRow, name: string): string {
+    const explicitId = normalizeLegacyImportDocId(getValue(row, SUPPLIER_CODE_HEADERS));
+    if (explicitId) return explicitId;
+    const contactInput = buildImportContactInput(row, name);
+    if (!hasImportContactInput(contactInput)) return '';
+    return buildContactlessDocumentBaseId('NCC', contactInput);
 }
 
 export function parseRawNumber(raw: string): number {
@@ -406,11 +468,10 @@ export function resolveTargetDocId(mode: ExcelImportMode, row: ExcelRow, modeCon
     const name = getValue(row, modeConfig.nameHeaders);
     if (!name) return '';
     if (mode === 'customer') {
-        const phone = getValue(row, ['SĐT', 'sdt', 'phone', 'Phone', 'Số điện thoại']);
-        return normalizeImportPhone(phone);
+        return resolveCustomerImportDocId(row, name);
     }
     if (mode === 'supplier') {
-        return '';
+        return resolveSupplierImportDocId(row, name);
     }
     if (mode === 'order' || mode === 'repair') {
         return normalizeLegacyImportDocId(name);

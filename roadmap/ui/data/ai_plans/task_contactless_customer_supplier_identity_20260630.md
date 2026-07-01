@@ -71,24 +71,24 @@
 
 ## Phase 6 - Excel Importer
 
-- [ ] Cap nhat `MODE_CONFIG.customer`:
-  - [ ] Bo `SDT` khoi required headers.
-  - [ ] Them `Ma KH`, `Zalo`, `Facebook`, `Kenh lien he chinh`.
-- [ ] Cap nhat `MODE_CONFIG.supplier`:
-  - [ ] Them `Ma NCC`, `Zalo`, `Facebook`.
-  - [ ] Giu phone optional.
-- [ ] Ghi ro guardrail: NCC import chi gom ho so/cong no con sot, khong import lich su nhap hang tu NCC vi ton kho da nhap trong product/accessory/part.
-- [ ] Cap nhat template fixtures cho customer/supplier/order/repair co dong mau khong SDT.
-- [ ] Cap nhat preview validation:
-  - [ ] SDT optional nhung validate neu co.
-  - [ ] Contact method bat buoc neu co cong no.
-  - [ ] Duplicate detection theo Ma, phone, Zalo/Facebook.
-- [ ] Cap nhat `resolveTargetDocId` cho customer khong SDT.
-- [ ] Sua `importCustomerRow` dung `customerId/contactMethods`.
-- [ ] Sua `importSupplierRow` dung `supplierId/contactMethods`.
-- [ ] Sua `importLegacyOrderRow` dung `Ma KH` hoac tao/link customer khong SDT.
-- [ ] Sua `importLegacyRepairRow` dung `Ma KH` hoac tao/link customer khong SDT.
-- [ ] Cap nhat `/admin/initial-data` mo ta cot va huong dan import.
+- [x] Cap nhat `MODE_CONFIG.customer`:
+  - [x] Bo `SDT` khoi required headers.
+  - [x] Them `Ma KH`, `Zalo`, `Facebook`, `Kenh lien he chinh`.
+- [x] Cap nhat `MODE_CONFIG.supplier`:
+  - [x] Them `Ma NCC`, `Zalo`, `Facebook`.
+  - [x] Giu phone optional.
+- [x] Ghi ro guardrail: NCC import chi gom ho so/cong no con sot, khong import lich su nhap hang tu NCC vi ton kho da nhap trong product/accessory/part.
+- [x] Cap nhat template fixtures cho customer/supplier/order/repair co dong mau khong SDT.
+- [x] Cap nhat preview validation:
+  - [x] SDT optional nhung validate neu co.
+  - [x] Contact method bat buoc neu co cong no.
+  - [x] Duplicate detection theo Ma, phone, Zalo/Facebook.
+- [x] Cap nhat `resolveTargetDocId` cho customer khong SDT.
+- [x] Sua `importCustomerRow` dung `customerId/contactMethods`.
+- [x] Sua `importSupplierRow` dung `supplierId/contactMethods`.
+- [x] Sua `importLegacyOrderRow` dung `Ma KH` hoac tao/link customer khong SDT.
+- [x] Sua `importLegacyRepairRow` dung `Ma KH` hoac tao/link customer khong SDT.
+- [x] Cap nhat `/admin/initial-data` mo ta cot va huong dan import.
 
 ## Phase 7 - Migration va guardrails
 
