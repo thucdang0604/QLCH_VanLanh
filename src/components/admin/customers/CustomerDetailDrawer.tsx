@@ -12,11 +12,15 @@ import { db } from '@/lib/firebase';
 import { getAuthInstance } from '@/lib/firebase';
 import { toast } from 'sonner';
 import type { CustomerTransaction } from '@/lib/types';
+import type { ContactMethod, ContactMethodType } from '@/lib/types/contact';
 
 export interface CustomerDetailRecord {
     id: string;
     phone: string;
     name: string;
+    primaryContactType?: ContactMethodType;
+    primaryContactValue?: string;
+    contactMethods?: ContactMethod[];
     type?: 'retail' | 'wholesale';
     totalSpent?: number;
     totalOrders?: number;
@@ -51,6 +55,11 @@ function formatDate(value: unknown): string {
     return date.toLocaleDateString('vi-VN');
 }
 
+function customerContactLabel(customer: CustomerDetailRecord): string {
+    const primary = customer.contactMethods?.find(method => method.isPrimary) || customer.contactMethods?.[0];
+    return customer.phone || customer.primaryContactValue || primary?.value || customer.id;
+}
+
 export default function CustomerDetailDrawer({ customer, isOpen, onClose }: Props) {
     const router = useRouter();
     const { user } = useAuth();
@@ -77,7 +86,8 @@ export default function CustomerDetailDrawer({ customer, isOpen, onClose }: Prop
     const canViewOrders = user?.role === 'admin' || !!user?.permissions?.includes('manage_orders');
     const canViewRepairs = user?.role === 'admin' || !!user?.permissions?.includes('manage_repairs');
     const activity = useCustomerActivity({
-        phone: customer?.phone || customer?.id,
+        customerId: customer?.id,
+        phone: customer?.phone,
         enabled: isOpen,
         includeOrders: canViewOrders,
         includeRepairs: canViewRepairs,
@@ -105,11 +115,11 @@ export default function CustomerDetailDrawer({ customer, isOpen, onClose }: Prop
     }, [isOpen, activeTab, customer?.phone]);
 
     useEffect(() => {
-        if (isOpen && activeTab === 'debt' && customer?.phone) {
+        if (isOpen && activeTab === 'debt' && customer?.id) {
             setLoadingTransactions(true);
             const q = query(
                 collection(db, 'customer_transactions'),
-                where('customerId', '==', customer.phone),
+                where('customerId', '==', customer.id),
                 orderBy('createdAt', 'desc'),
                 limit(20)
             );
@@ -121,7 +131,7 @@ export default function CustomerDetailDrawer({ customer, isOpen, onClose }: Prop
             });
             return () => unsub();
         }
-    }, [isOpen, activeTab, customer?.phone]);
+    }, [isOpen, activeTab, customer?.id]);
 
     const handleCollectDebt = async () => {
         if (!customer || !collectAmount) return;
@@ -142,10 +152,10 @@ export default function CustomerDetailDrawer({ customer, isOpen, onClose }: Prop
                     'Authorization': `Bearer ${idToken}`
                 },
                 body: JSON.stringify({
-                    customerId: customer.phone,
+                    customerId: customer.id,
                     amount,
                     paymentMethod: collectMethod,
-                    note: `Thu nợ khách hàng ${customer.name || customer.phone}`
+                    note: `Thu nợ khách hàng ${customer.name || customerContactLabel(customer)}`
                 })
             });
 
@@ -183,7 +193,7 @@ export default function CustomerDetailDrawer({ customer, isOpen, onClose }: Prop
                 <div className="sticky top-0 z-10 flex items-start justify-between border-b bg-white p-5">
                     <div className="min-w-0">
                         <h2 className="truncate text-lg font-semibold text-gray-900">{customer.name || 'Khách lẻ'}</h2>
-                        <p className="mt-1 font-mono text-sm text-gray-500">{customer.phone}</p>
+                        <p className="mt-1 font-mono text-sm text-gray-500">{customerContactLabel(customer)}</p>
                     </div>
                     <button type="button" onClick={onClose} className="rounded-lg p-2 text-gray-500 hover:bg-gray-100" aria-label="Đóng">
                         <X size={20} />

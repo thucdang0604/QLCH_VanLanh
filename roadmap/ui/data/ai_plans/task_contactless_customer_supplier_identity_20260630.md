@@ -23,7 +23,7 @@
 - [x] Sua `CustomerFormModal`: SDT optional, them contact method Zalo/Facebook/Khac.
 - [x] Sua `customers/page.tsx`: tao doc bang `customerId`, khong dung `phone` lam doc ID cho khach moi khong SDT.
 - [x] Sua search/filter CRM theo `customerId`, `phone`, `primaryContactValue`, `searchKeywords`, `tags`.
-- [ ] Sua customer detail/history de uu tien `customerId`, fallback phone.
+- [x] Sua customer detail/history de uu tien `customerId`, fallback phone.
 - [x] Cap nhat export CRM them Ma KH va contact chinh.
 
 ## Phase 2 - POS, thu no va customer ledger
