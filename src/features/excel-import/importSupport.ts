@@ -121,8 +121,8 @@ export const MODE_CONFIG: Record<ExcelImportMode, ModeConfig> = {
         sheetName: 'Khach_hang',
         collectionName: 'customers',
         nameHeaders: ['Tên KH', 'Tên', 'Tên khách hàng'],
-        requiredHeaders: ['Tên KH', 'SĐT'],
-        templateHeaders: ['Tên KH', 'SĐT', 'Loại KH', 'Email', 'Địa chỉ', 'Tags', 'Chi tiêu', 'Đơn hàng', 'Sửa chữa', 'Công nợ', 'Ghi chú'],
+        requiredHeaders: ['Tên KH'],
+        templateHeaders: ['Mã KH', 'Tên KH', 'SĐT', 'Zalo', 'Facebook', 'Kênh liên hệ chính', 'Loại KH', 'Email', 'Địa chỉ', 'Tags', 'Chi tiêu', 'Đơn hàng', 'Sửa chữa', 'Công nợ', 'Ghi chú'],
         exampleRow: EXCEL_IMPORT_PRIMARY_EXAMPLE_ROWS.customer,
         icon: 'customer',
     },
@@ -133,7 +133,7 @@ export const MODE_CONFIG: Record<ExcelImportMode, ModeConfig> = {
         collectionName: 'suppliers',
         nameHeaders: ['Tên NCC', 'Tên', 'Tên nhà cung cấp'],
         requiredHeaders: ['Tên NCC'],
-        templateHeaders: ['Tên NCC', 'SĐT', 'Người liên hệ', 'Email', 'Địa chỉ', 'Công ty', 'Phân loại', 'Mã số thuế', 'Số tài khoản', 'Ngân hàng', 'Hạn thanh toán', 'Phụ trách', 'Tags', 'Công nợ', 'Ghi chú'],
+        templateHeaders: ['Mã NCC', 'Tên NCC', 'SĐT', 'Zalo', 'Facebook', 'Kênh liên hệ chính', 'Người liên hệ', 'Email', 'Địa chỉ', 'Công ty', 'Phân loại', 'Mã số thuế', 'Số tài khoản', 'Ngân hàng', 'Hạn thanh toán', 'Phụ trách', 'Tags', 'Công nợ', 'Ghi chú'],
         exampleRow: EXCEL_IMPORT_PRIMARY_EXAMPLE_ROWS.supplier,
         icon: 'supplier',
     },
@@ -143,8 +143,8 @@ export const MODE_CONFIG: Record<ExcelImportMode, ModeConfig> = {
         sheetName: 'Don_hang_cu',
         collectionName: 'orders',
         nameHeaders: ['Mã đơn', 'Order ID', 'Mã hóa đơn', 'orderId'],
-        requiredHeaders: ['Mã đơn', 'Tên KH', 'SĐT', 'Tổng tiền', 'Ngày tạo'],
-        templateHeaders: ['Mã đơn', 'Tên KH', 'SĐT', 'Email', 'Địa chỉ', 'Sản phẩm', 'Số lượng', 'Đơn giá', 'IMEI/Serial', 'Bảo hành tháng', 'Ngày bắt đầu BH', 'Ngày hết BH', 'Tạm tính', 'Giảm giá', 'Tổng tiền', 'Trạng thái', 'Thanh toán', 'Phương thức', 'Ngày tạo', 'Ngày hoàn thành', 'Ghi chú'],
+        requiredHeaders: ['Mã đơn', 'Tên KH', 'Tổng tiền', 'Ngày tạo'],
+        templateHeaders: ['Mã đơn', 'Mã KH', 'Tên KH', 'SĐT', 'Zalo', 'Facebook', 'Email', 'Địa chỉ', 'Sản phẩm', 'Số lượng', 'Đơn giá', 'IMEI/Serial', 'Bảo hành tháng', 'Ngày bắt đầu BH', 'Ngày hết BH', 'Tạm tính', 'Giảm giá', 'Tổng tiền', 'Trạng thái', 'Thanh toán', 'Phương thức', 'Ngày tạo', 'Ngày hoàn thành', 'Ghi chú'],
         exampleRow: EXCEL_IMPORT_PRIMARY_EXAMPLE_ROWS.order,
         icon: 'order',
     },
@@ -154,8 +154,8 @@ export const MODE_CONFIG: Record<ExcelImportMode, ModeConfig> = {
         sheetName: 'Phieu_sua_cu',
         collectionName: 'repairs',
         nameHeaders: ['Mã phiếu', 'Repair ID', 'Mã sửa chữa', 'repairId'],
-        requiredHeaders: ['Mã phiếu', 'Tên KH', 'SĐT', 'Thiết bị', 'Lỗi/Bệnh', 'Trạng thái', 'Ngày nhận'],
-        templateHeaders: ['Mã phiếu', 'Tên KH', 'SĐT', 'Thiết bị', 'IMEI/Serial', 'Mật khẩu', 'Màu máy', 'Lỗi/Bệnh', 'Linh kiện', 'Tiền linh kiện', 'Phí sửa chữa', 'Phí phát sinh', 'Giảm giá', 'Đã cọc', 'Tổng tiền', 'Thanh toán', 'Trạng thái', 'KTV', 'Ngày nhận', 'Ngày hẹn trả', 'Ngày hoàn thành', 'Bảo hành dịch vụ tháng', 'Ngày hết BH dịch vụ', 'Ghi chú kỹ thuật', 'Ghi chú'],
+        requiredHeaders: ['Mã phiếu', 'Tên KH', 'Thiết bị', 'Lỗi/Bệnh', 'Trạng thái', 'Ngày nhận'],
+        templateHeaders: ['Mã phiếu', 'Mã KH', 'Tên KH', 'SĐT', 'Zalo', 'Facebook', 'Thiết bị', 'IMEI/Serial', 'Mật khẩu', 'Màu máy', 'Lỗi/Bệnh', 'Linh kiện', 'Tiền linh kiện', 'Phí sửa chữa', 'Phí phát sinh', 'Giảm giá', 'Đã cọc', 'Tổng tiền', 'Thanh toán', 'Trạng thái', 'KTV', 'Ngày nhận', 'Ngày hẹn trả', 'Ngày hoàn thành', 'Bảo hành dịch vụ tháng', 'Ngày hết BH dịch vụ', 'Ghi chú kỹ thuật', 'Ghi chú'],
         exampleRow: EXCEL_IMPORT_PRIMARY_EXAMPLE_ROWS.repair,
         icon: 'repair',
     },
@@ -861,7 +861,22 @@ export function columnGuideForHeader(header: string, modeConfig: ModeConfig): Co
         return { ...base, purpose: 'Tên khách hàng.', inputRule: 'Không để trống.', savedTo: 'name' };
     }
     if (normalized === 'sdt') {
-        return { ...base, purpose: 'Số điện thoại liên hệ.', inputRule: 'Không để trống đối với Khách hàng (SĐT dùng làm ID). Nếu trùng lặp hoặc đã tồn tại sẽ bị báo lỗi.', savedTo: 'phone, id' };
+        return { ...base, purpose: 'Số điện thoại liên hệ nếu khách/NCC có cung cấp.', inputRule: 'Có thể để trống nếu có Mã KH/Mã NCC, Zalo, Facebook, email, địa chỉ hoặc ghi chú nhận diện. Nếu nhập thì phải có 9-15 chữ số sau chuẩn hóa.', savedTo: 'phone, primaryPhone, contactMethods[]' };
+    }
+    if (normalized === 'ma kh') {
+        return { ...base, purpose: 'Mã khách hàng từ hệ thống cũ hoặc mã nội bộ mới.', inputRule: 'Nên nhập khi khách không có SĐT để link đơn hàng/phiếu sửa lịch sử ổn định.', acceptedValues: 'KH-CU-0001, KH-ZALO-LAN...', savedTo: 'customers/{customerId}, customer_info.customerId' };
+    }
+    if (normalized === 'ma ncc') {
+        return { ...base, purpose: 'Mã nhà cung cấp từ hệ thống cũ hoặc mã nội bộ mới.', inputRule: 'Nên nhập để tránh trùng NCC cùng tên. Không dùng để tạo phiếu nhập hàng lịch sử.', acceptedValues: 'NCC-CU-0001, NCC-PISEN...', savedTo: 'suppliers/{supplierId}' };
+    }
+    if (normalized === 'zalo') {
+        return { ...base, purpose: 'Kênh liên hệ Zalo khi không có hoặc không muốn lưu SĐT.', inputRule: 'Nhập tên Zalo, số Zalo hoặc ghi chú nhận diện đủ rõ.', savedTo: 'contactMethods[type=zalo]' };
+    }
+    if (normalized === 'facebook') {
+        return { ...base, purpose: 'Kênh liên hệ Facebook/Messenger.', inputRule: 'Nhập URL profile/page hoặc tên hiển thị đủ rõ.', savedTo: 'contactMethods[type=facebook]' };
+    }
+    if (normalized === 'kenh lien he chinh') {
+        return { ...base, purpose: 'Chọn kênh liên hệ ưu tiên khi có nhiều kênh.', inputRule: 'Nếu để trống hệ thống ưu tiên SĐT, rồi Zalo/Facebook/email/địa chỉ.', acceptedValues: 'SĐT, Zalo, Facebook, Email, Địa chỉ, Khác', savedTo: 'primaryContactType, primaryContactValue' };
     }
     if (normalized === 'ma don') {
         return { ...base, purpose: 'Mã đơn hàng từ hệ thống cũ, dùng làm ID để tránh import trùng.', inputRule: 'Không chứa /, #, ?, [, ]. Nên giữ nguyên mã hóa đơn cũ.', savedTo: 'orders/{id}' };
@@ -894,7 +909,7 @@ export function columnGuideForHeader(header: string, modeConfig: ModeConfig): Co
         return { ...base, purpose: 'Tổng số lần sửa chữa cũ.', inputRule: 'Chỉ nhập số nguyên không âm.', savedTo: 'totalRepairs' };
     }
     if (normalized === 'cong no') {
-        return { ...base, purpose: 'Công nợ khởi tạo.', inputRule: 'Nhập số dương nếu cửa hàng nợ đối tác, số âm nếu đối tác nợ cửa hàng.', savedTo: 'totalDebt' };
+        return { ...base, purpose: 'Công nợ khởi tạo hoặc công nợ còn sót từ hệ thống cũ.', inputRule: 'Nhập số dương nếu cửa hàng nợ đối tác, số âm nếu đối tác nợ cửa hàng. Dòng có công nợ phải có kênh liên hệ rõ. Với NCC, đây chỉ là số dư còn sót, không tạo phiếu nhập hàng lịch sử.', savedTo: 'totalDebt, *_transactions' };
     }
     if (normalized === 'ten ncc') {
         return { ...base, purpose: 'Tên nhà cung cấp.', inputRule: 'Không để trống, không trùng lặp.', savedTo: 'name' };

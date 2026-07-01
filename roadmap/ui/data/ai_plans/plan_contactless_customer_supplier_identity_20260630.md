@@ -266,6 +266,12 @@ NCC:
 Ma NCC, Ten NCC, SDT, Zalo, Facebook, Nguoi lien he, Email, Dia chi, Cong ty, Phan loai, Ma so thue, So tai khoan, Ngan hang, Han thanh toan, Phu trach, Tags, Cong no, Ghi chu
 ```
 
+Pham vi NCC import:
+
+- Chi import ho so NCC va so cong no con sot lai tu he thong cu.
+- Khong import lich su nhap hang tu NCC. Ton kho ban dau da duoc khai bao truc tiep khi import san pham, phu kien va linh kien; neu tao them phieu nhap hang lich su se lam trung ton kho, roi gia von va roi doi soat cong no.
+- Neu can giu vet NCC cu, dung `Ghi chu`, `Cong no`, `So tai khoan`, `Nguoi lien he`, `Zalo`, `Facebook`; khong tao `import_receipts` lich su.
+
 Don hang cu:
 
 ```text

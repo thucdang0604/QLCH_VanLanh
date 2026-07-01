@@ -77,6 +77,7 @@
 - [ ] Cap nhat `MODE_CONFIG.supplier`:
   - [ ] Them `Ma NCC`, `Zalo`, `Facebook`.
   - [ ] Giu phone optional.
+- [ ] Ghi ro guardrail: NCC import chi gom ho so/cong no con sot, khong import lich su nhap hang tu NCC vi ton kho da nhap trong product/accessory/part.
 - [ ] Cap nhat template fixtures cho customer/supplier/order/repair co dong mau khong SDT.
 - [ ] Cap nhat preview validation:
   - [ ] SDT optional nhung validate neu co.
