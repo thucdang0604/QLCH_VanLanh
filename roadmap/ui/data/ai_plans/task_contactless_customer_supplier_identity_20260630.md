@@ -6,16 +6,17 @@
 
 ## Phase 0 - Chot contract va helper dung chung
 
-- [ ] Tao type dung chung `ContactMethod` va `ContactMethodType`.
-- [ ] Mo rong `Customer`, `CustomerInfo`, `CustomerTransaction` de ho tro `customerId`, `primaryContact*`, `contactMethods`.
-- [ ] Mo rong `Supplier` de ho tro `primaryContact*`, `contactMethods`, `searchKeywords`.
-- [ ] Tao helper build/normalize contact:
-  - [ ] Normalize phone neu co.
-  - [ ] Normalize Zalo/Facebook/email.
-  - [ ] Build primary contact.
-  - [ ] Build search keywords.
-  - [ ] Validate "co cach lien he du ro rang" cho cong no.
-- [ ] Tao helper reserve/generate `customerId` khong dung SDT.
+- [x] Tao type dung chung `ContactMethod` va `ContactMethodType`.
+- [x] Mo rong `Customer`, `CustomerInfo`, `CustomerTransaction` de ho tro `customerId`, `primaryContact*`, `contactMethods`.
+- [x] Mo rong `Supplier` de ho tro `primaryContact*`, `contactMethods`, `searchKeywords`.
+- [x] Tao helper build/normalize contact:
+  - [x] Normalize phone neu co.
+  - [x] Normalize Zalo/Facebook/email.
+  - [x] Build primary contact.
+  - [x] Build search keywords.
+  - [x] Validate "co cach lien he du ro rang" cho cong no.
+- [x] Tao helper generate base ID khong dung SDT va khong them Firestore read.
+- [ ] Tao helper reserve `customerId` co kiem tra trung lap khi bat dau sua write path.
 
 ## Phase 1 - Backward-compatible CRM
 

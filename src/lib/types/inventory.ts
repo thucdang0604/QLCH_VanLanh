@@ -1,4 +1,5 @@
 import type { FirestoreDateValue } from './common';
+import type { ContactMethod, ContactMethodType } from './contact';
 
 export interface ImportReceiptItem {
     productId: string;
@@ -79,8 +80,14 @@ export interface InventoryLot {
 
 export interface Supplier {
     id: string;
+    code?: string;
     name: string;
     phone?: string;
+    primaryPhone?: string;
+    primaryContactType?: ContactMethodType;
+    primaryContactValue?: string;
+    contactMethods?: ContactMethod[];
+    searchKeywords?: string[];
     email?: string;
     address?: string;
     taxCode?: string;           // Mã số thuế
