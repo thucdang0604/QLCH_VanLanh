@@ -14,7 +14,7 @@
       "id": "plan-contactless-customer-supplier-identity-20260630",
       "title": "CRM/NCC Contact Identity: luu khach hang va nha cung cap khong co SDT",
       "date": "30.06.2026",
-      "status": "planned",
+      "status": "completed",
       "planFile": "data/ai_plans/plan_contactless_customer_supplier_identity_20260630.md",
       "taskFile": "data/ai_plans/task_contactless_customer_supplier_identity_20260630.md",
       "walkthroughFile": "",
@@ -31,7 +31,8 @@
         "src/app/api/admin/chat/rooms/[roomId]/customer/route.ts",
         "src/features/excel-import/importSupport.ts",
         "src/components/admin/ExcelImportModal.tsx",
-        "src/app/admin/initial-data/page.tsx"
+        "src/app/admin/initial-data/page.tsx",
+        "src/lib/contactlessRoadmapContracts.test.ts"
       ],
       "decisions": [
         "Khong tao SDT gia cho Zalo/Facebook; phone chi luu so dien thoai that",

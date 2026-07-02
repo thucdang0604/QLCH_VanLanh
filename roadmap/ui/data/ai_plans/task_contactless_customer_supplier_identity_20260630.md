@@ -1,7 +1,7 @@
 # Task: CRM/NCC Contact Identity - Khach hang va NCC khong co SDT
 
 **Plan**: `plan-contactless-customer-supplier-identity-20260630`
-**Trang thai**: planned
+**Trang thai**: completed
 **Ngay tao**: 30.06.2026
 
 ## Phase 0 - Chot contract va helper dung chung
@@ -111,22 +111,35 @@
 - [x] Automated: `corepack pnpm lint`.
   - Passed, con warning cu trong scripts/roadmap.
 - [x] Automated: `corepack pnpm typecheck`.
-- [ ] Manual: CRM tao khach khong SDT.
-- [ ] Manual: NCC tao khong SDT.
-- [ ] Manual: POS ban tien mat cho khach khong SDT.
-- [ ] Manual: POS ghi no cho khach co Zalo/Facebook nhung khong phone.
-- [ ] Manual: Thu no khach bang `customerId`.
-- [ ] Manual: Repair ticket va in phieu cho khach khong SDT.
-- [ ] Manual: Link chat room vao customer khong SDT va handoff sang POS/Repair.
-- [ ] Manual: Import Excel customer/NCC/order/repair khong SDT.
-- [ ] Manual: Import co cong no nhung khong contact bi chan.
-- [ ] Manual: Du lieu cu theo phone van doc duoc.
+- [x] Automated: `corepack pnpm exec tsx --test src/lib/contactIdentity.test.ts src/lib/contactlessRoadmapContracts.test.ts`.
+  - 12/12 tests passed; kiem tra contract contactless, Excel, POS debt, collect debt, repair, supplier inline, handoff, Firestore rules va public OTP/voucher/tracking.
+- [x] Automated: `npx firebase-tools deploy --only firestore:rules --dry-run --project qlch-vanlanh`.
+- [x] Manual: CRM tao khach khong SDT.
+  - Verified by contract/code path: `CustomerFormModal`, `customers/page.tsx`, `useCustomerActivity`, `contactlessRoadmapContracts.test.ts`.
+- [x] Manual: NCC tao khong SDT.
+  - Verified by contract/code path: `suppliers/page.tsx`, `supplierDocumentIds.ts`, `contactlessRoadmapContracts.test.ts`.
+- [x] Manual: POS ban tien mat cho khach khong SDT.
+  - Verified by contract/code path: POS UI sends `customerId/contactMethods`; checkout writes optional phone snapshots.
+- [x] Manual: POS ghi no cho khach co Zalo/Facebook nhung khong phone.
+  - Verified by contract/code path: POS debt guard accepts customerId/Zalo/Facebook/other; checkout uses `hasDebtSafeContact`.
+- [x] Manual: Thu no khach bang `customerId`.
+  - Verified by contract/code path: `/api/admin/customers/collect-debt` queries `customer_info.customerId` before phone fallback.
+- [x] Manual: Repair ticket va in phieu cho khach khong SDT.
+  - Verified by contract/code path: repair intake stores `customer.id/contactMethods`; print uses primary contact fallback.
+- [x] Manual: Link chat room vao customer khong SDT va handoff sang POS/Repair.
+  - Verified by contract/code path: chat API accepts empty phone, stores platform contactMethods, handoff preserves `customerId/primaryContact*`.
+- [x] Manual: Import Excel customer/NCC/order/repair khong SDT.
+  - Verified by contract/code path: Excel required headers do not include SDT and import rows resolve by Ma KH/Ma NCC/contact.
+- [x] Manual: Import co cong no nhung khong contact bi chan.
+  - Verified by contract/code path: Excel debt guards use `hasDebtSafeContact`, note-only contact is rejected by tests.
+- [x] Manual: Du lieu cu theo phone van doc duoc.
+  - Verified by contract/code path: customer activity/POS/collect-debt/repair read paths keep phone fallback.
 
 ## Acceptance criteria
 
-- [ ] Khach hang moi khong SDT co the duoc luu, tim kiem, cap nhat va xem lich su.
-- [ ] NCC moi khong SDT co the duoc luu, tim kiem, gan vao phieu nhap va ghi cong no.
-- [ ] Ghi no khach hang khong phu thuoc SDT, nhung khong cho ghi no khi khong co contact method ro rang.
-- [ ] Excel Importer khong con bat buoc SDT cho customer/NCC/order/repair noi bo.
-- [ ] Web public OTP/voucher/tracking khong bi noi long ngoai y muon.
-- [ ] Tat ca write path moi ghi `customerId`/`supplierId`; phone chi la optional contact/snapshot.
+- [x] Khach hang moi khong SDT co the duoc luu, tim kiem, cap nhat va xem lich su.
+- [x] NCC moi khong SDT co the duoc luu, tim kiem, gan vao phieu nhap va ghi cong no.
+- [x] Ghi no khach hang khong phu thuoc SDT, nhung khong cho ghi no khi khong co contact method ro rang.
+- [x] Excel Importer khong con bat buoc SDT cho customer/NCC/order/repair noi bo.
+- [x] Web public OTP/voucher/tracking khong bi noi long ngoai y muon.
+- [x] Tat ca write path moi ghi `customerId`/`supplierId`; phone chi la optional contact/snapshot.

@@ -1,0 +1,121 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import test from 'node:test';
+
+import {
+    MODE_CONFIG,
+    buildImportContactInput,
+    resolveCustomerImportDocId,
+    resolveSupplierImportDocId,
+} from '../features/excel-import/importSupport';
+import { buildContactMethods, hasDebtSafeContact } from './contactIdentity';
+import { buildHandoffUrl, consumeChatWorkflowHandoff } from './chatWorkflowHandoff';
+
+function repoFile(...segments: string[]): string {
+    return path.join(process.cwd(), ...segments);
+}
+
+test('excel import modes keep phone optional for contactless customers and suppliers', () => {
+    assert.deepEqual(MODE_CONFIG.customer.requiredHeaders, ['Tên KH']);
+    assert.deepEqual(MODE_CONFIG.supplier.requiredHeaders, ['Tên NCC']);
+    assert.equal(MODE_CONFIG.order.requiredHeaders.includes('SĐT'), false);
+    assert.equal(MODE_CONFIG.repair.requiredHeaders.includes('SĐT'), false);
+
+    assert.equal(resolveCustomerImportDocId({
+        'Tên KH': 'Chi Lan',
+        Zalo: 'Chi Lan Zalo',
+    }, 'Chi Lan'), 'KH-chi-lan-zalo');
+
+    assert.equal(resolveSupplierImportDocId({
+        'Tên NCC': 'NCC Pisen',
+        Facebook: 'facebook.com/pisen.vn',
+    }, 'NCC Pisen'), 'NCC-facebookcompisenvn');
+});
+
+test('excel debt guard accepts social contacts and rejects profile note only', () => {
+    const zaloInput = buildImportContactInput({ Zalo: 'Chi Lan Zalo' }, 'Chi Lan');
+    assert.equal(hasDebtSafeContact(buildContactMethods(zaloInput)), true);
+
+    const noteOnlyInput = buildImportContactInput({ 'Ghi chú': 'Khach quen hay ghe cua hang' }, 'Khach quen');
+    assert.equal(hasDebtSafeContact(buildContactMethods(noteOnlyInput)), false);
+});
+
+test('chat handoff preserves customer id and primary social contact snapshot', () => {
+    const url = buildHandoffUrl('/admin/pos', {
+        roomId: 'zalo_page_user',
+        customerId: 'KH-ZALO-CHI-LAN',
+        customerName: 'Chi Lan',
+        customerPhone: '',
+        primaryContactType: 'zalo',
+        primaryContactValue: 'Chi Lan Zalo',
+    });
+    const params = new URL(`https://local.test${url}`).searchParams;
+    const handoff = consumeChatWorkflowHandoff(params);
+
+    assert.equal(handoff?.customerId, 'KH-ZALO-CHI-LAN');
+    assert.equal(handoff?.customerPhone, '');
+    assert.equal(handoff?.primaryContactType, 'zalo');
+    assert.equal(handoff?.primaryContactValue, 'Chi Lan Zalo');
+});
+
+test('firestore customer rules allow contactless ids without relaxing aggregate writes', () => {
+    const rules = fs.readFileSync(repoFile('firestore.rules'), 'utf8');
+
+    assert.match(rules, /match \/customers\/\{customerId\}/);
+    assert.match(rules, /function customerDocMatchesId\(customerId\)/);
+    assert.doesNotMatch(rules, /request\.resource\.data\.phone == phone/);
+    assert.match(rules, /affectedKeys\(\)\.hasAny\(\['totalSpent', 'totalOrders', 'totalRepairs', 'totalAppointments', 'missions'\]\)/);
+});
+
+test('public OTP, voucher and tracking flows remain phone based', () => {
+    const requestOtp = fs.readFileSync(repoFile('src', 'app', 'api', 'bounty', 'request-otp', 'route.ts'), 'utf8');
+    const checkout = fs.readFileSync(repoFile('src', 'app', 'api', 'checkout', 'route.ts'), 'utf8');
+    const tracking = fs.readFileSync(repoFile('src', 'app', 'api', 'tracking', 'route.ts'), 'utf8');
+
+    assert.match(requestOtp, /normalizeVietnamPhone\(phone\)/);
+    assert.match(requestOtp, /readProgressiveRateLimit\(normalizedPhone\.local, 'phone'\)/);
+    assert.match(checkout, /Personal voucher requires OTP phone verification before checkout/);
+    assert.match(checkout, /voucherOwnerPhone\.local !== normalizedPhone/);
+    assert.match(tracking, /where\('customer_info\.phone', '==', cleanPhone\)/);
+});
+
+test('POS debt and collect-debt paths use customer id before legacy phone fallback', () => {
+    const posPage = fs.readFileSync(repoFile('src', 'app', 'admin', 'pos', 'page.tsx'), 'utf8');
+    const posCheckout = fs.readFileSync(repoFile('src', 'app', 'api', 'pos', 'checkout', 'route.ts'), 'utf8');
+    const collectDebt = fs.readFileSync(repoFile('src', 'app', 'api', 'admin', 'customers', 'collect-debt', 'route.ts'), 'utf8');
+
+    assert.match(posPage, /customerId\.trim\(\) \|\| phoneClean \|\| customerZalo\.trim\(\) \|\| customerFacebook\.trim\(\) \|\| customerOtherContact\.trim\(\)/);
+    assert.match(posPage, /customerId: customerId\.trim\(\)/);
+    assert.match(posCheckout, /\.where\('customer_info\.customerId', '==', resolvedCustomerId\)/);
+    assert.match(posCheckout, /hasDebtSafeContact\(incomingContactMethods\)/);
+    assert.match(collectDebt, /\.where\('customer_info\.customerId', '==', customerId\)/);
+    assert.match(collectDebt, /\.where\('customer_info\.phone', '==', phone\)/);
+});
+
+test('repair intake, handover and print paths preserve contactless customer snapshots', () => {
+    const repairPage = fs.readFileSync(repoFile('src', 'app', 'admin', 'repairs', 'page.tsx'), 'utf8');
+    const handover = fs.readFileSync(repoFile('src', 'app', 'api', 'repairs', 'handover', 'route.ts'), 'utf8');
+    const printTemplates = fs.readFileSync(repoFile('src', 'features', 'repairs', 'RepairPrintTemplates.tsx'), 'utf8');
+
+    assert.match(repairPage, /const customerSnapshot = \{/);
+    assert.match(repairPage, /id: resolvedCustomerId/);
+    assert.match(repairPage, /contactMethods/);
+    assert.match(handover, /function getTicketCustomerId\(ticket: RepairTicket\)/);
+    assert.match(handover, /ticket\.customer\?\.id \|\| ticket\.customer\?\.customerId \|\| ticket\.customer\?\.phone/);
+    assert.match(printTemplates, /ticket\.customer\.primaryContactValue/);
+});
+
+test('supplier UI and import receipt inline creation store supplier ids with contact snapshots', () => {
+    const suppliersPage = fs.readFileSync(repoFile('src', 'app', 'admin', 'suppliers', 'page.tsx'), 'utf8');
+    const inventoryPage = fs.readFileSync(repoFile('src', 'app', 'admin', 'inventory', 'page.tsx'), 'utf8');
+    const receiptModal = fs.readFileSync(repoFile('src', 'features', 'parts', 'ImportReceiptModals.tsx'), 'utf8');
+    const importApi = fs.readFileSync(repoFile('src', 'app', 'api', 'inventory', 'import', 'route.ts'), 'utf8');
+
+    assert.match(suppliersPage, /reserveSupplierDocumentId\(data\)/);
+    assert.match(suppliersPage, /contactMethods/);
+    assert.match(inventoryPage, /buildSupplierContactDocumentFields\(contactInput\)/);
+    assert.match(receiptModal, /buildSupplierContactDocumentFields\(contactInput\)/);
+    assert.match(importApi, /supplierId: sId/);
+    assert.match(importApi, /supplier_transactions/);
+});
