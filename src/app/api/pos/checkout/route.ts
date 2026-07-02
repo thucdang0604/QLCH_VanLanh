@@ -7,6 +7,8 @@ import { calculateAndSaveCommissionsServer } from '@/lib/commissionCalcServer';
 import type { Order, RepairTicket, WorkflowNode } from '@/lib/types';
 import { PRODUCT_STATUS, isProductArchived } from '@/lib/productLifecycle';
 import { normalizeVietnamPhone } from '@/lib/phone';
+import { buildContactMethods, buildContactSearchKeywords, buildContactlessDocumentBaseId, getPrimaryContact, hasDebtSafeContact } from '@/lib/contactIdentity';
+import type { ContactMethod, ContactMethodType } from '@/lib/types/contact';
 import { fetchFifoLogsForDeduction, executeFifoDeductionsWrites, type FifoDeductionResult, type FifoDeductor } from '@/lib/inventoryFifo';
 import { buildCompletedOrderRevenueDelta, buildPaymentChannelRevenueDelta, incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 import { loadRepairWorkflow, requireWorkflowNode, workflowNodeHasFeature } from '@/lib/repairWorkflowServer';
@@ -26,6 +28,42 @@ type CheckoutItemInput = Record<string, unknown> & {
     id?: unknown;
     imeis?: unknown;
 };
+
+function readString(value: unknown): string {
+    return typeof value === 'string' ? value.trim() : '';
+}
+
+function normalizeIncomingContactType(value: unknown): ContactMethodType | undefined {
+    const raw = readString(value).toLowerCase();
+    if (!raw) return undefined;
+    if (['phone', 'sdt', 'sđt', 'so dien thoai', 'số điện thoại'].includes(raw)) return 'phone';
+    if (raw === 'zalo') return 'zalo';
+    if (['facebook', 'messenger', 'fb'].includes(raw)) return 'facebook';
+    if (raw === 'email') return 'email';
+    if (['address', 'dia chi', 'địa chỉ'].includes(raw)) return 'address';
+    if (['note', 'ghi chu', 'ghi chú'].includes(raw)) return 'note';
+    if (['other', 'khac', 'khác'].includes(raw)) return 'other';
+    return undefined;
+}
+
+function buildIncomingCustomerContact(customerInfo: Record<string, unknown>) {
+    return {
+        name: readString(customerInfo.name),
+        phone: readString(customerInfo.phone),
+        zalo: readString(customerInfo.zalo),
+        facebook: readString(customerInfo.facebook),
+        email: readString(customerInfo.email),
+        address: readString(customerInfo.address),
+        note: readString(customerInfo.note),
+        other: readString(customerInfo.otherContact || customerInfo.other),
+        primaryType: normalizeIncomingContactType(customerInfo.primaryContactType),
+        source: 'pos' as const,
+    };
+}
+
+function getCustomerContactMethodsFromData(data: FirebaseFirestore.DocumentData | undefined): ContactMethod[] {
+    return Array.isArray(data?.contactMethods) ? data.contactMethods as ContactMethod[] : [];
+}
 
 function getCashierShiftChannel(paymentMethodCode: string): 'cash' | 'bank' | 'none' {
     const normalized = paymentMethodCode.trim().toUpperCase();
@@ -410,13 +448,25 @@ export async function POST(request: NextRequest) {
             let custRef: FirebaseFirestore.DocumentReference | null = null;
             let custSnap: FirebaseFirestore.DocumentSnapshot | null = null;
             let incomingName = '';
-            const rawPhone = customer_info?.phone;
+            const customerInfoRecord = (customer_info && typeof customer_info === 'object' ? customer_info : {}) as Record<string, unknown>;
+            const incomingContactInput = buildIncomingCustomerContact(customerInfoRecord);
+            const incomingContactMethods = buildContactMethods(incomingContactInput);
+            const incomingPrimaryContact = getPrimaryContact(incomingContactMethods);
+            const requestedCustomerId = readString(customerInfoRecord.customerId || customerInfoRecord.id);
+            const rawPhone = incomingContactInput.phone;
             const normalizedPhoneResult = rawPhone ? normalizeVietnamPhone(rawPhone) : null;
+            const resolvedCustomerId = normalizedPhoneResult?.local
+                || requestedCustomerId
+                || (
+                    incomingContactMethods.length > 0 && incomingContactInput.name && incomingContactInput.name !== 'Khách lẻ'
+                        ? buildContactlessDocumentBaseId('KH', incomingContactInput)
+                        : ''
+                );
 
-            if (normalizedPhoneResult) {
-                custRef = db.collection('customers').doc(normalizedPhoneResult.local);
+            if (resolvedCustomerId) {
+                custRef = db.collection('customers').doc(resolvedCustomerId);
                 custSnap = await tx.get(custRef);
-                incomingName = (customer_info?.name || '').trim();
+                incomingName = incomingContactInput.name;
             }
 
             const repairIdSet = new Set<string>();
@@ -512,17 +562,30 @@ export async function POST(request: NextRequest) {
                 return Math.max(0, totalOrderAmount - getPaidAmount(data));
             };
             const debtCandidateDocs: { ref: FirebaseFirestore.DocumentReference; snap: FirebaseFirestore.DocumentSnapshot }[] = [];
-            if (use_surplus_to_pay_debt === true && normalizedPhoneResult && paymentMethodCode !== 'DEBT') {
-                const rawCustomerPhone = String(customer_info?.phone || '').trim();
-                if (rawCustomerPhone) {
-                    const debtOrderSnap = await tx.get(
+            if (use_surplus_to_pay_debt === true && resolvedCustomerId && paymentMethodCode !== 'DEBT') {
+                const seenDebtCandidateIds = new Set<string>();
+                const debtOrderByCustomerIdSnap = await tx.get(
+                    db.collection('orders')
+                        .where('customer_info.customerId', '==', resolvedCustomerId)
+                        .limit(20)
+                );
+                for (const docSnap of debtOrderByCustomerIdSnap.docs) {
+                    if (orderPaymentDocs.has(docSnap.id)) continue;
+                    if (getRemainingOrderPayment(docSnap.data()) <= 0) continue;
+                    seenDebtCandidateIds.add(docSnap.id);
+                    debtCandidateDocs.push({ ref: docSnap.ref, snap: docSnap });
+                }
+
+                if (debtCandidateDocs.length === 0 && incomingContactInput.phone) {
+                    const debtOrderByPhoneSnap = await tx.get(
                         db.collection('orders')
-                            .where('customer_info.phone', '==', rawCustomerPhone)
+                            .where('customer_info.phone', '==', incomingContactInput.phone)
                             .limit(20)
                     );
-                    for (const docSnap of debtOrderSnap.docs) {
-                        if (orderPaymentDocs.has(docSnap.id)) continue;
+                    for (const docSnap of debtOrderByPhoneSnap.docs) {
+                        if (seenDebtCandidateIds.has(docSnap.id) || orderPaymentDocs.has(docSnap.id)) continue;
                         if (getRemainingOrderPayment(docSnap.data()) <= 0) continue;
+                        seenDebtCandidateIds.add(docSnap.id);
                         debtCandidateDocs.push({ ref: docSnap.ref, snap: docSnap });
                     }
                 }
@@ -653,10 +716,12 @@ export async function POST(request: NextRequest) {
             const stockProductIds = new Set([...preAggregatedForStock.keys(), ...repairAggregatedForStock.keys()]);
             const newDebt = !isDebtCollectionOnly ? Math.max(0, currentOrderTotal - paidNow) : 0;
 
-            // Strict Backend Validation: Debt orders or partial payments MUST have a customer phone number.
             const isDebt = paymentMethodCode === 'DEBT' || newDebt > 0;
-            if (isDebt && !normalizedPhoneResult) {
-                throw new Error('Đơn hàng ghi nợ hoặc thanh toán thiếu bắt buộc phải có số điện thoại khách hàng hợp lệ để ghi nhận công nợ.');
+            const existingCustomerContactMethods = getCustomerContactMethodsFromData(custSnap?.data());
+            const hasIncomingDebtSafeContact = hasDebtSafeContact(incomingContactMethods);
+            const hasExistingDebtSafeContact = hasDebtSafeContact(existingCustomerContactMethods);
+            if (isDebt && (!resolvedCustomerId || (!hasIncomingDebtSafeContact && !hasExistingDebtSafeContact))) {
+                throw new Error('Đơn hàng ghi nợ hoặc thanh toán thiếu bắt buộc phải có khách hàng và kênh liên hệ rõ như SĐT, Zalo, Facebook, email hoặc địa chỉ.');
             }
 
             const deltaDebt = isDebtCollectionOnly
@@ -683,7 +748,7 @@ export async function POST(request: NextRequest) {
                     const repairQty = repairAggregatedForStock.get(productId)?.quantity || 0;
                     return count + (retailQty > 0 ? 1 : 0) + (repairQty > 0 ? 1 : 0);
                 }, 0);
-            const customerTransactionCount = normalizedPhoneResult && orderPaymentTotal > 0
+            const customerTransactionCount = resolvedCustomerId && orderPaymentTotal > 0
                 ? 1
                 : 0;
             const inventoryLogAllocations = await reserveSequentialDocumentIds(tx, db, {
@@ -720,11 +785,15 @@ export async function POST(request: NextRequest) {
 
             const order: Record<string, unknown> = {
                 customer_info: {
-                    name: customer_info?.name || 'Khách lẻ',
-                    phone: customer_info?.phone || '',
-                    email: customer_info?.email || '',
-                    address: customer_info?.address || '',
-                    note: customer_info?.note || '',
+                    customerId: resolvedCustomerId || '',
+                    name: incomingContactInput.name || 'Khách lẻ',
+                    phone: normalizedPhoneResult?.local || incomingContactInput.phone || '',
+                    primaryContactType: incomingPrimaryContact?.type || null,
+                    primaryContactValue: incomingPrimaryContact?.value || '',
+                    contactMethods: incomingContactMethods,
+                    email: incomingContactInput.email || '',
+                    address: incomingContactInput.address || '',
+                    note: incomingContactInput.note || '',
                 },
                 items: orderItems,
                 subtotal_amount: discountableSubtotal,
@@ -955,6 +1024,17 @@ export async function POST(request: NextRequest) {
                     if (incomingName && incomingName !== 'Khách lẻ' && incomingName !== currentData.name) {
                         updateData.name = incomingName;
                     }
+                    if (incomingContactMethods.length > 0) {
+                        updateData.phone = normalizedPhoneResult?.local || incomingContactInput.phone || currentData.phone || '';
+                        updateData.primaryPhone = normalizedPhoneResult?.local || currentData.primaryPhone || '';
+                        updateData.primaryContactType = incomingPrimaryContact?.type || currentData.primaryContactType || null;
+                        updateData.primaryContactValue = incomingPrimaryContact?.value || currentData.primaryContactValue || '';
+                        updateData.contactMethods = incomingContactMethods;
+                        updateData.searchKeywords = buildContactSearchKeywords(incomingContactInput, incomingContactMethods);
+                        if (incomingContactInput.email) updateData.email = incomingContactInput.email;
+                        if (incomingContactInput.address) updateData.address = incomingContactInput.address;
+                        if (incomingContactInput.note) updateData.note = incomingContactInput.note;
+                    }
 
                     const customerSpendDelta = !isDebtCollectionOnly ? currentOrderTotal : 0;
                     if (customerSpendDelta > 0) {
@@ -976,9 +1056,20 @@ export async function POST(request: NextRequest) {
                 } else {
                     const customerSpendDelta = !isDebtCollectionOnly ? currentOrderTotal : 0;
                     const newCust: Record<string, unknown> = {
-                        phone: normalizedPhoneResult!.local,
+                        id: resolvedCustomerId,
+                        code: resolvedCustomerId,
+                        legacyPhoneId: normalizedPhoneResult?.local || '',
+                        phone: normalizedPhoneResult?.local || incomingContactInput.phone || '',
+                        primaryPhone: normalizedPhoneResult?.local || '',
                         name: incomingName || 'Khách lẻ',
                         type: 'retail',
+                        primaryContactType: incomingPrimaryContact?.type || null,
+                        primaryContactValue: incomingPrimaryContact?.value || '',
+                        contactMethods: incomingContactMethods,
+                        searchKeywords: buildContactSearchKeywords(incomingContactInput, incomingContactMethods),
+                        email: incomingContactInput.email || '',
+                        address: incomingContactInput.address || '',
+                        note: incomingContactInput.note || '',
                         totalSpent: customerSpendDelta,
                         totalOrders: customerSpendDelta > 0 ? 1 : 0,
                         totalRepairs: 0,
@@ -994,7 +1085,7 @@ export async function POST(request: NextRequest) {
 
                 if (!isDebtCollectionOnly) {
                     tx.set(customerLedgerAllocations[customerLedgerAllocationIndex++].ref, {
-                        customerId: normalizedPhoneResult!.local,
+                        customerId: resolvedCustomerId,
                         type: 'purchase_order',
                         amount: currentOrderTotal,
                         referenceId: orderId,
@@ -1002,7 +1093,7 @@ export async function POST(request: NextRequest) {
                     });
                     if (submittedDepositAmount > 0) {
                         tx.set(customerLedgerAllocations[customerLedgerAllocationIndex++].ref, {
-                            customerId: normalizedPhoneResult!.local,
+                            customerId: resolvedCustomerId,
                             type: 'purchase_payment',
                             amount: paidNow,
                             referenceId: orderId,
@@ -1012,7 +1103,7 @@ export async function POST(request: NextRequest) {
                 }
                 if (orderPaymentTotal > 0) {
                     tx.set(customerLedgerAllocations[customerLedgerAllocationIndex++].ref, {
-                        customerId: normalizedPhoneResult!.local,
+                        customerId: resolvedCustomerId,
                         type: 'debt_payment',
                         amount: orderPaymentTotal,
                         referenceId: debtPaymentReferenceId,
@@ -1102,11 +1193,11 @@ export async function POST(request: NextRequest) {
                 }
 
                 let customerTransactionAllocationIndex = 0;
-                if (normalizedPhoneResult) {
+                if (resolvedCustomerId) {
                     if (orderPaymentTotal > 0) {
                         tx.set(customerTransactionAllocations[customerTransactionAllocationIndex++].ref, {
-                            customerId: normalizedPhoneResult.local,
-                            customerName: incomingName || customer_info?.name || 'Khách lẻ',
+                            customerId: resolvedCustomerId,
+                            customerName: incomingName || incomingContactInput.name || 'Khách lẻ',
                             type: 'PAYMENT',
                             amount: orderPaymentTotal,
                             orderIds: updatedOrderIds,

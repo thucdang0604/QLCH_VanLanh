@@ -30,11 +30,11 @@
 
 - [ ] Sua POS state/UI de chon hoac tao customer khong SDT.
 - [ ] Sua handoff vao POS de nhan `customerId` va contact snapshot.
-- [ ] Sua `/api/pos/checkout`:
-  - [ ] Nhan `customer_info.customerId`.
-  - [ ] Tao/update customer theo `customerId`.
-  - [ ] Debt/partial payment guard dung `customerId + contactMethods`, khong bat buoc phone.
-  - [ ] Ghi `customer_ledger` va `customer_transactions` theo `customerId`.
+- [x] Sua `/api/pos/checkout`:
+  - [x] Nhan `customer_info.customerId`.
+  - [x] Tao/update customer theo `customerId`.
+  - [x] Debt/partial payment guard dung `customerId + contactMethods`, khong bat buoc phone.
+  - [x] Ghi `customer_ledger` va `customer_transactions` theo `customerId`.
 - [x] Sua `/api/admin/customers/collect-debt`:
   - [x] Query don no theo `customer_info.customerId`.
   - [x] Fallback query theo `customer_info.phone` cho du lieu cu.
