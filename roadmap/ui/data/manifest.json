@@ -15,6 +15,7 @@
       "title": "CRM/NCC Contact Identity: luu khach hang va nha cung cap khong co SDT",
       "date": "30.06.2026",
       "status": "completed",
+      "completedAt": "02.07.2026",
       "planFile": "data/ai_plans/plan_contactless_customer_supplier_identity_20260630.md",
       "taskFile": "data/ai_plans/task_contactless_customer_supplier_identity_20260630.md",
       "walkthroughFile": "",
