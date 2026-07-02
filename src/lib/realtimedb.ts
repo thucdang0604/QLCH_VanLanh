@@ -8,6 +8,8 @@ export interface ChatRoomInfo {
     customerName?: string;
     customerEmail?: string;
     customerPhone?: string;
+    primaryContactType?: string | null;
+    primaryContactValue?: string;
     displayName?: string;
     avatarUrl?: string;
     email?: string | null;

@@ -1,15 +1,25 @@
 import { FieldValue } from 'firebase-admin/firestore';
 import { NextRequest, NextResponse } from 'next/server';
 import { requirePermission } from '@/lib/apiAuth';
-import { toSafeRtdbKey } from '@/lib/chatChannels';
+import { normalizeChatChannel, toSafeRtdbKey, type ChatChannel } from '@/lib/chatChannels';
+import {
+  buildContactlessDocumentBaseId,
+  buildContactMethods,
+  buildContactSearchKeywords,
+  getPrimaryContact,
+} from '@/lib/contactIdentity';
 import { getAdminDb, getAdminRtdb } from '@/lib/firebaseAdmin';
+import type { ContactMethod, ContactMethodType } from '@/lib/types/contact';
 
 export const runtime = 'nodejs';
 const ROOM_LINK_TIMEOUT_MS = 8000;
 
 interface StoredCustomer {
+  customerId: string;
   phone: string;
   name: string;
+  primaryContactType?: ContactMethodType | null;
+  primaryContactValue?: string;
   totalOrders?: number;
   totalRepairs?: number;
   totalSpent?: number;
@@ -19,20 +29,33 @@ function normalizePhone(value: unknown): string {
   return typeof value === 'string' ? value.replace(/[^0-9]/g, '') : '';
 }
 
+function normalizeCustomerId(value: unknown): string {
+  return typeof value === 'string'
+    ? value.trim().replace(/[\/#?\[\]]/g, '-').slice(0, 120)
+    : '';
+}
+
+function readString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
 function parseRoomId(roomId: string): string | null {
   const safeRoomId = toSafeRtdbKey(roomId);
   return safeRoomId && safeRoomId === roomId ? safeRoomId : null;
 }
 
 function storedCustomer(
-  phone: string,
+  customerId: string,
   data: Record<string, unknown> | undefined,
   permissions: { viewOrders: boolean; viewRepairs: boolean },
 ): StoredCustomer | null {
   if (!data) return null;
   return {
-    phone,
+    customerId,
+    phone: typeof data.phone === 'string' ? data.phone : '',
     name: typeof data.name === 'string' ? data.name : '',
+    primaryContactType: data.primaryContactType as ContactMethodType | null | undefined,
+    primaryContactValue: typeof data.primaryContactValue === 'string' ? data.primaryContactValue : '',
     ...(permissions.viewOrders ? {
       totalOrders: Number(data.totalOrders || 0),
       totalSpent: Number(data.totalSpent || 0),
@@ -69,6 +92,51 @@ function timeoutAfter(ms: number): Promise<never> {
   });
 }
 
+function buildRoomContactInput(input: {
+  name: string;
+  phone: string;
+  channel: ChatChannel;
+  externalUserId: string;
+  roomId: string;
+}) {
+  const platformIdentity = input.externalUserId || input.roomId;
+  const primaryType: ContactMethodType = input.phone
+    ? 'phone'
+    : input.channel === 'facebook'
+      ? 'facebook'
+      : input.channel === 'zalo'
+        ? 'zalo'
+        : 'other';
+
+  return {
+    name: input.name,
+    phone: input.phone,
+    facebook: input.channel === 'facebook' ? platformIdentity : '',
+    zalo: input.channel === 'zalo' ? platformIdentity : '',
+    other: input.channel === 'web' ? `web:${platformIdentity}` : '',
+    primaryType,
+    source: 'chat' as const,
+  };
+}
+
+function mergeContactMethods(existing: unknown, incoming: ContactMethod[]): ContactMethod[] {
+  const byKey = new Map<string, ContactMethod>();
+  const add = (method: ContactMethod) => {
+    const value = method.normalizedValue || method.value;
+    if (!method.type || !value) return;
+    byKey.set(`${method.type}:${value}`, method);
+  };
+  if (Array.isArray(existing)) {
+    existing.forEach(method => add(method as ContactMethod));
+  }
+  incoming.forEach(method => add(method));
+  return Array.from(byKey.values()).map((method, index) => ({
+    ...method,
+    isPrimary: incoming.some(item => item.type === method.type && (item.normalizedValue || item.value) === (method.normalizedValue || method.value) && item.isPrimary)
+      || (index === 0 && !incoming.some(item => item.isPrimary)),
+  }));
+}
+
 export async function GET(
   request: NextRequest,
   context: { params: Promise<{ roomId: string }> },
@@ -80,15 +148,20 @@ export async function GET(
       return NextResponse.json({ success: false, error: 'Invalid roomId' }, { status: 400 });
     }
 
+    const customerId = normalizeCustomerId(request.nextUrl.searchParams.get('customerId'));
     const phone = normalizePhone(request.nextUrl.searchParams.get('phone'));
-    if (phone.length < 9 || phone.length > 15) {
+    if (phone && (phone.length < 9 || phone.length > 15)) {
       return NextResponse.json({ success: false, error: 'Invalid phone' }, { status: 400 });
     }
+    const lookupId = customerId || phone;
+    if (!lookupId) {
+      return NextResponse.json({ success: true, customer: null });
+    }
 
-    const snapshot = await getAdminDb().collection('customers').doc(phone).get();
+    const snapshot = await getAdminDb().collection('customers').doc(lookupId).get();
     return NextResponse.json({
       success: true,
-      customer: storedCustomer(phone, snapshot.exists ? snapshot.data() : undefined, getMetricPermissions(user)),
+      customer: storedCustomer(snapshot.id, snapshot.exists ? snapshot.data() : undefined, getMetricPermissions(user)),
     });
   } catch (error: unknown) {
     return routeError(error);
@@ -107,21 +180,45 @@ export async function POST(
       return NextResponse.json({ success: false, error: 'Invalid roomId' }, { status: 400 });
     }
 
-    const body = await request.json().catch(() => ({})) as Partial<{ name: string; phone: string }>;
+    const body = await request.json().catch(() => ({})) as Partial<{
+      name: string;
+      phone: string;
+      customerId: string;
+      channel: ChatChannel;
+      externalUserId: string;
+    }>;
     const name = typeof body.name === 'string' ? body.name.trim() : '';
     const phone = normalizePhone(body.phone);
+    const requestedCustomerId = normalizeCustomerId(body.customerId);
+    const channel = normalizeChatChannel(body.channel);
+    const externalUserId = readString(body.externalUserId);
     if (name.length < 2 || name.length > 100) {
       return NextResponse.json({ success: false, error: 'Invalid customer name' }, { status: 400 });
     }
-    if (phone.length < 9 || phone.length > 15) {
+    if (phone && (phone.length < 9 || phone.length > 15)) {
       return NextResponse.json({ success: false, error: 'Invalid phone' }, { status: 400 });
     }
 
-    const customerRef = getAdminDb().collection('customers').doc(phone);
+    const contactInput = buildRoomContactInput({ name, phone, channel, externalUserId, roomId: safeRoomId });
+    const incomingContactMethods = buildContactMethods(contactInput);
+    const incomingPrimaryContact = getPrimaryContact(incomingContactMethods);
+    const resolvedCustomerId = requestedCustomerId
+      || (phone ? phone : buildContactlessDocumentBaseId('KH', contactInput));
+
+    const customerRef = getAdminDb().collection('customers').doc(resolvedCustomerId);
     const existing = await customerRef.get();
+    const existingData = existing.exists ? existing.data() : undefined;
+    const contactMethods = mergeContactMethods(existingData?.contactMethods, incomingContactMethods);
+    const primaryContact = getPrimaryContact(contactMethods) || incomingPrimaryContact;
     await customerRef.set({
+      code: resolvedCustomerId,
       phone,
+      ...(phone ? { primaryPhone: phone } : {}),
       name,
+      primaryContactType: primaryContact?.type || null,
+      primaryContactValue: primaryContact?.value || '',
+      contactMethods,
+      searchKeywords: buildContactSearchKeywords(contactInput, contactMethods),
       updatedAt: FieldValue.serverTimestamp(),
       lastVisit: FieldValue.serverTimestamp(),
       ...(existing.exists ? {} : {
@@ -139,10 +236,12 @@ export async function POST(
     try {
       await Promise.race([
         getAdminRtdb().ref(`chats/${safeRoomId}/info`).update({
-          customerId: phone,
+          customerId: resolvedCustomerId,
           customerName: name,
-          customerPhone: phone,
-          phone,
+          customerPhone: phone || null,
+          phone: phone || null,
+          primaryContactType: primaryContact?.type || null,
+          primaryContactValue: primaryContact?.value || '',
           displayName: name.slice(0, 50),
         }),
         timeoutAfter(ROOM_LINK_TIMEOUT_MS),
@@ -152,10 +251,12 @@ export async function POST(
       console.error('[AdminChat] Customer stored but room link failed:', linkError);
     }
 
-    const customer = storedCustomer(phone, {
-      ...(existing.exists ? existing.data() : {}),
+    const customer = storedCustomer(resolvedCustomerId, {
+      ...(existingData || {}),
       phone,
       name,
+      primaryContactType: primaryContact?.type || null,
+      primaryContactValue: primaryContact?.value || '',
     }, getMetricPermissions(user));
     return NextResponse.json({ success: true, customer, roomLinked });
   } catch (error: unknown) {

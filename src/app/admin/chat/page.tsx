@@ -45,6 +45,8 @@ interface ChatRoom {
     customerId?: string;
     customerName?: string;
     customerPhone?: string;
+    primaryContactType?: string | null;
+    primaryContactValue?: string;
     lastMessage: string;
     lastMessageTime: number;
     hasUnread: boolean;
@@ -387,6 +389,8 @@ export default function AdminChatPage() {
                         customerId: typeof info.customerId === 'string' ? info.customerId : undefined,
                         customerName: typeof info.customerName === 'string' ? info.customerName : undefined,
                         customerPhone: typeof info.customerPhone === 'string' ? info.customerPhone : undefined,
+                        primaryContactType: typeof info.primaryContactType === 'string' ? info.primaryContactType : undefined,
+                        primaryContactValue: typeof info.primaryContactValue === 'string' ? info.primaryContactValue : undefined,
                         lastMessage: String(info.lastMessage || ''),
                         lastMessageTime: Number(info.lastMessageTime || 0),
                         hasUnread: !!(info.hasUnreadAdmin || info.hasUnread), // Check admin unread

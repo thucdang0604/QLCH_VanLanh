@@ -262,6 +262,7 @@ export function useCustomerActivity({
         normalizedPhone,
         customerId: stableCustomerId,
         hasLinkedPhone: normalizedPhone.length >= 9,
+        hasLinkedCustomer: Boolean(stableCustomerId || normalizedPhone.length >= 9),
         orders,
         repairs,
         openOrders: orders.filter(order => isOpenOrderStatus(order.status)),

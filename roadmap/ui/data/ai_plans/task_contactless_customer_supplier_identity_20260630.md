@@ -54,14 +54,16 @@
 
 ## Phase 4 - Chat CRM linkage
 
-- [ ] Sua `ChatCustomerProfileModal` cho phep tao/link customer khong phone.
-- [ ] Sua `/api/admin/chat/rooms/[roomId]/customer`:
-  - [ ] GET/POST theo `customerId` hoac contact token.
-  - [ ] Khong reject khi phone trong.
-  - [ ] Luu room/platform identity vao `contactMethods`.
-- [ ] Sua RTDB room info: `customerId`, `customerName`, `customerPhone?`, `primaryContactType`, `primaryContactValue`.
-- [ ] Sua `ChatCustomerActivityPanel` dung `customerId`, fallback phone.
+- [x] Sua `ChatCustomerProfileModal` cho phep tao/link customer khong phone.
+- [x] Sua `/api/admin/chat/rooms/[roomId]/customer`:
+  - [x] GET/POST theo `customerId` hoac contact token.
+  - [x] Khong reject khi phone trong.
+  - [x] Luu room/platform identity vao `contactMethods`.
+- [x] Sua RTDB room info: `customerId`, `customerName`, `customerPhone?`, `primaryContactType`, `primaryContactValue`.
+- [x] Sua `ChatCustomerActivityPanel` dung `customerId`, fallback phone.
 - [ ] Sua handoff chat -> POS/Repair truyen `customerId`.
+  - [x] Chat modal/build URL truyen `customerId`.
+  - [ ] Repair intake doc query tieu thu `handoffCustomerId`.
 
 ## Phase 5 - Suppliers va nhap kho
 
