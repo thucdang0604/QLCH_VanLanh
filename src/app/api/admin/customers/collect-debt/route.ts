@@ -6,6 +6,46 @@ import type { Order } from '@/lib/types';
 import { buildPaymentChannelRevenueDelta, incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 import { reserveSequentialDocumentId } from '@/lib/serverDocumentIds';
 
+async function loadDebtOrderDocs(
+    tx: FirebaseFirestore.Transaction,
+    db: FirebaseFirestore.Firestore,
+    customerId: string,
+    customerData: FirebaseFirestore.DocumentData,
+) {
+    const byCustomerIdSnap = await tx.get(
+        db.collection('orders')
+            .where('customer_info.customerId', '==', customerId)
+            .where('paymentStatus', '==', 'debt')
+            .orderBy('createdAt', 'asc')
+    );
+
+    if (!byCustomerIdSnap.empty) return byCustomerIdSnap.docs;
+
+    const phoneCandidates = Array.from(new Set([
+        customerId,
+        customerData.phone,
+        customerData.primaryPhone,
+        customerData.legacyPhoneId,
+    ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0)));
+
+    const byPhoneDocs: FirebaseFirestore.QueryDocumentSnapshot[] = [];
+    const seenIds = new Set<string>();
+    for (const phone of phoneCandidates) {
+        const byPhoneSnap = await tx.get(
+            db.collection('orders')
+                .where('customer_info.phone', '==', phone)
+                .where('paymentStatus', '==', 'debt')
+                .orderBy('createdAt', 'asc')
+        );
+        for (const doc of byPhoneSnap.docs) {
+            if (seenIds.has(doc.id)) continue;
+            seenIds.add(doc.id);
+            byPhoneDocs.push(doc);
+        }
+    }
+    return byPhoneDocs;
+}
+
 export async function POST(request: NextRequest) {
     try {
         const caller = await requirePermission(request, 'manage_customers');
@@ -38,13 +78,7 @@ export async function POST(request: NextRequest) {
                 throw new Error(`Số tiền thu (${numAmount.toLocaleString('vi-VN')}đ) lớn hơn số nợ hiện tại (${currentDebt.toLocaleString('vi-VN')}đ).`);
             }
 
-            // Tìm các đơn hàng đang nợ (FIFO)
-            const ordersSnap = await tx.get(
-                db.collection('orders')
-                    .where('customer_info.phone', '==', customerId)
-                    .where('paymentStatus', '==', 'debt')
-                    .orderBy('createdAt', 'asc')
-            );
+            const debtOrderDocs = await loadDebtOrderDocs(tx, db, customerId, currentData);
 
             let remainingAmountToDistribute = numAmount;
             const updatedOrderIds: string[] = [];
@@ -58,7 +92,7 @@ export async function POST(request: NextRequest) {
                 prefix: 'CT',
             });
 
-            for (const doc of ordersSnap.docs) {
+            for (const doc of debtOrderDocs) {
                 if (remainingAmountToDistribute <= 0) break;
 
                 const orderData = doc.data() as Order;

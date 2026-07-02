@@ -16,7 +16,7 @@
   - [x] Build search keywords.
   - [x] Validate "co cach lien he du ro rang" cho cong no.
 - [x] Tao helper generate base ID khong dung SDT va khong them Firestore read.
-- [ ] Tao helper reserve `customerId` co kiem tra trung lap khi bat dau sua write path.
+- [x] Tao helper reserve `customerId` co kiem tra trung lap khi bat dau sua write path.
 
 ## Phase 1 - Backward-compatible CRM
 
@@ -35,11 +35,11 @@
   - [ ] Tao/update customer theo `customerId`.
   - [ ] Debt/partial payment guard dung `customerId + contactMethods`, khong bat buoc phone.
   - [ ] Ghi `customer_ledger` va `customer_transactions` theo `customerId`.
-- [ ] Sua `/api/admin/customers/collect-debt`:
-  - [ ] Query don no theo `customer_info.customerId`.
-  - [ ] Fallback query theo `customer_info.phone` cho du lieu cu.
-  - [ ] Ghi transaction va revenue aggregate khong phu thuoc phone.
-- [ ] Kiem tra lai cashier shift/revenue path khong bi lech do `customerId`.
+- [x] Sua `/api/admin/customers/collect-debt`:
+  - [x] Query don no theo `customer_info.customerId`.
+  - [x] Fallback query theo `customer_info.phone` cho du lieu cu.
+  - [x] Ghi transaction va revenue aggregate khong phu thuoc phone.
+- [x] Kiem tra lai cashier shift/revenue path khong bi lech do `customerId`.
 
 ## Phase 3 - Repair, warranty va in phieu
 

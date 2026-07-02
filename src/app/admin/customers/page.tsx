@@ -13,7 +13,8 @@ import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 import { TierConfig } from '@/lib/customerTiers';
 import type { Customer } from '@/lib/types';
-import { buildContactMethods, buildContactSearchKeywords, buildContactlessDocumentBaseId, getPrimaryContact } from '@/lib/contactIdentity';
+import { buildContactMethods, buildContactSearchKeywords, getPrimaryContact } from '@/lib/contactIdentity';
+import { reserveCustomerDocumentId } from '@/lib/customerDocumentIds';
 import { normalizeVietnamPhone } from '@/lib/phone';
 import { generateSearchKeywords } from '@/lib/utils';
 import type { ContactMethod } from '@/lib/types/contact';
@@ -33,30 +34,6 @@ function firstContactValue(methods: ContactMethod[] | undefined, type: ContactMe
 function customerContactLabel(customer: Customer): string {
     const primary = customer.contactMethods?.find(method => method.isPrimary) || customer.contactMethods?.[0];
     return customer.phone || customer.primaryContactValue || primary?.value || customer.id;
-}
-
-async function reserveCustomerDocumentId(data: CustomerFormData): Promise<string> {
-    const normalizedPhone = data.phone ? normalizeVietnamPhone(data.phone) : null;
-    if (normalizedPhone) return normalizedPhone.local;
-
-    const baseId = buildContactlessDocumentBaseId('KH', {
-        name: data.name,
-        zalo: data.zalo,
-        facebook: data.facebook,
-        email: data.email,
-        address: data.address,
-        note: data.note,
-        other: data.otherContact,
-        primaryType: data.primaryContactType,
-        source: 'manual',
-    });
-
-    for (let i = 0; i < 50; i += 1) {
-        const candidate = i === 0 ? baseId : `${baseId}-${i + 1}`;
-        const snap = await getDoc(doc(db, 'customers', candidate));
-        if (!snap.exists()) return candidate;
-    }
-    throw new Error('Không thể tạo mã khách hàng không trùng.');
 }
 
 export default function CustomersPage() {
@@ -234,7 +211,18 @@ export default function CustomersPage() {
         const contactMethods = buildContactMethods(contactInput);
         const primaryContact = getPrimaryContact(contactMethods);
         const normalizedPhone = data.phone ? normalizeVietnamPhone(data.phone) : null;
-        const customerId = editingCustomer?.id || await reserveCustomerDocumentId(data);
+        const customerId = editingCustomer?.id || await reserveCustomerDocumentId({
+            name: data.name,
+            phone: data.phone,
+            zalo: data.zalo,
+            facebook: data.facebook,
+            email: data.email,
+            address: data.address,
+            note: data.note,
+            other: data.otherContact,
+            primaryType: data.primaryContactType,
+            source: 'manual',
+        });
         const ref = doc(db, 'customers', customerId);
         
         if (editingCustomer) {
