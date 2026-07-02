@@ -93,6 +93,20 @@ test('POS debt and collect-debt paths use customer id before legacy phone fallba
     assert.match(collectDebt, /\.where\('customer_info\.phone', '==', phone\)/);
 });
 
+test('POS customer entry stays compact and missing cashier shift is actionable', () => {
+    const posPage = fs.readFileSync(repoFile('src', 'app', 'admin', 'pos', 'page.tsx'), 'utf8');
+    const posCartPanel = fs.readFileSync(repoFile('src', 'features', 'pos', 'PosCartPanel.tsx'), 'utf8');
+    const posCheckout = fs.readFileSync(repoFile('src', 'app', 'api', 'pos', 'checkout', 'route.ts'), 'utf8');
+
+    assert.match(posCartPanel, /const customerContactOptions/);
+    assert.match(posCartPanel, /Liên hệ phụ/);
+    assert.match(posCartPanel, /missingCashierShift/);
+    assert.match(posCartPanel, /Mở ca thu ngân trước/);
+    assert.match(posPage, /setPosTab\('cashier'\)/);
+    assert.match(posPage, /Chưa mở ca thu ngân/);
+    assert.match(posCheckout, /normalizedMessage\.includes\('mở ca thu ngân'\)/);
+});
+
 test('repair intake, handover and print paths preserve contactless customer snapshots', () => {
     const repairPage = fs.readFileSync(repoFile('src', 'app', 'admin', 'repairs', 'page.tsx'), 'utf8');
     const handover = fs.readFileSync(repoFile('src', 'app', 'api', 'repairs', 'handover', 'route.ts'), 'utf8');

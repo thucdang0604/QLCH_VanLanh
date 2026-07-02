@@ -1187,6 +1187,14 @@ export default function POSPage() {
     const handleCheckout = async () => {
         if (cart.length === 0) return;
 
+        const requiresCashierShift = ['cash', 'bank', 'momo'].includes(paymentMethod)
+            && total > 0;
+        if (requiresCashierShift && !activeCashierShift) {
+            setPosTab('cashier');
+            toastError('Chưa mở ca thu ngân. Vui lòng mở ca ở tab Thu ngân trước khi thanh toán tiền mặt, chuyển khoản hoặc ví.');
+            return;
+        }
+
         // Validation for debt/partial payments
         const isDebtPayment = paymentMethod === 'debt' || (deposit > 0 && deposit < total);
         if (isDebtPayment) {
@@ -1413,6 +1421,7 @@ export default function POSPage() {
             subtotal={subtotal}
             total={total}
             isProcessing={isProcessing}
+            cashierShiftOpen={Boolean(activeCashierShift)}
             onCloseMobileCart={() => setShowMobileCart(false)}
             onLookupRepairByPhone={lookupRepairByPhone}
             onAddRepairToCart={addRepairToCart}

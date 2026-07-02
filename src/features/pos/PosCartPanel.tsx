@@ -1,6 +1,6 @@
 import { useState, useEffect, type Dispatch, type SetStateAction } from 'react';
 import Image from 'next/image';
-import { AlertTriangle, Banknote, CreditCard, Minus, Package, Phone, Plus, QrCode, Receipt, ShoppingCart, Tag, Trash2, User, Wrench, X } from 'lucide-react';
+import { AlertTriangle, Banknote, ChevronDown, CreditCard, MessageCircle, Minus, Package, Phone, Plus, QrCode, Receipt, ShoppingCart, Tag, Trash2, User, Wrench, X } from 'lucide-react';
 import CurrencyInput from '@/components/admin/CurrencyInput';
 import type { Product } from '@/lib/types';
 import type { ContactMethodType } from '@/lib/types/contact';
@@ -12,6 +12,19 @@ const paymentMethods = [
     { key: 'momo', label: 'MoMo', icon: QrCode },
     { key: 'installment', label: 'Trả góp', icon: CreditCard },
     { key: 'debt', label: 'Ghi nợ', icon: AlertTriangle },
+];
+
+type PosCustomerContactType = Extract<ContactMethodType, 'phone' | 'zalo' | 'facebook' | 'other'>;
+
+const customerContactOptions: Array<{
+    type: PosCustomerContactType;
+    label: string;
+    placeholder: string;
+}> = [
+    { type: 'phone', label: 'SĐT', placeholder: 'Số điện thoại' },
+    { type: 'zalo', label: 'Zalo', placeholder: 'Tên hoặc số Zalo' },
+    { type: 'facebook', label: 'Facebook', placeholder: 'Facebook/Messenger' },
+    { type: 'other', label: 'Khác', placeholder: 'Liên hệ khác' },
 ];
 
 interface PosCartPanelProps {
@@ -56,6 +69,7 @@ interface PosCartPanelProps {
     subtotal: number;
     total: number;
     isProcessing: boolean;
+    cashierShiftOpen: boolean;
     onCloseMobileCart: () => void;
     onLookupRepairByPhone: (phone: string) => void;
     onAddRepairToCart: (repair: RepairTicketInfo) => void;
@@ -110,6 +124,7 @@ export function PosCartPanel({
     subtotal,
     total,
     isProcessing,
+    cashierShiftOpen,
     onCloseMobileCart,
     onLookupRepairByPhone,
     onAddRepairToCart,
@@ -135,6 +150,31 @@ export function PosCartPanel({
     const changeDue = Math.max(0, surplusAfterSelectedDebt - autoDebtOffset);
     const remainingCurrentPayment = deposit > 0 ? Math.max(0, total - deposit) : 0;
     const [showRepairsList, setShowRepairsList] = useState(true);
+    const [showExtraContacts, setShowExtraContacts] = useState(false);
+    const compactPrimaryContactType = customerContactOptions.some(option => option.type === customerPrimaryContactType)
+        ? customerPrimaryContactType as PosCustomerContactType
+        : 'other';
+    const primaryContactOption = customerContactOptions.find(option => option.type === compactPrimaryContactType) || customerContactOptions[0];
+    const contactValues: Record<PosCustomerContactType, string> = {
+        phone: customerPhone,
+        zalo: customerZalo,
+        facebook: customerFacebook,
+        other: customerOtherContact,
+    };
+    const hasExtraContacts = customerContactOptions.some(option =>
+        option.type !== compactPrimaryContactType && contactValues[option.type].trim()
+    );
+    const requiresCashierShift = ['cash', 'bank', 'momo'].includes(paymentMethod)
+        && cart.length > 0
+        && total > 0;
+    const missingCashierShift = requiresCashierShift && !cashierShiftOpen;
+    const checkoutDisabled = cart.length === 0 || isProcessing || missingCashierShift;
+    const setContactValue = (type: PosCustomerContactType, value: string) => {
+        if (type === 'phone') setCustomerPhone(value);
+        else if (type === 'zalo') setCustomerZalo(value);
+        else if (type === 'facebook') setCustomerFacebook(value);
+        else setCustomerOtherContact(value);
+    };
 
     // Auto-expand repair list when a new set of repairs is loaded
     useEffect(() => {
@@ -142,6 +182,10 @@ export function PosCartPanel({
             setShowRepairsList(true);
         }
     }, [linkedRepairs, payableOrders]);
+
+    useEffect(() => {
+        if (hasExtraContacts) setShowExtraContacts(true);
+    }, [hasExtraContacts]);
 
     return (
         <>
@@ -249,7 +293,8 @@ export function PosCartPanel({
             </div>
 
             <div className="border-t px-4 py-3 space-y-3">
-                <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-2">
+                    <div className="grid grid-cols-2 gap-2">
                     <div className="relative">
                         <User size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
                         <input
@@ -265,45 +310,72 @@ export function PosCartPanel({
                         <User size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
                         <input type="text" placeholder="Tên KH" value={customerName} onChange={event => setCustomerName(event.target.value)} className="w-full pl-8 pr-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-orange-500/20" />
                     </div>
-                    <div className="relative">
-                        <Phone size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                        <input type="text" placeholder="SĐT" value={customerPhone} onChange={event => setCustomerPhone(event.target.value)} onBlur={() => onLookupRepairByPhone(customerPhone)} className="w-full pl-8 pr-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-orange-500/20" />
                     </div>
-                    <div>
+                    <div className="grid grid-cols-[112px_minmax(0,1fr)] gap-2">
                         <select
-                            title="Kênh chính"
-                            value={customerPrimaryContactType}
-                            onChange={event => setCustomerPrimaryContactType(event.target.value as ContactMethodType)}
+                            title="Kênh liên hệ chính"
+                            value={compactPrimaryContactType}
+                            onChange={event => setCustomerPrimaryContactType(event.target.value as PosCustomerContactType)}
                             className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:ring-2 focus:ring-orange-500/20"
                         >
-                            <option value="phone">SĐT</option>
-                            <option value="zalo">Zalo</option>
-                            <option value="facebook">Facebook</option>
-                            <option value="other">Khác</option>
+                            {customerContactOptions.map(option => (
+                                <option key={option.type} value={option.type}>{option.label}</option>
+                            ))}
                         </select>
+                        <div className="relative">
+                            {compactPrimaryContactType === 'phone' ? (
+                                <Phone size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                            ) : (
+                                <MessageCircle size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                            )}
+                            <input
+                                type="text"
+                                placeholder={primaryContactOption.placeholder}
+                                value={contactValues[compactPrimaryContactType]}
+                                onChange={event => setContactValue(compactPrimaryContactType, event.target.value)}
+                                onBlur={() => {
+                                    const lookupValue = compactPrimaryContactType === 'phone'
+                                        ? customerPhone
+                                        : customerId;
+                                    if (lookupValue.trim()) onLookupRepairByPhone(lookupValue);
+                                }}
+                                className="w-full pl-8 pr-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-orange-500/20"
+                            />
+                        </div>
                     </div>
-                    <input
-                        type="text"
-                        placeholder="Zalo"
-                        value={customerZalo}
-                        onChange={event => setCustomerZalo(event.target.value)}
-                        className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-orange-500/20"
-                    />
-                    <input
-                        type="text"
-                        placeholder="Facebook/Messenger"
-                        value={customerFacebook}
-                        onChange={event => setCustomerFacebook(event.target.value)}
-                        className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-orange-500/20"
-                    />
-                    <input
-                        type="text"
-                        placeholder="Liên hệ khác"
-                        value={customerOtherContact}
-                        onChange={event => setCustomerOtherContact(event.target.value)}
-                        className="col-span-2 w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-orange-500/20"
-                    />
+                    <button
+                        type="button"
+                        onClick={() => setShowExtraContacts(previous => !previous)}
+                        className="inline-flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-orange-600"
+                    >
+                        <ChevronDown size={14} className={`transition-transform ${showExtraContacts ? 'rotate-180' : ''}`} />
+                        Liên hệ phụ{hasExtraContacts ? ' đã nhập' : ''}
+                    </button>
+                    {showExtraContacts && (
+                        <div className="grid grid-cols-2 gap-2 rounded-lg border border-gray-100 bg-gray-50 p-2">
+                            {customerContactOptions
+                                .filter(option => option.type !== compactPrimaryContactType)
+                                .map(option => (
+                                    <input
+                                        key={option.type}
+                                        type="text"
+                                        placeholder={option.placeholder}
+                                        value={contactValues[option.type]}
+                                        onChange={event => setContactValue(option.type, event.target.value)}
+                                        onBlur={() => {
+                                            if (option.type === 'phone' && customerPhone.trim()) onLookupRepairByPhone(customerPhone);
+                                        }}
+                                        className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:ring-2 focus:ring-orange-500/20"
+                                    />
+                                ))}
+                        </div>
+                    )}
                 </div>
+                {missingCashierShift && (
+                    <div className="rounded-lg border border-red-200 bg-red-50 p-2 text-xs font-semibold text-red-700">
+                        Chưa mở ca thu ngân. Vào tab Thu ngân, nhập số đầu ca rồi bấm Mở ca trước khi thanh toán tiền mặt, chuyển khoản hoặc ví.
+                    </div>
+                )}
                 {customerDebt > 0 && (
                     <div className="bg-red-50 border border-red-200 text-red-600 rounded-lg p-2 text-xs flex items-center justify-between">
                         <span className="font-semibold flex items-center gap-1.5">
@@ -492,9 +564,11 @@ export function PosCartPanel({
                     {deposit > 0 && remainingCurrentPayment > 0 && <div className="flex justify-between font-bold text-red-600 pt-1"><span>CÒN LẠI</span><span>{formatPrice(remainingCurrentPayment)}</span></div>}
                     {deposit > 0 && changeDue > 0 && <div className="flex justify-between font-bold text-green-600 pt-1"><span>Tiền thối lại</span><span>{formatPrice(changeDue)}</span></div>}
                 </div>
-                <button onClick={onCheckout} disabled={cart.length === 0 || isProcessing} className="w-full py-3 rounded-xl font-bold text-white bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-orange-200/50 transition-all active:scale-[0.98]">
+                <button onClick={onCheckout} disabled={checkoutDisabled} className="w-full py-3 rounded-xl font-bold text-white bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-orange-200/50 transition-all active:scale-[0.98]">
                     {isProcessing ? (
                         <><span className="inline-block h-[18px] w-[18px] animate-spin rounded-full border-2 border-white/40 border-t-white" /> Đang xử lý...</>
+                    ) : missingCashierShift ? (
+                        <><AlertTriangle size={18} /> Mở ca thu ngân trước</>
                     ) : (
                         <><Receipt size={18} /> Thanh toán & Xuất hóa đơn</>
                     )}

@@ -1237,9 +1237,15 @@ export async function POST(request: NextRequest) {
     } catch (error: unknown) {
         console.error('POS Checkout API error:', error);
         const message = error instanceof Error ? error.message : 'Internal server error';
+        const normalizedMessage = message.toLowerCase();
+        const status = normalizedMessage.includes('mở ca thu ngân') || normalizedMessage.includes('mo ca thu ngan')
+            ? 409
+            : normalizedMessage.includes('không') || normalizedMessage.includes('khong')
+                ? 400
+                : 500;
         return NextResponse.json(
             { error: message },
-            { status: message.includes('không') ? 400 : 500 }
+            { status }
         );
     }
 }
