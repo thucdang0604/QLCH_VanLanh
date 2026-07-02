@@ -17,6 +17,7 @@ import UniversalProductModal from '@/components/admin/UniversalProductModal';
 import Image from 'next/image';
 import { db, getAuthInstance } from '@/lib/firebase';
 import type { Product, TaxonomyNode } from '@/lib/types';
+import type { ContactMethod, ContactMethodType } from '@/lib/types/contact';
 
 import { toastError, toastSuccess, toastWarning } from '@/lib/toast';
 import { DEFAULT_CONFIG } from '@/lib/config-defaults';
@@ -93,8 +94,10 @@ function mapRepairTicketInfo(id: string, data: Record<string, unknown>, fallback
 
     return {
         id,
+        customerId: String(customer.id || customer.customerId || ''),
         customerName: String(customer.name || data.customerName || ''),
         customerPhone: String(customer.phone || data.customerPhone || fallbackPhone),
+        primaryContactValue: String(customer.primaryContactValue || ''),
         deviceModel: String(deviceInfo.model || data.deviceModel || ''),
         status: String(data.status || ''),
         serviceName: typeof data.serviceName === 'string' ? data.serviceName : '',
@@ -123,6 +126,10 @@ function mapRepairTicketInfo(id: string, data: Record<string, unknown>, fallback
             };
         }) : [],
     };
+}
+
+function firstContactValue(methods: ContactMethod[] | undefined, type: ContactMethodType) {
+    return methods?.find(method => method.type === type)?.value || '';
 }
 
 function formatLookupDate(value: unknown) {
@@ -246,8 +253,13 @@ export default function POSPage() {
 
     // Cart
     const [cart, setCart] = useState<CartItem[]>([]);
+    const [customerId, setCustomerId] = useState('');
     const [customerName, setCustomerName] = useState('');
     const [customerPhone, setCustomerPhone] = useState('');
+    const [customerZalo, setCustomerZalo] = useState('');
+    const [customerFacebook, setCustomerFacebook] = useState('');
+    const [customerOtherContact, setCustomerOtherContact] = useState('');
+    const [customerPrimaryContactType, setCustomerPrimaryContactType] = useState<ContactMethodType>('phone');
     const [customerDebt, setCustomerDebt] = useState<number>(0);
     const [paymentMethod, setPaymentMethod] = useState('cash');
     const [discount, setDiscount] = useState(0);
@@ -388,6 +400,7 @@ export default function POSPage() {
         if (chatPrefillApplied.current || searchParams.get('source') !== 'chat') return;
         const handoff = consumeChatWorkflowHandoff(searchParams);
         if (!handoff) return;
+        setCustomerId(handoff.customerId || '');
         setCustomerName(handoff.customerName);
         setCustomerPhone(handoff.customerPhone);
         chatPrefillApplied.current = true;
@@ -409,8 +422,10 @@ export default function POSPage() {
                 const repair = mapRepairTicketInfo(snapshot.id, snapshot.data());
 
                 setLinkedRepairs(previous => [...previous, repair]);
+                setCustomerId(previous => previous || repair.customerId || '');
                 setCustomerName(previous => previous || repair.customerName);
                 setCustomerPhone(previous => previous || repair.customerPhone);
+                setCustomerOtherContact(previous => previous || repair.primaryContactValue || '');
             } catch (error) {
                 console.error('Failed to load repair by ID:', error);
             } finally {
@@ -425,9 +440,22 @@ export default function POSPage() {
     }, [searchParams, linkedRepairs]);
 
 
-    // Lookup repair by phone
-    const lookupRepairByPhone = async (phone: string) => {
-        if (!phone || phone.length < 8) {
+    const applyCustomerSnapshot = (id: string, data: Record<string, unknown>) => {
+        const contactMethods = Array.isArray(data.contactMethods) ? data.contactMethods as ContactMethod[] : [];
+        setCustomerId(id);
+        setCustomerName(previous => previous || String(data.name || ''));
+        setCustomerPhone(String(data.phone || data.primaryPhone || customerPhone || ''));
+        setCustomerZalo(firstContactValue(contactMethods, 'zalo'));
+        setCustomerFacebook(firstContactValue(contactMethods, 'facebook'));
+        setCustomerOtherContact(firstContactValue(contactMethods, 'other') || String(data.primaryContactValue || ''));
+        setCustomerPrimaryContactType((data.primaryContactType as ContactMethodType) || contactMethods.find(method => method.isPrimary)?.type || 'phone');
+        setCustomerDebt(Number(data.totalDebt || 0));
+    };
+
+    // Lookup repair/order debt by customer id first, then legacy phone fallback.
+    const lookupRepairByPhone = async (lookupValue: string) => {
+        const keyword = lookupValue.trim();
+        if (!keyword || keyword.length < 3) {
             setLinkedRepairs([]);
             setPayableOrders([]);
             setAutoDiscountAmount(0);
@@ -437,68 +465,86 @@ export default function POSPage() {
         }
         setRepairLoading(true);
         try {
-            const normalizedPhone = phone.replace(/[^0-9]/g, '');
-            // Fetch from customers collection
-            if (normalizedPhone) {
-                const { doc, getDoc } = await import('firebase/firestore');
-                const custSnap = await getDoc(doc(db, 'customers', normalizedPhone));
-                if (custSnap.exists()) {
-                    const cData = custSnap.data();
-                    if (!customerName && cData.name && cData.name !== 'Khách lẻ') {
-                        setCustomerName(cData.name);
-                    }
-                    setCustomerDebt(cData.totalDebt || 0);
-                } else {
-                    setCustomerDebt(0);
-                }
-            } else {
-                setCustomerDebt(0);
+            const normalizedPhone = keyword.replace(/[^0-9]/g, '');
+            let resolvedCustomerId = customerId.trim();
+            const { doc, getDoc } = await import('firebase/firestore');
+
+            const docCandidates = Array.from(new Set([resolvedCustomerId, normalizedPhone, keyword].filter(Boolean)));
+            for (const candidate of docCandidates) {
+                const custSnap = await getDoc(doc(db, 'customers', candidate));
+                if (!custSnap.exists()) continue;
+                resolvedCustomerId = custSnap.id;
+                applyCustomerSnapshot(custSnap.id, custSnap.data());
+                break;
             }
 
-            const q = query(
-                collection(db, 'repairs'),
-                where('customer.phone', '==', phone.trim()),
-            );
-            const ordersQuery = query(
-                collection(db, 'orders'),
-                where('customer_info.phone', '==', phone.trim()),
-                limit(20),
-            );
-            const [snap, ordersSnap] = await Promise.all([
-                getDocs(q),
-                getDocs(ordersQuery),
-            ]);
-            if (!snap.empty) {
-                const repairs = snap.docs
-                    .filter(d => {
-                        const ps = d.data().payment?.status;
-                        return !ps || ps === 'unpaid' || ps === 'partial';
-                    })
-                    .sort((a, b) => {
-                        const ta = a.data().createdAt?.toMillis?.() || 0;
-                        const tb = b.data().createdAt?.toMillis?.() || 0;
-                        return tb - ta;
-                    })
-                    .map(d => {
-                    const data = d.data();
-                    const repair = mapRepairTicketInfo(d.id, data, phone);
+            if (!resolvedCustomerId && keyword.length >= 3) {
+                const searchKeyword = generateSearchKeywords(keyword)[0] || keyword.toLowerCase();
+                const customerSnap = await getDocs(query(collection(db, 'customers'), where('searchKeywords', 'array-contains', searchKeyword), limit(1)));
+                const found = customerSnap.docs[0];
+                if (found) {
+                    resolvedCustomerId = found.id;
+                    applyCustomerSnapshot(found.id, found.data());
+                }
+            }
+
+            if (!resolvedCustomerId) setCustomerDebt(0);
+
+            const repairDocs = new Map<string, Record<string, unknown> & { id: string }>();
+            const orderDocs = new Map<string, Record<string, unknown> & { id: string }>();
+            const queryPairs: Promise<void>[] = [];
+            const addRepairsFromSnap = async (repairQuery: ReturnType<typeof query>) => {
+                const snap = await getDocs(repairQuery);
+                snap.docs.forEach(d => {
+                    const data = d.data() as Record<string, unknown>;
+                    repairDocs.set(d.id, { id: d.id, ...data });
+                });
+            };
+            const addOrdersFromSnap = async (ordersQuery: ReturnType<typeof query>) => {
+                const ordersSnap = await getDocs(ordersQuery);
+                ordersSnap.docs.forEach(d => {
+                    const data = d.data() as Record<string, unknown>;
+                    orderDocs.set(d.id, { id: d.id, ...data });
+                });
+            };
+
+            if (resolvedCustomerId) {
+                queryPairs.push(addRepairsFromSnap(query(collection(db, 'repairs'), where('customer.id', '==', resolvedCustomerId))));
+                queryPairs.push(addOrdersFromSnap(query(collection(db, 'orders'), where('customer_info.customerId', '==', resolvedCustomerId), limit(20))));
+            }
+            if (normalizedPhone) {
+                queryPairs.push(addRepairsFromSnap(query(collection(db, 'repairs'), where('customer.phone', '==', keyword))));
+                queryPairs.push(addOrdersFromSnap(query(collection(db, 'orders'), where('customer_info.phone', '==', keyword), limit(20))));
+            }
+            await Promise.all(queryPairs);
+
+            const repairs = Array.from(repairDocs.values())
+                .filter(d => {
+                    const payment = (d.payment || {}) as Record<string, unknown>;
+                    const ps = payment.status;
+                    return !ps || ps === 'unpaid' || ps === 'partial';
+                })
+                .sort((a, b) => {
+                    const ta = (a.createdAt as { toMillis?: () => number })?.toMillis?.() || 0;
+                    const tb = (b.createdAt as { toMillis?: () => number })?.toMillis?.() || 0;
+                    return tb - ta;
+                })
+                .map(d => {
+                    const repair = mapRepairTicketInfo(d.id, d, normalizedPhone || keyword);
                     // Auto-fill customer name if empty
                     if (!customerName && repair.customerName) {
                         setCustomerName(prev => prev || repair.customerName);
                     }
                     return repair;
                 });
-                setLinkedRepairs(repairs);
-            } else {
-                setLinkedRepairs([]);
-            }
-            const orders = ordersSnap.docs
+            setLinkedRepairs(repairs);
+            const orders = Array.from(orderDocs.values())
                 .sort((a, b) => {
-                    const ta = a.data().createdAt?.toMillis?.() || 0;
-                    const tb = b.data().createdAt?.toMillis?.() || 0;
+                    const ta = (a.createdAt as { toMillis?: () => number })?.toMillis?.() || 0;
+                    const tb = (b.createdAt as { toMillis?: () => number })?.toMillis?.() || 0;
                     return tb - ta;
                 })
-                .map(orderDoc => mapPayableOrderInfo(orderDoc.id, orderDoc.data()))
+                .map(orderDoc => mapPayableOrderInfo(orderDoc.id, orderDoc))
                 .filter((order): order is PayableOrderInfo => Boolean(order));
             setPayableOrders(orders);
         } catch (err) {
@@ -1135,12 +1181,13 @@ export default function POSPage() {
         const isDebtPayment = paymentMethod === 'debt' || (deposit > 0 && deposit < total);
         if (isDebtPayment) {
             const phoneClean = customerPhone.trim();
-            if (!phoneClean) {
-                toastError('Đơn hàng ghi nợ hoặc thanh toán thiếu bắt buộc phải nhập Số điện thoại khách hàng.');
+            const hasDebtContact = Boolean(customerId.trim() || phoneClean || customerZalo.trim() || customerFacebook.trim() || customerOtherContact.trim());
+            if (!hasDebtContact) {
+                toastError('Đơn hàng ghi nợ hoặc thanh toán thiếu bắt buộc phải có Mã KH, SĐT, Zalo, Facebook hoặc liên hệ khác.');
                 return;
             }
             const digits = phoneClean.replace(/[^0-9]/g, '');
-            if (digits.length < 9 || digits.length > 11) {
+            if (phoneClean && (digits.length < 9 || digits.length > 11)) {
                 toastError('Số điện thoại khách hàng không hợp lệ (yêu cầu từ 9 đến 11 chữ số).');
                 return;
             }
@@ -1201,8 +1248,13 @@ export default function POSPage() {
                 idempotencyKey: operationKey,
                 repairTicketIds: repairTicketIds.length > 0 ? repairTicketIds : undefined,
                 customer_info: {
+                    customerId: customerId.trim(),
                     name: customerName.trim() || 'Khách lẻ',
                     phone: customerPhone.trim(),
+                    zalo: customerZalo.trim(),
+                    facebook: customerFacebook.trim(),
+                    otherContact: customerOtherContact.trim(),
+                    primaryContactType: customerPrimaryContactType,
                 },
                 items: cart.map(c => ({
                     productId: c.productId,
@@ -1261,7 +1313,12 @@ export default function POSPage() {
             // Reset cart
             setCart([]);
             setCustomerName('');
+            setCustomerId('');
             setCustomerPhone('');
+            setCustomerZalo('');
+            setCustomerFacebook('');
+            setCustomerOtherContact('');
+            setCustomerPrimaryContactType('phone');
             setCustomerDebt(0);
             setLinkedRepairs([]);
             setDiscount(0);
@@ -1308,10 +1365,20 @@ export default function POSPage() {
             cart={cart}
             setCart={setCart}
             products={products}
+            customerId={customerId}
+            setCustomerId={setCustomerId}
             customerName={customerName}
             setCustomerName={setCustomerName}
             customerPhone={customerPhone}
             setCustomerPhone={setCustomerPhone}
+            customerZalo={customerZalo}
+            setCustomerZalo={setCustomerZalo}
+            customerFacebook={customerFacebook}
+            setCustomerFacebook={setCustomerFacebook}
+            customerOtherContact={customerOtherContact}
+            setCustomerOtherContact={setCustomerOtherContact}
+            customerPrimaryContactType={customerPrimaryContactType}
+            setCustomerPrimaryContactType={setCustomerPrimaryContactType}
             customerDebt={customerDebt}
             repairLoading={repairLoading}
             linkedRepairs={linkedRepairs}

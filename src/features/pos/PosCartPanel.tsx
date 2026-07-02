@@ -3,6 +3,7 @@ import Image from 'next/image';
 import { AlertTriangle, Banknote, CreditCard, Minus, Package, Phone, Plus, QrCode, Receipt, ShoppingCart, Tag, Trash2, User, Wrench, X } from 'lucide-react';
 import CurrencyInput from '@/components/admin/CurrencyInput';
 import type { Product } from '@/lib/types';
+import type { ContactMethodType } from '@/lib/types/contact';
 import type { AppliedVoucher, CartItem, DiscountDetail, PayableOrderInfo, RepairTicketInfo, VoucherStatus } from './posTypes';
 
 const paymentMethods = [
@@ -17,10 +18,20 @@ interface PosCartPanelProps {
     cart: CartItem[];
     setCart: Dispatch<SetStateAction<CartItem[]>>;
     products: (Product & { id: string })[];
+    customerId: string;
+    setCustomerId: (value: string) => void;
     customerName: string;
     setCustomerName: (value: string) => void;
     customerPhone: string;
     setCustomerPhone: (value: string) => void;
+    customerZalo: string;
+    setCustomerZalo: (value: string) => void;
+    customerFacebook: string;
+    setCustomerFacebook: (value: string) => void;
+    customerOtherContact: string;
+    setCustomerOtherContact: (value: string) => void;
+    customerPrimaryContactType: ContactMethodType;
+    setCustomerPrimaryContactType: (value: ContactMethodType) => void;
     customerDebt: number;
     repairLoading: boolean;
     linkedRepairs: RepairTicketInfo[];
@@ -61,10 +72,20 @@ export function PosCartPanel({
     cart,
     setCart,
     products,
+    customerId,
+    setCustomerId,
     customerName,
     setCustomerName,
     customerPhone,
     setCustomerPhone,
+    customerZalo,
+    setCustomerZalo,
+    customerFacebook,
+    setCustomerFacebook,
+    customerOtherContact,
+    setCustomerOtherContact,
+    customerPrimaryContactType,
+    setCustomerPrimaryContactType,
     customerDebt,
     repairLoading,
     linkedRepairs,
@@ -231,12 +252,57 @@ export function PosCartPanel({
                 <div className="grid grid-cols-2 gap-2">
                     <div className="relative">
                         <User size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <input
+                            type="text"
+                            placeholder="Mã KH"
+                            value={customerId}
+                            onChange={event => setCustomerId(event.target.value)}
+                            onBlur={() => onLookupRepairByPhone(customerId)}
+                            className="w-full pl-8 pr-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-orange-500/20"
+                        />
+                    </div>
+                    <div className="relative">
+                        <User size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
                         <input type="text" placeholder="Tên KH" value={customerName} onChange={event => setCustomerName(event.target.value)} className="w-full pl-8 pr-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-orange-500/20" />
                     </div>
                     <div className="relative">
                         <Phone size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
                         <input type="text" placeholder="SĐT" value={customerPhone} onChange={event => setCustomerPhone(event.target.value)} onBlur={() => onLookupRepairByPhone(customerPhone)} className="w-full pl-8 pr-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-orange-500/20" />
                     </div>
+                    <div>
+                        <select
+                            title="Kênh chính"
+                            value={customerPrimaryContactType}
+                            onChange={event => setCustomerPrimaryContactType(event.target.value as ContactMethodType)}
+                            className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:ring-2 focus:ring-orange-500/20"
+                        >
+                            <option value="phone">SĐT</option>
+                            <option value="zalo">Zalo</option>
+                            <option value="facebook">Facebook</option>
+                            <option value="other">Khác</option>
+                        </select>
+                    </div>
+                    <input
+                        type="text"
+                        placeholder="Zalo"
+                        value={customerZalo}
+                        onChange={event => setCustomerZalo(event.target.value)}
+                        className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-orange-500/20"
+                    />
+                    <input
+                        type="text"
+                        placeholder="Facebook/Messenger"
+                        value={customerFacebook}
+                        onChange={event => setCustomerFacebook(event.target.value)}
+                        className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-orange-500/20"
+                    />
+                    <input
+                        type="text"
+                        placeholder="Liên hệ khác"
+                        value={customerOtherContact}
+                        onChange={event => setCustomerOtherContact(event.target.value)}
+                        className="col-span-2 w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-orange-500/20"
+                    />
                 </div>
                 {customerDebt > 0 && (
                     <div className="bg-red-50 border border-red-200 text-red-600 rounded-lg p-2 text-xs flex items-center justify-between">

@@ -28,8 +28,10 @@
 
 ## Phase 2 - POS, thu no va customer ledger
 
-- [ ] Sua POS state/UI de chon hoac tao customer khong SDT.
+- [x] Sua POS state/UI de chon hoac tao customer khong SDT.
 - [ ] Sua handoff vao POS de nhan `customerId` va contact snapshot.
+  - [x] POS nhan `customerId` tu chat handoff va repair handoff co san.
+  - [ ] Chat/repair handoff truyen day du contact snapshot Zalo/Facebook/khac.
 - [x] Sua `/api/pos/checkout`:
   - [x] Nhan `customer_info.customerId`.
   - [x] Tao/update customer theo `customerId`.
