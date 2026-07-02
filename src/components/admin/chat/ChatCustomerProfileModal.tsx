@@ -194,6 +194,8 @@ export default function ChatCustomerProfileModal({ isOpen, room, onClose }: Prop
             customerId: customer.customerId,
             customerName: customer.name,
             customerPhone: customer.phone,
+            primaryContactType: customer.primaryContactType,
+            primaryContactValue: customer.primaryContactValue,
         });
         router.push(handoffUrl);
         onClose();

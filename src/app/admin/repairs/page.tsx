@@ -64,6 +64,10 @@ function getRepairCustomerContact(ticket: RepairTicket): string {
         || '';
 }
 
+function isContactMethodType(value: string | null | undefined): value is ContactMethodType {
+    return value === 'phone' || value === 'zalo' || value === 'facebook' || value === 'email' || value === 'address' || value === 'note' || value === 'other';
+}
+
 function getWorkflowForTicketFromLists(ticket: RepairTicket, repairStatuses: WorkflowNode[], warrantyStatuses: WorkflowNode[]): WorkflowNode[] {
     return ticket.ticketType === 'warranty' ? warrantyStatuses : repairStatuses;
 }
@@ -490,6 +494,8 @@ export default function RepairPage() {
         const handoff = consumeChatWorkflowHandoff(searchParams);
         if (!handoff) return;
         const initialStatus = (dynamicStatuses[0]?.id || REPAIR_STATUS.INTAKE) as RepairStatus;
+        const handoffContactType = isContactMethodType(handoff.primaryContactType) ? handoff.primaryContactType : handoff.customerPhone ? 'phone' : 'other';
+        const handoffContactValue = handoff.primaryContactValue || '';
         setEditingTicket(null);
         setPreMediaFiles([]);
         setPostMediaFiles([]);
@@ -499,7 +505,10 @@ export default function RepairPage() {
             customerId: handoff.customerId || '',
             customerName: handoff.customerName,
             customerPhone: handoff.customerPhone,
-            customerPrimaryContactType: handoff.customerPhone ? 'phone' : 'other',
+            customerZalo: handoffContactType === 'zalo' ? handoffContactValue : '',
+            customerFacebook: handoffContactType === 'facebook' ? handoffContactValue : '',
+            customerOtherContact: handoffContactType !== 'phone' && handoffContactType !== 'zalo' && handoffContactType !== 'facebook' ? handoffContactValue : '',
+            customerPrimaryContactType: handoffContactType,
         });
         setShowModal(true);
         chatPrefillApplied.current = true;

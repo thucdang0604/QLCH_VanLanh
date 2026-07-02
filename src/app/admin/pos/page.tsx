@@ -132,6 +132,10 @@ function firstContactValue(methods: ContactMethod[] | undefined, type: ContactMe
     return methods?.find(method => method.type === type)?.value || '';
 }
 
+function isContactMethodType(value: string | null | undefined): value is ContactMethodType {
+    return value === 'phone' || value === 'zalo' || value === 'facebook' || value === 'email' || value === 'address' || value === 'note' || value === 'other';
+}
+
 function formatLookupDate(value: unknown) {
     if (!value) return '';
     const timestamp = value as { toDate?: () => Date };
@@ -403,6 +407,12 @@ export default function POSPage() {
         setCustomerId(handoff.customerId || '');
         setCustomerName(handoff.customerName);
         setCustomerPhone(handoff.customerPhone);
+        const handoffContactType = isContactMethodType(handoff.primaryContactType) ? handoff.primaryContactType : handoff.customerPhone ? 'phone' : 'other';
+        const handoffContactValue = handoff.primaryContactValue || '';
+        setCustomerPrimaryContactType(handoffContactType);
+        if (handoffContactType === 'zalo') setCustomerZalo(handoffContactValue);
+        if (handoffContactType === 'facebook') setCustomerFacebook(handoffContactValue);
+        if (handoffContactType !== 'phone' && handoffContactType !== 'zalo' && handoffContactType !== 'facebook') setCustomerOtherContact(handoffContactValue);
         chatPrefillApplied.current = true;
     }, [searchParams]);
 
