@@ -35,6 +35,13 @@ service cloud.firestore {
       return hasPermission('manage_customers');
     }
 
+    function customerDocMatchesId(customerId) {
+      return (!('phone' in request.resource.data) || request.resource.data.phone == '' || request.resource.data.phone == customerId)
+        || ('customerId' in request.resource.data && request.resource.data.customerId == customerId)
+        || ('id' in request.resource.data && request.resource.data.id == customerId)
+        || ('code' in request.resource.data && request.resource.data.code == customerId);
+    }
+
     function canViewRevenueSources() {
       return hasPermission('view_revenue');
     }
@@ -141,11 +148,11 @@ service cloud.firestore {
     }
     
     // Customers
-    match /customers/{phone} {
+    match /customers/{customerId} {
       allow read: if canManageCustomerData();
-      allow create: if canManageCustomerData() && request.resource.data.phone == phone;
+      allow create: if canManageCustomerData() && customerDocMatchesId(customerId);
       allow update: if canManageCustomerData()
-        && request.resource.data.phone == phone
+        && customerDocMatchesId(customerId)
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['totalSpent', 'totalOrders', 'totalRepairs', 'totalAppointments', 'missions']);
       allow delete: if isAdmin();
     }
