@@ -63,11 +63,11 @@
 
 ## Phase 5 - Suppliers va nhap kho
 
-- [ ] Sua `suppliers/page.tsx` them contactMethods; phone optional.
-- [ ] Sua `supplierDocumentIds.ts` de uu tien `Ma NCC`, taxCode/bankAccount/contact slug, khong phu thuoc phone.
+- [x] Sua `suppliers/page.tsx` them contactMethods; phone optional.
+- [x] Sua `supplierDocumentIds.ts` de uu tien `Ma NCC`, taxCode/bankAccount/contact slug, khong phu thuoc phone.
 - [ ] Sua tao NCC inline trong inventory/import receipt de cho nhap contact khong phone.
-- [ ] Dam bao supplier debt/import transaction van dung `supplierId`.
-- [ ] Cap nhat search NCC theo `searchKeywords`, contact, taxCode, bankAccount.
+- [x] Dam bao supplier debt/import transaction van dung `supplierId`.
+- [x] Cap nhat search NCC theo `searchKeywords`, contact, taxCode, bankAccount.
 
 ## Phase 6 - Excel Importer
 

@@ -9,6 +9,8 @@ import { Building2, Plus, Search, Phone, Mail, MapPin, CreditCard, Edit2, Chevro
 import { toast } from 'sonner';
 import CurrencyInput from '@/components/admin/CurrencyInput';
 import type { Supplier, SupplierTransaction } from '@/lib/types';
+import { buildContactMethods, buildContactSearchKeywords, getPrimaryContact, hasProfileContact } from '@/lib/contactIdentity';
+import type { ContactMethodType } from '@/lib/types/contact';
 import { generateSlug } from '@/lib/utils';
 import { reserveSupplierDocumentId } from '@/lib/supplierDocumentIds';
 
@@ -27,14 +29,28 @@ function buildSupplierTransactionId(supplierId: string) {
     return `ST-${safeSupplierId}-${Date.now()}`;
 }
 
+function firstSupplierContactValue(supplier: Supplier, type: ContactMethodType) {
+    return supplier.contactMethods?.find(method => method.type === type)?.value || '';
+}
+
+function supplierPrimaryContactLabel(supplier: Supplier) {
+    const primary = supplier.contactMethods?.find(method => method.isPrimary) || supplier.contactMethods?.[0];
+    return supplier.primaryContactValue || primary?.value || supplier.phone || '';
+}
+
 function SupplierModal({ supplier, onClose, onSave }: {
     supplier: Supplier | null;
     onClose: () => void;
     onSave: (data: Partial<Supplier>) => Promise<void>;
 }) {
     const [form, setForm] = useState({
+        code: supplier?.code || '',
         name: supplier?.name || '',
         phone: supplier?.phone || '',
+        primaryContactType: supplier?.primaryContactType || supplier?.contactMethods?.find(method => method.isPrimary)?.type || (supplier?.phone ? 'phone' : 'zalo') as ContactMethodType,
+        zalo: firstSupplierContactValue(supplier || {} as Supplier, 'zalo'),
+        facebook: firstSupplierContactValue(supplier || {} as Supplier, 'facebook'),
+        otherContact: firstSupplierContactValue(supplier || {} as Supplier, 'other'),
         email: supplier?.email || '',
         address: supplier?.address || '',
         taxCode: supplier?.taxCode || '',
@@ -53,10 +69,39 @@ function SupplierModal({ supplier, onClose, onSave }: {
 
     const handleSave = async () => {
         if (!form.name.trim()) { toast.error('Vui lòng nhập tên NCC'); return; }
+        if (form.phone.trim() && !/^0?\d{9,11}$/.test(form.phone.trim().replace(/[^\d]/g, ''))) {
+            toast.error('SĐT NCC không hợp lệ'); return;
+        }
+        const contactInput = {
+            name: form.name,
+            phone: form.phone,
+            zalo: form.zalo,
+            facebook: form.facebook,
+            email: form.email,
+            address: form.address,
+            note: form.note,
+            other: form.otherContact,
+            primaryType: form.primaryContactType,
+            source: 'manual' as const,
+        };
+        const contactMethods = buildContactMethods(contactInput);
+        const hasBusinessIdentity = [form.code, form.taxCode, form.bankAccount, form.companyName, form.contactPerson].some(value => Boolean(value.trim()));
+        if (!hasProfileContact(contactMethods) && !hasBusinessIdentity) {
+            toast.error('Vui lòng nhập ít nhất một kênh liên hệ, mã NCC, MST, tài khoản ngân hàng hoặc người liên hệ');
+            return;
+        }
+        const primaryContact = getPrimaryContact(contactMethods);
         setSaving(true);
         try {
             await onSave({
                 ...form,
+                phone: form.phone.trim().replace(/[^\d]/g, ''),
+                primaryPhone: form.phone.trim().replace(/[^\d]/g, ''),
+                primaryContactType: primaryContact?.type || undefined,
+                primaryContactValue: primaryContact?.value || '',
+                contactMethods,
+                searchKeywords: buildContactSearchKeywords(contactInput, contactMethods),
+                code: form.code.trim(),
                 paymentTermsDays: Number(form.paymentTermsDays) || 0,
                 tags: form.tags.split(',').map(tag => tag.trim()).filter(Boolean),
                 isActive: true,
@@ -67,12 +112,16 @@ function SupplierModal({ supplier, onClose, onSave }: {
     };
 
     const fields: { key: keyof typeof form; label: string; type?: string }[] = [
+        { key: 'code', label: 'Mã NCC' },
         { key: 'name', label: 'Tên nhà cung cấp *' },
         { key: 'companyName', label: 'Tên công ty / pháp nhân' },
         { key: 'supplierType', label: 'Phân loại NCC' },
         { key: 'contactPerson', label: 'Người liên hệ' },
         { key: 'phone', label: 'Số điện thoại' },
+        { key: 'zalo', label: 'Zalo' },
+        { key: 'facebook', label: 'Facebook/Messenger' },
         { key: 'email', label: 'Email', type: 'email' },
+        { key: 'otherContact', label: 'Liên hệ khác' },
         { key: 'website', label: 'Website' },
         { key: 'address', label: 'Địa chỉ' },
         { key: 'taxCode', label: 'Mã số thuế' },
@@ -91,6 +140,23 @@ function SupplierModal({ supplier, onClose, onSave }: {
                     <button title="Đóng" onClick={onClose} className="p-1 hover:bg-gray-100 rounded-lg"><X size={20} /></button>
                 </div>
                 <div className="p-5 space-y-3">
+                    <div>
+                        <label className="text-sm text-gray-600 mb-1 block">Kênh liên hệ chính</label>
+                        <select
+                            title="Kênh liên hệ chính"
+                            value={form.primaryContactType}
+                            onChange={e => setForm(prev => ({ ...prev, primaryContactType: e.target.value as ContactMethodType }))}
+                            className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none bg-white"
+                        >
+                            <option value="phone">SĐT</option>
+                            <option value="zalo">Zalo</option>
+                            <option value="facebook">Facebook</option>
+                            <option value="email">Email</option>
+                            <option value="address">Địa chỉ</option>
+                            <option value="other">Khác</option>
+                            <option value="note">Ghi chú</option>
+                        </select>
+                    </div>
                     {fields.map(f => (
                         <div key={f.key}>
                             <label className="text-sm text-gray-600 mb-1 block">{f.label}</label>
@@ -207,9 +273,14 @@ function SupplierDetailDrawer({
     if (!supplier) return null;
     const debt = Number(supplier.totalDebt || 0);
     const infoRows = [
+        ['Mã NCC', supplier.code || supplier.id],
         ['Công ty', supplier.companyName],
         ['Người liên hệ', supplier.contactPerson],
+        ['Liên hệ chính', supplierPrimaryContactLabel(supplier)],
         ['Số điện thoại', supplier.phone],
+        ['Zalo', firstSupplierContactValue(supplier, 'zalo')],
+        ['Facebook', firstSupplierContactValue(supplier, 'facebook')],
+        ['Liên hệ khác', firstSupplierContactValue(supplier, 'other')],
         ['Email', supplier.email],
         ['Website', supplier.website],
         ['Địa chỉ', supplier.address],
@@ -381,7 +452,15 @@ export default function SuppliersPage() {
             toast.success('Đã cập nhật NCC');
         } else {
             const supplierId = await reserveSupplierDocumentId(data);
-            await setDoc(doc(db, 'suppliers', supplierId), { ...data, totalDebt: 0, isActive: true, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+            await setDoc(doc(db, 'suppliers', supplierId), {
+                ...data,
+                id: supplierId,
+                code: data.code || supplierId,
+                totalDebt: 0,
+                isActive: true,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+            });
             toast.success('Đã thêm NCC mới');
         }
         await loadSuppliers();
@@ -441,8 +520,13 @@ export default function SuppliersPage() {
     const filtered = suppliers.filter(s => {
         const queryText = search.toLowerCase();
         const matchesSearch = !queryText
+            || s.id.toLowerCase().includes(queryText)
+            || s.code?.toLowerCase().includes(queryText)
             || s.name.toLowerCase().includes(queryText)
             || s.phone?.includes(search)
+            || s.primaryContactValue?.toLowerCase().includes(queryText)
+            || s.searchKeywords?.some(keyword => keyword.toLowerCase().includes(queryText))
+            || s.contactMethods?.some(method => method.value.toLowerCase().includes(queryText) || method.normalizedValue?.toLowerCase().includes(queryText))
             || s.contactPerson?.toLowerCase().includes(queryText)
             || s.companyName?.toLowerCase().includes(queryText)
             || s.taxCode?.toLowerCase().includes(queryText)
@@ -518,7 +602,7 @@ export default function SuppliersPage() {
             {/* Search */}
             <div className="relative max-w-md">
                 <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                <input type="text" placeholder="Tìm tên, SĐT, người liên hệ..." value={search} onChange={e => setSearch(e.target.value)}
+                <input type="text" placeholder="Tìm tên, mã NCC, Zalo/Facebook, SĐT, MST..." value={search} onChange={e => setSearch(e.target.value)}
                     className="w-full pl-10 pr-4 py-2.5 border rounded-xl text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none" />
             </div>
 
@@ -534,6 +618,7 @@ export default function SuppliersPage() {
                                 <div className="flex items-center gap-2 mb-1">
                                     <h3 className="font-bold text-gray-900 truncate">{s.name}</h3>
                                     {s.supplierType && <span className="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded">{s.supplierType}</span>}
+                                    {(s.code || s.id) && <span className="text-[10px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{s.code || s.id}</span>}
                                     {!s.isActive && <span className="text-[10px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded">Ngưng HĐ</span>}
                                 </div>
                                 {(s.companyName || s.contactPerson || s.paymentTermsDays || s.assignedOwner) && (
@@ -546,6 +631,9 @@ export default function SuppliersPage() {
                                 )}
                                 <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
                                     {s.phone && <span className="flex items-center gap-1"><Phone size={12} />{s.phone}</span>}
+                                    {!s.phone && supplierPrimaryContactLabel(s) && <span className="flex items-center gap-1"><Phone size={12} />{supplierPrimaryContactLabel(s)}</span>}
+                                    {firstSupplierContactValue(s, 'zalo') && <span>Zalo: {firstSupplierContactValue(s, 'zalo')}</span>}
+                                    {firstSupplierContactValue(s, 'facebook') && <span>Facebook: {firstSupplierContactValue(s, 'facebook')}</span>}
                                     {s.email && <span className="flex items-center gap-1"><Mail size={12} />{s.email}</span>}
                                     {s.website && <span>{s.website}</span>}
                                     {s.address && <span className="flex items-center gap-1"><MapPin size={12} />{s.address}</span>}
