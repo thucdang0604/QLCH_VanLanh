@@ -1,14 +1,61 @@
 import { doc, getDoc } from 'firebase/firestore';
 
-import { buildContactlessDocumentBaseId, type ContactIdentityInput } from '@/lib/contactIdentity';
+import {
+    buildContactlessDocumentBaseId,
+    buildContactMethods,
+    buildContactSearchKeywords,
+    getPrimaryContact,
+    type ContactIdentityInput,
+} from '@/lib/contactIdentity';
 import { db } from '@/lib/firebase';
 import { generateSlug } from '@/lib/utils';
+import type { ContactMethodType } from '@/lib/types/contact';
 
 export interface SupplierDocumentIdInput extends ContactIdentityInput {
     code?: string;
     taxCode?: string;
     bankAccount?: string;
     companyName?: string;
+}
+
+export function buildInlineSupplierContactInput(name: string, contactValue: string): ContactIdentityInput {
+    const contact = contactValue.trim();
+    const lower = contact.toLowerCase();
+    const digits = contact.replace(/[^0-9]/g, '');
+    const primaryType: ContactMethodType = !contact
+        ? 'other'
+        : digits.length >= 9
+            ? 'phone'
+            : lower.startsWith('zalo')
+                ? 'zalo'
+                : lower.includes('facebook') || lower.includes('fb.com') || lower.includes('m.me/')
+                    ? 'facebook'
+                    : 'other';
+
+    return {
+        name,
+        phone: primaryType === 'phone' ? contact : '',
+        zalo: primaryType === 'zalo' ? contact.replace(/^zalo\s*[:\-]?\s*/i, '') : '',
+        facebook: primaryType === 'facebook' ? contact.replace(/^(facebook|fb)\s*[:\-]?\s*/i, '') : '',
+        other: primaryType === 'other' ? contact : '',
+        primaryType,
+        source: 'manual',
+    };
+}
+
+export function buildSupplierContactDocumentFields(input: ContactIdentityInput) {
+    const contactMethods = buildContactMethods(input);
+    const primaryContact = getPrimaryContact(contactMethods);
+    const phoneMethod = contactMethods.find(method => method.type === 'phone');
+
+    return {
+        phone: phoneMethod?.normalizedValue || '',
+        primaryPhone: phoneMethod?.normalizedValue || '',
+        primaryContactType: primaryContact?.type || null,
+        primaryContactValue: primaryContact?.value || '',
+        contactMethods,
+        searchKeywords: buildContactSearchKeywords(input, contactMethods),
+    };
 }
 
 export function buildSupplierDocumentBaseId(data: SupplierDocumentIdInput): string {

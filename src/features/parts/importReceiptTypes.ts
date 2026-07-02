@@ -1,4 +1,5 @@
 import type { FirestoreDateValue, Product } from '@/lib/types';
+import type { ContactMethod, ContactMethodType } from '@/lib/types/contact';
 
 export interface ImportReceiptItem {
     productId: string;
@@ -40,6 +41,11 @@ export interface ImportReceipt {
 export interface SupplierOption {
     id: string;
     name: string;
+    phone?: string;
+    primaryContactType?: ContactMethodType | null;
+    primaryContactValue?: string;
+    contactMethods?: ContactMethod[];
+    searchKeywords?: string[];
     totalDebt: number;
 }
 
