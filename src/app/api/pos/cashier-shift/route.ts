@@ -11,6 +11,8 @@ type CashierShiftData = FirebaseFirestore.DocumentData & {
     bankSalesAmount?: number;
     otherSalesAmount?: number;
     openedByName?: string;
+    closingCashAmount?: number;
+    closingBankAmount?: number;
 };
 
 const ACTIVE_SHIFT_LOCK_COLLECTION = 'system_counters';
@@ -35,6 +37,8 @@ function serializeShift(id: string, data: CashierShiftData) {
     const cashSalesAmount = asAmount(data.cashSalesAmount);
     const bankSalesAmount = asAmount(data.bankSalesAmount);
     const otherSalesAmount = asAmount(data.otherSalesAmount);
+    const expectedCashAmount = openingCashAmount + cashSalesAmount;
+    const expectedBankAmount = openingBankAmount + bankSalesAmount;
 
     return {
         id,
@@ -44,8 +48,10 @@ function serializeShift(id: string, data: CashierShiftData) {
         cashSalesAmount,
         bankSalesAmount,
         otherSalesAmount,
-        expectedCashAmount: openingCashAmount + cashSalesAmount,
-        expectedBankAmount: openingBankAmount + bankSalesAmount,
+        expectedCashAmount,
+        expectedBankAmount,
+        closingCashAmount: asAmount(data.closingCashAmount ?? expectedCashAmount),
+        closingBankAmount: asAmount(data.closingBankAmount ?? expectedBankAmount),
         openedBy: String(data.openedBy || ''),
         openedByName: String(data.openedByName || ''),
         openedAt: timestampToIso(data.openedAt),
@@ -68,10 +74,17 @@ export async function GET(request: NextRequest) {
     try {
         await requirePermission(request, 'manage_orders');
         const db = getAdminDb();
-        const activeShift = await getActiveShiftSnap(db);
+        const [activeShift, historySnap] = await Promise.all([
+            getActiveShiftSnap(db),
+            db.collection('cashier_shifts')
+                .orderBy('closedAt', 'desc')
+                .limit(10)
+                .get(),
+        ]);
         return NextResponse.json({
             success: true,
             shift: activeShift ? serializeShift(activeShift.id, activeShift.data()) : null,
+            history: historySnap.docs.map(doc => serializeShift(doc.id, doc.data())),
         });
     } catch (error: unknown) {
         console.error('Get cashier shift API error:', error);

@@ -217,8 +217,11 @@ interface CashierShiftView {
     otherSalesAmount?: number;
     expectedCashAmount: number;
     expectedBankAmount: number;
+    closingCashAmount?: number;
+    closingBankAmount?: number;
     openedByName?: string;
     openedAt?: string | null;
+    closedByName?: string;
     closedAt?: string | null;
 }
 
@@ -265,6 +268,7 @@ export default function POSPage() {
     const [bankConfig, setBankConfig] = useState<BankConfig | null>(null);
     const [posTab, setPosTab] = useState<PosTab>('sales');
     const [cashierShift, setCashierShift] = useState<CashierShiftView | null>(null);
+    const [cashierShiftHistory, setCashierShiftHistory] = useState<CashierShiftView[]>([]);
     const [cashierLoading, setCashierLoading] = useState(true);
     const [cashierSaving, setCashierSaving] = useState(false);
     const [openingCashAmount, setOpeningCashAmount] = useState(0);
@@ -300,6 +304,7 @@ export default function POSPage() {
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || 'Không thể tải ca thu ngân');
             setCashierShift(data.shift || null);
+            setCashierShiftHistory(Array.isArray(data.history) ? data.history : []);
         } catch (err) {
             console.error(err);
             toastError(err instanceof Error ? err.message : 'Không thể tải ca thu ngân');
@@ -358,6 +363,12 @@ export default function POSPage() {
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || 'Không thể chốt ca thu ngân');
             setCashierShift(null);
+            if (data.shift) {
+                setCashierShiftHistory(prev => [
+                    data.shift,
+                    ...prev.filter(shift => shift.id !== data.shift.id),
+                ].slice(0, 10));
+            }
             toastSuccess('Đã chốt ca thu ngân.');
         } catch (err) {
             console.error(err);
@@ -1468,6 +1479,76 @@ export default function POSPage() {
                         </button>
                     </div>
                 </div>
+            </div>
+            <div className="mt-4 rounded-2xl border bg-white p-4 shadow-sm">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                        <h2 className="text-base font-bold text-gray-900">Lịch sử chốt ca</h2>
+                        <p className="text-xs font-medium text-gray-500">Các ca đã chốt gần nhất để đối chiếu két.</p>
+                    </div>
+                    <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-bold text-gray-600">
+                        {cashierShiftHistory.length} ca
+                    </span>
+                </div>
+
+                {cashierLoading ? (
+                    <div className="flex min-h-24 items-center justify-center rounded-2xl bg-gray-50">
+                        <Loader2 className="animate-spin text-emerald-600" size={24} />
+                    </div>
+                ) : cashierShiftHistory.length === 0 ? (
+                    <div className="rounded-2xl bg-gray-50 p-4 text-center text-sm font-medium text-gray-500">
+                        Chưa có ca nào đã chốt.
+                    </div>
+                ) : (
+                    <div className="space-y-3">
+                        {cashierShiftHistory.map(shift => {
+                            const cashAmount = shift.closingCashAmount ?? shift.expectedCashAmount;
+                            const bankAmount = shift.closingBankAmount ?? shift.expectedBankAmount;
+                            return (
+                                <div key={shift.id} className="rounded-2xl border border-gray-100 p-3">
+                                    <div className="mb-3 flex items-start justify-between gap-3">
+                                        <div>
+                                            <div className="text-sm font-black text-gray-900">
+                                                Ca #{shift.id.slice(-6).toUpperCase()}
+                                            </div>
+                                            <div className="mt-0.5 text-xs font-medium text-gray-500">
+                                                {shift.openedAt ? formatDateTime(shift.openedAt) : 'Không rõ giờ mở'}
+                                                {shift.closedAt ? ` - ${formatDateTime(shift.closedAt)}` : ''}
+                                            </div>
+                                        </div>
+                                        <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">
+                                            Đã chốt
+                                        </span>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+                                        <div className="rounded-xl bg-gray-50 p-2">
+                                            <div className="text-[11px] font-bold uppercase text-gray-500">Tiền mặt</div>
+                                            <div className="font-black text-gray-900">{formatPrice(cashAmount)}</div>
+                                        </div>
+                                        <div className="rounded-xl bg-blue-50 p-2">
+                                            <div className="text-[11px] font-bold uppercase text-blue-600">Chuyển khoản</div>
+                                            <div className="font-black text-blue-900">{formatPrice(bankAmount)}</div>
+                                        </div>
+                                        <div className="rounded-xl bg-orange-50 p-2">
+                                            <div className="text-[11px] font-bold uppercase text-orange-700">Tổng</div>
+                                            <div className="font-black text-orange-700">{formatPrice(cashAmount + bankAmount)}</div>
+                                        </div>
+                                        <div className="rounded-xl bg-gray-50 p-2">
+                                            <div className="text-[11px] font-bold uppercase text-gray-500">POS phát sinh</div>
+                                            <div className="font-black text-gray-900">{formatPrice(shift.cashSalesAmount + shift.bankSalesAmount)}</div>
+                                        </div>
+                                    </div>
+
+                                    <div className="mt-3 grid gap-1 text-xs font-medium text-gray-500 sm:grid-cols-2">
+                                        <div>Mở: {shift.openedByName || 'Nhân viên'}</div>
+                                        <div>Chốt: {shift.closedByName || 'Nhân viên'}</div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
             </div>
         </div>
     );

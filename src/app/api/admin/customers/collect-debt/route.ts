@@ -3,7 +3,7 @@ import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requirePermission } from '@/lib/apiAuth';
 import { FieldValue } from 'firebase-admin/firestore';
 import type { Order } from '@/lib/types';
-import { incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
+import { buildPaymentChannelRevenueDelta, incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 import { reserveSequentialDocumentId } from '@/lib/serverDocumentIds';
 
 export async function POST(request: NextRequest) {
@@ -48,6 +48,8 @@ export async function POST(request: NextRequest) {
 
             let remainingAmountToDistribute = numAmount;
             const updatedOrderIds: string[] = [];
+            let posOrderRevenue = 0;
+            let webOrderRevenue = 0;
             const staffSnap = await tx.get(db.collection('users').doc(caller.uid));
             const sData = staffSnap.data();
             const createdByName = sData?.displayName || sData?.name || (caller as { email?: string }).email || caller.uid;
@@ -74,6 +76,8 @@ export async function POST(request: NextRequest) {
 
                 const paymentForThisOrder = Math.min(orderDebt, remainingAmountToDistribute);
                 remainingAmountToDistribute -= paymentForThisOrder;
+                if (orderData.source === 'pos') posOrderRevenue += paymentForThisOrder;
+                else webOrderRevenue += paymentForThisOrder;
                 
                 const newPaidSoFar = paidSoFar + paymentForThisOrder;
                 const isFullyPaid = Math.abs(totalOrderAmount - newPaidSoFar) < 1; // Tolerance 1đ
@@ -113,7 +117,12 @@ export async function POST(request: NextRequest) {
                 createdByName,
                 createdAt: FieldValue.serverTimestamp()
             });
-            incrementRevenueAggregates(tx, db, { orderRevenue: numAmount });
+            incrementRevenueAggregates(tx, db, {
+                orderRevenue: numAmount,
+                ...buildPaymentChannelRevenueDelta(numAmount, paymentMethod),
+                posOrderRevenue,
+                webOrderRevenue,
+            });
 
             return { success: true, updatedOrderIds, amountPaid: numAmount, remainingDebt: currentDebt - numAmount };
         });

@@ -8,7 +8,7 @@ import type { Order, RepairTicket, WorkflowNode } from '@/lib/types';
 import { PRODUCT_STATUS, isProductArchived } from '@/lib/productLifecycle';
 import { normalizeVietnamPhone } from '@/lib/phone';
 import { fetchFifoLogsForDeduction, executeFifoDeductionsWrites, type FifoDeductionResult, type FifoDeductor } from '@/lib/inventoryFifo';
-import { buildCompletedOrderRevenueDelta, incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
+import { buildCompletedOrderRevenueDelta, buildPaymentChannelRevenueDelta, incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 import { loadRepairWorkflow, requireWorkflowNode, workflowNodeHasFeature } from '@/lib/repairWorkflowServer';
 import { isSelectedRepairPart } from '@/lib/repairStatus';
 import { reserveSequentialDocumentId, reserveSequentialDocumentIds, type ReservedSequentialDocumentId } from '@/lib/serverDocumentIds';
@@ -908,7 +908,19 @@ export async function POST(request: NextRequest) {
                 }
             }
             if (!isPending && orderPaymentTotal > 0) {
-                incrementRevenueAggregates(tx, db, { orderRevenue: orderPaymentTotal });
+                let debtCollectionPosRevenue = 0;
+                let debtCollectionWebRevenue = 0;
+                for (const [id, paymentAmount] of orderPaymentTotals.entries()) {
+                    const source = String(orderPaymentDocs.get(id)?.snap.data()?.source || '');
+                    if (source === 'pos') debtCollectionPosRevenue += paymentAmount;
+                    else debtCollectionWebRevenue += paymentAmount;
+                }
+                incrementRevenueAggregates(tx, db, {
+                    orderRevenue: orderPaymentTotal,
+                    ...buildPaymentChannelRevenueDelta(orderPaymentTotal, payment_method || paymentMethodCode),
+                    posOrderRevenue: debtCollectionPosRevenue,
+                    webOrderRevenue: debtCollectionWebRevenue,
+                });
             }
 
             if (cashierShiftRef && cashierShiftCollectedAmount > 0) {

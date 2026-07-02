@@ -18,6 +18,7 @@
 - [x] Split order/repair payment history into cash, bank, momo/other, and debt.
 - [x] Count import cost only when paid immediately; keep debt imports as supplier debt, not store cash-out.
 - [x] Update aggregate fields or keep legacy aggregate fallback transparent until backfill exists.
+- [x] Fix `/admin/revenue` actual-collected breakdown so POS/source and cash/bank channels match real receipts.
 
 ## Phase 4 - Shipping, Buyback, Cashier Shift
 
@@ -26,6 +27,7 @@
 - [x] Add cashier shift opening form with locked cash/bank opening amount.
 - [x] Add API/transaction hooks so POS cash/bank payments update the active cashier shift.
 - [x] Unify POS old-debt collection and surplus debt offset into one checkout transaction path.
+- [x] Show recent closed cashier shifts for end-of-shift reconciliation.
 
 ## Phase 5 - Tablet Upload
 

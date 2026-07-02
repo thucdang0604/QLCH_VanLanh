@@ -5,7 +5,7 @@
 - **Status:** implemented-awaiting-e2e
 - **Date:** 2026-06-29
 - **Files:** `src/app/admin/pos/page.tsx`, `src/app/api/pos/cashier-shift/route.ts`, `src/app/api/pos/checkout/route.ts`
-- **Summary:** POS co tab `Ban hang`/`Thu ngan`. Tab thu ngan mo ca bang tien mat/chuyen khoan dau ca, khoa so dau ca, hien tien hien co va phat sinh POS theo ca.
+- **Summary:** POS co tab `Ban hang`/`Thu ngan`. Tab thu ngan mo ca bang tien mat/chuyen khoan dau ca, khoa so dau ca, hien tien hien co va phat sinh POS theo ca; sau khi chot ca hien lich su cac ca da chot gan nhat de doi chieu.
 - **Guardrail:** Thanh toan POS bang tien mat/chuyen khoan/vi bat buoc co ca thu ngan dang mo; checkout cong phat sinh vao `cashier_shifts` trong transaction. Khong con dem so to theo menh gia.
 
 ### Fix POS-DEBT-001: Dong bo thu no cu tai POS
