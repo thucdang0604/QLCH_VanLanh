@@ -19,6 +19,15 @@ function getDateMillis(value: unknown): number {
         || 0;
 }
 
+function getCustomerContactLabel(ticket: RepairTicket): string {
+    return ticket.customer.primaryContactValue
+        || ticket.customer.contactValue
+        || ticket.customer.phone
+        || ticket.customer.id
+        || ticket.customer.customerId
+        || '';
+}
+
 interface RepairPrintTemplatesProps {
     ticket: RepairTicket | null;
     mode: RepairPrintMode;
@@ -83,7 +92,7 @@ export function RepairPrintTemplates({
     ].filter(Boolean);
     const payload = {
         customerName: ticket.customer.name,
-        customerPhone: ticket.customer.phone,
+        customerPhone: getCustomerContactLabel(ticket),
         deviceModel: ticket.deviceInfo?.model || '—',
         deviceColor: ticket.deviceInfo?.color,
         deviceImei: ticket.deviceInfo?.imei,

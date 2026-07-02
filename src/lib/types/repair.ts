@@ -1,4 +1,5 @@
 import type { FirestoreDateValue, PaymentHistoryEntry, PaymentStatus } from './common';
+import type { ContactMethod, ContactMethodType } from './contact';
 
 export type RepairStatus = string; // Changed from union to string to support dynamic statuses in DB
 
@@ -114,8 +115,17 @@ export interface RepairTicket {
     categoryPath?: string[];
     serviceName?: string;
     customer: {
+        id?: string;
+        customerId?: string;
         name: string;
         phone: string;
+        contactType?: ContactMethodType;
+        contactLabel?: string;
+        contactValue?: string;
+        primaryContactType?: ContactMethodType | null;
+        primaryContactValue?: string;
+        contactMethods?: ContactMethod[];
+        searchKeywords?: string[];
     };
     deviceInfo: {
         model: string;

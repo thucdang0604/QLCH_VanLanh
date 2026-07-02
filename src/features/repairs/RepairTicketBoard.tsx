@@ -62,6 +62,15 @@ function hasWarrantyCandidatePart(ticket: RepairTicket) {
     return (ticket.parts || []).some(part => isSelectedRepairPart(part) && isWarrantyEligibleRepairPart(part));
 }
 
+function getCustomerContactLabel(ticket: RepairTicket) {
+    return ticket.customer.primaryContactValue
+        || ticket.customer.contactValue
+        || ticket.customer.phone
+        || ticket.customer.id
+        || ticket.customer.customerId
+        || '';
+}
+
 export function RepairTicketBoard({
     filtered,
     paginatedTickets,
@@ -122,7 +131,7 @@ export function RepairTicketBoard({
                                         )}
                                     </div>
                                     <p className="text-sm font-medium text-gray-900">{ticket.customer.name}</p>
-                                    <p className="text-xs text-gray-500">{ticket.customer.phone}</p>
+                                    <p className="text-xs text-gray-500">{getCustomerContactLabel(ticket)}</p>
                                 </div>
                                 <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold flex-shrink-0 rounded-full border ${st.color}`}>
                                     <StIcon size={12} /> {st.label}
@@ -265,7 +274,7 @@ export function RepairTicketBoard({
                                     </td>
                                     <td className="px-4 py-3">
                                         <p className="font-medium text-gray-900 text-sm">{ticket.customer.name}</p>
-                                        <p className="text-xs text-gray-500">{ticket.customer.phone}</p>
+                                        <p className="text-xs text-gray-500">{getCustomerContactLabel(ticket)}</p>
                                     </td>
                                     <td className="px-4 py-3">
                                         <div className="flex items-center gap-1.5">

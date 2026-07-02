@@ -45,12 +45,12 @@
 
 ## Phase 3 - Repair, warranty va in phieu
 
-- [ ] Sua form repair de co customer selector/search khong chi phone.
-- [ ] Cho tao repair ticket voi contact Zalo/Facebook/note neu khong co phone.
-- [ ] Luu `customer.id`/`customerId` va contact snapshot tren repair ticket.
-- [ ] Sua `/api/repairs/handover` aggregate vao `customers/{customerId}`.
-- [ ] Sua print/warranty template hien "Lien he" khi khong co SDT.
-- [ ] Giu fallback phone cho repair ticket cu.
+- [x] Sua form repair de co customer selector/search khong chi phone.
+- [x] Cho tao repair ticket voi contact Zalo/Facebook/note neu khong co phone.
+- [x] Luu `customer.id`/`customerId` va contact snapshot tren repair ticket.
+- [x] Sua `/api/repairs/handover` aggregate vao `customers/{customerId}`.
+- [x] Sua print/warranty template hien "Lien he" khi khong co SDT.
+- [x] Giu fallback phone cho repair ticket cu.
 
 ## Phase 4 - Chat CRM linkage
 
@@ -61,9 +61,9 @@
   - [x] Luu room/platform identity vao `contactMethods`.
 - [x] Sua RTDB room info: `customerId`, `customerName`, `customerPhone?`, `primaryContactType`, `primaryContactValue`.
 - [x] Sua `ChatCustomerActivityPanel` dung `customerId`, fallback phone.
-- [ ] Sua handoff chat -> POS/Repair truyen `customerId`.
+- [x] Sua handoff chat -> POS/Repair truyen `customerId`.
   - [x] Chat modal/build URL truyen `customerId`.
-  - [ ] Repair intake doc query tieu thu `handoffCustomerId`.
+  - [x] Repair intake doc query tieu thu `handoffCustomerId`.
 
 ## Phase 5 - Suppliers va nhap kho
 

@@ -24,6 +24,14 @@ interface RepairAuxiliaryModalsProps {
     onSubmitManagerOverride: () => void;
 }
 
+function buildPosRepairHref(ticket: RepairTicket): string {
+    const params = new URLSearchParams({ repairId: ticket.id });
+    const customerId = ticket.customer.id || ticket.customer.customerId || '';
+    if (customerId) params.set('customerId', customerId);
+    if (ticket.customer.phone) params.set('phone', ticket.customer.phone);
+    return `/admin/pos?${params.toString()}`;
+}
+
 export function RepairAuxiliaryModals({
     noteModal,
     deliveryNote,
@@ -97,7 +105,7 @@ export function RepairAuxiliaryModals({
                         <div className="pt-4 flex gap-3 justify-center">
                             <button onClick={onClosePosRedirect} className="px-5 py-2.5 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-xl font-medium">Đóng</button>
                             <a
-                                href={`/admin/pos?phone=${encodeURIComponent(posRedirectModal.ticket.customer.phone)}&repairId=${posRedirectModal.ticket.id}`}
+                                href={buildPosRepairHref(posRedirectModal.ticket)}
                                 className="px-5 py-2.5 text-white bg-blue-600 hover:bg-blue-700 rounded-xl font-medium"
                             >
                                 Tới màn hình Thu Ngân
