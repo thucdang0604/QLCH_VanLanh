@@ -27,6 +27,7 @@ import { consumeChatWorkflowHandoff } from '@/lib/chatWorkflowHandoff';
 import { extractProductCodeFromScan, getPrimaryProductCode, getProductScanCandidates, productCodeSearchText } from '@/lib/productCodes';
 import { PRODUCT_STATUS, isProductSellable } from '@/lib/productLifecycle';
 import { generateSearchKeywords } from '@/lib/utils';
+import { extractZaloQrIdentity } from '@/lib/zaloContactCardImport';
 import { PosCartPanel } from '@/features/pos/PosCartPanel';
 import type { AppliedVoucher, CartItem, DiscountDetail, LastOrderData, OrderLineItem, PayableOrderInfo, RepairTicketInfo, VoucherStatus } from '@/features/pos/posTypes';
 import CurrencyInput from '@/components/admin/CurrencyInput';
@@ -453,8 +454,8 @@ export default function POSPage() {
     const applyCustomerSnapshot = (id: string, data: Record<string, unknown>) => {
         const contactMethods = Array.isArray(data.contactMethods) ? data.contactMethods as ContactMethod[] : [];
         setCustomerId(id);
-        setCustomerName(previous => previous || String(data.name || ''));
-        setCustomerPhone(String(data.phone || data.primaryPhone || customerPhone || ''));
+        setCustomerName(String(data.name || ''));
+        setCustomerPhone(String(data.phone || data.primaryPhone || ''));
         setCustomerZalo(firstContactValue(contactMethods, 'zalo'));
         setCustomerFacebook(firstContactValue(contactMethods, 'facebook'));
         setCustomerOtherContact(firstContactValue(contactMethods, 'other') || String(data.primaryContactValue || ''));
@@ -464,7 +465,9 @@ export default function POSPage() {
 
     // Lookup repair/order debt by customer id first, then legacy phone fallback.
     const lookupRepairByPhone = async (lookupValue: string) => {
-        const keyword = lookupValue.trim();
+        const rawKeyword = lookupValue.trim();
+        const zaloQr = extractZaloQrIdentity(rawKeyword);
+        const keyword = zaloQr?.profileUrl || rawKeyword;
         if (!keyword || keyword.length < 3) {
             setLinkedRepairs([]);
             setPayableOrders([]);
@@ -475,11 +478,23 @@ export default function POSPage() {
         }
         setRepairLoading(true);
         try {
-            const normalizedPhone = keyword.replace(/[^0-9]/g, '');
-            let resolvedCustomerId = customerId.trim();
+            const normalizedPhone = zaloQr ? '' : keyword.replace(/[^0-9]/g, '');
+            const currentCustomerId = customerId.trim();
+            const lookupMatchesCurrentCustomerId = Boolean(currentCustomerId)
+                && currentCustomerId.toLowerCase() === keyword.toLowerCase();
+            let resolvedCustomerId = '';
             const { doc, getDoc } = await import('firebase/firestore');
+            const isSafeDocumentId = (value: string) => Boolean(value)
+                && !/[\/\\#?\[\]]/.test(value)
+                && value.length <= 120;
 
-            const docCandidates = Array.from(new Set([resolvedCustomerId, normalizedPhone, keyword].filter(Boolean)));
+            const docCandidates = Array.from(new Set([
+                lookupMatchesCurrentCustomerId ? currentCustomerId : '',
+                normalizedPhone,
+                keyword,
+                zaloQr?.externalId,
+            ].filter((value): value is string => Boolean(value))))
+                .filter(isSafeDocumentId);
             for (const candidate of docCandidates) {
                 const custSnap = await getDoc(doc(db, 'customers', candidate));
                 if (!custSnap.exists()) continue;
@@ -489,16 +504,25 @@ export default function POSPage() {
             }
 
             if (!resolvedCustomerId && keyword.length >= 3) {
-                const searchKeyword = generateSearchKeywords(keyword)[0] || keyword.toLowerCase();
-                const customerSnap = await getDocs(query(collection(db, 'customers'), where('searchKeywords', 'array-contains', searchKeyword), limit(1)));
-                const found = customerSnap.docs[0];
-                if (found) {
+                const searchKeywords = Array.from(new Set([
+                    keyword.toLowerCase(),
+                    zaloQr?.externalId?.toLowerCase(),
+                    generateSearchKeywords(keyword)[0] || keyword.toLowerCase(),
+                ].filter(Boolean)));
+                for (const searchKeyword of searchKeywords) {
+                    const customerSnap = await getDocs(query(collection(db, 'customers'), where('searchKeywords', 'array-contains', searchKeyword), limit(1)));
+                    const found = customerSnap.docs[0];
+                    if (!found) continue;
                     resolvedCustomerId = found.id;
                     applyCustomerSnapshot(found.id, found.data());
+                    break;
                 }
             }
 
-            if (!resolvedCustomerId) setCustomerDebt(0);
+            if (!resolvedCustomerId) {
+                setCustomerId('');
+                setCustomerDebt(0);
+            }
 
             const repairDocs = new Map<string, Record<string, unknown> & { id: string }>();
             const orderDocs = new Map<string, Record<string, unknown> & { id: string }>();
@@ -539,15 +563,13 @@ export default function POSPage() {
                     const tb = (b.createdAt as { toMillis?: () => number })?.toMillis?.() || 0;
                     return tb - ta;
                 })
-                .map(d => {
-                    const repair = mapRepairTicketInfo(d.id, d, normalizedPhone || keyword);
-                    // Auto-fill customer name if empty
-                    if (!customerName && repair.customerName) {
-                        setCustomerName(prev => prev || repair.customerName);
-                    }
-                    return repair;
-                });
+                .map(d => mapRepairTicketInfo(d.id, d, normalizedPhone || keyword));
             setLinkedRepairs(repairs);
+            const firstRepair = repairs[0];
+            if (!resolvedCustomerId && firstRepair) {
+                if (firstRepair.customerName) setCustomerName(firstRepair.customerName);
+                if (firstRepair.customerPhone) setCustomerPhone(firstRepair.customerPhone);
+            }
             const orders = Array.from(orderDocs.values())
                 .sort((a, b) => {
                     const ta = (a.createdAt as { toMillis?: () => number })?.toMillis?.() || 0;
@@ -1296,8 +1318,12 @@ export default function POSPage() {
                 ...(appliedVoucher ? { voucherCode: appliedVoucher.code } : {}),
             };
 
+            const checkoutStartedAt = performance.now();
             const auth = await getAuthInstance();
+            const tokenStartedAt = performance.now();
             const idToken = await auth.currentUser?.getIdToken();
+            const tokenMs = Math.round(performance.now() - tokenStartedAt);
+            const requestStartedAt = performance.now();
             const res = await fetch('/api/pos/checkout', {
                 method: 'POST',
                 headers: {
@@ -1306,8 +1332,18 @@ export default function POSPage() {
                 },
                 body: JSON.stringify(orderData)
             });
+            const requestMs = Math.round(performance.now() - requestStartedAt);
 
             const data = await res.json();
+            const totalCheckoutMs = Math.round(performance.now() - checkoutStartedAt);
+            if (totalCheckoutMs > 1500 || data?.debugTiming) {
+                console.info('POS checkout timing', {
+                    tokenMs,
+                    requestMs,
+                    totalCheckoutMs,
+                    server: data?.debugTiming,
+                });
+            }
             if (!res.ok) {
                 throw new Error(data.error || 'Lỗi khi thanh toán qua API');
             }

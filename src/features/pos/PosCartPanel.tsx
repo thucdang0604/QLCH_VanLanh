@@ -1,9 +1,10 @@
-import { useState, useEffect, type Dispatch, type SetStateAction } from 'react';
+import { useState, useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
 import Image from 'next/image';
-import { AlertTriangle, Banknote, ChevronDown, CreditCard, MessageCircle, Minus, Package, Phone, Plus, QrCode, Receipt, ShoppingCart, Tag, Trash2, User, Wrench, X } from 'lucide-react';
+import { AlertTriangle, Banknote, Camera, ChevronDown, CreditCard, MessageCircle, Minus, Package, Phone, Plus, QrCode, Receipt, Search, ShoppingCart, Square, Tag, Trash2, User, Wrench, X } from 'lucide-react';
 import CurrencyInput from '@/components/admin/CurrencyInput';
 import type { Product } from '@/lib/types';
 import type { ContactMethodType } from '@/lib/types/contact';
+import { extractZaloQrIdentity } from '@/lib/zaloContactCardImport';
 import type { AppliedVoucher, CartItem, DiscountDetail, PayableOrderInfo, RepairTicketInfo, VoucherStatus } from './posTypes';
 
 const paymentMethods = [
@@ -151,10 +152,14 @@ export function PosCartPanel({
     const remainingCurrentPayment = deposit > 0 ? Math.max(0, total - deposit) : 0;
     const [showRepairsList, setShowRepairsList] = useState(true);
     const [showExtraContacts, setShowExtraContacts] = useState(false);
+    const [showVoucherEntry, setShowVoucherEntry] = useState(false);
+    const [customerLookupQuery, setCustomerLookupQuery] = useState('');
+    const [customerQrScanning, setCustomerQrScanning] = useState(false);
+    const customerQrVideoRef = useRef<HTMLVideoElement>(null);
+    const customerQrControlsRef = useRef<{ stop: () => void } | null>(null);
     const compactPrimaryContactType = customerContactOptions.some(option => option.type === customerPrimaryContactType)
         ? customerPrimaryContactType as PosCustomerContactType
         : 'other';
-    const primaryContactOption = customerContactOptions.find(option => option.type === compactPrimaryContactType) || customerContactOptions[0];
     const contactValues: Record<PosCustomerContactType, string> = {
         phone: customerPhone,
         zalo: customerZalo,
@@ -164,16 +169,57 @@ export function PosCartPanel({
     const hasExtraContacts = customerContactOptions.some(option =>
         option.type !== compactPrimaryContactType && contactValues[option.type].trim()
     );
+    const hasStoredContactDetails = Boolean(
+        customerId.trim() || customerZalo.trim() || customerFacebook.trim() || customerOtherContact.trim()
+    );
     const requiresCashierShift = ['cash', 'bank', 'momo'].includes(paymentMethod)
         && cart.length > 0
         && total > 0;
     const missingCashierShift = requiresCashierShift && !cashierShiftOpen;
     const checkoutDisabled = cart.length === 0 || isProcessing || missingCashierShift;
-    const setContactValue = (type: PosCustomerContactType, value: string) => {
-        if (type === 'phone') setCustomerPhone(value);
-        else if (type === 'zalo') setCustomerZalo(value);
-        else if (type === 'facebook') setCustomerFacebook(value);
-        else setCustomerOtherContact(value);
+    const runCustomerLookup = (rawValue = customerLookupQuery) => {
+        const value = rawValue.trim();
+        if (!value) return;
+        onLookupRepairByPhone(value);
+    };
+    const stopCustomerQrScanner = () => {
+        customerQrControlsRef.current?.stop();
+        customerQrControlsRef.current = null;
+        setCustomerQrScanning(false);
+    };
+    const applyCustomerQrText = (rawText: string) => {
+        const zalo = extractZaloQrIdentity(rawText);
+        const lookupValue = zalo?.profileUrl || rawText.trim();
+        if (!lookupValue) return false;
+        setCustomerLookupQuery(lookupValue);
+        if (zalo) {
+            setCustomerZalo(zalo.profileUrl);
+            if (!customerPhone.trim()) setCustomerPrimaryContactType('zalo');
+        }
+        onLookupRepairByPhone(lookupValue);
+        return true;
+    };
+    const startCustomerQrScanner = async () => {
+        if (!customerQrVideoRef.current) return;
+        setCustomerQrScanning(true);
+        try {
+            const { BrowserQRCodeReader } = await import('@zxing/browser');
+            const reader = new BrowserQRCodeReader();
+            const controls = await reader.decodeFromVideoDevice(
+                undefined,
+                customerQrVideoRef.current,
+                (result) => {
+                    if (!result) return;
+                    if (applyCustomerQrText(result.getText())) {
+                        stopCustomerQrScanner();
+                    }
+                },
+            );
+            customerQrControlsRef.current = controls;
+        } catch (error) {
+            console.error('POS customer QR scanner error:', error);
+            stopCustomerQrScanner();
+        }
     };
 
     // Auto-expand repair list when a new set of repairs is loaded
@@ -183,9 +229,7 @@ export function PosCartPanel({
         }
     }, [linkedRepairs, payableOrders]);
 
-    useEffect(() => {
-        if (hasExtraContacts) setShowExtraContacts(true);
-    }, [hasExtraContacts]);
+    useEffect(() => () => stopCustomerQrScanner(), []);
 
     return (
         <>
@@ -294,80 +338,149 @@ export function PosCartPanel({
 
             <div className="border-t px-4 py-3 space-y-3">
                 <div className="space-y-2">
-                    <div className="grid grid-cols-2 gap-2">
                     <div className="relative">
-                        <User size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
                         <input
                             type="text"
-                            placeholder="Mã KH"
-                            value={customerId}
-                            onChange={event => setCustomerId(event.target.value)}
-                            onBlur={() => onLookupRepairByPhone(customerId)}
-                            className="w-full pl-8 pr-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-orange-500/20"
+                            placeholder="Tìm khách: SĐT, tên, mã KH, link Zalo, Facebook"
+                            value={customerLookupQuery}
+                            onChange={event => setCustomerLookupQuery(event.target.value)}
+                            onKeyDown={event => {
+                                if (event.key === 'Enter') {
+                                    event.preventDefault();
+                                    runCustomerLookup();
+                                }
+                            }}
+                            onBlur={() => runCustomerLookup()}
+                            className="w-full pl-8 pr-20 py-1.5 text-sm border rounded-lg focus:ring-2 focus:ring-orange-500/20"
                         />
-                    </div>
-                    <div className="relative">
-                        <User size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                        <input type="text" placeholder="Tên KH" value={customerName} onChange={event => setCustomerName(event.target.value)} className="w-full pl-8 pr-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-orange-500/20" />
-                    </div>
-                    </div>
-                    <div className="grid grid-cols-[112px_minmax(0,1fr)] gap-2">
-                        <select
-                            title="Kênh liên hệ chính"
-                            value={compactPrimaryContactType}
-                            onChange={event => setCustomerPrimaryContactType(event.target.value as PosCustomerContactType)}
-                            className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:ring-2 focus:ring-orange-500/20"
+                        <button
+                            type="button"
+                            onMouseDown={event => event.preventDefault()}
+                            onClick={() => runCustomerLookup()}
+                            className="absolute right-10 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-orange-600"
+                            aria-label="Tìm khách"
+                            title="Tìm khách"
                         >
-                            {customerContactOptions.map(option => (
-                                <option key={option.type} value={option.type}>{option.label}</option>
-                            ))}
-                        </select>
+                            <Search size={15} />
+                        </button>
+                        <button
+                            type="button"
+                            onMouseDown={event => event.preventDefault()}
+                            onClick={customerQrScanning ? stopCustomerQrScanner : startCustomerQrScanner}
+                            className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-sky-600"
+                            aria-label={customerQrScanning ? 'Dừng quét QR khách' : 'Quét QR khách'}
+                            title={customerQrScanning ? 'Dừng quét QR khách' : 'Quét QR khách'}
+                        >
+                            {customerQrScanning ? <Square size={15} /> : <Camera size={15} />}
+                        </button>
+                    </div>
+                    <video
+                        ref={customerQrVideoRef}
+                        muted
+                        playsInline
+                        className={`w-full rounded-lg border border-sky-200 bg-black ${customerQrScanning ? 'block' : 'hidden'}`}
+                    />
+                    <div className="grid grid-cols-[minmax(0,1.2fr)_minmax(110px,0.8fr)] gap-2">
                         <div className="relative">
-                            {compactPrimaryContactType === 'phone' ? (
-                                <Phone size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                            ) : (
-                                <MessageCircle size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                            )}
+                            <User size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
                             <input
                                 type="text"
-                                placeholder={primaryContactOption.placeholder}
-                                value={contactValues[compactPrimaryContactType]}
-                                onChange={event => setContactValue(compactPrimaryContactType, event.target.value)}
+                                placeholder="Tên KH"
+                                value={customerName}
+                                onChange={event => setCustomerName(event.target.value)}
                                 onBlur={() => {
-                                    const lookupValue = compactPrimaryContactType === 'phone'
-                                        ? customerPhone
-                                        : customerId;
-                                    if (lookupValue.trim()) onLookupRepairByPhone(lookupValue);
+                                    if (!customerLookupQuery.trim() && customerName.trim()) runCustomerLookup(customerName);
                                 }}
-                                className="w-full pl-8 pr-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-orange-500/20"
+                                className="w-full pl-8 pr-3 py-1.5 text-sm border rounded-lg focus:ring-2 focus:ring-orange-500/20"
+                            />
+                        </div>
+                        <div className="relative">
+                            <Phone size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                            <input
+                                type="text"
+                                placeholder="SĐT"
+                                value={customerPhone}
+                                onChange={event => {
+                                    setCustomerPhone(event.target.value.replace(/[^0-9]/g, ''));
+                                    setCustomerPrimaryContactType('phone');
+                                }}
+                                onBlur={() => {
+                                    if (customerPhone.trim()) runCustomerLookup(customerPhone);
+                                }}
+                                className="w-full pl-8 pr-3 py-1.5 text-sm border rounded-lg focus:ring-2 focus:ring-orange-500/20"
                             />
                         </div>
                     </div>
-                    <button
-                        type="button"
-                        onClick={() => setShowExtraContacts(previous => !previous)}
-                        className="inline-flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-orange-600"
-                    >
-                        <ChevronDown size={14} className={`transition-transform ${showExtraContacts ? 'rotate-180' : ''}`} />
-                        Liên hệ phụ{hasExtraContacts ? ' đã nhập' : ''}
-                    </button>
+                    <div className="flex items-center justify-between gap-2">
+                        <button
+                            type="button"
+                            onClick={() => setShowExtraContacts(previous => !previous)}
+                            className="inline-flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-orange-600"
+                        >
+                            <ChevronDown size={14} className={`transition-transform ${showExtraContacts ? 'rotate-180' : ''}`} />
+                            Liên hệ phụ: Zalo / Facebook / Mã KH{hasStoredContactDetails ? ' đã có' : ''}
+                        </button>
+                        {hasStoredContactDetails && (
+                            <span className="truncate text-[11px] font-medium text-gray-400">
+                                {[customerId && 'Mã KH', customerZalo && 'Zalo', customerFacebook && 'Facebook', customerOtherContact && 'Khác'].filter(Boolean).join(' · ')}
+                            </span>
+                        )}
+                    </div>
                     {showExtraContacts && (
                         <div className="grid grid-cols-2 gap-2 rounded-lg border border-gray-100 bg-gray-50 p-2">
-                            {customerContactOptions
-                                .filter(option => option.type !== compactPrimaryContactType)
-                                .map(option => (
-                                    <input
-                                        key={option.type}
-                                        type="text"
-                                        placeholder={option.placeholder}
-                                        value={contactValues[option.type]}
-                                        onChange={event => setContactValue(option.type, event.target.value)}
-                                        onBlur={() => {
-                                            if (option.type === 'phone' && customerPhone.trim()) onLookupRepairByPhone(customerPhone);
-                                        }}
-                                        className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:ring-2 focus:ring-orange-500/20"
-                                    />
-                                ))}
+                            <div className="relative">
+                                <MessageCircle size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                                <input
+                                    type="text"
+                                    placeholder="Link Zalo"
+                                    value={customerZalo}
+                                    onChange={event => {
+                                        setCustomerZalo(event.target.value);
+                                        if (!customerPhone.trim()) setCustomerPrimaryContactType('zalo');
+                                    }}
+                                    onBlur={() => {
+                                        if (customerZalo.trim()) runCustomerLookup(customerZalo);
+                                    }}
+                                    className="w-full pl-8 pr-3 py-1.5 text-sm border rounded-lg bg-white focus:ring-2 focus:ring-orange-500/20"
+                                />
+                            </div>
+                            <div className="relative">
+                                <MessageCircle size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                                <input
+                                    type="text"
+                                    placeholder="Facebook"
+                                    value={customerFacebook}
+                                    onChange={event => {
+                                        setCustomerFacebook(event.target.value);
+                                        if (!customerPhone.trim() && !customerZalo.trim()) setCustomerPrimaryContactType('facebook');
+                                    }}
+                                    onBlur={() => {
+                                        if (customerFacebook.trim()) runCustomerLookup(customerFacebook);
+                                    }}
+                                    className="w-full pl-8 pr-3 py-1.5 text-sm border rounded-lg bg-white focus:ring-2 focus:ring-orange-500/20"
+                                />
+                            </div>
+                            <input
+                                type="text"
+                                placeholder="Mã KH"
+                                value={customerId}
+                                onChange={event => setCustomerId(event.target.value)}
+                                onBlur={() => {
+                                    if (customerId.trim()) runCustomerLookup(customerId);
+                                }}
+                                className="w-full px-3 py-1.5 text-sm border rounded-lg bg-white focus:ring-2 focus:ring-orange-500/20"
+                            />
+                            <input
+                                type="text"
+                                placeholder="Liên hệ khác"
+                                value={customerOtherContact}
+                                onChange={event => {
+                                    setCustomerOtherContact(event.target.value);
+                                    if (!customerPhone.trim() && !customerZalo.trim() && !customerFacebook.trim()) setCustomerPrimaryContactType('other');
+                                }}
+                                className="w-full px-3 py-1.5 text-sm border rounded-lg bg-white focus:ring-2 focus:ring-orange-500/20"
+                            />
                         </div>
                     )}
                 </div>
@@ -499,44 +612,62 @@ export function PosCartPanel({
                         </button>
                     </div>
                 )}
-                <div className="flex gap-1.5">
+                <div className="grid grid-cols-5 gap-1.5">
                     {paymentMethods.map(method => (
-                        <button key={method.key} onClick={() => setPaymentMethod(method.key)} className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium transition-all ${paymentMethod === method.key ? 'bg-orange-500 text-white shadow-md shadow-orange-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                        <button
+                            key={method.key}
+                            onClick={() => setPaymentMethod(method.key)}
+                            title={method.label}
+                            className={`flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg px-1 py-1.5 text-[11px] font-medium leading-tight transition-all ${paymentMethod === method.key ? 'bg-orange-500 text-white shadow-md shadow-orange-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                        >
                             <method.icon size={14} />
-                            {method.label}
+                            <span className="truncate">{method.label}</span>
                         </button>
                     ))}
                 </div>
-                <div className="flex items-center gap-2 text-sm">
-                    <span className="text-gray-500">Giảm giá:</span>
-                    <CurrencyInput value={discount || ''} onChange={value => setDiscount(value)} placeholder="0" className="flex-1 px-3 py-1.5 border rounded-lg text-right text-sm" />
+                <label className="block rounded-lg border border-orange-200 bg-orange-50/60 p-2">
+                    <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-orange-700">Khách đưa</span>
+                    <CurrencyInput
+                        value={deposit || ''}
+                        onChange={value => setDeposit(value)}
+                        placeholder="0"
+                        className="w-full rounded-lg border border-orange-300 bg-white px-3 py-2.5 text-right text-xl font-bold text-orange-700 shadow-sm focus:ring-2 focus:ring-orange-500/20"
+                    />
+                </label>
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 text-sm">
+                    <label className="flex min-w-0 items-center gap-2">
+                        <span className="text-gray-500 whitespace-nowrap">Giảm:</span>
+                        <CurrencyInput value={discount || ''} onChange={value => setDiscount(value)} placeholder="0" className="min-w-0 flex-1 px-3 py-1.5 border rounded-lg text-right text-sm" />
+                    </label>
+                    <button
+                        type="button"
+                        onClick={() => setShowVoucherEntry(previous => !previous)}
+                        className={`inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-semibold ${showVoucherEntry || voucherCode || appliedVoucher ? 'bg-blue-50 text-blue-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                    >
+                        <ChevronDown size={14} className={`transition-transform ${showVoucherEntry ? 'rotate-180' : ''}`} />
+                        Voucher{appliedVoucher ? ' đã áp dụng' : voucherCode ? ' đã nhập' : ''}
+                    </button>
                 </div>
-
-                <div className="space-y-1">
-                    <div className="flex items-center gap-2 text-sm">
-                        <span className="text-gray-500">Voucher:</span>
-                        <div className="flex-1 relative flex gap-1">
-                            <input type="text" placeholder="Nhập mã giảm giá" value={voucherCode} onChange={event => setVoucherCode(event.target.value.toUpperCase())} className="w-full px-3 py-1.5 border rounded-lg text-sm uppercase" />
+                {(showVoucherEntry || voucherCode || voucherStatus) && (
+                    <div className="space-y-1">
+                        <div className="flex items-center gap-1 text-sm">
+                            <input type="text" placeholder="Nhập mã giảm giá" value={voucherCode} onChange={event => setVoucherCode(event.target.value.toUpperCase())} className="min-w-0 flex-1 px-3 py-1.5 border rounded-lg text-sm uppercase" />
                             <button onClick={onApplyVoucher} className="px-3 py-1.5 bg-blue-50 text-blue-600 font-semibold rounded-lg hover:bg-blue-100 text-sm whitespace-nowrap">
                                 Áp dụng
                             </button>
                         </div>
+                        {voucherStatus && (
+                            <div className={`text-xs text-right pr-1 ${voucherStatus.type === 'success' ? 'text-green-600' : 'text-red-500'}`}>
+                                {voucherStatus.message}
+                                {appliedVoucher && (
+                                    <button onClick={() => { setAppliedVoucher(null); setVoucherCode(''); setVoucherStatus(null); }} className="ml-2 text-red-500 underline">
+                                        Bỏ
+                                    </button>
+                                )}
+                            </div>
+                        )}
                     </div>
-                    {voucherStatus && (
-                        <div className={`text-xs text-right pr-1 ${voucherStatus.type === 'success' ? 'text-green-600' : 'text-red-500'}`}>
-                            {voucherStatus.message}
-                            {appliedVoucher && (
-                                <button onClick={() => { setAppliedVoucher(null); setVoucherCode(''); setVoucherStatus(null); }} className="ml-2 text-red-500 underline">
-                                    Bỏ
-                                </button>
-                            )}
-                        </div>
-                    )}
-                </div>
-                <div className="flex items-center gap-2 text-sm">
-                    <span className="text-gray-500">Khách đưa:</span>
-                    <CurrencyInput value={deposit || ''} onChange={value => setDeposit(value)} placeholder="0" className="flex-1 px-3 py-1.5 border rounded-lg text-right text-sm" />
-                </div>
+                )}
                 {remainingDebtAfterSelected > 0 && surplusAfterSelectedDebt > 0 && (
                     <div className="flex items-start gap-2 bg-blue-50 p-2 rounded-lg mt-2 border border-blue-200">
                         <input type="checkbox" id="useSurplusDebt" className="mt-0.5 w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer" checked={useSurplusToPayDebt} onChange={(event) => setUseSurplusToPayDebt(event.target.checked)} />

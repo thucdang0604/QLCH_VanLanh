@@ -7,7 +7,7 @@ import { calculateAndSaveCommissionsServer } from '@/lib/commissionCalcServer';
 import type { Order, RepairTicket, WorkflowNode } from '@/lib/types';
 import { PRODUCT_STATUS, isProductArchived } from '@/lib/productLifecycle';
 import { normalizeVietnamPhone } from '@/lib/phone';
-import { buildContactMethods, buildContactSearchKeywords, buildContactlessDocumentBaseId, getPrimaryContact, hasDebtSafeContact } from '@/lib/contactIdentity';
+import { buildContactMethods, buildContactSearchKeywords, buildContactlessDocumentBaseId, getPrimaryContact, hasDebtSafeContact, mergeContactMethods } from '@/lib/contactIdentity';
 import type { ContactMethod, ContactMethodType } from '@/lib/types/contact';
 import { fetchFifoLogsForDeduction, executeFifoDeductionsWrites, type FifoDeductionResult, type FifoDeductor } from '@/lib/inventoryFifo';
 import { buildCompletedOrderRevenueDelta, buildPaymentChannelRevenueDelta, incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
@@ -130,11 +130,31 @@ function getRepairPaymentAmount(ticket: RepairTicket, ticketId: string): number 
 }
 
 export async function POST(request: NextRequest) {
+    const startedAt = Date.now();
+    const debugTiming: Record<string, number | Record<string, number>> = {};
+    let lastTimingMark = startedAt;
+    const markTiming = (key: string) => {
+        const now = Date.now();
+        debugTiming[key] = now - lastTimingMark;
+        lastTimingMark = now;
+    };
+    const transactionTiming: Record<string, number> = {};
+    let lastTransactionMark = startedAt;
+    const resetTransactionTiming = () => {
+        lastTransactionMark = Date.now();
+    };
+    const markTransaction = (key: string) => {
+        const now = Date.now();
+        transactionTiming[key] = now - lastTransactionMark;
+        lastTransactionMark = now;
+    };
     try {
         const caller = await requirePermission(request, 'manage_orders');
+        markTiming('auth');
 
         const body = await request.json();
         const { idempotencyKey, repairTicketId, repairTicketIds, customer_info, items, discount_amount, total_amount, deposit_amount, payment_method, voucherCode, use_surplus_to_pay_debt } = body;
+        markTiming('parseBody');
 
         if (!Array.isArray(items) || items.length === 0) {
             return NextResponse.json({ error: 'Giỏ hàng trống' }, { status: 400 });
@@ -171,7 +191,9 @@ export async function POST(request: NextRequest) {
             return Math.max(Number(data.deposit_amount) || 0, paidFromHistory);
         };
 
+        resetTransactionTiming();
         const result = await db.runTransaction(async (tx) => {
+            resetTransactionTiming();
             if (idempotencyKey) {
                 const opRef = db.collection('operation_requests').doc(idempotencyKey);
                 const opSnap = await tx.get(opRef);
@@ -188,6 +210,7 @@ export async function POST(request: NextRequest) {
                     }
                 }
             }
+            markTransaction('idempotency');
 
             // Pre-aggregate for overall stock check
             const preAggregatedForStock = new Map<string, number>();
@@ -231,10 +254,12 @@ export async function POST(request: NextRequest) {
                 }
                 productDocs.set(productId, { ref: pRef, data: (pSnap.data() || {}) as FirebaseFirestore.DocumentData });
             }
+            markTransaction('readProducts');
 
             // Fetch taxonomy for warranty config
             const taxonomySnap = await tx.get(db.collection('system_config').doc('taxonomy_settings'));
             const retailTrees = taxonomySnap.data()?.taxonomy?.retail || [];
+            markTransaction('readTaxonomy');
 
             function resolveWarranty(productData: { warrantyType?: string; warrantyMonths?: string | number; category?: string;[key: string]: unknown }): { warrantyType: string, warrantyMonths: number } | null {
                 if (productData.warrantyType && productData.warrantyType !== 'none') {
@@ -385,6 +410,7 @@ export async function POST(request: NextRequest) {
             if (hasRepairPayment && paidNow + 1 < currentOrderTotal) {
                 throw new Error(`Thanh toán phiếu sửa chữa còn thiếu ${(currentOrderTotal - paidNow).toLocaleString('vi-VN')}đ. Vui lòng thu đủ trước khi hoàn tất.`);
             }
+            markTransaction('normalizeTotals');
 
             let voucherRef: FirebaseFirestore.DocumentReference | null = null;
             let appliedVoucherCode: string | undefined;
@@ -428,6 +454,7 @@ export async function POST(request: NextRequest) {
                     throw new Error('Mã Voucher không tồn tại hoặc đã bị vô hiệu.');
                 }
             }
+            markTransaction('voucher');
 
             // Total cost guard
             if (submittedTotalAmount !== null && Math.abs(serverTotal - submittedTotalAmount) > 1) {
@@ -468,6 +495,7 @@ export async function POST(request: NextRequest) {
                 custSnap = await tx.get(custRef);
                 incomingName = incomingContactInput.name;
             }
+            markTransaction('readStaffCustomer');
 
             const repairIdSet = new Set<string>();
             if (repairTicketId) repairIdSet.add(normalizeRepairTicketId(repairTicketId));
@@ -492,6 +520,7 @@ export async function POST(request: NextRequest) {
                 }
                 repairDocs.set(id, { ref, snap });
             }
+            markTransaction('readRepairs');
 
             const repairPaymentRequestedTotals = new Map<string, number>();
             const repairPaymentTotals = new Map<string, number>();
@@ -535,6 +564,7 @@ export async function POST(request: NextRequest) {
                 }
                 orderPaymentDocs.set(id, { ref, snap });
             }
+            markTransaction('readPayableOrders');
 
             const orderPaymentRequestedTotals = new Map<string, number>();
             for (const item of checkoutItems) {
@@ -653,6 +683,7 @@ export async function POST(request: NextRequest) {
                 }
                 cashierShiftRef = activeShiftDoc.ref;
             }
+            markTransaction('readCashierShift');
 
             const repairCompletionTargets = new Map<string, { targetStatus: string; shouldCountCompletion: boolean }>();
             for (const [id, repairDoc] of repairDocs.entries()) {
@@ -712,6 +743,7 @@ export async function POST(request: NextRequest) {
             if (fifoDeductors.length > 0) {
                             fifoLogsDataMap = await fetchFifoLogsForDeduction(tx, db, fifoDeductors);
             }
+            markTransaction('workflowAndFifo');
 
             const stockProductIds = new Set([...preAggregatedForStock.keys(), ...repairAggregatedForStock.keys()]);
             const newDebt = !isDebtCollectionOnly ? Math.max(0, currentOrderTotal - paidNow) : 0;
@@ -778,6 +810,7 @@ export async function POST(request: NextRequest) {
             }
             const orderRef = orderAllocation?.ref || null;
             const orderId = orderAllocation?.id || '';
+            markTransaction('reserveIds');
             const debtPaymentReferenceId = updatedOrderIds.length === 1
                 ? updatedOrderIds[0]
                 : (idempotencyKey || orderId || `DEBT-${updatedOrderIds.map(id => id.slice(-6)).join('-')}`);
@@ -1025,12 +1058,14 @@ export async function POST(request: NextRequest) {
                         updateData.name = incomingName;
                     }
                     if (incomingContactMethods.length > 0) {
+                        const contactMethods = mergeContactMethods(currentData.contactMethods, incomingContactMethods);
+                        const primaryContact = getPrimaryContact(contactMethods) || incomingPrimaryContact;
                         updateData.phone = normalizedPhoneResult?.local || incomingContactInput.phone || currentData.phone || '';
                         updateData.primaryPhone = normalizedPhoneResult?.local || currentData.primaryPhone || '';
-                        updateData.primaryContactType = incomingPrimaryContact?.type || currentData.primaryContactType || null;
-                        updateData.primaryContactValue = incomingPrimaryContact?.value || currentData.primaryContactValue || '';
-                        updateData.contactMethods = incomingContactMethods;
-                        updateData.searchKeywords = buildContactSearchKeywords(incomingContactInput, incomingContactMethods);
+                        updateData.primaryContactType = primaryContact?.type || currentData.primaryContactType || null;
+                        updateData.primaryContactValue = primaryContact?.value || currentData.primaryContactValue || '';
+                        updateData.contactMethods = contactMethods;
+                        updateData.searchKeywords = buildContactSearchKeywords(incomingContactInput, contactMethods);
                         if (incomingContactInput.email) updateData.email = incomingContactInput.email;
                         if (incomingContactInput.address) updateData.address = incomingContactInput.address;
                         if (incomingContactInput.note) updateData.note = incomingContactInput.note;
@@ -1220,6 +1255,7 @@ export async function POST(request: NextRequest) {
                     updatedOrderIds
                 });
             }
+            markTransaction('queueWrites');
             inventoryLogAllocations.at(-1)?.commitCounter();
             customerLedgerAllocations.at(-1)?.commitCounter();
             customerTransactionAllocations.at(-1)?.commitCounter();
@@ -1232,9 +1268,17 @@ export async function POST(request: NextRequest) {
                 warnings: checkoutWarnings
             };
         });
+        markTiming('transaction');
+        debugTiming.transactionSteps = transactionTiming;
+        debugTiming.total = Date.now() - startedAt;
+        if (Number(debugTiming.total) > 1500) {
+            console.info('POS checkout API timing', debugTiming);
+        }
 
-        return NextResponse.json(result);
+        return NextResponse.json({ ...result, debugTiming });
     } catch (error: unknown) {
+        debugTiming.total = Date.now() - startedAt;
+        console.error('POS checkout API timing before error:', debugTiming);
         console.error('POS Checkout API error:', error);
         const message = error instanceof Error ? error.message : 'Internal server error';
         const normalizedMessage = message.toLowerCase();

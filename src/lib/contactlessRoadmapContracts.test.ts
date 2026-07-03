@@ -38,7 +38,12 @@ test('excel debt guard accepts social contacts and rejects profile note only', (
     assert.equal(hasDebtSafeContact(buildContactMethods(zaloInput)), true);
 
     const noteOnlyInput = buildImportContactInput({ 'Ghi chú': 'Khach quen hay ghe cua hang' }, 'Khach quen');
+    assert.equal(noteOnlyInput.note, '');
+    assert.deepEqual(buildContactMethods(noteOnlyInput), []);
     assert.equal(hasDebtSafeContact(buildContactMethods(noteOnlyInput)), false);
+
+    const otherContactInput = buildImportContactInput({ 'Liên hệ khác': 'Khach quen hay ghe cua hang' }, 'Khach quen');
+    assert.equal(hasDebtSafeContact(buildContactMethods(otherContactInput)), true);
 });
 
 test('chat handoff preserves customer id and primary social contact snapshot', () => {
@@ -63,7 +68,10 @@ test('firestore customer rules allow contactless ids without relaxing aggregate 
     const rules = fs.readFileSync(repoFile('firestore.rules'), 'utf8');
 
     assert.match(rules, /match \/customers\/\{customerId\}/);
-    assert.match(rules, /function customerDocMatchesId\(customerId\)/);
+    assert.match(rules, /function customerDocMatchesId\(data, customerId\)/);
+    assert.match(rules, /customerDocMatchesId\(request\.resource\.data, customerId\) \|\| customerDocMatchesId\(resource\.data, customerId\)/);
+    assert.match(rules, /function customerPhoneUpdateAllowed\(\)/);
+    assert.match(rules, /request\.resource\.data\.phone == resource\.data\.phone/);
     assert.doesNotMatch(rules, /request\.resource\.data\.phone == phone/);
     assert.match(rules, /affectedKeys\(\)\.hasAny\(\['totalSpent', 'totalOrders', 'totalRepairs', 'totalAppointments', 'missions'\]\)/);
 });
@@ -105,6 +113,34 @@ test('POS customer entry stays compact and missing cashier shift is actionable',
     assert.match(posPage, /setPosTab\('cashier'\)/);
     assert.match(posPage, /Chưa mở ca thu ngân/);
     assert.match(posCheckout, /normalizedMessage\.includes\('mở ca thu ngân'\)/);
+});
+
+test('CRM customer edit can add phone to contactless records without changing document id', () => {
+    const customersPage = fs.readFileSync(repoFile('src', 'app', 'admin', 'customers', 'page.tsx'), 'utf8');
+    const customerModal = fs.readFileSync(repoFile('src', 'components', 'admin', 'customers', 'CustomerFormModal.tsx'), 'utf8');
+
+    assert.match(customersPage, /id: customerId/);
+    assert.match(customersPage, /customerId,/);
+    assert.match(customersPage, /code: editingCustomer\.code \|\| customerId/);
+    assert.match(customersPage, /const submittedPhone = normalizedPhone\?\.local \|\| data\.phone \|\| ''/);
+    assert.match(customersPage, /legacyPhoneId: submittedPhone/);
+    assert.match(customersPage, /syncCustomerFormContactMethods/);
+    assert.doesNotMatch(customerModal, /disabled=\{isEditMode\}/);
+    assert.match(customerModal, /disabled=\{isPhoneLocked\}/);
+    assert.match(customerModal, /normalizeVietnamPhone\(form\.phone\)/);
+    assert.match(customerModal, /SĐT đã lưu là định danh riêng/);
+    assert.match(customerModal, /Hồ sơ chưa có SĐT, có thể bổ sung SĐT/);
+});
+
+test('CRM customer list exposes clickable Zalo and Facebook contact links', () => {
+    const customersPage = fs.readFileSync(repoFile('src', 'app', 'admin', 'customers', 'page.tsx'), 'utf8');
+
+    assert.match(customersPage, /function customerSocialLinks\(customer: Customer\)/);
+    assert.match(customersPage, /normalizeSocialContactHref\(type, value\)/);
+    assert.match(customersPage, /href=\{link\.href\}/);
+    assert.match(customersPage, /target="_blank"/);
+    assert.match(customersPage, /event\.stopPropagation\(\)/);
+    assert.match(customersPage, /link\.label/);
 });
 
 test('repair intake, handover and print paths preserve contactless customer snapshots', () => {

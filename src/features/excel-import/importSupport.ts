@@ -12,6 +12,7 @@ import { generateSlug } from '@/lib/utils';
 import { optimizeImage } from '@/lib/imageOptimizer';
 import { validateImageFile } from '@/lib/validateImage';
 import { EXCEL_IMPORT_ADDITIONAL_EXAMPLE_ROWS, EXCEL_IMPORT_PRIMARY_EXAMPLE_ROWS } from '@/components/admin/excelImportTemplateFixtures';
+import { extractZaloQrIdentity } from '@/lib/zaloContactCardImport';
 
 export type ExcelImportMode = 'product' | 'accessory' | 'part' | 'service' | 'customer' | 'supplier' | 'order' | 'repair';
 
@@ -124,7 +125,7 @@ export const MODE_CONFIG: Record<ExcelImportMode, ModeConfig> = {
         collectionName: 'customers',
         nameHeaders: ['Tên KH', 'Tên', 'Tên khách hàng'],
         requiredHeaders: ['Tên KH'],
-        templateHeaders: ['Mã KH', 'Tên KH', 'SĐT', 'Zalo', 'Facebook', 'Kênh liên hệ chính', 'Loại KH', 'Email', 'Địa chỉ', 'Tags', 'Chi tiêu', 'Đơn hàng', 'Sửa chữa', 'Công nợ', 'Ghi chú'],
+        templateHeaders: ['Mã KH', 'Tên KH', 'SĐT', 'Zalo', 'Zalo QR', 'Facebook', 'Kênh liên hệ chính', 'Loại KH', 'Email', 'Địa chỉ', 'Tags', 'Chi tiêu', 'Đơn hàng', 'Sửa chữa', 'Công nợ', 'Ghi chú'],
         exampleRow: EXCEL_IMPORT_PRIMARY_EXAMPLE_ROWS.customer,
         icon: 'customer',
     },
@@ -146,7 +147,7 @@ export const MODE_CONFIG: Record<ExcelImportMode, ModeConfig> = {
         collectionName: 'orders',
         nameHeaders: ['Mã đơn', 'Order ID', 'Mã hóa đơn', 'orderId'],
         requiredHeaders: ['Mã đơn', 'Tên KH', 'Tổng tiền', 'Ngày tạo'],
-        templateHeaders: ['Mã đơn', 'Mã KH', 'Tên KH', 'SĐT', 'Zalo', 'Facebook', 'Email', 'Địa chỉ', 'Sản phẩm', 'Số lượng', 'Đơn giá', 'IMEI/Serial', 'Bảo hành tháng', 'Ngày bắt đầu BH', 'Ngày hết BH', 'Tạm tính', 'Giảm giá', 'Tổng tiền', 'Trạng thái', 'Thanh toán', 'Phương thức', 'Ngày tạo', 'Ngày hoàn thành', 'Ghi chú'],
+        templateHeaders: ['Mã đơn', 'Mã KH', 'Tên KH', 'SĐT', 'Zalo', 'Zalo QR', 'Facebook', 'Email', 'Địa chỉ', 'Sản phẩm', 'Số lượng', 'Đơn giá', 'IMEI/Serial', 'Bảo hành tháng', 'Ngày bắt đầu BH', 'Ngày hết BH', 'Tạm tính', 'Giảm giá', 'Tổng tiền', 'Trạng thái', 'Thanh toán', 'Phương thức', 'Ngày tạo', 'Ngày hoàn thành', 'Ghi chú'],
         exampleRow: EXCEL_IMPORT_PRIMARY_EXAMPLE_ROWS.order,
         icon: 'order',
     },
@@ -157,7 +158,7 @@ export const MODE_CONFIG: Record<ExcelImportMode, ModeConfig> = {
         collectionName: 'repairs',
         nameHeaders: ['Mã phiếu', 'Repair ID', 'Mã sửa chữa', 'repairId'],
         requiredHeaders: ['Mã phiếu', 'Tên KH', 'Thiết bị', 'Lỗi/Bệnh', 'Trạng thái', 'Ngày nhận'],
-        templateHeaders: ['Mã phiếu', 'Mã KH', 'Tên KH', 'SĐT', 'Zalo', 'Facebook', 'Thiết bị', 'IMEI/Serial', 'Mật khẩu', 'Màu máy', 'Lỗi/Bệnh', 'Linh kiện', 'Tiền linh kiện', 'Phí sửa chữa', 'Phí phát sinh', 'Giảm giá', 'Đã cọc', 'Tổng tiền', 'Thanh toán', 'Trạng thái', 'KTV', 'Ngày nhận', 'Ngày hẹn trả', 'Ngày hoàn thành', 'Bảo hành dịch vụ tháng', 'Ngày hết BH dịch vụ', 'Ghi chú kỹ thuật', 'Ghi chú'],
+        templateHeaders: ['Mã phiếu', 'Mã KH', 'Tên KH', 'SĐT', 'Zalo', 'Zalo QR', 'Facebook', 'Thiết bị', 'IMEI/Serial', 'Mật khẩu', 'Màu máy', 'Lỗi/Bệnh', 'Linh kiện', 'Tiền linh kiện', 'Phí sửa chữa', 'Phí phát sinh', 'Giảm giá', 'Đã cọc', 'Tổng tiền', 'Thanh toán', 'Trạng thái', 'KTV', 'Ngày nhận', 'Ngày hẹn trả', 'Ngày hoàn thành', 'Bảo hành dịch vụ tháng', 'Ngày hết BH dịch vụ', 'Ghi chú kỹ thuật', 'Ghi chú'],
         exampleRow: EXCEL_IMPORT_PRIMARY_EXAMPLE_ROWS.repair,
         icon: 'repair',
     },
@@ -207,7 +208,8 @@ export const IMAGE_OTHER_HEADERS = ['Ảnh phụ', 'Images'];
 export const PHONE_HEADERS = ['SĐT', 'sdt', 'phone', 'Phone', 'Số điện thoại'];
 export const CUSTOMER_CODE_HEADERS = ['Mã KH', 'Mã khách hàng', 'Customer ID', 'customerId'];
 export const SUPPLIER_CODE_HEADERS = ['Mã NCC', 'Mã nhà cung cấp', 'Supplier ID', 'supplierId'];
-export const ZALO_HEADERS = ['Zalo', 'zalo'];
+export const ZALO_HEADERS = ['Zalo', 'zalo', 'ZL', 'zl', 'ZALO', 'LH ZALO', 'LH Zalo'];
+export const ZALO_QR_HEADERS = ['Zalo QR', 'Link Zalo', 'Zalo Link', 'QR Zalo', 'Zalo profile', 'Zalo Profile'];
 export const FACEBOOK_HEADERS = ['Facebook', 'facebook', 'Messenger'];
 export const PRIMARY_CONTACT_HEADERS = ['Kênh liên hệ chính', 'Primary Contact', 'primaryContactType'];
 export const OTHER_CONTACT_HEADERS = ['Liên hệ khác', 'Khác', 'Other Contact'];
@@ -260,17 +262,27 @@ export function normalizeImportContactType(value: string): ContactMethodType | u
 }
 
 export function buildImportContactInput(row: ExcelRow, name: string) {
+    const zaloQrRaw = getValue(row, ZALO_QR_HEADERS);
+    const zaloQr = extractZaloQrIdentity(zaloQrRaw);
     return {
         name,
         phone: normalizeImportPhone(getValue(row, PHONE_HEADERS)),
-        zalo: getValue(row, ZALO_HEADERS),
+        zalo: getValue(row, ZALO_HEADERS) || zaloQr?.profileUrl || zaloQrRaw,
         facebook: getValue(row, FACEBOOK_HEADERS),
         email: getValue(row, EMAIL_HEADERS),
         address: getValue(row, ADDRESS_HEADERS),
-        note: getValue(row, NOTE_HEADERS),
+        note: '',
         other: getValue(row, OTHER_CONTACT_HEADERS),
         primaryType: normalizeImportContactType(getValue(row, PRIMARY_CONTACT_HEADERS)),
         source: 'excel' as const,
+        methodMeta: {
+            zalo: {
+                externalId: zaloQr?.externalId,
+                profileUrl: zaloQr?.profileUrl,
+                verified: Boolean(zaloQr),
+                confidence: zaloQr?.confidence,
+            },
+        },
     };
 }
 
@@ -922,7 +934,7 @@ export function columnGuideForHeader(header: string, modeConfig: ModeConfig): Co
         return { ...base, purpose: 'Tên khách hàng.', inputRule: 'Không để trống.', savedTo: 'name' };
     }
     if (normalized === 'sdt') {
-        return { ...base, purpose: 'Số điện thoại liên hệ nếu khách/NCC có cung cấp.', inputRule: 'Có thể để trống nếu có Mã KH/Mã NCC, Zalo, Facebook, email, địa chỉ hoặc ghi chú nhận diện. Nếu nhập thì phải có 9-15 chữ số sau chuẩn hóa.', savedTo: 'phone, primaryPhone, contactMethods[]' };
+        return { ...base, purpose: 'Số điện thoại liên hệ nếu khách/NCC có cung cấp.', inputRule: 'Có thể để trống nếu có Mã KH/Mã NCC, Zalo, Facebook, email, địa chỉ hoặc Liên hệ khác. Nếu nhập thì phải có 9-15 chữ số sau chuẩn hóa.', savedTo: 'phone, primaryPhone, contactMethods[]' };
     }
     if (normalized === 'ma kh') {
         return { ...base, purpose: 'Mã khách hàng từ hệ thống cũ hoặc mã nội bộ mới.', inputRule: 'Nên nhập khi khách không có SĐT để link đơn hàng/phiếu sửa lịch sử ổn định.', acceptedValues: 'KH-CU-0001, KH-ZALO-LAN...', savedTo: 'customers/{customerId}, customer_info.customerId' };
@@ -931,7 +943,10 @@ export function columnGuideForHeader(header: string, modeConfig: ModeConfig): Co
         return { ...base, purpose: 'Mã nhà cung cấp từ hệ thống cũ hoặc mã nội bộ mới.', inputRule: 'Nên nhập để tránh trùng NCC cùng tên. Không dùng để tạo phiếu nhập hàng lịch sử.', acceptedValues: 'NCC-CU-0001, NCC-PISEN...', savedTo: 'suppliers/{supplierId}' };
     }
     if (normalized === 'zalo') {
-        return { ...base, purpose: 'Kênh liên hệ Zalo khi không có hoặc không muốn lưu SĐT.', inputRule: 'Nhập tên Zalo, số Zalo hoặc ghi chú nhận diện đủ rõ.', savedTo: 'contactMethods[type=zalo]' };
+        return { ...base, purpose: 'Kênh liên hệ Zalo khi không có hoặc không muốn lưu SĐT.', inputRule: 'Nhập tên Zalo hoặc số Zalo đủ rõ.', savedTo: 'contactMethods[type=zalo]' };
+    }
+    if (normalized === 'zalo qr' || normalized === 'link zalo' || normalized === 'qr zalo') {
+        return { ...base, purpose: 'Link QR danh thiếp Zalo dùng để xác thực đúng tài khoản Zalo.', inputRule: 'Dán link dạng http://zaloapp.com/qr/p/<mã> nếu có.', acceptedValues: 'http://zaloapp.com/qr/p/quqkt6s37tuw', savedTo: 'contactMethods[type=zalo].externalId/profileUrl' };
     }
     if (normalized === 'facebook') {
         return { ...base, purpose: 'Kênh liên hệ Facebook/Messenger.', inputRule: 'Nhập URL profile/page hoặc tên hiển thị đủ rõ.', savedTo: 'contactMethods[type=facebook]' };

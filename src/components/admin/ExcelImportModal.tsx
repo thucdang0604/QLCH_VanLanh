@@ -16,8 +16,8 @@ import {
     Wrench,
     X,
 } from 'lucide-react';
-import { collection, doc, query, runTransaction, serverTimestamp, where } from 'firebase/firestore';
-import { getDocs } from '@/lib/firestoreLogger';
+import { collection, doc, limit, query, runTransaction, serverTimestamp, where } from 'firebase/firestore';
+import { getDoc, getDocs } from '@/lib/firestoreLogger';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
 import { db } from '@/lib/firebase';
@@ -26,7 +26,7 @@ import { useConfig } from '@/lib/ConfigContext';
 import { PART_CATEGORY_LABEL } from '@/lib/constants';
 import { buildProductCodeFromId, normalizeProductCode } from '@/lib/productCodes';
 import { buildClientDocumentId } from '@/lib/clientDocumentIds';
-import { buildContactMethods, buildContactSearchKeywords, getPrimaryContact, hasDebtSafeContact, hasProfileContact } from '@/lib/contactIdentity';
+import { buildContactMethods, buildContactSearchKeywords, getPrimaryContact, hasDebtSafeContact, hasProfileContact, mergeContactMethods } from '@/lib/contactIdentity';
 import { generateSearchKeywords, generateSlug } from '@/lib/utils';
 import { triggerRevalidate } from '@/lib/revalidate';
 import {
@@ -161,12 +161,44 @@ function formatContactCheckValue(identity: ReturnType<typeof buildCustomerImport
         id,
         identity.phone ? `SĐT ${identity.phone}` : '',
         identity.contactInput.zalo ? `Zalo: ${identity.contactInput.zalo}` : '',
+        identity.contactMethods.find(method => method.type === 'zalo')?.profileUrl ? `Zalo QR: ${identity.contactMethods.find(method => method.type === 'zalo')?.profileUrl}` : '',
         identity.contactInput.facebook ? `Facebook: ${identity.contactInput.facebook}` : '',
         identity.contactInput.email ? `Email: ${identity.contactInput.email}` : '',
         identity.contactInput.address ? `Địa chỉ: ${identity.contactInput.address}` : '',
         identity.contactInput.other ? `Khác: ${identity.contactInput.other}` : '',
-        identity.contactInput.note ? `Ghi chú: ${identity.contactInput.note}` : '',
     ].filter(Boolean).join(' / ');
+}
+
+async function findExistingCustomerDocIdForImport(identity: ReturnType<typeof buildCustomerImportIdentity>): Promise<string> {
+    const directIds = Array.from(new Set([
+        identity.customerId,
+        identity.explicitId,
+        identity.phone,
+    ].filter(Boolean)));
+
+    for (const candidate of directIds) {
+        const snapshot = await getDoc(doc(db, 'customers', candidate));
+        if (snapshot.exists()) return snapshot.id;
+    }
+
+    const keywordCandidates = Array.from(new Set(
+        identity.contactMethods
+            .flatMap(method => [method.externalId, method.profileUrl, method.normalizedValue, method.value])
+            .filter((value): value is string => Boolean(value && value.trim()))
+            .map(value => value.trim().toLowerCase())
+            .filter(value => value.length >= 2)
+    ));
+
+    for (const keyword of keywordCandidates) {
+        const snapshot = await getDocs(query(
+            collection(db, 'customers'),
+            where('searchKeywords', 'array-contains', keyword),
+            limit(1),
+        ));
+        if (!snapshot.empty) return snapshot.docs[0].id;
+    }
+
+    return '';
 }
 
 function parseLegacyDate(row: ExcelRow, headers: string[]): Date | null {
@@ -509,11 +541,11 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
                         if (phoneRaw && !/^\d{9,15}$/.test(phone)) {
                             checks.push(buildCheck('phone', 'SĐT', phoneRaw, 'error', 'SĐT cần có 9-15 chữ số'));
                         } else if (!identity.hasProfileContact) {
-                            checks.push(buildCheck('phone', 'Liên hệ', '', 'error', 'Cần SĐT, Mã KH, Zalo, Facebook, email, địa chỉ hoặc ghi chú nhận diện'));
+                            checks.push(buildCheck('phone', 'Liên hệ', '', 'error', 'Cần SĐT, Mã KH, Zalo, Facebook, email, địa chỉ hoặc Liên hệ khác'));
                         } else if (duplicateTargetIdsInFile.has(identity.customerId)) {
                             checks.push(buildCheck('phone', 'Liên hệ', formatContactCheckValue(identity, identity.customerId), 'error', `Trùng ID khách hàng trong file: ${identity.customerId}`));
                         } else if (existingDocIds.has(identity.customerId)) {
-                            checks.push(buildCheck('phone', 'Liên hệ', formatContactCheckValue(identity, identity.customerId), 'error', `Khách hàng ${identity.customerId} đã tồn tại`));
+                            checks.push(buildCheck('phone', 'Liên hệ', formatContactCheckValue(identity, identity.customerId), 'warning', `Khách hàng ${identity.customerId} đã tồn tại, sẽ cập nhật liên hệ`));
                         } else {
                             checks.push(buildCheck('phone', 'Liên hệ', formatContactCheckValue(identity, identity.customerId), 'ok', `ID sẽ tạo: ${identity.customerId}`));
                         }
@@ -586,7 +618,7 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
                         if (phoneRaw && !/^\d{9,15}$/.test(phone)) {
                             checks.push(buildCheck('phone', 'SĐT', phoneRaw, 'error', 'SĐT cần có 9-15 chữ số'));
                         } else if (!identity.hasProfileContact) {
-                            checks.push(buildCheck('phone', 'Liên hệ', '', 'error', 'Cần SĐT, Mã NCC, Zalo, Facebook, email, địa chỉ hoặc ghi chú nhận diện'));
+                            checks.push(buildCheck('phone', 'Liên hệ', '', 'error', 'Cần SĐT, Mã NCC, Zalo, Facebook, email, địa chỉ hoặc Liên hệ khác'));
                         } else {
                             checks.push(buildCheck('phone', 'Liên hệ', formatContactCheckValue(identity, identity.supplierId), 'ok', 'Liên hệ NCC có thể import'));
                         }
@@ -657,7 +689,7 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
                         } else if (phoneRaw && !/^\d{9,15}$/.test(phone)) {
                             checks.push(buildCheck('phone', 'Khách hàng', [customerName, phoneRaw].filter(Boolean).join(' / '), 'error', 'SĐT khách hàng cần có 9-15 chữ số'));
                         } else if (!identity.hasProfileContact) {
-                            checks.push(buildCheck('phone', 'Khách hàng', customerName, 'error', 'Cần SĐT, Mã KH, Zalo, Facebook, email, địa chỉ hoặc ghi chú nhận diện'));
+                            checks.push(buildCheck('phone', 'Khách hàng', customerName, 'error', 'Cần SĐT, Mã KH, Zalo, Facebook, email, địa chỉ hoặc Liên hệ khác'));
                         } else if (paymentStatus === 'debt' && !identity.hasDebtSafeContact) {
                             checks.push(buildCheck('phone', 'Khách hàng', formatContactCheckValue(identity, identity.customerId), 'error', 'Đơn còn nợ cần kênh liên hệ rõ như SĐT, Zalo, Facebook, email hoặc địa chỉ'));
                         } else {
@@ -747,7 +779,7 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
                         } else if (phoneRaw && !/^\d{9,15}$/.test(phone)) {
                             checks.push(buildCheck('phone', 'Khách hàng', [customerName, phoneRaw].filter(Boolean).join(' / '), 'error', 'SĐT khách hàng cần có 9-15 chữ số'));
                         } else if (!identity.hasProfileContact) {
-                            checks.push(buildCheck('phone', 'Khách hàng', customerName, 'error', 'Cần SĐT, Mã KH, Zalo, Facebook, email, địa chỉ hoặc ghi chú nhận diện'));
+                            checks.push(buildCheck('phone', 'Khách hàng', customerName, 'error', 'Cần SĐT, Mã KH, Zalo, Facebook, email, địa chỉ hoặc Liên hệ khác'));
                         } else if (paymentStatus === 'pay_later' && !identity.hasDebtSafeContact) {
                             checks.push(buildCheck('phone', 'Khách hàng', formatContactCheckValue(identity, identity.customerId), 'error', 'Phiếu sửa trả sau cần kênh liên hệ rõ như SĐT, Zalo, Facebook, email hoặc địa chỉ'));
                         } else {
@@ -1173,45 +1205,81 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
         const totalSpent = getNumber(row.data, ['Chi tiêu', 'Spent', 'Tổng chi tiêu']);
         const totalOrders = getNumber(row.data, ['Đơn hàng', 'Orders', 'Tổng đơn hàng']);
         const totalRepairs = getNumber(row.data, ['Sửa chữa', 'Repairs', 'Tổng sửa chữa']);
-        const customerRef = doc(db, 'customers', identity.customerId);
-        const txRef = totalDebt !== 0 ? doc(db, 'customer_transactions', buildClientDocumentId('CT', identity.customerId)) : null;
+        const existingCustomerId = await findExistingCustomerDocIdForImport(identity);
+        const resolvedCustomerId = existingCustomerId || identity.customerId;
+        const customerRef = doc(db, 'customers', resolvedCustomerId);
+        const txRef = totalDebt !== 0 ? doc(db, 'customer_transactions', buildClientDocumentId('CT', resolvedCustomerId)) : null;
 
         await runTransaction(db, async (transaction) => {
             const snapshot = await transaction.get(customerRef);
             if (snapshot.exists()) {
-                throw new Error(`Khách hàng ${identity.customerId} đã tồn tại.`);
+                const existingData = snapshot.data() as {
+                    name?: string;
+                    phone?: string;
+                    primaryPhone?: string;
+                    contactMethods?: unknown;
+                    tags?: string[];
+                    note?: string;
+                    email?: string;
+                    address?: string;
+                    code?: string;
+                };
+                const contactMethods = mergeContactMethods(existingData.contactMethods, identity.contactMethods);
+                const primaryContact = getPrimaryContact(contactMethods) || identity.primaryContact;
+                transaction.update(customerRef, {
+                    id: resolvedCustomerId,
+                    code: existingData.code || resolvedCustomerId,
+                    phone: identity.phone || existingData.phone || '',
+                    primaryPhone: identity.phone || existingData.primaryPhone || '',
+                    name: name || existingData.name || resolvedCustomerId,
+                    type,
+                    primaryContactType: primaryContact?.type || null,
+                    primaryContactValue: primaryContact?.value || '',
+                    contactMethods,
+                    searchKeywords: buildContactSearchKeywords({ ...identity.contactInput, name: name || existingData.name || resolvedCustomerId }, contactMethods),
+                    email: getValue(row.data, ['Email']) || existingData.email || '',
+                    address: getValue(row.data, ['Địa chỉ', 'Address']) || existingData.address || '',
+                    zalo: getValue(row.data, ZALO_HEADERS),
+                    facebook: getValue(row.data, FACEBOOK_HEADERS),
+                    otherContact: getValue(row.data, OTHER_CONTACT_HEADERS),
+                    tags: Array.from(new Set([...(existingData.tags || []), ...splitList(getValue(row.data, ['Tags', 'Tag']))])),
+                    note: getValue(row.data, ['Ghi chú', 'Note']) || existingData.note || '',
+                    updatedAt: serverTimestamp(),
+                    lastVisit: serverTimestamp(),
+                });
+            } else {
+                transaction.set(customerRef, {
+                    id: resolvedCustomerId,
+                    code: resolvedCustomerId,
+                    phone: identity.phone,
+                    primaryPhone: identity.phone,
+                    name,
+                    type,
+                    primaryContactType: identity.primaryContact?.type || null,
+                    primaryContactValue: identity.primaryContact?.value || '',
+                    contactMethods: identity.contactMethods,
+                    searchKeywords: buildContactSearchKeywords(identity.contactInput, identity.contactMethods),
+                    email: getValue(row.data, ['Email']),
+                    address: getValue(row.data, ['Địa chỉ', 'Address']),
+                    zalo: getValue(row.data, ZALO_HEADERS),
+                    facebook: getValue(row.data, FACEBOOK_HEADERS),
+                    otherContact: getValue(row.data, OTHER_CONTACT_HEADERS),
+                    tags: splitList(getValue(row.data, ['Tags', 'Tag'])),
+                    note: getValue(row.data, ['Ghi chú', 'Note']),
+                    totalSpent,
+                    totalOrders,
+                    totalRepairs,
+                    totalDebt,
+                    createdAt: serverTimestamp(),
+                    updatedAt: serverTimestamp(),
+                    lastVisit: serverTimestamp(),
+                });
             }
-
-            transaction.set(customerRef, {
-                id: identity.customerId,
-                phone: identity.phone,
-                primaryPhone: identity.phone,
-                name,
-                type,
-                primaryContactType: identity.primaryContact?.type || null,
-                primaryContactValue: identity.primaryContact?.value || '',
-                contactMethods: identity.contactMethods,
-                searchKeywords: buildContactSearchKeywords(identity.contactInput, identity.contactMethods),
-                email: getValue(row.data, ['Email']),
-                address: getValue(row.data, ['Địa chỉ', 'Address']),
-                zalo: getValue(row.data, ZALO_HEADERS),
-                facebook: getValue(row.data, FACEBOOK_HEADERS),
-                otherContact: getValue(row.data, OTHER_CONTACT_HEADERS),
-                tags: splitList(getValue(row.data, ['Tags', 'Tag'])),
-                note: getValue(row.data, ['Ghi chú', 'Note']),
-                totalSpent,
-                totalOrders,
-                totalRepairs,
-                totalDebt,
-                createdAt: serverTimestamp(),
-                updatedAt: serverTimestamp(),
-                lastVisit: serverTimestamp(),
-            });
 
             if (txRef) {
                 transaction.set(txRef, {
-                    customerId: identity.customerId,
-                    customerName: name || identity.customerId,
+                    customerId: resolvedCustomerId,
+                    customerName: name || resolvedCustomerId,
                     type: totalDebt > 0 ? 'DEBT' : 'PAYMENT',
                     amount: Math.abs(totalDebt),
                     paymentMethod: 'INITIAL_EXCEL_IMPORT',
@@ -1304,8 +1372,10 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
         const createdAt = parseLegacyDate(row.data, ['Ngày tạo', 'Created At']) || new Date();
         const completedAt = parseLegacyDate(row.data, ['Ngày hoàn thành', 'Completed At']);
         const status = normalizeOrderStatus(getValue(row.data, ['Trạng thái', 'Status']));
+        const existingCustomerId = await findExistingCustomerDocIdForImport(identity);
+        const resolvedCustomerId = existingCustomerId || identity.customerId;
         const orderRef = doc(db, 'orders', orderId);
-        const customerRef = doc(db, 'customers', identity.customerId);
+        const customerRef = doc(db, 'customers', resolvedCustomerId);
         const txRef = paymentStatus === 'debt' ? doc(db, 'customer_transactions', buildClientDocumentId('CT', orderId)) : null;
         if (paymentStatus === 'debt' && !identity.hasDebtSafeContact) throw new Error('Đơn hàng còn nợ cần kênh liên hệ rõ.');
 
@@ -1316,27 +1386,29 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
                 throw new Error(`Đơn hàng ${orderId} đã tồn tại.`);
             }
 
-            const customerData = customerSnapshot.data() as { totalSpent?: number; totalOrders?: number; totalDebt?: number } | undefined;
+            const customerData = customerSnapshot.data() as { totalSpent?: number; totalOrders?: number; totalDebt?: number; contactMethods?: unknown } | undefined;
+            const contactMethods = mergeContactMethods(customerData?.contactMethods, identity.contactMethods);
+            const primaryContact = getPrimaryContact(contactMethods) || identity.primaryContact;
             transaction.set(orderRef, {
                 id: orderId,
                 customer_info: {
-                    customerId: identity.customerId,
+                    customerId: resolvedCustomerId,
                     name: customerName,
                     phone: identity.phone,
-                    primaryContactType: identity.primaryContact?.type || null,
-                    primaryContactValue: identity.primaryContact?.value || '',
-                    contactMethods: identity.contactMethods,
+                    primaryContactType: primaryContact?.type || null,
+                    primaryContactValue: primaryContact?.value || '',
+                    contactMethods,
                     email: getValue(row.data, EMAIL_HEADERS),
                     address: getValue(row.data, ADDRESS_HEADERS),
                     note: getValue(row.data, NOTE_HEADERS),
                 },
                 customer: {
-                    id: identity.customerId,
+                    id: resolvedCustomerId,
                     name: customerName,
                     phone: identity.phone,
-                    primaryContactType: identity.primaryContact?.type || null,
-                    primaryContactValue: identity.primaryContact?.value || '',
-                    contactMethods: identity.contactMethods,
+                    primaryContactType: primaryContact?.type || null,
+                    primaryContactValue: primaryContact?.value || '',
+                    contactMethods,
                     email: getValue(row.data, EMAIL_HEADERS),
                     address: getValue(row.data, ADDRESS_HEADERS),
                     note: getValue(row.data, NOTE_HEADERS),
@@ -1363,22 +1435,25 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
             });
 
             transaction.set(customerRef, {
-                id: identity.customerId,
+                id: resolvedCustomerId,
+                code: resolvedCustomerId,
                 phone: identity.phone,
                 primaryPhone: identity.phone,
-                name: customerName || identity.customerId,
-                primaryContactType: identity.primaryContact?.type || null,
-                primaryContactValue: identity.primaryContact?.value || '',
-                contactMethods: identity.contactMethods,
-                searchKeywords: buildContactSearchKeywords(identity.contactInput, identity.contactMethods),
+                name: customerName || resolvedCustomerId,
+                primaryContactType: primaryContact?.type || null,
+                primaryContactValue: primaryContact?.value || '',
+                contactMethods,
+                searchKeywords: buildContactSearchKeywords(identity.contactInput, contactMethods),
                 email: getValue(row.data, EMAIL_HEADERS),
                 address: getValue(row.data, ADDRESS_HEADERS),
                 zalo: getValue(row.data, ZALO_HEADERS),
                 facebook: getValue(row.data, FACEBOOK_HEADERS),
                 otherContact: getValue(row.data, OTHER_CONTACT_HEADERS),
-                totalSpent: (customerData?.totalSpent || 0) + (paymentStatus === 'paid' ? total : 0),
-                totalOrders: (customerData?.totalOrders || 0) + 1,
-                totalDebt: (customerData?.totalDebt || 0) + (paymentStatus === 'debt' ? total : 0),
+                ...(customerSnapshot.exists() ? {} : {
+                    totalSpent: paymentStatus === 'paid' ? total : 0,
+                    totalOrders: 1,
+                    totalDebt: paymentStatus === 'debt' ? total : 0,
+                }),
                 lastOrderDate: completedAt || createdAt,
                 lastVisit: completedAt || createdAt,
                 updatedAt: serverTimestamp(),
@@ -1387,8 +1462,8 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
 
             if (txRef) {
                 transaction.set(txRef, {
-                    customerId: identity.customerId,
-                    customerName: customerName || identity.customerId,
+                    customerId: resolvedCustomerId,
+                    customerName: customerName || resolvedCustomerId,
                     type: 'DEBT',
                     amount: total,
                     orderIds: [orderId],
@@ -1425,8 +1500,10 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
         const amount = getNumber(row.data, ['Tổng tiền', 'Total']) || Math.max(0, partsCost + laborCost + additionalFees - discountAmount);
         const paymentStatus = normalizeRepairPaymentStatus(getValue(row.data, ['Thanh toán', 'Payment Status']));
         const status = getValue(row.data, ['Trạng thái', 'Status']);
+        const existingCustomerId = await findExistingCustomerDocIdForImport(identity);
+        const resolvedCustomerId = existingCustomerId || identity.customerId;
         const repairRef = doc(db, 'repairs', repairId);
-        const customerRef = doc(db, 'customers', identity.customerId);
+        const customerRef = doc(db, 'customers', resolvedCustomerId);
         const txRef = paymentStatus === 'pay_later' ? doc(db, 'customer_transactions', buildClientDocumentId('CT', repairId)) : null;
         if (paymentStatus === 'pay_later' && !identity.hasDebtSafeContact) throw new Error('Phiếu sửa trả sau cần kênh liên hệ rõ.');
 
@@ -1437,16 +1514,18 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
                 throw new Error(`Phiếu sửa ${repairId} đã tồn tại.`);
             }
 
-            const customerData = customerSnapshot.data() as { totalSpent?: number; totalRepairs?: number; totalDebt?: number } | undefined;
+            const customerData = customerSnapshot.data() as { contactMethods?: unknown } | undefined;
+            const contactMethods = mergeContactMethods(customerData?.contactMethods, identity.contactMethods);
+            const primaryContact = getPrimaryContact(contactMethods) || identity.primaryContact;
             transaction.set(repairRef, {
                 id: repairId,
                 customer: {
-                    id: identity.customerId,
+                    id: resolvedCustomerId,
                     name: customerName,
                     phone: identity.phone,
-                    primaryContactType: identity.primaryContact?.type || null,
-                    primaryContactValue: identity.primaryContact?.value || '',
-                    contactMethods: identity.contactMethods,
+                    primaryContactType: primaryContact?.type || null,
+                    primaryContactValue: primaryContact?.value || '',
+                    contactMethods,
                 },
                 deviceInfo: {
                     model: getValue(row.data, ['Thiết bị', 'Dòng máy', 'Device']),
@@ -1512,22 +1591,25 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
             });
 
             transaction.set(customerRef, {
-                id: identity.customerId,
+                id: resolvedCustomerId,
+                code: resolvedCustomerId,
                 phone: identity.phone,
                 primaryPhone: identity.phone,
-                name: customerName || identity.customerId,
-                primaryContactType: identity.primaryContact?.type || null,
-                primaryContactValue: identity.primaryContact?.value || '',
-                contactMethods: identity.contactMethods,
-                searchKeywords: buildContactSearchKeywords(identity.contactInput, identity.contactMethods),
+                name: customerName || resolvedCustomerId,
+                primaryContactType: primaryContact?.type || null,
+                primaryContactValue: primaryContact?.value || '',
+                contactMethods,
+                searchKeywords: buildContactSearchKeywords(identity.contactInput, contactMethods),
                 email: getValue(row.data, EMAIL_HEADERS),
                 address: getValue(row.data, ADDRESS_HEADERS),
                 zalo: getValue(row.data, ZALO_HEADERS),
                 facebook: getValue(row.data, FACEBOOK_HEADERS),
                 otherContact: getValue(row.data, OTHER_CONTACT_HEADERS),
-                totalSpent: (customerData?.totalSpent || 0) + (paymentStatus === 'paid' ? amount : 0),
-                totalRepairs: (customerData?.totalRepairs || 0) + 1,
-                totalDebt: (customerData?.totalDebt || 0) + (paymentStatus === 'pay_later' ? Math.max(0, amount - depositAmount) : 0),
+                ...(customerSnapshot.exists() ? {} : {
+                    totalSpent: paymentStatus === 'paid' ? amount : 0,
+                    totalRepairs: 1,
+                    totalDebt: paymentStatus === 'pay_later' ? Math.max(0, amount - depositAmount) : 0,
+                }),
                 lastVisit: completedAt || receivedAt,
                 updatedAt: serverTimestamp(),
                 ...(customerSnapshot.exists() ? {} : { createdAt: serverTimestamp(), type: 'retail' }),
@@ -1535,8 +1617,8 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
 
             if (txRef) {
                 transaction.set(txRef, {
-                    customerId: identity.customerId,
-                    customerName: customerName || identity.customerId,
+                    customerId: resolvedCustomerId,
+                    customerName: customerName || resolvedCustomerId,
                     type: 'DEBT',
                     amount: Math.max(0, amount - depositAmount),
                     paymentMethod: 'LEGACY_REPAIR_IMPORT',

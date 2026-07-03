@@ -7,6 +7,7 @@ import {
     buildContactlessDocumentBaseId,
     hasDebtSafeContact,
     hasProfileContact,
+    mergeContactMethods,
     normalizeContactValue,
 } from './contactIdentity';
 
@@ -30,6 +31,30 @@ test('builds contact methods with a primary non-phone contact', () => {
     assert.equal(methods[0].isPrimary, true);
     assert.equal(hasProfileContact(methods), true);
     assert.equal(hasDebtSafeContact(methods), true);
+});
+
+test('omits undefined contact metadata before Firestore writes', () => {
+    const methods = buildContactMethods({
+        name: 'Khach moi',
+        phone: '0987654321',
+        zalo: 'Khach Zalo',
+        primaryType: 'phone',
+        source: 'pos',
+        methodMeta: {
+            zalo: {
+                externalId: undefined,
+                profileUrl: undefined,
+                verified: undefined,
+            },
+        },
+    });
+    const merged = mergeContactMethods([], methods);
+    const json = JSON.parse(JSON.stringify(merged));
+
+    assert.deepEqual(merged, json);
+    assert.equal(Object.prototype.hasOwnProperty.call(merged[1], 'externalId'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(merged[1], 'profileUrl'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(merged[1], 'verified'), false);
 });
 
 test('does not treat note-only profiles as debt-safe contact', () => {

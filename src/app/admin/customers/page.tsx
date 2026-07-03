@@ -13,7 +13,7 @@ import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 import { TierConfig } from '@/lib/customerTiers';
 import type { Customer } from '@/lib/types';
-import { buildContactMethods, buildContactSearchKeywords, getPrimaryContact } from '@/lib/contactIdentity';
+import { buildContactMethods, buildContactSearchKeywords, getPrimaryContact, mergeContactMethods, normalizeContactValue } from '@/lib/contactIdentity';
 import { reserveCustomerDocumentId } from '@/lib/customerDocumentIds';
 import { normalizeVietnamPhone } from '@/lib/phone';
 import { generateSearchKeywords } from '@/lib/utils';
@@ -34,6 +34,52 @@ function firstContactValue(methods: ContactMethod[] | undefined, type: ContactMe
 function customerContactLabel(customer: Customer): string {
     const primary = customer.contactMethods?.find(method => method.isPrimary) || customer.contactMethods?.[0];
     return customer.phone || customer.primaryContactValue || primary?.value || customer.id;
+}
+
+function normalizeSocialContactHref(type: 'zalo' | 'facebook', value: string): string {
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+    if (/^https?:\/\//i.test(trimmed)) return trimmed;
+
+    const withoutProtocol = trimmed.replace(/^www\./i, '');
+    if (type === 'zalo') {
+        if (/^(zalo\.me|zaloapp\.com)\//i.test(withoutProtocol)) return `https://${withoutProtocol}`;
+        const digits = trimmed.replace(/[^0-9]/g, '');
+        return digits.length >= 9 ? `https://zalo.me/${digits}` : '';
+    }
+
+    if (/^(facebook\.com|fb\.com|m\.facebook\.com)\//i.test(withoutProtocol)) return `https://${withoutProtocol}`;
+    return `https://www.facebook.com/${encodeURIComponent(trimmed)}`;
+}
+
+function customerSocialLinks(customer: Customer): Array<{ type: 'zalo' | 'facebook'; label: string; href: string; value: string }> {
+    return (['zalo', 'facebook'] as const)
+        .map(type => {
+            const value = firstContactValue(customer.contactMethods, type);
+            return {
+                type,
+                label: type === 'zalo' ? 'Zalo' : 'Facebook',
+                href: normalizeSocialContactHref(type, value),
+                value,
+            };
+        })
+        .filter(link => Boolean(link.value));
+}
+
+const CUSTOMER_FORM_CONTACT_TYPES = new Set<ContactMethod['type']>(['phone', 'zalo', 'facebook', 'email', 'address', 'note', 'other']);
+
+function contactMethodKey(method: ContactMethod): string {
+    const externalId = String(method.externalId || '').trim().toLowerCase();
+    if (externalId) return `${method.type}:external:${externalId}`;
+    const normalizedValue = String(method.normalizedValue || normalizeContactValue(method.type, method.value || '')).trim();
+    return `${method.type}:value:${normalizedValue}`;
+}
+
+function syncCustomerFormContactMethods(existing: unknown, incoming: ContactMethod[]): ContactMethod[] {
+    const incomingKeys = new Set(incoming.map(contactMethodKey));
+    return mergeContactMethods(existing, incoming).filter(method =>
+        !CUSTOMER_FORM_CONTACT_TYPES.has(method.type) || incomingKeys.has(contactMethodKey(method))
+    );
 }
 
 export default function CustomersPage() {
@@ -207,10 +253,26 @@ export default function CustomersPage() {
             other: data.otherContact,
             primaryType: data.primaryContactType,
             source: 'manual' as const,
+            methodMeta: {
+                zalo: {
+                    source: data.zaloExternalId ? 'zalo_contact_card' as const : 'manual' as const,
+                    externalId: data.zaloExternalId,
+                    profileUrl: data.zaloProfileUrl,
+                    verified: Boolean(data.zaloExternalId),
+                    confidence: data.zaloExternalId ? 'high' as const : undefined,
+                },
+            },
         };
-        const contactMethods = buildContactMethods(contactInput);
+        const contactMethods = syncCustomerFormContactMethods(editingCustomer?.contactMethods, buildContactMethods(contactInput));
         const primaryContact = getPrimaryContact(contactMethods);
         const normalizedPhone = data.phone ? normalizeVietnamPhone(data.phone) : null;
+        const submittedPhone = normalizedPhone?.local || data.phone || '';
+        const existingPhone = editingCustomer?.phone
+            ? (normalizeVietnamPhone(editingCustomer.phone)?.local || editingCustomer.phone)
+            : '';
+        if (editingCustomer && existingPhone && submittedPhone !== existingPhone) {
+            throw new Error('Khách hàng đã có SĐT nên không thể thay đổi SĐT. Hãy tạo hồ sơ khác nếu đây là người khác.');
+        }
         const customerId = editingCustomer?.id || await reserveCustomerDocumentId({
             name: data.name,
             phone: data.phone,
@@ -228,10 +290,14 @@ export default function CustomersPage() {
         if (editingCustomer) {
             // Update
             await updateDoc(ref, {
+                id: customerId,
+                customerId,
+                code: editingCustomer.code || customerId,
+                legacyPhoneId: submittedPhone,
                 name: data.name,
                 type: data.type,
-                phone: normalizedPhone?.local || data.phone || '',
-                primaryPhone: normalizedPhone?.local || '',
+                phone: submittedPhone,
+                primaryPhone: submittedPhone,
                 primaryContactType: primaryContact?.type || null,
                 primaryContactValue: primaryContact?.value || '',
                 contactMethods,
@@ -251,10 +317,12 @@ export default function CustomersPage() {
             }
             // Create
             await setDoc(ref, {
+                id: customerId,
+                customerId,
                 code: customerId,
-                legacyPhoneId: normalizedPhone?.local || '',
-                phone: normalizedPhone?.local || data.phone || '',
-                primaryPhone: normalizedPhone?.local || '',
+                legacyPhoneId: submittedPhone,
+                phone: submittedPhone,
+                primaryPhone: submittedPhone,
                 name: data.name,
                 type: data.type,
                 primaryContactType: primaryContact?.type || null,
@@ -329,16 +397,16 @@ export default function CustomersPage() {
             {/* Page Header */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                    <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
                         <Users className="text-orange-500" /> Quản lý khách hàng (CRM)
                     </h1>
                     <p className="text-gray-500 text-sm mt-0.5">Danh sách, phân loại, tags và lịch sử giao dịch</p>
                 </div>
                 <div className="flex gap-2">
-                    <button onClick={handleExportExcel} className="flex items-center gap-2 bg-green-50 text-green-700 px-4 py-2 rounded-xl hover:bg-green-100 font-medium text-sm transition-colors border border-green-200">
+                    <button onClick={handleExportExcel} className="flex items-center gap-2 bg-green-50 text-green-700 px-3 py-1.5 text-xs rounded-xl hover:bg-green-100 font-medium text-sm transition-colors border border-green-200">
                         <Download size={18} /> Xuất Excel
                     </button>
-                    <button onClick={openAddModal} className="flex items-center gap-2 bg-orange-500 text-white px-4 py-2 rounded-xl hover:bg-orange-600 font-medium text-sm transition-colors">
+                    <button onClick={openAddModal} className="flex items-center gap-2 bg-orange-500 text-white px-3 py-1.5 text-xs rounded-xl hover:bg-orange-600 font-medium text-sm transition-colors">
                         <Plus size={18} /> Thêm khách hàng
                     </button>
                 </div>
@@ -346,40 +414,40 @@ export default function CustomersPage() {
 
             {/* Stats */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <div className="bg-white rounded-xl border p-4 flex items-center gap-4">
+                <div className="bg-white rounded-xl border p-3 flex items-center gap-4">
                     <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 shrink-0">
                         <Users size={20} />
                     </div>
                     <div>
                         <p className="text-xs text-gray-500">Hiển thị</p>
-                        <p className="text-xl font-bold text-gray-800">{stats.totalLoaded}</p>
+                        <p className="text-lg font-bold text-gray-800">{stats.totalLoaded}</p>
                     </div>
                 </div>
-                <div className="bg-white rounded-xl border p-4 flex items-center gap-4">
+                <div className="bg-white rounded-xl border p-3 flex items-center gap-4">
                     <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center text-green-600 shrink-0">
                         <TrendingUp size={20} />
                     </div>
                     <div>
                         <p className="text-xs text-gray-500">Khách lẻ</p>
-                        <p className="text-xl font-bold text-gray-800">{stats.retail}</p>
+                        <p className="text-lg font-bold text-gray-800">{stats.retail}</p>
                     </div>
                 </div>
-                <div className="bg-white rounded-xl border p-4 flex items-center gap-4">
+                <div className="bg-white rounded-xl border p-3 flex items-center gap-4">
                     <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 shrink-0">
                         <Star size={20} />
                     </div>
                     <div>
                         <p className="text-xs text-gray-500">Khách sỉ / VIP</p>
-                        <p className="text-xl font-bold text-gray-800">{stats.wholesale}</p>
+                        <p className="text-lg font-bold text-gray-800">{stats.wholesale}</p>
                     </div>
                 </div>
-                <div className="bg-white rounded-xl border p-4 flex items-center gap-4">
+                <div className="bg-white rounded-xl border p-3 flex items-center gap-4">
                     <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 shrink-0">
                         <Filter size={20} />
                     </div>
                     <div>
                         <p className="text-xs text-gray-500">Thẻ (Tags)</p>
-                        <p className="text-xl font-bold text-gray-800">{availableTags.length}</p>
+                        <p className="text-lg font-bold text-gray-800">{availableTags.length}</p>
                     </div>
                 </div>
             </div>
@@ -387,22 +455,22 @@ export default function CustomersPage() {
             {/* Filters */}
             <div className="flex flex-col md:flex-row gap-4">
                 <div className="flex-1 relative">
-                    <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                     <input
                         type="text"
                         placeholder="Tìm SĐT, tên, Zalo, Facebook hoặc Tag..."
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        className="w-full h-11 pl-10 pr-4 border rounded-lg focus:border-orange-500 focus:outline-none"
+                        className="w-full h-8 text-sm pl-8 pr-3 border rounded-lg focus:border-orange-500 focus:outline-none"
                     />
                 </div>
                 {searchQuery.trim().length > 0 && filteredCustomers.length === 0 && (
                     <button 
                         onClick={searchInDatabase}
                         disabled={isSearchingDB}
-                        className="h-11 px-4 bg-orange-100 text-orange-600 rounded-lg hover:bg-orange-200 transition-colors whitespace-nowrap flex items-center gap-2 font-medium"
+                        className="h-8 px-3 text-sm bg-orange-100 text-orange-600 rounded-lg hover:bg-orange-200 transition-colors whitespace-nowrap flex items-center gap-2 font-medium"
                     >
-                        {isSearchingDB ? <Loader2 className="animate-spin" size={18} /> : <Search size={18} />}
+                        {isSearchingDB ? <Loader2 className="animate-spin" size={18} /> : <Search size={14} />}
                         Tìm trên Server
                     </button>
                 )}
@@ -410,7 +478,7 @@ export default function CustomersPage() {
                     title="Chọn loại khách hàng"
                     value={typeFilter}
                     onChange={(e) => setTypeFilter(e.target.value)}
-                    className="w-full md:w-48 h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none bg-white"
+                    className="w-full md:w-48 h-8 text-sm px-4 border rounded-lg focus:border-orange-500 focus:outline-none bg-white"
                 >
                     <option value="">Tất cả loại KH</option>
                     <option value="retail">Khách lẻ</option>
@@ -418,7 +486,7 @@ export default function CustomersPage() {
                 </select>
                 <button
                     onClick={() => setHasDebtFilter(!hasDebtFilter)}
-                    className={`h-11 px-4 rounded-lg font-medium transition-colors border whitespace-nowrap flex items-center justify-center ${hasDebtFilter ? 'bg-red-50 text-red-600 border-red-200' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                    className={`h-8 px-3 text-sm rounded-lg font-medium transition-colors border whitespace-nowrap flex items-center justify-center ${hasDebtFilter ? 'bg-red-50 text-red-600 border-red-200' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
                 >
                     Khách có nợ {hasDebtFilter ? '✅' : ''}
                 </button>
@@ -448,6 +516,7 @@ export default function CustomersPage() {
                                 </tr>
                             ) : paginatedData.map((customer) => {
                                 const tier = calculateTier(customer.totalSpent || 0);
+                                const socialLinks = customerSocialLinks(customer);
                                 return (
                                 <tr key={customer.id} className="hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => setSelectedCustomer(customer)}>
                                     <td className="px-6 py-4 align-top">
@@ -455,6 +524,35 @@ export default function CustomersPage() {
                                             {customer.name || 'Khách lẻ'}
                                         </p>
                                         <p className="text-xs text-gray-500 font-mono mt-0.5">{customerContactLabel(customer)}</p>
+                                        {socialLinks.length > 0 && (
+                                            <div className="mt-2 flex flex-wrap gap-1.5">
+                                                {socialLinks.map(link => link.href ? (
+                                                    <a
+                                                        key={link.type}
+                                                        href={link.href}
+                                                        target="_blank"
+                                                        rel="noreferrer"
+                                                        onClick={event => event.stopPropagation()}
+                                                        className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-semibold transition-colors ${link.type === 'zalo'
+                                                            ? 'border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100'
+                                                            : 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
+                                                            }`}
+                                                    >
+                                                        {link.label}
+                                                    </a>
+                                                ) : (
+                                                    <span
+                                                        key={link.type}
+                                                        className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-semibold ${link.type === 'zalo'
+                                                            ? 'border-sky-200 bg-sky-50 text-sky-700'
+                                                            : 'border-blue-200 bg-blue-50 text-blue-700'
+                                                            }`}
+                                                    >
+                                                        {link.label}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        )}
                                         {customer.tags && customer.tags.length > 0 && (
                                             <div className="mt-2 flex flex-wrap gap-1">
                                                 {customer.tags.map(tag => (
@@ -538,7 +636,7 @@ export default function CustomersPage() {
                     <div className="p-4 border-t border-gray-100 flex justify-center">
                         <button 
                             onClick={loadMoreData}
-                            className="px-6 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-lg transition-colors flex items-center gap-2"
+                            className="px-4 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium rounded-lg transition-colors flex items-center gap-2"
                         >
                             Tải thêm danh sách cũ
                         </button>
