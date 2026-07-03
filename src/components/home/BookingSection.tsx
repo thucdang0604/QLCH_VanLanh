@@ -47,9 +47,14 @@ const timeSlotLabels: Record<string, string> = {
     evening: 'Tối (17h - 21h)',
 };
 
-export default function BookingSection() {
+interface BookingSectionProps {
+    variant?: 'section' | 'modal';
+}
+
+export default function BookingSection({ variant = 'section' }: BookingSectionProps) {
     const { config, formatHotline } = useConfig();
     const branches = config.store_branches || [];
+    const isModal = variant === 'modal';
 
     // View Mode: 'booking' or 'tracking'
     const [viewMode, setViewMode] = useState<'booking' | 'tracking'>('booking');
@@ -223,18 +228,22 @@ export default function BookingSection() {
     };
 
     return (
-        <section id="booking-section" className="py-2">
+        <section id={isModal ? undefined : 'booking-section'} className={isModal ? 'py-0' : 'hidden py-2 lg:block'}>
             {/* Toast Notification */}
             {toast && <Toast message={toast} onClose={() => setToast(null)} />}
 
-            <div className="max-w-[1200px] mx-auto px-2 md:px-4">
-                <div className="rounded-xl shadow-lg overflow-hidden px-6 py-12 relative min-h-[600px] transition-all perspective-[1000px]" style={{ backgroundColor: 'var(--outer-bg, #1a1a2e)' }}>
+            <div className={isModal ? 'px-0' : 'mx-auto max-w-[1200px] px-2 md:px-4'}>
+                <div
+                    className={`relative overflow-hidden rounded-xl shadow-lg transition-all perspective-[1000px] ${isModal ? 'max-h-[calc(100dvh-120px)] overflow-y-auto px-4 py-5' : 'px-6 py-7 lg:px-8 lg:py-8'}`}
+                    style={{ backgroundColor: 'var(--outer-bg, #1a1a2e)' }}
+                >
                     
 
                     {/* Top Right Toggle Button */}
                     <button
+                        type="button"
                         onClick={handleToggle}
-                        className="absolute top-6 right-6 z-10 flex items-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-full backdrop-blur-sm transition-all text-sm font-medium border border-white/10 hover:scale-105 active:scale-95"
+                        className={`absolute z-10 flex items-center gap-2 rounded-full border border-white/10 bg-white/10 font-medium text-white backdrop-blur-sm transition-all hover:scale-105 hover:bg-white/20 active:scale-95 ${isModal ? 'right-4 top-4 px-3 py-1.5 text-xs' : 'right-6 top-6 px-4 py-2 text-sm'}`}
                     >
                         {viewMode === 'booking' ? (
                             <>
@@ -255,17 +264,17 @@ export default function BookingSection() {
                     >
 
                         {/* Title Section - Updates based on mode */}
-                        <div className="text-center mb-8">
-                            <div className="inline-flex items-center gap-2 bg-copper/20 text-copper px-4 py-2 rounded-full mb-4">
+                        <div className={isModal ? 'mb-5 pr-20 text-left' : 'mb-6 text-center'}>
+                            <div className={`inline-flex items-center gap-2 rounded-full bg-copper/20 text-copper ${isModal ? 'mb-3 px-3 py-1.5' : 'mb-3 px-4 py-2'}`}>
                                 {viewMode === 'booking' ? <CalendarClock size={18} /> : <History size={18} />}
                                 <span className="text-sm font-medium">
                                     {viewMode === 'booking' ? 'Đặt lịch online' : 'Tra cứu lịch hẹn'}
                                 </span>
                             </div>
-                            <h2 className="text-3xl font-bold text-white mb-2">
+                            <h2 className={isModal ? 'mb-1 text-xl font-bold text-white' : 'mb-2 text-2xl font-bold text-white lg:text-3xl'}>
                                 {viewMode === 'booking' ? 'ĐẶT LỊCH SỬA CHỮA' : 'KIỂM TRA LỊCH HẸN'}
                             </h2>
-                            <p className="text-gray-400">
+                            <p className={isModal ? 'text-sm text-gray-400' : 'text-sm text-gray-400 lg:text-base'}>
                                 {viewMode === 'booking'
                                     ? 'Vui lòng nhập thông tin, chúng tôi sẽ liên hệ xác nhận'
                                     : 'Nhập số điện thoại để xem trạng thái lịch hẹn của bạn'}
@@ -274,7 +283,7 @@ export default function BookingSection() {
 
                         {/* ============ BOOKING FORM ============ */}
                         {viewMode === 'booking' && (
-                            <form onSubmit={handleSubmitBooking} className="space-y-4 animate-[fadeIn_0.3s_ease]">
+                            <form onSubmit={handleSubmitBooking} className="space-y-3 animate-[fadeIn_0.3s_ease]">
                                 {/* Name & Phone */}
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                     <div className="relative">
@@ -284,7 +293,7 @@ export default function BookingSection() {
                                             placeholder="Họ và tên *"
                                             value={formData.fullName}
                                             onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
-                                            className="w-full pl-12 pr-4 py-3.5 bg-dark-light border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-copper transition-colors"
+                                            className="w-full rounded-xl border border-gray-700 bg-dark-light py-3 pl-12 pr-4 text-white placeholder-gray-500 transition-colors focus:border-copper focus:outline-none"
                                             required
                                         />
                                     </div>
@@ -295,7 +304,7 @@ export default function BookingSection() {
                                             placeholder="Số điện thoại *"
                                             value={formData.phone}
                                             onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                                            className="w-full pl-12 pr-4 py-3.5 bg-dark-light border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-copper transition-colors"
+                                            className="w-full rounded-xl border border-gray-700 bg-dark-light py-3 pl-12 pr-4 text-white placeholder-gray-500 transition-colors focus:border-copper focus:outline-none"
                                             required
                                         />
                                     </div>
@@ -309,7 +318,7 @@ export default function BookingSection() {
                                             value={formData.date}
                                             onChange={(e) => setFormData({ ...formData, date: e.target.value })}
                                             aria-label="Chọn ngày hẹn"
-                                            className="w-full pl-12 pr-4 py-3.5 bg-dark-light border border-gray-700 rounded-xl text-white appearance-none focus:outline-none focus:border-copper transition-colors"
+                                            className="w-full appearance-none rounded-xl border border-gray-700 bg-dark-light py-3 pl-12 pr-4 text-white transition-colors focus:border-copper focus:outline-none"
                                             required
                                         >
                                             <option value="" className="text-gray-500">Chọn ngày *</option>
@@ -324,7 +333,7 @@ export default function BookingSection() {
                                         value={formData.store}
                                         onChange={(e) => setFormData({ ...formData, store: e.target.value })}
                                         aria-label="Chọn chi nhánh"
-                                        className="w-full px-4 py-3.5 bg-dark-light border border-gray-700 rounded-xl text-white appearance-none focus:outline-none focus:border-copper transition-colors"
+                                        className="w-full appearance-none rounded-xl border border-gray-700 bg-dark-light px-4 py-3 text-white transition-colors focus:border-copper focus:outline-none"
                                     >
                                         {branches.map((branch) => (
                                             <option key={branch.id} value={branch.id}>
@@ -336,7 +345,7 @@ export default function BookingSection() {
 
                                 {/* Time Slot */}
                                 <div>
-                                    <label className="text-sm text-gray-400 mb-3 flex items-center gap-2">
+                                    <label className="mb-2 flex items-center gap-2 text-sm text-gray-400">
                                         <Clock size={14} />
                                         Chọn buổi *
                                     </label>
@@ -346,7 +355,7 @@ export default function BookingSection() {
                                                 key={slot.value}
                                                 type="button"
                                                 onClick={() => setFormData({ ...formData, timeSlot: slot.value })}
-                                                className={`py-3 rounded-xl border text-center transition-all ${formData.timeSlot === slot.value
+                                                className={`rounded-xl border py-2.5 text-center transition-all ${formData.timeSlot === slot.value
                                                     ? 'border-copper bg-copper/20 text-copper'
                                                     : 'border-gray-700 text-gray-400 hover:border-gray-500'
                                                     }`}
@@ -362,7 +371,7 @@ export default function BookingSection() {
                                 <button
                                     type="submit"
                                     disabled={isSubmitting}
-                                    className="w-full py-4 bg-gradient-to-r from-copper to-copper-dark text-white font-bold text-lg rounded-xl hover:opacity-90 transition-opacity disabled:opacity-50 shadow-lg shadow-copper/25 flex items-center justify-center gap-2"
+                                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-copper to-copper-dark py-3.5 text-base font-bold text-white shadow-lg shadow-copper/25 transition-opacity hover:opacity-90 disabled:opacity-50 lg:text-lg"
                                 >
                                     {isSubmitting ? (
                                         <>
@@ -388,7 +397,7 @@ export default function BookingSection() {
                                         placeholder="Nhập số điện thoại của bạn..."
                                         value={trackPhone}
                                         onChange={(e) => setTrackPhone(e.target.value)}
-                                        className="w-full pl-6 pr-32 py-4 bg-dark-light border border-gray-700 rounded-xl text-white text-lg placeholder-gray-500 focus:outline-none focus:border-copper transition-colors"
+                                        className="w-full rounded-xl border border-gray-700 bg-dark-light py-3.5 pl-5 pr-28 text-base text-white placeholder-gray-500 transition-colors focus:border-copper focus:outline-none lg:text-lg"
                                     />
                                     <button
                                         type="submit"
@@ -449,9 +458,9 @@ export default function BookingSection() {
                         )}
 
                         {/* Store Info Footer (Always Visible) */}
-                        <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-gray-400 pt-8 border-t border-gray-800">
+                        <div className={`${isModal ? 'mt-5 pt-5' : 'mt-6 pt-6'} grid grid-cols-1 gap-3 border-t border-gray-800 text-sm text-gray-400 sm:grid-cols-2`}>
                             {branches.map((branch) => (
-                                <div key={branch.id} className="flex items-start gap-3 bg-dark-light p-4 rounded-xl">
+                                <div key={branch.id} className="flex items-start gap-3 rounded-xl bg-dark-light p-3.5">
                                     <div className="w-2 h-2 bg-green-400 rounded-full mt-1.5 flex-shrink-0" />
                                     <div>
                                         <span className="block text-white font-medium mb-1">{branch.name}</span>

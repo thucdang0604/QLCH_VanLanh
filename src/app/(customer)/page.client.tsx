@@ -12,7 +12,7 @@ import type { HeroBanner, StoreBranch } from '@/lib/ConfigContext';
 
 // ===== Dynamic section components map =====
 const FlashSale = dynamic(() => import("@/components/home/FlashSale"), { ssr: false, loading: () => <div className="h-[200px] bg-white animate-pulse rounded-xl container mx-auto mt-4"></div> });
-const BookingSection = dynamic(() => import("@/components/home/BookingSection"), { ssr: false, loading: () => <div className="h-[300px] bg-white animate-pulse rounded-xl container mx-auto mt-4"></div> });
+const BookingSection = dynamic(() => import("@/components/home/BookingSection"), { ssr: false, loading: () => <div className="container mx-auto mt-4 hidden h-[300px] animate-pulse rounded-xl bg-white lg:block"></div> });
 const ArticleBlock = dynamic(() => import("@/components/home/ArticleBlock"), { ssr: false, loading: () => <div className="h-[400px] bg-white animate-pulse rounded-xl container mx-auto mt-4"></div> });
 const SuggestedSection = dynamic(() => import("@/components/home/SuggestedSection"), { ssr: false, loading: () => <div className="h-[400px] bg-white animate-pulse rounded-xl container mx-auto mt-4"></div> });
 const PricingSection = dynamic(() => import("@/components/home/PricingSection"), { ssr: false, loading: () => <div className="h-[300px] bg-white animate-pulse rounded-xl container mx-auto mt-4"></div> });

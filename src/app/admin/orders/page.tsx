@@ -474,7 +474,7 @@ export default function OrdersPage() {
             {/* Page Header */}
             <div className="flex items-center justify-between">
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                    <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
                         <ShoppingBag className="text-orange-500" /> Quản lý đơn hàng
                     </h1>
                     <p className="text-gray-500 text-sm mt-0.5">Tổng cộng {stats.total} đơn hàng</p>
@@ -483,19 +483,19 @@ export default function OrdersPage() {
 
             {/* Stats */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <div className="bg-white rounded-xl border p-4">
+                <div className="bg-white rounded-xl border p-3">
                     <p className="text-xs text-gray-500">Tổng đơn</p>
-                    <p className="text-2xl font-bold text-gray-800">{stats.total}</p>
+                    <p className="text-lg font-bold text-gray-800">{stats.total}</p>
                 </div>
-                <div className="bg-white rounded-xl border p-4">
+                <div className="bg-white rounded-xl border p-3">
                     <p className="text-xs text-gray-500">Chờ xử lý</p>
-                    <p className="text-2xl font-bold text-yellow-600">{stats.pending}</p>
+                    <p className="text-lg font-bold text-yellow-600">{stats.pending}</p>
                 </div>
-                <div className="bg-white rounded-xl border p-4">
+                <div className="bg-white rounded-xl border p-3">
                     <p className="text-xs text-gray-500">Hoàn thành</p>
-                    <p className="text-2xl font-bold text-green-600">{stats.completed}</p>
+                    <p className="text-lg font-bold text-green-600">{stats.completed}</p>
                 </div>
-                <div className="bg-white rounded-xl border p-4">
+                <div className="bg-white rounded-xl border p-3">
                     <p className="text-xs text-gray-500">Doanh thu</p>
                     <p className="text-lg font-bold text-orange-600">{formatPrice(stats.revenue)}</p>
                 </div>
@@ -516,7 +516,7 @@ export default function OrdersPage() {
                             <button
                                 key={tab.key}
                                 onClick={() => setSourceFilter(tab.key)}
-                                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${
+                                className={`px-3 py-1.5 text-xs rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${
                                     sourceFilter === tab.key
                                         ? 'bg-orange-500 text-white shadow-sm'
                                         : 'bg-white border text-gray-600 hover:bg-gray-50'
@@ -541,22 +541,22 @@ export default function OrdersPage() {
             {/* Filters */}
             <div className="flex flex-col md:flex-row gap-4">
                 <div className="flex-1 relative">
-                    <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                     <input
                         type="text"
                         placeholder="Tìm theo mã đơn, SĐT..."
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        className="w-full h-11 pl-10 pr-4 border rounded-lg focus:border-orange-500 focus:outline-none"
+                        className="w-full h-8 text-sm pl-8 pr-3 border rounded-lg focus:border-orange-500 focus:outline-none"
                     />
                 </div>
                 {searchQuery.trim().length > 0 && filteredOrders.length === 0 && (
                     <button
                         onClick={searchInDatabase}
                         disabled={isSearchingDB}
-                        className="h-11 px-4 bg-orange-100 text-orange-600 rounded-lg hover:bg-orange-200 transition-colors whitespace-nowrap flex items-center gap-2 font-medium"
+                        className="h-8 px-3 text-sm bg-orange-100 text-orange-600 rounded-lg hover:bg-orange-200 transition-colors whitespace-nowrap flex items-center gap-2 font-medium"
                     >
-                        {isSearchingDB ? <Loader2 className="animate-spin" size={18} /> : <Search size={18} />}
+                        {isSearchingDB ? <Loader2 className="animate-spin" size={18} /> : <Search size={14} />}
                         Tìm trên Server
                     </button>
                 )}
@@ -565,7 +565,7 @@ export default function OrdersPage() {
                     onChange={(e) => setStatusFilter(e.target.value)}
                     title="Lọc theo trạng thái"
                     aria-label="Lọc theo trạng thái"
-                    className="w-full md:w-48 h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none bg-white"
+                    className="w-full md:w-48 h-8 text-sm px-4 border rounded-lg focus:border-orange-500 focus:outline-none bg-white"
                 >
                     <option value="">Tất cả trạng thái</option>
                     {Object.entries(statusConfig).map(([key, value]) => (
@@ -577,7 +577,7 @@ export default function OrdersPage() {
             {/* Orders Table */}
             <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-100">
                 {/* Mobile View */}
-                <div className="block md:hidden divide-y divide-gray-100">
+                <div className="block lg:hidden divide-y divide-gray-100">
                     {filteredOrders.length === 0 ? (
                         <div className="text-center py-12 text-gray-400">
                             <ShoppingBag size={48} className="mx-auto mb-3 opacity-50" />
@@ -628,7 +628,7 @@ export default function OrdersPage() {
                                 <div className="pt-1">
                                     <button
                                         onClick={() => setSelectedOrder(order)}
-                                        className="w-full py-2.5 bg-white text-gray-700 text-sm font-medium rounded-lg flex items-center justify-center gap-2 transition-colors border border-gray-200 active:bg-gray-50"
+                                        className="w-full py-2.5 bg-white text-gray-700 text-xs font-medium rounded-lg flex items-center justify-center gap-2 transition-all border border-gray-200 hover:bg-gray-50 active:scale-95"
                                     >
                                         <Eye size={16} /> Xem chi tiết đơn hàng
                                     </button>
@@ -639,17 +639,17 @@ export default function OrdersPage() {
                 </div>
 
                 {/* Desktop View */}
-                <div className="hidden md:block overflow-x-auto">
+                <div className="hidden lg:block overflow-x-auto">
                     <table className="w-full">
-                        <thead className="bg-gray-50">
+                        <thead className="bg-gray-50 border-b border-gray-100">
                             <tr>
-                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Mã đơn</th>
-                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Khách hàng</th>
-                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Tổng tiền</th>
-                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Thanh toán</th>
-                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Trạng thái</th>
-                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Ngày tạo</th>
-                                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Hình động</th>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Mã đơn</th>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Khách hàng</th>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Tổng tiền</th>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Thanh toán</th>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Trạng thái</th>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Ngày tạo</th>
+                                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Thao tác</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
@@ -669,39 +669,39 @@ export default function OrdersPage() {
                                 const cName = order.customer?.name || order.customer_info?.name || 'Khách lẻ';
                                 const cPhone = order.customer?.phone || order.customer_info?.phone || '—';
                                 return (
-                                    <tr key={order.id} className="hover:bg-gray-50">
-                                        <td className="padding-6 py-4">
+                                    <tr key={order.id} className="hover:bg-gray-50 transition-colors duration-200">
+                                        <td className="px-4 py-3">
                                             <span className="font-mono text-sm text-gray-700">#{order.id.slice(-6).toUpperCase()}</span>
                                             {order.is_vat_exported && (
                                                 <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-600 text-xs rounded">VAT</span>
                                             )}
                                             {order.source === 'pos' && (
-                                                <span className="ml-1 px-2 py-0.5 bg-orange-100 text-orange-600 text-xs rounded">POS</span>
+                                                <span className="ml-1 px-2 py-0.5 bg-orange-100 text-orange-600 text-[10px] uppercase font-bold rounded">POS</span>
                                             )}
                                         </td>
-                                        <td className="px-6 py-4">
+                                        <td className="px-4 py-3">
                                             <p className="text-sm font-medium text-gray-900">{cName}</p>
                                             <p className="text-xs text-gray-500">{cPhone}</p>
                                         </td>
-                                        <td className="px-6 py-4 font-medium text-gray-900">
+                                        <td className="px-4 py-3 font-medium text-gray-900">
                                             <div>{formatPrice(order.total_amount || 0)}</div>
                                             {isDebt && (
                                                 <div className="text-[11px] text-red-600 font-semibold mt-0.5">(Còn nợ: {formatPrice(remainingDebt)})</div>
                                             )}
                                         </td>
-                                        <td className="px-6 py-4 text-sm text-gray-600">{order.payment_method || '—'}</td>
-                                        <td className="px-6 py-4">
-                                            <span className={`inline-flex items-center gap-1 px-3 py-1 text-xs font-medium rounded-full ${status.color}`}>
-                                                <StIcon size={14} />
+                                        <td className="px-4 py-3 text-sm text-gray-600">{order.payment_method || '—'}</td>
+                                        <td className="px-4 py-3">
+                                            <span className={`inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-full ${status.color}`}>
+                                                <StIcon size={12} />
                                                 {status.label}
                                             </span>
                                         </td>
-                                        <td className="px-6 py-4 text-sm text-gray-500">{formatDate(order.createdAt)}</td>
-                                        <td className="px-6 py-4">
+                                        <td className="px-4 py-3 text-sm text-gray-500">{formatDate(order.createdAt)}</td>
+                                        <td className="px-4 py-3">
                                             <div className="flex items-center justify-end gap-2">
                                                 <button
                                                     onClick={() => setSelectedOrder(order)}
-                                                    className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                                                    className="p-1.5 text-gray-400 hover:text-orange-500 hover:bg-orange-50 rounded-lg transition-all active:scale-95"
                                                     title="Xem chi tiết"
                                                 >
                                                     <Eye size={18} />
@@ -729,7 +729,7 @@ export default function OrdersPage() {
                     <div className="p-4 border-t border-gray-100 flex justify-center">
                         <button
                             onClick={loadMoreData}
-                            className="px-6 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-lg transition-colors flex items-center gap-2"
+                            className="px-4 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium rounded-lg transition-colors flex items-center gap-2"
                         >
                             Tải thêm lịch sử cũ
                         </button>
@@ -744,7 +744,7 @@ export default function OrdersPage() {
                         {/* Modal Header */}
                         <div className="flex items-center justify-between p-4 md:p-6 border-b shrink-0 bg-white sticky top-0 rounded-t-2xl z-10">
                             <div>
-                                <h2 className="text-lg md:text-xl font-bold text-gray-900">Chi tiết đơn hàng</h2>
+                                <h2 className="text-lg md:text-lg font-bold text-gray-900">Chi tiết đơn hàng</h2>
                                 <p className="text-gray-500 text-sm font-mono mt-0.5">#{selectedOrder.id.slice(-6).toUpperCase()}</p>
                             </div>
                             <button title="Đóng" aria-label="Đóng" onClick={() => setSelectedOrder(null)} className="p-2 bg-gray-100 hover:bg-gray-200 rounded-full transition-colors">
@@ -763,7 +763,7 @@ export default function OrdersPage() {
                                         : (statusConfig[selectedOrder.status] || statusConfig.Pending);
                                     const StI = st.icon;
                                     return (
-                                        <span className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-full ${st.color}`}>
+                                        <span className={`inline-flex items-center gap-2 px-3 py-1.5 text-xs text-sm font-medium rounded-full ${st.color}`}>
                                             <StI size={18} />
                                             {st.label}
                                         </span>
@@ -923,7 +923,7 @@ export default function OrdersPage() {
                             </div>
 
                             {(selectedOrder.paymentHistory || []).length > 0 && (
-                                <div className="bg-white rounded-xl border p-4 space-y-3">
+                                <div className="bg-white rounded-xl border p-3 space-y-3">
                                     <div className="flex items-center justify-between">
                                         <h3 className="font-bold text-gray-800 flex items-center gap-2">
                                             <Clock size={17} className="text-blue-500" /> Lịch sử thanh toán

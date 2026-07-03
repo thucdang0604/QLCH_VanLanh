@@ -266,7 +266,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                 <Toaster position="top-right" richColors closeButton />
                 {isSidebarOpen && (
                     <div
-                        className="fixed inset-0 bg-black/50 z-30 lg:hidden"
+                        className="fixed inset-0 bg-black/50 z-30 lg:hidden animate-[fadeIn_0.2s_ease-out]"
                         onClick={() => setIsSidebarOpen(false)}
                     />
                 )}
@@ -360,7 +360,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                         role="dialog"
                         aria-modal="true"
                         aria-label="Menu quản trị"
-                        className="fixed inset-x-0 bottom-0 z-40 lg:hidden bg-white rounded-t-2xl shadow-2xl border-t border-gray-200 max-h-[88dvh] pb-[env(safe-area-inset-bottom)] flex flex-col"
+                        className="fixed inset-x-0 bottom-0 z-40 lg:hidden bg-white rounded-t-2xl shadow-2xl border-t border-gray-200 max-h-[88dvh] pb-[env(safe-area-inset-bottom)] flex flex-col animate-[slideUp_0.3s_ease-out]"
                     >
                         <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between gap-3">
                             <div className="flex items-center gap-3 min-w-0">
@@ -448,7 +448,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                             <button
                                 type="button"
                                 onClick={handleLogout}
-                                className="w-full flex items-center justify-center gap-2 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-semibold text-red-600"
+                                className="w-full flex items-center justify-center gap-2 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-semibold text-red-600 transition-colors hover:bg-red-100"
                             >
                                 <LogOut size={18} />
                                 Đăng xuất
@@ -463,7 +463,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                             <div className="flex items-center gap-3">
                                 <button
                                     onClick={() => setIsSidebarOpen(true)}
-                                    className="lg:hidden w-10 h-10 flex items-center justify-center text-gray-600 hover:bg-gray-100 rounded-xl"
+                                    className="lg:hidden w-10 h-10 flex items-center justify-center text-gray-600 hover:bg-gray-100 rounded-xl transition-colors active:scale-95"
                                     aria-label="Mở menu"
                                     title="Mở menu"
                                 >
@@ -481,13 +481,13 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                                 <button
                                     type="button"
                                     onClick={handleLogout}
-                                    className="w-10 h-10 flex items-center justify-center rounded-full bg-red-50 text-red-500 border border-red-100"
+                                    className="w-10 h-10 flex items-center justify-center rounded-full bg-red-50 text-red-500 border border-red-100 hover:bg-red-100 transition-colors active:scale-95"
                                     aria-label="Đăng xuất"
                                     title="Đăng xuất"
                                 >
                                     <LogOut size={18} />
                                 </button>
-                                <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center overflow-hidden">
+                                <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center overflow-hidden hover:opacity-90 transition-opacity">
                                     {user.photoURL ? (
                                         <img src={user.photoURL} alt="" className="w-full h-full object-cover" />
                                     ) : (
@@ -510,7 +510,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                                     <p className="text-sm font-medium text-gray-800">{user.displayName || 'Admin'}</p>
                                     <p className="text-xs text-gray-500">{user.email}</p>
                                 </div>
-                                <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center overflow-hidden">
+                                <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center overflow-hidden hover:opacity-90 transition-opacity">
                                     {user.photoURL ? (
                                         <img src={user.photoURL} alt="" className="w-full h-full object-cover" />
                                     ) : (
@@ -528,7 +528,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
 
                 {quickActionItems.length > 0 && (
                     <nav
-                        className="fixed inset-x-0 bottom-0 z-30 lg:hidden bg-white/95 backdrop-blur border-t border-gray-200 px-3 pt-2 pb-[calc(env(safe-area-inset-bottom)+8px)] shadow-[0_-8px_24px_rgba(15,23,42,0.08)]"
+                        className="fixed inset-x-0 bottom-0 z-30 lg:hidden bg-white/95 backdrop-blur border-t border-gray-200 px-3 pt-2 pb-[calc(env(safe-area-inset-bottom)+8px)] shadow-[0_-8px_24px_rgba(15,23,42,0.08)] animate-[slideUp_0.4s_ease-out]"
                         aria-label="Lối tắt quản trị"
                     >
                         <div className="flex items-stretch gap-2">
@@ -540,15 +540,15 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                                     <Link
                                         key={item.href}
                                         href={item.href}
-                                        className={`min-w-0 flex-1 h-14 rounded-xl flex flex-col items-center justify-center gap-1 transition-colors ${isActive
-                                            ? 'bg-orange-50 text-orange-600'
+                                        className={`min-w-0 flex-1 h-14 rounded-xl flex flex-col items-center justify-center gap-1 transition-all duration-200 active:scale-95 ${isActive
+                                            ? 'bg-orange-50 text-orange-600 shadow-sm'
                                             : 'text-gray-500 hover:bg-gray-50'
                                             }`}
                                     >
                                         <div className="relative">
-                                            <Icon size={18} />
+                                            <Icon size={18} className={`transition-transform duration-200 ${isActive ? 'scale-110' : ''}`} />
                                             {(badgeMap[item.href] ?? 0) > 0 && (
-                                                <span className="absolute -top-2 -right-2 min-w-[16px] h-4 px-1 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
+                                                <span className="absolute -top-2 -right-2 min-w-[16px] h-4 px-1 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center animate-pulse">
                                                     {badgeMap[item.href] > 9 ? '9+' : badgeMap[item.href]}
                                                 </span>
                                             )}

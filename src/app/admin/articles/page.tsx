@@ -71,12 +71,12 @@ export default function ArticlesPage() {
             {/* Page Header */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-900">Quản lý bài viết</h1>
+                    <h1 className="text-lg font-bold text-gray-900">Quản lý bài viết</h1>
                     <p className="text-gray-500">Tin tức, khuyến mãi và mẹo hay ({articles.length} bài)</p>
                 </div>
                 <button
                     onClick={() => { setEditingArticle(null); setIsModalOpen(true); }}
-                    className="flex items-center gap-2 bg-orange-500 text-white px-4 py-2.5 rounded-lg font-medium hover:bg-orange-600 transition-colors"
+                    className="flex items-center gap-2 bg-orange-500 text-white px-3 py-1.5 text-xs rounded-lg font-medium hover:bg-orange-600 transition-colors"
                 >
                     <Plus size={20} />
                     Thêm bài viết
@@ -85,13 +85,13 @@ export default function ArticlesPage() {
 
             {/* Search */}
             <div className="relative max-w-md">
-                <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
                     type="text"
                     placeholder="Tìm bài viết..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full h-11 pl-10 pr-4 border rounded-lg focus:border-orange-500 focus:outline-none"
+                    className="w-full h-8 text-sm pl-8 pr-3 border rounded-lg focus:border-orange-500 focus:outline-none"
                     disabled={activeTab !== 'articles'}
                 />
             </div>
@@ -123,7 +123,7 @@ export default function ArticlesPage() {
                 /* Articles Table */
                 <div className="bg-white rounded-xl shadow-sm overflow-hidden">
                     {/* Mobile Card View */}
-                    <div className="block md:hidden divide-y divide-gray-100">
+                    <div className="block lg:hidden divide-y divide-gray-100">
                         {filteredArticles.length === 0 ? (
                             <div className="px-6 py-12 text-center text-gray-400">
                                 <FileText size={40} className="mx-auto mb-2 text-gray-300" />
@@ -172,7 +172,7 @@ export default function ArticlesPage() {
                         ))}
                     </div>
                     {/* Desktop Table View */}
-                    <div className="hidden md:block overflow-x-auto">
+                    <div className="hidden lg:block overflow-x-auto">
                         <table className="w-full min-w-[800px]">
                             <thead className="bg-gray-50">
                                 <tr>

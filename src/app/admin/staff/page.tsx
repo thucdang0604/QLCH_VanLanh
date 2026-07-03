@@ -183,12 +183,12 @@ export default function StaffPage() {
         <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-900">Quản lý Nhân viên</h1>
+                    <h1 className="text-lg font-bold text-gray-900">Quản lý Nhân viên</h1>
                     <p className="text-gray-500">Phân quyền và quản lý tài khoản nhân viên</p>
                 </div>
                 <button
                     onClick={() => setShowAddModal(true)}
-                    className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors"
+                    className="flex items-center gap-2 px-3 py-1.5 text-xs bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors"
                 >
                     <Plus size={20} />
                     Thêm nhân viên
@@ -196,32 +196,31 @@ export default function StaffPage() {
             </div>
 
             {/* Staff List — Desktop Table */}
-            <div className="hidden md:block bg-white rounded-xl shadow-sm border border-gray-200 overflow-x-auto">
-                <table className="w-full text-left border-collapse min-w-[800px]">
+            <div className="hidden lg:block bg-white rounded-xl shadow-sm border border-gray-200 overflow-x-auto">
+                <table className="w-full text-left border-collapse">
                     <thead>
                         <tr className="bg-gray-50 border-b border-gray-100 text-xs uppercase text-gray-500 font-semibold">
-                            <th className="px-6 py-4">Nhân viên</th>
-                            <th className="px-6 py-4">Liên hệ</th>
-                            <th className="px-6 py-4">Vai trò</th>
-                            <th className="px-6 py-4">Quyền hạn</th>
-                            <th className="px-6 py-4 text-right">Thao tác</th>
+                            <th className="px-4 py-3">Nhân viên</th>
+                            <th className="px-4 py-3">Liên hệ</th>
+                            <th className="px-4 py-3">Phân quyền</th>
+                            <th className="px-4 py-3 text-right">Thao tác</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                         {staffs.map((staff) => (
-                            <tr key={staff.uid} className="hover:bg-gray-50/50 transition-colors">
-                                <td className="px-6 py-4">
+                            <tr key={staff.uid} className="hover:bg-gray-50 transition-colors duration-200">
+                                <td className="px-4 py-3">
                                     <div className="flex items-center gap-3">
-                                        <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center text-orange-600 font-bold">
+                                        <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center text-orange-600 font-bold shrink-0">
                                             {staff.displayName?.[0] || 'U'}
                                         </div>
-                                        <div>
-                                            <div className="font-medium text-gray-900">{staff.displayName}</div>
-                                            <div className="text-xs text-gray-500">RID: {staff.uid.slice(0, 8)}...</div>
+                                        <div className="min-w-0">
+                                            <div className="font-medium text-gray-900 line-clamp-1">{staff.displayName}</div>
+                                            <div className="text-xs text-gray-500 truncate">RID: {staff.uid.slice(0, 8)}...</div>
                                         </div>
                                     </div>
                                 </td>
-                                <td className="px-6 py-4">
+                                <td className="px-4 py-3">
                                     <div className="space-y-1 text-sm text-gray-600">
                                         <div className="flex items-center gap-2">
                                             <Mail size={14} />
@@ -235,38 +234,38 @@ export default function StaffPage() {
                                         )}
                                     </div>
                                 </td>
-                                <td className="px-6 py-4">
-                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${staff.role === 'admin'
-                                        ? 'bg-purple-100 text-purple-800'
-                                        : 'bg-blue-100 text-blue-800'
-                                        }`}>
-                                        {staff.role === 'admin' ? 'Quản trị viên' : 'Nhân viên'}
-                                    </span>
-                                </td>
-                                <td className="px-6 py-4">
-                                    <div className="flex flex-wrap gap-1">
-                                        {staff.role === 'admin' ? (
-                                            <span className="text-xs text-gray-400 italic">Toàn quyền hệ thống</span>
-                                        ) : (
-                                            staff.permissions?.map(perm => {
-                                                const label = PERMISSIONS.find(p => p.id === perm)?.label || perm;
-                                                return (
-                                                    <span key={perm} className="inline-flex px-2 py-1 bg-gray-100 text-gray-600 rounded text-[10px] border border-gray-200">
-                                                        {label}
-                                                    </span>
-                                                );
-                                            })
-                                        )}
-                                        {staff.role !== 'admin' && (!staff.permissions || staff.permissions.length === 0) && (
-                                            <span className="text-xs text-gray-400 italic">Chưa cấp quyền</span>
-                                        )}
+                                <td className="px-4 py-3">
+                                    <div className="space-y-2">
+                                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium ${staff.role === 'admin'
+                                            ? 'bg-purple-100 text-purple-800'
+                                            : 'bg-blue-100 text-blue-800'
+                                            }`}>
+                                            {staff.role === 'admin' ? 'Quản trị viên' : 'Nhân viên'}
+                                        </span>
+                                        <div className="flex flex-wrap gap-1">
+                                            {staff.role === 'admin' ? (
+                                                <span className="text-[11px] text-gray-400 italic">Toàn quyền hệ thống</span>
+                                            ) : (
+                                                staff.permissions?.map(perm => {
+                                                    const label = PERMISSIONS.find(p => p.id === perm)?.label || perm;
+                                                    return (
+                                                        <span key={perm} className="inline-flex px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-[10px] border border-gray-200">
+                                                            {label}
+                                                        </span>
+                                                    );
+                                                })
+                                            )}
+                                            {staff.role !== 'admin' && (!staff.permissions || staff.permissions.length === 0) && (
+                                                <span className="text-[11px] text-gray-400 italic">Chưa cấp quyền</span>
+                                            )}
+                                        </div>
                                     </div>
                                 </td>
-                                <td className="px-6 py-4 text-right">
+                                <td className="px-4 py-3 text-right">
                                     <button
                                         title="Chỉnh sửa nhân viên"
                                         onClick={() => handleOpenModal(staff)}
-                                        className="p-2 text-gray-400 hover:text-orange-500 hover:bg-orange-50 rounded-lg transition-colors"
+                                        className="p-1.5 text-gray-400 hover:text-orange-500 hover:bg-orange-50 rounded-lg transition-all active:scale-95"
                                     >
                                         <Edit size={18} />
                                     </button>
@@ -278,9 +277,9 @@ export default function StaffPage() {
             </div>
 
             {/* Staff List — Mobile Cards */}
-            <div className="md:hidden space-y-3">
+            <div className="lg:hidden space-y-3">
                 {staffs.map((staff) => (
-                    <div key={staff.uid} className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+                    <div key={staff.uid} className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 transition-all duration-200 hover:shadow-md">
                         <div className="flex items-start justify-between gap-3">
                             <div className="flex items-center gap-3">
                                 <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center text-orange-600 font-bold shrink-0">
@@ -301,7 +300,7 @@ export default function StaffPage() {
                             <button
                                 title="Chỉnh sửa nhân viên"
                                 onClick={() => handleOpenModal(staff)}
-                                className="p-2 text-gray-400 hover:text-orange-500 hover:bg-orange-50 rounded-lg transition-colors shrink-0"
+                                className="p-2 text-blue-600 hover:bg-blue-50 bg-blue-50/50 rounded-lg transition-all active:scale-95 shrink-0"
                             >
                                 <Edit size={18} />
                             </button>
@@ -357,14 +356,14 @@ export default function StaffPage() {
                                             value={searchEmail}
                                             onChange={e => setSearchEmail(e.target.value)}
                                             placeholder="nguyenvan@gmail.com"
-                                            className="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500/20"
+                                            className="flex-1 px-3 py-1.5 text-xs border rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500/20"
                                         />
                                         <button
                                             type="submit"
                                             disabled={searching}
-                                            className="px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors flex items-center gap-2 disabled:opacity-70"
+                                            className="px-3 py-1.5 text-xs bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors flex items-center gap-2 disabled:opacity-70"
                                         >
-                                            {searching ? <Loader2 size={18} className="animate-spin" /> : <Search size={18} />}
+                                            {searching ? <Loader2 size={18} className="animate-spin" /> : <Search size={14} />}
                                         </button>
                                     </div>
                                 </div>
@@ -416,7 +415,7 @@ export default function StaffPage() {
                                         type="text"
                                         value={formData.displayName}
                                         onChange={e => setFormData({ ...formData, displayName: e.target.value })}
-                                        className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500/20"
+                                        className="w-full px-3 py-1.5 text-xs border rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500/20"
                                         disabled={!editingUser} // Can't edit name if not editing (mock restriction)
                                     />
                                 </div>
@@ -426,7 +425,7 @@ export default function StaffPage() {
                                         title="Email"
                                         type="email"
                                         value={formData.email}
-                                        className="w-full px-4 py-2 border rounded-lg bg-gray-50 text-gray-500"
+                                        className="w-full px-3 py-1.5 text-xs border rounded-lg bg-gray-50 text-gray-500"
                                         disabled
                                     />
                                 </div>
@@ -528,14 +527,14 @@ export default function StaffPage() {
                                 <button
                                     type="button"
                                     onClick={() => setShowModal(false)}
-                                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+                                    className="px-3 py-1.5 text-xs text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
                                 >
                                     Hủy bỏ
                                 </button>
                                 <button
                                     type="submit"
                                     disabled={processing}
-                                    className="px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-lg hover:bg-orange-600 transition-colors flex items-center gap-2 disabled:opacity-50"
+                                    className="px-3 py-1.5 text-xs text-sm font-medium text-white bg-orange-500 rounded-lg hover:bg-orange-600 transition-colors flex items-center gap-2 disabled:opacity-50"
                                 >
                                     {processing && <Loader2 size={16} className="animate-spin" />}
                                     Lưu thay đổi

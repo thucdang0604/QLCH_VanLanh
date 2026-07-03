@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import {
     LayoutGrid, Headphones, ClipboardList, User,
     X, Phone, MessageCircle, MapPin, CalendarClock,
@@ -14,6 +15,11 @@ import { getBusinessIdentity } from '@/lib/businessIdentity';
 import TrackingModal from '@/components/TrackingModal';
 import { getIcon } from '@/lib/icon-map';
 import type { SidebarMenuItem } from '@/lib/config-defaults';
+
+const BookingSection = dynamic(() => import('@/components/home/BookingSection'), {
+    ssr: false,
+    loading: () => <div className="h-[420px] animate-pulse rounded-xl bg-gray-900" />,
+});
 
 // Zalo SVG icon - compact inline
 function ZaloIcon({ size = 22 }: { size?: number }) {
@@ -73,6 +79,7 @@ export default function MobileBottomNav() {
     const [showContactMenu, setShowContactMenu] = useState(false);
     const [showCategoryMenu, setShowCategoryMenu] = useState(false);
     const [isTrackingModalOpen, setIsTrackingModalOpen] = useState(false);
+    const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
     const menuRef = useRef<HTMLDivElement>(null);
     const categoryMenuRef = useRef<HTMLDivElement>(null);
     const [activeCategoryId, setActiveCategoryId] = useState<string>('');
@@ -113,6 +120,7 @@ export default function MobileBottomNav() {
         // We intentionally close a local UI menu when the route changes.
         setShowContactMenu(false);
         setShowCategoryMenu(false);
+        setIsBookingModalOpen(false);
     }, [pathname]);
 
     const handleContactOptionClick = (optId: string) => {
@@ -360,18 +368,24 @@ export default function MobileBottomNav() {
                         )}
 
                         {/* 4. Đặt lịch */}
-                        <Link
-                            href="/#booking-section"
-                            className="flex flex-col items-center justify-center py-2 min-w-[56px] text-gray-500 transition-colors"
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setShowCategoryMenu(false);
+                                setShowContactMenu(false);
+                                setIsBookingModalOpen(true);
+                            }}
+                            className={`flex min-w-[56px] flex-col items-center justify-center py-2 transition-colors ${isBookingModalOpen ? 'text-copper' : 'text-gray-500'}`}
                         >
                             <CalendarClock size={22} />
-                            <span className="text-[10px] mt-1">
+                            <span className={`mt-1 text-[10px] ${isBookingModalOpen ? 'font-semibold' : ''}`}>
                                 Đặt lịch
                             </span>
-                        </Link>
+                        </button>
 
                         {/* 5. Tra cứu */}
                         <button
+                            type="button"
                             onClick={() => setIsTrackingModalOpen(true)}
                             className={`flex flex-col items-center justify-center py-2 min-w-[56px] transition-colors ${isTrackingModalOpen ? 'text-copper' : 'text-gray-500'}`}
                         >
@@ -383,6 +397,34 @@ export default function MobileBottomNav() {
                     </div>
                 </nav>
             </div>
+
+            {isBookingModalOpen && (
+                <div className="fixed inset-0 z-[70] flex items-end bg-black/60 px-3 pb-[calc(env(safe-area-inset-bottom)+84px)] pt-6 lg:hidden md:items-center md:justify-center md:px-6 md:pb-6">
+                    <button
+                        type="button"
+                        aria-label="Đóng đặt lịch"
+                        className="absolute inset-0 cursor-default"
+                        onClick={() => setIsBookingModalOpen(false)}
+                    />
+                    <div className="relative w-full max-w-2xl animate-[slideUp_0.25s_ease]">
+                        <div className="mb-2 flex items-center justify-between rounded-xl bg-white px-4 py-3 shadow-lg">
+                            <div>
+                                <p className="text-sm font-bold text-gray-900">Đặt lịch online</p>
+                                <p className="text-xs text-gray-500">Chọn thời gian, chi nhánh và gửi thông tin hẹn.</p>
+                            </div>
+                            <button
+                                type="button"
+                                aria-label="Đóng đặt lịch"
+                                onClick={() => setIsBookingModalOpen(false)}
+                                className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 text-gray-500 transition-colors hover:bg-gray-200 hover:text-gray-700"
+                            >
+                                <X size={18} />
+                            </button>
+                        </div>
+                        <BookingSection variant="modal" />
+                    </div>
+                </div>
+            )}
 
             <TrackingModal isOpen={isTrackingModalOpen} onClose={() => setIsTrackingModalOpen(false)} />
         </>

@@ -135,7 +135,7 @@ export default function PartsPage() {
         <div className="space-y-6">
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                    <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
                         <Wrench className="text-orange-500" /> Kho linh kiện
                     </h1>
                     <p className="text-gray-500">{parts.length} linh kiện trong hệ thống</p>
@@ -144,14 +144,14 @@ export default function PartsPage() {
                     <ExportImportReportButton />
                     <button
                         onClick={() => setIsLotTrackingOpen(true)}
-                        className="flex items-center gap-2 bg-indigo-50 text-indigo-700 border border-indigo-200 px-4 py-2.5 rounded-lg font-medium hover:bg-indigo-100 transition-colors shadow-sm"
+                        className="flex items-center gap-2 bg-indigo-50 text-indigo-700 border border-indigo-200 px-3 py-1.5 text-xs rounded-lg font-medium hover:bg-indigo-100 transition-colors shadow-sm"
                     >
-                        <Search size={18} />
+                        <Search size={14} />
                         Tra ma lo
                     </button>
                     <button
                         onClick={() => setShowFixHidden(true)}
-                        className="flex items-center gap-2 border-2 border-amber-300 text-amber-700 px-4 py-2.5 rounded-lg font-medium hover:bg-amber-50 transition-colors text-sm"
+                        className="flex items-center gap-2 border-2 border-amber-300 text-amber-700 px-3 py-1.5 text-xs rounded-lg font-medium hover:bg-amber-50 transition-colors text-sm"
                     >
                         <AlertTriangle size={18} />
                         Khoi phuc an
@@ -161,7 +161,7 @@ export default function PartsPage() {
                             setEditingPart(null);
                             setIsModalOpen(true);
                         }}
-                        className="flex items-center gap-2 bg-orange-500 text-white px-4 py-2.5 rounded-lg font-medium hover:bg-orange-600 transition-colors shadow-sm"
+                        className="flex items-center gap-2 bg-orange-500 text-white px-3 py-1.5 text-xs rounded-lg font-medium hover:bg-orange-600 transition-colors shadow-sm"
                     >
                         <Plus size={18} />
                         Thêm linh kiện
@@ -171,13 +171,13 @@ export default function PartsPage() {
 
             <div className="flex flex-col md:flex-row gap-4">
                 <div className="relative flex-1 max-w-md">
-                    <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                     <input
                         type="text"
                         placeholder="Tìm tên, dòng máy, loại linh kiện..."
                         value={searchQuery}
                         onChange={(event) => setSearchQuery(event.target.value)}
-                        className="w-full h-11 pl-10 pr-4 border rounded-lg focus:border-orange-500 focus:outline-none"
+                        className="w-full h-8 text-sm pl-8 pr-3 border rounded-lg focus:border-orange-500 focus:outline-none"
                     />
                 </div>
                 <div className="flex gap-2 overflow-x-auto pb-1 sm:pb-0">
@@ -189,7 +189,7 @@ export default function PartsPage() {
                         <button
                             key={key}
                             onClick={() => setStatusFilter(key)}
-                            className={`px-4 py-2 text-sm font-medium rounded-lg whitespace-nowrap transition-colors ${statusFilter === key
+                            className={`px-3 py-1.5 text-xs font-medium rounded-lg whitespace-nowrap transition-colors ${statusFilter === key
                                 ? 'bg-orange-100 text-orange-700'
                                 : 'bg-white text-gray-600 border hover:bg-gray-50'
                                 }`}
@@ -208,7 +208,7 @@ export default function PartsPage() {
                     </div>
                 ) : (
                     <>
-                        <div className="md:hidden divide-y divide-gray-100">
+                        <div className="lg:hidden divide-y divide-gray-100">
                             {paginatedParts.map(part => (
                                 <div key={part.id} className="p-4 space-y-3">
                                     <div className="flex items-start justify-between gap-3">
@@ -231,10 +231,10 @@ export default function PartsPage() {
                                         </div>
                                     </div>
                                     <div className="flex gap-2">
-                                        <button onClick={() => setQrPart(part as Product & { id: string })} className="flex-1 rounded-lg border px-3 py-2 text-xs font-medium text-gray-700">
+                                        <button onClick={() => setQrPart(part as Product & { id: string })} className="flex-1 rounded-lg border px-3 py-2 text-xs font-medium text-gray-700 active:scale-95 transition-all">
                                             QR
                                         </button>
-                                        <button onClick={() => { setEditingPart(part); setIsModalOpen(true); }} className="flex-1 rounded-lg bg-orange-50 px-3 py-2 text-xs font-medium text-orange-700">
+                                        <button onClick={() => { setEditingPart(part); setIsModalOpen(true); }} className="flex-1 rounded-lg bg-orange-50 px-3 py-2 text-xs font-medium text-orange-700 active:scale-95 transition-all">
                                             Sửa
                                         </button>
                                     </div>
@@ -242,8 +242,8 @@ export default function PartsPage() {
                             ))}
                         </div>
 
-                        <div className="hidden md:block overflow-x-auto">
-                            <table className="w-full min-w-[900px]">
+                        <div className="hidden lg:block overflow-x-auto">
+                            <table className="w-full text-left">
                                 <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">
                                     <tr>
                                         <th className="px-4 py-3">Linh kiện</th>
@@ -257,7 +257,7 @@ export default function PartsPage() {
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
                                     {paginatedParts.map(part => (
-                                        <tr key={part.id} className="hover:bg-gray-50">
+                                        <tr key={part.id} className="hover:bg-gray-50 transition-colors duration-200">
                                             <td className="px-4 py-3">
                                                 <p className="font-semibold text-gray-900">{part.name}</p>
                                                 <p className="text-xs text-gray-500">{part.description || part.sku || part.id}</p>
@@ -276,13 +276,13 @@ export default function PartsPage() {
                                             <td className="px-4 py-3 text-center text-sm">{Number(part.sold) || 0}</td>
                                             <td className="px-4 py-3">
                                                 <div className="flex items-center justify-end gap-1">
-                                                    <button onClick={() => setQrPart(part as Product & { id: string })} className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg" title="In QR">
+                                                    <button onClick={() => setQrPart(part as Product & { id: string })} className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all active:scale-95" title="In QR">
                                                         <QrCode size={16} />
                                                     </button>
-                                                    <button onClick={() => { setEditingPart(part); setIsModalOpen(true); }} className="p-2 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded-lg" title="Sửa">
+                                                    <button onClick={() => { setEditingPart(part); setIsModalOpen(true); }} className="p-2 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded-lg transition-all active:scale-95" title="Sửa">
                                                         <Edit size={16} />
                                                     </button>
-                                                    <button onClick={() => handleArchive(part)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg" title="Lưu trữ">
+                                                    <button onClick={() => handleArchive(part)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all active:scale-95" title="Lưu trữ">
                                                         <Archive size={16} />
                                                     </button>
                                                 </div>
@@ -328,7 +328,7 @@ export default function PartsPage() {
                     <div className="flex justify-end gap-3">
                         <button
                             onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
-                            className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg"
+                            className="px-3 py-1.5 text-xs text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg"
                         >
                             Huy
                         </button>
@@ -337,7 +337,7 @@ export default function PartsPage() {
                                 await confirmModal.onConfirm();
                                 setConfirmModal(prev => ({ ...prev, isOpen: false }));
                             }}
-                            className={`px-4 py-2 text-sm font-semibold text-white rounded-lg ${confirmModal.dangerous ? 'bg-red-600 hover:bg-red-700' : 'bg-orange-600 hover:bg-orange-700'}`}
+                            className={`px-3 py-1.5 text-xs text-sm font-semibold text-white rounded-lg ${confirmModal.dangerous ? 'bg-red-600 hover:bg-red-700' : 'bg-orange-600 hover:bg-orange-700'}`}
                         >
                             {confirmModal.confirmText || 'Xac nhan'}
                         </button>
