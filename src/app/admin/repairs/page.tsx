@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { collection, query, where, updateDoc, doc, serverTimestamp, orderBy, Timestamp, limit, startAfter, DocumentSnapshot, runTransaction, arrayUnion, type QueryConstraint } from 'firebase/firestore';
@@ -11,6 +11,14 @@ import type { RepairTicket, RepairStatus, PaymentStatus, DeviceChecklist, Workfl
 import { isChecklistComplete, areAllPartsReady } from '@/lib/workflowFeatures';
 import { REPAIR_STATUS, isPendingRepairPart, isRepairStatus, isSelectedRepairPart, isWarrantyEligibleRepairPart } from '@/lib/repairStatus';
 import { normalizeVietnamPhone } from '@/lib/phone';
+import {
+    buildContactMethods,
+    buildContactSearchKeywords,
+    getPrimaryContact,
+} from '@/lib/contactIdentity';
+import { buildCustomerDocumentBaseId } from '@/lib/customerDocumentIds';
+import type { ContactMethodType } from '@/lib/types/contact';
+import { consumeChatWorkflowHandoff } from '@/lib/chatWorkflowHandoff';
 import type { ReceiptConfig } from '@/components/admin/PrintableReceipt';
 import type { WarrantyTemplateConfig } from '@/app/admin/settings/receipt/WarrantyComponents';
 import { toastError, toastSuccess, toastWarning } from '@/lib/toast';
@@ -46,6 +54,19 @@ const formatPrice = formatRepairPrice;
 const REPAIRS_PAGE_SIZE = 50;
 const REPAIR_SEARCH_LIMIT = 50;
 type RepairListTab = 'active' | 'closed';
+
+function getRepairCustomerContact(ticket: RepairTicket): string {
+    return ticket.customer.primaryContactValue
+        || ticket.customer.contactValue
+        || ticket.customer.phone
+        || ticket.customer.id
+        || ticket.customer.customerId
+        || '';
+}
+
+function isContactMethodType(value: string | null | undefined): value is ContactMethodType {
+    return value === 'phone' || value === 'zalo' || value === 'facebook' || value === 'email' || value === 'address' || value === 'note' || value === 'other';
+}
 
 function getWorkflowForTicketFromLists(ticket: RepairTicket, repairStatuses: WorkflowNode[], warrantyStatuses: WorkflowNode[]): WorkflowNode[] {
     return ticket.ticketType === 'warranty' ? warrantyStatuses : repairStatuses;
@@ -151,6 +172,7 @@ export default function RepairPage() {
     const [assignTechnicianId, setAssignTechnicianId] = useState('');
     const [managerOverrideModal, setManagerOverrideModal] = useState<{ ticket: RepairTicket; targetStatus: string } | null>(null);
     const [managerOverrideNote, setManagerOverrideNote] = useState('');
+    const chatPrefillApplied = useRef(false);
 
     useEffect(() => {
         if (warrantyModal) {
@@ -168,11 +190,16 @@ export default function RepairPage() {
             setWarrantyHistory([]);
         }
     }, [warrantyModal]);
-    const emptyForm: RepairEditorFormData = {
+    const emptyForm = useMemo<RepairEditorFormData>(() => ({
         appointmentId: '',
         appointmentIntakeMethod: '',
+        customerId: '',
         customerName: '',
         customerPhone: '',
+        customerZalo: '',
+        customerFacebook: '',
+        customerOtherContact: '',
+        customerPrimaryContactType: 'phone' as ContactMethodType,
         deviceModel: '',
         deviceImei: '',
         devicePasscode: '',
@@ -201,7 +228,7 @@ export default function RepairPage() {
         estimatedReturnDate: '',
         selectedServiceName: '',
         selectedCategoryPath: [] as string[],
-    };
+    }), []);
     const [formData, setFormData] = useState(emptyForm);
 
     useEffect(() => {
@@ -211,13 +238,20 @@ export default function RepairPage() {
                 try {
                     const snap = await getDoc(doc(db, 'customers', phone));
                     if (snap.exists()) {
-                        const fetchedName = snap.data().name || snap.data().displayName || '';
+                        const customerData = snap.data();
+                        const fetchedName = customerData.name || customerData.displayName || '';
                         if (fetchedName) {
                             setFormData(p => {
-                                if (!p.customerName) {
-                                    return { ...p, customerName: fetchedName };
-                                }
-                                return p;
+                                const contactMethods = Array.isArray(customerData.contactMethods) ? customerData.contactMethods : [];
+                                return {
+                                    ...p,
+                                    customerId: p.customerId || snap.id,
+                                    customerName: p.customerName || fetchedName,
+                                    customerZalo: p.customerZalo || String(contactMethods.find((method: { type?: string }) => method.type === 'zalo')?.value || ''),
+                                    customerFacebook: p.customerFacebook || String(contactMethods.find((method: { type?: string }) => method.type === 'facebook')?.value || ''),
+                                    customerOtherContact: p.customerOtherContact || String(customerData.primaryContactValue || ''),
+                                    customerPrimaryContactType: (customerData.primaryContactType as ContactMethodType) || p.customerPrimaryContactType,
+                                };
                             });
                         }
                     }
@@ -342,6 +376,7 @@ export default function RepairPage() {
         try {
             const s = searchTerm.trim();
             const queries = [
+                getDocs(query(collection(db, 'repairs'), where('customer.id', '==', s), limit(REPAIR_SEARCH_LIMIT))),
                 getDocs(query(collection(db, 'repairs'), where('customer.phone', '==', s), limit(REPAIR_SEARCH_LIMIT))),
                 getDocs(query(collection(db, 'repairs'), where('deviceInfo.imei', '==', s), limit(REPAIR_SEARCH_LIMIT)))
             ];
@@ -453,6 +488,31 @@ export default function RepairPage() {
             }
         })();
     }, [searchParams, services, user?.uid]);
+
+    useEffect(() => {
+        if (chatPrefillApplied.current || searchParams.get('source') !== 'chat') return;
+        const handoff = consumeChatWorkflowHandoff(searchParams);
+        if (!handoff) return;
+        const initialStatus = (dynamicStatuses[0]?.id || REPAIR_STATUS.INTAKE) as RepairStatus;
+        const handoffContactType = isContactMethodType(handoff.primaryContactType) ? handoff.primaryContactType : handoff.customerPhone ? 'phone' : 'other';
+        const handoffContactValue = handoff.primaryContactValue || '';
+        setEditingTicket(null);
+        setPreMediaFiles([]);
+        setPostMediaFiles([]);
+        setFormData({
+            ...emptyForm,
+            status: initialStatus,
+            customerId: handoff.customerId || '',
+            customerName: handoff.customerName,
+            customerPhone: handoff.customerPhone,
+            customerZalo: handoffContactType === 'zalo' ? handoffContactValue : '',
+            customerFacebook: handoffContactType === 'facebook' ? handoffContactValue : '',
+            customerOtherContact: handoffContactType !== 'phone' && handoffContactType !== 'zalo' && handoffContactType !== 'facebook' ? handoffContactValue : '',
+            customerPrimaryContactType: handoffContactType,
+        });
+        setShowModal(true);
+        chatPrefillApplied.current = true;
+    }, [dynamicStatuses, emptyForm, searchParams]);
     const isTerminal = (ticket: RepairTicket) => {
         return isTerminalTicket(ticket, dynamicStatuses, warrantyStatuses);
     };
@@ -468,7 +528,7 @@ export default function RepairPage() {
         const s = searchTerm.toLowerCase();
         const matchSearch = !s ||
             t.customer.name.toLowerCase().includes(s) ||
-            t.customer.phone.includes(s) ||
+            getRepairCustomerContact(t).toLowerCase().includes(s) ||
             t.deviceInfo?.imei?.includes(s) ||
             t.deviceInfo?.model?.toLowerCase().includes(s);
         const matchStatus = statusFilter === 'all' || t.status === statusFilter;
@@ -900,8 +960,13 @@ export default function RepairPage() {
             setFormData({
                 appointmentId: ticket.appointmentId || '',
                 appointmentIntakeMethod: (ticket as RepairTicket & { appointmentIntakeMethod?: string | null }).appointmentIntakeMethod || '',
+                customerId: ticket.customer.id || ticket.customer.customerId || '',
                 customerName: ticket.customer.name,
                 customerPhone: ticket.customer.phone,
+                customerZalo: ticket.customer.contactMethods?.find(method => method.type === 'zalo')?.value || '',
+                customerFacebook: ticket.customer.contactMethods?.find(method => method.type === 'facebook')?.value || '',
+                customerOtherContact: ticket.customer.contactMethods?.find(method => method.type === 'other')?.value || ticket.customer.primaryContactValue || ticket.customer.contactValue || '',
+                customerPrimaryContactType: ticket.customer.primaryContactType || ticket.customer.contactType || (ticket.customer.phone ? 'phone' : 'other'),
                 deviceModel: ticket.deviceInfo?.model || '',
                 deviceImei: ticket.deviceInfo?.imei || '',
                 devicePasscode: ticket.deviceInfo?.passcode || '',
@@ -950,14 +1015,53 @@ export default function RepairPage() {
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
 
+        let normalizedCustomerPhone = '';
         if (formData.customerPhone) {
             const normalizedPhone = normalizeVietnamPhone(formData.customerPhone);
             if (!normalizedPhone) {
                 alert('Số điện thoại không hợp lệ. Vui lòng nhập đúng định dạng số điện thoại Việt Nam.');
                 return;
             }
-            formData.customerPhone = normalizedPhone.local; // store normalized
+            normalizedCustomerPhone = normalizedPhone.local;
         }
+
+        const customerContactInput = {
+            name: formData.customerName,
+            phone: normalizedCustomerPhone,
+            zalo: String(formData.customerZalo || ''),
+            facebook: String(formData.customerFacebook || ''),
+            other: String(formData.customerOtherContact || ''),
+            primaryType: formData.customerPrimaryContactType as ContactMethodType,
+            source: 'repair' as const,
+        };
+        const contactMethods = buildContactMethods(customerContactInput);
+        const primaryContact = getPrimaryContact(contactMethods);
+        const explicitCustomerId = String(formData.customerId || '').trim();
+        const resolvedCustomerId = explicitCustomerId
+            || buildCustomerDocumentBaseId({
+                ...customerContactInput,
+            });
+        if (!formData.customerName.trim()) {
+            toastError('Can nhap ten khach hang.');
+            return;
+        }
+        if (!explicitCustomerId && contactMethods.length === 0) {
+            toastError('Can co Ma KH, SDT, Zalo, Facebook hoac lien he khac de tao phieu sua chua.');
+            return;
+        }
+        const customerSnapshot = {
+            id: resolvedCustomerId,
+            customerId: resolvedCustomerId,
+            name: formData.customerName.trim(),
+            phone: normalizedCustomerPhone,
+            contactType: primaryContact?.type || null,
+            contactLabel: primaryContact?.label || '',
+            contactValue: primaryContact?.value || '',
+            primaryContactType: primaryContact?.type || null,
+            primaryContactValue: primaryContact?.value || '',
+            contactMethods,
+            searchKeywords: buildContactSearchKeywords(customerContactInput, contactMethods),
+        };
 
         const tech = staffs.find(s => s.uid === formData.technicianId);
         try {
@@ -998,7 +1102,7 @@ export default function RepairPage() {
                         appointmentIntakeMethod: formData.appointmentIntakeMethod || null,
                         categoryPath: formData.selectedCategoryPath,
                         serviceName: formData.selectedServiceName,
-                        customer: { name: formData.customerName, phone: formData.customerPhone },
+                        customer: customerSnapshot,
                         deviceInfo: {
                             model: formData.deviceModel,
                             imei: formData.deviceImei,
@@ -1052,7 +1156,7 @@ export default function RepairPage() {
                     appointmentIntakeMethod: formData.appointmentIntakeMethod || null,
                     categoryPath: formData.selectedCategoryPath,
                     serviceName: formData.selectedServiceName,
-                    customer: { name: formData.customerName, phone: formData.customerPhone },
+                    customer: customerSnapshot,
                     deviceInfo: {
                         model: formData.deviceModel,
                         imei: formData.deviceImei,
@@ -1143,13 +1247,13 @@ export default function RepairPage() {
                 }
             }
 
-            if (formData.customerPhone) {
+            if (normalizedCustomerPhone) {
                 fetch('/api/customers/sync', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         name: formData.customerName,
-                        phone: formData.customerPhone,
+                        phone: normalizedCustomerPhone,
                         forceUpdateName: true
                     })
                 }).catch(err => console.error('Failed to sync customer', err));

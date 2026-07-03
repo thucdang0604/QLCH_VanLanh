@@ -24,7 +24,7 @@ import {
 import { buildImportPreviewState } from '@/features/parts/importReceiptUtils';
 import { CreateReceiptModal, ImportPreviewModal } from '@/features/parts/ImportReceiptModals';
 import type { ImportPreviewState, ImportReceiptItem, SupplierOption } from '@/features/parts/importReceiptTypes';
-import { reserveSupplierDocumentId } from '@/lib/supplierDocumentIds';
+import { buildInlineSupplierContactInput, buildSupplierContactDocumentFields, reserveSupplierDocumentId } from '@/lib/supplierDocumentIds';
 
 // ── Status Config ──
 const statusConfig = {
@@ -32,6 +32,20 @@ const statusConfig = {
     ordered: { label: 'Đã đặt hàng', color: 'bg-blue-100 text-blue-700', icon: Package },
     completed: { label: 'Đã nhập', color: 'bg-green-100 text-green-700', icon: CheckCircle2 },
 };
+
+function supplierMatchesSearch(supplier: SupplierOption, search: string): boolean {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    const values = [
+        supplier.id,
+        supplier.name,
+        supplier.phone,
+        supplier.primaryContactValue,
+        ...(supplier.searchKeywords || []),
+        ...(supplier.contactMethods || []).flatMap(method => [method.value, method.normalizedValue]),
+    ];
+    return values.some(value => String(value || '').toLowerCase().includes(q));
+}
 
 type InventoryTab = 'completed' | 'draft' | 'ordered' | 'all';
 const RECEIPT_BATCH_SIZE = 80;
@@ -589,7 +603,7 @@ export default function InventoryPage() {
                                                     const isUnavailable = itemAvailability === 'unavailable';
                                                     const itemKey = `${receipt.id}_${i}`;
                                                     const isSupplierActive = supplierActiveKey === itemKey;
-                                                    const supplierMatches = supplierList.filter(supplier => supplier.name.toLowerCase().includes((supplierSearch || '').toLowerCase()));
+                                                    const supplierMatches = supplierList.filter(supplier => supplierMatchesSearch(supplier, supplierSearch || ''));
                                                     const canCreateSupplier = Boolean((supplierSearch || '').trim()) && !supplierList.some(supplier => supplier.name.toLowerCase() === (supplierSearch || '').trim().toLowerCase());
 
                                                     return (
@@ -670,8 +684,17 @@ export default function InventoryPage() {
                                                                                         onMouseDown={async (event) => {
                                                                                             event.preventDefault();
                                                                                             const supplierName = (supplierSearch || '').trim();
-                                                                                            const supplierId = await reserveSupplierDocumentId({ name: supplierName });
-                                                                                            await setDoc(doc(db, 'suppliers', supplierId), { name: supplierName, totalDebt: 0, isActive: true, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+                                                                                            const contactValue = window.prompt('Nhap SDT, Zalo, Facebook hoac lien he khac cho NCC (co the bo trong):') || '';
+                                                                                            const contactInput = buildInlineSupplierContactInput(supplierName, contactValue);
+                                                                                            const supplierId = await reserveSupplierDocumentId(contactInput);
+                                                                                            await setDoc(doc(db, 'suppliers', supplierId), {
+                                                                                                name: supplierName,
+                                                                                                ...buildSupplierContactDocumentFields(contactInput),
+                                                                                                totalDebt: 0,
+                                                                                                isActive: true,
+                                                                                                createdAt: serverTimestamp(),
+                                                                                                updatedAt: serverTimestamp(),
+                                                                                            });
                                                                                             setSupplierActiveKey(null);
                                                                                             handleAutoSaveSupplier(receipt.id, i, supplierName, supplierId);
                                                                                         }}

@@ -13,7 +13,7 @@ import type { Product } from '@/lib/types';
 import { normalizeDocId } from '@/lib/idNormalizer';
 import { buildProductCodeFromId } from '@/lib/productCodes';
 import { createProductWithCodes } from '@/lib/productCodeRegistry';
-import { reserveSupplierDocumentId } from '@/lib/supplierDocumentIds';
+import { buildInlineSupplierContactInput, buildSupplierContactDocumentFields, reserveSupplierDocumentId } from '@/lib/supplierDocumentIds';
 import { toastError, toastSuccess } from '@/lib/toast';
 import type { ImportPreviewState, ImportReceiptItem, SupplierOption } from './importReceiptTypes';
 
@@ -21,6 +21,20 @@ function buildImportReceiptBaseId() {
     const now = new Date();
     const dateKey = `${String(now.getFullYear()).slice(2)}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
     return `NH-${dateKey}-${Date.now().toString(36).toUpperCase()}`;
+}
+
+function supplierMatchesSearch(supplier: SupplierOption, search: string): boolean {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    const values = [
+        supplier.id,
+        supplier.name,
+        supplier.phone,
+        supplier.primaryContactValue,
+        ...(supplier.searchKeywords || []),
+        ...(supplier.contactMethods || []).flatMap(method => [method.value, method.normalizedValue]),
+    ];
+    return values.some(value => String(value || '').toLowerCase().includes(q));
 }
 
 async function getAvailableImportReceiptId() {
@@ -599,7 +613,7 @@ export function CreateReceiptModal({ isOpen, onClose, parts, retailProducts, onC
                                                 {activeSupplierIdx === idx && (
                                                     <div className="absolute left-0 right-0 mt-1 bg-white border rounded-lg shadow-lg z-30 max-h-40 overflow-y-auto">
                                                         {suppliers
-                                                            .filter(s => s.name.toLowerCase().includes((itemSupplierSearch || '').toLowerCase()))
+                                                            .filter(s => supplierMatchesSearch(s, itemSupplierSearch || ''))
                                                             .map(s => (
                                                                 <button key={s.id} type="button"
                                                                     onMouseDown={(e) => e.preventDefault()}
@@ -621,8 +635,17 @@ export function CreateReceiptModal({ isOpen, onClose, parts, retailProducts, onC
                                                                 onClick={async () => {
                                                                     const nm = (itemSupplierSearch || '').trim();
                                                                     try {
-                                                                        const supplierId = await reserveSupplierDocumentId({ name: nm });
-                                                                        await setDoc(doc(db, 'suppliers', supplierId), { name: nm, totalDebt: 0, isActive: true, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+                                                                        const contactValue = window.prompt('Nhap SDT, Zalo, Facebook hoac lien he khac cho NCC (co the bo trong):') || '';
+                                                                        const contactInput = buildInlineSupplierContactInput(nm, contactValue);
+                                                                        const supplierId = await reserveSupplierDocumentId(contactInput);
+                                                                        await setDoc(doc(db, 'suppliers', supplierId), {
+                                                                            name: nm,
+                                                                            ...buildSupplierContactDocumentFields(contactInput),
+                                                                            totalDebt: 0,
+                                                                            isActive: true,
+                                                                            createdAt: serverTimestamp(),
+                                                                            updatedAt: serverTimestamp(),
+                                                                        });
                                                                         const newItems = [...items];
                                                                         newItems[idx] = { ...newItems[idx], supplier: nm, supplierId };
                                                                         setItems(newItems);

@@ -11,6 +11,40 @@
   "constraints": [],
   "aiPlans": [
     {
+      "id": "plan-contactless-customer-supplier-identity-20260630",
+      "title": "CRM/NCC Contact Identity: luu khach hang va nha cung cap khong co SDT",
+      "date": "30.06.2026",
+      "status": "completed",
+      "completedAt": "02.07.2026",
+      "planFile": "data/ai_plans/plan_contactless_customer_supplier_identity_20260630.md",
+      "taskFile": "data/ai_plans/task_contactless_customer_supplier_identity_20260630.md",
+      "walkthroughFile": "",
+      "scope": [
+        "src/lib/types/commerce.ts",
+        "src/components/admin/customers/CustomerFormModal.tsx",
+        "src/app/admin/customers/page.tsx",
+        "src/app/admin/suppliers/page.tsx",
+        "src/app/admin/pos/page.tsx",
+        "src/app/api/pos/checkout/route.ts",
+        "src/app/api/admin/customers/collect-debt/route.ts",
+        "src/app/admin/repairs/page.tsx",
+        "src/app/api/repairs/handover/route.ts",
+        "src/app/api/admin/chat/rooms/[roomId]/customer/route.ts",
+        "src/features/excel-import/importSupport.ts",
+        "src/components/admin/ExcelImportModal.tsx",
+        "src/app/admin/initial-data/page.tsx",
+        "src/lib/contactlessRoadmapContracts.test.ts"
+      ],
+      "decisions": [
+        "Khong tao SDT gia cho Zalo/Facebook; phone chi luu so dien thoai that",
+        "Tach customerId/supplierId khoi phone va them contactMethods lam lop dinh danh lien he",
+        "Ghi no/tra sau bat buoc co customerId va mot contact method ro rang, khong bat buoc SDT",
+        "Excel Importer phai ho tro Ma KH/Ma NCC, Zalo, Facebook va cac dong khong co SDT",
+        "Giu backward compatibility: du lieu cu customers/{phone} van doc duoc qua fallback phone"
+      ],
+      "updatedAt": "2026-06-30T00:00:00.000+07:00"
+    },
+    {
       "id": "plan-media-manager-hash-dedup-20260628",
       "title": "Kế hoạch Đồng bộ Hóa Cơ chế Chống trùng lặp Ảnh bằng Hash cho Toàn bộ Hệ thống (MediaManager)",
       "date": "28.06.2026",

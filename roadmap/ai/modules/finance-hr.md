@@ -62,6 +62,19 @@ graph TD
 ```
 
 # 🐛 Bugs
+## BUG-REV-003: Admin Revenue "Thuc thu" hien sai breakdown POS/channel
+- **Status:** fixed
+- **Severity:** high
+- **Module:** FIN
+- **Files:** `src/app/admin/revenue/page.tsx`, `src/lib/revenueAggregateServer.ts`, `src/app/api/pos/checkout/route.ts`, `src/app/api/admin/customers/collect-debt/route.ts`
+### Cause
+<b>Phan tich</b>: `posOrderRevenue`/`webOrderRevenue` dang ghi theo tong gia tri don thay vi tien da thu, trong khi card `THUC THU` lai hien chung voi tong thuc thu. Rieng thu no cu tai POS/admin chi tang `orderRevenue` nhung khong tang `cashRevenue`/`bankRevenue`, lam tong thuc thu lon hon tong theo kenh tien.
+### Fix 2026-06-30
+- `buildCompletedOrderRevenueDelta` ghi source revenue theo `orderRevenue` thuc thu.
+- POS checkout va API thu no khach hang ghi them delta kenh tien mat/chuyen khoan/khac va phan bo source POS/Web cho tien thu no.
+- `admin/revenue` tach breakdown thanh `Theo kenh thu` va `Theo nguon thu`, cap source breakdown ve tong thuc thu va hien `Chua phan loai kenh` khi gap aggregate cu thieu channel.
+- Verification: `corepack pnpm typecheck`.
+
 ## BUG-FIN-001: Lỗ hổng Đọc Không Đồng Bộ Ngoài Transaction khi Thu Nợ Khách Hàng (Non-Transactional Read in Debt Collection)
 - **Status:** fixed
 - **Severity:** high

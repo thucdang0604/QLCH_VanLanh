@@ -57,7 +57,6 @@ function isOrderPaymentItem(item: RevenueOrderItem) {
 
 function getRevenuePaymentTotal(order: Order) {
     return (order.paymentHistory || []).reduce((sum, payment) => {
-        if (payment.type === 'debt_payment') return sum;
         return payment.type === 'refund' ? sum - (payment.amount || 0) : sum + (payment.amount || 0);
     }, 0);
 }
@@ -96,6 +95,15 @@ function isFirestorePermissionError(error: unknown) {
         && (error as { code?: unknown }).code === 'permission-denied';
 }
 
+function capBreakdownToTotal(total: number, values: number[]) {
+    let remaining = Math.max(0, total);
+    return values.map((value) => {
+        const capped = Math.min(Math.max(0, value), remaining);
+        remaining -= capped;
+        return capped;
+    });
+}
+
 export default function RevenuePage() {
     // Data
     const [orders, setOrders] = useState<Order[]>([]);
@@ -108,7 +116,7 @@ export default function RevenuePage() {
     const [loading, setLoading] = useState(true);
 
     // Filters
-    const [period, setPeriod] = useState<'today' | 'week' | 'month' | 'custom'>('month');
+    const [period, setPeriod] = useState<'today' | 'week' | 'month' | 'custom'>('today');
     const [customFrom, setCustomFrom] = useState('');
     const [customTo, setCustomTo] = useState('');
 
@@ -178,7 +186,7 @@ export default function RevenuePage() {
             const loadSourceCollections = async () => {
                 const diffTime = to.getTime() - from.getTime();
                 const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                
+
                 if (diffDays > 32) {
                     setUseAggregateData(false);
                     setAggregateDays([]);
@@ -304,7 +312,7 @@ export default function RevenuePage() {
                     const paidRetail = Math.min(paidSoFar, retailTotal);
                     orderRevenue += paidRetail;
                     (o.paymentHistory || []).forEach((payment) => {
-                        if (payment.type === 'refund' || payment.type === 'debt_payment') return;
+                        if (payment.type === 'refund') return;
                         const amount = Math.max(0, payment.amount || 0);
                         const channel = getPaymentChannel(payment.method || o.payment_method);
                         if (channel === 'cash') cashRevenue += amount;
@@ -412,6 +420,14 @@ export default function RevenuePage() {
         const completedRetailOrders = orders.filter(o => (o.status === 'Completed' || o.status === 'Shipping') && inRange(o.completedAt || o.updatedAt || o.createdAt) && getRetailOrderTotal(o) > 0);
         const webOrders = completedRetailOrders.filter(o => o.source !== 'pos');
         const posOrders = completedRetailOrders.filter(o => o.source === 'pos');
+        const getActualRetailRevenue = (order: Order) => {
+            const retailTotal = getRetailOrderTotal(order);
+            if (order.paymentHistory && order.paymentHistory.length > 0) {
+                return Math.min(getRevenuePaymentTotal(order), retailTotal);
+            }
+            if (order.paymentStatus === 'debt' || order.payment_method === 'Debt') return 0;
+            return retailTotal;
+        };
 
         return {
             orderRevenue, repairRevenue, cashRevenue, bankRevenue, otherRevenue, debtRevenue, totalRevenue, totalGiftDiscount,
@@ -419,12 +435,28 @@ export default function RevenuePage() {
             netProfit,
             webOrderCount: webOrders.length,
             posOrderCount: posOrders.length,
-            webOrderRevenue: webOrders.reduce((s, o) => s + getRetailOrderTotal(o), 0),
-            posOrderRevenue: posOrders.reduce((s, o) => s + getRetailOrderTotal(o), 0),
+            webOrderRevenue: webOrders.reduce((s, o) => s + getActualRetailRevenue(o), 0),
+            posOrderRevenue: posOrders.reduce((s, o) => s + getActualRetailRevenue(o), 0),
             repairCount: repairs.filter(r => r.status === 'done' && r.ticketType !== 'warranty' && inRange(r.timing?.completedAt || r.createdAt)).length,
             warrantyCount: repairs.filter(r => r.ticketType === 'warranty' && inRange(r.timing?.completedAt || r.createdAt)).length,
         };
     }, [useAggregateData, aggregateDays, orders, repairs, importReceipts, commissions, expenses, inRange]);
+
+    const revenueDisplay = useMemo(() => {
+        const channelTotal = calculations.cashRevenue + calculations.bankRevenue + calculations.otherRevenue;
+        const unclassifiedRevenue = Math.max(0, calculations.totalRevenue - channelTotal);
+        const [webOrderRevenue, posOrderRevenue, repairRevenue] = capBreakdownToTotal(
+            calculations.totalRevenue,
+            [calculations.webOrderRevenue, calculations.posOrderRevenue, calculations.repairRevenue],
+        );
+
+        return {
+            unclassifiedRevenue,
+            webOrderRevenue,
+            posOrderRevenue,
+            repairRevenue,
+        };
+    }, [calculations]);
 
     // ── Daily chart data ──
     const chartData = useMemo(() => {
@@ -625,14 +657,19 @@ export default function RevenuePage() {
                         )}
                     </div>
                     <div className="mt-3 space-y-1 text-xs text-green-100">
-                        <div className="flex justify-between"><span>Tien mat</span><span>{formatPrice(calculations.cashRevenue)}</span></div>
-                        <div className="flex justify-between"><span>Chuyen khoan/QR</span><span>{formatPrice(calculations.bankRevenue)}</span></div>
+                        <div className="text-[11px] font-bold uppercase tracking-wide text-green-50/80">Theo kênh thu</div>
+                        <div className="flex justify-between"><span>Tiền mặt</span><span>{formatPrice(calculations.cashRevenue)}</span></div>
+                        <div className="flex justify-between"><span>Chuyển khoản/QR</span><span>{formatPrice(calculations.bankRevenue)}</span></div>
                         {calculations.otherRevenue > 0 && (
-                            <div className="flex justify-between"><span>Khac</span><span>{formatPrice(calculations.otherRevenue)}</span></div>
+                            <div className="flex justify-between"><span>Khác</span><span>{formatPrice(calculations.otherRevenue)}</span></div>
                         )}
-                        <div className="flex justify-between"><span>🌐 Web ({calculations.webOrderCount})</span><span>{formatPrice(calculations.webOrderRevenue)}</span></div>
-                        <div className="flex justify-between"><span>🏪 POS ({calculations.posOrderCount})</span><span>{formatPrice(calculations.posOrderRevenue)}</span></div>
-                        <div className="flex justify-between"><span>🔧 Sửa chữa ({calculations.repairCount})</span><span>{formatPrice(calculations.repairRevenue)}</span></div>
+                        {revenueDisplay.unclassifiedRevenue > 0 && (
+                            <div className="flex justify-between text-amber-100"><span>Chưa phân loại kênh</span><span>{formatPrice(revenueDisplay.unclassifiedRevenue)}</span></div>
+                        )}
+                        <div className="pt-2 text-[11px] font-bold uppercase tracking-wide text-green-50/80">Theo nguồn thu</div>
+                        <div className="flex justify-between"><span>🌐 Web ({calculations.webOrderCount})</span><span>{formatPrice(revenueDisplay.webOrderRevenue)}</span></div>
+                        <div className="flex justify-between"><span>🏪 POS ({calculations.posOrderCount})</span><span>{formatPrice(revenueDisplay.posOrderRevenue)}</span></div>
+                        <div className="flex justify-between"><span>🔧 Sửa chữa ({calculations.repairCount})</span><span>{formatPrice(revenueDisplay.repairRevenue)}</span></div>
                     </div>
                 </div>
 
@@ -758,36 +795,36 @@ export default function RevenuePage() {
                 <div className="hidden md:block overflow-x-auto">
                     <table className="w-full text-sm min-w-[600px]">
                         <thead>
-                        <tr className="text-gray-500 text-xs border-b bg-gray-50">
-                            <th className="text-left px-5 py-3">Ngày</th>
-                            <th className="text-left">Danh mục</th>
-                            <th className="text-left">Mô tả</th>
-                            <th className="text-left">Người tạo</th>
-                            <th className="text-right px-5">Số tiền</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {(showAllExpenses ? expenses : expenses.slice(0, 10)).map(e => {
-                            const cat = expenseCategories.find(c => c.key === e.category);
-                            return (
-                                <tr key={e.id} className="border-b border-gray-50 hover:bg-gray-50">
-                                    <td className="px-5 py-3 text-xs text-gray-500">
-                                        {toDate(e.createdAt)?.toLocaleDateString('vi-VN') || '—'}
-                                    </td>
-                                    <td><span className="text-xs">{cat?.icon} {cat?.label || e.category}</span></td>
-                                    <td className="text-gray-600">{e.description || '—'}</td>
-                                    <td className="text-xs text-gray-400">{e.createdByName}</td>
-                                    <td className="text-right px-5 font-bold text-red-600">{formatPrice(e.amount)}</td>
-                                </tr>
-                            );
-                        })}
-                        {expenses.length === 0 && (
-                            <tr>
-                                <td colSpan={5} className="text-center py-8 text-gray-400 text-sm">Chưa có phiếu chi</td>
+                            <tr className="text-gray-500 text-xs border-b bg-gray-50">
+                                <th className="text-left px-5 py-3">Ngày</th>
+                                <th className="text-left">Danh mục</th>
+                                <th className="text-left">Mô tả</th>
+                                <th className="text-left">Người tạo</th>
+                                <th className="text-right px-5">Số tiền</th>
                             </tr>
-                        )}
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            {(showAllExpenses ? expenses : expenses.slice(0, 10)).map(e => {
+                                const cat = expenseCategories.find(c => c.key === e.category);
+                                return (
+                                    <tr key={e.id} className="border-b border-gray-50 hover:bg-gray-50">
+                                        <td className="px-5 py-3 text-xs text-gray-500">
+                                            {toDate(e.createdAt)?.toLocaleDateString('vi-VN') || '—'}
+                                        </td>
+                                        <td><span className="text-xs">{cat?.icon} {cat?.label || e.category}</span></td>
+                                        <td className="text-gray-600">{e.description || '—'}</td>
+                                        <td className="text-xs text-gray-400">{e.createdByName}</td>
+                                        <td className="text-right px-5 font-bold text-red-600">{formatPrice(e.amount)}</td>
+                                    </tr>
+                                );
+                            })}
+                            {expenses.length === 0 && (
+                                <tr>
+                                    <td colSpan={5} className="text-center py-8 text-gray-400 text-sm">Chưa có phiếu chi</td>
+                                </tr>
+                            )}
+                        </tbody>
+                    </table>
                 </div>
                 {expenses.length > 10 && (
                     <div className="flex justify-center py-3 border-t">
@@ -803,38 +840,38 @@ export default function RevenuePage() {
 
             {/* ═══ Expense Modal ═══ */}
             <Modal isOpen={showExpenseModal} onClose={() => setShowExpenseModal(false)} title="Tạo phiếu chi" size="md">
-                        <div className="px-6 py-4 space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Danh mục</label>
-                                <select title="Chọn danh mục" value={expCategory} onChange={e => setExpCategory(e.target.value)}
-                                    className="w-full px-4 py-2 border rounded-lg bg-white">
-                                    {expenseCategories.filter(c => c.key !== 'supplier_payment').map(c => (
-                                        <option key={c.key} value={c.key}>{c.icon} {c.label}</option>
-                                    ))}
-                                </select>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Mô tả</label>
-                                <input type="text" value={expDescription} onChange={e => setExpDescription(e.target.value)}
-                                    placeholder="VD: Tiền điện tháng 2"
-                                    className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20" />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Số tiền (VNĐ)</label>
-                                <CurrencyInput value={expAmount || ''} onChange={v => setExpAmount(v)}
-                                    placeholder="0"
-                                    className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20 text-lg font-bold" />
-                            </div>
-                        </div>
-                        <div className="flex justify-end gap-3 px-6 py-4 border-t">
-                            <button onClick={() => setShowExpenseModal(false)}
-                                className="px-4 py-2 text-sm bg-gray-100 rounded-lg hover:bg-gray-200">Hủy</button>
-                            <button onClick={handleSaveExpense} disabled={isProcessing || expAmount <= 0}
-                                className="px-5 py-2 text-sm font-semibold text-white bg-red-500 rounded-lg hover:bg-red-600 disabled:opacity-50 flex items-center gap-2">
-                                {isProcessing ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}
-                                Lưu phiếu chi
-                            </button>
-                        </div>
+                <div className="px-6 py-4 space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Danh mục</label>
+                        <select title="Chọn danh mục" value={expCategory} onChange={e => setExpCategory(e.target.value)}
+                            className="w-full px-4 py-2 border rounded-lg bg-white">
+                            {expenseCategories.filter(c => c.key !== 'supplier_payment').map(c => (
+                                <option key={c.key} value={c.key}>{c.icon} {c.label}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Mô tả</label>
+                        <input type="text" value={expDescription} onChange={e => setExpDescription(e.target.value)}
+                            placeholder="VD: Tiền điện tháng 2"
+                            className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20" />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Số tiền (VNĐ)</label>
+                        <CurrencyInput value={expAmount || ''} onChange={v => setExpAmount(v)}
+                            placeholder="0"
+                            className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20 text-lg font-bold" />
+                    </div>
+                </div>
+                <div className="flex justify-end gap-3 px-6 py-4 border-t">
+                    <button onClick={() => setShowExpenseModal(false)}
+                        className="px-4 py-2 text-sm bg-gray-100 rounded-lg hover:bg-gray-200">Hủy</button>
+                    <button onClick={handleSaveExpense} disabled={isProcessing || expAmount <= 0}
+                        className="px-5 py-2 text-sm font-semibold text-white bg-red-500 rounded-lg hover:bg-red-600 disabled:opacity-50 flex items-center gap-2">
+                        {isProcessing ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}
+                        Lưu phiếu chi
+                    </button>
+                </div>
             </Modal>
         </div>
     );

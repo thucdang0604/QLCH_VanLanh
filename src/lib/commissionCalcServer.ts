@@ -1,6 +1,7 @@
-import { getFirestore, FieldValue, Transaction } from 'firebase-admin/firestore';
+import { FieldValue, Transaction } from 'firebase-admin/firestore';
 import type { Commission, CommissionRule, Order, RepairTicket, Product } from '@/lib/types';
 import { incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
+import { getAdminDb } from '@/lib/firebaseAdmin';
 
 function getSafePercentage(rule: CommissionRule): number | null {
     const pct = typeof rule.percentage === 'number' ? rule.percentage : Number(rule.percentage);
@@ -53,7 +54,7 @@ function safeNumber(value: unknown): number {
 
 // Fetch all active rules
 export async function getActiveRulesServer(): Promise<CommissionRule[]> {
-    const db = getFirestore();
+    const db = getAdminDb();
     const snap = await db.collection('commission_rules').where('isActive', '==', true).get();
     return snap.docs.map(d => ({ id: d.id, ...d.data() } as CommissionRule));
 }
@@ -106,7 +107,7 @@ export async function calculateAndSaveCommissionsServer(
     docData: Order | RepairTicket
 ) {
     try {
-        const db = getFirestore();
+        const db = getAdminDb();
         
         // Guard: Only calculate commissions when completed/paid
         if (docType === 'repair') {
@@ -239,7 +240,7 @@ export async function reverseCommissionServer(
     sourceType: 'order' | 'repair',
     callerUid: string
 ) {
-    const db = getFirestore();
+    const db = getAdminDb();
     const commSnap = await db
         .collection('commissions')
         .where('sourceId', '==', sourceId)

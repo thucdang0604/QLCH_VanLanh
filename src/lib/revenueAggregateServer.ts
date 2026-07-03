@@ -61,6 +61,17 @@ export function incrementRevenueAggregates(
     );
 }
 
+export function buildPaymentChannelRevenueDelta(amount: number, method: unknown): RevenueAggregateDelta {
+    const value = Math.max(0, safeNumber(amount));
+    if (value <= 0) return {};
+
+    const channel = getPaymentChannel(method);
+    if (channel === 'cash') return { cashRevenue: value };
+    if (channel === 'bank') return { bankRevenue: value };
+    if (channel === 'debt') return {};
+    return { otherRevenue: value };
+}
+
 export function buildCompletedOrderRevenueDelta(order: Order, multiplier = 1): RevenueAggregateDelta {
     const items = order.items || [];
     const hasOrderPaymentItems = items.some(item => {
@@ -124,7 +135,7 @@ export function buildCompletedOrderRevenueDelta(order: Order, multiplier = 1): R
         debtRevenue: debtRevenue * multiplier,
         webOrderCount: isPos ? 0 : multiplier,
         posOrderCount: isPos ? multiplier : 0,
-        webOrderRevenue: isPos ? 0 : orderTotal * multiplier,
-        posOrderRevenue: isPos ? orderTotal * multiplier : 0,
+        webOrderRevenue: isPos ? 0 : orderRevenue * multiplier,
+        posOrderRevenue: isPos ? orderRevenue * multiplier : 0,
     };
 }

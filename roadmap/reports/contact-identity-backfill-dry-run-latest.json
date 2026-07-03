@@ -1,0 +1,12 @@
+{
+  "mode": "dry-run",
+  "collection": "customers",
+  "startedAt": "2026-07-02T09:05:48.122Z",
+  "scanned": 0,
+  "wouldPatch": 0,
+  "patched": 0,
+  "missingPhone": 0,
+  "missingContact": 0,
+  "samples": [],
+  "finishedAt": "2026-07-02T09:05:52.533Z"
+}

@@ -10,7 +10,18 @@ export interface OrderLineItem {
 
 export interface LastOrderData {
     id: string;
-    customer_info: { name: string; phone: string; email?: string; city?: string; district?: string; ward?: string; address?: string };
+    customer_info: {
+        customerId?: string;
+        name: string;
+        phone: string;
+        primaryContactType?: string | null;
+        primaryContactValue?: string;
+        email?: string;
+        city?: string;
+        district?: string;
+        ward?: string;
+        address?: string;
+    };
     items: OrderLineItem[];
     total_amount: number;
     discount_amount: number;
@@ -42,8 +53,10 @@ export interface CartItem {
 
 export interface RepairTicketInfo {
     id: string;
+    customerId?: string;
     customerName: string;
     customerPhone: string;
+    primaryContactValue?: string;
     deviceModel: string;
     status: string;
     parts: { productName: string; partType?: string; unitPriceAtUse?: number; status?: string; quantity?: number }[];

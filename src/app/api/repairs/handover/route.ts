@@ -13,6 +13,10 @@ import { reserveSequentialDocumentIds } from '@/lib/serverDocumentIds';
 
 const LEGACY_TERMINAL_STATUSES = [REPAIR_STATUS.DONE, REPAIR_STATUS.OUT, REPAIR_STATUS.REFUND, 'bh_hoan_tat', 'bh_tu_choi', 'bh_refund'];
 
+function getTicketCustomerId(ticket: RepairTicket): string {
+    return ticket.customer?.id || ticket.customer?.customerId || ticket.customer?.phone || '';
+}
+
 function resolveServiceWarrantyMonths(taxonomy: unknown, categoryPath: string[] | undefined) {
     if (!Array.isArray(categoryPath) || categoryPath.length === 0) return 3;
 
@@ -156,16 +160,14 @@ export async function POST(request: NextRequest) {
             let fifoDeductors: FifoDeductor[] = [];
 
             // --- READ PHASE ---
-            let custSnap: FirebaseFirestore.DocumentSnapshot | null = null;
             let custRef: FirebaseFirestore.DocumentReference | null = null;
             const productDocs = new Map<string, { ref: FirebaseFirestore.DocumentReference; data: FirebaseFirestore.DocumentData }>();
 
             if (!isWarranty) {
                 // Read customer
-                if (ticket.customer?.phone) {
-                    const phone = ticket.customer.phone;
-                    custRef = db.collection('customers').doc(phone);
-                    custSnap = await tx.get(custRef);
+                const customerId = getTicketCustomerId(ticket);
+                if (customerId) {
+                    custRef = db.collection('customers').doc(customerId);
                 }
 
 
@@ -317,18 +319,27 @@ export async function POST(request: NextRequest) {
                 (updateData.payment as Record<string, unknown>).paidAt = FieldValue.serverTimestamp();
 
                 // Customer Aggregate (if valid customer)
-                if (custRef && custSnap) {
-                    if (custSnap.exists) {
-                        tx.update(custRef, {
-                            totalSpent: FieldValue.increment(amount),
-                            totalRepairs: FieldValue.increment(1),
-                            updatedAt: FieldValue.serverTimestamp()
-                        });
-                    }
+                if (custRef) {
+                    tx.set(custRef, {
+                        code: getTicketCustomerId(ticket),
+                        name: ticket.customer?.name || '',
+                        phone: ticket.customer?.phone || '',
+                        primaryPhone: ticket.customer?.phone || '',
+                        primaryContactType: ticket.customer?.primaryContactType || ticket.customer?.contactType || null,
+                        primaryContactValue: ticket.customer?.primaryContactValue || ticket.customer?.contactValue || ticket.customer?.phone || '',
+                        contactMethods: ticket.customer?.contactMethods || [],
+                        searchKeywords: ticket.customer?.searchKeywords || [],
+                        totalSpent: FieldValue.increment(amount),
+                        totalRepairs: FieldValue.increment(1),
+                        updatedAt: FieldValue.serverTimestamp(),
+                        lastVisit: FieldValue.serverTimestamp(),
+                    }, { merge: true });
                     // Ledger
                     const ledgerRef = customerLedgerAllocations[0].ref;
                     tx.set(ledgerRef, {
-                        customerId: ticket.customer?.phone,
+                        customerId: getTicketCustomerId(ticket),
+                        customerPhone: ticket.customer?.phone || '',
+                        customerName: ticket.customer?.name || '',
                         type: 'repair_payment',
                         amount: amount,
                         referenceId: ticketId,

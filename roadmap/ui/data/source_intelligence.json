@@ -2,8 +2,10 @@
   "_meta": {
     "description": "Bản đồ trí tuệ mã nguồn — tự động tích lũy khi AI đọc/sửa code. Giúp AI sau chỉ cần đọc file này là hiểu ngay cấu trúc, liên kết, và cách sửa.",
     "lastUpdated": "2026-06-30T00:00:00.000+07:00",
-    "version": 26,
+    "version": 28,
     "changelog": [
+      "v28: Admin revenue actual-collected fix - source revenue fields now represent collected revenue instead of gross order total, debt collection increments payment-channel revenue, and /admin/revenue separates channel/source breakdowns.",
+      "v27: POS cashier shift history - /api/pos/cashier-shift returns recent closed shifts and the Thu ngan tab shows closed-shift history for cash/bank reconciliation after closing a shift.",
       "v26: POS debt collection sync - /api/pos/checkout unifies selected old-order payments and surplus debt offset through orderPaymentTotals, updates old order paymentHistory/customer_transactions/revenue/cashier shift, and POS payment UI shows remaining amount/change due.",
       "v25: POS cashier shifts - cashier_shifts stores locked opening cash/bank amounts, POS cash/bank payments increment active shift totals in checkout transaction, and cashier tab opens/closes the active shift through /api/pos/cashier-shift.",
       "v24: Retail ops commission/revenue/POS plan - commission_rules support calculationMode and priceRanges; revenue aggregates split cash/bank/other/debt channels; inventory imports paid by debt increment importDebt/debtExpenses without increasing importCost until actual payment.",
@@ -54,6 +56,7 @@
         "api/pos/checkout/route.ts"
       ],
       "changeLog": [
+        "v27: GET /api/pos/cashier-shift returns recent closed shifts; POS cashier tab displays closed-shift history for reconciliation.",
         "v26: Checkout increments cash/bank shift totals with the retained amount from current order plus old-debt payment, excluding change due.",
         "v25: Added active cashier shift tracking. Cash/bank/Momo POS payments require an open shift and increment shift totals in checkout transaction."
       ]

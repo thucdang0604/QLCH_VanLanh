@@ -17,6 +17,7 @@ import UniversalProductModal from '@/components/admin/UniversalProductModal';
 import Image from 'next/image';
 import { db, getAuthInstance } from '@/lib/firebase';
 import type { Product, TaxonomyNode } from '@/lib/types';
+import type { ContactMethod, ContactMethodType } from '@/lib/types/contact';
 
 import { toastError, toastSuccess, toastWarning } from '@/lib/toast';
 import { DEFAULT_CONFIG } from '@/lib/config-defaults';
@@ -26,6 +27,7 @@ import { consumeChatWorkflowHandoff } from '@/lib/chatWorkflowHandoff';
 import { extractProductCodeFromScan, getPrimaryProductCode, getProductScanCandidates, productCodeSearchText } from '@/lib/productCodes';
 import { PRODUCT_STATUS, isProductSellable } from '@/lib/productLifecycle';
 import { generateSearchKeywords } from '@/lib/utils';
+import { extractZaloQrIdentity } from '@/lib/zaloContactCardImport';
 import { PosCartPanel } from '@/features/pos/PosCartPanel';
 import type { AppliedVoucher, CartItem, DiscountDetail, LastOrderData, OrderLineItem, PayableOrderInfo, RepairTicketInfo, VoucherStatus } from '@/features/pos/posTypes';
 import CurrencyInput from '@/components/admin/CurrencyInput';
@@ -93,8 +95,10 @@ function mapRepairTicketInfo(id: string, data: Record<string, unknown>, fallback
 
     return {
         id,
+        customerId: String(customer.id || customer.customerId || ''),
         customerName: String(customer.name || data.customerName || ''),
         customerPhone: String(customer.phone || data.customerPhone || fallbackPhone),
+        primaryContactValue: String(customer.primaryContactValue || ''),
         deviceModel: String(deviceInfo.model || data.deviceModel || ''),
         status: String(data.status || ''),
         serviceName: typeof data.serviceName === 'string' ? data.serviceName : '',
@@ -123,6 +127,14 @@ function mapRepairTicketInfo(id: string, data: Record<string, unknown>, fallback
             };
         }) : [],
     };
+}
+
+function firstContactValue(methods: ContactMethod[] | undefined, type: ContactMethodType) {
+    return methods?.find(method => method.type === type)?.value || '';
+}
+
+function isContactMethodType(value: string | null | undefined): value is ContactMethodType {
+    return value === 'phone' || value === 'zalo' || value === 'facebook' || value === 'email' || value === 'address' || value === 'note' || value === 'other';
 }
 
 function formatLookupDate(value: unknown) {
@@ -217,8 +229,11 @@ interface CashierShiftView {
     otherSalesAmount?: number;
     expectedCashAmount: number;
     expectedBankAmount: number;
+    closingCashAmount?: number;
+    closingBankAmount?: number;
     openedByName?: string;
     openedAt?: string | null;
+    closedByName?: string;
     closedAt?: string | null;
 }
 
@@ -243,8 +258,13 @@ export default function POSPage() {
 
     // Cart
     const [cart, setCart] = useState<CartItem[]>([]);
+    const [customerId, setCustomerId] = useState('');
     const [customerName, setCustomerName] = useState('');
     const [customerPhone, setCustomerPhone] = useState('');
+    const [customerZalo, setCustomerZalo] = useState('');
+    const [customerFacebook, setCustomerFacebook] = useState('');
+    const [customerOtherContact, setCustomerOtherContact] = useState('');
+    const [customerPrimaryContactType, setCustomerPrimaryContactType] = useState<ContactMethodType>('phone');
     const [customerDebt, setCustomerDebt] = useState<number>(0);
     const [paymentMethod, setPaymentMethod] = useState('cash');
     const [discount, setDiscount] = useState(0);
@@ -265,6 +285,7 @@ export default function POSPage() {
     const [bankConfig, setBankConfig] = useState<BankConfig | null>(null);
     const [posTab, setPosTab] = useState<PosTab>('sales');
     const [cashierShift, setCashierShift] = useState<CashierShiftView | null>(null);
+    const [cashierShiftHistory, setCashierShiftHistory] = useState<CashierShiftView[]>([]);
     const [cashierLoading, setCashierLoading] = useState(true);
     const [cashierSaving, setCashierSaving] = useState(false);
     const [openingCashAmount, setOpeningCashAmount] = useState(0);
@@ -300,6 +321,7 @@ export default function POSPage() {
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || 'Không thể tải ca thu ngân');
             setCashierShift(data.shift || null);
+            setCashierShiftHistory(Array.isArray(data.history) ? data.history : []);
         } catch (err) {
             console.error(err);
             toastError(err instanceof Error ? err.message : 'Không thể tải ca thu ngân');
@@ -358,6 +380,12 @@ export default function POSPage() {
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || 'Không thể chốt ca thu ngân');
             setCashierShift(null);
+            if (data.shift) {
+                setCashierShiftHistory(prev => [
+                    data.shift,
+                    ...prev.filter(shift => shift.id !== data.shift.id),
+                ].slice(0, 10));
+            }
             toastSuccess('Đã chốt ca thu ngân.');
         } catch (err) {
             console.error(err);
@@ -377,8 +405,15 @@ export default function POSPage() {
         if (chatPrefillApplied.current || searchParams.get('source') !== 'chat') return;
         const handoff = consumeChatWorkflowHandoff(searchParams);
         if (!handoff) return;
+        setCustomerId(handoff.customerId || '');
         setCustomerName(handoff.customerName);
         setCustomerPhone(handoff.customerPhone);
+        const handoffContactType = isContactMethodType(handoff.primaryContactType) ? handoff.primaryContactType : handoff.customerPhone ? 'phone' : 'other';
+        const handoffContactValue = handoff.primaryContactValue || '';
+        setCustomerPrimaryContactType(handoffContactType);
+        if (handoffContactType === 'zalo') setCustomerZalo(handoffContactValue);
+        if (handoffContactType === 'facebook') setCustomerFacebook(handoffContactValue);
+        if (handoffContactType !== 'phone' && handoffContactType !== 'zalo' && handoffContactType !== 'facebook') setCustomerOtherContact(handoffContactValue);
         chatPrefillApplied.current = true;
     }, [searchParams]);
 
@@ -398,8 +433,10 @@ export default function POSPage() {
                 const repair = mapRepairTicketInfo(snapshot.id, snapshot.data());
 
                 setLinkedRepairs(previous => [...previous, repair]);
+                setCustomerId(previous => previous || repair.customerId || '');
                 setCustomerName(previous => previous || repair.customerName);
                 setCustomerPhone(previous => previous || repair.customerPhone);
+                setCustomerOtherContact(previous => previous || repair.primaryContactValue || '');
             } catch (error) {
                 console.error('Failed to load repair by ID:', error);
             } finally {
@@ -414,9 +451,24 @@ export default function POSPage() {
     }, [searchParams, linkedRepairs]);
 
 
-    // Lookup repair by phone
-    const lookupRepairByPhone = async (phone: string) => {
-        if (!phone || phone.length < 8) {
+    const applyCustomerSnapshot = (id: string, data: Record<string, unknown>) => {
+        const contactMethods = Array.isArray(data.contactMethods) ? data.contactMethods as ContactMethod[] : [];
+        setCustomerId(id);
+        setCustomerName(String(data.name || ''));
+        setCustomerPhone(String(data.phone || data.primaryPhone || ''));
+        setCustomerZalo(firstContactValue(contactMethods, 'zalo'));
+        setCustomerFacebook(firstContactValue(contactMethods, 'facebook'));
+        setCustomerOtherContact(firstContactValue(contactMethods, 'other') || String(data.primaryContactValue || ''));
+        setCustomerPrimaryContactType((data.primaryContactType as ContactMethodType) || contactMethods.find(method => method.isPrimary)?.type || 'phone');
+        setCustomerDebt(Number(data.totalDebt || 0));
+    };
+
+    // Lookup repair/order debt by customer id first, then legacy phone fallback.
+    const lookupRepairByPhone = async (lookupValue: string) => {
+        const rawKeyword = lookupValue.trim();
+        const zaloQr = extractZaloQrIdentity(rawKeyword);
+        const keyword = zaloQr?.profileUrl || rawKeyword;
+        if (!keyword || keyword.length < 3) {
             setLinkedRepairs([]);
             setPayableOrders([]);
             setAutoDiscountAmount(0);
@@ -426,68 +478,105 @@ export default function POSPage() {
         }
         setRepairLoading(true);
         try {
-            const normalizedPhone = phone.replace(/[^0-9]/g, '');
-            // Fetch from customers collection
-            if (normalizedPhone) {
-                const { doc, getDoc } = await import('firebase/firestore');
-                const custSnap = await getDoc(doc(db, 'customers', normalizedPhone));
-                if (custSnap.exists()) {
-                    const cData = custSnap.data();
-                    if (!customerName && cData.name && cData.name !== 'Khách lẻ') {
-                        setCustomerName(cData.name);
-                    }
-                    setCustomerDebt(cData.totalDebt || 0);
-                } else {
-                    setCustomerDebt(0);
+            const normalizedPhone = zaloQr ? '' : keyword.replace(/[^0-9]/g, '');
+            const currentCustomerId = customerId.trim();
+            const lookupMatchesCurrentCustomerId = Boolean(currentCustomerId)
+                && currentCustomerId.toLowerCase() === keyword.toLowerCase();
+            let resolvedCustomerId = '';
+            const { doc, getDoc } = await import('firebase/firestore');
+            const isSafeDocumentId = (value: string) => Boolean(value)
+                && !/[\/\\#?\[\]]/.test(value)
+                && value.length <= 120;
+
+            const docCandidates = Array.from(new Set([
+                lookupMatchesCurrentCustomerId ? currentCustomerId : '',
+                normalizedPhone,
+                keyword,
+                zaloQr?.externalId,
+            ].filter((value): value is string => Boolean(value))))
+                .filter(isSafeDocumentId);
+            for (const candidate of docCandidates) {
+                const custSnap = await getDoc(doc(db, 'customers', candidate));
+                if (!custSnap.exists()) continue;
+                resolvedCustomerId = custSnap.id;
+                applyCustomerSnapshot(custSnap.id, custSnap.data());
+                break;
+            }
+
+            if (!resolvedCustomerId && keyword.length >= 3) {
+                const searchKeywords = Array.from(new Set([
+                    keyword.toLowerCase(),
+                    zaloQr?.externalId?.toLowerCase(),
+                    generateSearchKeywords(keyword)[0] || keyword.toLowerCase(),
+                ].filter(Boolean)));
+                for (const searchKeyword of searchKeywords) {
+                    const customerSnap = await getDocs(query(collection(db, 'customers'), where('searchKeywords', 'array-contains', searchKeyword), limit(1)));
+                    const found = customerSnap.docs[0];
+                    if (!found) continue;
+                    resolvedCustomerId = found.id;
+                    applyCustomerSnapshot(found.id, found.data());
+                    break;
                 }
-            } else {
+            }
+
+            if (!resolvedCustomerId) {
+                setCustomerId('');
                 setCustomerDebt(0);
             }
 
-            const q = query(
-                collection(db, 'repairs'),
-                where('customer.phone', '==', phone.trim()),
-            );
-            const ordersQuery = query(
-                collection(db, 'orders'),
-                where('customer_info.phone', '==', phone.trim()),
-                limit(20),
-            );
-            const [snap, ordersSnap] = await Promise.all([
-                getDocs(q),
-                getDocs(ordersQuery),
-            ]);
-            if (!snap.empty) {
-                const repairs = snap.docs
-                    .filter(d => {
-                        const ps = d.data().payment?.status;
-                        return !ps || ps === 'unpaid' || ps === 'partial';
-                    })
-                    .sort((a, b) => {
-                        const ta = a.data().createdAt?.toMillis?.() || 0;
-                        const tb = b.data().createdAt?.toMillis?.() || 0;
-                        return tb - ta;
-                    })
-                    .map(d => {
-                    const data = d.data();
-                    const repair = mapRepairTicketInfo(d.id, data, phone);
-                    // Auto-fill customer name if empty
-                    if (!customerName && repair.customerName) {
-                        setCustomerName(prev => prev || repair.customerName);
-                    }
-                    return repair;
+            const repairDocs = new Map<string, Record<string, unknown> & { id: string }>();
+            const orderDocs = new Map<string, Record<string, unknown> & { id: string }>();
+            const queryPairs: Promise<void>[] = [];
+            const addRepairsFromSnap = async (repairQuery: ReturnType<typeof query>) => {
+                const snap = await getDocs(repairQuery);
+                snap.docs.forEach(d => {
+                    const data = d.data() as Record<string, unknown>;
+                    repairDocs.set(d.id, { id: d.id, ...data });
                 });
-                setLinkedRepairs(repairs);
-            } else {
-                setLinkedRepairs([]);
+            };
+            const addOrdersFromSnap = async (ordersQuery: ReturnType<typeof query>) => {
+                const ordersSnap = await getDocs(ordersQuery);
+                ordersSnap.docs.forEach(d => {
+                    const data = d.data() as Record<string, unknown>;
+                    orderDocs.set(d.id, { id: d.id, ...data });
+                });
+            };
+
+            if (resolvedCustomerId) {
+                queryPairs.push(addRepairsFromSnap(query(collection(db, 'repairs'), where('customer.id', '==', resolvedCustomerId))));
+                queryPairs.push(addOrdersFromSnap(query(collection(db, 'orders'), where('customer_info.customerId', '==', resolvedCustomerId), limit(20))));
             }
-            const orders = ordersSnap.docs
+            if (normalizedPhone) {
+                queryPairs.push(addRepairsFromSnap(query(collection(db, 'repairs'), where('customer.phone', '==', keyword))));
+                queryPairs.push(addOrdersFromSnap(query(collection(db, 'orders'), where('customer_info.phone', '==', keyword), limit(20))));
+            }
+            await Promise.all(queryPairs);
+
+            const repairs = Array.from(repairDocs.values())
+                .filter(d => {
+                    const payment = (d.payment || {}) as Record<string, unknown>;
+                    const ps = payment.status;
+                    return !ps || ps === 'unpaid' || ps === 'partial';
+                })
                 .sort((a, b) => {
-                    const ta = a.data().createdAt?.toMillis?.() || 0;
-                    const tb = b.data().createdAt?.toMillis?.() || 0;
+                    const ta = (a.createdAt as { toMillis?: () => number })?.toMillis?.() || 0;
+                    const tb = (b.createdAt as { toMillis?: () => number })?.toMillis?.() || 0;
                     return tb - ta;
                 })
-                .map(orderDoc => mapPayableOrderInfo(orderDoc.id, orderDoc.data()))
+                .map(d => mapRepairTicketInfo(d.id, d, normalizedPhone || keyword));
+            setLinkedRepairs(repairs);
+            const firstRepair = repairs[0];
+            if (!resolvedCustomerId && firstRepair) {
+                if (firstRepair.customerName) setCustomerName(firstRepair.customerName);
+                if (firstRepair.customerPhone) setCustomerPhone(firstRepair.customerPhone);
+            }
+            const orders = Array.from(orderDocs.values())
+                .sort((a, b) => {
+                    const ta = (a.createdAt as { toMillis?: () => number })?.toMillis?.() || 0;
+                    const tb = (b.createdAt as { toMillis?: () => number })?.toMillis?.() || 0;
+                    return tb - ta;
+                })
+                .map(orderDoc => mapPayableOrderInfo(orderDoc.id, orderDoc))
                 .filter((order): order is PayableOrderInfo => Boolean(order));
             setPayableOrders(orders);
         } catch (err) {
@@ -1120,16 +1209,25 @@ export default function POSPage() {
     const handleCheckout = async () => {
         if (cart.length === 0) return;
 
+        const requiresCashierShift = ['cash', 'bank', 'momo'].includes(paymentMethod)
+            && total > 0;
+        if (requiresCashierShift && !activeCashierShift) {
+            setPosTab('cashier');
+            toastError('Chưa mở ca thu ngân. Vui lòng mở ca ở tab Thu ngân trước khi thanh toán tiền mặt, chuyển khoản hoặc ví.');
+            return;
+        }
+
         // Validation for debt/partial payments
         const isDebtPayment = paymentMethod === 'debt' || (deposit > 0 && deposit < total);
         if (isDebtPayment) {
             const phoneClean = customerPhone.trim();
-            if (!phoneClean) {
-                toastError('Đơn hàng ghi nợ hoặc thanh toán thiếu bắt buộc phải nhập Số điện thoại khách hàng.');
+            const hasDebtContact = Boolean(customerId.trim() || phoneClean || customerZalo.trim() || customerFacebook.trim() || customerOtherContact.trim());
+            if (!hasDebtContact) {
+                toastError('Đơn hàng ghi nợ hoặc thanh toán thiếu bắt buộc phải có Mã KH, SĐT, Zalo, Facebook hoặc liên hệ khác.');
                 return;
             }
             const digits = phoneClean.replace(/[^0-9]/g, '');
-            if (digits.length < 9 || digits.length > 11) {
+            if (phoneClean && (digits.length < 9 || digits.length > 11)) {
                 toastError('Số điện thoại khách hàng không hợp lệ (yêu cầu từ 9 đến 11 chữ số).');
                 return;
             }
@@ -1190,8 +1288,13 @@ export default function POSPage() {
                 idempotencyKey: operationKey,
                 repairTicketIds: repairTicketIds.length > 0 ? repairTicketIds : undefined,
                 customer_info: {
+                    customerId: customerId.trim(),
                     name: customerName.trim() || 'Khách lẻ',
                     phone: customerPhone.trim(),
+                    zalo: customerZalo.trim(),
+                    facebook: customerFacebook.trim(),
+                    otherContact: customerOtherContact.trim(),
+                    primaryContactType: customerPrimaryContactType,
                 },
                 items: cart.map(c => ({
                     productId: c.productId,
@@ -1215,8 +1318,12 @@ export default function POSPage() {
                 ...(appliedVoucher ? { voucherCode: appliedVoucher.code } : {}),
             };
 
+            const checkoutStartedAt = performance.now();
             const auth = await getAuthInstance();
+            const tokenStartedAt = performance.now();
             const idToken = await auth.currentUser?.getIdToken();
+            const tokenMs = Math.round(performance.now() - tokenStartedAt);
+            const requestStartedAt = performance.now();
             const res = await fetch('/api/pos/checkout', {
                 method: 'POST',
                 headers: {
@@ -1225,8 +1332,18 @@ export default function POSPage() {
                 },
                 body: JSON.stringify(orderData)
             });
+            const requestMs = Math.round(performance.now() - requestStartedAt);
 
             const data = await res.json();
+            const totalCheckoutMs = Math.round(performance.now() - checkoutStartedAt);
+            if (totalCheckoutMs > 1500 || data?.debugTiming) {
+                console.info('POS checkout timing', {
+                    tokenMs,
+                    requestMs,
+                    totalCheckoutMs,
+                    server: data?.debugTiming,
+                });
+            }
             if (!res.ok) {
                 throw new Error(data.error || 'Lỗi khi thanh toán qua API');
             }
@@ -1250,7 +1367,12 @@ export default function POSPage() {
             // Reset cart
             setCart([]);
             setCustomerName('');
+            setCustomerId('');
             setCustomerPhone('');
+            setCustomerZalo('');
+            setCustomerFacebook('');
+            setCustomerOtherContact('');
+            setCustomerPrimaryContactType('phone');
             setCustomerDebt(0);
             setLinkedRepairs([]);
             setDiscount(0);
@@ -1297,10 +1419,20 @@ export default function POSPage() {
             cart={cart}
             setCart={setCart}
             products={products}
+            customerId={customerId}
+            setCustomerId={setCustomerId}
             customerName={customerName}
             setCustomerName={setCustomerName}
             customerPhone={customerPhone}
             setCustomerPhone={setCustomerPhone}
+            customerZalo={customerZalo}
+            setCustomerZalo={setCustomerZalo}
+            customerFacebook={customerFacebook}
+            setCustomerFacebook={setCustomerFacebook}
+            customerOtherContact={customerOtherContact}
+            setCustomerOtherContact={setCustomerOtherContact}
+            customerPrimaryContactType={customerPrimaryContactType}
+            setCustomerPrimaryContactType={setCustomerPrimaryContactType}
             customerDebt={customerDebt}
             repairLoading={repairLoading}
             linkedRepairs={linkedRepairs}
@@ -1325,6 +1457,7 @@ export default function POSPage() {
             subtotal={subtotal}
             total={total}
             isProcessing={isProcessing}
+            cashierShiftOpen={Boolean(activeCashierShift)}
             onCloseMobileCart={() => setShowMobileCart(false)}
             onLookupRepairByPhone={lookupRepairByPhone}
             onAddRepairToCart={addRepairToCart}
@@ -1468,6 +1601,76 @@ export default function POSPage() {
                         </button>
                     </div>
                 </div>
+            </div>
+            <div className="mt-4 rounded-2xl border bg-white p-4 shadow-sm">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                        <h2 className="text-base font-bold text-gray-900">Lịch sử chốt ca</h2>
+                        <p className="text-xs font-medium text-gray-500">Các ca đã chốt gần nhất để đối chiếu két.</p>
+                    </div>
+                    <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-bold text-gray-600">
+                        {cashierShiftHistory.length} ca
+                    </span>
+                </div>
+
+                {cashierLoading ? (
+                    <div className="flex min-h-24 items-center justify-center rounded-2xl bg-gray-50">
+                        <Loader2 className="animate-spin text-emerald-600" size={24} />
+                    </div>
+                ) : cashierShiftHistory.length === 0 ? (
+                    <div className="rounded-2xl bg-gray-50 p-4 text-center text-sm font-medium text-gray-500">
+                        Chưa có ca nào đã chốt.
+                    </div>
+                ) : (
+                    <div className="space-y-3">
+                        {cashierShiftHistory.map(shift => {
+                            const cashAmount = shift.closingCashAmount ?? shift.expectedCashAmount;
+                            const bankAmount = shift.closingBankAmount ?? shift.expectedBankAmount;
+                            return (
+                                <div key={shift.id} className="rounded-2xl border border-gray-100 p-3">
+                                    <div className="mb-3 flex items-start justify-between gap-3">
+                                        <div>
+                                            <div className="text-sm font-black text-gray-900">
+                                                Ca #{shift.id.slice(-6).toUpperCase()}
+                                            </div>
+                                            <div className="mt-0.5 text-xs font-medium text-gray-500">
+                                                {shift.openedAt ? formatDateTime(shift.openedAt) : 'Không rõ giờ mở'}
+                                                {shift.closedAt ? ` - ${formatDateTime(shift.closedAt)}` : ''}
+                                            </div>
+                                        </div>
+                                        <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">
+                                            Đã chốt
+                                        </span>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+                                        <div className="rounded-xl bg-gray-50 p-2">
+                                            <div className="text-[11px] font-bold uppercase text-gray-500">Tiền mặt</div>
+                                            <div className="font-black text-gray-900">{formatPrice(cashAmount)}</div>
+                                        </div>
+                                        <div className="rounded-xl bg-blue-50 p-2">
+                                            <div className="text-[11px] font-bold uppercase text-blue-600">Chuyển khoản</div>
+                                            <div className="font-black text-blue-900">{formatPrice(bankAmount)}</div>
+                                        </div>
+                                        <div className="rounded-xl bg-orange-50 p-2">
+                                            <div className="text-[11px] font-bold uppercase text-orange-700">Tổng</div>
+                                            <div className="font-black text-orange-700">{formatPrice(cashAmount + bankAmount)}</div>
+                                        </div>
+                                        <div className="rounded-xl bg-gray-50 p-2">
+                                            <div className="text-[11px] font-bold uppercase text-gray-500">POS phát sinh</div>
+                                            <div className="font-black text-gray-900">{formatPrice(shift.cashSalesAmount + shift.bankSalesAmount)}</div>
+                                        </div>
+                                    </div>
+
+                                    <div className="mt-3 grid gap-1 text-xs font-medium text-gray-500 sm:grid-cols-2">
+                                        <div>Mở: {shift.openedByName || 'Nhân viên'}</div>
+                                        <div>Chốt: {shift.closedByName || 'Nhân viên'}</div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
             </div>
         </div>
     );

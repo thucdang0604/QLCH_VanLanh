@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
 import { Search, Users, Loader2, Star, TrendingUp, Plus, Download, Filter } from 'lucide-react';
-import { collection, query, orderBy, limit, startAfter, DocumentSnapshot, doc, setDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { collection, query, orderBy, limit, startAfter, DocumentSnapshot, doc, setDoc, serverTimestamp, updateDoc, where } from 'firebase/firestore';
 import { onSnapshot, getDocs, getDoc } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import CustomerDetailDrawer from '@/components/admin/customers/CustomerDetailDrawer';
@@ -13,6 +13,11 @@ import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 import { TierConfig } from '@/lib/customerTiers';
 import type { Customer } from '@/lib/types';
+import { buildContactMethods, buildContactSearchKeywords, getPrimaryContact, mergeContactMethods, normalizeContactValue } from '@/lib/contactIdentity';
+import { reserveCustomerDocumentId } from '@/lib/customerDocumentIds';
+import { normalizeVietnamPhone } from '@/lib/phone';
+import { generateSearchKeywords } from '@/lib/utils';
+import type { ContactMethod } from '@/lib/types/contact';
 
 const formatPrice = (price: number) => new Intl.NumberFormat('vi-VN').format(price) + 'đ';
 const formatDate = (ts: unknown) => {
@@ -21,6 +26,61 @@ const formatDate = (ts: unknown) => {
     const d = typeof obj.toDate === 'function' ? obj.toDate() : new Date(ts as string | number | Date);
     return d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
 };
+
+function firstContactValue(methods: ContactMethod[] | undefined, type: ContactMethod['type']): string {
+    return methods?.find(method => method.type === type)?.value || '';
+}
+
+function customerContactLabel(customer: Customer): string {
+    const primary = customer.contactMethods?.find(method => method.isPrimary) || customer.contactMethods?.[0];
+    return customer.phone || customer.primaryContactValue || primary?.value || customer.id;
+}
+
+function normalizeSocialContactHref(type: 'zalo' | 'facebook', value: string): string {
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+    if (/^https?:\/\//i.test(trimmed)) return trimmed;
+
+    const withoutProtocol = trimmed.replace(/^www\./i, '');
+    if (type === 'zalo') {
+        if (/^(zalo\.me|zaloapp\.com)\//i.test(withoutProtocol)) return `https://${withoutProtocol}`;
+        const digits = trimmed.replace(/[^0-9]/g, '');
+        return digits.length >= 9 ? `https://zalo.me/${digits}` : '';
+    }
+
+    if (/^(facebook\.com|fb\.com|m\.facebook\.com)\//i.test(withoutProtocol)) return `https://${withoutProtocol}`;
+    return `https://www.facebook.com/${encodeURIComponent(trimmed)}`;
+}
+
+function customerSocialLinks(customer: Customer): Array<{ type: 'zalo' | 'facebook'; label: string; href: string; value: string }> {
+    return (['zalo', 'facebook'] as const)
+        .map(type => {
+            const value = firstContactValue(customer.contactMethods, type);
+            return {
+                type,
+                label: type === 'zalo' ? 'Zalo' : 'Facebook',
+                href: normalizeSocialContactHref(type, value),
+                value,
+            };
+        })
+        .filter(link => Boolean(link.value));
+}
+
+const CUSTOMER_FORM_CONTACT_TYPES = new Set<ContactMethod['type']>(['phone', 'zalo', 'facebook', 'email', 'address', 'note', 'other']);
+
+function contactMethodKey(method: ContactMethod): string {
+    const externalId = String(method.externalId || '').trim().toLowerCase();
+    if (externalId) return `${method.type}:external:${externalId}`;
+    const normalizedValue = String(method.normalizedValue || normalizeContactValue(method.type, method.value || '')).trim();
+    return `${method.type}:value:${normalizedValue}`;
+}
+
+function syncCustomerFormContactMethods(existing: unknown, incoming: ContactMethod[]): ContactMethod[] {
+    const incomingKeys = new Set(incoming.map(contactMethodKey));
+    return mergeContactMethods(existing, incoming).filter(method =>
+        !CUSTOMER_FORM_CONTACT_TYPES.has(method.type) || incomingKeys.has(contactMethodKey(method))
+    );
+}
 
 export default function CustomersPage() {
     const [customers, setCustomers] = useState<Customer[]>([]);
@@ -94,17 +154,26 @@ export default function CustomersPage() {
 
     const searchInDatabase = async () => {
         if (!searchQuery.trim()) {
-            toast.error('Vui lòng nhập SĐT để tìm kiếm trên Server');
+            toast.error('Vui lòng nhập từ khóa để tìm kiếm trên Server');
             return;
         }
         setIsSearchingDB(true);
         try {
-            const phone = searchQuery.replace(/[^0-9]/g, '').trim();
-            const docRef = doc(db, 'customers', phone);
-            const docSnap = await getDoc(docRef);
-            
-            if (docSnap.exists()) {
-                const foundCustomer = { id: docSnap.id, ...docSnap.data() } as Customer;
+            const keyword = searchQuery.trim();
+            const phone = keyword.replace(/[^0-9]/g, '').trim();
+            const docCandidates = Array.from(new Set([keyword, phone].filter(Boolean)));
+            let docSnap: Awaited<ReturnType<typeof getDoc>> | null = null;
+
+            for (const candidate of docCandidates) {
+                const candidateSnap = await getDoc(doc(db, 'customers', candidate));
+                if (candidateSnap.exists()) {
+                    docSnap = candidateSnap;
+                    break;
+                }
+            }
+
+            if (docSnap?.exists()) {
+                const foundCustomer = { id: docSnap.id, ...(docSnap.data() as Record<string, unknown>) } as Customer;
                 setCustomers(prev => {
                     const exists = prev.find(p => p.id === foundCustomer.id);
                     if (exists) return prev;
@@ -112,7 +181,19 @@ export default function CustomersPage() {
                 });
                 toast.success('Đã tìm thấy KH từ Server!');
             } else {
-                toast.error('Không tìm thấy dữ liệu trên máy chủ cho SĐT này.');
+                const searchKeyword = generateSearchKeywords(keyword)[0] || keyword.toLowerCase();
+                const q = query(collection(db, 'customers'), where('searchKeywords', 'array-contains', searchKeyword), limit(10));
+                const snap = await getDocs(q);
+                if (snap.empty) {
+                    toast.error('Không tìm thấy dữ liệu trên máy chủ cho từ khóa này.');
+                    return;
+                }
+                const foundCustomers = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Customer[];
+                setCustomers(prev => {
+                    const existingIds = new Set(prev.map(p => p.id));
+                    return [...foundCustomers.filter(customer => !existingIds.has(customer.id)), ...prev];
+                });
+                toast.success(`Đã tìm thấy ${foundCustomers.length} khách hàng từ Server`);
             }
         } catch (error) {
             console.error("Lỗi khi tìm kiếm trên database", error);
@@ -124,8 +205,15 @@ export default function CustomersPage() {
 
     const filteredCustomers = customers.filter((c) => {
         const q = searchQuery.toLowerCase();
+        const contactValues = [
+            c.phone,
+            c.primaryContactValue,
+            ...(c.contactMethods || []).flatMap(method => [method.value, method.normalizedValue]),
+            ...(c.searchKeywords || []),
+        ].filter(Boolean).join(' ').toLowerCase();
         const matchesSearch = !q ||
             c.id.includes(q) ||
+            contactValues.includes(q) ||
             (c.name || '').toLowerCase().includes(q) ||
             (c.tags || []).some(t => t.toLowerCase().includes(q));
         const matchesType = !typeFilter || c.type === typeFilter;
@@ -154,14 +242,66 @@ export default function CustomersPage() {
 
     // Save Customer
     const handleSaveCustomer = async (data: CustomerFormData) => {
-        const phoneId = data.phone;
-        const ref = doc(db, 'customers', phoneId);
+        const contactInput = {
+            name: data.name,
+            phone: data.phone,
+            zalo: data.zalo,
+            facebook: data.facebook,
+            email: data.email,
+            address: data.address,
+            note: data.note,
+            other: data.otherContact,
+            primaryType: data.primaryContactType,
+            source: 'manual' as const,
+            methodMeta: {
+                zalo: {
+                    source: data.zaloExternalId ? 'zalo_contact_card' as const : 'manual' as const,
+                    externalId: data.zaloExternalId,
+                    profileUrl: data.zaloProfileUrl,
+                    verified: Boolean(data.zaloExternalId),
+                    confidence: data.zaloExternalId ? 'high' as const : undefined,
+                },
+            },
+        };
+        const contactMethods = syncCustomerFormContactMethods(editingCustomer?.contactMethods, buildContactMethods(contactInput));
+        const primaryContact = getPrimaryContact(contactMethods);
+        const normalizedPhone = data.phone ? normalizeVietnamPhone(data.phone) : null;
+        const submittedPhone = normalizedPhone?.local || data.phone || '';
+        const existingPhone = editingCustomer?.phone
+            ? (normalizeVietnamPhone(editingCustomer.phone)?.local || editingCustomer.phone)
+            : '';
+        if (editingCustomer && existingPhone && submittedPhone !== existingPhone) {
+            throw new Error('Khách hàng đã có SĐT nên không thể thay đổi SĐT. Hãy tạo hồ sơ khác nếu đây là người khác.');
+        }
+        const customerId = editingCustomer?.id || await reserveCustomerDocumentId({
+            name: data.name,
+            phone: data.phone,
+            zalo: data.zalo,
+            facebook: data.facebook,
+            email: data.email,
+            address: data.address,
+            note: data.note,
+            other: data.otherContact,
+            primaryType: data.primaryContactType,
+            source: 'manual',
+        });
+        const ref = doc(db, 'customers', customerId);
         
         if (editingCustomer) {
             // Update
             await updateDoc(ref, {
+                id: customerId,
+                customerId,
+                code: editingCustomer.code || customerId,
+                legacyPhoneId: submittedPhone,
                 name: data.name,
                 type: data.type,
+                phone: submittedPhone,
+                primaryPhone: submittedPhone,
+                primaryContactType: primaryContact?.type || null,
+                primaryContactValue: primaryContact?.value || '',
+                contactMethods,
+                searchKeywords: buildContactSearchKeywords(contactInput, contactMethods),
                 tags: data.tags || [],
                 note: data.note || '',
                 address: data.address || '',
@@ -173,13 +313,22 @@ export default function CustomersPage() {
             // Check existence
             const snap = await getDoc(ref);
             if (snap.exists()) {
-                throw new Error('Số điện thoại này đã tồn tại trong hệ thống!');
+                throw new Error('Khách hàng này đã tồn tại trong hệ thống!');
             }
             // Create
             await setDoc(ref, {
-                phone: data.phone,
+                id: customerId,
+                customerId,
+                code: customerId,
+                legacyPhoneId: submittedPhone,
+                phone: submittedPhone,
+                primaryPhone: submittedPhone,
                 name: data.name,
                 type: data.type,
+                primaryContactType: primaryContact?.type || null,
+                primaryContactValue: primaryContact?.value || '',
+                contactMethods,
+                searchKeywords: buildContactSearchKeywords(contactInput, contactMethods),
                 tags: data.tags || [],
                 note: data.note || '',
                 address: data.address || '',
@@ -214,7 +363,11 @@ export default function CustomersPage() {
         }
         
         const data = filteredCustomers.map(c => ({
+            'Mã KH': c.id,
             'SĐT': c.phone,
+            'Liên hệ chính': customerContactLabel(c),
+            'Zalo': firstContactValue(c.contactMethods, 'zalo'),
+            'Facebook': firstContactValue(c.contactMethods, 'facebook'),
             'Tên KH': c.name,
             'Loại KH': c.type === 'wholesale' ? 'Khách sỉ' : 'Khách lẻ',
             'Tags': c.tags?.join(', ') || '',
@@ -244,16 +397,16 @@ export default function CustomersPage() {
             {/* Page Header */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                    <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
                         <Users className="text-orange-500" /> Quản lý khách hàng (CRM)
                     </h1>
                     <p className="text-gray-500 text-sm mt-0.5">Danh sách, phân loại, tags và lịch sử giao dịch</p>
                 </div>
                 <div className="flex gap-2">
-                    <button onClick={handleExportExcel} className="flex items-center gap-2 bg-green-50 text-green-700 px-4 py-2 rounded-xl hover:bg-green-100 font-medium text-sm transition-colors border border-green-200">
+                    <button onClick={handleExportExcel} className="flex items-center gap-2 bg-green-50 text-green-700 px-3 py-1.5 text-xs rounded-xl hover:bg-green-100 font-medium text-sm transition-colors border border-green-200">
                         <Download size={18} /> Xuất Excel
                     </button>
-                    <button onClick={openAddModal} className="flex items-center gap-2 bg-orange-500 text-white px-4 py-2 rounded-xl hover:bg-orange-600 font-medium text-sm transition-colors">
+                    <button onClick={openAddModal} className="flex items-center gap-2 bg-orange-500 text-white px-3 py-1.5 text-xs rounded-xl hover:bg-orange-600 font-medium text-sm transition-colors">
                         <Plus size={18} /> Thêm khách hàng
                     </button>
                 </div>
@@ -261,40 +414,40 @@ export default function CustomersPage() {
 
             {/* Stats */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <div className="bg-white rounded-xl border p-4 flex items-center gap-4">
+                <div className="bg-white rounded-xl border p-3 flex items-center gap-4">
                     <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 shrink-0">
                         <Users size={20} />
                     </div>
                     <div>
                         <p className="text-xs text-gray-500">Hiển thị</p>
-                        <p className="text-xl font-bold text-gray-800">{stats.totalLoaded}</p>
+                        <p className="text-lg font-bold text-gray-800">{stats.totalLoaded}</p>
                     </div>
                 </div>
-                <div className="bg-white rounded-xl border p-4 flex items-center gap-4">
+                <div className="bg-white rounded-xl border p-3 flex items-center gap-4">
                     <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center text-green-600 shrink-0">
                         <TrendingUp size={20} />
                     </div>
                     <div>
                         <p className="text-xs text-gray-500">Khách lẻ</p>
-                        <p className="text-xl font-bold text-gray-800">{stats.retail}</p>
+                        <p className="text-lg font-bold text-gray-800">{stats.retail}</p>
                     </div>
                 </div>
-                <div className="bg-white rounded-xl border p-4 flex items-center gap-4">
+                <div className="bg-white rounded-xl border p-3 flex items-center gap-4">
                     <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 shrink-0">
                         <Star size={20} />
                     </div>
                     <div>
                         <p className="text-xs text-gray-500">Khách sỉ / VIP</p>
-                        <p className="text-xl font-bold text-gray-800">{stats.wholesale}</p>
+                        <p className="text-lg font-bold text-gray-800">{stats.wholesale}</p>
                     </div>
                 </div>
-                <div className="bg-white rounded-xl border p-4 flex items-center gap-4">
+                <div className="bg-white rounded-xl border p-3 flex items-center gap-4">
                     <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 shrink-0">
                         <Filter size={20} />
                     </div>
                     <div>
                         <p className="text-xs text-gray-500">Thẻ (Tags)</p>
-                        <p className="text-xl font-bold text-gray-800">{availableTags.length}</p>
+                        <p className="text-lg font-bold text-gray-800">{availableTags.length}</p>
                     </div>
                 </div>
             </div>
@@ -302,22 +455,22 @@ export default function CustomersPage() {
             {/* Filters */}
             <div className="flex flex-col md:flex-row gap-4">
                 <div className="flex-1 relative">
-                    <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                     <input
                         type="text"
-                        placeholder="Tìm SĐT, Tên hoặc Tag..."
+                        placeholder="Tìm SĐT, tên, Zalo, Facebook hoặc Tag..."
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        className="w-full h-11 pl-10 pr-4 border rounded-lg focus:border-orange-500 focus:outline-none"
+                        className="w-full h-8 text-sm pl-8 pr-3 border rounded-lg focus:border-orange-500 focus:outline-none"
                     />
                 </div>
                 {searchQuery.trim().length > 0 && filteredCustomers.length === 0 && (
                     <button 
                         onClick={searchInDatabase}
                         disabled={isSearchingDB}
-                        className="h-11 px-4 bg-orange-100 text-orange-600 rounded-lg hover:bg-orange-200 transition-colors whitespace-nowrap flex items-center gap-2 font-medium"
+                        className="h-8 px-3 text-sm bg-orange-100 text-orange-600 rounded-lg hover:bg-orange-200 transition-colors whitespace-nowrap flex items-center gap-2 font-medium"
                     >
-                        {isSearchingDB ? <Loader2 className="animate-spin" size={18} /> : <Search size={18} />}
+                        {isSearchingDB ? <Loader2 className="animate-spin" size={18} /> : <Search size={14} />}
                         Tìm trên Server
                     </button>
                 )}
@@ -325,7 +478,7 @@ export default function CustomersPage() {
                     title="Chọn loại khách hàng"
                     value={typeFilter}
                     onChange={(e) => setTypeFilter(e.target.value)}
-                    className="w-full md:w-48 h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none bg-white"
+                    className="w-full md:w-48 h-8 text-sm px-4 border rounded-lg focus:border-orange-500 focus:outline-none bg-white"
                 >
                     <option value="">Tất cả loại KH</option>
                     <option value="retail">Khách lẻ</option>
@@ -333,7 +486,7 @@ export default function CustomersPage() {
                 </select>
                 <button
                     onClick={() => setHasDebtFilter(!hasDebtFilter)}
-                    className={`h-11 px-4 rounded-lg font-medium transition-colors border whitespace-nowrap flex items-center justify-center ${hasDebtFilter ? 'bg-red-50 text-red-600 border-red-200' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                    className={`h-8 px-3 text-sm rounded-lg font-medium transition-colors border whitespace-nowrap flex items-center justify-center ${hasDebtFilter ? 'bg-red-50 text-red-600 border-red-200' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
                 >
                     Khách có nợ {hasDebtFilter ? '✅' : ''}
                 </button>
@@ -363,13 +516,43 @@ export default function CustomersPage() {
                                 </tr>
                             ) : paginatedData.map((customer) => {
                                 const tier = calculateTier(customer.totalSpent || 0);
+                                const socialLinks = customerSocialLinks(customer);
                                 return (
                                 <tr key={customer.id} className="hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => setSelectedCustomer(customer)}>
                                     <td className="px-6 py-4 align-top">
                                         <p className="text-sm font-bold text-gray-900 group-hover:text-orange-600">
                                             {customer.name || 'Khách lẻ'}
                                         </p>
-                                        <p className="text-xs text-gray-500 font-mono mt-0.5">{customer.phone}</p>
+                                        <p className="text-xs text-gray-500 font-mono mt-0.5">{customerContactLabel(customer)}</p>
+                                        {socialLinks.length > 0 && (
+                                            <div className="mt-2 flex flex-wrap gap-1.5">
+                                                {socialLinks.map(link => link.href ? (
+                                                    <a
+                                                        key={link.type}
+                                                        href={link.href}
+                                                        target="_blank"
+                                                        rel="noreferrer"
+                                                        onClick={event => event.stopPropagation()}
+                                                        className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-semibold transition-colors ${link.type === 'zalo'
+                                                            ? 'border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100'
+                                                            : 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
+                                                            }`}
+                                                    >
+                                                        {link.label}
+                                                    </a>
+                                                ) : (
+                                                    <span
+                                                        key={link.type}
+                                                        className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-semibold ${link.type === 'zalo'
+                                                            ? 'border-sky-200 bg-sky-50 text-sky-700'
+                                                            : 'border-blue-200 bg-blue-50 text-blue-700'
+                                                            }`}
+                                                    >
+                                                        {link.label}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        )}
                                         {customer.tags && customer.tags.length > 0 && (
                                             <div className="mt-2 flex flex-wrap gap-1">
                                                 {customer.tags.map(tag => (
@@ -453,7 +636,7 @@ export default function CustomersPage() {
                     <div className="p-4 border-t border-gray-100 flex justify-center">
                         <button 
                             onClick={loadMoreData}
-                            className="px-6 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-lg transition-colors flex items-center gap-2"
+                            className="px-4 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium rounded-lg transition-colors flex items-center gap-2"
                         >
                             Tải thêm danh sách cũ
                         </button>

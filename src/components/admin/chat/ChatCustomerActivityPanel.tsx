@@ -40,13 +40,16 @@ export default function ChatCustomerActivityPanel({
     onClose,
 }: Props) {
     const router = useRouter();
-    const linkedPhone = room.customerPhone || room.phone || room.customerId;
+    const linkedPhone = room.customerPhone || room.phone || '';
+    const linkedCustomerId = room.customerId || '';
     const activity = useCustomerActivity({
+        customerId: linkedCustomerId,
         phone: linkedPhone,
-        enabled: !!linkedPhone,
+        enabled: Boolean(linkedCustomerId || linkedPhone),
         includeOrders: canViewOrders,
         includeRepairs: canViewRepairs,
     });
+    const contactLabel = linkedPhone || room.primaryContactValue || linkedCustomerId;
 
     const navigateTo = (url: string) => {
         onClose?.();
@@ -68,7 +71,7 @@ export default function ChatCustomerActivityPanel({
             </div>
 
             <div className="flex-1 space-y-5 overflow-y-auto p-4">
-                {!activity.hasLinkedPhone ? (
+                {!activity.hasLinkedCustomer ? (
                     <div className="space-y-3 rounded-lg border border-dashed p-4 text-sm text-gray-600">
                         <p>Chưa liên kết khách hàng với hội thoại này.</p>
                         <button
@@ -84,7 +87,7 @@ export default function ChatCustomerActivityPanel({
                     <>
                         <div className="rounded-lg bg-gray-50 p-3">
                             <p className="truncate text-sm font-medium text-gray-900">{room.customerName || room.displayName}</p>
-                            <p className="mt-1 font-mono text-xs text-gray-500">{activity.normalizedPhone}</p>
+                            <p className="mt-1 font-mono text-xs text-gray-500">{contactLabel}</p>
                         </div>
 
                         {!canViewOrders && !canViewRepairs && (

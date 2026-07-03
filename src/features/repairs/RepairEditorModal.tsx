@@ -8,6 +8,7 @@ import CategoryTaxonomySelector from '@/components/admin/CategoryTaxonomySelecto
 import CurrencyInput from '@/components/admin/CurrencyInput';
 import { useConfig } from '@/lib/ConfigContext';
 import type { PaymentStatus, RepairIssue, RepairStatus, RepairTicket, TaxonomyNode, WorkflowNode } from '@/lib/types';
+import type { ContactMethodType } from '@/lib/types/contact';
 import type { ServiceModel } from './repairPageUtils';
 
 type RepairFormValue = string | number | boolean | RepairIssue[] | string[] | PaymentStatus | RepairStatus;
@@ -24,8 +25,13 @@ type ServiceSuggestion = {
 export type RepairEditorFormData = {
     appointmentId: string;
     appointmentIntakeMethod: string;
+    customerId: string;
     customerName: string;
     customerPhone: string;
+    customerZalo: string;
+    customerFacebook: string;
+    customerOtherContact: string;
+    customerPrimaryContactType: ContactMethodType;
     deviceModel: string;
     deviceImei: string;
     devicePasscode: string;
@@ -118,8 +124,28 @@ export function RepairEditorModal({
                             <fieldset className="space-y-3">
                                 <legend className="flex items-center gap-2 font-semibold text-gray-900"><User size={18} className="text-orange-500" /> Khách hàng</legend>
                                 <div className="grid md:grid-cols-2 gap-4">
-                                    <InputField label="Tên *" value={formData.customerName} onChange={v => setFormData(p => ({ ...p, customerName: v }))} required />
-                                    <InputField label="Số điện thoại *" value={formData.customerPhone} onChange={v => setFormData(p => ({ ...p, customerPhone: v }))} type="tel" required />
+                                    <InputField label="Ma KH" value={formData.customerId} onChange={v => setFormData(p => ({ ...p, customerId: v }))} placeholder="De trong neu tao moi" />
+                                    <InputField label="Ten *" value={formData.customerName} onChange={v => setFormData(p => ({ ...p, customerName: v }))} required />
+                                    <InputField label="So dien thoai" value={formData.customerPhone} onChange={v => setFormData(p => ({ ...p, customerPhone: v }))} type="tel" placeholder="Tuy chon" />
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Kenh lien he chinh</label>
+                                        <select
+                                            value={formData.customerPrimaryContactType}
+                                            onChange={event => setFormData(p => ({ ...p, customerPrimaryContactType: event.target.value as ContactMethodType }))}
+                                            className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20 focus:outline-none bg-white"
+                                            title="Kenh lien he chinh"
+                                        >
+                                            <option value="phone">SDT</option>
+                                            <option value="zalo">Zalo</option>
+                                            <option value="facebook">Facebook</option>
+                                            <option value="other">Khac</option>
+                                        </select>
+                                    </div>
+                                    <InputField label="Zalo" value={formData.customerZalo} onChange={v => setFormData(p => ({ ...p, customerZalo: v }))} />
+                                    <InputField label="Facebook/Messenger" value={formData.customerFacebook} onChange={v => setFormData(p => ({ ...p, customerFacebook: v }))} />
+                                    <div className="md:col-span-2">
+                                        <InputField label="Lien he khac" value={formData.customerOtherContact} onChange={v => setFormData(p => ({ ...p, customerOtherContact: v }))} />
+                                    </div>
                                 </div>
                             </fieldset>
                             <hr className="border-gray-100" />
