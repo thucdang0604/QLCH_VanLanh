@@ -35,11 +35,17 @@ service cloud.firestore {
       return hasPermission('manage_customers');
     }
 
-    function customerDocMatchesId(customerId) {
-      return (!('phone' in request.resource.data) || request.resource.data.phone == '' || request.resource.data.phone == customerId)
-        || ('customerId' in request.resource.data && request.resource.data.customerId == customerId)
-        || ('id' in request.resource.data && request.resource.data.id == customerId)
-        || ('code' in request.resource.data && request.resource.data.code == customerId);
+    function customerDocMatchesId(data, customerId) {
+      return (!('phone' in data) || data.phone == '' || data.phone == customerId)
+        || ('customerId' in data && data.customerId == customerId)
+        || ('id' in data && data.id == customerId)
+        || ('code' in data && data.code == customerId);
+    }
+
+    function customerPhoneUpdateAllowed() {
+      return !('phone' in resource.data)
+        || resource.data.phone == ''
+        || (('phone' in request.resource.data) && request.resource.data.phone == resource.data.phone);
     }
 
     function canViewRevenueSources() {
@@ -150,9 +156,10 @@ service cloud.firestore {
     // Customers
     match /customers/{customerId} {
       allow read: if canManageCustomerData();
-      allow create: if canManageCustomerData() && customerDocMatchesId(customerId);
+      allow create: if canManageCustomerData() && customerDocMatchesId(request.resource.data, customerId);
       allow update: if canManageCustomerData()
-        && customerDocMatchesId(customerId)
+        && (customerDocMatchesId(request.resource.data, customerId) || customerDocMatchesId(resource.data, customerId))
+        && customerPhoneUpdateAllowed()
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['totalSpent', 'totalOrders', 'totalRepairs', 'totalAppointments', 'missions']);
       allow delete: if isAdmin();
     }

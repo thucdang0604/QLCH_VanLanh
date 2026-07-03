@@ -607,7 +607,7 @@ export default function RevenuePage() {
             {/* Header */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                    <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
                         <BarChart3 className="text-orange-500" /> Bảng điều khiển Tài chính
                     </h1>
                     <p className="text-sm text-gray-500 mt-0.5">Tổng hợp THU — CHI — LỢI NHUẬN</p>
@@ -631,7 +631,7 @@ export default function RevenuePage() {
 
             {/* Custom date range */}
             {period === 'custom' && (
-                <div className="flex gap-3 items-center bg-gray-50 rounded-xl px-4 py-2">
+                <div className="flex gap-3 items-center bg-gray-50 rounded-xl px-3 py-1.5 text-xs">
                     <Calendar size={16} className="text-gray-400" />
                     <input type="date" title="Ngày bắt đầu" value={customFrom} onChange={e => setCustomFrom(e.target.value)}
                         className="px-3 py-1.5 border rounded-lg text-sm" />
@@ -767,7 +767,7 @@ export default function RevenuePage() {
                     </h3>
                 </div>
                 {/* Mobile Card View */}
-                <div className="block md:hidden divide-y divide-gray-100">
+                <div className="block lg:hidden divide-y divide-gray-100">
                     {(showAllExpenses ? expenses : expenses.slice(0, 10)).map(e => {
                         const cat = expenseCategories.find(c => c.key === e.category);
                         return (
@@ -792,29 +792,29 @@ export default function RevenuePage() {
                     )}
                 </div>
                 {/* Desktop Table View */}
-                <div className="hidden md:block overflow-x-auto">
-                    <table className="w-full text-sm min-w-[600px]">
+                <div className="hidden lg:block overflow-x-auto">
+                    <table className="w-full text-sm">
                         <thead>
                             <tr className="text-gray-500 text-xs border-b bg-gray-50">
-                                <th className="text-left px-5 py-3">Ngày</th>
-                                <th className="text-left">Danh mục</th>
-                                <th className="text-left">Mô tả</th>
-                                <th className="text-left">Người tạo</th>
-                                <th className="text-right px-5">Số tiền</th>
+                                <th className="text-left px-4 py-3">Ngày</th>
+                                <th className="text-left px-4 py-3">Danh mục</th>
+                                <th className="text-left px-4 py-3">Mô tả</th>
+                                <th className="text-left px-4 py-3">Người tạo</th>
+                                <th className="text-right px-4 py-3">Số tiền</th>
                             </tr>
                         </thead>
                         <tbody>
                             {(showAllExpenses ? expenses : expenses.slice(0, 10)).map(e => {
                                 const cat = expenseCategories.find(c => c.key === e.category);
                                 return (
-                                    <tr key={e.id} className="border-b border-gray-50 hover:bg-gray-50">
-                                        <td className="px-5 py-3 text-xs text-gray-500">
+                                    <tr key={e.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors duration-200">
+                                        <td className="px-4 py-3 text-xs text-gray-500">
                                             {toDate(e.createdAt)?.toLocaleDateString('vi-VN') || '—'}
                                         </td>
-                                        <td><span className="text-xs">{cat?.icon} {cat?.label || e.category}</span></td>
-                                        <td className="text-gray-600">{e.description || '—'}</td>
-                                        <td className="text-xs text-gray-400">{e.createdByName}</td>
-                                        <td className="text-right px-5 font-bold text-red-600">{formatPrice(e.amount)}</td>
+                                        <td className="px-4 py-3"><span className="text-xs">{cat?.icon} {cat?.label || e.category}</span></td>
+                                        <td className="px-4 py-3 text-gray-600">{e.description || '—'}</td>
+                                        <td className="px-4 py-3 text-xs text-gray-400">{e.createdByName}</td>
+                                        <td className="px-4 py-3 text-right font-bold text-red-600">{formatPrice(e.amount)}</td>
                                     </tr>
                                 );
                             })}
@@ -844,7 +844,7 @@ export default function RevenuePage() {
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">Danh mục</label>
                         <select title="Chọn danh mục" value={expCategory} onChange={e => setExpCategory(e.target.value)}
-                            className="w-full px-4 py-2 border rounded-lg bg-white">
+                            className="w-full px-3 py-1.5 text-xs border rounded-lg bg-white">
                             {expenseCategories.filter(c => c.key !== 'supplier_payment').map(c => (
                                 <option key={c.key} value={c.key}>{c.icon} {c.label}</option>
                             ))}
@@ -854,18 +854,18 @@ export default function RevenuePage() {
                         <label className="block text-sm font-medium text-gray-700 mb-1">Mô tả</label>
                         <input type="text" value={expDescription} onChange={e => setExpDescription(e.target.value)}
                             placeholder="VD: Tiền điện tháng 2"
-                            className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20" />
+                            className="w-full px-3 py-1.5 text-xs border rounded-lg focus:ring-2 focus:ring-orange-500/20" />
                     </div>
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">Số tiền (VNĐ)</label>
                         <CurrencyInput value={expAmount || ''} onChange={v => setExpAmount(v)}
                             placeholder="0"
-                            className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20 text-lg font-bold" />
+                            className="w-full px-3 py-1.5 text-xs border rounded-lg focus:ring-2 focus:ring-orange-500/20 text-lg font-bold" />
                     </div>
                 </div>
                 <div className="flex justify-end gap-3 px-6 py-4 border-t">
                     <button onClick={() => setShowExpenseModal(false)}
-                        className="px-4 py-2 text-sm bg-gray-100 rounded-lg hover:bg-gray-200">Hủy</button>
+                        className="px-3 py-1.5 text-xs text-sm bg-gray-100 rounded-lg hover:bg-gray-200">Hủy</button>
                     <button onClick={handleSaveExpense} disabled={isProcessing || expAmount <= 0}
                         className="px-5 py-2 text-sm font-semibold text-white bg-red-500 rounded-lg hover:bg-red-600 disabled:opacity-50 flex items-center gap-2">
                         {isProcessing ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}

@@ -116,7 +116,7 @@ export default function Modal({
 
     return (
         <div
-            className={`fixed inset-0 bg-black/50 flex ${mobileAlign} justify-center ${zClass} p-0 md:p-4 ${blurClass} ${printClass}`}
+            className={`fixed inset-0 bg-black/50 flex ${mobileAlign} justify-center ${zClass} p-0 md:p-4 ${blurClass} ${printClass} animate-[fadeIn_0.2s_ease-out]`}
             onMouseDown={(e) => {
                 if (e.target === e.currentTarget) {
                     backdropMouseDown.current = true;
@@ -135,7 +135,7 @@ export default function Modal({
             aria-label={title}
         >
             <div
-                className={`bg-white w-full ${mobileSheet ? 'rounded-t-2xl md:rounded-2xl mt-auto md:mt-0' : 'rounded-2xl'} ${SIZE_MAP[size]} max-h-[90vh] md:max-h-[85vh] flex flex-col overflow-hidden animate-[fadeIn_0.15s_ease-out] ${className}`}
+                className={`bg-white w-full ${mobileSheet ? 'rounded-t-2xl md:rounded-2xl mt-auto md:mt-0 md:animate-[fadeIn_0.15s_ease-out] animate-[slideUp_0.3s_ease-out]' : 'rounded-2xl animate-[fadeIn_0.15s_ease-out]'} ${SIZE_MAP[size]} max-h-[90vh] md:max-h-[85vh] flex flex-col overflow-hidden ${className}`}
                 onClick={(e) => e.stopPropagation()}
             >
                 {/* Header — chỉ render nếu có title */}

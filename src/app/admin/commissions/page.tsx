@@ -303,7 +303,7 @@ export default function CommissionsPage() {
             {/* Header */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                    <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
                         <Award className="text-orange-500" /> Hoa hồng nhân viên
                     </h1>
                     <p className="text-sm text-gray-500 mt-0.5">Quản lý quy tắc & theo dõi hoa hồng</p>
@@ -313,23 +313,23 @@ export default function CommissionsPage() {
             {/* Stats */}
             <div className={`grid grid-cols-2 ${isAdmin ? 'md:grid-cols-4' : 'md:grid-cols-2'} gap-3`}>
                 {isAdmin && (
-                    <div className="bg-white rounded-xl border p-4">
+                    <div className="bg-white rounded-xl border p-3">
                         <p className="text-xs text-gray-500">Quy tắc đang hoạt động</p>
-                        <p className="text-2xl font-bold text-green-600">{rules.filter(r => r.isActive).length}</p>
+                        <p className="text-lg font-bold text-green-600">{rules.filter(r => r.isActive).length}</p>
                     </div>
                 )}
-                <div className="bg-white rounded-xl border p-4">
+                <div className="bg-white rounded-xl border p-3">
                     <p className="text-xs text-gray-500">Tổng HH tháng {filterMonth.split('-')[1]}</p>
                     <p className="text-lg font-bold text-orange-600">{formatPrice(totalCommission)}</p>
                 </div>
-                <div className="bg-white rounded-xl border p-4">
+                <div className="bg-white rounded-xl border p-3">
                     <p className="text-xs text-gray-500">Số lượt tính HH</p>
-                    <p className="text-2xl font-bold text-blue-600">{filteredCommissions.length}</p>
+                    <p className="text-lg font-bold text-blue-600">{filteredCommissions.length}</p>
                 </div>
                 {isAdmin && (
-                    <div className="bg-white rounded-xl border p-4">
+                    <div className="bg-white rounded-xl border p-3">
                         <p className="text-xs text-gray-500">Nhân viên có HH</p>
-                        <p className="text-2xl font-bold text-purple-600">{Object.keys(staffStats).length}</p>
+                        <p className="text-lg font-bold text-purple-600">{Object.keys(staffStats).length}</p>
                     </div>
                 )}
             </div>
@@ -355,14 +355,14 @@ export default function CommissionsPage() {
                 <div className="space-y-3">
                     <div className="flex justify-end">
                         <button onClick={() => openRuleModal()}
-                            className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-xl hover:bg-orange-600 text-sm font-semibold shadow-md shadow-orange-200/50">
+                            className="flex items-center gap-2 px-3 py-1.5 text-xs bg-orange-500 text-white rounded-xl hover:bg-orange-600 text-sm font-semibold shadow-md shadow-orange-200/50">
                             <Plus size={16} /> Thêm quy tắc
                         </button>
                     </div>
 
                     {rules.map(rule => (
-                        <div key={rule.id} className={`bg-white rounded-xl border p-4 flex items-center gap-4 ${!rule.isActive ? 'opacity-50' : ''}`}>
-                            <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-lg font-bold ${rule.isActive ? 'bg-orange-100 text-orange-600' : 'bg-gray-100 text-gray-400'}`}>
+                        <div key={rule.id} className={`bg-white rounded-xl border p-3 flex items-center gap-4 ${!rule.isActive ? 'opacity-50' : ''}`}>
+                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg font-bold ${rule.isActive ? 'bg-orange-100 text-orange-600' : 'bg-gray-100 text-gray-400'}`}>
                                 {getRuleDisplayValue(rule)}
                             </div>
                             <div className="flex-1">
@@ -404,10 +404,10 @@ export default function CommissionsPage() {
                 <div className="space-y-3">
                     <div className="flex items-center justify-between">
                         <input type="month" title="Chọn tháng" value={filterMonth} onChange={e => setFilterMonth(e.target.value)}
-                            className="px-4 py-2 border rounded-xl text-sm bg-white" />
+                            className="px-3 py-1.5 text-xs border rounded-xl text-sm bg-white" />
                         {isAdmin && (
                             <button onClick={() => setShowManualModal(true)}
-                                className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-xl hover:bg-blue-600 text-sm font-semibold">
+                                className="flex items-center gap-2 px-3 py-1.5 text-xs bg-blue-500 text-white rounded-xl hover:bg-blue-600 text-sm font-semibold">
                                 <Plus size={16} /> Thêm thủ công
                             </button>
                         )}
@@ -432,7 +432,7 @@ export default function CommissionsPage() {
                     {/* Commission list */}
                     <div className="bg-white rounded-xl border overflow-hidden">
                         {/* Mobile Card View */}
-                        <div className="block md:hidden divide-y divide-gray-100">
+                        <div className="block lg:hidden divide-y divide-gray-100">
                             {paginatedCommissions.map(c => (
                                 <div key={c.id} className="p-4 hover:bg-gray-50 transition-colors">
                                     <div className="flex items-start justify-between">
@@ -454,10 +454,10 @@ export default function CommissionsPage() {
                             ))}
                         </div>
                         {/* Desktop Table View */}
-                        <div className="hidden md:block">
+                        <div className="hidden lg:block overflow-x-auto">
                         <table className="w-full text-sm">
                             <thead>
-                                <tr className="text-gray-500 text-xs border-b bg-gray-50">
+                                <tr className="text-gray-500 text-xs border-b border-gray-100 bg-gray-50">
                                     <th className="text-left px-4 py-3">Ngày</th>
                                     <th className="text-left">Nhân viên</th>
                                     <th className="text-left">Loại</th>
@@ -467,7 +467,7 @@ export default function CommissionsPage() {
                             </thead>
                             <tbody>
                                 {paginatedCommissions.map(c => (
-                                    <tr key={c.id} className="border-b border-gray-50 hover:bg-gray-50">
+                                    <tr key={c.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
                                         <td className="px-4 py-3 text-xs text-gray-500">{formatDate(c.createdAt)}</td>
                                         <td className="font-medium">{c.staffName}</td>
                                         <td>
@@ -506,7 +506,7 @@ export default function CommissionsPage() {
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Tên quy tắc</label>
                                 <input type="text" value={ruleName} onChange={e => setRuleName(e.target.value)}
                                     placeholder="VD: Hoa hồng sửa chữa cơ bản"
-                                    className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20" />
+                                    className="w-full px-3 py-1.5 text-xs border rounded-lg focus:ring-2 focus:ring-orange-500/20" />
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
@@ -527,7 +527,7 @@ export default function CommissionsPage() {
                                                 }
                                             }
                                         }}
-                                        className="w-full px-4 py-2 border rounded-lg bg-white">
+                                        className="w-full px-3 py-1.5 text-xs border rounded-lg bg-white">
                                         <option value="all">Tất cả</option>
                                         <option value="repair">Sửa chữa</option>
                                         <option value="order">Đơn hàng</option>
@@ -537,14 +537,14 @@ export default function CommissionsPage() {
                                     <label className="block text-sm font-medium text-gray-700 mb-1">% Hoa hồng</label>
                                     <input type="number" title="Nhập % hoa hồng" placeholder="Nhập % hoa hồng" value={rulePercentage} onChange={e => setRulePercentage(Number(e.target.value))}
                                         min={0} max={100}
-                                        className="w-full px-4 py-2 border rounded-lg" />
+                                        className="w-full px-3 py-1.5 text-xs border rounded-lg" />
                                 </div>
                             </div>
 
                             <div className="bg-gray-50 rounded-xl p-3 space-y-3 border border-gray-200">
-                                <label className="block text-xs font-semibold text-gray-700">Cach tinh hoa hong</label>
+                                <label className="block text-xs font-semibold text-gray-700">Cách tính hoa hồng</label>
                                 <select
-                                    title="Chon cach tinh hoa hong"
+                                    title="Chọn cách tính hoa hồng"
                                     value={ruleCalculationMode}
                                     onChange={(e) => {
                                         const value = e.target.value;
@@ -554,14 +554,14 @@ export default function CommissionsPage() {
                                     }}
                                     className="w-full px-3 py-2 text-sm border rounded-lg bg-white"
                                 >
-                                    <option value="percentage">Phan tram theo doanh thu</option>
-                                    <option value="fixed">So tien co dinh</option>
-                                    <option value="fixed_by_price_range">So tien co dinh theo khoang gia ban may</option>
+                                    <option value="percentage">Phần trăm theo doanh thu</option>
+                                    <option value="fixed">Số tiền cố định</option>
+                                    <option value="fixed_by_price_range">Số tiền cố định theo khoảng giá bán máy</option>
                                 </select>
 
                                 {ruleCalculationMode === 'fixed' && (
                                     <div>
-                                        <label className="block text-xs font-medium text-gray-600 mb-1">Tien hoa hong co dinh</label>
+                                        <label className="block text-xs font-medium text-gray-600 mb-1">Tiền hoa hồng cố định</label>
                                         <CurrencyInput
                                             value={ruleFixedAmount || ''}
                                             onChange={setRuleFixedAmount}
@@ -574,9 +574,9 @@ export default function CommissionsPage() {
                                 {ruleCalculationMode === 'fixed_by_price_range' && (
                                     <div className="space-y-2">
                                         <div className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2 text-[11px] font-semibold text-gray-500">
-                                            <span>Tu gia</span>
-                                            <span>Den gia</span>
-                                            <span>HH co dinh</span>
+                                            <span>Từ giá</span>
+                                            <span>Đến giá</span>
+                                            <span>HH cố định</span>
                                             <span />
                                         </div>
                                         {rulePriceRanges.map((range, index) => (
@@ -590,7 +590,7 @@ export default function CommissionsPage() {
                                                 <CurrencyInput
                                                     value={range.max || ''}
                                                     onChange={(value) => setRulePriceRanges(prev => prev.map((item, i) => i === index ? { ...item, max: value || undefined } : item))}
-                                                    placeholder="Khong gioi han"
+                                                    placeholder="Không giới hạn"
                                                     className="w-full px-2 py-1.5 text-sm border rounded bg-white"
                                                 />
                                                 <CurrencyInput
@@ -601,7 +601,7 @@ export default function CommissionsPage() {
                                                 />
                                                 <button
                                                     type="button"
-                                                    title="Xoa khoang gia"
+                                                    title="Xóa khoảng giá"
                                                     onClick={() => setRulePriceRanges(prev => prev.filter((_, i) => i !== index))}
                                                     className="px-2 text-red-500 hover:bg-red-50 rounded"
                                                 >
@@ -614,9 +614,9 @@ export default function CommissionsPage() {
                                             onClick={() => setRulePriceRanges(prev => [...prev, { min: 0, amount: 0 }])}
                                             className="text-xs font-semibold text-blue-600 hover:text-blue-700"
                                         >
-                                            + Them khoang gia
+                                            + Thêm khoảng giá
                                         </button>
-                                        <p className="text-[10px] text-gray-500">Dung cho hoa hong ban may: he thong so khop theo gia ban tung dong san pham.</p>
+                                        <p className="text-[10px] text-gray-500">Dùng cho hoa hồng bán máy: hệ thống so khớp theo giá bán từng dòng sản phẩm.</p>
                                     </div>
                                 )}
                             </div>
@@ -684,7 +684,7 @@ export default function CommissionsPage() {
                         </div>
                         <div className="flex justify-end gap-3 px-6 py-4 border-t">
                             <button onClick={() => setShowRuleModal(false)}
-                                className="px-4 py-2 text-sm bg-gray-100 rounded-lg hover:bg-gray-200">Hủy</button>
+                                className="px-3 py-1.5 text-xs text-sm bg-gray-100 rounded-lg hover:bg-gray-200">Hủy</button>
                             <button onClick={handleSaveRule} disabled={isProcessing || !ruleName}
                                 className="px-5 py-2 text-sm font-semibold text-white bg-orange-500 rounded-lg hover:bg-orange-600 disabled:opacity-50 flex items-center gap-2">
                                 <Save size={16} /> Lưu
@@ -698,7 +698,7 @@ export default function CommissionsPage() {
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Nhân viên</label>
                                 <select title="Chọn nhân viên" value={manualStaffId} onChange={e => setManualStaffId(e.target.value)}
-                                    className="w-full px-4 py-2 border rounded-lg bg-white">
+                                    className="w-full px-3 py-1.5 text-xs border rounded-lg bg-white">
                                     <option value="">— Chọn nhân viên —</option>
                                     {staffList.map(s => <option key={s.uid} value={s.uid}>{s.displayName}</option>)}
                                 </select>
@@ -707,12 +707,12 @@ export default function CommissionsPage() {
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">Doanh thu gốc</label>
                                     <CurrencyInput value={manualBaseAmount || ''} onChange={v => setManualBaseAmount(v)}
-                                        placeholder="0" className="w-full px-4 py-2 border rounded-lg" />
+                                        placeholder="0" className="w-full px-3 py-1.5 text-xs border rounded-lg" />
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">Tiền hoa hồng</label>
                                     <CurrencyInput value={manualAmount || ''} onChange={v => setManualAmount(v)}
-                                        placeholder="0" className="w-full px-4 py-2 border rounded-lg" />
+                                        placeholder="0" className="w-full px-3 py-1.5 text-xs border rounded-lg" />
                                 </div>
                             </div>
                             <div className="grid grid-cols-2 gap-4">
@@ -725,7 +725,7 @@ export default function CommissionsPage() {
                                             const v = e.target.value;
                                             if (v === 'repair' || v === 'order') setManualSourceType(v);
                                         }}
-                                        className="w-full px-4 py-2 border rounded-lg bg-white">
+                                        className="w-full px-3 py-1.5 text-xs border rounded-lg bg-white">
                                         <option value="repair">Sửa chữa</option>
                                         <option value="order">Đơn hàng</option>
                                     </select>
@@ -733,13 +733,13 @@ export default function CommissionsPage() {
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">Mã nguồn (tùy chọn)</label>
                                     <input type="text" title="Nhập mã nguồn" placeholder="Nhập mã nguồn" value={manualSourceId} onChange={e => setManualSourceId(e.target.value)}
-                                        className="w-full px-4 py-2 border rounded-lg" />
+                                        className="w-full px-3 py-1.5 text-xs border rounded-lg" />
                                 </div>
                             </div>
                         </div>
                         <div className="flex justify-end gap-3 px-6 py-4 border-t">
                             <button onClick={() => setShowManualModal(false)}
-                                className="px-4 py-2 text-sm bg-gray-100 rounded-lg hover:bg-gray-200">Hủy</button>
+                                className="px-3 py-1.5 text-xs text-sm bg-gray-100 rounded-lg hover:bg-gray-200">Hủy</button>
                             <button onClick={handleManualCommission} disabled={isProcessing || !manualStaffId || manualAmount <= 0}
                                 className="px-5 py-2 text-sm font-semibold text-white bg-blue-500 rounded-lg hover:bg-blue-600 disabled:opacity-50 flex items-center gap-2">
                                 <Save size={16} /> Lưu

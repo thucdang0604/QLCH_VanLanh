@@ -177,7 +177,7 @@ export default function StockPage() {
     return (
         <div className="p-4 md:p-6 space-y-4">
             <div>
-                <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
                     <Package className="text-orange-500" /> Tổng Tồn Kho
                 </h1>
                 <p className="text-sm text-gray-500 mt-0.5">{statusFiltered.length} mặt hàng đã tải{stockTab !== 'all' ? ` (${stockTab === 'retail' ? 'bán lẻ' : 'linh kiện'})` : ''}</p>
@@ -187,7 +187,7 @@ export default function StockPage() {
             <div className="flex gap-2">
                 {([['all', '📋 Tất cả'], ['retail', '📦 Bán lẻ & Phụ kiện'], ['component', '🔧 Linh kiện']] as const).map(([key, label]) => (
                     <button key={key} onClick={() => setStockTab(key)}
-                        className={`px-4 py-2 rounded-xl text-sm font-medium transition-all border ${stockTab === key
+                        className={`px-3 py-1.5 text-xs rounded-xl text-sm font-medium transition-all border ${stockTab === key
                                 ? key === 'component' ? 'bg-orange-50 border-orange-300 text-orange-700 shadow-sm'
                                     : key === 'retail' ? 'bg-blue-50 border-blue-300 text-blue-700 shadow-sm'
                                         : 'bg-gray-800 border-gray-800 text-white shadow-sm'
@@ -204,7 +204,7 @@ export default function StockPage() {
                     ['archived', `Đã lưu trữ (${archivedCount})`],
                 ] as const).map(([key, label]) => (
                     <button key={key} onClick={() => setStatusFilter(key)}
-                        className={`px-4 py-2 rounded-xl text-sm font-medium transition-all border ${statusFilter === key
+                        className={`px-3 py-1.5 text-xs rounded-xl text-sm font-medium transition-all border ${statusFilter === key
                                 ? 'bg-orange-50 border-orange-300 text-orange-700 shadow-sm'
                                 : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
                             }`}>
@@ -215,38 +215,38 @@ export default function StockPage() {
 
             {/* Stats */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <div className="bg-white rounded-xl border p-4">
+                <div className="bg-white rounded-xl border p-3">
                     <p className="text-xs text-gray-500">Tổng tồn kho</p>
-                    <p className="text-2xl font-bold text-gray-800">{totalItems}</p>
+                    <p className="text-lg font-bold text-gray-800">{totalItems}</p>
                 </div>
-                <div className="bg-white rounded-xl border p-4">
+                <div className="bg-white rounded-xl border p-3">
                     <p className="text-xs text-gray-500">Giá trị tồn kho</p>
                     <p className="text-lg font-bold text-orange-600">{formatPrice(totalValue)}</p>
                 </div>
-                <div className="bg-white rounded-xl border p-4">
+                <div className="bg-white rounded-xl border p-3">
                     <p className="text-xs text-gray-500">Sắp hết hàng (≤3)</p>
-                    <p className="text-2xl font-bold text-amber-600">{lowStock}</p>
+                    <p className="text-lg font-bold text-amber-600">{lowStock}</p>
                 </div>
-                <div className="bg-white rounded-xl border p-4">
+                <div className="bg-white rounded-xl border p-3">
                     <p className="text-xs text-gray-500">Hết hàng</p>
-                    <p className="text-2xl font-bold text-red-600">{outOfStock}</p>
+                    <p className="text-lg font-bold text-red-600">{outOfStock}</p>
                 </div>
             </div>
 
             {/* Search */}
             <div className="relative max-w-md">
-                <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input type="text" placeholder="Tìm sản phẩm, linh kiện..."
                     value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2.5 border rounded-xl focus:ring-2 focus:ring-orange-500/30 bg-white shadow-sm" />
+                    className="w-full pl-8 pr-3 py-2.5 border rounded-xl focus:ring-2 focus:ring-orange-500/30 bg-white shadow-sm" />
             </div>
 
             {/* Table */}
             <div className="bg-white rounded-xl shadow-sm overflow-hidden">
                 {/* Desktop Table */}
-                <div className="hidden md:block overflow-x-auto">
-                    <table className="w-full min-w-[800px]">
-                        <thead className="bg-gray-50">
+                <div className="hidden lg:block overflow-x-auto">
+                    <table className="w-full">
+                        <thead className="bg-gray-50 border-b border-gray-100">
                             <tr>
                                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Mã SP</th>
                                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase cursor-pointer hover:text-orange-600"
@@ -275,7 +275,7 @@ export default function StockPage() {
                                 const costPrice = p.costPrice || 0;
                                 const stockValue = stock * costPrice;
                                 return (
-                                    <tr key={p.id} className={`hover:bg-gray-50 ${stock <= 0 ? 'bg-red-50/50' : stock <= 3 ? 'bg-amber-50/50' : ''}`}>
+                                    <tr key={p.id} className={`transition-colors duration-200 hover:bg-gray-50 ${stock <= 0 ? 'bg-red-50/50' : stock <= 3 ? 'bg-amber-50/50' : ''}`}>
                                         <td className="px-4 py-3 font-mono text-xs text-gray-500">#{p.id.slice(-6).toUpperCase()}</td>
                                         <td className="px-4 py-3">
                                             <p className="font-medium text-gray-900 text-sm">{p.name}</p>
@@ -309,7 +309,7 @@ export default function StockPage() {
                 </div>
 
                 {/* Mobile Card List */}
-                <div className="md:hidden">
+                <div className="lg:hidden">
                     {/* Mobile sort controls */}
                     <div className="flex items-center gap-2 p-3 bg-gray-50 border-b overflow-x-auto">
                         <span className="text-xs text-gray-500 shrink-0">Sắp xếp:</span>
@@ -388,7 +388,7 @@ export default function StockPage() {
                             type="button"
                             onClick={() => loadProducts('more', lastDoc)}
                             disabled={loadingMore}
-                            className="inline-flex items-center gap-2 rounded-lg border border-orange-200 bg-white px-4 py-2 text-sm font-medium text-orange-700 hover:bg-orange-50 disabled:cursor-not-allowed disabled:opacity-60"
+                            className="inline-flex items-center gap-2 rounded-lg border border-orange-200 bg-white px-3 py-1.5 text-xs text-sm font-medium text-orange-700 hover:bg-orange-50 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                             {loadingMore && <Loader2 size={16} className="animate-spin" />}
                             Tải thêm {STOCK_BATCH_SIZE} mặt hàng
