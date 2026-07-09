@@ -68,7 +68,7 @@ export async function GET(request: NextRequest) {
         const primaryToken = tokens[0] || normalizeSearchText(q);
         const db = getAdminDb();
 
-        const [productSnaps, serviceKeywordSnaps, serviceFallbackSnap] = await Promise.all([
+        const [productSnaps, serviceKeywordSnaps] = await Promise.all([
             Promise.all(tokens.map(token => db.collection('products')
                 .where('status', '==', 'active')
                 .where('searchKeywords', 'array-contains', token)
@@ -78,10 +78,6 @@ export async function GET(request: NextRequest) {
                 .where('searchKeywords', 'array-contains', token)
                 .limit(RESULT_LIMIT)
                 .get())),
-            db.collection('services')
-                .orderBy('name', 'asc')
-                .limit(SERVICE_FALLBACK_LIMIT)
-                .get(),
         ]);
 
         const results = new Map<string, PublicSearchResult>();
@@ -96,15 +92,6 @@ export async function GET(request: NextRequest) {
             const data = doc.data();
             if (data.isActive === false) return;
             results.set(`service:${doc.id}`, { ...toPublicService(doc.id, data), _type: 'service' });
-        });
-
-        serviceFallbackSnap.docs.forEach(doc => {
-            if (results.size >= RESULT_LIMIT) return;
-            const data = doc.data();
-            if (data.isActive === false) return;
-            const publicService = toPublicService(doc.id, data);
-            if (!matchesKeyword(publicService, primaryToken)) return;
-            results.set(`service:${doc.id}`, { ...publicService, _type: 'service' });
         });
 
         return NextResponse.json({ results: Array.from(results.values()).slice(0, RESULT_LIMIT) });

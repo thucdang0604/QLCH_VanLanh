@@ -169,7 +169,7 @@ export default async function CategoryPage({ params }: { params: Promise<{ slug:
     const isRepair = !!info.isRepair;
 
     // Fetch data from server
-    const items = await fetchCategoryItems(isRepair);
+    const items = await fetchCategoryItems(isRepair, info.categoryConfig?.id, info.condition);
 
     const seoDescription = isRepair
         ? `Dịch vụ ${info.label} chính hãng tại ${identity.siteName}. Linh kiện chính hãng, bảo hành trọn đời, xong trong 30 phút. Hotline: ${identity.formattedPhone}`
