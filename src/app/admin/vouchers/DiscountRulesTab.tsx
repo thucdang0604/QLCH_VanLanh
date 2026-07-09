@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { collection, query, orderBy, updateDoc, doc, deleteDoc, serverTimestamp, setDoc, limit } from 'firebase/firestore';
+import { collection, query, orderBy, updateDoc, doc, deleteDoc, serverTimestamp, setDoc, limit, where, type QueryConstraint } from 'firebase/firestore';
 import { onSnapshot, getDocs, getDoc } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import { Percent, Plus, Edit2, Trash2, ToggleLeft, ToggleRight, X, Tag, Medal, Users, ChevronDown, Search, ArrowDown, Zap, ShoppingBag } from 'lucide-react';
@@ -13,6 +13,7 @@ import { useConfig } from '@/lib/ConfigContext';
 import { generateSlug } from '@/lib/utils';
 
 const fmt = (n: number) => n.toLocaleString('vi-VN') + 'đ';
+const TIER_CUSTOMER_PREVIEW_LIMIT = 20;
 
 // ── Flatten taxonomy tree into searchable list ──
 interface FlatNode {
@@ -23,13 +24,7 @@ interface FlatNode {
     seoKeywords?: string;
 }
 
-interface ServiceLinkSuggestion {
-    id: string;
-    name: string;
-    categoryIds: string[];
-    linkedProductCategoryIds: string[];
-    tags?: string[];
-}
+
 
 function flattenTaxonomy(nodes: TaxonomyNode[], parentPath = '', depth = 0): FlatNode[] {
     const result: FlatNode[] = [];
@@ -211,13 +206,12 @@ function KeywordChips({ keywords, onChange }: { keywords: string[]; onChange: (k
 }
 
 // ── Accessory Rule Modal (Visual Builder) ──
-function AccessoryRuleModal({ rule, onClose, onSave, serviceNodes, productNodes, serviceLinkSuggestions }: {
+function AccessoryRuleModal({ rule, onClose, onSave, serviceNodes, productNodes }: {
     rule: AccessoryDiscountRule | null;
     onClose: () => void;
     onSave: (data: Partial<AccessoryDiscountRule>) => Promise<void>;
     serviceNodes: FlatNode[];
     productNodes: FlatNode[];
-    serviceLinkSuggestions: ServiceLinkSuggestion[];
 }) {
     const [form, setForm] = useState({
         name: rule?.name || '',
@@ -234,12 +228,6 @@ function AccessoryRuleModal({ rule, onClose, onSave, serviceNodes, productNodes,
     // Find selected node names for preview
     const triggerNode = serviceNodes.find(n => n.id === form.triggerServiceCategory);
     const targetNode = productNodes.find(n => n.id === form.targetProductCategory);
-    const linkedSuggestions = serviceLinkSuggestions.filter(service =>
-        form.triggerServiceCategory &&
-        service.linkedProductCategoryIds.length > 0 &&
-        service.categoryIds.includes(form.triggerServiceCategory)
-    );
-
     const previewText = (() => {
         const trigger = triggerNode?.name || form.triggerKeywords[0] || '...';
         const target = targetNode?.name || form.targetKeywords[0] || '...';
@@ -266,15 +254,6 @@ function AccessoryRuleModal({ rule, onClose, onSave, serviceNodes, productNodes,
             targetKeywords: node?.seoKeywords
                 ? node.seoKeywords.split(',').map(s => s.trim()).filter(Boolean)
                 : nodeId ? p.targetKeywords : [],
-        }));
-    };
-
-    const applyServiceLinkSuggestion = (suggestion: ServiceLinkSuggestion) => {
-        const targetCategory = suggestion.linkedProductCategoryIds[suggestion.linkedProductCategoryIds.length - 1] || '';
-        setForm(p => ({
-            ...p,
-            targetProductCategory: targetCategory,
-            targetKeywords: suggestion.tags?.length ? suggestion.tags : p.targetKeywords,
         }));
     };
 
@@ -331,23 +310,7 @@ function AccessoryRuleModal({ rule, onClose, onSave, serviceNodes, productNodes,
                                 onChange={handleTriggerSelect}
                                 placeholder="Chọn danh mục dịch vụ..."
                             />
-                            {linkedSuggestions.length > 0 && (
-                                <div className="rounded-lg border border-blue-100 bg-white p-3">
-                                    <p className="text-xs font-semibold text-blue-800">Gợi ý bán kèm từ dịch vụ</p>
-                                    <div className="mt-2 flex flex-wrap gap-2">
-                                        {linkedSuggestions.map(suggestion => (
-                                            <button
-                                                key={suggestion.id}
-                                                type="button"
-                                                onClick={() => applyServiceLinkSuggestion(suggestion)}
-                                                className="rounded-lg border border-blue-100 bg-blue-50 px-2.5 py-1.5 text-left text-xs font-medium text-blue-700 hover:bg-blue-100"
-                                            >
-                                                {suggestion.name}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
+
                             <div>
                                 <p className="text-xs text-gray-500 mb-1.5">Từ khóa kích hoạt (tự động từ taxonomy hoặc thêm thủ công):</p>
                                 <KeywordChips keywords={form.triggerKeywords} onChange={kw => setForm(p => ({ ...p, triggerKeywords: kw }))} />
@@ -444,12 +407,15 @@ export default function DiscountRulesTab() {
     const [rules, setRules] = useState<(AccessoryDiscountRule & { id: string })[]>([]);
     const [showAccessoryModal, setShowAccessoryModal] = useState(false);
     const [editRule, setEditRule] = useState<AccessoryDiscountRule | null>(null);
-    const [serviceLinkSuggestions, setServiceLinkSuggestions] = useState<ServiceLinkSuggestion[]>([]);
+    // Guard: chỉ fetch accessory rules 1 lần khi tab mở lần đầu
+    const accessoryRulesLoadedRef = useRef(false);
 
     // Tiers State
     const [tiers, setTiers] = useState<TierConfig[]>(TIER_CONFIGS);
     const [savingTiers, setSavingTiers] = useState(false);
     const [expandedTier, setExpandedTier] = useState<string | null>(null);
+    const [loadingTierName, setLoadingTierName] = useState<string | null>(null);
+    const [loadedTierCustomers, setLoadedTierCustomers] = useState<Record<string, boolean>>({});
 
     // Customers per tier
     const [tierCustomers, setTierCustomers] = useState<Record<string, { name: string; phone: string; totalSpent: number }[]>>({});
@@ -472,31 +438,48 @@ export default function DiscountRulesTab() {
         return map;
     }, [serviceNodes, productNodes]);
 
-    const loadTierCustomers = useCallback(async () => {
-        const customerPreviewQuery = query(collection(db, 'customers'), orderBy('totalSpent', 'desc'), limit(500));
-        const snap = await getDocs(customerPreviewQuery);
-        const grouped: Record<string, { name: string; phone: string; totalSpent: number }[]> = {};
-        for (const tier of tiers) grouped[tier.name] = [];
+    const loadTierCustomers = useCallback(async (tierName: string) => {
+        if (loadedTierCustomers[tierName] || loadingTierName) return;
+        const tier = tiers.find(item => item.name === tierName);
+        if (!tier) return;
 
-        snap.docs.forEach(d => {
-            const data = d.data();
-            const spent = Number(data.totalSpent || 0);
-            let matched = 'Bronze';
-            for (const tier of tiers) {
-                if (tier.minSpent > 0 && spent >= tier.minSpent) { matched = tier.name; break; }
-            }
-            if (!grouped[matched]) grouped[matched] = [];
-            grouped[matched].push({ name: data.name || data.phone || d.id, phone: d.id, totalSpent: spent });
-        });
-        for (const key of Object.keys(grouped)) {
-            grouped[key].sort((a, b) => b.totalSpent - a.totalSpent);
+        setLoadingTierName(tierName);
+        try {
+            const nextTierMinSpent = tiers
+                .filter(item => item.minSpent > tier.minSpent)
+                .sort((a, b) => a.minSpent - b.minSpent)[0]?.minSpent;
+            const constraints: QueryConstraint[] = [
+                where('totalSpent', '>=', tier.minSpent),
+                ...(nextTierMinSpent !== undefined ? [where('totalSpent', '<', nextTierMinSpent)] : []),
+                orderBy('totalSpent', 'desc'),
+                limit(TIER_CUSTOMER_PREVIEW_LIMIT),
+            ];
+            const customerPreviewQuery = query(collection(db, 'customers'), ...constraints);
+            const snap = await getDocs(customerPreviewQuery);
+            const customers = snap.docs.map(d => {
+                const data = d.data();
+                const spent = Number(data.totalSpent || 0);
+                return { name: data.name || data.phone || d.id, phone: d.id, totalSpent: spent };
+            });
+            setTierCustomers(current => ({ ...current, [tierName]: customers }));
+            setLoadedTierCustomers(current => ({ ...current, [tierName]: true }));
+        } finally {
+            setLoadingTierName(null);
         }
-        setTierCustomers(grouped);
-    }, [tiers]);
+    }, [loadedTierCustomers, loadingTierName, tiers]);
 
-    useEffect(() => {
-        loadTierCustomers().catch(error => console.error('Failed to load tier customers:', error));
-    }, [loadTierCustomers]);
+    const handleToggleTierCustomers = async (tierName: string) => {
+        if (!loadedTierCustomers[tierName]) {
+            try {
+                await loadTierCustomers(tierName);
+            } catch (error) {
+                console.error('Failed to load tier customers:', error);
+                toast.error('Khong tai duoc danh sach khach hang theo hang');
+                return;
+            }
+        }
+        setExpandedTier(current => current === tierName ? null : tierName);
+    };
 
     const loadAccessoryRules = useCallback(async () => {
         const qRules = query(collection(db, 'accessory_discount_rules'), orderBy('createdAt', 'desc'), limit(100));
@@ -504,36 +487,26 @@ export default function DiscountRulesTab() {
         setRules(snap.docs.map(d => ({ id: d.id, ...d.data() } as AccessoryDiscountRule & { id: string })));
     }, []);
 
-    const loadServiceLinkSuggestions = useCallback(async () => {
-        const snap = await getDocs(query(collection(db, 'services'), limit(20)));
-        setServiceLinkSuggestions(snap.docs
-            .map(docSnap => {
-                const data = docSnap.data() as Partial<ServiceLinkSuggestion>;
-                return {
-                    id: docSnap.id,
-                    name: String(data.name || docSnap.id),
-                    categoryIds: Array.isArray(data.categoryIds) ? data.categoryIds : [],
-                    linkedProductCategoryIds: Array.isArray(data.linkedProductCategoryIds) ? data.linkedProductCategoryIds : [],
-                    tags: Array.isArray(data.tags) ? data.tags : [],
-                };
-            })
-            .filter(service => service.categoryIds.length > 0 && service.linkedProductCategoryIds.length > 0)
-        );
-    }, []);
+    useEffect(() => {
+        if (activeTab !== 'accessories') return;
+        if (accessoryRulesLoadedRef.current) return;
+        accessoryRulesLoadedRef.current = true;
+        loadAccessoryRules().catch(error => console.error('Failed to load accessory discount rules:', error));
+    }, [activeTab, loadAccessoryRules]);
 
     useEffect(() => {
-        loadAccessoryRules().catch(error => console.error('Failed to load accessory discount rules:', error));
-        loadServiceLinkSuggestions().catch(error => console.error('Failed to load service link suggestions:', error));
-
         // Fetch Tier Settings
         const unsubTiers = onSnapshot(doc(db, 'system_config', 'tier_settings'), snap => {
             if (snap.exists() && snap.data().tiers) {
                 setTiers(snap.data().tiers);
+                setLoadedTierCustomers({});
+                setTierCustomers({});
+                setExpandedTier(null);
             }
         });
 
         return () => { unsubTiers(); };
-    }, [loadAccessoryRules, loadServiceLinkSuggestions]);
+    }, []);
 
     // Handlers for Accessories
     const handleSaveAccessoryRule = async (data: Partial<AccessoryDiscountRule>) => {
@@ -566,6 +539,9 @@ export default function DiscountRulesTab() {
         const newTiers = [...tiers];
         newTiers[index] = { ...newTiers[index], [field]: value };
         setTiers(newTiers);
+        setLoadedTierCustomers({});
+        setTierCustomers({});
+        setExpandedTier(null);
     };
 
     const handleSaveTiers = async () => {
@@ -631,8 +607,10 @@ export default function DiscountRulesTab() {
                             </thead>
                             <tbody className="divide-y divide-gray-100">
                                 {tiers.map((tier, idx) => {
-                                    const customers = tierCustomers[tier.name] || [];
+                                    const _customers = tierCustomers[tier.name] || [];
                                     const isExpanded = expandedTier === tier.name;
+                                    const isLoaded = !!loadedTierCustomers[tier.name];
+                                    const isLoading = loadingTierName === tier.name;
                                     return (
                                         <tr key={tier.name} className="hover:bg-gray-50 transition-colors align-top">
                                             <td className="px-4 py-3 font-bold text-gray-900">
@@ -663,18 +641,16 @@ export default function DiscountRulesTab() {
                                                 </div>
                                             </td>
                                             <td className="px-4 py-3 text-center">
-                                                {customers.length > 0 ? (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setExpandedTier(isExpanded ? null : tier.name)}
-                                                        className="inline-flex items-center gap-1 px-2.5 py-1 bg-orange-50 text-orange-600 rounded-lg text-xs font-bold hover:bg-orange-100 transition-colors"
-                                                    >
-                                                        <Users size={14} /> {customers.length}
-                                                        <span className="text-[10px]">{isExpanded ? '▲' : '▼'}</span>
-                                                    </button>
-                                                ) : (
-                                                    <span className="text-xs text-gray-400">0</span>
-                                                )}
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleToggleTierCustomers(tier.name)}
+                                                    disabled={!!loadingTierName}
+                                                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-orange-50 text-orange-600 rounded-lg text-xs font-bold hover:bg-orange-100 transition-colors disabled:opacity-50"
+                                                >
+                                                    <Users size={14} />
+                                                    {isLoading ? 'Dang tai' : isLoaded ? 'Dang xem' : 'Xem'}
+                                                    {isLoaded && <span className="text-[10px]">{isExpanded ? '▲' : '▼'}</span>}
+                                                </button>
                                             </td>
                                         </tr>
                                     );
@@ -686,8 +662,9 @@ export default function DiscountRulesTab() {
                         {expandedTier && (tierCustomers[expandedTier] || []).length > 0 && (
                             <div className="border-t bg-gray-50 p-4">
                                 <h4 className="text-sm font-bold text-gray-700 mb-3">
-                                    Khách hàng hạng {expandedTier} ({tierCustomers[expandedTier].length})
+                                    Preview khách hàng hạng {expandedTier}
                                 </h4>
+                                <p className="text-xs text-gray-500 mb-3">Chi hien toi da {TIER_CUSTOMER_PREVIEW_LIMIT} khach co tong chi tieu cao nhat trong hang nay. Tong so khach theo hang can doc tu aggregate rieng, khong dem bang list preview.</p>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-[300px] overflow-y-auto">
                                     {tierCustomers[expandedTier].map(c => (
                                         <div key={c.phone} className="bg-white rounded-lg border px-3 py-2 flex items-center justify-between gap-2">
@@ -773,7 +750,7 @@ export default function DiscountRulesTab() {
                             onSave={handleSaveAccessoryRule}
                             serviceNodes={serviceNodes}
                             productNodes={productNodes}
-                            serviceLinkSuggestions={serviceLinkSuggestions}
+
                         />
                     )}
                 </div>

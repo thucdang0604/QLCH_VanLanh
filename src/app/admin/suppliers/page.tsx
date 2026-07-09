@@ -11,7 +11,6 @@ import CurrencyInput from '@/components/admin/CurrencyInput';
 import type { Supplier, SupplierTransaction } from '@/lib/types';
 import { buildContactMethods, buildContactSearchKeywords, getPrimaryContact, hasProfileContact } from '@/lib/contactIdentity';
 import type { ContactMethodType } from '@/lib/types/contact';
-import { generateSlug } from '@/lib/utils';
 import { reserveSupplierDocumentId } from '@/lib/supplierDocumentIds';
 
 // ── Format helpers ──
@@ -23,11 +22,6 @@ const fmtDate = (d: unknown) => {
 };
 
 // ── Supplier Form Modal ──
-
-function buildSupplierTransactionId(supplierId: string) {
-    const safeSupplierId = generateSlug(supplierId).slice(0, 60) || 'supplier';
-    return `ST-${safeSupplierId}-${Date.now()}`;
-}
 
 function firstSupplierContactValue(supplier: Supplier, type: ContactMethodType) {
     return supplier.contactMethods?.find(method => method.type === type)?.value || '';
@@ -400,7 +394,7 @@ function SupplierDetailDrawer({
 }
 
 export default function SuppliersPage() {
-    const { user } = useAuth();
+    useAuth();
     const [suppliers, setSuppliers] = useState<(Supplier & { id: string })[]>([]);
     const [search, setSearch] = useState('');
     const [supplierTypeFilter, setSupplierTypeFilter] = useState('');
@@ -468,38 +462,28 @@ export default function SuppliersPage() {
 
     // Pay debt
     const handlePay = async (supplier: Supplier, amount: number, method: string, note: string) => {
-        const txId = buildSupplierTransactionId(supplier.id);
-        // Create supplier transaction
-        await setDoc(doc(db, 'supplier_transactions', txId), {
-            supplierId: supplier.id,
-            supplierName: supplier.name,
-            type: 'PAYMENT',
-            amount,
-            paymentMethod: method,
-            note,
-            createdBy: user?.uid || '',
-            createdByName: user?.displayName || '',
-            createdAt: serverTimestamp(),
+        const auth = await (await import('@/lib/firebase')).getAuthInstance();
+        const idToken = await auth.currentUser?.getIdToken();
+        if (!idToken) throw new Error('Missing admin auth token');
+
+        const res = await fetch('/api/admin/suppliers/pay-debt', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${idToken}`,
+            },
+            body: JSON.stringify({
+                supplierId: supplier.id,
+                amount,
+                paymentMethod: method,
+                note,
+                idempotencyKey: crypto.randomUUID(),
+            }),
         });
-        // Write-time enrichment: create expenses doc so revenue page picks it up (0 extra reads)
-        await setDoc(doc(db, 'expenses', `supplier-pay-${txId}`), {
-            category: 'supplier_payment',
-            description: `Trả nợ NCC: ${supplier.name}${note ? ` – ${note}` : ''}`,
-            amount,
-            paymentMethod: method,
-            supplierId: supplier.id,
-            supplierTransactionId: txId,
-            date: serverTimestamp(),
-            createdBy: user?.uid || '',
-            createdByName: user?.displayName || '',
-            createdAt: serverTimestamp(),
-        });
-        // Update totalDebt
-        await updateDoc(doc(db, 'suppliers', supplier.id), {
-            totalDebt: (supplier.totalDebt || 0) - amount,
-            updatedAt: serverTimestamp(),
-        });
-        toast.success(`Đã thanh toán ${fmt(amount)} cho ${supplier.name}`);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Failed to pay supplier debt');
+        toast.success(`Da thanh toan ${fmt(amount)} cho ${supplier.name}`);
+        await loadSuppliers();
         if (expandedId === supplier.id) loadTransactions(supplier.id);
     };
 
@@ -549,52 +533,52 @@ export default function SuppliersPage() {
     return (
         <div className="space-y-6">
             <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                <div className="flex items-center gap-3 rounded-xl border bg-white p-4">
+                <div className="flex items-center gap-3 rounded-xl border bg-white p-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 text-blue-600"><Building2 size={20} /></div>
-                    <div><p className="text-xs text-gray-500">Tong NCC</p><p className="text-xl font-bold text-gray-800">{stats.total}</p></div>
+                    <div><p className="text-xs text-gray-500">Tổng NCC</p><p className="text-lg font-bold text-gray-800">{stats.total}</p></div>
                 </div>
-                <div className="flex items-center gap-3 rounded-xl border bg-white p-4">
+                <div className="flex items-center gap-3 rounded-xl border bg-white p-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-100 text-green-600"><Clock3 size={20} /></div>
-                    <div><p className="text-xs text-gray-500">Dang hoat dong</p><p className="text-xl font-bold text-gray-800">{stats.active}</p></div>
+                    <div><p className="text-xs text-gray-500">Đang hoạt động</p><p className="text-lg font-bold text-gray-800">{stats.active}</p></div>
                 </div>
-                <div className="flex items-center gap-3 rounded-xl border bg-white p-4">
+                <div className="flex items-center gap-3 rounded-xl border bg-white p-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-full bg-red-100 text-red-600"><CreditCard size={20} /></div>
-                    <div><p className="text-xs text-gray-500">Co cong no</p><p className="text-xl font-bold text-gray-800">{stats.debt}</p></div>
+                    <div><p className="text-xs text-gray-500">Có công nợ</p><p className="text-lg font-bold text-gray-800">{stats.debt}</p></div>
                 </div>
-                <div className="flex items-center gap-3 rounded-xl border bg-white p-4">
+                <div className="flex items-center gap-3 rounded-xl border bg-white p-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-full bg-orange-100 text-orange-600"><Tags size={20} /></div>
-                    <div><p className="text-xs text-gray-500">Tags</p><p className="text-xl font-bold text-gray-800">{stats.tags}</p></div>
+                    <div><p className="text-xs text-gray-500">Tags</p><p className="text-lg font-bold text-gray-800">{stats.tags}</p></div>
                 </div>
             </div>
 
             <div className="flex flex-col gap-3 lg:flex-row">
-                <select title="Loc loai NCC" value={supplierTypeFilter} onChange={event => setSupplierTypeFilter(event.target.value)} className="h-11 rounded-xl border bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
-                    <option value="">Tat ca loai NCC</option>
+                <select title="Lọc loại NCC" value={supplierTypeFilter} onChange={event => setSupplierTypeFilter(event.target.value)} className="h-8 rounded-xl border bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <option value="">Tất cả loại NCC</option>
                     {supplierTypes.map(type => <option key={type} value={type}>{type}</option>)}
                 </select>
-                <select title="Loc tag" value={tagFilter} onChange={event => setTagFilter(event.target.value)} className="h-11 rounded-xl border bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
-                    <option value="">Tat ca tags</option>
+                <select title="Lọc tag" value={tagFilter} onChange={event => setTagFilter(event.target.value)} className="h-8 rounded-xl border bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <option value="">Tất cả tags</option>
                     {availableTags.map(tag => <option key={tag} value={tag}>{tag}</option>)}
                 </select>
                 <button
                     type="button"
                     onClick={() => setDebtOnly(value => !value)}
-                    className={`inline-flex h-11 items-center justify-center gap-2 rounded-xl border px-4 text-sm font-semibold ${debtOnly ? 'border-red-200 bg-red-50 text-red-600' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'}`}
+                    className={`inline-flex h-8 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-semibold ${debtOnly ? 'border-red-200 bg-red-50 text-red-600' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'}`}
                 >
                     <Filter size={16} />
-                    Co cong no
+                    Có công nợ
                 </button>
             </div>
             {/* Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                    <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
                         <Building2 className="text-orange-500" size={28} /> Nhà cung cấp
                     </h1>
                     <p className="text-sm text-gray-500 mt-1">{suppliers.length} NCC · Tổng công nợ: <span className="font-bold text-orange-600">{fmt(totalDebt)}</span></p>
                 </div>
                 <button onClick={() => { setEditSupplier(null); setShowModal(true); }}
-                    className="flex items-center gap-2 bg-orange-500 text-white px-4 py-2.5 rounded-xl hover:bg-orange-600 font-medium text-sm">
+                    className="flex items-center gap-2 bg-orange-500 text-white px-3 py-1.5 text-xs rounded-xl hover:bg-orange-600 font-medium">
                     <Plus size={18} /> Thêm NCC
                 </button>
             </div>
@@ -603,7 +587,7 @@ export default function SuppliersPage() {
             <div className="relative max-w-md">
                 <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input type="text" placeholder="Tìm tên, mã NCC, Zalo/Facebook, SĐT, MST..." value={search} onChange={e => setSearch(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2.5 border rounded-xl text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none" />
+                    className="w-full pl-10 pr-4 h-8 text-sm border rounded-xl focus:ring-2 focus:ring-orange-500 focus:outline-none" />
             </div>
 
             {/* List */}

@@ -19,7 +19,12 @@ async function loadDebtOrderDocs(
             .orderBy('createdAt', 'asc')
     );
 
-    if (!byCustomerIdSnap.empty) return byCustomerIdSnap.docs;
+    const debtDocs: FirebaseFirestore.QueryDocumentSnapshot[] = [];
+    const seenIds = new Set<string>();
+    for (const doc of byCustomerIdSnap.docs) {
+        seenIds.add(doc.id);
+        debtDocs.push(doc);
+    }
 
     const phoneCandidates = Array.from(new Set([
         customerId,
@@ -28,8 +33,6 @@ async function loadDebtOrderDocs(
         customerData.legacyPhoneId,
     ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0)));
 
-    const byPhoneDocs: FirebaseFirestore.QueryDocumentSnapshot[] = [];
-    const seenIds = new Set<string>();
     for (const phone of phoneCandidates) {
         const byPhoneSnap = await tx.get(
             db.collection('orders')
@@ -40,10 +43,10 @@ async function loadDebtOrderDocs(
         for (const doc of byPhoneSnap.docs) {
             if (seenIds.has(doc.id)) continue;
             seenIds.add(doc.id);
-            byPhoneDocs.push(doc);
+            debtDocs.push(doc);
         }
     }
-    return byPhoneDocs;
+    return debtDocs;
 }
 
 export async function POST(request: NextRequest) {
@@ -51,17 +54,45 @@ export async function POST(request: NextRequest) {
         const caller = await requirePermission(request, 'manage_customers');
 
         const body = await request.json();
-        const { customerId, amount, paymentMethod = 'CASH', note } = body;
+        const { customerId, amount, paymentMethod = 'CASH', note, idempotencyKey } = body;
+        const operationKey = typeof idempotencyKey === 'string' ? idempotencyKey.trim() : '';
 
         const numAmount = Number(amount);
+        if (!operationKey) {
+            return NextResponse.json({ error: 'Missing idempotencyKey' }, { status: 400 });
+        }
         if (!customerId || isNaN(numAmount) || numAmount <= 0) {
             return NextResponse.json({ error: 'Dữ liệu không hợp lệ (customerId, amount > 0)' }, { status: 400 });
         }
 
         const db = getAdminDb();
         const custRef = db.collection('customers').doc(customerId);
+        const opRef = db.collection('operation_requests').doc(operationKey);
 
         const result = await db.runTransaction(async (tx) => {
+            const opSnap = await tx.get(opRef);
+            if (opSnap.exists) {
+                const opData = opSnap.data() || {};
+                if (
+                    opData.status === 'completed'
+                    && opData.type === 'admin_collect_debt'
+                    && opData.customerId === customerId
+                    && Number(opData.amount) === numAmount
+                    && opData.paymentMethod === paymentMethod
+                    && opData.actorId === caller.uid
+                ) {
+                    return {
+                        success: true,
+                        updatedOrderIds: Array.isArray(opData.updatedOrderIds) ? opData.updatedOrderIds : [],
+                        amountPaid: Number(opData.amountPaid) || numAmount,
+                        remainingDebt: Number(opData.remainingDebt) || 0,
+                        transactionId: typeof opData.referenceId === 'string' ? opData.referenceId : '',
+                        fromCache: true,
+                    };
+                }
+                throw new Error('Idempotency key was already used for a different collect-debt request.');
+            }
+
             const custSnap = await tx.get(custRef);
             if (!custSnap.exists) {
                 throw new Error('Khách hàng không tồn tại');
@@ -133,6 +164,10 @@ export async function POST(request: NextRequest) {
             }
 
             // Cập nhật customer totalDebt
+            if (remainingAmountToDistribute > 0) {
+                throw new Error('Collect-debt amount could not be fully distributed to debt orders.');
+            }
+
             tx.update(custRef, {
                 totalDebt: FieldValue.increment(-numAmount),
                 updatedAt: FieldValue.serverTimestamp()
@@ -157,8 +192,28 @@ export async function POST(request: NextRequest) {
                 posOrderRevenue,
                 webOrderRevenue,
             });
+            tx.set(opRef, {
+                status: 'completed',
+                type: 'admin_collect_debt',
+                actorId: caller.uid,
+                customerId,
+                amount: numAmount,
+                amountPaid: numAmount,
+                paymentMethod,
+                referenceId: transactionAllocation.id,
+                updatedOrderIds,
+                remainingDebt: currentDebt - numAmount,
+                completedAt: FieldValue.serverTimestamp(),
+            });
 
-            return { success: true, updatedOrderIds, amountPaid: numAmount, remainingDebt: currentDebt - numAmount };
+            return {
+                success: true,
+                updatedOrderIds,
+                amountPaid: numAmount,
+                remainingDebt: currentDebt - numAmount,
+                transactionId: transactionAllocation.id,
+                fromCache: false,
+            };
         });
 
         return NextResponse.json(result);

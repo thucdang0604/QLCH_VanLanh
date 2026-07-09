@@ -30,7 +30,7 @@ export interface ImportReceipt {
     receiptType?: 'component' | 'retail';
     status: 'draft' | 'ordered' | 'completed';
     version?: number;
-    paymentMethod?: 'paid' | 'cash' | 'bank' | 'debt' | string;
+    paymentMethod?: 'cash' | 'bank' | 'debt';
     createdBy: string;
     createdByName: string;
     createdAt: FirestoreDateValue;

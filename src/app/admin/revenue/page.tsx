@@ -19,6 +19,7 @@ import {
     toRevenueDateId,
     type RevenueAggregateDoc,
 } from '@/lib/revenueAggregate';
+import { useAuth } from '@/lib/AuthContext';
 
 // ── Expense categories ──
 const expenseCategories = [
@@ -105,6 +106,7 @@ function capBreakdownToTotal(total: number, values: number[]) {
 }
 
 export default function RevenuePage() {
+    const { user } = useAuth();
     // Data
     const [orders, setOrders] = useState<Order[]>([]);
     const [repairs, setRepairs] = useState<RepairTicket[]>([]);
@@ -127,6 +129,7 @@ export default function RevenuePage() {
     const [expAmount, setExpAmount] = useState(0);
     const [isProcessing, setIsProcessing] = useState(false);
     const [showAllExpenses, setShowAllExpenses] = useState(false);
+    const canCreateExpense = user?.role === 'admin';
 
     const formatPrice = (n: number) => n.toLocaleString('vi-VN') + 'đ';
     const toDate = (ts: unknown) => {
@@ -202,11 +205,11 @@ export default function RevenuePage() {
                 const toTs = Timestamp.fromDate(to);
 
                 const [oSnap, rSnap, iSnap, cSnap, eSnap] = await Promise.all([
-                    getDocs(query(collection(db, 'orders'), where('createdAt', '>=', fromTs), where('createdAt', '<=', toTs), orderBy('createdAt', 'desc'))),
-                    getDocs(query(collection(db, 'repairs'), where('createdAt', '>=', fromTs), where('createdAt', '<=', toTs), orderBy('createdAt', 'desc'))),
-                    getDocs(query(collection(db, 'import_receipts'), where('createdAt', '>=', fromTs), where('createdAt', '<=', toTs), orderBy('createdAt', 'desc'))),
-                    getDocs(query(collection(db, 'commissions'), where('createdAt', '>=', fromTs), where('createdAt', '<=', toTs), orderBy('createdAt', 'desc'))),
-                    getDocs(query(collection(db, 'expenses'), where('createdAt', '>=', fromTs), where('createdAt', '<=', toTs), orderBy('createdAt', 'desc'))),
+                    getDocs(query(collection(db, 'orders'), where('createdAt', '>=', fromTs), where('createdAt', '<=', toTs), orderBy('createdAt', 'desc'), limit(200))),
+                    getDocs(query(collection(db, 'repairs'), where('createdAt', '>=', fromTs), where('createdAt', '<=', toTs), orderBy('createdAt', 'desc'), limit(200))),
+                    getDocs(query(collection(db, 'import_receipts'), where('createdAt', '>=', fromTs), where('createdAt', '<=', toTs), orderBy('createdAt', 'desc'), limit(200))),
+                    getDocs(query(collection(db, 'commissions'), where('createdAt', '>=', fromTs), where('createdAt', '<=', toTs), orderBy('createdAt', 'desc'), limit(200))),
+                    getDocs(query(collection(db, 'expenses'), where('createdAt', '>=', fromTs), where('createdAt', '<=', toTs), orderBy('createdAt', 'desc'), limit(200))),
                 ]);
                 if (cancelled) return;
                 setUseAggregateData(false);
@@ -241,9 +244,16 @@ export default function RevenuePage() {
                         return;
                     } catch (aggregateError) {
                         if (!isFirestorePermissionError(aggregateError)) {
-                            throw aggregateError;
+                            console.warn('Failed to load revenue aggregates:', aggregateError);
                         }
-                        await loadSourceCollections();
+                        if (cancelled) return;
+                        setUseAggregateData(true);
+                        setAggregateDays([]);
+                        setOrders([]);
+                        setRepairs([]);
+                        setImportReceipts([]);
+                        setCommissions([]);
+                        setExpenses([]);
                         return;
                     }
                 }
@@ -612,7 +622,7 @@ export default function RevenuePage() {
                     </h1>
                     <p className="text-sm text-gray-500 mt-0.5">Tổng hợp THU — CHI — LỢI NHUẬN</p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                     {/* Period filter */}
                     {(['today', 'week', 'month', 'custom'] as const).map(p => (
                         <button key={p} onClick={() => setPeriod(p)}
@@ -622,16 +632,18 @@ export default function RevenuePage() {
                             {periodLabel[p]}
                         </button>
                     ))}
-                    <button onClick={() => setShowExpenseModal(true)}
+                    {canCreateExpense && (
+                        <button onClick={() => setShowExpenseModal(true)}
                         className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500 text-white rounded-lg hover:bg-red-600 text-xs font-semibold">
                         <Plus size={14} /> Tạo phiếu chi
-                    </button>
+                        </button>
+                    )}
                 </div>
             </div>
 
             {/* Custom date range */}
             {period === 'custom' && (
-                <div className="flex gap-3 items-center bg-gray-50 rounded-xl px-3 py-1.5 text-xs">
+                <div className="flex flex-wrap gap-3 items-center bg-gray-50 rounded-xl px-3 py-1.5 text-xs">
                     <Calendar size={16} className="text-gray-400" />
                     <input type="date" title="Ngày bắt đầu" value={customFrom} onChange={e => setCustomFrom(e.target.value)}
                         className="px-3 py-1.5 border rounded-lg text-sm" />
@@ -642,7 +654,7 @@ export default function RevenuePage() {
             )}
 
             {/* ═══ Main KPI Cards ═══ */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {/* TỔNG THU */}
                 <div className="bg-gradient-to-br from-green-500 to-emerald-600 rounded-2xl p-5 text-white shadow-lg shadow-green-200/50 flex flex-col justify-between">
                     <div>
@@ -701,11 +713,13 @@ export default function RevenuePage() {
                 </div>
 
                 {/* LỢI NHUẬN */}
-                <div className={`bg-gradient-to-br ${calculations.netProfit >= 0 ? 'from-blue-500 to-indigo-600 shadow-blue-200/50' : 'from-gray-500 to-gray-700 shadow-gray-200/50'} rounded-2xl p-5 text-white shadow-lg`}>
-                    <div className="flex items-center gap-2 text-blue-100 text-sm mb-1">
-                        <Wallet size={18} /> LỢI NHUẬN RÒNG
+                <div className={`md:col-span-2 lg:col-span-1 bg-gradient-to-br ${calculations.netProfit >= 0 ? 'from-blue-500 to-indigo-600 shadow-blue-200/50' : 'from-gray-500 to-gray-700 shadow-gray-200/50'} rounded-2xl p-5 text-white shadow-lg flex flex-col justify-between`}>
+                    <div>
+                        <div className="flex items-center gap-2 text-blue-100 text-sm mb-1">
+                            <Wallet size={18} /> LỢI NHUẬN RÒNG
+                        </div>
+                        <p className="text-3xl font-bold">{formatPrice(calculations.netProfit)}</p>
                     </div>
-                    <p className="text-3xl font-bold">{formatPrice(calculations.netProfit)}</p>
                     <div className="mt-3">
                         <div className="bg-white/20 rounded-lg px-3 py-2 text-xs">
                             <p>Biên lợi nhuận: <b>{calculations.totalRevenue > 0 ? ((calculations.netProfit / calculations.totalRevenue) * 100).toFixed(1) : 0}%</b></p>

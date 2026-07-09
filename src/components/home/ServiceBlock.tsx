@@ -14,21 +14,20 @@ import {
     LucideIcon
 } from 'lucide-react';
 import { ServiceCardSkeleton } from '../ui/Skeleton';
-import { collection, query, orderBy, limit, getDocs } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
 import { useConfig } from '@/lib/ConfigContext';
 
 interface Service {
     id: string;
     name: string;
-    description: string;
-    price: string;
+    description?: string;
+    price?: number;
+    price_original?: number;
+    price_promo?: number;
     imageUrl?: string;
     icon?: string;
     isActive?: boolean;
 }
 
-// Icon mapping
 const iconMap: Record<string, LucideIcon> = {
     Battery,
     Smartphone,
@@ -40,7 +39,6 @@ const iconMap: Record<string, LucideIcon> = {
     Cpu,
 };
 
-// Color palette for services
 const colorPalette = [
     { color: 'from-green-500 to-emerald-600', bgColor: 'bg-green-50' },
     { color: 'from-blue-500 to-cyan-600', bgColor: 'bg-blue-50' },
@@ -52,6 +50,11 @@ const colorPalette = [
     { color: 'from-pink-500 to-rose-600', bgColor: 'bg-pink-50' },
 ];
 
+function formatPrice(service: Service) {
+    const displayPrice = service.price_promo || service.price_original || service.price || 0;
+    return displayPrice > 0 ? `${new Intl.NumberFormat('vi-VN').format(displayPrice)}đ` : 'Liên hệ';
+}
+
 export default function ServiceBlock() {
     const { config, formatHotline } = useConfig();
     const [services, setServices] = useState<Array<Service & { color?: string; bgColor?: string }>>([]);
@@ -59,37 +62,21 @@ export default function ServiceBlock() {
     const mainPhone = config.contact_info?.main_phone || config.store_branches?.[0]?.phone || '';
 
     useEffect(() => {
-        // Query mới nhất - hiển thị dịch vụ mới nhất lên đầu (limit 12)
-        const q = query(
-            collection(db, 'services'),
-            orderBy('createdAt', 'desc'),
-            limit(12)
-        );
-
         const fetchServices = async () => {
             try {
-                const snapshot = await getDocs(q);
-                if (snapshot.empty) {
-                    setServices([]);
-                } else {
-                    const all = snapshot.docs.map((doc, index) => {
-                        const data = doc.data() as Partial<Service>;
-                        const colors = colorPalette[index % colorPalette.length];
-                        return {
-                            id: doc.id,
-                            name: data.name ?? 'Dịch vụ',
-                            description: data.description ?? '',
-                            price: data.price ?? '',
-                            imageUrl: data.imageUrl,
-                            icon: data.icon || 'Wrench',
-                            isActive: data.isActive,
-                            ...colors,
-                        };
-                    });
-                    // Client-side: lọc active nếu trường tồn tại
-                    const active = all.filter(s => s.isActive !== false);
-                    setServices(active);
-                }
+                const response = await fetch('/api/services/homepage-pricing');
+                if (!response.ok) throw new Error(`Services API failed with ${response.status}`);
+                const data = await response.json() as { services?: Service[] };
+                const publicServices = Array.isArray(data.services) ? data.services.slice(0, 12) : [];
+                setServices(publicServices
+                    .filter(service => service.isActive !== false)
+                    .map((service, index) => ({
+                        ...service,
+                        name: service.name || 'Dịch vụ',
+                        description: service.description || '',
+                        icon: service.icon || 'Wrench',
+                        ...colorPalette[index % colorPalette.length],
+                    })));
             } catch (error) {
                 console.error('Services fetch error:', error);
                 setServices([]);
@@ -105,7 +92,6 @@ export default function ServiceBlock() {
 
     return (
         <section className="container mx-auto px-4 py-8">
-            {/* Section Header */}
             <div className="flex items-center justify-between mb-6">
                 <div>
                     <h2 className="text-2xl font-bold text-gray-800">
@@ -123,7 +109,6 @@ export default function ServiceBlock() {
                 </Link>
             </div>
 
-            {/* Services Grid */}
             {isLoading ? (
                 <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
                     {Array.from({ length: 8 }).map((_, i) => (
@@ -137,17 +122,15 @@ export default function ServiceBlock() {
                         return (
                             <Link
                                 key={service.id}
-                                href={`/product/${service.id}`}
+                                href={`/service/${service.id}`}
                                 className="group bg-white rounded-xl p-4 shadow-sm hover:shadow-lg transition-all hover:-translate-y-1"
                             >
-                                {/* Icon */}
                                 <div className={`w-14 h-14 ${service.bgColor} rounded-xl flex items-center justify-center mx-auto mb-3 group-hover:scale-110 transition-transform`}>
                                     <div className={`w-8 h-8 bg-gradient-to-br ${service.color} rounded-lg flex items-center justify-center`}>
                                         <IconComponent size={18} className="text-white" />
                                     </div>
                                 </div>
 
-                                {/* Content */}
                                 <div className="text-center">
                                     <h3 className="font-semibold text-gray-800 text-sm mb-1 group-hover:text-orange-600 transition-colors">
                                         {service.name}
@@ -156,7 +139,7 @@ export default function ServiceBlock() {
                                         {service.description}
                                     </p>
                                     <p className="text-xs font-bold text-orange-600">
-                                        {service.price}
+                                        {formatPrice(service)}
                                     </p>
                                 </div>
                             </Link>
@@ -165,7 +148,6 @@ export default function ServiceBlock() {
                 </div>
             )}
 
-            {/* CTA Banner */}
             <div className="mt-8 bg-gradient-to-r from-orange-500 to-red-500 rounded-2xl p-6 md:p-8 text-white">
                 <div className="flex flex-col md:flex-row items-center justify-between gap-4">
                     <div>
@@ -179,11 +161,11 @@ export default function ServiceBlock() {
                     <div className="flex items-center gap-3">
                         {mainPhone ? (
                             <a href={`tel:${mainPhone}`} className="px-6 py-3 bg-white text-orange-600 font-bold rounded-xl hover:bg-orange-50 transition-colors">
-                                📞 {formatHotline(mainPhone)}
+                                {formatHotline(mainPhone)}
                             </a>
                         ) : (
                             <span aria-disabled="true" className="px-6 py-3 bg-white/70 text-orange-300 font-bold rounded-xl cursor-not-allowed">
-                                📞 Liên hệ
+                                Liên hệ
                             </span>
                         )}
                         <Link

@@ -13,7 +13,7 @@ import {
     DollarSign,
     Loader2
 } from 'lucide-react';
-import { collection, query, where, doc } from 'firebase/firestore';
+import { collection, query, where, doc, limit } from 'firebase/firestore';
 import { getDocs, getDoc } from '@/lib/firestoreLogger';
 import { db, getRtdbInstance } from '@/lib/firebase';
 import type { Order, RepairTicket } from '@/lib/types';
@@ -63,7 +63,8 @@ export default function AdminDashboard() {
 
                 const todayStr = `${year}-${month}-${dateNum}`;
                 const startOfToday = new Date(year, now.getMonth(), now.getDate(), 0, 0, 0);
-                const endOfToday = new Date(year, now.getMonth(), now.getDate(), 23, 59, 59, 999);
+                let dailyProductsSold = 0;
+ const endOfToday = new Date(year, now.getMonth(), now.getDate(), 23, 59, 59, 999);
                 const todayStartMs = startOfToday.getTime();
                 const todayEndMs = endOfToday.getTime();
 
@@ -72,14 +73,12 @@ export default function AdminDashboard() {
                 const qOrders = query(
                     ordersRef,
                     where('updatedAt', '>=', startOfToday),
-                    where('updatedAt', '<=', endOfToday)
+                    where('updatedAt', '<=', endOfToday), limit(200)
                 );
                 const ordersSnapshot = await getDocs(qOrders);
 
                 let dailyRevenue = 0;
                 let dailyOrdersCount = 0;
-                let dailyProductsSold = 0;
-
                 ordersSnapshot.forEach((docSnap) => {
                     const data = docSnap.data() as Partial<Order>;
                     // Only count orders actually created today
@@ -112,7 +111,7 @@ export default function AdminDashboard() {
                 const qRepairs = query(
                     repairsRef,
                     where('updatedAt', '>=', startOfToday),
-                    where('updatedAt', '<=', endOfToday)
+                    where('updatedAt', '<=', endOfToday), limit(200)
                 );
                 const repairsSnapshot = await getDocs(qRepairs);
 

@@ -13,6 +13,10 @@ type OrderUpdate = {
     status: string;
     updatedAt: FieldValue;
     completedAt?: FieldValue;
+    paymentStatus?: 'paid' | 'unpaid' | 'debt' | 'refunded';
+    refundedAt?: FieldValue;
+    refundAmount?: number;
+    paymentHistory?: FieldValue;
 };
 const ORDER_STATUSES = ['Pending', 'Confirmed', 'Shipping', 'Completed', 'Cancelled'] as const;
 const ORDER_TRANSITIONS: Record<string, string[]> = {
@@ -39,6 +43,29 @@ function assertAllowedOrderTransition(oldStatus: Order['status'], targetStatus: 
     }
 }
 
+function getOrderPaymentTotal(order: Order) {
+    return (order.paymentHistory || []).reduce((sum, payment) => {
+        return payment.type === 'refund' ? sum - (payment.amount || 0) : sum + (payment.amount || 0);
+    }, 0);
+}
+
+function isRepairOrderItem(item: Order['items'][number] & { isRepairTicket?: boolean; repairTicketId?: string }) {
+    return item.isRepairTicket === true || Boolean(item.repairTicketId);
+}
+
+function getOrderRetailTotal(order: Order) {
+    const items = (order.items || []) as (Order['items'][number] & { isRepairTicket?: boolean; repairTicketId?: string; isOrderPayment?: boolean; orderPaymentId?: string })[];
+    if (items.length === 0) return Number(order.total_amount) || 0;
+
+    const retailSubtotal = items
+        .filter(item => !isRepairOrderItem(item) && item.isOrderPayment !== true && !item.orderPaymentId)
+        .reduce((sum, item) => sum + (Number(item.price) || 0) * (Number(item.quantity) || 1), 0);
+    if (retailSubtotal <= 0) return Number(order.total_amount) || 0;
+
+    const retailDiscount = Math.min(Number(order.discount_amount) || 0, retailSubtotal);
+    return Math.max(0, retailSubtotal - retailDiscount);
+}
+
 export async function POST(request: NextRequest) {
     try {
         const caller = await requirePermission(request, 'manage_orders');
@@ -54,15 +81,20 @@ export async function POST(request: NextRequest) {
         const isActiveStatus = (s: string) => ['Pending', 'Confirmed', 'Shipping'].includes(s);
 
         await db.runTransaction(async (tx) => {
-            // Optional: Idempotency check with operation_requests could be added here
             if (idempotencyKey) {
                 const opRef = db.collection('operation_requests').doc(idempotencyKey);
                 const opSnap = await tx.get(opRef);
                 if (opSnap.exists) {
                     const data = opSnap.data();
                     if (data?.status === 'completed') {
-                        // Idempotent return
-                        return;
+                        if (
+                            data.type === 'order_transition' &&
+                            data.referenceId === orderId &&
+                            data.targetStatus === targetStatus
+                        ) {
+                            return;
+                        }
+                        throw new Error('Idempotency key da duoc dung cho thao tac khac.');
                     }
                 }
             }
@@ -125,8 +157,11 @@ export async function POST(request: NextRequest) {
                 const voucherSnap = await tx.get(
                     db.collection('vouchers')
                         .where('code', '==', voucherCode)
-                        .limit(1)
+                        .limit(2)
                 );
+                if (voucherSnap.size > 1) {
+                    throw new Error('Ma Voucher dang bi trung du lieu. Vui long tat hoac gop ma trung truoc khi huy don.');
+                }
                 const voucherDoc = voucherSnap.docs[0];
                 if (voucherDoc) {
                     voucherRef = voucherDoc.ref;
@@ -219,6 +254,30 @@ export async function POST(request: NextRequest) {
 
             if (targetStatus === 'Completed') {
                 updateData.completedAt = FieldValue.serverTimestamp();
+            }
+            if (oldStatus === 'Completed' && targetStatus === 'Cancelled') {
+                const historyRefundAmount = Math.max(0, getOrderPaymentTotal(freshOrder));
+                const legacyPaidAmount = freshOrder.paymentStatus === 'debt' || freshOrder.payment_method === 'Debt'
+                    ? Math.max(0, Number(freshOrder.deposit_amount) || 0)
+                    : getOrderRetailTotal(freshOrder);
+                const refundAmount = Array.isArray(freshOrder.paymentHistory) && freshOrder.paymentHistory.length > 0
+                    ? historyRefundAmount
+                    : legacyPaidAmount;
+                updateData.paymentStatus = refundAmount > 0 ? 'refunded' : 'unpaid';
+                updateData.refundedAt = FieldValue.serverTimestamp();
+                updateData.refundAmount = refundAmount;
+                if (refundAmount > 0) {
+                    updateData.paymentHistory = FieldValue.arrayUnion({
+                        amount: refundAmount,
+                        method: freshOrder.payment_method || 'unknown',
+                        type: 'refund',
+                        timestamp: Date.now(),
+                        referenceId: orderId,
+                        paidAfter: 0,
+                        remainingAfter: 0,
+                        note: 'Hoan tien khi huy don da hoan thanh',
+                    });
+                }
             }
 
             tx.update(orderRef, updateData);
@@ -314,7 +373,8 @@ export async function POST(request: NextRequest) {
                     status: 'completed',
                     completedAt: FieldValue.serverTimestamp(),
                     type: 'order_transition',
-                    referenceId: orderId
+                    referenceId: orderId,
+                    targetStatus
                 });
             }
             inventoryLogAllocations.at(-1)?.commitCounter();

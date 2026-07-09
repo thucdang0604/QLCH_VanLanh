@@ -157,6 +157,8 @@ export default function MobileBottomNav() {
                         <span className="font-bold text-dark text-lg">Danh mục dịch vụ</span>
                     </div>
                     <button
+                        aria-label="Đóng danh mục dịch vụ"
+                        title="Đóng danh mục dịch vụ"
                         onClick={() => setShowCategoryMenu(false)}
                         className="p-1.5 hover:bg-gray-200 rounded-full transition-colors"
                     >

@@ -49,6 +49,7 @@ type WorkingProduct = {
     costPrice: number;
     updateData: ProductUpdateData;
 };
+type ImportPaymentMethod = 'cash' | 'bank' | 'debt';
 
 function errorMessage(error: unknown): string {
     return error instanceof Error ? error.message : 'Internal server error';
@@ -84,6 +85,14 @@ function calculateImportTotal(items: ValidatedReceiptItem[]): number {
     return items.reduce((sum, item) => sum + item.importPrice * item.quantity, 0);
 }
 
+function normalizeImportPaymentMethod(value: unknown): ImportPaymentMethod {
+    const method = String(value || 'cash').trim().toLowerCase();
+    if (method === 'cash' || method === 'bank' || method === 'debt') {
+        return method;
+    }
+    throw new Error('Phuong thuc thanh toan phieu nhap khong hop le.');
+}
+
 export async function POST(request: NextRequest) {
     try {
         const caller = await requirePermission(request, 'manage_inventory');
@@ -94,6 +103,10 @@ export async function POST(request: NextRequest) {
         if (!action || !receiptId) {
             return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
         }
+        const operationType = `inventory_import_${action}`;
+        const requestedPaymentMethod = action === 'complete_import'
+            ? normalizeImportPaymentMethod(body.paymentMethod)
+            : null;
 
         const db = getAdminDb();
 
@@ -104,6 +117,13 @@ export async function POST(request: NextRequest) {
                 if (opSnap.exists) {
                     const data = opSnap.data();
                     if (data?.status === 'completed') {
+                        if (
+                            data.type !== operationType ||
+                            data.referenceId !== receiptId ||
+                            (data.paymentMethod ?? null) !== requestedPaymentMethod
+                        ) {
+                            throw new Error('Idempotency key da duoc dung cho thao tac khac.');
+                        }
                         return { success: true, fromCache: true };
                     }
                 }
@@ -124,6 +144,50 @@ export async function POST(request: NextRequest) {
 
             if (receipt.status === 'completed') {
                 throw new Error('Phiếu nhập đã hoàn tất, không thể thay đổi.');
+            }
+
+
+            if (action === 'patch_item') {
+                const itemIndex = Number(body.itemIndex);
+                if (!Number.isInteger(itemIndex) || itemIndex < 0) {
+                    throw new Error('Dong phieu nhap khong hop le.');
+                }
+                const items = [...(receipt.items || [])];
+                const currentItem = items[itemIndex];
+                if (!currentItem) {
+                    throw new Error('Khong tim thay dong phieu nhap.');
+                }
+
+                const patch = body.patch || {};
+                const nextItem: ReceiptItem = { ...currentItem };
+                if (Object.prototype.hasOwnProperty.call(patch, 'importPrice')) {
+                    nextItem.importPrice = readNonNegativeImportPrice(patch.importPrice, String(currentItem.productName || currentItem.productId || itemIndex));
+                }
+                if (Object.prototype.hasOwnProperty.call(patch, 'quantity')) {
+                    nextItem.quantity = readPositiveImportQuantity(patch.quantity, String(currentItem.productName || currentItem.productId || itemIndex));
+                }
+                if (Object.prototype.hasOwnProperty.call(patch, 'supplier')) {
+                    nextItem.supplier = typeof patch.supplier === 'string' ? patch.supplier.trim() : '';
+                }
+                if (Object.prototype.hasOwnProperty.call(patch, 'supplierId')) {
+                    nextItem.supplierId = typeof patch.supplierId === 'string' ? patch.supplierId.trim() : '';
+                }
+
+                items[itemIndex] = nextItem;
+                const totalAmount = calculateImportTotal(
+                    items
+                        .filter((item) => item.status !== 'unavailable')
+                        .map(validateImportItemValues),
+                );
+
+                tx.update(receiptRef, {
+                    items,
+                    totalAmount,
+                    version: (receipt.version || 0) + 1,
+                    updatedAt: FieldValue.serverTimestamp(),
+                });
+
+                return { success: true, items, totalAmount, version: (receipt.version || 0) + 1 };
             }
 
             // PRE-FETCH ALL RELATED DOCUMENTS TO AVOID READ-AFTER-WRITE IN FIRESTORE
@@ -277,13 +341,14 @@ export async function POST(request: NextRequest) {
                     });
                 }
             } else if (action === 'complete_import') {
-                const { paymentMethod, newParts = {} } = body;
+                const { newParts = {} } = body;
+                const paymentMethod = requestedPaymentMethod;
 
                 if (receipt.status !== 'ordered') {
                     throw new Error('Chỉ có thể hoàn tất phiếu nhập ở trạng thái đã đặt hàng.');
                 }
 
-                const missingSupplier = (receipt.items || []).filter((item) => item.status !== 'unavailable' && !item.supplier && !item.supplierId);
+                const missingSupplier = (receipt.items || []).filter((item) => item.status !== 'unavailable' && !item.supplier && !item.supplierId && !receipt.supplierId);
                 if (missingSupplier.length > 0) {
                     throw new Error('Thiếu nhà cung cấp. Vui lòng gán nhà cung cấp cho tất cả linh kiện cần nhập.');
                 }
@@ -580,7 +645,7 @@ export async function POST(request: NextRequest) {
                     completedAt: FieldValue.serverTimestamp(),
                     completedBy: caller.uid,
                     totalAmount,
-                    paymentMethod: paymentMethod || 'cash',
+                    paymentMethod,
                     version: (receipt.version || 0) + 1,
                     updatedAt: FieldValue.serverTimestamp()
                 });
@@ -648,8 +713,9 @@ export async function POST(request: NextRequest) {
                 tx.set(db.collection('operation_requests').doc(idempotencyKey), {
                     status: 'completed',
                     completedAt: FieldValue.serverTimestamp(),
-                    type: `inventory_import_${action}`,
-                    referenceId: receiptId
+                    type: operationType,
+                    referenceId: receiptId,
+                    paymentMethod: requestedPaymentMethod
                 });
             }
 

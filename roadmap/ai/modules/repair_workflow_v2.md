@@ -1,5 +1,64 @@
 # Repair Workflow Firestore V2
 
+## BUG-REPAIR-022: Handover bo qua phu phi payload va sai contract idempotency
+- **Status:** fixed
+- **Severity:** high
+- **Module:** Repair
+- **Files:** `src/app/admin/repairs/page.tsx`, `src/app/api/repairs/handover/route.ts`, `src/app/api/repairs/payment-edit/route.ts`
+### Symptom
+Thu ngan nhap phu phi/ghi chu tai modal ban giao nhung tong tien co the khong cap nhat neu cac field do chua duoc luu truoc qua payment-edit. Retry ban giao khong dung operation cache.
+### Cause
+Client gui `additionalFees`, `discountAmount`, `handoverNote`, `paymentConfirmed` va `operationKey`, nhung API handover chi doc `laborCost` va `idempotencyKey`. `additionalFees`/`discountAmount` lay tu `ticket.payment` hien co; `operationKey` bi bo qua nen idempotency guard khong kich hoat.
+### Proposed Fix
+Dong bo payload contract cua handover: chap nhan mot ten idempotency duy nhat, validate/persist payment fields va handover note server-side trong transaction, va them smoke cho phu phi ban giao + double-click/retry.
+### Fix 2026-07-04
+- `/api/repairs/handover` now accepts both `idempotencyKey` and the current client `operationKey`.
+- Handover now reads `additionalFees` from payload, persists it into `payment.additionalFees`, and includes it in final `payment.amount`.
+- Handover idempotency cache-hit now verifies `type`, `referenceId`, `targetStatus`, labor cost, and additional fees before returning cached success.
+- Verification: `node node_modules/typescript/bin/tsc --noEmit --pretty false` pass.
+
+## BUG-REPAIR-023: Repair editor save tach payment API va client update khong atomic
+- **Status:** fixed
+- **Severity:** high
+- **Module:** Repair
+- **Files:** `src/app/admin/repairs/page.tsx`, `src/app/api/repairs/payment-edit/route.ts`
+### Symptom
+Khi sua phieu sua chua, client goi `/api/repairs/payment-edit` truoc de cap nhat payment, sau do moi chay client Firestore transaction update thong tin khach/thiet bi/media/staff/version.
+### Cause
+Mot thao tac luu tren UI bi tach thanh 2 write path khac nhau. `payment-edit` da commit transaction va tang `version`; neu client transaction tiep theo fail vi version/concurrency/network/rules, payment van da thay doi nhung phan ho so con lai khong duoc luu. Phan update ho so van ghi truc tiep tu client vao `repairs`, khong qua API workflow/audit chung.
+### Impact
+Co the xuat hien phieu sua chua co tien cong/coc da thay doi nhung thong tin may, KTV, checklist, media hoac ghi chu khong khop voi thao tac nhan vien vua bam luu. Day cung lam kho rollback va audit vi khong co mot operation id duy nhat cho ca lan save.
+### Proposed Fix
+Dua edit repair thanh mot server API transaction duy nhat: validate `ticketVersion`, merge payment + profile/device/media/staff fields, ghi timeline/audit/requestId, va tra ve ticket moi. Client khong nen update truc tiep `repairs` cho luong edit chinh.
+### Fix 2026-07-05
+- Added `/api/repairs/edit` with `manage_repairs` auth, idempotency contract, `ticketVersion` check, terminal/payment-paid guard, and one Admin SDK transaction for profile + payment changes.
+- `/admin/repairs` edit submit now calls `/api/repairs/edit` once instead of committing `/api/repairs/payment-edit` and then running a separate client Firestore transaction.
+- The server merges customer/device/checklist/media/staff/timing and payment fields, recalculates payment amount, increments version once, and returns the updated operation result.
+- Verification: `node node_modules/typescript/bin/tsc --noEmit --pretty false` pass.
+
+## BUG-REPAIR-021: Checklist va media sua chua con ghi truc tiep tu client
+- **Status:** fixed
+- **Severity:** high
+- **Module:** Repair
+- **Files:** `src/app/admin/technician/page.tsx`, `src/features/repairs/RepairTicketBoard.tsx`, `firestore.rules`
+### Symptom
+Checklist thiet bi va media ban giao co the mat update/audit khi nhieu nguoi thao tac hoac khi ticket da vao trang thai khong nen sua.
+### Cause
+Technician page update truc tiep `repairs/{id}.deviceInfo.checklist.*`; repair board append `postRepairMedia` bang `postRepairMedia: [...existing, value]` tu snapshot client. Rules cho phep staff `manage_repairs` update cac field nay vi chung khong nam trong deny-list.
+### Proposed Fix
+Dua checklist/media patch vao API server co version/idempotency, assigned-technician/manager check, terminal-status guard va `arrayUnion`/operation log.
+### Partial Fix 2026-07-05
+- Added `/api/repairs/media` with `manage_repairs` auth, server-side status guard, URL validation, YouTube validation, and Admin SDK `FieldValue.arrayUnion` append for `postRepairMedia`.
+- `RepairTicketBoard` now uploads/selects media as before, then calls the server API instead of writing `postRepairMedia: [...existing, value]` from a client snapshot.
+- This removes the lost-update risk for post-repair media append. Checklist patching in `/admin/technician` still writes `deviceInfo.checklist.*` directly and remains open under this bug.
+- Verification: `node node_modules/typescript/bin/tsc --noEmit --pretty false` pass.
+### Fix 2026-07-05
+- Added `/api/repairs/checklist` with `manage_repairs` auth, assigned-technician/manager guard, terminal-status guard, field/value whitelist, `ticketVersion` check, and server-side version increment.
+- `/admin/technician` checklist selects/history toggles now call the server API instead of direct client `updateDoc` to `repairs/{id}.deviceInfo.checklist.*`.
+- `postRepairMedia` append was already moved to `/api/repairs/media` in the partial fix above, so both direct client checklist and media writes are now removed from the tracked paths.
+- Verification: `node node_modules/typescript/bin/tsc --noEmit --pretty false` pass.
+
+
 ## BUG-REP-012: Workflow có hai nguồn và semantics feature không đồng nhất
 - **Status:** fixed
 - **Severity:** high

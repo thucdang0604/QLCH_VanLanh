@@ -186,6 +186,7 @@ export async function handleAIAutoReply(roomId: string, messages: ChatMessage[],
     try {
         const rtdb = await getRtdbInstance();
         const { ref, get } = await import('firebase/database');
+        const { getAuthInstance } = await import('./firebase');
 
         const infoRef = ref(rtdb, `chats/${roomId}/info`);
         const botActiveSnap = await get(infoRef);
@@ -211,9 +212,18 @@ export async function handleAIAutoReply(roomId: string, messages: ChatMessage[],
         }
         recentHistory.push({ role: 'user', parts: [{ text: newText }] });
 
+        const auth = await getAuthInstance();
+        const idToken = await auth.currentUser?.getIdToken();
+        if (!idToken) {
+            return { success: false, providerStatus: 'missing_chat_auth', retryable: true };
+        }
+
         const aiRes = await fetch('/api/ai', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${idToken}`,
+            },
             body: JSON.stringify({
                 prompt: newText,
                 history: recentHistory,

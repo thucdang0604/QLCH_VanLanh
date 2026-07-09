@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import Modal from '@/components/admin/Modal';
 import CurrencyInput from '@/components/admin/CurrencyInput';
-import { collection, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, query, orderBy, where, limit, Timestamp, setDoc } from 'firebase/firestore';
+import { collection, updateDoc, deleteDoc, doc, serverTimestamp, query, orderBy, where, limit, Timestamp, setDoc } from 'firebase/firestore';
 import { getDocs, getDoc } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
@@ -131,7 +131,7 @@ export default function CommissionsPage() {
                         orderBy('createdAt', 'desc'),
                         limit(COMMISSION_HISTORY_LIMIT),
                     )),
-                    getDocs(collection(db, 'users')),
+                    getDocs(query(collection(db, 'users'), where('role', 'in', ['staff', 'admin']))),
                 ]);
                 setRules(rulesSnap.docs.map(d => ({ id: d.id, ...d.data() } as CommissionRule & { id: string })));
                 setCommissions(commSnap.docs.map(d => ({ id: d.id, ...d.data() } as Commission & { id: string })));
@@ -260,19 +260,43 @@ export default function CommissionsPage() {
         if (!manualStaffId || manualAmount <= 0) return;
         setIsProcessing(true);
         try {
-            const staff = staffList.find(s => s.uid === manualStaffId);
+            const { getAuthInstance } = await import('@/lib/firebase');
+            const auth = await getAuthInstance();
+            const token = await auth.currentUser?.getIdToken();
+            if (!token) throw new Error('Missing admin auth token');
+
+            const res = await fetch('/api/admin/commissions/manual', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({
+                    staffId: manualStaffId,
+                    sourceType: manualSourceType,
+                    sourceId: manualSourceId || 'manual-entry',
+                    amount: manualAmount,
+                    baseAmount: manualBaseAmount,
+                    idempotencyKey: crypto.randomUUID(),
+                }),
+            });
+            const response = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                throw new Error(response.error || 'Failed to create manual commission');
+            }
+
+            const commission = response.commission as Commission & { id: string };
             const data = {
                 staffId: manualStaffId,
-                staffName: staff?.displayName || 'N/A',
+                staffName: commission.staffName || 'N/A',
                 ruleId: 'manual',
                 sourceType: manualSourceType,
                 sourceId: manualSourceId || 'manual-entry',
                 amount: manualAmount,
                 baseAmount: manualBaseAmount,
-                createdAt: serverTimestamp(),
+                createdAt: new Date(String(commission.createdAt)),
             };
-            const ref = await addDoc(collection(db, 'commissions'), data);
-            setCommissions(prev => [{ id: ref.id, ...data, createdAt: serverTimestamp() as FirestoreWriteTimestamp } as Commission & { id: string }, ...prev]);
+            setCommissions(prev => [{ id: commission.id, ...data } as Commission & { id: string }, ...prev]);
             setShowManualModal(false);
             setManualStaffId('');
             setManualAmount(0);

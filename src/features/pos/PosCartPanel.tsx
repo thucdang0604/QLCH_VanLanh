@@ -166,9 +166,6 @@ export function PosCartPanel({
         facebook: customerFacebook,
         other: customerOtherContact,
     };
-    const hasExtraContacts = customerContactOptions.some(option =>
-        option.type !== compactPrimaryContactType && contactValues[option.type].trim()
-    );
     const hasStoredContactDetails = Boolean(
         customerId.trim() || customerZalo.trim() || customerFacebook.trim() || customerOtherContact.trim()
     );

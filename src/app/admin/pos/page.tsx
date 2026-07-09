@@ -543,11 +543,11 @@ export default function POSPage() {
             };
 
             if (resolvedCustomerId) {
-                queryPairs.push(addRepairsFromSnap(query(collection(db, 'repairs'), where('customer.id', '==', resolvedCustomerId))));
+                queryPairs.push(addRepairsFromSnap(query(collection(db, 'repairs'), where('customer.id', '==', resolvedCustomerId), fbOrderBy('createdAt', 'desc'), limit(20))));
                 queryPairs.push(addOrdersFromSnap(query(collection(db, 'orders'), where('customer_info.customerId', '==', resolvedCustomerId), limit(20))));
             }
             if (normalizedPhone) {
-                queryPairs.push(addRepairsFromSnap(query(collection(db, 'repairs'), where('customer.phone', '==', keyword))));
+                queryPairs.push(addRepairsFromSnap(query(collection(db, 'repairs'), where('customer.phone', '==', keyword), fbOrderBy('createdAt', 'desc'), limit(20))));
                 queryPairs.push(addOrdersFromSnap(query(collection(db, 'orders'), where('customer_info.phone', '==', keyword), limit(20))));
             }
             await Promise.all(queryPairs);
@@ -1337,7 +1337,7 @@ export default function POSPage() {
             const data = await res.json();
             const totalCheckoutMs = Math.round(performance.now() - checkoutStartedAt);
             if (totalCheckoutMs > 1500 || data?.debugTiming) {
-                console.info('POS checkout timing', {
+                console.warn('POS checkout timing', {
                     tokenMs,
                     requestMs,
                     totalCheckoutMs,

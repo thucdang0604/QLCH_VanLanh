@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { collection, query, orderBy, addDoc, updateDoc, doc, deleteDoc, serverTimestamp, limit } from 'firebase/firestore';
+import { collection, query, orderBy, limit } from 'firebase/firestore';
 import { getDocs } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import { Ticket, Plus, Edit2, Trash2, ToggleLeft, ToggleRight, X, Copy, Check, Settings, Target } from 'lucide-react';
@@ -39,11 +39,21 @@ function VoucherModal({ voucher, onClose, onSave }: {
         isExclusive: voucher?.stackingRules?.isExclusive ?? false,
     });
     const [saving, setSaving] = useState(false);
+    const [validationError, setValidationError] = useState('');
 
     const handleSave = async () => {
         const code = form.code.trim().toUpperCase();
-        if (!code) { toast.error('Nhập mã Voucher'); return; }
-        if (!form.value || Number(form.value) <= 0) { toast.error('Giá trị giảm không hợp lệ'); return; }
+        if (!code) {
+            setValidationError('Vui lòng nhập mã Voucher.');
+            toast.error('Nhập mã Voucher');
+            return;
+        }
+        if (!form.value || Number(form.value) <= 0) {
+            setValidationError('Giá trị giảm phải lớn hơn 0.');
+            toast.error('Giá trị giảm không hợp lệ');
+            return;
+        }
+        setValidationError('');
         setSaving(true);
         try {
             await onSave({
@@ -78,8 +88,12 @@ function VoucherModal({ voucher, onClose, onSave }: {
                     {/* Mã Voucher */}
                     <div>
                         <label className="text-sm text-gray-600 mb-1 block">Mã Voucher *</label>
-                        <input title="Mã Voucher" value={form.code} onChange={e => setForm(p => ({ ...p, code: e.target.value.toUpperCase() }))}
+                        <input title="Mã Voucher" value={form.code} onChange={e => {
+                            setForm(p => ({ ...p, code: e.target.value.toUpperCase() }));
+                            if (validationError) setValidationError('');
+                        }}
                             placeholder="VD: MUAHE50K" maxLength={20}
+                            required
                             className="w-full border rounded-lg px-3 py-2 text-sm font-mono uppercase focus:ring-2 focus:ring-orange-500 focus:outline-none" />
                     </div>
 
@@ -95,8 +109,12 @@ function VoucherModal({ voucher, onClose, onSave }: {
                         </div>
                         <div className="flex-1">
                             <label className="text-sm text-gray-600 mb-1 block">Giá trị *</label>
-                            <input type="number" title="Giá trị giảm" value={form.value} onChange={e => setForm(p => ({ ...p, value: e.target.value }))}
+                            <input type="number" title="Giá trị giảm" value={form.value} onChange={e => {
+                                setForm(p => ({ ...p, value: e.target.value }));
+                                if (validationError) setValidationError('');
+                            }}
                                 placeholder={form.type === 'percentage' ? '10' : '50000'} min="0"
+                                required
                                 className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none" />
                         </div>
                     </div>
@@ -154,6 +172,11 @@ function VoucherModal({ voucher, onClose, onSave }: {
                             <span className="text-sm text-gray-700">Cho phép dùng chung với Hạng thành viên VIP</span>
                         </label>
                     </div>
+                    {validationError && (
+                        <p className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm font-medium text-red-600">
+                            {validationError}
+                        </p>
+                    )}
                 </div>
                 <div className="flex justify-end gap-2 p-5 border-t">
                     <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Hủy</button>
@@ -331,26 +354,52 @@ export default function VouchersPage() {
         loadVouchers().catch(error => console.error('Failed to load vouchers:', error));
     }, [loadVouchers]);
 
+    const getIdToken = async () => {
+        const { getAuthInstance } = await import('@/lib/firebase');
+        const auth = await getAuthInstance();
+        const token = await auth.currentUser?.getIdToken();
+        if (!token) throw new Error('Missing admin session.');
+        return token;
+    };
+
+    const callVoucherApi = async (method: 'POST' | 'PATCH' | 'DELETE', body?: Record<string, unknown>, id?: string) => {
+        const token = await getIdToken();
+        const url = method === 'DELETE' && id
+            ? `/api/admin/vouchers?id=${encodeURIComponent(id)}`
+            : '/api/admin/vouchers';
+        const response = await fetch(url, {
+            method,
+            headers: {
+                Authorization: `Bearer ${token}`,
+                ...(body ? { 'Content-Type': 'application/json' } : {}),
+            },
+            ...(body ? { body: JSON.stringify(body) } : {}),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.error || 'Voucher API failed.');
+        return payload;
+    };
+
     const handleSave = async (data: Partial<Voucher>) => {
         if (editVoucher) {
-            await updateDoc(doc(db, 'vouchers', editVoucher.id), { ...data, updatedAt: serverTimestamp() });
+            await callVoucherApi('PATCH', { ...data, id: editVoucher.id });
             toast.success('Đã cập nhật Voucher');
         } else {
-            await addDoc(collection(db, 'vouchers'), { ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+            await callVoucherApi('POST', data as Record<string, unknown>);
             toast.success('Đã tạo Voucher mới');
         }
         await loadVouchers();
     };
 
     const toggleActive = async (v: Voucher & { id: string }) => {
-        await updateDoc(doc(db, 'vouchers', v.id), { isActive: !v.isActive, updatedAt: serverTimestamp() });
+        await callVoucherApi('PATCH', { ...v, id: v.id, isActive: !v.isActive });
         toast.success(v.isActive ? 'Đã tắt Voucher' : 'Đã bật Voucher');
         await loadVouchers();
     };
 
     const handleDelete = async (id: string) => {
         if (!confirm('Xóa Voucher này?')) return;
-        await deleteDoc(doc(db, 'vouchers', id));
+        await callVoucherApi('DELETE', undefined, id);
         toast.success('Đã xóa Voucher');
         await loadVouchers();
     };
@@ -371,14 +420,14 @@ export default function VouchersPage() {
         <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                    <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
                         <Ticket className="text-orange-500" size={28} /> Giảm giá & Voucher
                     </h1>
                     <p className="text-sm text-gray-500 mt-1">Quản lý mã giảm giá, hạng thành viên và chương trình khuyến mãi</p>
                 </div>
                 {activeTab === 'vouchers' && (
                     <button title="Tạo Voucher" onClick={() => { setEditVoucher(null); setShowModal(true); }}
-                        className="flex items-center gap-2 bg-orange-500 text-white px-4 py-2 rounded-xl hover:bg-orange-600 font-medium text-sm">
+                        className="flex items-center gap-2 bg-orange-500 text-white px-3 py-1.5 text-xs rounded-xl hover:bg-orange-600 font-medium">
                         <Plus size={18} /> Tạo Voucher
                     </button>
                 )}

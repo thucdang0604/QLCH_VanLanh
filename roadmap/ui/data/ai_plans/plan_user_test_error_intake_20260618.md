@@ -632,7 +632,7 @@
 - Expected result: Admin không còn thấy hoặc dùng được thao tác xóa phiếu sửa chữa; phiếu sửa nên được đóng/hủy theo workflow hoặc trạng thái nghiệp vụ thay vì delete document.
 - Actual result: UI hiện vẫn có phần xóa phiếu cho admin.
 - Initial bucket: repair destructive action removal, write reduction, auditability
-- Status: open
+- Status: fixed in Part 36
 
 #### UT-20260620-002 - Completed repair handover needs warranty print
 - Reporter note: Hiện có in "biên nhận" khi nhận máy, khi trả máy chưa có in "phiếu bảo hành" cho đơn sửa chữa đã hoàn tất theo cấu hình đã có trong cài đặt in.
@@ -640,7 +640,7 @@
 - Expected result: Khi phiếu sửa đã hoàn tất/bàn giao, admin có thể in phiếu bảo hành theo cấu hình in hiện có, gồm linh kiện/dịch vụ, thời hạn bảo hành, khách hàng, thiết bị, IMEI và điều khoản.
 - Actual result: Luồng nhận máy có biên nhận, nhưng luồng trả máy/hoàn tất chưa có phiếu bảo hành.
 - Initial bucket: repair printing, warranty handover
-- Status: open
+- Status: fixed in Part 40
 
 #### UT-20260620-003 - Terminal repair tickets should move to a separate tab to reduce reads
 - Reporter note: Đơn đã chuyển đến trạng thái được gắn cờ terminal theo workflow sửa chữa cần chuyển sang tab riêng trong cùng trang để khi bấm vào xem chỉ tải những đơn cần thao tác; phiếu đã đóng chuyển sang tab khác để giảm lượt read Firebase.
@@ -648,7 +648,7 @@
 - Expected result: Tab chính chỉ query/load phiếu đang cần thao tác. Phiếu terminal/đã đóng nằm trong tab riêng, query theo nhu cầu và có pagination/limit.
 - Actual result: Danh sách hiện có nguy cơ tải cả phiếu đang thao tác lẫn phiếu đã đóng trong cùng luồng.
 - Initial bucket: Firebase read optimization, repair active/closed split, workflow terminal filtering
-- Status: open
+- Status: fixed in Part 41
 
 #### UT-20260620-004 - Repair issue detail needs multiple service mappings and expected price suggestions
 - Reporter note: Một máy có thể vừa thay màn vừa thay main; nhóm dịch vụ không thể chỉ chọn một dịch vụ. Nếu nhập bệnh bên dưới và mỗi bệnh gợi ý nhóm dịch vụ, nhiều bệnh sẽ chọn được nhiều nhóm dịch vụ. Tốt hơn nữa là dựa theo dịch vụ đang có để gợi ý giá dự kiến.
@@ -664,7 +664,7 @@
 - Expected result: Technician active queue excludes tickets at the workflow node equivalent to "chờ bàn giao khách"; those tickets remain available to admin/front desk handover views.
 - Actual result: KTV vẫn thấy các phiếu không còn thao tác kỹ thuật, gây tốn đọc và nhiễu danh sách.
 - Initial bucket: technician read optimization, workflow-aware queue filter
-- Status: open
+- Status: fixed in Part 39
 
 #### UT-20260620-006 - Services "Liên kết nghiệp vụ" needs clearer explanation and usable UX
 - Reporter note: `admin/services`: "Liên kết nghiệp vụ" cách thức hoạt động như thế nào chưa hiểu và không biết áp dụng thế nào.
@@ -672,7 +672,7 @@
 - Expected result: UI giải thích ngắn gọn và thể hiện rõ liên kết nghiệp vụ dùng cho đâu: gợi ý phụ kiện/sản phẩm ở POS, gợi ý linh kiện/nhóm dịch vụ khi tạo phiếu sửa, rule giảm giá, bảo hành/in ấn.
 - Actual result: Chức năng có metadata nhưng ý nghĩa vận hành chưa rõ với admin.
 - Initial bucket: services UX, business linkage explanation
-- Status: open
+- Status: fixed in Part 37
 
 #### UT-20260620-007 - Product create/edit forms should remove manual variant config
 - Reporter note: `admin/products`: "Gom nhóm Biến thể" đang tự động gom theo danh mục rồi thì xóa phần cấu hình biến thể ở cuối các phiếu tạo và sửa sản phẩm.
@@ -680,7 +680,7 @@
 - Expected result: Product create/edit modal no longer shows manual variant grouping fields; category remains the grouping source.
 - Actual result: Manual variant configuration still appears inside product create/edit flow.
 - Initial bucket: product variant UX cleanup, category-derived variants
-- Status: open
+- Status: fixed in Part 38
 
 #### UT-20260620-008 - Parts proposal and ordered logic should move fully to inventory
 - Reporter note: `admin/parts`: trang đang có các logic trong tab "đề xuất nhập hàng" và "đã đặt hàng"; cần chuyển toàn bộ logic này đến `admin/inventory`, giữ trang parts chỉ để xem danh sách linh kiện. Đây là di chuyển logic, không phải xóa logic.

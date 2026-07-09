@@ -53,6 +53,23 @@ const ACTIVITY_BADGE_DOC_LIMIT = 20;
  * @param userRole - Current user role ('admin' | 'staff')
  * @param userPermissions - Array of permission strings for the current user
  */
+
+// ── Hook ──
+
+/**
+ * Single source of truth for all admin sidebar badge counts.
+ * Consolidates all realtime listeners into ONE hook to avoid duplicate reads.
+ * Listeners are conditionally enabled based on user permissions to reduce reads.
+ * 
+ * @param userUid - Current user UID (for KTV badge filtering)
+ * @param userRole - Current user role ('admin' | 'staff')
+ * @param userPermissions - Array of permission strings for the current user
+ */
+
+// Module-level cache for badges to prevent repeated reads on navigation
+let lastBadgeFetchTime = 0;
+const BADGE_CACHE_TTL_MS = 120_000; // 2 minutes
+
 export function useAdminBadges(userUid?: string, userRole?: string, userPermissions?: string[]) {
     // Helper: check if user has permission (admin always has all)
     const hasPerm = useCallback((perm: string) => {
@@ -66,7 +83,14 @@ export function useAdminBadges(userUid?: string, userRole?: string, userPermissi
     const [pendingRepairs, setPendingRepairs] = useState(0);
     const [repairDocs, setRepairDocs] = useState<RepairBadgeDoc[]>([]);
     const [activities, setActivities] = useState<ActivityItem[]>([]);
+    
     const refreshFirestoreBadges = useCallback(async () => {
+        const now = Date.now();
+        if (now - lastBadgeFetchTime < BADGE_CACHE_TTL_MS && (pendingOrders !== 0 || pendingRepairs !== 0)) {
+            // Already cached and populated, skip fetching to save reads
+            return;
+        }
+
         const tasks: Promise<void>[] = [];
 
         if (hasPerm('manage_orders')) {
@@ -120,6 +144,7 @@ export function useAdminBadges(userUid?: string, userRole?: string, userPermissi
         }
 
         await Promise.all(tasks);
+        lastBadgeFetchTime = Date.now();
     }, [hasPerm]);
 
     useEffect(() => {

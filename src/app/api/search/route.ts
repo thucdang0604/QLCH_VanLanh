@@ -1,161 +1,115 @@
-type SerializedDoc = { id: string; _type?: string } & Record<string, unknown>;
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDb, isAdminAvailable } from '@/lib/firebaseAdmin';
 import { isRateLimited } from '@/lib/rateLimit';
+import { toPublicProduct, toPublicService } from '@/lib/publicCatalog';
+
+type PublicSearchResult =
+    | (ReturnType<typeof toPublicProduct> & { _type: 'product' })
+    | (ReturnType<typeof toPublicService> & { _type: 'service' });
 
 const RATE_LIMIT_MAX = 10;
 const RATE_LIMIT_WINDOW_MS = 60_000;
+const RESULT_LIMIT = 20;
+const SERVICE_FALLBACK_LIMIT = 50;
+const MIN_QUERY_LENGTH = 2;
 
-// ── Simple in-memory cache ──
-let cachedResults: { products: Record<string, unknown>[]; services: Record<string, unknown>[] } | null = null;
-let cacheTimestamp = 0;
-const CACHE_TTL_MS = 60_000; // 60s
+function normalizeSearchText(value: string): string {
+    return value
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/đ/gi, 'd')
+        .toLowerCase()
+        .trim()
+        .replace(/\s+/g, ' ');
+}
 
-async function getCachedData() {
-    const now = Date.now();
-    if (cachedResults && now - cacheTimestamp < CACHE_TTL_MS) {
-        return cachedResults;
-    }
+function searchTokens(query: string): string[] {
+    return Array.from(new Set([
+        query.toLowerCase().trim(),
+        normalizeSearchText(query),
+    ].filter(token => token.length >= MIN_QUERY_LENGTH))).slice(0, 2);
+}
 
-    const db = getAdminDb();
+function matchesKeyword(item: Record<string, unknown>, keyword: string): boolean {
+    const haystack = [
+        item.name,
+        item.title,
+        item.category,
+        item.brand,
+        item.description,
+        ...(Array.isArray(item.tags) ? item.tags : []),
+    ].join(' ').toLowerCase();
 
-    const [productsSnap, servicesSnap] = await Promise.all([
-        db.collection('products').where('status', '==', 'active').get(),
-        db.collection('services').get(),
-    ]);
-
-    type FirestoreDoc = {
-        id: string;
-        createdAt?: { toDate?: () => Date } | number;
-        updatedAt?: { toDate?: () => Date } | number;
-        isActive?: boolean;
-        name?: string;
-        title?: string;
-        category?: string;
-        brand?: string;
-        description?: string;
-        [key: string]: unknown;
-    };
-
-    const products = productsSnap.docs.map(doc => {
-        const data = doc.data();
-        const serialized = { ...data, id: doc.id, _type: 'product' } as FirestoreDoc;
-        if (typeof serialized.createdAt === 'object' && serialized.createdAt?.toDate) serialized.createdAt = serialized.createdAt.toDate().getTime();
-        if (typeof serialized.updatedAt === 'object' && serialized.updatedAt?.toDate) serialized.updatedAt = serialized.updatedAt.toDate().getTime();
-        return serialized as Record<string, unknown>;
-    });
-
-    const services = servicesSnap.docs
-        .map(doc => {
-            const data = doc.data();
-            const serialized = { ...data, id: doc.id, _type: 'service' } as FirestoreDoc;
-            if (typeof serialized.createdAt === 'object' && serialized.createdAt?.toDate) serialized.createdAt = serialized.createdAt.toDate().getTime();
-            if (typeof serialized.updatedAt === 'object' && serialized.updatedAt?.toDate) serialized.updatedAt = serialized.updatedAt.toDate().getTime();
-            return serialized;
-        })
-        .filter((s: FirestoreDoc) => s.isActive !== false)
-        .map(s => s as Record<string, unknown>);
-
-    cachedResults = { products, services };
-    cacheTimestamp = now;
-    return cachedResults;
+    return normalizeSearchText(haystack).includes(keyword);
 }
 
 export async function GET(request: NextRequest) {
     try {
-        // Rate limit
         const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
             || request.headers.get('x-real-ip')
             || 'unknown';
 
         if (await isRateLimited(ip, 'search', RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS)) {
-            return NextResponse.json(
-                { error: 'Bạn đang tìm kiếm quá nhanh. Vui lòng thử lại sau.' },
-                { status: 429 }
-            );
+            return NextResponse.json({ error: 'Too many search requests' }, { status: 429 });
         }
 
         const { searchParams } = new URL(request.url);
         const q = searchParams.get('q')?.trim() || '';
 
-        if (!q) {
+        if (q.length < MIN_QUERY_LENGTH) {
             return NextResponse.json({ results: [] });
         }
 
         if (!isAdminAvailable()) {
-            return NextResponse.json(
-                { error: 'Service unavailable' },
-                { status: 503 }
-            );
+            return NextResponse.json({ error: 'Service unavailable' }, { status: 503 });
         }
 
-        const { products, services } = await getCachedData();
-        const keyword = q.toLowerCase();
-
-        const combined = [...products, ...services].filter((item: Record<string, unknown>) => {
-            const name = (String(item.name || item.title || '')).toLowerCase();
-            const category = (String(item.category || '')).toLowerCase();
-            const brand = (String(item.brand || '')).toLowerCase();
-            const description = (String(item.description || '')).toLowerCase();
-            return name.includes(keyword) || category.includes(keyword) || brand.includes(keyword) || description.includes(keyword);
-        });
-
+        const tokens = searchTokens(q);
+        const primaryToken = tokens[0] || normalizeSearchText(q);
         const db = getAdminDb();
-        const ordersResult: Record<string, unknown>[] = [];
-        const repairsResult: Record<string, unknown>[] = [];
 
-        // Exact match queries for Orders and Repairs (useful for QR codes)
-        const [orderDoc, repairDoc] = await Promise.all([
-            db.collection('orders').doc(q).get(),
-            db.collection('repairs').doc(q).get()
+        const [productSnaps, serviceKeywordSnaps, serviceFallbackSnap] = await Promise.all([
+            Promise.all(tokens.map(token => db.collection('products')
+                .where('status', '==', 'active')
+                .where('searchKeywords', 'array-contains', token)
+                .limit(RESULT_LIMIT)
+                .get())),
+            Promise.all(tokens.map(token => db.collection('services')
+                .where('searchKeywords', 'array-contains', token)
+                .limit(RESULT_LIMIT)
+                .get())),
+            db.collection('services')
+                .orderBy('name', 'asc')
+                .limit(SERVICE_FALLBACK_LIMIT)
+                .get(),
         ]);
 
-        const serializeDoc = (doc: { id: string; data: () => Record<string, unknown> | undefined }, type: string) => {
-            const data = doc.data() ?? {};
-            const serialized: SerializedDoc = { ...data, id: doc.id, _type: type };
-            if (serialized.createdAt && typeof (serialized.createdAt as { toDate?: unknown }).toDate === 'function') {
-                serialized.createdAt = (serialized.createdAt as { toDate: () => Date }).toDate().getTime();
-            }
-            if (serialized.updatedAt && typeof (serialized.updatedAt as { toDate?: unknown }).toDate === 'function') {
-                serialized.updatedAt = (serialized.updatedAt as { toDate: () => Date }).toDate().getTime();
-            }
-            if (serialized.completedAt && typeof (serialized.completedAt as { toDate?: unknown }).toDate === 'function') {
-                serialized.completedAt = (serialized.completedAt as { toDate: () => Date }).toDate().getTime();
-            }
-            return serialized;
-        };
+        const results = new Map<string, PublicSearchResult>();
 
-        if (orderDoc.exists) {
-            ordersResult.push(serializeDoc(orderDoc, 'order'));
-        }
-        if (repairDoc.exists) {
-            repairsResult.push(serializeDoc(repairDoc, 'repair'));
-        }
+        productSnaps.flatMap(snap => snap.docs).forEach(doc => {
+            const data = doc.data();
+            if (data.status !== 'active') return;
+            results.set(`product:${doc.id}`, { ...toPublicProduct(doc.id, data), _type: 'product' });
+        });
 
-        // Phone number query
-        if (/^\d{8,12}$/.test(q)) {
-            const [ordersSnap, repairsSnap] = await Promise.all([
-                db.collection('orders').where('customer.phone', '==', q).limit(5).get(),
-                db.collection('repairs').where('customer.phone', '==', q).limit(5).get()
-            ]);
-            ordersSnap.docs.forEach(doc => {
-                if (!ordersResult.some(o => o.id === doc.id)) {
-                    ordersResult.push(serializeDoc(doc, 'order'));
-                }
-            });
-            repairsSnap.docs.forEach(doc => {
-                if (!repairsResult.some(r => r.id === doc.id)) {
-                    repairsResult.push(serializeDoc(doc, 'repair'));
-                }
-            });
-        }
+        serviceKeywordSnaps.flatMap(snap => snap.docs).forEach(doc => {
+            const data = doc.data();
+            if (data.isActive === false) return;
+            results.set(`service:${doc.id}`, { ...toPublicService(doc.id, data), _type: 'service' });
+        });
 
-        return NextResponse.json({ results: [...combined, ...ordersResult, ...repairsResult] });
+        serviceFallbackSnap.docs.forEach(doc => {
+            if (results.size >= RESULT_LIMIT) return;
+            const data = doc.data();
+            if (data.isActive === false) return;
+            const publicService = toPublicService(doc.id, data);
+            if (!matchesKeyword(publicService, primaryToken)) return;
+            results.set(`service:${doc.id}`, { ...publicService, _type: 'service' });
+        });
+
+        return NextResponse.json({ results: Array.from(results.values()).slice(0, RESULT_LIMIT) });
     } catch (error) {
         console.error('Search API error:', error);
-        return NextResponse.json(
-            { error: 'Lỗi hệ thống. Vui lòng thử lại sau.' },
-            { status: 500 }
-        );
+        return NextResponse.json({ error: 'Search failed' }, { status: 500 });
     }
 }

@@ -50,8 +50,8 @@ export function RepairFilters({
     );
 
     return (
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 grid grid-cols-1 md:grid-cols-5 gap-4 print:hidden">
-            <div className="relative md:col-span-2 flex gap-2">
+        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4 print:hidden">
+            <div className="relative md:col-span-3 lg:col-span-2 flex gap-2">
                 <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
                     <input

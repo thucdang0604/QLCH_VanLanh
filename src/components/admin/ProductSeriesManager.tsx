@@ -3,7 +3,7 @@
 import React, { useState, useMemo } from 'react';
 import { useFirestoreCollection, updateDocument } from '@/lib/useFirestore';
 import { Product } from '@/lib/types';
-import { orderBy } from 'firebase/firestore';
+import { limit, orderBy } from 'firebase/firestore';
 import { Layers, Box, Link2Off, Link2, CheckSquare, Square, SearchIcon, Loader2 } from 'lucide-react';
 import Image from 'next/image';
 import { toastSuccess, toastError } from '@/lib/toast';
@@ -12,7 +12,7 @@ const formatPrice = (p: number) => p > 0 ? p.toLocaleString('vi-VN') + 'đ' : '�
 const getErrorMessage = (error: unknown) => error instanceof Error ? error.message : 'Lỗi không xác định';
 
 export default function ProductSeriesManager() {
-    const { data: products, loading } = useFirestoreCollection<Product>('products', [orderBy('createdAt', 'desc')]);
+    const { data: products, loading } = useFirestoreCollection<Product>('products', [orderBy('createdAt', 'desc'), limit(300)]);
     
     const [activeTab, setActiveTab] = useState<'grouped' | 'ungrouped'>('grouped');
     const [searchQuery, setSearchQuery] = useState('');

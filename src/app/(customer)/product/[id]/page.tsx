@@ -9,6 +9,7 @@ import Image from 'next/image';
 import { getBusinessIdentity } from '@/lib/businessIdentity';
 
 export const revalidate = 30;
+type PublicDetailData = ProductData & Record<string, unknown> & { _type?: 'product' | 'service'; categoryIds?: unknown[] };
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
     const { id } = await params;
@@ -36,12 +37,12 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 export default async function ProductDetailPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = await params;
     const identity = getBusinessIdentity();
-    let data = await fetchDetailItem(id, 'products');
+    let data = await fetchDetailItem(id, 'products') as PublicDetailData | null;
     
     // Fallback just in case they visit a service URL using the product route 
     // Usually shouldn't happen but the original code had a fallback
     if (!data) {
-        data = await fetchDetailItem(id, 'services');
+        data = await fetchDetailItem(id, 'services') as PublicDetailData | null;
         if (data) {
             data._type = 'service';
         }

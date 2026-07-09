@@ -2,7 +2,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
-import { collection, query, where, updateDoc, doc, serverTimestamp, orderBy, Timestamp, limit, startAfter, DocumentSnapshot, runTransaction, arrayUnion, type QueryConstraint } from 'firebase/firestore';
+import { collection, query, where, updateDoc, doc, serverTimestamp, orderBy, Timestamp, limit, startAfter, DocumentSnapshot, arrayUnion, type QueryConstraint } from 'firebase/firestore';
 import { getDocs, onSnapshot, getDoc } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
@@ -1067,7 +1067,7 @@ export default function RepairPage() {
         try {
             if (editingTicket) {
                 const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
-                const paymentRes = await fetch('/api/repairs/payment-edit', {
+                const editRes = await fetch('/api/repairs/edit', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -1077,6 +1077,47 @@ export default function RepairPage() {
                         ticketId: editingTicket.id,
                         ticketVersion: editingTicket.version || 0,
                         idempotencyKey: crypto.randomUUID(),
+                        profileData: {
+                            appointmentId: formData.appointmentId || null,
+                            appointmentIntakeMethod: formData.appointmentIntakeMethod || null,
+                            categoryPath: formData.selectedCategoryPath,
+                            serviceName: formData.selectedServiceName,
+                            customer: customerSnapshot,
+                            deviceInfo: {
+                                model: formData.deviceModel,
+                                imei: formData.deviceImei,
+                                passcode: formData.devicePasscode,
+                                color: formData.deviceColor,
+                                checklist: {
+                                    body: formData.checkBody,
+                                    screen: formData.checkScreen,
+                                    touch: formData.checkTouch,
+                                    camera: formData.checkCamera,
+                                    speaker: formData.checkSpeaker,
+                                    connectivity: formData.checkConnectivity,
+                                    battery: formData.checkBattery,
+                                    biometric: formData.checkBiometric,
+                                    hasPriorRepair: formData.hasPriorRepair,
+                                    hasWaterDamage: formData.hasWaterDamage,
+                                    hasNonGenuineParts: formData.hasNonGenuineParts,
+                                    historyOtherNote: formData.historyOtherNote.trim(),
+                                } as DeviceChecklist,
+                            },
+                            preRepairMedia: preMediaFiles,
+                            postRepairMedia: postMediaFiles,
+                            issue: {
+                                description: formData.issues.length > 0
+                                    ? formData.issues.map(i => i.label).join(' | ')
+                                    : formData.issueDescription,
+                                notes: formData.techNotes
+                            },
+                            issues: formData.issues.length > 0 ? formData.issues : null,
+                            estimatedReturnAt: formData.estimatedReturnDate
+                                ? new Date(formData.estimatedReturnDate).toISOString()
+                                : null,
+                            assignedTechnician: formData.technicianId,
+                            assignedTechnicianName: tech?.displayName || '',
+                        },
                         paymentData: {
                             deposit: Number(formData.depositAmount) || 0,
                             laborCost: Number(formData.laborCost) || 0,
@@ -1084,72 +1125,10 @@ export default function RepairPage() {
                     })
                 });
 
-                const paymentDataResp = await paymentRes.json();
-                if (!paymentRes.ok) {
-                    throw new Error(paymentDataResp.error || 'Lỗi cập nhật chi phí');
-                }
-                const ticketRef = doc(db, 'repairs', editingTicket.id);
-                await runTransaction(db, async (transaction) => {
-                    const freshDoc = await transaction.get(ticketRef);
-                    if (!freshDoc.exists()) throw new Error('Phiếu sửa chữa không còn tồn tại!');
-                    const freshVersion = freshDoc.data()?.version || 0;
-
-                    if (freshVersion > (editingTicket.version || 0) + 1) {
-                        throw new Error('Phiếu đã được cập nhật bởi người khác. Vui lòng tải lại trang.');
-                    }
-                    const updateData = {
-                        appointmentId: formData.appointmentId || null,
-                        appointmentIntakeMethod: formData.appointmentIntakeMethod || null,
-                        categoryPath: formData.selectedCategoryPath,
-                        serviceName: formData.selectedServiceName,
-                        customer: customerSnapshot,
-                        deviceInfo: {
-                            model: formData.deviceModel,
-                            imei: formData.deviceImei,
-                            passcode: formData.devicePasscode,
-                            color: formData.deviceColor,
-                            checklist: {
-                                body: formData.checkBody,
-                                screen: formData.checkScreen,
-                                touch: formData.checkTouch,
-                                camera: formData.checkCamera,
-                                speaker: formData.checkSpeaker,
-                                connectivity: formData.checkConnectivity,
-                                battery: formData.checkBattery,
-                                biometric: formData.checkBiometric,
-                                hasPriorRepair: formData.hasPriorRepair,
-                                hasWaterDamage: formData.hasWaterDamage,
-                                hasNonGenuineParts: formData.hasNonGenuineParts,
-                                historyOtherNote: formData.historyOtherNote.trim(),
-                            } as DeviceChecklist,
-                        },
-                        preRepairMedia: preMediaFiles,
-                        postRepairMedia: postMediaFiles,
-                        issue: {
-                            description: formData.issues.length > 0
-                                ? formData.issues.map(i => i.label).join(' | ')
-                                : formData.issueDescription,
-                            notes: formData.techNotes
-                        },
-                        issues: formData.issues.length > 0 ? formData.issues : null,
-                        timing: {
-                            receivedAt: editingTicket?.timing?.receivedAt || serverTimestamp(),
-                            estimatedReturnAt: formData.estimatedReturnDate
-                                ? Timestamp.fromDate(new Date(formData.estimatedReturnDate))
-                                : null,
-                        },
-                        staff: {
-                            createdBy: editingTicket?.staff?.createdBy || user?.uid || '',
-                            createdByName: editingTicket?.staff?.createdByName || user?.displayName || 'Admin',
-                            assignedTechnician: formData.technicianId,
-                            assignedTechnicianName: tech?.displayName || '',
-                        },
-                        updatedAt: serverTimestamp(),
-                        version: freshVersion + 1,
-                    };
-                    transaction.update(ticketRef, updateData);
-                });
-            } else {
+                const editDataResp = await editRes.json();
+                if (!editRes.ok) {
+                    throw new Error(editDataResp.error || 'Loi cap nhat phieu sua chua');
+                }            } else {
                 const initialStatus = (dynamicStatuses[0]?.id || REPAIR_STATUS.INTAKE) as RepairStatus;
                 const ticketData: Record<string, unknown> = {
                     appointmentId: formData.appointmentId || null,

@@ -10,9 +10,10 @@ import {
     Loader2,
     Wrench
 } from 'lucide-react';
+import { limit, orderBy } from 'firebase/firestore';
 import { useFirestoreCollection, addDocumentWithId, updateDocument, deleteDocument } from '@/lib/useFirestore';
 
-import { generateSlug } from '@/lib/utils';
+import { generateSearchKeywords, generateSlug } from '@/lib/utils';
 import type { FirestoreDateValue } from '@/lib/types';
 import { getCategoryPath, collectAllNodeIds } from '@/lib/utils';
 import { toastError, toastSuccess, toastWarning } from '@/lib/toast';
@@ -60,7 +61,7 @@ function parseLegacyPrice(s?: string): number {
 
 export default function ServicesPage() {
     const { config, loading: configLoading } = useConfig();
-    const { data: services, loading } = useFirestoreCollection<Service>('services');
+    const { data: services, loading } = useFirestoreCollection<Service>('services', [orderBy('createdAt', 'desc'), limit(50)]);
     const [searchQuery, setSearchQuery] = useState('');
     const [filterCategoryIds, setFilterCategoryIds] = useState<string[]>([]);
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -196,12 +197,12 @@ export default function ServicesPage() {
             {/* Header */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-900">Quản lý dịch vụ</h1>
+                    <h1 className="text-lg font-bold text-gray-900">Quản lý dịch vụ</h1>
                     <p className="text-gray-500">{services.length} dịch vụ</p>
                 </div>
                 <button
                     onClick={() => { setEditingService(null); setIsModalOpen(true); }}
-                    className="flex items-center gap-2 bg-orange-500 text-white px-4 py-2.5 rounded-lg font-medium hover:bg-orange-600 transition-colors"
+                    className="flex items-center gap-2 bg-orange-500 text-white px-3 py-1.5 text-xs rounded-xl hover:bg-orange-600 font-medium transition-colors"
                 >
                     <Plus size={20} />
                     Thêm dịch vụ
@@ -243,7 +244,7 @@ export default function ServicesPage() {
                             placeholder="Tìm dịch vụ..."
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            className="w-full h-11 pl-10 pr-4 border rounded-lg focus:border-orange-500 focus:outline-none"
+                            className="w-full h-8 text-sm pl-10 pr-4 border rounded-lg focus:border-orange-500 focus:outline-none"
                         />
                     </div>
                 </div>
@@ -478,6 +479,11 @@ function ServiceModal({
             const imageUrl = images[0] || '';
 
             const tagsArray = formData.tags.split(',').map(t => t.trim()).filter(Boolean);
+            const searchKeywords = generateSearchKeywords([
+                formData.name,
+                formData.device_model,
+                ...tagsArray,
+            ].filter(Boolean).join(' '));
 
             const data: Record<string, unknown> = {
                 name: formData.name,
@@ -495,6 +501,7 @@ function ServiceModal({
                 repair_time: formData.repair_time || '',
                 seoDescription: formData.seoDescription || '',
                 tags: tagsArray,
+                searchKeywords,
                 imageUrl,
                 images,
             };

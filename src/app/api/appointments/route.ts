@@ -8,6 +8,14 @@ import { reserveSequentialDocumentId } from '@/lib/serverDocumentIds';
 const RATE_LIMIT_MAX = 3;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 
+function stripHtml(value: string): string {
+    return value.replace(/<[^>]*>/g, '').trim();
+}
+
+function canPublicSetCustomerName(currentName: unknown, nextName: string): boolean {
+    return Boolean(nextName && nextName !== 'Khách lẻ' && (!currentName || currentName === 'Khách lẻ'));
+}
+
 export async function POST(request: NextRequest) {
     try {
         // ── 1. Rate Limiting ──
@@ -33,9 +41,10 @@ export async function POST(request: NextRequest) {
         }
 
         const { fullName, phone, date, timeSlot, store, serviceName, serviceId } = body;
+        const safeFullName = typeof fullName === 'string' ? stripHtml(fullName).slice(0, 100) : '';
 
         // ── 3. Validate required fields ──
-        if (!fullName || typeof fullName !== 'string' || fullName.trim().length < 2) {
+        if (safeFullName.length < 2) {
             return NextResponse.json(
                 { error: 'Vui lòng nhập họ tên (ít nhất 2 ký tự).' },
                 { status: 400 }
@@ -74,7 +83,7 @@ export async function POST(request: NextRequest) {
 
         // ── 4. Create appointment ──
         const appointment = {
-            fullName: fullName.trim(),
+            fullName: safeFullName,
             phone: normalizedPhone.local,
             date,
             timeSlot,
@@ -97,7 +106,7 @@ export async function POST(request: NextRequest) {
             const customerSnap = await transaction.get(customerRef);
 
             appointmentAllocation.commitCounter();
-            transaction.set(appointmentAllocation.ref, appointment);
+            transaction.set(appointmentAllocation.ref, { ...appointment });
             appointmentId = appointmentAllocation.id;
 
             if (!customerSnap.exists) {
@@ -121,6 +130,9 @@ export async function POST(request: NextRequest) {
                     lastVisit: FieldValue.serverTimestamp(),
                     totalAppointments: FieldValue.increment(1),
                 };
+                if (!canPublicSetCustomerName(currentData.name, appointment.fullName)) {
+                    appointment.fullName = '';
+                }
                 if (appointment.fullName && appointment.fullName !== 'Khách lẻ' && appointment.fullName !== currentData.name) {
                     updateData.name = appointment.fullName;
                 }

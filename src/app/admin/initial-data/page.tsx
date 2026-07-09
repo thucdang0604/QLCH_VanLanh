@@ -87,6 +87,8 @@ const IMPORT_OPTIONS: ImportOption[] = [
     },
 ];
 
+const CLIENT_IMPORT_OPTIONS = IMPORT_OPTIONS.filter((option) => option.mode !== 'order' && option.mode !== 'repair');
+
 function normalizePreviewImageSource(value: string): { src: string; error: string } {
     const trimmed = value.trim();
     if (!trimmed) return { src: '', error: '' };
@@ -817,7 +819,7 @@ export default function InitialDataPage() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {IMPORT_OPTIONS.map((option) => {
+                {CLIENT_IMPORT_OPTIONS.map((option) => {
                     const Icon = option.icon;
                     return (
                         <button

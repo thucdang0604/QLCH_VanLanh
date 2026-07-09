@@ -7,7 +7,6 @@ import {
     where,
     orderBy,
     limit,
-    onSnapshot,
     QueryConstraint,
     DocumentData,
     addDoc,
@@ -15,9 +14,9 @@ import {
     deleteDoc,
     doc,
     serverTimestamp,
-    getDocs,
     setDoc
 } from 'firebase/firestore';
+import { onSnapshot, getDocs } from './firestoreLogger';
 import { db } from './firebase';
 
 /**
@@ -147,7 +146,7 @@ export function useFlashSaleProducts(maxItems: number = 6) {
  * Hook for Services
  */
 export function useServices() {
-    const constraints = [orderBy('name', 'asc')];
+    const constraints = [orderBy('name', 'asc'), limit(50)];
     return useFirestoreCollection('services', constraints);
 }
 

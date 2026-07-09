@@ -226,7 +226,7 @@ export default function ChatIntegrationsTab() {
                 <button
                     onClick={saveConfig}
                     disabled={saving}
-                    className="flex items-center gap-2 px-5 py-2.5 bg-orange-500 text-white rounded-lg hover:bg-orange-600 disabled:opacity-50"
+                    className="fixed bottom-4 right-4 z-50 md:static md:bottom-auto md:right-auto md:z-auto flex items-center gap-2 px-5 py-2.5 bg-orange-500 text-white rounded-lg shadow-lg md:shadow-none hover:bg-orange-600 disabled:opacity-50"
                 >
                     {saving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
                     Lưu cấu hình

@@ -1,6 +1,7 @@
 import ClientPage from './page.client';
 import { isAdminAvailable, getAdminDb } from '@/lib/firebaseAdmin';
 import { DEFAULT_CONFIG, type HeroBanner, type HomeSectionItem, type StoreBranch, type HomeServiceCategory } from '@/lib/config-defaults';
+import { toPublicProduct, toPublicService } from '@/lib/publicCatalog';
 
 import { unstable_cache } from 'next/cache';
 
@@ -62,11 +63,7 @@ const fetchHomeConfigData = async (): Promise<SSRHomeConfig> => {
     ]);
 
     // Parse products (convert timestamps to strings)
-    const rawProducts = productsSnapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }));
-    const ssrLatestProducts = JSON.parse(JSON.stringify(rawProducts));
+    const ssrLatestProducts = productsSnapshot.docs.map(doc => toPublicProduct(doc.id, doc.data()));
 
     // Parse articles
     const rawArticles = articlesSnapshot.docs.map(doc => ({
@@ -76,11 +73,7 @@ const fetchHomeConfigData = async (): Promise<SSRHomeConfig> => {
     const ssrArticles = JSON.parse(JSON.stringify(rawArticles));
 
     // Parse services
-    const rawServices = servicesSnapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }));
-    const ssrPricingServices = JSON.parse(JSON.stringify(rawServices));
+    const ssrPricingServices = servicesSnapshot.docs.map(doc => toPublicService(doc.id, doc.data()));
 
     if (!configSnapshot.exists) {
       return {

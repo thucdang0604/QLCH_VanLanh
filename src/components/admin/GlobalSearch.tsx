@@ -57,7 +57,18 @@ export default function GlobalSearch() {
         }
         setIsSearching(true);
         try {
-            const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+            const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(auth => auth.currentUser?.getIdToken());
+            if (!idToken) {
+                setResults([]);
+                setShowResults(false);
+                return;
+            }
+
+            const res = await fetch(`/api/admin/search?q=${encodeURIComponent(q)}`, {
+                headers: {
+                    Authorization: `Bearer ${idToken}`,
+                },
+            });
             if (res.ok) {
                 const data = await res.json();
                 setResults(data.results || []);

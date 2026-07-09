@@ -6,6 +6,7 @@ import { getAdminDb, isAdminAvailable } from "@/lib/firebaseAdmin";
 import { SITE_URL } from "@/lib/constants";
 import { getBusinessIdentity } from "@/lib/businessIdentity";
 import type { SiteConfig } from "@/lib/config-defaults";
+import FirebasePerformance from "@/components/FirebasePerformance";
 
 const inter = Inter({
   subsets: ["latin", "vietnamese"],
@@ -105,6 +106,7 @@ export default function RootLayout({
       <body className={`${inter.variable} font-sans antialiased`}>
         <AuthProvider>
           {children}
+          <FirebasePerformance />
         </AuthProvider>
       </body>
     </html>

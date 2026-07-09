@@ -18,6 +18,11 @@ type RepairHeldData = Pick<RepairTicket, 'ticketType'> & {
     parts?: RepairPartData[];
 };
 
+type FixHeldPayload = {
+    apply?: boolean;
+    confirm?: string;
+};
+
 function reservedQuantity(part: RepairPartData): number {
     const quantity = Math.max(0, Number(part.quantity) || 0);
     const explicitReserved = Number(part.reservedQuantity);
@@ -36,6 +41,8 @@ function isTerminalRepair(repair: RepairHeldData, settings: RepairWorkflowSettin
 export async function POST(request: NextRequest) {
     try {
         const caller = await requirePermission(request, 'manage_inventory');
+        const payload = await request.json().catch(() => ({})) as FixHeldPayload;
+        const shouldApply = payload.apply === true && payload.confirm === 'FIX_HELD_APPLY';
         const db = getAdminDb();
         const [productsSnap, repairsSnap, configSnap] = await Promise.all([
             db.collection('products').get(),
@@ -57,15 +64,49 @@ export async function POST(request: NextRequest) {
             }
         }
 
-        const writer = db.bulkWriter();
+        const changes: Array<{
+            productId: string;
+            currentHeld: number;
+            nextHeld: number;
+        }> = [];
+
         for (const productDoc of productsSnap.docs) {
-            writer.update(productDoc.ref, { held: heldMap.get(productDoc.id) || 0 });
+            const currentHeld = Math.max(0, Number(productDoc.data().held) || 0);
+            const nextHeld = heldMap.get(productDoc.id) || 0;
+            if (currentHeld !== nextHeld) {
+                changes.push({
+                    productId: productDoc.id,
+                    currentHeld,
+                    nextHeld,
+                });
+            }
         }
-        await writer.close();
+
+        if (shouldApply && changes.length > 0) {
+            const writer = db.bulkWriter();
+            for (const change of changes) {
+                writer.update(db.collection('products').doc(change.productId), { held: change.nextHeld });
+            }
+            await writer.close();
+
+            await db.collection('maintenance_audit_logs').add({
+                action: 'fix-held',
+                executedBy: caller.uid,
+                executedAt: new Date(),
+                changedProducts: changes.length,
+                scannedProducts: productsSnap.size,
+                scannedRepairs: repairsSnap.size,
+            });
+        }
 
         return NextResponse.json({
             success: true,
-            updatedProducts: productsSnap.size,
+            dryRun: !shouldApply,
+            scannedProducts: productsSnap.size,
+            scannedRepairs: repairsSnap.size,
+            changedProducts: changes.length,
+            updatedProducts: shouldApply ? changes.length : 0,
+            changes,
             heldByProduct: Object.fromEntries(heldMap),
             executedBy: caller.uid,
         });

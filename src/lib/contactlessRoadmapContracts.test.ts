@@ -168,4 +168,11 @@ test('supplier UI and import receipt inline creation store supplier ids with con
     assert.match(receiptModal, /buildSupplierContactDocumentFields\(contactInput\)/);
     assert.match(importApi, /supplierId: sId/);
     assert.match(importApi, /supplier_transactions/);
+    assert.match(inventoryPage, /function receiptItemHasSupplier\(receipt: ImportReceipt, item: ImportReceiptItem\)/);
+    assert.match(inventoryPage, /receipt\.supplierId/);
+    assert.match(importApi, /function normalizeImportPaymentMethod\(value: unknown\): ImportPaymentMethod/);
+    assert.match(importApi, /method === 'cash' \|\| method === 'bank' \|\| method === 'debt'/);
+    assert.match(importApi, /!item\.supplier && !item\.supplierId && !receipt\.supplierId/);
+    assert.match(receiptModal, /useState<'cash' \| 'bank' \| 'debt'>\('debt'\)/);
+    assert.doesNotMatch(receiptModal, /setPaymentMethod\('paid'\)/);
 });

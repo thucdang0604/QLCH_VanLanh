@@ -17,6 +17,7 @@ import { isYouTubeUrl, getYouTubeEmbedUrl } from '@/lib/workflowFeatures';
 import type { LucideIcon } from 'lucide-react';
 import { SITE_URL } from "@/lib/constants";
 import { normalizeRepairWorkflow, normalizeWarrantyWorkflow } from '@/lib/repairWorkflowConfig';
+import { normalizeVietnamPhone } from '@/lib/phone';
 
 /* ─── Appointment ─── */
 interface Appointment {
@@ -103,6 +104,7 @@ export default function TrackingPage() {
     const { config } = useConfig();
     const [activeTab, setActiveTab] = useState<'appointment' | 'repair' | 'order'>('repair');
     const [phone, setPhone] = useState('');
+    const [phoneError, setPhoneError] = useState('');
     const [loading, setLoading] = useState(false);
     const [searched, setSearched] = useState(false);
 
@@ -155,6 +157,16 @@ export default function TrackingPage() {
         e.preventDefault();
         if (!phone.trim()) return;
 
+        const normalizedPhone = normalizeVietnamPhone(phone);
+        if (!normalizedPhone) {
+            setPhoneError('Vui lòng nhập số điện thoại hợp lệ.');
+            setSearched(false);
+            setAppointments([]);
+            setRepairs([]);
+            setOrders([]);
+            return;
+        }
+
         const toMillis = (v: unknown): number => {
             if (!v) return 0;
             if (typeof v === 'object' && v !== null) {
@@ -179,17 +191,19 @@ export default function TrackingPage() {
         setAppointments([]);
         setRepairs([]);
         setOrders([]);
+        setPhoneError('');
 
         try {
             const res = await fetch('/api/tracking', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ phone }),
+                body: JSON.stringify({ phone: normalizedPhone.local }),
             });
 
             if (!res.ok) {
-                const errData = await res.json();
-                throw new Error(errData.error || 'Truy vấn thất bại.');
+                const errData = await res.json().catch(() => ({}));
+                setPhoneError(errData.error || 'Không thể tra cứu lúc này. Vui lòng thử lại.');
+                return;
             }
 
             const data = await res.json();
@@ -495,8 +509,15 @@ export default function TrackingPage() {
                                 type="tel"
                                 placeholder="Nhập số điện thoại..."
                                 value={phone}
-                                onChange={(e) => setPhone(e.target.value)}
-                                className="flex-1 h-14 px-6 bg-gray-50 border-2 border-transparent rounded-xl text-lg focus:bg-white focus:border-orange-500 focus:outline-none transition-all"
+                                onChange={(e) => {
+                                    setPhone(e.target.value);
+                                    if (phoneError) setPhoneError('');
+                                }}
+                                aria-invalid={Boolean(phoneError)}
+                                className={`flex-1 h-14 px-6 bg-gray-50 border-2 rounded-xl text-lg focus:bg-white focus:outline-none transition-all ${phoneError
+                                    ? 'border-red-300 focus:border-red-500'
+                                    : 'border-transparent focus:border-orange-500'
+                                    }`}
                             />
                             <button
                                 type="submit"
@@ -507,6 +528,9 @@ export default function TrackingPage() {
                                 Tra cứu
                             </button>
                         </form>
+                        {phoneError && (
+                            <p className="mt-3 text-sm font-medium text-red-600">{phoneError}</p>
+                        )}
                     </div>
 
                     {/* Results */}
