@@ -52,7 +52,7 @@ export default function AdminReviewsPage() {
 
         setLoading(true);
         const collectionName = filterSource === 'store' ? 'reviews' : 'product_reviews';
-        const q = query(collection(db, collectionName), orderBy('createdAt', 'desc'), limit(200));
+        const q = query(collection(db, collectionName), orderBy('createdAt', 'desc'), limit(50));
 
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const data: UnifiedReview[] = [];

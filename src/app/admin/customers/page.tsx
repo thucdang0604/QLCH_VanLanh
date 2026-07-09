@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
-import { Search, Users, Loader2, Star, TrendingUp, Plus, Download, Filter } from 'lucide-react';
+import { Search, Users, Loader2, Star, TrendingUp, Plus, Download, Filter, RefreshCw } from 'lucide-react';
 import { collection, query, orderBy, limit, startAfter, DocumentSnapshot, doc, setDoc, serverTimestamp, updateDoc, where } from 'firebase/firestore';
 import { onSnapshot, getDocs, getDoc } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
@@ -115,21 +115,26 @@ export default function CustomersPage() {
         return sorted.find(t => spent >= t.minSpent) || null;
     };
 
-    // Fetch real-time recent customers
-    useEffect(() => {
-        const q = query(collection(db, 'customers'), orderBy('updatedAt', 'desc'), limit(50));
-        const unsub = onSnapshot(q, (snap) => {
+    const fetchCustomers = useCallback(async () => {
+        setLoading(true);
+        try {
+            const q = query(collection(db, 'customers'), orderBy('updatedAt', 'desc'), limit(50));
+            const snap = await getDocs(q);
             const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Customer[];
             setCustomers(data);
             setLastDoc(snap.docs[snap.docs.length - 1] || null);
             setHasMore(snap.docs.length === 50);
-            setLoading(false);
-        }, (err) => {
+        } catch (err) {
             console.error('Customers fetch error:', err);
+        } finally {
             setLoading(false);
-        });
-        return () => unsub();
+        }
     }, []);
+
+    // Fetch real-time recent customers
+    useEffect(() => {
+        fetchCustomers();
+    }, [fetchCustomers]);
 
     const loadMoreData = async () => {
         if (!lastDoc || !hasMore) return;
@@ -403,6 +408,9 @@ export default function CustomersPage() {
                     <p className="text-gray-500 text-sm mt-0.5">Danh sách, phân loại, tags và lịch sử giao dịch</p>
                 </div>
                 <div className="flex gap-2">
+                    <button onClick={fetchCustomers} className="flex items-center gap-2 bg-white text-gray-700 px-3 py-1.5 text-xs rounded-xl hover:bg-gray-50 font-medium text-sm transition-colors border border-gray-200" title="Tải lại danh sách mới nhất">
+                        <RefreshCw size={18} className={loading ? "animate-spin" : ""} /> Tải lại
+                    </button>
                     <button onClick={handleExportExcel} className="flex items-center gap-2 bg-green-50 text-green-700 px-3 py-1.5 text-xs rounded-xl hover:bg-green-100 font-medium text-sm transition-colors border border-green-200">
                         <Download size={18} /> Xuất Excel
                     </button>
@@ -492,135 +500,181 @@ export default function CustomersPage() {
                 </button>
             </div>
 
-            {/* Customers Table */}
+            {/* Customers List */}
             <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-100">
-                <div className="overflow-x-auto">
-                    <table className="w-full">
-                        <thead className="bg-gray-50">
-                            <tr>
-                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Khách hàng</th>
-                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Loại & Hạng</th>
-                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Thông tin mở rộng</th>
-                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Giao dịch</th>
-                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Công nợ</th>
-                                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Hành động</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-100">
-                            {filteredCustomers.length === 0 ? (
+                {filteredCustomers.length === 0 ? (
+                    <div className="text-center py-16 text-gray-400">
+                        <Users size={48} className="mx-auto mb-3 opacity-50" />
+                        <p>Không có dữ liệu khách hàng</p>
+                    </div>
+                ) : (
+                    <>
+                    {/* Desktop Table */}
+                    <div className="hidden lg:block overflow-x-auto">
+                        <table className="w-full">
+                            <thead className="bg-gray-50">
                                 <tr>
-                                    <td colSpan={5} className="text-center py-16 text-gray-400">
-                                        <Users size={48} className="mx-auto mb-3 opacity-50" />
-                                        <p>Không có dữ liệu khách hàng</p>
-                                    </td>
+                                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Khách hàng</th>
+                                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Loại & Hạng</th>
+                                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Thông tin mở rộng</th>
+                                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Giao dịch</th>
+                                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Công nợ</th>
+                                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Hành động</th>
                                 </tr>
-                            ) : paginatedData.map((customer) => {
-                                const tier = calculateTier(customer.totalSpent || 0);
-                                const socialLinks = customerSocialLinks(customer);
-                                return (
-                                <tr key={customer.id} className="hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => setSelectedCustomer(customer)}>
-                                    <td className="px-6 py-4 align-top">
-                                        <p className="text-sm font-bold text-gray-900 group-hover:text-orange-600">
-                                            {customer.name || 'Khách lẻ'}
-                                        </p>
-                                        <p className="text-xs text-gray-500 font-mono mt-0.5">{customerContactLabel(customer)}</p>
-                                        {socialLinks.length > 0 && (
-                                            <div className="mt-2 flex flex-wrap gap-1.5">
-                                                {socialLinks.map(link => link.href ? (
-                                                    <a
-                                                        key={link.type}
-                                                        href={link.href}
-                                                        target="_blank"
-                                                        rel="noreferrer"
-                                                        onClick={event => event.stopPropagation()}
-                                                        className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-semibold transition-colors ${link.type === 'zalo'
-                                                            ? 'border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100'
-                                                            : 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
-                                                            }`}
-                                                    >
-                                                        {link.label}
-                                                    </a>
-                                                ) : (
-                                                    <span
-                                                        key={link.type}
-                                                        className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-semibold ${link.type === 'zalo'
-                                                            ? 'border-sky-200 bg-sky-50 text-sky-700'
-                                                            : 'border-blue-200 bg-blue-50 text-blue-700'
-                                                            }`}
-                                                    >
-                                                        {link.label}
-                                                    </span>
-                                                ))}
-                                            </div>
-                                        )}
-                                        {customer.tags && customer.tags.length > 0 && (
-                                            <div className="mt-2 flex flex-wrap gap-1">
-                                                {customer.tags.map(tag => (
-                                                    <span key={tag} className="px-1.5 py-0.5 bg-blue-50 border border-blue-100 text-blue-700 text-[10px] rounded-md font-semibold">
-                                                        {tag}
-                                                    </span>
-                                                ))}
-                                            </div>
-                                        )}
-                                    </td>
-                                    <td className="px-6 py-4 align-top">
-                                        <div className="flex flex-col gap-1.5 items-start">
-                                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold ${
-                                                customer.type === 'wholesale' ? 'bg-purple-100 text-purple-700 border border-purple-200' : 'bg-green-100 text-green-700 border border-green-200'
-                                            }`}>
-                                                {customer.type === 'wholesale' ? 'SỈ / THỢ' : 'LẺ'}
-                                            </span>
-                                            {tier && (
-                                                <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-orange-100 text-orange-700 border border-orange-200">
-                                                    HẠNG: {tier.name.toUpperCase()}
-                                                </span>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100">
+                                {paginatedData.map((customer) => {
+                                    const tier = calculateTier(customer.totalSpent || 0);
+                                    const socialLinks = customerSocialLinks(customer);
+                                    return (
+                                    <tr key={customer.id} className="hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => setSelectedCustomer(customer)}>
+                                        <td className="px-4 py-3 align-top">
+                                            <p className="text-sm font-bold text-gray-900">{customer.name || 'Khách lẻ'}</p>
+                                            <p className="text-xs text-gray-500 font-mono mt-0.5">{customerContactLabel(customer)}</p>
+                                            {socialLinks.length > 0 && (
+                                                <div className="mt-1.5 flex flex-wrap gap-1">
+                                                    {socialLinks.map(link => link.href ? (
+                                                        <a key={link.type} href={link.href} target="_blank" rel="noreferrer" onClick={event => event.stopPropagation()}
+                                                            className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-semibold transition-colors ${link.type === 'zalo' ? 'border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100' : 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'}`}
+                                                        >{link.label}</a>
+                                                    ) : (
+                                                        <span key={link.type}
+                                                            className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-semibold ${link.type === 'zalo' ? 'border-sky-200 bg-sky-50 text-sky-700' : 'border-blue-200 bg-blue-50 text-blue-700'}`}
+                                                        >{link.label}</span>
+                                                    ))}
+                                                </div>
                                             )}
-                                        </div>
-                                    </td>
-                                    <td className="px-6 py-4 align-top">
-                                        <div className="text-xs text-gray-600 space-y-1">
-                                            {customer.email && <p><span className="font-medium text-gray-500">Email:</span> {customer.email}</p>}
-                                            {customer.address && <p><span className="font-medium text-gray-500">Địa chỉ:</span> <span className="line-clamp-1">{customer.address}</span></p>}
-                                            {customer.note && <p className="text-orange-600 bg-orange-50 p-1 rounded inline-block max-w-xs truncate"><span className="font-medium">Lưu ý:</span> {customer.note}</p>}
-                                        </div>
-                                    </td>
-                                    <td className="px-6 py-4 align-top">
-                                        <p className="text-sm font-bold text-orange-600">
-                                            {formatPrice(customer.totalSpent || 0)}
-                                        </p>
-                                        <div className="flex gap-2 text-[11px] text-gray-500 mt-1 font-medium">
-                                            <span>{customer.totalOrders || 0} ĐH</span>
-                                            <span>•</span>
-                                            <span>{customer.totalRepairs || 0} Sửa chữa</span>
-                                        </div>
-                                        <p className="text-[10px] text-gray-400 mt-1">Gần nhất: {formatDate(customer.lastOrderDate || customer.lastVisit)}</p>
-                                    </td>
-                                    <td className="px-6 py-4 align-top">
-                                        {customer.totalDebt && customer.totalDebt > 0 ? (
-                                            <div className="flex flex-col gap-1">
+                                            {customer.tags && customer.tags.length > 0 && (
+                                                <div className="mt-1.5 flex flex-wrap gap-1">
+                                                    {customer.tags.map(tag => (
+                                                        <span key={tag} className="px-1.5 py-0.5 bg-blue-50 border border-blue-100 text-blue-700 text-[10px] rounded-md font-semibold">{tag}</span>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </td>
+                                        <td className="px-4 py-3 align-top">
+                                            <div className="flex flex-col gap-1.5 items-start">
+                                                <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold ${customer.type === 'wholesale' ? 'bg-purple-100 text-purple-700 border border-purple-200' : 'bg-green-100 text-green-700 border border-green-200'}`}>
+                                                    {customer.type === 'wholesale' ? 'SỈ / THỢ' : 'LẺ'}
+                                                </span>
+                                                {tier && (
+                                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-orange-100 text-orange-700 border border-orange-200">
+                                                        HẠNG: {tier.name.toUpperCase()}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </td>
+                                        <td className="px-4 py-3 align-top">
+                                            <div className="text-xs text-gray-600 space-y-1">
+                                                {customer.email && <p><span className="font-medium text-gray-500">Email:</span> {customer.email}</p>}
+                                                {customer.address && <p><span className="font-medium text-gray-500">Địa chỉ:</span> <span className="line-clamp-1">{customer.address}</span></p>}
+                                                {customer.note && <p className="text-orange-600 bg-orange-50 p-1 rounded inline-block max-w-xs truncate"><span className="font-medium">Lưu ý:</span> {customer.note}</p>}
+                                            </div>
+                                        </td>
+                                        <td className="px-4 py-3 align-top">
+                                            <p className="text-sm font-bold text-orange-600">{formatPrice(customer.totalSpent || 0)}</p>
+                                            <div className="flex gap-2 text-[11px] text-gray-500 mt-1 font-medium">
+                                                <span>{customer.totalOrders || 0} ĐH</span>
+                                                <span>•</span>
+                                                <span>{customer.totalRepairs || 0} SC</span>
+                                            </div>
+                                            <p className="text-[10px] text-gray-400 mt-1">Gần nhất: {formatDate(customer.lastOrderDate || customer.lastVisit)}</p>
+                                        </td>
+                                        <td className="px-4 py-3 align-top">
+                                            {customer.totalDebt && customer.totalDebt > 0 ? (
                                                 <span className="text-sm font-bold text-red-600">{formatPrice(customer.totalDebt)}</span>
-                                            </div>
-                                        ) : customer.totalDebt && customer.totalDebt < 0 ? (
-                                            <div className="flex flex-col gap-1">
+                                            ) : customer.totalDebt && customer.totalDebt < 0 ? (
                                                 <span className="text-sm font-bold text-green-600">Dư: {formatPrice(Math.abs(customer.totalDebt))}</span>
-                                            </div>
-                                        ) : (
-                                            <span className="text-sm text-gray-400 font-medium">Không có nợ</span>
+                                            ) : (
+                                                <span className="text-sm text-gray-400 font-medium">—</span>
+                                            )}
+                                        </td>
+                                        <td className="px-4 py-3 align-top">
+                                            <button onClick={(e) => openEditModal(customer, e)}
+                                                className="text-sm font-medium text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-colors">
+                                                Sửa
+                                            </button>
+                                        </td>
+                                    </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    {/* Mobile Card List */}
+                    <div className="lg:hidden divide-y divide-gray-100">
+                        {paginatedData.map((customer) => {
+                            const tier = calculateTier(customer.totalSpent || 0);
+                            const socialLinks = customerSocialLinks(customer);
+                            return (
+                            <div key={customer.id} className="p-3 hover:bg-gray-50/50 transition-colors cursor-pointer active:bg-gray-100" onClick={() => setSelectedCustomer(customer)}>
+                                {/* Row 1: Name + Type badges */}
+                                <div className="flex items-start justify-between gap-2">
+                                    <div className="min-w-0 flex-1">
+                                        <p className="font-semibold text-gray-900 text-sm truncate">{customer.name || 'Khách lẻ'}</p>
+                                        <p className="text-xs text-gray-500 font-mono mt-0.5">{customerContactLabel(customer)}</p>
+                                    </div>
+                                    <div className="flex flex-col items-end gap-1 shrink-0">
+                                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold ${customer.type === 'wholesale' ? 'bg-purple-100 text-purple-700' : 'bg-green-100 text-green-700'}`}>
+                                            {customer.type === 'wholesale' ? 'SỈ' : 'LẺ'}
+                                        </span>
+                                        {tier && (
+                                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-orange-100 text-orange-700">
+                                                {tier.name.toUpperCase()}
+                                            </span>
                                         )}
-                                    </td>
-                                    <td className="px-6 py-4 align-top">
-                                        <button 
-                                            onClick={(e) => openEditModal(customer, e)}
-                                            className="text-sm font-medium text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-colors"
-                                        >
-                                            Sửa
-                                        </button>
-                                    </td>
-                                </tr>
-                            )})}
-                        </tbody>
-                    </table>
-                </div>
+                                    </div>
+                                </div>
+
+                                {/* Row 2: Social links & tags */}
+                                {(socialLinks.length > 0 || (customer.tags && customer.tags.length > 0)) && (
+                                    <div className="mt-1.5 flex flex-wrap gap-1">
+                                        {socialLinks.map(link => link.href ? (
+                                            <a key={link.type} href={link.href} target="_blank" rel="noreferrer" onClick={event => { event.stopPropagation(); }}
+                                                className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-semibold ${link.type === 'zalo' ? 'border-sky-200 bg-sky-50 text-sky-700' : 'border-blue-200 bg-blue-50 text-blue-700'}`}
+                                            >{link.label}</a>
+                                        ) : (
+                                            <span key={link.type} className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-semibold ${link.type === 'zalo' ? 'border-sky-200 bg-sky-50 text-sky-700' : 'border-blue-200 bg-blue-50 text-blue-700'}`}>{link.label}</span>
+                                        ))}
+                                        {customer.tags?.map(tag => (
+                                            <span key={tag} className="px-1.5 py-0.5 bg-blue-50 border border-blue-100 text-blue-700 text-[10px] rounded-md font-semibold">{tag}</span>
+                                        ))}
+                                    </div>
+                                )}
+
+                                {/* Row 3: Spending + Debt + Actions */}
+                                <div className="mt-2 flex items-center justify-between gap-2">
+                                    <div className="flex items-baseline gap-3">
+                                        <div>
+                                            <p className="text-sm font-bold text-orange-600">{formatPrice(customer.totalSpent || 0)}</p>
+                                            <p className="text-[10px] text-gray-400">{customer.totalOrders || 0} ĐH · {customer.totalRepairs || 0} SC</p>
+                                        </div>
+                                        {customer.totalDebt && customer.totalDebt > 0 ? (
+                                            <span className="text-xs font-bold text-red-600">Nợ: {formatPrice(customer.totalDebt)}</span>
+                                        ) : customer.totalDebt && customer.totalDebt < 0 ? (
+                                            <span className="text-xs font-bold text-green-600">Dư: {formatPrice(Math.abs(customer.totalDebt))}</span>
+                                        ) : null}
+                                    </div>
+                                    <button onClick={(e) => openEditModal(customer, e)}
+                                        className="shrink-0 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-xl transition-all active:scale-95">
+                                        Sửa
+                                    </button>
+                                </div>
+
+                                {/* Row 4: Note (if any) */}
+                                {customer.note && (
+                                    <p className="mt-1.5 text-[11px] text-orange-600 bg-orange-50 px-2 py-1 rounded-lg truncate">
+                                        <span className="font-medium">Lưu ý:</span> {customer.note}
+                                    </p>
+                                )}
+                            </div>
+                            );
+                        })}
+                    </div>
+                    </>
+                )}
+
                 <PaginationBar
                     currentPage={currentPage}
                     totalPages={totalPages}

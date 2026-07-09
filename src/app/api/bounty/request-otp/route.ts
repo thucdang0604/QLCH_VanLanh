@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminDb } from '@/lib/firebaseAdmin';
+import { getAdminAuth, getAdminDb } from '@/lib/firebaseAdmin';
 import { normalizeVietnamPhone } from '@/lib/phone';
 
 type BountyStatus = 'eligible' | 'already_claimed_unused' | 'already_claimed_used';
@@ -140,6 +140,22 @@ async function recordSuccessfulOtpSend(identifier: string, type: 'ip' | 'phone')
     }
 }
 
+async function requireVerifiedPhoneForRecord(request: NextRequest, expectedPhone: string) {
+    const authHeader = request.headers.get('authorization') || '';
+    const match = authHeader.match(/^Bearer\s+(.+)$/i);
+    if (!match) {
+        throw new Error('Thiếu xác thực OTP.');
+    }
+
+    const decoded = await getAdminAuth().verifyIdToken(match[1]);
+    const tokenPhone = typeof decoded.phone_number === 'string'
+        ? normalizeVietnamPhone(decoded.phone_number)
+        : null;
+    if (!tokenPhone || tokenPhone.local !== expectedPhone) {
+        throw new Error('Số điện thoại xác thực không khớp.');
+    }
+}
+
 export async function POST(request: NextRequest) {
     try {
         const body = await request.json();
@@ -172,6 +188,13 @@ export async function POST(request: NextRequest) {
             || 'unknown';
 
         if (action === 'record') {
+            try {
+                await requireVerifiedPhoneForRecord(request, normalizedPhone.local);
+            } catch (error) {
+                const message = error instanceof Error ? error.message : 'Xác thực OTP không hợp lệ.';
+                return NextResponse.json({ error: message }, { status: 401 });
+            }
+
             await Promise.all([
                 recordSuccessfulOtpSend(ip, 'ip'),
                 recordSuccessfulOtpSend(normalizedPhone.local, 'phone'),

@@ -1,9 +1,44 @@
 {
   "_meta": {
     "description": "Bản đồ trí tuệ mã nguồn — tự động tích lũy khi AI đọc/sửa code. Giúp AI sau chỉ cần đọc file này là hiểu ngay cấu trúc, liên kết, và cách sửa.",
-    "lastUpdated": "2026-06-30T00:00:00.000+07:00",
-    "version": 28,
+    "lastUpdated": "2026-07-07T00:00:00.000+07:00",
+    "version": 63,
     "changelog": [
+      "v63: Reconciled file line counts after major refactoring. types.ts is now a barrel re-export (10 lines) split into src/lib/types/ (10 files: common, catalog, commerce, content, repair, inventory, finance, voucher, workflow, contact). parts/page.tsx refactored from ~2005 to ~354 lines with logic extracted to src/features/parts/ (ImportReceiptModals, importReceiptTypes, importReceiptUtils). repairs/page.tsx refactored from ~2852 to ~1435 with 12 sub-components extracted to src/features/repairs/. pos/page.tsx corrected to ~2220 with PosCartPanel and posTypes extracted to src/features/pos/. New src/features/ directory houses modular feature components for parts, pos, repairs, technician, articles, and excel-import.",
+      "v62: Closed the system and POS audit trackers after all concrete open BUG entries in the 2026-07-03 pass were fixed. Remaining roadmap items are features or performance follow-ups requiring production timing samples, not open bug regressions; manifest openBugs is now 0.",
+      "v61: Repair editor save is now atomic. /api/repairs/edit performs profile, device, checklist, media, staff, timing, and payment updates in one Admin SDK transaction with manage_repairs auth, idempotency, ticketVersion, terminal-state, and paid/refunded guards. Admin repairs edit submit no longer calls payment-edit followed by a client transaction.",
+      "v60: Initial-data bootstrap no longer exposes order/repair legacy import modes that would be blocked by production Firestore Rules. Supported client bootstrap modes remain visible; future historical order/repair import should be built as dedicated server APIs if needed.",
+      "v59: Closed remaining admin catalog full-read bugs with bounded initial reads. Products, parts, services, ProductSeriesManager, and inventory product preload now cap initial Firestore reads at 300 docs instead of streaming/loading whole collections; deeper full-history search/load-more remains a UX improvement rather than an unbounded read bug.",
+      "v58: Closed repair checklist/media direct-write bug and import receipt autosave lost-update bug. /api/repairs/checklist now patches checklist with auth, assignment, terminal status, field whitelist, and ticketVersion guards; technician UI uses it. /api/inventory/import now supports patch_item for per-line autosave with receiptVersion guard, recalculated totals, and server-side version increment; admin inventory no longer writes import_receipts.items directly for autosave.",
+      "v57: Repair post-handover media append moved off direct client Firestore writes. RepairTicketBoard now calls /api/repairs/media, which requires manage_repairs auth, validates media URLs/YouTube links, guards editable statuses, and appends postRepairMedia via Admin SDK arrayUnion. Checklist direct writes remain open under BUG-REPAIR-021.",
+      "v56: Public /api/search no longer reads full product/service collections on cache miss. Product and service lookup now use bounded searchKeywords array-contains queries, services keep a small bounded fallback for legacy docs, and /admin/services writes searchKeywords for new or edited services.",
+      "v55: Closed voucher uniqueness and public tracking scale/security bugs. Admin voucher mutations now go through /api/admin/vouchers with normalized deterministic code docs and client voucher writes closed in Firestore Rules; validate/web checkout/POS checkout/order rollback reject duplicate active voucher codes. /api/tracking now rate-limits, normalizes phone, bounds history queries, and returns masked whitelisted payloads. The admin/vouchers 500-customer read spike is marked fixed with exact tier-count aggregates deferred as a Firebase read optimization follow-up.",
+      "v54: Closed catalog DTO, revenue fallback, mutation idempotency, completed-order refund, and repair handover payload bugs. Public product/service paths now share publicCatalog DTOs; revenue no longer falls back to raw scans on aggregate failure; inventory/order/repair mutation cache hits verify operation contracts; completed order cancellation persists refund state; repair handover accepts operationKey and additionalFees.",
+      "v53: Closed five more audit bugs: import receipt supplier fallback now accepts receipt.supplierId, inventory import paymentMethod is cash|bank|debt only, public /api/checkout requires idempotencyKey, POS repair lookup is bounded by createdAt desc limit(20), and POS checkout reads the active cashier shift lock doc instead of querying open shifts.",
+      "v52: Inventory import payment contract now uses only cash|bank|debt end-to-end: preview UI no longer sends paid, /api/inventory/import rejects unknown paymentMethod values, ImportReceipt types were narrowed, and order/complete guards accept receipt.supplierId as the supplier fallback for import lines.",
+      "v51: Commission calculation no longer swallows transaction-critical errors; calculateAndSaveCommissionsServer logs and rethrows so POS checkout, order transition, and repair handover cannot silently skip commission docs or commissionCost aggregates.",
+      "v50: Manual commission creation moved from client Firestore addDoc to /api/admin/commissions/manual with admin auth, required idempotencyKey, staff/admin recipient validation, operation_requests caching, revenue aggregate commissionCost increment in the same transaction, and commissions writes are now server-only in Firestore Rules.",
+      "v49: Manual expense creation is now admin-only: Firestore expenses writes are no longer granted by view_revenue, /api/revenue/expenses requires admin auth, and /admin/revenue hides the create-expense action for staff viewers.",
+      "v48: Supplier debt payment now goes through /api/admin/suppliers/pay-debt with manage_inventory auth, required idempotencyKey, current-debt validation, one Firestore transaction for supplier transaction/expense/debt updates, and revenue aggregate increments for supplierPaymentCost plus cash/bank expense channels.",
+      "v47: Admin collect-debt now merges customerId debt orders with legacy phone debt orders, dedupes by order id, and rejects payments that cannot be fully distributed before writing debt/revenue updates.",
+      "v46: Admin collect-debt now requires an idempotencyKey, records completed operation_requests, validates cache hits by type/customer/amount/payment method/actor, and the customer drawer sends crypto.randomUUID per submit.",
+      "v45: /api/services/homepage-pricing now returns a whitelisted homepage pricing service DTO instead of raw service documents.",
+      "v44: System bug task now separates deferred follow-up work from small bug fixes: tracking proof model, voucher tier count aggregates, search indexing, shared public catalog DTOs, fix-held cursor mode, POS checkout timing pass, and revenue diagnostic fallback.",
+      "v43: Public /api/appointments and /api/checkout now strip HTML from submitted customer names and only update existing CRM names when the current name is empty or generic, matching /api/customers/sync.",
+      "v42: /api/ai now requires Firebase bearer auth, path-safe roomId, and decoded uid == roomId before pushing bot replies to RTDB; ChatWidget auto-reply sends the current Firebase ID token.",
+      "v41: /api/admin/fix-held is now dry-run by default; apply requires apply=true and confirm=FIX_HELD_APPLY, updates only products with changed held counts, and records a maintenance audit log.",
+      "v40: Public /api/search is now catalog-only with whitelisted product/service DTO fields and no order/repair reads; admin order/repair lookup moved to /api/admin/search with Firebase admin/staff bearer auth and masked summaries.",
+      "v39: Public /api/proxy-image now rejects arbitrary URLs; it only proxies https VietQR image hosts, uses a 5s timeout, requires image content-type, and caps responses at 2MB.",
+      "v38: Bounty OTP request record action now requires a Firebase ID token whose phone_number matches the requested phone; MissionsWidget records only after OTP confirmation succeeds.",
+      "v37: Public /api/products now clamps caller-provided limit to 1..50, always filters active products, and returns a whitelisted public product DTO instead of raw Firestore product documents.",
+      "v36: Audit pass recorded admin/vouchers read spike: opening the vouchers page can trigger DiscountRulesTab tier preview to query customers ordered by totalSpent limit(500), causing 500 Firestore reads before the customer preview is needed.",
+      "v35: Audit pass found initial-data order/repair Excel import still writes orders and repairs through client Firestore transactions, but Firestore Rules now block client creates for both server-only collections.",
+      "v34: Audit pass found idempotency guards are inconsistent across mutation APIs: POS checkout, inventory import, order transition, repair handover, and repair payment-edit accept completed operation keys too broadly compared with newer repair APIs that verify type/reference/actor.",
+      "v33: Audit pass found voucher code uniqueness is documented but not enforced: admin vouchers create auto-ID docs with no duplicate check while validate/web checkout/POS checkout query active vouchers by code limit(1).",
+      "v32: Audit pass added supplier payment aggregate drift and remaining admin catalog full-read paths: services page full services listener, ProductSeriesManager full products stream, and inventory refreshProducts full products load.",
+      "v31: Audit pass found repair editor edit-save is not atomic: admin repairs page commits payment via /api/repairs/payment-edit before a separate client transaction updates the remaining repair profile/device/media/staff fields.",
+      "v30: Audit pass added raw public catalog DTO leak (products/services expose costPrice/supplier/held through API/SSR/client props), inventory import paymentMethod mismatch (UI sends paid while API/report expects cash|bank|debt), and receipt-level supplier fallback mismatch during complete_import.",
+      "v29: System bug/performance audit opened follow-up plan for POS checkout latency, full products listeners, search/revenue scans, supplier payment atomicity, public tracking proof/rate-limit, repair client patch bypass, import receipt lost-update risk, bounty OTP record proof, products API limit clamp, proxy-image SSRF guard, AI RTDB room ownership, appointment/customer-name overwrite sync, web checkout required idempotency, fix-held maintenance guard, manual commission aggregate consistency, collect-debt idempotency and legacy-phone distribution, completed-order refund state drift, public search order/repair leak, and repair handover payload/idempotency mismatch.",
       "v28: Admin revenue actual-collected fix - source revenue fields now represent collected revenue instead of gross order total, debt collection increments payment-channel revenue, and /admin/revenue separates channel/source breakdowns.",
       "v27: POS cashier shift history - /api/pos/cashier-shift returns recent closed shifts and the Thu ngan tab shows closed-shift history for cash/bank reconciliation after closing a shift.",
       "v26: POS debt collection sync - /api/pos/checkout unifies selected old-order payments and surplus debt offset through orderPaymentTotals, updates old order paymentHistory/customer_transactions/revenue/cashier shift, and POS payment UI shows remaining amount/change due.",
@@ -101,9 +136,11 @@
         "parts/page.tsx"
       ],
       "changeLog": [
+        "v30: Public catalog paths currently need a whitelist DTO mapper so costPrice/supplier/held/internal fields are not serialized to customer API/SSR/client payloads.",
         "v2: supplierId field added to link to suppliers collection",
         "v3: supplier+supplierId moved to per-item level. paymentMethod added (paid|debt). Receipt-level supplier optional/backward compat.",
-        "v5: handleOrderReceipt validates all items have supplier before status transition. Draft expanded view has editable NCC dropdown per-item."
+        "v5: handleOrderReceipt validates all items have supplier before status transition. Draft expanded view has editable NCC dropdown per-item.",
+        "v30: complete_import guard must be aligned with receipt-level supplierId fallback; paymentMethod must be normalized to cash|bank|debt instead of UI paid."
       ]
     },
     "suppliers": {
@@ -525,8 +562,8 @@
   },
   "files": {
     "src/app/admin/parts/page.tsx": {
-      "lines": "~2005",
-      "purpose": "Quản lý linh kiện + nhập kho. Chứa: PartsPage, ImportPreviewModal, CreateReceiptModal.",
+      "lines": "~354",
+      "purpose": "Quản lý linh kiện. Đã tách ImportPreviewModal và CreateReceiptModal ra src/features/parts/ImportReceiptModals.tsx; logic hỗ trợ vào importReceiptUtils.ts và importReceiptTypes.ts.",
       "keyFunctions": {
         "executeFinalImport(paymentMethod)": {
           "description": "Chốt nhập kho. runTransaction: đọc products → cập nhật stock/costPrice → mark receipt completed → group items by supplierId → per-supplier debt/IMPORT_PAID → sync repair ticket parts+payment.",
@@ -610,7 +647,7 @@
       ]
     },
     "src/components/admin/CurrencyInput.tsx": {
-      "lines": 81,
+      "lines": 79,
       "purpose": "Drop-in replacement cho <input type='number'> hiển thị tiền VNĐ với dấu chấm ngăn cách hàng nghìn.",
       "exports": [
         "formatVND(value) → '1.500.000'",
@@ -654,7 +691,7 @@
       "dataFlow": "fetchDetailItem → deepest categoryIds → fetchProductVariants(categoryId) + fetchProductReviews(id) → pass to ProductDetailClient"
     },
     "src/app/(customer)/_lib/server-queries.ts": {
-      "lines": "~302",
+      "lines": "~352",
       "purpose": "Server-side Firestore queries dùng Admin SDK. Tất cả có cache/revalidate.",
       "functions": {
         "fetchDetailItem": "Fetch single product/service by ID or slug",
@@ -668,8 +705,8 @@
       }
     },
     "src/app/admin/pos/page.tsx": {
-      "lines": "~1160",
-      "purpose": "POS bán hàng. Cart + payment + receipt + repair lookup + auto-discount + QR/barcode scanner.",
+      "lines": "~2220",
+      "purpose": "POS bán hàng. Cart panel đã tách ra src/features/pos/PosCartPanel.tsx (~697 dòng) và posTypes.ts (~95 dòng). Page vẫn chứa logic checkout, repair lookup, auto-discount, QR/barcode scanner và cashier shift.",
       "keyFunctions": {
         "handleCheckout": {
           "description": "Checkout: group cart → build orderData → runTransaction(stock decrement + audit) → commission.",
@@ -715,8 +752,8 @@
       ]
     },
     "src/app/admin/repairs/page.tsx": {
-      "lines": "~2852",
-      "purpose": "Quản lý phiếu sửa chữa. Kanban board + modals + timeline.",
+      "lines": "~1435",
+      "purpose": "Quản lý phiếu sửa chữa. Đã tách 12 sub-components ra src/features/repairs/: RepairTicketBoard, RepairDetailModal, RepairEditorModal, RepairHandoverModal, RepairWarrantyModal, RepairFilters, RepairStatsGrid, RepairPrintTemplates, RepairAuxiliaryModals, RepairPageHeader, RepairMediaManagers, RepairPaginationFooter.",
       "currencyInputs": [
         "estimatedPrice (in issue list) — uses CurrencyInput since v3"
       ]
@@ -733,8 +770,8 @@
       ]
     },
     "src/lib/types.ts": {
-      "lines": 544,
-      "purpose": "TypeScript interfaces cho toàn bộ hệ thống.",
+      "lines": "10 (barrel re-export)",
+      "purpose": "Barrel file re-export từ src/lib/types/ gồm 10 module: common.ts, catalog.ts, commerce.ts, content.ts, repair.ts, inventory.ts, finance.ts, voucher.ts, workflow.ts, contact.ts.",
       "relevantTypes": {
         "Product": "seriesId, color, storageCapacity, conditionLabel đã có",
         "RepairTicket": "customer.phone dùng lookup, payment.status cần auto-update",
@@ -2025,8 +2062,15 @@
       "methods": [
         "GET"
       ],
-      "description": "Auto-mapped from app/api/search/route.ts",
+      "description": "Public catalog search only; returns whitelisted product/service DTO fields and does not expose order/repair documents.",
       "file": "src/app/api/search/route.ts"
+    },
+    "/api/admin/search": {
+      "methods": [
+        "GET"
+      ],
+      "description": "Admin/staff global search for catalog plus masked order/repair exact or phone lookup.",
+      "file": "src/app/api/admin/search/route.ts"
     },
     "/api/seed-admin": {
       "methods": [

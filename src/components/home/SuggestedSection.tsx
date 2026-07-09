@@ -1,17 +1,15 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { collection, query, where, orderBy, limit, getDocs, DocumentData, type QueryConstraint } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
-import Link from "next/link";
-import ServiceCard from "@/components/home/ServiceCard";
+import Link from 'next/link';
+import ServiceCard from '@/components/home/ServiceCard';
 
 const suggestedTabs = [
   { label: 'Tất cả', value: 'Tất cả' },
-  { label: 'iPhone', value: 'Apple' },   // iPhone ≈ brand Apple trong DB
+  { label: 'iPhone', value: 'Apple' },
   { label: 'Samsung', value: 'Samsung' },
   { label: 'Xiaomi', value: 'Xiaomi' },
-  { label: 'Oppo', value: 'OPPO' },      // chuẩn hoá theo brand trong admin
+  { label: 'Oppo', value: 'OPPO' },
 ];
 
 function SkeletonCard() {
@@ -27,39 +25,38 @@ function SkeletonCard() {
   );
 }
 
+const textValue = (value: unknown) => typeof value === 'string' ? value : '';
+const numberValue = (value: unknown) => typeof value === 'number' ? value : undefined;
+const tagList = (value: unknown) => Array.isArray(value)
+  ? value.filter((tag): tag is string => typeof tag === 'string')
+  : [];
+
 export default function SuggestedSection({ ssrLatestProducts = [] }: { ssrLatestProducts?: Record<string, unknown>[] }) {
-  const [suggestedBrand, setSuggestedBrand] = useState<string>('Tất cả');
-  // Initialize with SSR data if available
-  const [suggestedProducts, setSuggestedProducts] = useState<(DocumentData & { id: string })[]>(ssrLatestProducts.slice(0, 10) as (DocumentData & { id: string })[]);
+  const [suggestedBrand, setSuggestedBrand] = useState<string>(suggestedTabs[0].value);
+  const [suggestedProducts, setSuggestedProducts] = useState<Record<string, unknown>[]>(ssrLatestProducts.slice(0, 10));
   const [suggestedLoading, setSuggestedLoading] = useState(!ssrLatestProducts.length);
 
   useEffect(() => {
     let isMounted = true;
     const fetchSuggested = async () => {
-      // If "Tất cả", rely on SSR data unless empty
-      if (suggestedBrand === 'Tất cả' && ssrLatestProducts && ssrLatestProducts.length > 0) {
-        setSuggestedProducts(ssrLatestProducts.slice(0, 10) as (DocumentData & { id: string })[]);
+      if (suggestedBrand === suggestedTabs[0].value && ssrLatestProducts.length > 0) {
+        setSuggestedProducts(ssrLatestProducts.slice(0, 10));
         setSuggestedLoading(false);
         return;
       }
 
       setSuggestedLoading(true);
       try {
-        const constraints: QueryConstraint[] = [
-          where('status', '==', 'active'),
-          orderBy('createdAt', 'desc'),
-          limit(10),
-        ];
-        if (suggestedBrand !== 'Tất cả') {
-          constraints.push(where('brand', '==', suggestedBrand));
+        const params = new URLSearchParams({ limit: '10' });
+        if (suggestedBrand !== suggestedTabs[0].value) {
+          params.set('brand', suggestedBrand);
         }
-        const q = query(collection(db, 'products'), ...constraints);
-        const snapshot = await getDocs(q);
-        if (isMounted) {
-          setSuggestedProducts(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
-        }
+        const res = await fetch(`/api/products?${params.toString()}`);
+        if (!res.ok) throw new Error(`Products API failed with ${res.status}`);
+        const data = await res.json() as { products?: Record<string, unknown>[] };
+        if (isMounted) setSuggestedProducts(Array.isArray(data.products) ? data.products : []);
       } catch (error) {
-        console.error("Error fetching suggested:", error);
+        console.error('Error fetching suggested:', error);
       } finally {
         if (isMounted) setSuggestedLoading(false);
       }
@@ -105,19 +102,19 @@ export default function SuggestedSection({ ssrLatestProducts = [] }: { ssrLatest
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
               {suggestedProducts.map((product) => (
                 <ServiceCard
-                  key={product.id}
-                  id={product.id}
-                  name={product.name || product.title || ''}
-                  image={product.image || product.imageUrl || ''}
-                  price={product.price}
-                  price_original={product.price_original}
-                  price_promo={product.price_promo}
-                  warranty_text={product.warranty_text}
-                  repair_time={product.repair_time}
-                  tags={product.tags || []}
-                  rating={product.rating}
-                  reviewCount={product.reviewCount}
-                  isFlashSale={product.isFlashSale}
+                  key={String(product.id)}
+                  id={String(product.id || '')}
+                  name={textValue(product.name) || textValue(product.title)}
+                  image={textValue(product.image) || textValue(product.imageUrl)}
+                  price={numberValue(product.price)}
+                  price_original={numberValue(product.price_original)}
+                  price_promo={numberValue(product.price_promo)}
+                  warranty_text={textValue(product.warranty_text)}
+                  repair_time={textValue(product.repair_time)}
+                  tags={tagList(product.tags)}
+                  rating={numberValue(product.rating)}
+                  reviewCount={numberValue(product.reviewCount)}
+                  isFlashSale={product.isFlashSale === true}
                 />
               ))}
             </div>

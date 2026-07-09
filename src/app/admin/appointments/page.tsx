@@ -71,10 +71,22 @@ export default function AppointmentsPage() {
     const [lastDoc, setLastDoc] = useState<DocumentSnapshot | null>(null);
     const [hasMore, setHasMore] = useState(true);
     const [isSearchingDB, setIsSearchingDB] = useState(false);
+    const [activeTab, setActiveTab] = useState<'active' | 'completed'>('active');
+
+    // Reset status filter when changing tabs
+    useEffect(() => {
+        setStatusFilter('');
+    }, [activeTab]);
 
     // Fetch appointments (Real-time with limit)
     useEffect(() => {
-        const q = query(collection(db, 'appointments'), orderBy('createdAt', 'desc'), limit(50));
+        setLoading(true);
+        let q;
+        if (activeTab === 'completed') {
+            q = query(collection(db, 'appointments'), where('status', '==', 'completed'), orderBy('createdAt', 'desc'), limit(20));
+        } else {
+            q = query(collection(db, 'appointments'), where('status', 'in', ['pending', 'confirmed', 'cancelled']), orderBy('createdAt', 'desc'), limit(20));
+        }
         const unsubscribe = onSnapshot(q, (snapshot: QuerySnapshot<DocumentData>) => {
             const data = snapshot.docs.map((doc) => ({
                 id: doc.id,
@@ -90,12 +102,17 @@ export default function AppointmentsPage() {
         });
 
         return () => unsubscribe();
-    }, []);
+    }, [activeTab]);
 
     const loadMoreData = async () => {
         if (!lastDoc || !hasMore) return;
         setLoading(true);
-        const q = query(collection(db, 'appointments'), orderBy('createdAt', 'desc'), startAfter(lastDoc), limit(50));
+        let q;
+        if (activeTab === 'completed') {
+            q = query(collection(db, 'appointments'), where('status', '==', 'completed'), orderBy('createdAt', 'desc'), startAfter(lastDoc), limit(20));
+        } else {
+            q = query(collection(db, 'appointments'), where('status', 'in', ['pending', 'confirmed', 'cancelled']), orderBy('createdAt', 'desc'), startAfter(lastDoc), limit(20));
+        }
         const snap = await getDocs(q);
         
         if (!snap.empty) {
@@ -281,7 +298,7 @@ export default function AppointmentsPage() {
     const { paginatedData: paginatedAppointments, currentPage, totalPages, pageSize, totalFiltered, setPage, setPageSize, resetPage } = useClientPagination(filteredAppointments, 20);
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    useEffect(() => { resetPage(); }, [searchQuery, statusFilter, storeFilter]);
+    useEffect(() => { resetPage(); }, [searchQuery, statusFilter, storeFilter, activeTab]);
 
     if (loading) {
         return (
@@ -298,6 +315,22 @@ export default function AppointmentsPage() {
                     <h1 className="text-lg font-bold text-gray-900">Quản lý đặt lịch</h1>
                     <p className="text-gray-500">Danh sách khách hàng đăng ký sửa chữa</p>
                 </div>
+            </div>
+
+            {/* Tabs */}
+            <div className="flex space-x-1 bg-gray-100 p-1 rounded-lg w-fit">
+                <button
+                    onClick={() => setActiveTab('active')}
+                    className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${activeTab === 'active' ? 'bg-white text-gray-900 shadow' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                    Đang hoạt động
+                </button>
+                <button
+                    onClick={() => setActiveTab('completed')}
+                    className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${activeTab === 'completed' ? 'bg-white text-gray-900 shadow' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                    Đã hoàn thành
+                </button>
             </div>
 
             {/* Filters */}
@@ -332,7 +365,9 @@ export default function AppointmentsPage() {
                         className="w-full h-8 text-sm px-4 border rounded-lg focus:border-orange-500 focus:outline-none bg-white"
                     >
                         <option value="">Tất cả trạng thái</option>
-                        {Object.entries(statusConfig).map(([key, value]) => (
+                        {Object.entries(statusConfig)
+                            .filter(([key]) => activeTab === 'completed' ? key === 'completed' : key !== 'completed')
+                            .map(([key, value]) => (
                             <option key={key} value={key}>{value.label}</option>
                         ))}
                     </select>

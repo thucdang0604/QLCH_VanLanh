@@ -110,7 +110,27 @@ export default function SettingsPage() {
 
     return (
         <div className={`${activeTab === 'receipt' ? 'max-w-7xl' : 'max-w-4xl'} mx-auto space-y-6`}>
-            <div className="flex items-center gap-6 border-b border-gray-200 overflow-x-auto">
+            {/* Mobile Tab Selector */}
+            <div className="block md:hidden">
+                <select
+                    aria-label="Chọn tab cài đặt"
+                    title="Chọn tab cài đặt"
+                    value={activeTab}
+                    onChange={(e) => setActiveTab(e.target.value as typeof activeTab)}
+                    className="w-full h-11 px-4 border border-gray-200 rounded-xl bg-white text-gray-900 focus:ring-2 focus:ring-orange-500 focus:outline-none font-medium shadow-sm"
+                >
+                    <option value="general">Cài đặt chung</option>
+                    <option value="categories">Danh mục & Thương hiệu</option>
+                    <option value="navigation">Quản lý Menu</option>
+                    <option value="payment">Thanh toán & Ngân hàng</option>
+                    <option value="chat">Tích hợp Live Chat</option>
+                    <option value="repairs">Workflow Sửa chữa</option>
+                    <option value="receipt">Cấu hình in</option>
+                </select>
+            </div>
+
+            {/* Desktop Tabs */}
+            <div className="hidden md:flex items-center gap-6 border-b border-gray-200">
                 <button
                     onClick={() => setActiveTab('general')}
                     className={`pb-3 text-sm font-medium transition-colors border-b-2 ${activeTab === 'general'
@@ -450,7 +470,7 @@ export default function SettingsPage() {
                         </div>
 
                         {/* Footer Actions */}
-                        <div className="px-6 py-4 bg-gray-50 border-t flex items-center justify-end gap-3">
+                        <div className="p-4 md:px-6 md:py-4 bg-white md:bg-gray-50 border-t flex items-center justify-end gap-3 sticky bottom-0 z-40 shadow-[0_-4px_10px_-4px_rgba(0,0,0,0.1)] md:shadow-none md:relative md:z-auto">
                             <button
                                 type="button"
                                 title="Hủy thay đổi"

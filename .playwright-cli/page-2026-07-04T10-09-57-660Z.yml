@@ -1,0 +1,310 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - banner [ref=e3]:
+      - generic [ref=e6]:
+        - link "Văn Lành Service" [ref=e7] [cursor=pointer]:
+          - /url: /
+          - img "Văn Lành Service" [ref=e8]
+        - generic [ref=e9]:
+          - link "0975.242.026" [ref=e10] [cursor=pointer]:
+            - /url: tel:0975242026
+            - img [ref=e11]
+            - generic [ref=e13]: 0975.242.026
+          - button "Giỏ hàng" [ref=e14]:
+            - img [ref=e15]
+            - generic [ref=e19]: Giỏ hàng
+          - button "Mở menu" [ref=e20]:
+            - img [ref=e21]
+      - generic [ref=e24]:
+        - textbox "Bạn cần tìm gì hôm nay?" [ref=e25]
+        - button "Tìm kiếm" [ref=e26]:
+          - img [ref=e27]
+      - navigation [ref=e30]:
+        - list [ref=e32]:
+          - listitem [ref=e33]:
+            - link "IOS|Android" [ref=e34] [cursor=pointer]:
+              - /url: /category/sua-dien-thoai
+              - img [ref=e35]
+              - text: IOS|Android
+          - listitem [ref=e38]:
+            - link "Laptop|Macbook" [ref=e39] [cursor=pointer]:
+              - /url: /category/sua-chua-laptop
+              - img [ref=e40]
+              - text: Laptop|Macbook
+          - listitem [ref=e42]:
+            - link "Máy cũ giá tốt" [ref=e43] [cursor=pointer]:
+              - /url: /category/dien-thoai
+              - img [ref=e44]
+              - text: Máy cũ giá tốt
+          - listitem [ref=e47]:
+            - link "Phụ kiện" [ref=e48] [cursor=pointer]:
+              - /url: /category/phu-kien
+              - img [ref=e49]
+              - text: Phụ kiện
+          - listitem [ref=e51]:
+            - link "Đào tạo" [ref=e52] [cursor=pointer]:
+              - /url: tin-tuc
+              - img [ref=e53]
+              - text: Đào tạo
+    - main [ref=e55]:
+      - generic [ref=e58]:
+        - link [ref=e59] [cursor=pointer]:
+          - /url: /
+          - img [ref=e60]
+        - generic [ref=e62]:
+          - heading "Kết quả tìm kiếm" [level=1] [ref=e63]
+          - paragraph [ref=e64]: "Từ khóa: \"iphone\""
+    - contentinfo [ref=e126]:
+      - generic [ref=e128]:
+        - generic [ref=e130]:
+          - generic [ref=e131]:
+            - heading "Hệ thống cửa hàng" [level=3] [ref=e132]:
+              - img [ref=e133]
+              - text: Hệ thống cửa hàng
+            - generic [ref=e136]:
+              - generic [ref=e137]:
+                - generic [ref=e138]: Trụ sở chính
+                - generic [ref=e139]: 117 Nguyên Hồng, Phường Bình Lợi Trung, Bình Thạnh, TP.HCM
+                - link "0932.242.026" [ref=e140] [cursor=pointer]:
+                  - /url: tel:0932242026
+                  - img [ref=e141]
+                  - text: 0932.242.026
+                - link "Xem bản đồ" [ref=e143] [cursor=pointer]:
+                  - /url: https://maps.app.goo.gl/ShyyoH2fMeyJKioy5
+                  - img [ref=e144]
+                  - text: Xem bản đồ
+              - generic [ref=e147]:
+                - img [ref=e148]
+                - generic [ref=e151]: "Giờ làm việc: 9h - 21h tất cả các ngày"
+          - generic [ref=e152]:
+            - heading "Chính sách" [level=3] [ref=e153]:
+              - img [ref=e154]
+              - text: Chính sách
+            - list [ref=e156]:
+              - listitem [ref=e157]:
+                - link "Chính sách bảo hành" [ref=e158] [cursor=pointer]:
+                  - /url: /info/chinh-sach-bao-hanh
+                  - img [ref=e159]
+                  - text: Chính sách bảo hành
+              - listitem [ref=e161]:
+                - link "Chính sách mua hàng & giao nhận" [ref=e162] [cursor=pointer]:
+                  - /url: /info/chinh-sach-mua-hang
+                  - img [ref=e163]
+                  - text: Chính sách mua hàng & giao nhận
+              - listitem [ref=e165]:
+                - link "Chính sách đổi trả" [ref=e166] [cursor=pointer]:
+                  - /url: /info/chinh-sach-doi-tra
+                  - img [ref=e167]
+                  - text: Chính sách đổi trả
+              - listitem [ref=e169]:
+                - link "Chính sách trả góp" [ref=e170] [cursor=pointer]:
+                  - /url: /info/tra-gop
+                  - img [ref=e171]
+                  - text: Chính sách trả góp
+              - listitem [ref=e173]:
+                - link "Chính sách bảo mật" [ref=e174] [cursor=pointer]:
+                  - /url: /info/chinh-sach-bao-mat
+                  - img [ref=e175]
+                  - text: Chính sách bảo mật
+              - listitem [ref=e177]:
+                - link "Điều khoản dịch vụ" [ref=e178] [cursor=pointer]:
+                  - /url: /info/dieu-khoan-dich-vu
+                  - img [ref=e179]
+                  - text: Điều khoản dịch vụ
+          - generic [ref=e181]:
+            - heading "Dịch vụ sửa chữa" [level=3] [ref=e182]:
+              - img [ref=e183]
+              - text: Dịch vụ sửa chữa
+            - list [ref=e185]:
+              - listitem [ref=e186]:
+                - link "Sửa chữa Điện thoại" [ref=e187] [cursor=pointer]:
+                  - /url: /category/dien-thoai
+                  - img [ref=e188]
+                  - text: Sửa chữa Điện thoại
+              - listitem [ref=e190]:
+                - link "Sửa chữa Laptop" [ref=e191] [cursor=pointer]:
+                  - /url: /category/laptop
+                  - img [ref=e192]
+                  - text: Sửa chữa Laptop
+              - listitem [ref=e194]:
+                - link "Thay Pin điện thoại" [ref=e195] [cursor=pointer]:
+                  - /url: /category/dich-vu-pho-bien/thay-pin
+                  - img [ref=e196]
+                  - text: Thay Pin điện thoại
+              - listitem [ref=e198]:
+                - link "Ép kính điện thoại" [ref=e199] [cursor=pointer]:
+                  - /url: /category/dich-vu-pho-bien/ep-kinh
+                  - img [ref=e200]
+                  - text: Ép kính điện thoại
+              - listitem [ref=e202]:
+                - link "Sửa mainboard chuyên sâu" [ref=e203] [cursor=pointer]:
+                  - /url: /category/dich-vu-pho-bien
+                  - img [ref=e204]
+                  - text: Sửa mainboard chuyên sâu
+              - listitem [ref=e206]:
+                - link "Phụ kiện chính hãng" [ref=e207] [cursor=pointer]:
+                  - /url: /category/phu-kien
+                  - img [ref=e208]
+                  - text: Phụ kiện chính hãng
+          - generic [ref=e210]:
+            - heading "Về Văn Lành Service" [level=3] [ref=e211]
+            - list [ref=e212]:
+              - listitem [ref=e213]:
+                - link "Giới thiệu" [ref=e214] [cursor=pointer]:
+                  - /url: /info/gioi-thieu
+                  - img [ref=e215]
+                  - text: Giới thiệu
+              - listitem [ref=e217]:
+                - link "Bài Viết Nổi Bật" [ref=e218] [cursor=pointer]:
+                  - /url: /tin-tuc
+                  - img [ref=e219]
+                  - text: Bài Viết Nổi Bật
+              - listitem [ref=e221]:
+                - link "Đào tạo học viên" [ref=e222] [cursor=pointer]:
+                  - /url: /dao-tao-hoc-vien
+                  - img [ref=e223]
+                  - text: Đào tạo học viên
+              - listitem [ref=e225]:
+                - link "Liên hệ" [ref=e226] [cursor=pointer]:
+                  - /url: /lien-he
+                  - img [ref=e227]
+                  - text: Liên hệ
+            - generic [ref=e229]:
+              - img [ref=e231]
+              - generic [ref=e233]:
+                - generic [ref=e234]: Văn Lành Service
+                - text: fixphone.vn
+        - generic [ref=e236]:
+          - generic [ref=e237]: © 2026 Văn Lành Service. All rights reserved.
+          - generic [ref=e238]:
+            - text: "Hotline:"
+            - link "0975.242.026" [ref=e239] [cursor=pointer]:
+              - /url: tel:0975242026
+    - generic [ref=e240]:
+      - generic [ref=e241]:
+        - generic [ref=e242]:
+          - generic [ref=e243]: 🔧
+          - generic [ref=e244]: Danh mục dịch vụ
+        - button [ref=e245]:
+          - img [ref=e246]
+      - generic [ref=e249]:
+        - generic [ref=e250]:
+          - button "Sửa iPhone" [ref=e251]:
+            - img [ref=e253]
+            - generic [ref=e255]: Sửa iPhone
+          - button "Sửa Samsung" [ref=e256]:
+            - img [ref=e258]
+            - generic [ref=e260]: Sửa Samsung
+          - button "Thay Pin" [ref=e261]:
+            - img [ref=e263]
+            - generic [ref=e265]: Thay Pin
+          - button "Ép Kính" [ref=e266]:
+            - img [ref=e268]
+            - generic [ref=e270]: Ép Kính
+          - button "Sửa Laptop" [ref=e271]:
+            - img [ref=e273]
+            - generic [ref=e275]: Sửa Laptop
+          - button "Sửa Apple Watch" [ref=e276]:
+            - img [ref=e278]
+            - generic [ref=e283]: Sửa Apple Watch
+          - button "Sửa iPad" [ref=e284]:
+            - img [ref=e286]
+            - generic [ref=e288]: Sửa iPad
+          - button "Sửa Máy tính" [ref=e289]:
+            - img [ref=e291]
+            - generic [ref=e294]: Sửa Máy tính
+          - button "IOS" [ref=e295]:
+            - img [ref=e297]
+            - generic [ref=e299]: IOS
+          - button "Samsung" [ref=e300]:
+            - img [ref=e302]
+            - generic [ref=e304]: Samsung
+          - button "Android" [ref=e305]:
+            - img [ref=e307]
+            - generic [ref=e309]: Android
+        - generic [ref=e311]:
+          - generic [ref=e312]:
+            - heading "Sửa iPhone" [level=3] [ref=e313]
+            - link "Xem tất cả" [ref=e314] [cursor=pointer]:
+              - /url: /category/sua-chua-dien-thoai/ios
+              - text: Xem tất cả
+              - img [ref=e315]
+          - generic [ref=e317]:
+            - generic [ref=e318]:
+              - heading "Dòng máy" [level=4] [ref=e319]
+              - generic [ref=e320]:
+                - link "iPhone 16 Pro Max" [ref=e321] [cursor=pointer]:
+                  - /url: /category/sua-chua-dien-thoai/ios
+                - link "iPhone 16 Pro" [ref=e322] [cursor=pointer]:
+                  - /url: /category/sua-chua-dien-thoai/ios
+                - link "iPhone 16" [ref=e323] [cursor=pointer]:
+                  - /url: /category/sua-chua-dien-thoai/ios
+                - link "iPhone 15 Pro Max" [ref=e324] [cursor=pointer]:
+                  - /url: /category/sua-chua-dien-thoai/ios
+                - link "iPhone 15 Pro" [ref=e325] [cursor=pointer]:
+                  - /url: /category/sua-chua-dien-thoai/ios
+                - link "iPhone 15" [ref=e326] [cursor=pointer]:
+                  - /url: /category/sua-chua-dien-thoai/ios
+                - link "iPhone 14 Pro Max" [ref=e327] [cursor=pointer]:
+                  - /url: /category/sua-chua-dien-thoai/ios
+                - link "iPhone 14" [ref=e328] [cursor=pointer]:
+                  - /url: /category/sua-chua-dien-thoai/ios
+                - link "iPhone 13" [ref=e329] [cursor=pointer]:
+                  - /url: /category/sua-chua-dien-thoai/ios
+                - link "iPhone 12" [ref=e330] [cursor=pointer]:
+                  - /url: /category/sua-chua-dien-thoai/ios
+                - link "iPhone 11" [ref=e331] [cursor=pointer]:
+                  - /url: /category/sua-chua-dien-thoai/ios
+            - generic [ref=e332]:
+              - heading "Dịch vụ phổ biến" [level=4] [ref=e333]
+              - generic [ref=e334]:
+                - link "Thay màn hình iPhone" [ref=e335] [cursor=pointer]:
+                  - /url: /category/sua-chua-dien-thoai/ios
+                - link "Thay pin iPhone" [ref=e336] [cursor=pointer]:
+                  - /url: /category/sua-chua-dien-thoai/ios
+                - link "Ép kính iPhone" [ref=e337] [cursor=pointer]:
+                  - /url: /category/sua-chua-dien-thoai/ios
+                - link "Sửa loa iPhone" [ref=e338] [cursor=pointer]:
+                  - /url: /category/sua-chua-dien-thoai/ios
+                - link "Thay camera iPhone" [ref=e339] [cursor=pointer]:
+                  - /url: /category/sua-chua-dien-thoai/ios
+    - navigation [ref=e341]:
+      - generic [ref=e342]:
+        - button "Danh mục" [ref=e343]:
+          - img [ref=e344]
+          - generic [ref=e349]: Danh mục
+        - link "Bài viết" [ref=e350] [cursor=pointer]:
+          - /url: /tin-tuc
+          - img [ref=e351]
+          - generic [ref=e354]: Bài viết
+        - button "Mở liên hệ" [ref=e355]:
+          - img [ref=e357]
+          - generic [ref=e359]: Liên hệ
+        - button "Đặt lịch" [ref=e360]:
+          - img [ref=e361]
+          - generic [ref=e365]: Đặt lịch
+        - button "Tra cứu" [ref=e366]:
+          - img [ref=e367]
+          - generic [ref=e370]: Tra cứu
+    - generic [ref=e371]:
+      - generic:
+        - link "Chat qua Zalo":
+          - /url: https://zalo.me/0975242026
+          - img
+          - generic: Chat Zalo
+        - link "Chat qua Messenger":
+          - /url: https://www.facebook.com/vanlanh2402
+          - img
+          - generic: Messenger
+        - button "Mở chat hỗ trợ":
+          - generic: Chat AI hỗ trợ
+      - button "Liên hệ" [ref=e372]:
+        - img [ref=e374]
+  - button "Open Next.js Dev Tools" [ref=e382] [cursor=pointer]:
+    - img [ref=e383]
+  - alert [ref=e386]
+  - generic [ref=e387]:
+    - button "Nhận quà tặng" [ref=e388]:
+      - img [ref=e389]
+    - button "Ẩn" [ref=e391]:
+      - img [ref=e392]

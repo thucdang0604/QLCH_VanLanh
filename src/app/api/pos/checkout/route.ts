@@ -72,6 +72,9 @@ function getCashierShiftChannel(paymentMethodCode: string): 'cash' | 'bank' | 'n
     return 'none';
 }
 
+const ACTIVE_SHIFT_LOCK_COLLECTION = 'system_counters';
+const ACTIVE_SHIFT_LOCK_ID = 'active_cashier_shift';
+
 function resolvePaymentCompletionTarget(workflow: WorkflowNode[], currentStatus: string) {
     const currentNode = requireWorkflowNode(workflow, currentStatus);
     if (currentNode.isTerminal) {
@@ -417,11 +420,13 @@ export async function POST(request: NextRequest) {
             let appliedPersonalVoucher = false;
 
             if (voucherCode && typeof voucherCode === 'string') {
-                const voucherQuery = await db.collection('vouchers')
+                const voucherQuery = await tx.get(db.collection('vouchers')
                     .where('code', '==', voucherCode.trim().toUpperCase())
                     .where('isActive', '==', true)
-                    .limit(1)
-                    .get();
+                    .limit(2));
+                if (voucherQuery.size > 1) {
+                    throw new Error('Mã Voucher đang bị trùng dữ liệu. Vui lòng tắt hoặc gộp mã trùng trước khi sử dụng.');
+                }
                 if (!voucherQuery.empty) {
                     voucherRef = voucherQuery.docs[0].ref;
                     const voucherSnap = await tx.get(voucherRef);
@@ -672,14 +677,17 @@ export async function POST(request: NextRequest) {
             let cashierShiftRef: FirebaseFirestore.DocumentReference | null = null;
 
             if (cashierShiftCollectedAmount > 0) {
-                const activeShiftSnap = await tx.get(
-                    db.collection('cashier_shifts')
-                        .where('status', '==', 'open')
-                        .limit(1)
-                );
-                const activeShiftDoc = activeShiftSnap.docs[0];
+                const activeShiftLockSnap = await tx.get(db.collection(ACTIVE_SHIFT_LOCK_COLLECTION).doc(ACTIVE_SHIFT_LOCK_ID));
+                const activeShiftId = typeof activeShiftLockSnap.data()?.activeShiftId === 'string'
+                    ? String(activeShiftLockSnap.data()?.activeShiftId)
+                    : '';
+                const activeShiftRef = activeShiftId ? db.collection('cashier_shifts').doc(activeShiftId) : null;
+                const activeShiftDoc = activeShiftRef ? await tx.get(activeShiftRef) : null;
                 if (!activeShiftDoc) {
                     throw new Error('Vui lòng mở ca thu ngân trước khi thanh toán tiền mặt hoặc chuyển khoản tại POS.');
+                }
+                if (!activeShiftDoc.exists || activeShiftDoc.data()?.status !== 'open') {
+                    throw new Error('Ca thu ngan dang mo khong hop le. Vui long chot/mo lai ca truoc khi thanh toan.');
                 }
                 cashierShiftRef = activeShiftDoc.ref;
             }
@@ -1272,7 +1280,7 @@ export async function POST(request: NextRequest) {
         debugTiming.transactionSteps = transactionTiming;
         debugTiming.total = Date.now() - startedAt;
         if (Number(debugTiming.total) > 1500) {
-            console.info('POS checkout API timing', debugTiming);
+            console.warn('POS checkout API timing', debugTiming);
         }
 
         return NextResponse.json({ ...result, debugTiming });

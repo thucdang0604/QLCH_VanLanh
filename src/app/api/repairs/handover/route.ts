@@ -43,13 +43,16 @@ export async function POST(request: NextRequest) {
         const caller = await requirePermission(request, 'manage_repairs');
 
         const body = await request.json();
-        const { ticketId, targetStatus, ticketVersion, idempotencyKey, laborCost } = body;
+        const { ticketId, targetStatus, ticketVersion, laborCost, additionalFees } = body;
+        const idempotencyKey = body.idempotencyKey || body.operationKey;
 
         if (!ticketId || !targetStatus) {
             return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
         }
 
         const db = getAdminDb();
+        const requestedLaborCost = laborCost === undefined ? null : Number(laborCost) || 0;
+        const requestedAdditionalFees = additionalFees === undefined ? null : Number(additionalFees) || 0;
 
         const result = await db.runTransaction(async (tx) => {
             if (idempotencyKey) {
@@ -58,6 +61,15 @@ export async function POST(request: NextRequest) {
                 if (opSnap.exists) {
                     const data = opSnap.data();
                     if (data?.status === 'completed') {
+                        if (
+                            data.type !== 'repair_handover' ||
+                            data.referenceId !== ticketId ||
+                            data.targetStatus !== targetStatus ||
+                            (data.laborCost ?? null) !== requestedLaborCost ||
+                            (data.additionalFees ?? null) !== requestedAdditionalFees
+                        ) {
+                            throw new Error('Idempotency key da duoc dung cho thao tac khac.');
+                        }
                         return { success: true, fromCache: true };
                     }
                 }
@@ -130,11 +142,11 @@ export async function POST(request: NextRequest) {
             // Recompute payment strictly
             const partsCost = selectedParts.reduce((sum, p) => sum + ((p.unitPriceAtUse || 0) * p.quantity), 0);
             const currentPayment = ticket.payment || {} as RepairTicket['payment'];
-            const additionalFees = Number(currentPayment.additionalFees) || 0;
+            const finalAdditionalFees = requestedAdditionalFees ?? (Number(currentPayment.additionalFees) || 0);
             const discountAmount = Number(currentPayment.discountAmount) || 0;
             const calculatedLaborCost = (ticket.issues || []).reduce((sum, i) => sum + (Number(i.estimatedPrice) || 0), 0);
             const finalLaborCost = laborCost !== undefined ? Number(laborCost) : (currentPayment.laborCost !== undefined ? currentPayment.laborCost : calculatedLaborCost);
-            const amount = partsCost + finalLaborCost + additionalFees - discountAmount;
+            const amount = partsCost + finalLaborCost + finalAdditionalFees - discountAmount;
 
             const updateData: Record<string, unknown> = {
                 status: targetStatus,
@@ -147,6 +159,7 @@ export async function POST(request: NextRequest) {
                     ...currentPayment,
                     partsCost,
                     laborCost: finalLaborCost,
+                    additionalFees: finalAdditionalFees,
                     amount
                 },
                 version: (ticket.version || 0) + 1,
@@ -375,7 +388,10 @@ export async function POST(request: NextRequest) {
                     status: 'completed',
                     completedAt: FieldValue.serverTimestamp(),
                     type: 'repair_handover',
-                    referenceId: ticketId
+                    referenceId: ticketId,
+                    targetStatus,
+                    laborCost: requestedLaborCost,
+                    additionalFees: requestedAdditionalFees
                 });
             }
             inventoryLogAllocations.at(-1)?.commitCounter();

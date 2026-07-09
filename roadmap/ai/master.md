@@ -27,4 +27,5 @@
 - [master](modules/master.md)
 - [agent-chat](modules/agent-chat.md)
 - [customer-web-qa](modules/customer-web-qa.md)
+- [System Performance Audit 2026-07-03](modules/system_performance_20260703.md)
 - [Bugs Khác](modules/other_bugs.md)

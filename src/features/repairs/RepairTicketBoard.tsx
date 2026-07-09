@@ -100,7 +100,7 @@ export function RepairTicketBoard({
 }: RepairTicketBoardProps) {
     return (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden print:hidden">
-            <div className="block md:hidden divide-y divide-gray-100">
+            <div className="block lg:hidden divide-y divide-gray-100">
                 {filtered.length === 0 ? (
                     <div className="px-6 py-12 text-center text-gray-400">
                         <Wrench size={40} className="mx-auto mb-2 opacity-30" />
@@ -228,7 +228,7 @@ export function RepairTicketBoard({
                     );
                 })}
             </div>
-            <div className="hidden md:block overflow-x-auto">
+            <div className="hidden lg:block overflow-x-auto">
                 <table className="w-full text-left min-w-[800px]">
                     <thead>
                         <tr className="bg-gray-50 border-b text-xs uppercase text-gray-500 font-semibold">

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, updateDoc, where } from 'firebase/firestore';
+import { collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, updateDoc, where, limit, getDocs, QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
 import { Loader2, MessageCircle, Save, Star, Trash2, X } from 'lucide-react';
 import Modal from '@/components/admin/Modal';
 import { db } from '@/lib/firebase';
@@ -19,7 +19,8 @@ export function CommentsModal({ article, onClose }: { article: Article, onClose:
         const q = query(
             collection(db, 'article_comments'),
             where('articleId', '==', article.id),
-            orderBy('createdAt', 'desc')
+            orderBy('createdAt', 'desc'),
+            limit(50)
         );
         const unsub = onSnapshot(q, (snap) => {
             const items = snap.docs.map(d => ({ id: d.id, ...d.data() } as ArticleComment));
@@ -208,16 +209,23 @@ export function GlobalCommentsTab({ articles }: { articles: Article[] }) {
     const [savingReply, setSavingReply] = useState(false);
 
     useEffect(() => {
-        const q = query(
-            collection(db, 'article_comments'),
-            orderBy('createdAt', 'desc')
-        );
-        const unsub = onSnapshot(q, (snap) => {
-            const items = snap.docs.map(d => ({ id: d.id, ...d.data() } as ArticleComment));
-            setComments(items);
-            setLoading(false);
-        });
-        return () => unsub();
+        const loadComments = async () => {
+            try {
+                const q = query(
+                    collection(db, 'article_comments'),
+                    orderBy('createdAt', 'desc'),
+                    limit(100)
+                );
+                const snap = await getDocs(q);
+                const items = snap.docs.map((d: QueryDocumentSnapshot<DocumentData>) => ({ id: d.id, ...d.data() } as ArticleComment));
+                setComments(items);
+                setLoading(false);
+            } catch (err) {
+                console.error('Error loading global comments:', err);
+                setLoading(false);
+            }
+        };
+        loadComments();
     }, []);
 
     const handleApprove = async (id: string, currentStatus: string) => {

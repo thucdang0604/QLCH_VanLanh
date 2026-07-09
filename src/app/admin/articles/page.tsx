@@ -28,7 +28,7 @@ export default function ArticlesPage() {
 
     // ── Realtime subscription to Firestore ──
     useEffect(() => {
-        const q = query(collection(db, 'articles'), orderBy('createdAt', 'desc'), limit(200));
+        const q = query(collection(db, 'articles'), orderBy('createdAt', 'desc'), limit(50));
         const unsub = onSnapshot(q, (snap) => {
             const items = snap.docs.map(d => ({ id: d.id, ...d.data() } as Article));
             setArticles(items);

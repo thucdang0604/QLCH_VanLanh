@@ -2,6 +2,7 @@ import { getAdminDb, isAdminAvailable } from '@/lib/firebaseAdmin';
 import { unstable_cache } from 'next/cache';
 import { PRODUCT_STATUS } from '@/lib/productLifecycle';
 import { filterFlashSaleProducts } from '@/lib/flashSale';
+import { toPublicProduct, toPublicService } from '@/lib/publicCatalog';
 
 /** Serialized Firestore document with guaranteed `id` field */
 export type SerializedDoc = { id: string } & Record<string, unknown>;
@@ -92,17 +93,7 @@ export const fetchCategoryItems = unstable_cache(
 
         const items = snapshot.docs.map(doc => {
             const data = doc.data();
-
-            // Remove non-serializable fields (like Firestore Timestamps)
-            const serialized: SerializedDoc = { ...data, id: doc.id };
-            if (serialized.createdAt && typeof (serialized.createdAt as { toDate?: unknown }).toDate === 'function') {
-                serialized.createdAt = (serialized.createdAt as { toDate: () => Date }).toDate().getTime();
-            }
-            if (serialized.updatedAt && typeof (serialized.updatedAt as { toDate?: unknown }).toDate === 'function') {
-                serialized.updatedAt = (serialized.updatedAt as { toDate: () => Date }).toDate().getTime();
-            }
-
-            return serialized;
+            return isRepair ? toPublicService(doc.id, data) : toPublicProduct(doc.id, data);
         });
 
         return items;
@@ -161,15 +152,7 @@ export const fetchDetailItem = unstable_cache(
         if (type === 'products' && data.status !== PRODUCT_STATUS.ACTIVE) {
             return null;
         }
-        const serialized: SerializedDoc = { ...data, id: doc.id };
-        if (serialized.createdAt && typeof (serialized.createdAt as { toDate?: unknown }).toDate === 'function') {
-            serialized.createdAt = (serialized.createdAt as { toDate: () => Date }).toDate().getTime();
-        }
-        if (serialized.updatedAt && typeof (serialized.updatedAt as { toDate?: unknown }).toDate === 'function') {
-            serialized.updatedAt = (serialized.updatedAt as { toDate: () => Date }).toDate().getTime();
-        }
-
-        return serialized;
+        return type === 'products' ? toPublicProduct(doc.id, data) : toPublicService(doc.id, data);
     },
     ['detail-item'],
     { tags: ['products', 'services'], revalidate: 300 }
@@ -229,17 +212,7 @@ export const fetchFlashSaleProducts = unstable_cache(
             .limit(20)
             .get();
 
-        const items = snapshot.docs.map(doc => {
-            const data = doc.data();
-            const serialized: SerializedDoc = { ...data, id: doc.id };
-            if (serialized.createdAt && typeof (serialized.createdAt as { toDate?: unknown }).toDate === 'function') {
-                serialized.createdAt = (serialized.createdAt as { toDate: () => Date }).toDate().getTime();
-            }
-            if (serialized.updatedAt && typeof (serialized.updatedAt as { toDate?: unknown }).toDate === 'function') {
-                serialized.updatedAt = (serialized.updatedAt as { toDate: () => Date }).toDate().getTime();
-            }
-            return serialized;
-        });
+        const items = snapshot.docs.map(doc => toPublicProduct(doc.id, doc.data()));
 
         return filterFlashSaleProducts(items);
     },
@@ -257,17 +230,7 @@ export const fetchServices = unstable_cache(
             .limit(12)
             .get();
 
-        const items = snapshot.docs.map(doc => {
-            const data = doc.data();
-            const serialized: SerializedDoc = { ...data, id: doc.id };
-            if (serialized.createdAt && typeof (serialized.createdAt as { toDate?: unknown }).toDate === 'function') {
-                serialized.createdAt = (serialized.createdAt as { toDate: () => Date }).toDate().getTime();
-            }
-            if (serialized.updatedAt && typeof (serialized.updatedAt as { toDate?: unknown }).toDate === 'function') {
-                serialized.updatedAt = (serialized.updatedAt as { toDate: () => Date }).toDate().getTime();
-            }
-            return serialized;
-        });
+        const items = snapshot.docs.map(doc => toPublicService(doc.id, doc.data()));
 
         // Filter active services
         return items.filter((s) => s.isActive !== false);

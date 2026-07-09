@@ -103,7 +103,7 @@ export default function CustomerDetailDrawer({ customer, isOpen, onClose }: Prop
     useEffect(() => {
         if (isOpen && activeTab === 'appointments' && customer?.phone) {
             setLoadingAppointments(true);
-            const q = query(collection(db, 'appointments'), where('phone', '==', customer.phone), orderBy('createdAt', 'desc'));
+            const q = query(collection(db, 'appointments'), where('phone', '==', customer.phone), orderBy('createdAt', 'desc'), limit(20));
             const unsub = onSnapshot(q, (snap: QuerySnapshot<DocumentData>) => {
                 setAppointments(snap.docs.map((d: QueryDocumentSnapshot<DocumentData>) => ({ id: d.id, ...d.data() })));
                 setLoadingAppointments(false);
@@ -155,6 +155,7 @@ export default function CustomerDetailDrawer({ customer, isOpen, onClose }: Prop
                     customerId: customer.id,
                     amount,
                     paymentMethod: collectMethod,
+                    idempotencyKey: crypto.randomUUID(),
                     note: `Thu nợ khách hàng ${customer.name || customerContactLabel(customer)}`
                 })
             });

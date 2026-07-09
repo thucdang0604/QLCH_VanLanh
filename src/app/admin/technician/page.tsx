@@ -6,7 +6,7 @@ import {
     CheckCircle2, Loader2, X,
     User as UserIcon, ArrowRightLeft, ShieldAlert
 } from 'lucide-react';
-import { collection, query, doc, updateDoc, serverTimestamp, where, orderBy, limit } from 'firebase/firestore';
+import { collection, query, doc, where, orderBy, limit } from 'firebase/firestore';
 import { onSnapshot, getDocs } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
@@ -689,25 +689,40 @@ export default function TechnicianPage() {
 
 
 
-    const handleChecklistUpdate = async (ticketId: string, key: string, newValue: string) => {
+    const patchChecklist = async (ticket: RepairTicket, key: string, value: string | boolean) => {
+        const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
+        const res = await fetch('/api/repairs/checklist', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${idToken}`,
+            },
+            body: JSON.stringify({
+                ticketId: ticket.id,
+                ticketVersion: ticket.version || 0,
+                key,
+                value,
+            }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Khong the cap nhat checklist.');
+    };
+
+    const handleChecklistUpdate = async (ticket: RepairTicket, key: string, newValue: string) => {
         try {
-            await updateDoc(doc(db, 'repairs', ticketId), {
-                [`deviceInfo.checklist.${key}`]: newValue,
-                updatedAt: serverTimestamp(),
-            });
+            await patchChecklist(ticket, key, newValue);
         } catch (err) {
             console.error('Checklist update error:', err);
+            toastError(err instanceof Error ? err.message : 'Khong the cap nhat checklist.');
         }
     };
 
-    const handleHistoryToggle = async (ticketId: string, key: string, currentValue: boolean) => {
+    const handleHistoryToggle = async (ticket: RepairTicket, key: string, currentValue: boolean) => {
         try {
-            await updateDoc(doc(db, 'repairs', ticketId), {
-                [`deviceInfo.checklist.${key}`]: !currentValue,
-                updatedAt: serverTimestamp(),
-            });
+            await patchChecklist(ticket, key, !currentValue);
         } catch (err) {
             console.error('History toggle error:', err);
+            toastError(err instanceof Error ? err.message : 'Khong the cap nhat checklist.');
         }
     };
 
@@ -886,7 +901,7 @@ export default function TechnicianPage() {
                                                                 <select
                                                                     value={val}
                                                                     onClick={e => e.stopPropagation()}
-                                                                    onChange={e => handleChecklistUpdate(ticket.id, key, e.target.value)}
+                                                                    onChange={e => handleChecklistUpdate(ticket, key, e.target.value)}
                                                                     disabled={isReadOnly}
                                                                     aria-label={`Checklist: ${checklistLabels[key]}`}
                                                                     title={`Checklist: ${checklistLabels[key]}`}
@@ -909,7 +924,7 @@ export default function TechnicianPage() {
                                                         const labels: Record<string, string> = { hasPriorRepair: 'Đã từng sửa', hasWaterDamage: 'Vào nước', hasNonGenuineParts: 'Kém/Lô' };
                                                         const val = !!(ticket.deviceInfo?.checklist as Record<string, boolean> | undefined)?.[key];
                                                         return (
-                                                            <button key={key} onClick={(e) => { e.stopPropagation(); if (!isReadOnly) handleHistoryToggle(ticket.id, key, val); }}
+                                                            <button key={key} onClick={(e) => { e.stopPropagation(); if (!isReadOnly) handleHistoryToggle(ticket, key, val); }}
                                                                 disabled={isReadOnly}
                                                                 className={`text-sm px-3 py-1.5 rounded-lg border transition-all ${isReadOnly ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'} ${val ? 'bg-orange-50 border-orange-200 text-orange-700 font-bold' : 'bg-gray-50 border-gray-200 text-gray-500'
                                                                     }`}
@@ -1085,7 +1100,7 @@ export default function TechnicianPage() {
                                                                         <select
                                                                             value={val}
                                                                             onClick={e => e.stopPropagation()}
-                                                                            onChange={e => handleChecklistUpdate(ticket.id, key, e.target.value)}
+                                                                            onChange={e => handleChecklistUpdate(ticket, key, e.target.value)}
                                                                             disabled={isReadOnly}
                                                                             aria-label={`Checklist (kanban): ${checklistLabels[key]}`}
                                                                             title={`Checklist (kanban): ${checklistLabels[key]}`}

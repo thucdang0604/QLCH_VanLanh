@@ -1,6 +1,59 @@
 # 🧩 Workflows
 ## inventory
 
+## BUG-INV-006: Fix-held maintenance route co the bulk update toan bo products
+- **Status:** fixed
+- **Severity:** medium
+- **Module:** Inventory
+- **Files:** `src/app/api/admin/fix-held/route.ts`
+### Symptom
+Nhan vien co `manage_inventory` goi route co the doc toan bo repairs/products va update `held` tren moi product.
+### Cause
+Route maintenance khong dry-run mac dinh, khong chia batch/cursor, khong confirm apply/audit log chi tiet.
+### Proposed Fix
+Bien thanh diagnostic dry-run truoc, apply can admin/confirm token, chi write product co delta va batch theo cursor.
+### Fix 2026-07-04
+- This duplicate tracker is now aligned with `BUG-SYS-PERF-006`.
+- `/api/admin/fix-held` defaults to dry-run, requires `apply: true` plus `confirm: "FIX_HELD_APPLY"` for writes, updates only products whose held value changes, and records a maintenance audit log.
+- Remaining cursor batching for very large collections stays tracked as future scale hardening, not an open correctness bug.
+
+## BUG-INV-018: Hoan tat phieu nhap khong nhan NCC cap phieu
+- **Status:** fixed
+- **Severity:** high
+- **Module:** Inventory
+- **Files:** `src/app/api/inventory/import/route.ts`, `src/app/admin/inventory/page.tsx`, `src/lib/types/inventory.ts`
+### Symptom
+Phieu nhap co `receipt.supplierId` cap phieu van co the bi chan khi bam hoan tat neu tung dong khong co `item.supplierId`/`item.supplier`.
+### Cause
+`order_receipt` server check thieu NCC co tinh `receipt.supplierId`, nhung `complete_import` lai dung dieu kien `(item.status !== 'unavailable' && !item.supplier && !item.supplierId)`. Ngay sau do logic tao cong no lai dung `item.supplierId || receipt.supplierId`, cho thay contract co ho tro NCC cap phieu nhung guard khong dong bo. UI `handleOrderReceipt` cung chi check tung dong, khong tinh fallback receipt-level supplier.
+### Impact
+Luon nhap kho bi ket hoac bat buoc gan NCC lai tung dong du lieu, lam sai contract `ImportReceipt.supplierId` va co the lam nhan vien sua workaround tren client.
+### Proposed Fix
+Dong bo guard server/UI: chap nhan `receipt.supplierId` lam fallback cho moi item, hoac bo han contract NCC cap phieu. Them test hoan tat phieu nhap `paymentMethod=debt` voi supplier o cap receipt.
+### Fix 2026-07-04
+- `complete_import` now accepts `receipt.supplierId` as the supplier fallback when checking imported lines.
+- `/admin/inventory` uses the same fallback for order/complete readiness and missing-supplier badges.
+- Verification: `tsc --noEmit` pass; `npx tsx --test src/lib/contactlessRoadmapContracts.test.ts` pass.
+
+## BUG-INV-019: Inventory import paymentMethod mismatch giua UI va API
+- **Status:** fixed
+- **Severity:** high
+- **Module:** Inventory
+- **Files:** `src/app/admin/inventory/page.tsx`, `src/app/api/inventory/import/route.ts`, `src/lib/types/inventory.ts`
+### Symptom
+UI hoan tat nhap kho goi `executeFinalImport(paymentMethod: 'paid' | 'debt')`, trong khi API phan nhanh theo `paymentMethod === 'debt'` va `paymentMethod === 'bank'`, con moi gia tri khac duoc tinh nhu tien mat.
+### Cause
+Client gui `'paid'`; API luu `paymentMethod: paymentMethod || 'cash'`, tao expense `paymentMethod: paymentMethod`, nhung aggregate lai tang `cashExpenses` vi `'paid' !== 'bank'`. Type `ImportReceipt.paymentMethod` mo rong `cash|bank|debt|string` che giau mismatch.
+### Impact
+Phieu nhap tra ngay co the luu `paymentMethod='paid'` trong receipt/expense nhung bao cao aggregate tinh nhu cash. Cac man hinh/report filter theo `cash`/`bank`/`debt` de bi lech hoac khong nhan ra giao dich.
+### Proposed Fix
+Chuan hoa contract: UI gui `cash` hoac `bank` ro rang, API validate enum `cash|bank|debt` va reject gia tri la. Migration/backfill cac receipt/expense `paymentMethod='paid'` neu da co.
+### Fix 2026-07-04
+- Import preview now sends only `cash`, `bank`, or `debt`.
+- `/api/inventory/import` validates `paymentMethod` server-side and rejects unknown values such as `paid`.
+- `ImportReceipt.paymentMethod` types were narrowed to `cash|bank|debt`; existing `paymentMethod='paid'` data remains a deferred backfill item.
+- Verification: `tsc --noEmit` pass; `npx tsx --test src/lib/contactlessRoadmapContracts.test.ts` pass.
+
 ### Fix INV-REV-001: Nhap hang ghi no khong tinh vao chi thuc
 - **Status:** implemented-awaiting-verification
 - **Date:** 2026-06-28

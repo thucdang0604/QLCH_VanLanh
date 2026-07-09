@@ -227,6 +227,7 @@ export async function calculateAndSaveCommissionsServer(
 
     } catch (error) {
         console.error('Error calculating commissions server:', error);
+        throw error;
     }
 }
 

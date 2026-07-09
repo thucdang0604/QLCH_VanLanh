@@ -472,6 +472,8 @@ export default function CategoryClient({
                                     value={filterPrice}
                                     onChange={e => setFilterPrice(e.target.value)}
                                     className="flex-shrink-0 h-8 px-2 text-xs font-medium bg-white border border-gray-200 rounded-md focus:outline-none focus:border-copper focus:ring-1 focus:ring-copper"
+                                    aria-label="Lọc theo mức giá"
+                                    title="Lọc theo mức giá"
                                 >
                                     <option value="">Mức giá</option>
                                     <option value="0-5">Dưới 5 triệu</option>
@@ -485,6 +487,8 @@ export default function CategoryClient({
                                         value={filterCondition}
                                         onChange={e => setFilterCondition(e.target.value)}
                                         className="flex-shrink-0 h-8 px-2 text-xs font-medium bg-white border border-gray-200 rounded-md focus:outline-none focus:border-copper focus:ring-1 focus:ring-copper"
+                                        aria-label="Lọc theo tình trạng"
+                                        title="Lọc theo tình trạng"
                                     >
                                         <option value="">Tình trạng</option>
                                         {productConditions.includes('new') && <option value="new">Mới 100%</option>}
@@ -498,6 +502,8 @@ export default function CategoryClient({
                                         value={sidebarCategory}
                                         onChange={e => setSidebarCategory(e.target.value)}
                                         className="flex-shrink-0 h-8 px-2 text-xs font-medium bg-white border border-gray-200 rounded-md focus:outline-none focus:border-copper focus:ring-1 focus:ring-copper max-w-[120px]"
+                                        aria-label="Lọc theo danh mục"
+                                        title="Lọc theo danh mục"
                                     >
                                         <option value="">Danh mục</option>
                                         {productCategories.map(c => <option key={c} value={c}>{c}</option>)}

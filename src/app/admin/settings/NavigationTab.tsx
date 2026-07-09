@@ -390,10 +390,14 @@ export default function NavigationTab() {
                     <h1 className="text-2xl font-bold text-gray-900">Quản lý Menu</h1>
                     <p className="text-gray-500 mt-1">Tùy chỉnh Header, Sidebar và Footer navigation</p>
                 </div>
+            </div>
+
+            {/* Mobile Sticky Save Button */}
+            <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-gray-200 z-50 md:static md:p-0 md:bg-transparent md:border-t-0 md:z-auto md:flex md:justify-end md:-mt-16">
                 <button
                     onClick={handleSave}
                     disabled={saving}
-                    className="flex items-center gap-2 px-5 py-2.5 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors disabled:opacity-50 font-medium"
+                    className="w-full md:w-auto flex items-center justify-center gap-2 px-5 py-2.5 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors disabled:opacity-50 font-medium"
                 >
                     {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
                     Lưu tất cả
@@ -427,13 +431,13 @@ export default function NavigationTab() {
                 </div>
                 <div className="divide-y divide-gray-50">
                     {headerNav.map((item, idx) => (
-                        <div key={item.id} className="px-5 py-3 flex items-center gap-3 hover:bg-gray-50/50 group">
+                        <div key={item.id} className="px-4 py-4 md:py-3 flex flex-wrap items-center gap-y-3 gap-x-2 hover:bg-gray-50/50 group border-b border-gray-50 last:border-0">
                             <GripVertical size={14} className="text-gray-300" />
                             <IconPicker value={item.iconName} onChange={v => updateHeaderItem(idx, { iconName: v })} />
                             <input
                                 value={item.label}
                                 onChange={e => updateHeaderItem(idx, { label: e.target.value })}
-                                className="flex-1 text-sm border rounded-lg px-3 py-1.5 focus:ring-1 focus:ring-orange-300 focus:border-orange-300"
+                                className="flex-1 min-w-[150px] text-sm border rounded-lg px-3 py-1.5 focus:ring-1 focus:ring-orange-300 focus:border-orange-300"
                                 placeholder="Tên hiển thị"
                             />
                             <div className="flex items-center gap-1 text-xs text-gray-400">
@@ -464,7 +468,7 @@ export default function NavigationTab() {
                                 <button title="Lên" onClick={() => setHeaderNav(prev => moveUp(prev, idx))} className="text-gray-400 hover:text-gray-600" disabled={idx === 0}><ChevronUp size={12} /></button>
                                 <button title="Xuống" onClick={() => setHeaderNav(prev => moveDown(prev, idx))} className="text-gray-400 hover:text-gray-600" disabled={idx === headerNav.length - 1}><ChevronDown size={12} /></button>
                             </div>
-                            <button title="Xóa" onClick={() => removeHeaderItem(idx)} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button title="Xóa" onClick={() => removeHeaderItem(idx)} className="text-gray-300 hover:text-red-500 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                                 <Trash2 size={14} />
                             </button>
                             <TaxonomyBadge slug={item.slug} taxonomyRef={item.taxonomyRef} allTrees={allTaxonomyTrees} />
@@ -513,13 +517,13 @@ export default function NavigationTab() {
                         return (
                             <div key={item.id} className="hover:bg-gray-50/30">
                                 {/* Main row */}
-                                <div className="px-5 py-3 flex items-center gap-3 group">
+                                <div className="px-4 py-4 md:py-3 flex flex-wrap items-center gap-y-3 gap-x-2 group border-b border-gray-50 last:border-0">
                                     <GripVertical size={14} className="text-gray-300" />
                                     <IconPicker value={item.iconName} onChange={v => updateSidebarItem(idx, { iconName: v })} />
                                     <input
                                         value={item.name}
                                         onChange={e => updateSidebarItem(idx, { name: e.target.value })}
-                                        className="flex-1 text-sm border rounded-lg px-3 py-1.5 focus:ring-1 focus:ring-blue-300 focus:border-blue-300"
+                                        className="flex-1 min-w-[150px] text-sm border rounded-lg px-3 py-1.5 focus:ring-1 focus:ring-blue-300 focus:border-blue-300"
                                         placeholder="Tên danh mục"
                                     />
                                     <div className="flex items-center gap-1 text-xs text-gray-400">
@@ -555,7 +559,7 @@ export default function NavigationTab() {
                                         <button title="Lên" onClick={() => setSidebarMenu(prev => moveUp(prev, idx))} className="text-gray-400 hover:text-gray-600" disabled={idx === 0}><ChevronUp size={12} /></button>
                                         <button title="Xuống" onClick={() => setSidebarMenu(prev => moveDown(prev, idx))} className="text-gray-400 hover:text-gray-600" disabled={idx === sidebarMenu.length - 1}><ChevronDown size={12} /></button>
                                     </div>
-                                    <button title="Xóa" onClick={() => removeSidebarItem(idx)} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button title="Xóa" onClick={() => removeSidebarItem(idx)} className="text-gray-300 hover:text-red-500 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                                         <Trash2 size={14} />
                                     </button>
                                     <TaxonomyBadge slug={item.slug} taxonomyRef={item.taxonomyRef} allTrees={allTaxonomyTrees} />
@@ -634,12 +638,12 @@ export default function NavigationTab() {
                 </div>
                 <div className="divide-y divide-gray-50">
                     {footerServices.map((item, idx) => (
-                        <div key={item.id} className="px-5 py-3 flex items-center gap-3 hover:bg-gray-50/50 group">
+                        <div key={item.id} className="px-4 py-4 md:py-3 flex flex-wrap items-center gap-y-3 gap-x-2 hover:bg-gray-50/50 group border-b border-gray-50 last:border-0">
                             <GripVertical size={14} className="text-gray-300" />
                             <input
                                 value={item.name}
                                 onChange={e => updateFooterItem(idx, { name: e.target.value })}
-                                className="flex-1 text-sm border rounded-lg px-3 py-1.5 focus:ring-1 focus:ring-green-300 focus:border-green-300"
+                                className="flex-1 min-w-[150px] text-sm border rounded-lg px-3 py-1.5 focus:ring-1 focus:ring-green-300 focus:border-green-300"
                                 placeholder="Tên dịch vụ"
                             />
                             <div className="flex items-center gap-1 text-xs text-gray-400">
@@ -669,7 +673,7 @@ export default function NavigationTab() {
                                 <button title="Lên" onClick={() => setFooterServices(prev => moveUp(prev, idx))} className="text-gray-400 hover:text-gray-600" disabled={idx === 0}><ChevronUp size={12} /></button>
                                 <button title="Xuống" onClick={() => setFooterServices(prev => moveDown(prev, idx))} className="text-gray-400 hover:text-gray-600" disabled={idx === footerServices.length - 1}><ChevronDown size={12} /></button>
                             </div>
-                            <button title="Xóa" onClick={() => removeFooterItem(idx)} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button title="Xóa" onClick={() => removeFooterItem(idx)} className="text-gray-300 hover:text-red-500 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                                 <Trash2 size={14} />
                             </button>
                             <TaxonomyBadge slug={item.slug} taxonomyRef={item.taxonomyRef} allTrees={allTaxonomyTrees} />
@@ -702,7 +706,7 @@ export default function NavigationTab() {
                 </div>
                 <div className="divide-y divide-gray-50">
                     {homeServiceCategories.map((item, idx) => (
-                        <div key={item.id} className="px-5 py-3 flex items-center gap-3 hover:bg-gray-50/50 group">
+                        <div key={item.id} className="px-4 py-4 md:py-3 flex flex-wrap items-center gap-y-3 gap-x-2 hover:bg-gray-50/50 group border-b border-gray-50 last:border-0">
                             <GripVertical size={14} className="text-gray-300" />
                             <button
                                 type="button"
@@ -721,7 +725,7 @@ export default function NavigationTab() {
                             <input
                                 value={item.name}
                                 onChange={e => updateHomeServiceCategory(idx, { name: e.target.value })}
-                                className="flex-1 text-sm border rounded-lg px-3 py-1.5 focus:ring-1 focus:ring-purple-300 focus:border-purple-300"
+                                className="flex-1 min-w-[150px] text-sm border rounded-lg px-3 py-1.5 focus:ring-1 focus:ring-purple-300 focus:border-purple-300"
                                 placeholder="Tên danh mục"
                             />
                             <input
@@ -757,7 +761,7 @@ export default function NavigationTab() {
                                 <button title="Lên" onClick={() => setHomeServiceCategories(prev => moveUp(prev, idx))} className="text-gray-400 hover:text-gray-600" disabled={idx === 0}><ChevronUp size={12} /></button>
                                 <button title="Xuống" onClick={() => setHomeServiceCategories(prev => moveDown(prev, idx))} className="text-gray-400 hover:text-gray-600" disabled={idx === homeServiceCategories.length - 1}><ChevronDown size={12} /></button>
                             </div>
-                            <button title="Xóa" onClick={() => removeHomeServiceCategory(idx)} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button title="Xóa" onClick={() => removeHomeServiceCategory(idx)} className="text-gray-300 hover:text-red-500 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                                 <Trash2 size={14} />
                             </button>
                             <TaxonomyBadge slug={item.slug} taxonomyRef={item.taxonomyRef} allTrees={allTaxonomyTrees} />

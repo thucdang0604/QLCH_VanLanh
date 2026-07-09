@@ -1,6 +1,104 @@
 # 🧩 Workflows
 ## pos-orders
 
+### Audit POS-PERF-20260703: POS checkout latency and lookup scale
+- **Status:** fixed
+- **Severity:** high
+- **Date:** 2026-07-03
+- **Files:** `src/app/api/pos/checkout/route.ts`, `src/app/admin/pos/page.tsx`, `src/lib/commissionCalcServer.ts`, `src/lib/inventoryFifo.ts`, `src/lib/serverDocumentIds.ts`
+- **Symptom:** `/admin/pos` thanh toan mot don dang cham; lookup khach hang tai POS cung co nguy co cham voi khach co nhieu phieu sua chua.
+- **Cause:** Checkout gom qua nhieu doc/ghi vao mot transaction, co read trung lap cho commission, query active cashier shift bang collection query thay vi lock doc, FIFO/ID reservation doc tuan tu, va POS repair lookup doc `repairs` theo khach khong `limit`.
+- **Direction:** Uu tien do `debugTiming.transactionSteps`, doi checkout sang cashier lock one-doc, truyen product metadata da doc san sang commission, batch doc reads, bound repair lookup theo active/unpaid workflow states.
+### Close 2026-07-05
+- POS checkout no longer queries open cashier shifts in the hot transaction; it reads the active shift lock document and target shift document directly.
+- POS customer repair lookup is bounded by `createdAt desc limit(20)`.
+- Related mutation/idempotency and completed-order refund bugs in this audit pass are closed in `BUG-POS-019`, `BUG-POS-020`, `BUG-ORD-021`, `BUG-ORD-022`, and `BUG-ORD-023`.
+- Remaining deep latency work requires real `debugTiming` samples from slow production cases and is tracked as performance tuning, not an open correctness bug.
+
+## BUG-POS-019: POS checkout doc cashier shift bang query thay vi active lock
+- **Status:** fixed
+- **Severity:** high
+- **Module:** POS
+- **Files:** `src/app/api/pos/checkout/route.ts`, `src/app/api/pos/cashier-shift/route.ts`
+### Symptom
+Thanh toan POS bang tien mat/chuyen khoan/vi phai query `cashier_shifts.where(status == open).limit(1)` trong transaction. Neu du lieu legacy con nhieu ca open, checkout co the cong tien vao ca khong dung; neu khong co duplicate thi van ton them query trong hot path.
+### Cause
+Route open/close da dung lock `system_counters/active_cashier_shift`, nhung route checkout chua chuyen sang contract nay.
+### Proposed Fix
+Checkout doc lock doc trong transaction, verify shift doc con `status: open`, roi update ca do. Fallback query legacy chi nen nam trong flow reconcile/repair rieng co audit warning.
+### Fix 2026-07-04
+- `/api/pos/checkout` now reads `system_counters/active_cashier_shift` inside the transaction and then reads the locked `cashier_shifts/{activeShiftId}` document directly.
+- Checkout rejects missing/stale locks instead of querying `cashier_shifts.where(status == open).limit(1)` in the hot payment path.
+- Verification: `tsc --noEmit` pass.
+
+## BUG-POS-020: POS lookup repair theo khach hang khong gioi han
+- **Status:** fixed
+- **Severity:** medium
+- **Module:** POS
+- **Files:** `src/app/admin/pos/page.tsx`
+### Symptom
+Tra khach hang tai POS co the cham khi khach co nhieu phieu sua chua.
+### Cause
+Query repairs theo `customer.id` va `customer.phone` khong co `limit`/`orderBy`; orders da duoc bound `limit(20)` nhung repairs thi chua.
+### Proposed Fix
+Chi doc repair active/unpaid/actionable theo workflow status, them `orderBy(createdAt desc)` va `limit(20)`, neu can xem lich su thi mo drawer/load-more rieng.
+### Fix 2026-07-04
+- `/admin/pos` repair lookup by `customer.id` and legacy `customer.phone` now uses `orderBy('createdAt', 'desc')` and `limit(20)`.
+- Existing unpaid/partial filtering remains client-side on the bounded result set.
+- Verification: `tsc --noEmit` pass.
+
+## BUG-ORD-021: Huy don Completed chua dong bo payment/refund state
+- **Status:** fixed
+- **Severity:** high
+- **Module:** Orders
+- **Files:** `src/app/api/orders/transition/route.ts`, `src/app/admin/orders/page.tsx`
+### Symptom
+Huy don da `Completed` co the lam doanh thu/customer ledger/stock thay doi nhung payment history va dong tien hoan tra khong co ban ghi server tuong ung.
+### Cause
+`orders/transition` cho `Completed -> Cancelled`, tra stock, giam aggregate va ghi `customer_ledger` `refund_order`, nhung khong them `paymentHistory` refund, khong reset/cap nhat `paymentStatus`/`deposit_amount`, va khong ghi cash/bank refund movement. UI `admin/orders/page.tsx` lai tu them state local paymentHistory khi chuyen `Completed`, khong phai du lieu server.
+### Proposed Fix
+Tach flow huy don da thu tien thanh refund/cancel API ro rang: tinh paid amount tu `paymentHistory/deposit_amount`, ghi refund paymentHistory va cash/bank ledger neu that su hoan tien, cap nhat `paymentStatus`, aggregate va customer ledger trong cung transaction.
+### Fix 2026-07-04
+- `/api/orders/transition` now writes refund state when `Completed -> Cancelled`: `paymentStatus`, `refundedAt`, `refundAmount`, and a `paymentHistory` refund entry when collected money exists.
+- Legacy completed orders without `paymentHistory` use retail total/deposit fallback for refund amount.
+- `Order.paymentStatus` type now includes `refunded`.
+- Verification: `node node_modules/typescript/bin/tsc --noEmit --pretty false` pass.
+
+## BUG-ORD-022: Web checkout idempotency van optional o API boundary
+- **Status:** fixed
+- **Severity:** high
+- **Module:** Orders
+- **Files:** `src/app/api/checkout/route.ts`, `src/app/(customer)/checkout/page.tsx`
+### Symptom
+Goi truc tiep `/api/checkout` khong co `idempotencyKey` van tao don moi, tang `held` va `voucher.usedCount` moi lan request.
+### Cause
+BUG-ORD-007 da them client idempotency va server cache khi co key, nhung API khong bat buoc `idempotencyKey`. Nhanh chong lap chi chay khi body co key.
+### Proposed Fix
+Bat buoc `idempotencyKey` hop le cho public checkout; reject request thieu key. Ghi `operation_requests` trong transaction va tra original order id khi duplicate.
+### Fix 2026-07-04
+- `/api/checkout` now requires a string `idempotencyKey` before entering the order transaction.
+- Duplicate cache hits are accepted only for completed `type='web_checkout'`; reused keys from other operations are rejected.
+- The route always records `operation_requests/{idempotencyKey}` for successful web checkout.
+- Verification: `tsc --noEmit` pass.
+
+## BUG-ORD-023: Voucher code khong unique gay ap dung/usedCount nham ma
+- **Status:** fixed
+- **Severity:** high
+- **Module:** ORD
+- **Files:** `src/app/admin/vouchers/page.tsx`, `src/app/api/vouchers/validate/route.ts`, `src/app/api/checkout/route.ts`, `src/app/api/pos/checkout/route.ts`, `firestore.rules`
+### Symptom
+Hai voucher active co cung `code` co the cung ton tai. Validate/checkout/POS checkout chi query `where('code','==', code).where('isActive','==', true).limit(1)` va lay document dau tien, nen customer/POS co the ap dung nham voucher, sai gia tri giam, sai `ownerId`/usageLimit, va `usedCount` tang tren mot doc khong duoc admin mong doi.
+### Cause
+Schema type comment noi `code` la unique, nhung admin vouchers tao moi bang `addDoc(collection(db, 'vouchers'), ...)` auto-ID, khong co transaction/API server-side check duplicate va khong dung normalized code lam document ID. Firestore rules cho staff `manage_discounts` create/update truc tiep nen khong co invariant unique o server boundary.
+### Proposed Fix
+Chuyen tao/sua voucher sang server API transaction, normalize code uppercase, dung `vouchers/{code}` hoac collection unique index/lock doc, reject duplicate active/code collision khi create/update. Validate/checkout phai doc one-doc deterministic theo normalized code va migration can hop nhat/xu ly duplicate hien co truoc khi enforce.
+### Fix 2026-07-04
+- Added `/api/admin/vouchers` for create/update/delete with `manage_discounts` auth, transaction checks, normalized uppercase codes, and deterministic `vouchers/code_<CODE>` document IDs for new writes.
+- `/admin/vouchers` now mutates vouchers through the server API instead of direct client Firestore writes.
+- Firestore rules now block direct client create/update/delete on `vouchers`; checkout/order APIs remain the only path that can mutate usage counters through Admin SDK.
+- `/api/vouchers/validate`, web checkout, POS checkout, and order-cancel voucher rollback now query active voucher codes with `limit(2)` and reject duplicate active codes instead of silently using the first document.
+- Verification: `node node_modules/typescript/bin/tsc --noEmit --pretty false` pass.
+
 ### Feature POS-CASHIER-001: Tab thu ngan va so dau ca
 - **Status:** implemented-awaiting-e2e
 - **Date:** 2026-06-29

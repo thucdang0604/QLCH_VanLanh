@@ -2,8 +2,19 @@ import { NextResponse, NextRequest } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requirePermission } from '@/lib/apiAuth';
 import { FieldValue } from 'firebase-admin/firestore';
+import { createHash } from 'crypto';
 import type { RepairTicket } from '@/lib/types';
 import { loadRepairWorkflow, requireWorkflowNode } from '@/lib/repairWorkflowServer';
+
+const PAYMENT_SIGNATURE_FIELDS = ['deposit', 'quote', 'giftDiscount', 'additionalFees', 'laborCost', 'paymentMethod'] as const;
+
+function paymentPayloadSignature(paymentData: Record<string, unknown>) {
+    const normalized = PAYMENT_SIGNATURE_FIELDS.reduce((acc, field) => {
+        if (field in paymentData) acc[field] = paymentData[field];
+        return acc;
+    }, {} as Record<string, unknown>);
+    return createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
+}
 
 export async function POST(request: NextRequest) {
     try {
@@ -15,6 +26,7 @@ export async function POST(request: NextRequest) {
         if (!ticketId || !paymentData) {
             return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
         }
+        const payloadSignature = paymentPayloadSignature(paymentData as Record<string, unknown>);
 
         const db = getAdminDb();
 
@@ -25,6 +37,13 @@ export async function POST(request: NextRequest) {
                 if (opSnap.exists) {
                     const data = opSnap.data();
                     if (data?.status === 'completed') {
+                        if (
+                            data.type !== 'repair_payment_edit' ||
+                            data.referenceId !== ticketId ||
+                            data.payloadSignature !== payloadSignature
+                        ) {
+                            throw new Error('Idempotency key da duoc dung cho thao tac khac.');
+                        }
                         const ticketSnap = await tx.get(db.collection('repairs').doc(ticketId));
                         return { success: true, fromCache: true, payment: ticketSnap.data()?.payment };
                     }
@@ -87,7 +106,8 @@ export async function POST(request: NextRequest) {
                     status: 'completed',
                     completedAt: FieldValue.serverTimestamp(),
                     type: 'repair_payment_edit',
-                    referenceId: ticketId
+                    referenceId: ticketId,
+                    payloadSignature
                 });
             }
 

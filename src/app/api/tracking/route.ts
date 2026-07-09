@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
+import { isRateLimited } from '@/lib/rateLimit';
+import { normalizeVietnamPhone } from '@/lib/phone';
 
-// Simple function to format timestamps to match Firestore client library expected structure or raw serialized structure
+const RATE_LIMIT_MAX = 5;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const TRACKING_RESULT_LIMIT = 10;
+
 function formatTimestamp(val: unknown): { seconds: number; nanoseconds: number } | null {
     if (!val) return null;
     const obj = val as Record<string, unknown>;
@@ -20,7 +25,7 @@ function formatTimestamp(val: unknown): { seconds: number; nanoseconds: number }
     }
     if (typeof val === 'string') {
         const d = new Date(val);
-        if (!isNaN(d.getTime())) {
+        if (!Number.isNaN(d.getTime())) {
             return { seconds: Math.floor(d.getTime() / 1000), nanoseconds: 0 };
         }
     }
@@ -31,31 +36,51 @@ function maskPhone(p: string): string {
     if (!p) return '';
     const clean = p.trim().replace(/\s+/g, '');
     if (clean.length <= 4) return '***';
-    return clean.substring(0, 3) + '***' + clean.substring(clean.length - 3);
+    return `${clean.substring(0, 3)}***${clean.substring(clean.length - 3)}`;
 }
 
 function maskName(name: string): string {
     if (!name) return '';
     const parts = name.trim().split(/\s+/);
-    if (parts.length === 1) return parts[0]!.substring(0, 1) + '***';
-    return parts[0] + ' ' + parts.slice(1).map(p => p[0] + '***').join(' ');
+    if (parts.length === 1) return `${parts[0]!.substring(0, 1)}***`;
+    return `${parts[0]} ${parts.slice(1).map(p => `${p[0]}***`).join(' ')}`;
+}
+
+function clientIp(request: NextRequest): string {
+    return request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+        || request.headers.get('x-real-ip')
+        || 'unknown';
 }
 
 export async function POST(request: NextRequest) {
     try {
+        const ip = clientIp(request);
+        if (await isRateLimited(ip, 'tracking', RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS)) {
+            return NextResponse.json(
+                { error: 'Ban dang tra cuu qua nhieu lan. Vui long thu lai sau.' },
+                { status: 429 }
+            );
+        }
+
         const body = await request.json();
         const { phone } = body;
 
         if (!phone || typeof phone !== 'string') {
-            return NextResponse.json({ error: 'Số điện thoại không hợp lệ.' }, { status: 400 });
+            return NextResponse.json({ error: 'So dien thoai khong hop le.' }, { status: 400 });
         }
 
-        const cleanPhone = phone.trim().replace(/\s+/g, '');
+        const normalizedPhone = normalizeVietnamPhone(phone);
+        if (!normalizedPhone) {
+            return NextResponse.json({ error: 'So dien thoai khong hop le.' }, { status: 400 });
+        }
+
+        const cleanPhone = normalizedPhone.local;
         const db = getAdminDb();
 
-        // 1. Query Appointments
-        const appointmentsRef = db.collection('appointments');
-        const appointmentsSnap = await appointmentsRef.where('phone', '==', cleanPhone).get();
+        const appointmentsSnap = await db.collection('appointments')
+            .where('phone', '==', cleanPhone)
+            .limit(TRACKING_RESULT_LIMIT)
+            .get();
         const appointments = appointmentsSnap.docs.map(doc => {
             const data = doc.data();
             return {
@@ -70,14 +95,14 @@ export async function POST(request: NextRequest) {
             };
         });
 
-        // 2. Query Repairs
-        const repairsRef = db.collection('repairs');
-        const repairsSnap = await repairsRef.where('customer.phone', '==', cleanPhone).get();
+        const repairsSnap = await db.collection('repairs')
+            .where('customer.phone', '==', cleanPhone)
+            .orderBy('createdAt', 'desc')
+            .limit(TRACKING_RESULT_LIMIT)
+            .get();
         const repairs = repairsSnap.docs.map(doc => {
             const data = doc.data();
-            // Deep copy to mutate without side effects
             const cleanDeviceInfo = data.deviceInfo ? { ...data.deviceInfo } : {};
-            // Completely strip passcode & imei to avoid PII leak
             delete cleanDeviceInfo.passcode;
             delete cleanDeviceInfo.imei;
 
@@ -86,14 +111,21 @@ export async function POST(request: NextRequest) {
                 ticketType: data.ticketType || 'repair',
                 status: data.status,
                 deliveryNote: data.deliveryNote || '',
-                postRepairMedia: data.postRepairMedia || [],
+                postRepairMedia: Array.isArray(data.postRepairMedia) ? data.postRepairMedia : [],
                 customer: {
                     name: maskName(data.customer?.name),
                     phone: maskPhone(data.customer?.phone),
                 },
                 deviceInfo: cleanDeviceInfo,
-                issue: data.issue || {},
-                payment: data.payment || {},
+                issue: {
+                    description: data.issue?.description || data.issue?.summary || '',
+                    status: data.issue?.status || '',
+                },
+                payment: {
+                    status: data.payment?.status || '',
+                    totalAmount: Number(data.payment?.totalAmount || 0),
+                    paidAmount: Number(data.payment?.paidAmount || 0),
+                },
                 parts: ((data.parts as Record<string, unknown>[]) || []).map((part) => ({
                     productId: part.productId as string | undefined,
                     productName: part.productName as string | undefined,
@@ -113,9 +145,11 @@ export async function POST(request: NextRequest) {
             };
         });
 
-        // 3. Query Orders
-        const ordersRef = db.collection('orders');
-        const ordersSnap = await ordersRef.where('customer_info.phone', '==', cleanPhone).get();
+        const ordersSnap = await db.collection('orders')
+            .where('customer_info.phone', '==', cleanPhone)
+            .orderBy('createdAt', 'desc')
+            .limit(TRACKING_RESULT_LIMIT)
+            .get();
         const orders = ordersSnap.docs.map(doc => {
             const data = doc.data();
             return {
@@ -127,9 +161,14 @@ export async function POST(request: NextRequest) {
                     phone: maskPhone(data.customer_info?.phone),
                     note: data.customer_info?.note,
                 },
-                items: data.items || [],
-                shipping_fee: data.shipping_fee || 0,
-                total_amount: data.total_amount || 0,
+                items: Array.isArray(data.items) ? data.items.map((item: Record<string, unknown>) => ({
+                    name: item.name,
+                    productName: item.productName,
+                    quantity: item.quantity,
+                    price: item.price,
+                })) : [],
+                shipping_fee: Number(data.shipping_fee || 0),
+                total_amount: Number(data.total_amount || 0),
             };
         });
 
@@ -139,9 +178,8 @@ export async function POST(request: NextRequest) {
             repairs,
             orders,
         });
-
     } catch (error: unknown) {
         console.error('Tracking API error:', error);
-        return NextResponse.json({ error: 'Lỗi hệ thống. Vui lòng thử lại sau.' }, { status: 500 });
+        return NextResponse.json({ error: 'Loi he thong. Vui long thu lai sau.' }, { status: 500 });
     }
 }

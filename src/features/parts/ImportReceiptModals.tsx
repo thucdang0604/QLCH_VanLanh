@@ -53,7 +53,7 @@ interface ImportPreviewModalProps {
     forecastCostPrices: Map<string, number>;
     partTypeOptions: string[];
     suppliers: SupplierOption[];
-    onConfirm: (paymentMethod: 'paid' | 'debt') => Promise<void>;
+    onConfirm: (paymentMethod: 'cash' | 'bank' | 'debt') => Promise<void>;
 }
 // Import Preview Modal Component
 export function ImportPreviewModal({
@@ -65,7 +65,7 @@ export function ImportPreviewModal({
 }: ImportPreviewModalProps) {
     const { receipt, newParts } = importPreviewModal;
     const [loading, setLoading] = useState(false);
-    const [paymentMethod, setPaymentMethod] = useState<'paid' | 'debt'>('debt');
+    const [paymentMethod, setPaymentMethod] = useState<'cash' | 'bank' | 'debt'>('debt');
     if (!receipt) return null;
     const newItems = receipt.items.filter((i: ImportReceiptItem) => {
         const partKey = i.productId || i.partLineId || '';
@@ -137,13 +137,23 @@ export function ImportPreviewModal({
                         </button>
                         <button
                             type="button"
-                            onClick={() => setPaymentMethod('paid')}
-                            className={`flex-1 py-2.5 px-4 rounded-xl text-sm font-medium border-2 transition-all ${paymentMethod === 'paid'
+                            onClick={() => setPaymentMethod('cash')}
+                            className={`flex-1 py-2.5 px-4 rounded-xl text-sm font-medium border-2 transition-all ${paymentMethod === 'cash'
                                 ? 'border-green-500 bg-green-50 text-green-700'
                                 : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
                                 }`}
                         >
                             💰 Thanh toán ngay
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setPaymentMethod('bank')}
+                            className={`flex-1 py-2.5 px-4 rounded-xl text-sm font-medium border-2 transition-all ${paymentMethod === 'bank'
+                                ? 'border-blue-500 bg-blue-50 text-blue-700'
+                                : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
+                                }`}
+                        >
+                            Chuyen khoan
                         </button>
                     </div>
                     <p className="text-xs text-gray-500 mt-2">

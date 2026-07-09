@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, doc, onSnapshot, query, where, getDocs, limit, QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { FirestoreDateValue, Order, RepairTicket, WorkflowNode } from '@/lib/types';
 import { normalizeRepairWorkflow, normalizeWarrantyWorkflow } from '@/lib/repairWorkflowConfig';
@@ -120,41 +120,33 @@ export function useCustomerActivity({
             setLoadingOrders(false);
         };
 
-        const unsubs: Array<() => void> = [];
-        if (shouldQueryPhone) {
-            unsubs.push(onSnapshot(
-                query(collection(db, 'orders'), where('customer_info.phone', '==', normalizedPhone)),
-                snapshot => {
-                    setCurrentOrders(snapshot.docs.map(item => ({ id: item.id, ...item.data() } as Order)));
+        const loadOrders = async () => {
+            try {
+                if (shouldQueryPhone) {
+                    const q = query(collection(db, 'orders'), where('customer_info.phone', '==', normalizedPhone), limit(50));
+                    const snapshot = await getDocs(q);
+                    setCurrentOrders(snapshot.docs.map((item: QueryDocumentSnapshot<DocumentData>) => ({ id: item.id, ...item.data() } as Order)));
                     markLoaded();
-                },
-                handleError,
-            ));
-        }
-        if (shouldQueryLegacyOrderPhone) {
-            unsubs.push(onSnapshot(
-                query(collection(db, 'orders'), where('customer.phone', '==', normalizedPhone)),
-                snapshot => {
-                    setLegacyOrders(snapshot.docs.map(item => ({ id: item.id, ...item.data() } as Order)));
+                }
+                if (shouldQueryLegacyOrderPhone) {
+                    const q = query(collection(db, 'orders'), where('customer.phone', '==', normalizedPhone), limit(50));
+                    const snapshot = await getDocs(q);
+                    setLegacyOrders(snapshot.docs.map((item: QueryDocumentSnapshot<DocumentData>) => ({ id: item.id, ...item.data() } as Order)));
                     markLoaded();
-                },
-                handleError,
-            ));
-        }
-        if (shouldQueryCustomerId) {
-            unsubs.push(onSnapshot(
-                query(collection(db, 'orders'), where('customer_info.customerId', '==', stableCustomerId)),
-                snapshot => {
-                    setCustomerIdOrders(snapshot.docs.map(item => ({ id: item.id, ...item.data() } as Order)));
+                }
+                if (shouldQueryCustomerId) {
+                    const q = query(collection(db, 'orders'), where('customer_info.customerId', '==', stableCustomerId), limit(50));
+                    const snapshot = await getDocs(q);
+                    setCustomerIdOrders(snapshot.docs.map((item: QueryDocumentSnapshot<DocumentData>) => ({ id: item.id, ...item.data() } as Order)));
                     markLoaded();
-                },
-                handleError,
-            ));
-        }
-
-        return () => {
-            unsubs.forEach(unsub => unsub());
+                }
+            } catch (err) {
+                console.error('Error loading orders:', err);
+                handleError();
+            }
         };
+
+        loadOrders();
     }, [canLoad, includeOrders, normalizedPhone, shouldQueryCustomerId, shouldQueryLegacyOrderPhone, shouldQueryPhone, stableCustomerId]);
 
     useEffect(() => {
@@ -183,27 +175,28 @@ export function useCustomerActivity({
             setLoadingRepairs(false);
         };
 
-        const unsubs: Array<() => void> = [];
-        if (shouldQueryPhone) {
-            unsubs.push(onSnapshot(
-                query(collection(db, 'repairs'), where('customer.phone', '==', normalizedPhone)),
-                snapshot => {
-                    setTickets(snapshot.docs.map(item => ({ id: item.id, ...item.data() } as RepairTicket)));
+        const loadRepairs = async () => {
+            try {
+                if (shouldQueryPhone) {
+                    const q = query(collection(db, 'repairs'), where('customer.phone', '==', normalizedPhone), limit(50));
+                    const snapshot = await getDocs(q);
+                    setTickets(snapshot.docs.map((item: QueryDocumentSnapshot<DocumentData>) => ({ id: item.id, ...item.data() } as RepairTicket)));
                     markTicketLoaded();
-                },
-                handleRepairError,
-            ));
-        }
-        if (shouldQueryCustomerId) {
-            unsubs.push(onSnapshot(
-                query(collection(db, 'repairs'), where('customer.id', '==', stableCustomerId)),
-                snapshot => {
-                    setCustomerIdTickets(snapshot.docs.map(item => ({ id: item.id, ...item.data() } as RepairTicket)));
+                }
+                if (shouldQueryCustomerId) {
+                    const q = query(collection(db, 'repairs'), where('customer.id', '==', stableCustomerId), limit(50));
+                    const snapshot = await getDocs(q);
+                    setCustomerIdTickets(snapshot.docs.map((item: QueryDocumentSnapshot<DocumentData>) => ({ id: item.id, ...item.data() } as RepairTicket)));
                     markTicketLoaded();
-                },
-                handleRepairError,
-            ));
-        }
+                }
+            } catch (err) {
+                console.error('Error loading repairs:', err);
+                handleRepairError();
+            }
+        };
+
+        loadRepairs();
+
         const unsubStatuses = onSnapshot(doc(db, 'system_config', 'repairs'), snapshot => {
             statusesLoaded = true;
             const data = snapshot.data();
@@ -216,7 +209,6 @@ export function useCustomerActivity({
         });
 
         return () => {
-            unsubs.forEach(unsub => unsub());
             unsubStatuses();
         };
     }, [canLoad, includeRepairs, normalizedPhone, shouldQueryCustomerId, shouldQueryPhone, stableCustomerId]);

@@ -289,13 +289,6 @@ export default function MissionsWidget() {
 
             const auth = getBountyAuth();
             const confirmation = await signInWithPhoneNumber(auth, normalized.e164, window.recaptchaVerifier);
-            void fetch('/api/bounty/request-otp', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'record', phone: normalized.local }),
-            }).catch((recordError) => {
-                console.warn('Không ghi nhận được lượt gửi OTP thành công:', recordError);
-            });
             setConfirmationResult(confirmation);
             setPhone(normalized.local);
             setStep(1.5);
@@ -327,6 +320,16 @@ export default function MissionsWidget() {
             if (!confirmationResult) throw new Error('Chưa gửi OTP');
             const result = await confirmationResult.confirm(otp);
             const token = await result.user.getIdToken();
+            void fetch('/api/bounty/request-otp', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                },
+                body: JSON.stringify({ action: 'record', phone }),
+            }).catch((recordError) => {
+                console.warn('Không ghi nhận được lượt xác thực OTP thành công:', recordError);
+            });
 
             // Lưu trạng thái để phục hồi khi refresh (F5)
             localStorage.setItem('bounty_phone', phone.replace(/[^0-9]/g, ''));

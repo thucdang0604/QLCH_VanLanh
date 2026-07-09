@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { orderBy, doc, serverTimestamp } from 'firebase/firestore';
+import { orderBy, doc, serverTimestamp, limit } from 'firebase/firestore';
 import { onSnapshot } from '@/lib/firestoreLogger';
 import {
     AlertTriangle,
@@ -33,7 +33,7 @@ import { toastError } from '@/lib/toast';
 type StatusFilter = 'all' | 'out_of_stock' | 'bestseller';
 
 export default function PartsPage() {
-    const { data: products, loading } = useFirestoreCollection<Product>('products', [orderBy('createdAt', 'desc')]);
+    const { data: products, loading } = useFirestoreCollection<Product>('products', [orderBy('createdAt', 'desc'), limit(50)]);
     const [searchQuery, setSearchQuery] = useState('');
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
     const [isModalOpen, setIsModalOpen] = useState(false);

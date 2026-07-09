@@ -1,13 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDb, isAdminAvailable } from '@/lib/firebaseAdmin';
+import { toPublicProduct } from '@/lib/publicCatalog';
+
+const DEFAULT_LIMIT = 20;
+const MAX_LIMIT = 50;
 
 export async function GET(request: NextRequest) {
     try {
         const { searchParams } = new URL(request.url);
         const category = searchParams.get('category');
         const brand = searchParams.get('brand');
-        const status = searchParams.get('status') || 'active';
-        const limitParam = parseInt(searchParams.get('limit') || '20');
+        const requestedLimit = Number.parseInt(searchParams.get('limit') || `${DEFAULT_LIMIT}`, 10);
+        const limitParam = Number.isFinite(requestedLimit)
+            ? Math.min(MAX_LIMIT, Math.max(1, requestedLimit))
+            : DEFAULT_LIMIT;
 
         if (!isAdminAvailable()) {
             return NextResponse.json(
@@ -18,7 +24,7 @@ export async function GET(request: NextRequest) {
 
         let productsQuery = getAdminDb().collection('products') as FirebaseFirestore.Query;
 
-        if (status) productsQuery = productsQuery.where('status', '==', status);
+        productsQuery = productsQuery.where('status', '==', 'active');
         if (category) productsQuery = productsQuery.where('category', '==', category);
         if (brand) productsQuery = productsQuery.where('brand', '==', brand);
 
@@ -27,10 +33,7 @@ export async function GET(request: NextRequest) {
             .limit(limitParam)
             .get();
 
-        const products = snapshot.docs.map((doc) => ({
-            id: doc.id,
-            ...doc.data(),
-        }));
+        const products = snapshot.docs.map(doc => toPublicProduct(doc.id, doc.data()));
 
         return NextResponse.json({
             success: true,

@@ -2,6 +2,7 @@ import { initializeApp, getApps } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
 import type { Auth } from 'firebase/auth';
 import type { Database } from 'firebase/database';
+import type { FirebasePerformance } from 'firebase/performance';
 import type { FirebaseStorage } from 'firebase/storage';
 
 const firebaseConfig = {
@@ -50,6 +51,15 @@ export async function getStorageInstance(): Promise<FirebaseStorage> {
         _storage = getStorage(app);
     }
     return _storage;
+}
+
+let _perf: FirebasePerformance | null = null;
+export async function getPerfInstance(): Promise<FirebasePerformance> {
+    if (!_perf && typeof window !== 'undefined') {
+        const { getPerformance } = await import('firebase/performance');
+        _perf = getPerformance(app);
+    }
+    return _perf!;
 }
 
 export default app;

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { FieldValue } from 'firebase-admin/firestore';
-import { requirePermission } from '@/lib/apiAuth';
+import { requireAdmin } from '@/lib/apiAuth';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 import { reserveSequentialDocumentId } from '@/lib/serverDocumentIds';
@@ -13,7 +13,7 @@ function getErrorMessage(error: unknown): string {
 
 export async function POST(request: NextRequest) {
     try {
-        const caller = await requirePermission(request, 'view_revenue');
+        const caller = await requireAdmin(request);
         const body = await request.json() as {
             category?: string;
             description?: string;
@@ -75,6 +75,12 @@ export async function POST(request: NextRequest) {
     } catch (error: unknown) {
         console.error('Create expense API error:', error);
         const message = getErrorMessage(error);
-        return NextResponse.json({ error: message }, { status: message.includes('Forbidden') ? 403 : 500 });
+        const lower = message.toLowerCase();
+        const status = lower.includes('missing authorization')
+            ? 401
+            : lower.includes('forbidden')
+                ? 403
+                : 500;
+        return NextResponse.json({ error: message }, { status });
     }
 }

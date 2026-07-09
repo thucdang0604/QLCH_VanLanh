@@ -77,8 +77,8 @@ export default function Header() {
                                 height={64}
                                 quality={80}
                                 priority
-                                style={{ width: 'auto' }}
-                                className={`object-contain transition-all duration-300 ${scrolled ? 'h-9' : 'h-16'}`}
+                                style={{ width: scrolled ? 90 : 160, height: scrolled ? 36 : 64 }}
+                                className="object-contain transition-all duration-300"
                             />
                         ) : (
                             <span className={`font-bold text-copper whitespace-nowrap transition-all duration-300 ${scrolled ? 'text-base' : 'text-lg'}`}>

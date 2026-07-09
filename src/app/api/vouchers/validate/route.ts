@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { normalizeVietnamPhone } from '@/lib/phone';
+import { getUniqueActiveVoucherByCode } from '@/lib/voucherServer';
 
 export async function POST(request: NextRequest) {
     try {
@@ -11,20 +12,14 @@ export async function POST(request: NextRequest) {
         }
 
         const db = getAdminDb();
-        const snap = await db.collection('vouchers')
-            .where('code', '==', code.trim().toUpperCase())
-            .where('isActive', '==', true)
-            .limit(1)
-            .get();
+        const doc = await getUniqueActiveVoucherByCode(db, code);
 
-        if (snap.empty) {
+        if (!doc) {
             return NextResponse.json({ valid: false, error: 'Mã Voucher không tồn tại hoặc đã bị vô hiệu.' });
         }
 
-        const doc = snap.docs[0];
         const v = doc.data();
 
-        // Kiểm tra hạn sử dụng
         if (v.expiryDate) {
             const expiry = v.expiryDate.toDate ? v.expiryDate.toDate() : new Date(v.expiryDate);
             if (expiry.getTime() < Date.now()) {
@@ -32,12 +27,10 @@ export async function POST(request: NextRequest) {
             }
         }
 
-        // Kiểm tra giới hạn lượt dùng
         if (v.usageLimit > 0 && v.usedCount >= v.usageLimit) {
             return NextResponse.json({ valid: false, error: 'Mã Voucher đã hết lượt sử dụng.' });
         }
 
-        // Kiểm tra đơn tối thiểu
         const orderSubtotal = Number(subtotal) || 0;
         if (v.minOrderValue && orderSubtotal < v.minOrderValue) {
             return NextResponse.json({
@@ -46,19 +39,17 @@ export async function POST(request: NextRequest) {
             });
         }
 
-        // Kiểm tra Voucher cá nhân (Bounty Program)
         if (v.ownerId) {
             const normalizedPhone = typeof phone === 'string' ? normalizeVietnamPhone(phone) : null;
             const normalizedOwnerId = normalizeVietnamPhone(String(v.ownerId));
             if (!normalizedPhone || !normalizedOwnerId || normalizedPhone.local !== normalizedOwnerId.local) {
                 return NextResponse.json({
                     valid: false,
-                    error: `Voucher này là phần thưởng cá nhân. Vui lòng nhập đúng Số điện thoại đã làm nhiệm vụ.`,
+                    error: 'Voucher này là phần thưởng cá nhân. Vui lòng nhập đúng số điện thoại đã làm nhiệm vụ.',
                 });
             }
         }
 
-        // Tính số tiền giảm preview
         let discountPreview = 0;
         if (v.type === 'fixed') {
             discountPreview = Math.min(v.value, orderSubtotal);
@@ -82,6 +73,9 @@ export async function POST(request: NextRequest) {
         });
     } catch (error) {
         console.error('Voucher validate error:', error);
-        return NextResponse.json({ valid: false, error: 'Lỗi hệ thống.' }, { status: 500 });
+        const message = error instanceof Error && error.message.includes('duplicated')
+            ? 'Mã Voucher đang bị trùng dữ liệu. Vui lòng tắt hoặc gộp mã trùng trước khi sử dụng.'
+            : 'Lỗi hệ thống.';
+        return NextResponse.json({ valid: false, error: message }, { status: 500 });
     }
 }

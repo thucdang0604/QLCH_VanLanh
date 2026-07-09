@@ -6,9 +6,18 @@ import { PRODUCT_STATUS, isProductArchived } from '@/lib/productLifecycle';
 import { calculateCustomerTier, getTierDiscountPercent } from '@/lib/customerTiers';
 import { normalizeVietnamPhone } from '@/lib/phone';
 import { reserveSequentialDocumentId } from '@/lib/serverDocumentIds';
+import { getUniqueActiveVoucherByCode } from '@/lib/voucherServer';
 
 const RATE_LIMIT_MAX = 3;
 const RATE_LIMIT_WINDOW_MS = 60_000; // 1 phút
+
+function stripHtml(value: string): string {
+    return value.replace(/<[^>]*>/g, '').trim();
+}
+
+function canPublicSetCustomerName(currentName: unknown, nextName: string): boolean {
+    return Boolean(nextName && nextName !== 'Khách lẻ' && (!currentName || currentName === 'Khách lẻ'));
+}
 
 async function verifyVoucherProofPhone(token: unknown, expectedPhone: string) {
     if (!token || typeof token !== 'string') {
@@ -58,10 +67,13 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const { idempotencyKey, name, phone, note, items, voucherCode, voucherProofToken } = body;
+        const { idempotencyKey, name: rawName, phone, note, items, voucherCode, voucherProofToken } = body;
+        const safeCustomerName = typeof rawName === 'string' ? stripHtml(rawName).slice(0, 100) : '';
+        let name = safeCustomerName;
+        const requestIdempotencyKey = typeof idempotencyKey === 'string' ? idempotencyKey.trim() : '';
 
         // ── 3. Validate required fields ──
-        if (!name || typeof name !== 'string' || name.trim().length < 2) {
+        if (safeCustomerName.length < 2) {
             return NextResponse.json(
                 { error: 'Vui lòng nhập họ tên (ít nhất 2 ký tự).' },
                 { status: 400 }
@@ -105,12 +117,8 @@ export async function POST(request: NextRequest) {
         let verifiedVoucherProofPhone: string | null = null;
 
         if (voucherCode && typeof voucherCode === 'string') {
-            const voucherPreviewQuery = await db.collection('vouchers')
-                .where('code', '==', voucherCode.trim().toUpperCase())
-                .where('isActive', '==', true)
-                .limit(1)
-                .get();
-            const voucherOwnerId = voucherPreviewQuery.docs[0]?.data()?.ownerId;
+            const voucherPreviewDoc = await getUniqueActiveVoucherByCode(db, voucherCode);
+            const voucherOwnerId = voucherPreviewDoc?.data()?.ownerId;
             if (voucherOwnerId) {
                 const voucherOwnerPhone = normalizeVietnamPhone(String(voucherOwnerId));
                 if (!voucherOwnerPhone || voucherOwnerPhone.local !== normalizedPhone) {
@@ -122,20 +130,23 @@ export async function POST(request: NextRequest) {
                 }
             }
         }
+
+        if (requestIdempotencyKey.length < 12) {
+            return NextResponse.json(
+                { error: 'Missing idempotencyKey' },
+                { status: 400 }
+            );
+        }
         
         const result = await db.runTransaction(async (transaction) => {
-            if (idempotencyKey) {
-                const opRef = db.collection('operation_requests').doc(String(idempotencyKey));
-                const opSnap = await transaction.get(opRef);
-                if (opSnap.exists) {
-                    const data = opSnap.data();
-                    if (data?.status === 'completed' && data.referenceId) {
-                        return { orderId: String(data.referenceId), fromCache: true };
-                    }
-                    if (data?.type && data.type !== 'web_checkout') {
-                        throw new Error('Ma chong gui trung da duoc dung cho thao tac khac.');
-                    }
+            const opRef = db.collection('operation_requests').doc(requestIdempotencyKey);
+            const opSnap = await transaction.get(opRef);
+            if (opSnap.exists) {
+                const data = opSnap.data();
+                if (data?.status === 'completed' && data.type === 'web_checkout' && data.referenceId) {
+                    return { orderId: String(data.referenceId), fromCache: true };
                 }
+                throw new Error('Ma chong gui trung da duoc dung cho thao tac khac.');
             }
 
             const normalizedItems = [];
@@ -257,11 +268,13 @@ export async function POST(request: NextRequest) {
             let voucherSnap: FirebaseFirestore.DocumentSnapshot | null = null;
             let voucherRef: FirebaseFirestore.DocumentReference | null = null;
             if (voucherCode && typeof voucherCode === 'string') {
-                const voucherQuery = await db.collection('vouchers')
+                const voucherQuery = await transaction.get(db.collection('vouchers')
                     .where('code', '==', voucherCode.trim().toUpperCase())
                     .where('isActive', '==', true)
-                    .limit(1)
-                    .get();
+                    .limit(2));
+                if (voucherQuery.size > 1) {
+                    throw new Error('Mã Voucher đang bị trùng dữ liệu. Vui lòng tắt hoặc gộp mã trùng trước khi sử dụng.');
+                }
                 if (!voucherQuery.empty) {
                     voucherRef = voucherQuery.docs[0].ref;
                     voucherSnap = await transaction.get(voucherRef);
@@ -382,7 +395,7 @@ export async function POST(request: NextRequest) {
 
             const order = {
                 customer_info: {
-                    name: name.trim(),
+                    name: safeCustomerName,
                     phone: phone.trim(),
                     email: '',
                     address: '',
@@ -467,6 +480,9 @@ export async function POST(request: NextRequest) {
                         updatedAt: FieldValue.serverTimestamp(),
                         lastVisit: FieldValue.serverTimestamp(),
                     };
+                    if (!canPublicSetCustomerName(currentData.name, safeCustomerName)) {
+                        name = '';
+                    }
                     
                     if (name.trim() !== '' && name.trim() !== 'Khách lẻ' && name.trim() !== currentData.name) {
                         updateData.name = name.trim();
@@ -483,14 +499,12 @@ export async function POST(request: NextRequest) {
                 }
             }
 
-            if (idempotencyKey) {
-                transaction.set(db.collection('operation_requests').doc(String(idempotencyKey)), {
-                    status: 'completed',
-                    completedAt: FieldValue.serverTimestamp(),
-                    type: 'web_checkout',
-                    referenceId: orderRefId,
-                });
-            }
+            transaction.set(opRef, {
+                status: 'completed',
+                completedAt: FieldValue.serverTimestamp(),
+                type: 'web_checkout',
+                referenceId: orderRefId,
+            });
 
             return { orderId: orderRefId, fromCache: false };
         });

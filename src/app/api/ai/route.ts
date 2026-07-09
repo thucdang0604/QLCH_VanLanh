@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { chatWithGemini } from '@/lib/gemini';
-import { getAdminDb, isAdminAvailable } from '@/lib/firebaseAdmin';
+import { toSafeRtdbKey } from '@/lib/chatChannels';
+import { getAdminAuth, getAdminDb, isAdminAvailable } from '@/lib/firebaseAdmin';
 import { isRateLimited } from '@/lib/rateLimit';
 
 const RATE_LIMIT_MAX = 5;
@@ -17,6 +18,35 @@ type RAGProduct = {
 // Prevents N×250 Firestore reads per minute from concurrent chat messages.
 let ragCache: { data: RAGProduct[]; expiry: number } | null = null;
 const RAG_CACHE_TTL_MS = 15 * 60 * 1000;
+
+async function assertRoomWriteAllowed(request: NextRequest, roomId: unknown): Promise<string> {
+    if (typeof roomId !== 'string' || !roomId.trim()) {
+        throw new Response(JSON.stringify({ error: 'Missing roomId' }), { status: 400 });
+    }
+
+    const safeRoomId = toSafeRtdbKey(roomId);
+    if (safeRoomId !== roomId || safeRoomId.length === 0) {
+        throw new Response(JSON.stringify({ error: 'Invalid roomId' }), { status: 400 });
+    }
+
+    const authHeader = request.headers.get('authorization') || request.headers.get('Authorization');
+    const match = authHeader?.match(/^Bearer\s+(.+)$/i);
+    if (!match) {
+        throw new Response(JSON.stringify({ error: 'Missing Authorization bearer token' }), { status: 401 });
+    }
+
+    let decoded: Awaited<ReturnType<ReturnType<typeof getAdminAuth>['verifyIdToken']>>;
+    try {
+        decoded = await getAdminAuth().verifyIdToken(match[1]);
+    } catch {
+        throw new Response(JSON.stringify({ error: 'Invalid Authorization bearer token' }), { status: 401 });
+    }
+    if (decoded.uid !== safeRoomId) {
+        throw new Response(JSON.stringify({ error: 'Forbidden room' }), { status: 403 });
+    }
+
+    return safeRoomId;
+}
 
 async function getRAGProducts(): Promise<RAGProduct[]> {
     if (ragCache && Date.now() < ragCache.expiry) {
@@ -58,6 +88,16 @@ export async function POST(request: NextRequest) {
         }
         if (history && Array.isArray(history) && history.length > 30) {
             return NextResponse.json({ error: 'History too long' }, { status: 413 });
+        }
+
+        let verifiedRoomId: string | null = null;
+        if (pushToRtdb) {
+            try {
+                verifiedRoomId = await assertRoomWriteAllowed(request, roomId);
+            } catch (authError) {
+                if (authError instanceof Response) return authError;
+                throw authError;
+            }
         }
 
         let dbContext = '';
@@ -106,16 +146,16 @@ export async function POST(request: NextRequest) {
         const finalContext = (context || '') + dbContext;
         const result = await chatWithGemini(prompt, finalContext, history);
 
-        if (pushToRtdb && roomId) {
+        if (pushToRtdb && verifiedRoomId) {
             try {
                 const { getAdminRtdb } = await import('@/lib/firebaseAdmin');
                 const rtdb = getAdminRtdb();
-                const infoRef = rtdb.ref(`chats/${roomId}/info`);
+                const infoRef = rtdb.ref(`chats/${verifiedRoomId}/info`);
                 const infoSnap = await infoRef.get();
                 const infoData = infoSnap.val() || {};
 
                 if (infoData.botActive !== false) {
-                    const messagesRef = rtdb.ref(`chats/${roomId}/messages`);
+                    const messagesRef = rtdb.ref(`chats/${verifiedRoomId}/messages`);
                     await messagesRef.push({
                         text: result.content,
                         senderId: 'bot',

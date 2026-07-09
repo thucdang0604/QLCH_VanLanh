@@ -6,7 +6,7 @@ import {
     Loader2, ChevronDown, ChevronRight,
     ArrowDownToLine, ExternalLink, PackagePlus, Trash2
 } from 'lucide-react';
-import { collection, deleteDoc, doc, serverTimestamp, query, orderBy, updateDoc, setDoc, limit, startAfter, getCountFromServer, where, type DocumentSnapshot, type QueryConstraint, type QuerySnapshot, type QueryDocumentSnapshot, type DocumentData } from 'firebase/firestore';
+import { collection, deleteDoc, doc, serverTimestamp, query, orderBy, setDoc, limit, startAfter, getCountFromServer, where, type DocumentSnapshot, type QueryConstraint, type QuerySnapshot, type QueryDocumentSnapshot, type DocumentData } from 'firebase/firestore';
 import { getDocs, onSnapshot } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
@@ -32,6 +32,12 @@ const statusConfig = {
     ordered: { label: 'Đã đặt hàng', color: 'bg-blue-100 text-blue-700', icon: Package },
     completed: { label: 'Đã nhập', color: 'bg-green-100 text-green-700', icon: CheckCircle2 },
 };
+
+type ImportPaymentMethod = 'cash' | 'bank' | 'debt';
+
+function receiptItemHasSupplier(receipt: ImportReceipt, item: ImportReceiptItem) {
+    return Boolean(item.supplier || item.supplierId || receipt.supplierId);
+}
 
 function supplierMatchesSearch(supplier: SupplierOption, search: string): boolean {
     const q = search.trim().toLowerCase();
@@ -108,7 +114,7 @@ export default function InventoryPage() {
             const snap = await getDocs(query(
                 collection(db, 'import_receipts'),
                 ...buildReceiptQueryConstraints(isReset ? null : cursor),
-            ));
+ ));
             const nextReceipts = snap.docs.map(d => ({ id: d.id, ...d.data() } as ImportReceipt & { id: string }));
             setReceipts(current => isReset ? nextReceipts : [...current, ...nextReceipts]);
             setLastReceiptDoc(snap.docs[snap.docs.length - 1] || null);
@@ -120,7 +126,7 @@ export default function InventoryPage() {
 
     const refreshProducts = useCallback(async () => {
         if (products.length > 0) return; // Lazy load: already loaded
-        const snap = await getDocs(collection(db, 'products'));
+        const snap = await getDocs(query(collection(db, 'products'), orderBy('createdAt', 'desc'), limit(50)));
         setProducts(snap.docs.map(d => ({ id: d.id, ...d.data() } as Product & { id: string })));
     }, [products.length]);
 
@@ -151,7 +157,6 @@ export default function InventoryPage() {
                 pool = fetched;
             }
         }
-
         const batchItems: PrintBatchItem[] = receipt.items.map(item => {
             const prod = pool.find(p => p.id === item.productId);
             if (!prod) return null;
@@ -193,11 +198,9 @@ export default function InventoryPage() {
 
     const formatPrice = (n: number) => n.toLocaleString('vi-VN') + 'đ';
     useEffect(() => {
-        const unsub = onSnapshot(
-            query(collection(db, 'suppliers'), orderBy('name', 'asc')),
-            (snap: QuerySnapshot<DocumentData>) => setSupplierList(snap.docs.map((d: QueryDocumentSnapshot<DocumentData>) => ({ id: d.id, ...d.data() } as SupplierOption)))
-        );
-        return () => unsub();
+        getDocs(query(collection(db, 'suppliers'), orderBy('name', 'asc'), limit(100))).then((snap: QuerySnapshot<DocumentData>) => {
+            setSupplierList(snap.docs.map((d: QueryDocumentSnapshot<DocumentData>) => ({ id: d.id, ...d.data() } as SupplierOption)));
+        }).catch(err => console.error('Failed to load suppliers:', err));
     }, []);
 
     useEffect(() => {
@@ -231,24 +234,42 @@ export default function InventoryPage() {
         setEditingQuantities({ [receiptId]: receipt.items.map(item => item.quantity) });
     };
 
+    const patchReceiptItem = async (
+        receipt: ImportReceipt & { id: string },
+        itemIndex: number,
+        patch: Record<string, unknown>,
+    ) => {
+        const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(auth => auth.currentUser?.getIdToken());
+        const res = await fetch('/api/inventory/import', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + idToken,
+            },
+            body: JSON.stringify({
+                action: 'patch_item',
+                receiptId: receipt.id,
+                receiptVersion: (receipt as ImportReceipt & { version?: number }).version || 0,
+                itemIndex,
+                patch,
+            }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Khong the cap nhat dong phieu nhap.');
+        return data as { items: ImportReceiptItem[]; totalAmount: number; version: number };
+    };
+
     const handleAutoSaveItem = async (receiptId: string, itemIdx: number, newPrice: number, newQty: number) => {
         const receipt = receipts.find(item => item.id === receiptId);
         if (!receipt) return;
 
         try {
-            const updatedItems = [...receipt.items];
-            updatedItems[itemIdx] = { ...updatedItems[itemIdx], importPrice: newPrice, quantity: newQty };
-            const totalAmount = calculateImportableTotal(updatedItems);
-            await updateDoc(doc(db, 'import_receipts', receipt.id), {
-                items: updatedItems,
-                totalAmount,
-                updatedAt: serverTimestamp(),
-            });
-            setReceipts(prev => prev.map(item => item.id === receiptId ? { ...item, items: updatedItems, totalAmount } : item));
-            toastSuccess('Đã tự động lưu.');
+            const data = await patchReceiptItem(receipt, itemIdx, { importPrice: newPrice, quantity: newQty });
+            setReceipts(prev => prev.map(item => item.id === receiptId ? { ...item, items: data.items, totalAmount: data.totalAmount, version: data.version } : item));
+            toastSuccess('Da tu dong luu.');
         } catch (err) {
             console.error(err);
-            toastError('Lỗi tự động lưu.');
+            toastError(err instanceof Error ? err.message : 'Loi tu dong luu.');
         }
     };
 
@@ -257,17 +278,12 @@ export default function InventoryPage() {
         if (!receipt) return;
 
         try {
-            const updatedItems = [...receipt.items];
-            updatedItems[itemIdx] = { ...updatedItems[itemIdx], supplier: supplierName, supplierId };
-            await updateDoc(doc(db, 'import_receipts', receipt.id), {
-                items: updatedItems,
-                updatedAt: serverTimestamp(),
-            });
-            setReceipts(prev => prev.map(item => item.id === receiptId ? { ...item, items: updatedItems } : item));
-            toastSuccess('Đã cập nhật NCC.');
+            const data = await patchReceiptItem(receipt, itemIdx, { supplier: supplierName, supplierId });
+            setReceipts(prev => prev.map(item => item.id === receiptId ? { ...item, items: data.items, totalAmount: data.totalAmount, version: data.version } : item));
+            toastSuccess('Da cap nhat NCC.');
         } catch (err) {
             console.error(err);
-            toastError('Lỗi cập nhật NCC.');
+            toastError(err instanceof Error ? err.message : 'Loi cap nhat NCC.');
         }
     };
 
@@ -277,7 +293,7 @@ export default function InventoryPage() {
             toastError('Phiếu không còn hàng có thể đặt.');
             return;
         }
-        const missingSupplier = importableItems.filter(item => !item.supplier && !item.supplierId);
+        const missingSupplier = importableItems.filter(item => !receiptItemHasSupplier(receipt, item));
         if (missingSupplier.length > 0) {
             toastError(`Còn ${missingSupplier.length} dòng chưa gắn NCC.`);
             return;
@@ -357,7 +373,7 @@ export default function InventoryPage() {
         setImportPreviewModal(previewState);
     };
 
-    const executeFinalImport = async (paymentMethod: 'paid' | 'debt') => {
+    const executeFinalImport = async (paymentMethod: ImportPaymentMethod) => {
         const { receipt, newParts } = importPreviewModal;
         if (!receipt) return;
 
@@ -546,7 +562,7 @@ export default function InventoryPage() {
                     const prices = editingPrices[receipt.id] || receipt.items.map(item => item.importPrice);
                     const quantities = editingQuantities[receipt.id] || receipt.items.map(item => item.quantity);
                     const importableItems = receipt.items.filter(item => !isReceiptItemUnavailable(item));
-                    const missingSupplierCount = importableItems.filter(item => !item.supplier && !item.supplierId).length;
+                    const missingSupplierCount = importableItems.filter(item => !receiptItemHasSupplier(receipt, item)).length;
                     const importableTotal = calculateImportableTotal(receipt.items);
 
                     return (
