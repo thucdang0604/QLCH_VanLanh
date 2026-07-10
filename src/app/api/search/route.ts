@@ -10,7 +10,6 @@ type PublicSearchResult =
 const RATE_LIMIT_MAX = 10;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RESULT_LIMIT = 20;
-const SERVICE_FALLBACK_LIMIT = 50;
 const MIN_QUERY_LENGTH = 2;
 
 function normalizeSearchText(value: string): string {
@@ -24,23 +23,8 @@ function normalizeSearchText(value: string): string {
 }
 
 function searchTokens(query: string): string[] {
-    return Array.from(new Set([
-        query.toLowerCase().trim(),
-        normalizeSearchText(query),
-    ].filter(token => token.length >= MIN_QUERY_LENGTH))).slice(0, 2);
-}
-
-function matchesKeyword(item: Record<string, unknown>, keyword: string): boolean {
-    const haystack = [
-        item.name,
-        item.title,
-        item.category,
-        item.brand,
-        item.description,
-        ...(Array.isArray(item.tags) ? item.tags : []),
-    ].join(' ').toLowerCase();
-
-    return normalizeSearchText(haystack).includes(keyword);
+    const token = normalizeSearchText(query);
+    return token.length >= MIN_QUERY_LENGTH ? [token] : [];
 }
 
 export async function GET(request: NextRequest) {
@@ -65,7 +49,6 @@ export async function GET(request: NextRequest) {
         }
 
         const tokens = searchTokens(q);
-        const primaryToken = tokens[0] || normalizeSearchText(q);
         const db = getAdminDb();
 
         const [productSnaps, serviceKeywordSnaps] = await Promise.all([
@@ -75,6 +58,7 @@ export async function GET(request: NextRequest) {
                 .limit(RESULT_LIMIT)
                 .get())),
             Promise.all(tokens.map(token => db.collection('services')
+                .where('isActive', '==', true)
                 .where('searchKeywords', 'array-contains', token)
                 .limit(RESULT_LIMIT)
                 .get())),
@@ -90,7 +74,6 @@ export async function GET(request: NextRequest) {
 
         serviceKeywordSnaps.flatMap(snap => snap.docs).forEach(doc => {
             const data = doc.data();
-            if (data.isActive === false) return;
             results.set(`service:${doc.id}`, { ...toPublicService(doc.id, data), _type: 'service' });
         });
 

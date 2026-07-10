@@ -8,7 +8,7 @@ import {
     limit,
     startAfter,
     DocumentData,
-    QueryDocumentSnapshot
+    QueryDocumentSnapshot,
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { getDocs, getCountFromServer } from './firestoreLogger';
@@ -30,19 +30,32 @@ export interface UseFirestorePaginatedReturn<T> {
 }
 
 export interface FirestorePaginationConfig {
+    /**
+     * Stable representation of every filter and sort applied to the query.
+     * Firestore QueryConstraint instances stringify to "[object Object]", so
+     * they cannot be used to detect changes safely.
+     */
+    queryKey: string;
     whereConstraints?: QueryConstraint[];
     orderByConstraints?: QueryConstraint[];
     pageSize?: number;
 }
 
-/**
- * Custom hook for cursor-based Firestore pagination with server-side document count
- */
+type ActiveQueryConfig = Pick<FirestorePaginationConfig, 'whereConstraints' | 'orderByConstraints'> & {
+    queryKey: string;
+};
+
+/** Custom hook for bounded Firestore reads with cursor pagination and aggregate count. */
 export function useFirestorePaginated<T extends DocumentData>(
     collectionName: string,
-    config: FirestorePaginationConfig = {}
+    config: FirestorePaginationConfig,
 ): UseFirestorePaginatedReturn<T> {
-    const { whereConstraints = [], orderByConstraints = [], pageSize: initialPageSize = 20 } = config;
+    const {
+        queryKey,
+        whereConstraints = [],
+        orderByConstraints = [],
+        pageSize: initialPageSize = 20,
+    } = config;
 
     const [data, setData] = useState<T[]>([]);
     const [loading, setLoading] = useState(true);
@@ -51,120 +64,131 @@ export function useFirestorePaginated<T extends DocumentData>(
     const [currentPage, setCurrentPage] = useState(1);
     const [pageSize, setPageSize] = useState(initialPageSize);
 
-    // Caching document snapshots (cursors) to allow backwards navigation
-    // pageCursors[1] = null (page 1 starts from beginning)
-    // pageCursors[p] = last document of page (p - 1)
+    // pageCursors[p] is the last document of page p. page 1 starts at null.
     const pageCursorsRef = useRef<(QueryDocumentSnapshot<DocumentData> | null)[]>([null]);
-    
-    // Maintain a stable string representation of query constraints to detect actual filter changes
-    const serializedConstraints = JSON.stringify([
-        ...whereConstraints.map(c => c.toString()),
-        ...orderByConstraints.map(c => c.toString())
-    ]);
+    const queryConfigRef = useRef<ActiveQueryConfig | null>(null);
 
-    // Fetch the total count of documents matching the filters (runs only when filters change)
+    if (queryConfigRef.current?.queryKey !== queryKey) {
+        queryConfigRef.current = { queryKey, whereConstraints, orderByConstraints };
+    }
+    const activeQueryConfig = queryConfigRef.current;
+
+    const getPageSnapshot = useCallback(async (
+        cursor: QueryDocumentSnapshot<DocumentData> | null,
+        size: number,
+    ) => {
+        const constraints: QueryConstraint[] = [
+            ...(activeQueryConfig.whereConstraints || []),
+            ...(activeQueryConfig.orderByConstraints || []),
+        ];
+
+        if (cursor) constraints.push(startAfter(cursor));
+        constraints.push(limit(size));
+
+        return getDocs(query(collection(db, collectionName), ...constraints));
+    }, [activeQueryConfig, collectionName]);
+
     const fetchTotalCount = useCallback(async () => {
         try {
-            const countQuery = query(collection(db, collectionName), ...whereConstraints);
+            const countQuery = query(
+                collection(db, collectionName),
+                ...(activeQueryConfig.whereConstraints || []),
+            );
             const snapshot = await getCountFromServer(countQuery);
             setTotalCount(snapshot.data().count);
         } catch (err) {
             console.error(`Error counting ${collectionName}:`, err);
             setTotalCount(0);
         }
-    }, [collectionName, serializedConstraints]); // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeQueryConfig, collectionName]);
 
-    // Fetch data for a specific page using cursor
     const fetchPage = useCallback(async (pageNumber: number, size: number) => {
-        if (pageNumber < 1) return;
-        
+        if (pageNumber < 1) return false;
+
         const isFirstPage = pageNumber === 1;
-        if (isFirstPage) {
-            setLoading(true);
-        } else {
-            setLoadingMore(true);
-        }
+        if (isFirstPage) setLoading(true);
+        else setLoadingMore(true);
 
         try {
-            const cursor = pageCursorsRef.current[pageNumber - 1] || null;
-            const queryParams: QueryConstraint[] = [
-                ...whereConstraints,
-                ...orderByConstraints
-            ];
+            const cursor = pageCursorsRef.current[pageNumber - 1];
+            if (cursor === undefined) return false;
 
-            if (cursor && !isFirstPage) {
-                queryParams.push(startAfter(cursor));
-            }
-            queryParams.push(limit(size));
-
-            const pageQuery = query(collection(db, collectionName), ...queryParams);
-            const snapshot = await getDocs(pageQuery);
-
+            const snapshot = await getPageSnapshot(cursor, size);
             const items = snapshot.docs.map(doc => ({
                 id: doc.id,
-                ...doc.data()
+                ...doc.data(),
             })) as unknown as T[];
 
             setData(items);
-
-            // Store the last document snapshot as the cursor for the NEXT page
-            const lastDoc = snapshot.docs[snapshot.docs.length - 1] || null;
-            pageCursorsRef.current[pageNumber] = lastDoc;
-
+            pageCursorsRef.current[pageNumber] = snapshot.docs.at(-1) || null;
             setCurrentPage(pageNumber);
+            return true;
         } catch (err) {
             console.error(`Error loading page ${pageNumber} of ${collectionName}:`, err);
+            return false;
         } finally {
             setLoading(false);
             setLoadingMore(false);
         }
-    }, [collectionName, serializedConstraints]); // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [collectionName, getPageSnapshot]);
 
-    // Reset pagination and fetch new count + first page when query filters or page size changes
+    const ensureCursorForPage = useCallback(async (pageNumber: number, size: number) => {
+        for (let cursorPage = 1; cursorPage < pageNumber; cursorPage += 1) {
+            if (pageCursorsRef.current[cursorPage] !== undefined) continue;
+
+            const previousCursor = pageCursorsRef.current[cursorPage - 1];
+            if (previousCursor === undefined || (cursorPage > 1 && previousCursor === null)) return false;
+
+            const snapshot = await getPageSnapshot(previousCursor, size);
+            const lastDocument = snapshot.docs.at(-1) || null;
+            pageCursorsRef.current[cursorPage] = lastDocument;
+            if (!lastDocument) return false;
+        }
+
+        return pageCursorsRef.current[pageNumber - 1] !== undefined;
+    }, [getPageSnapshot]);
+
     useEffect(() => {
         pageCursorsRef.current = [null];
-        fetchTotalCount();
-        fetchPage(1, pageSize);
-    }, [serializedConstraints, pageSize, fetchTotalCount, fetchPage]);
+        void fetchTotalCount();
+        void fetchPage(1, pageSize);
+    }, [fetchPage, fetchTotalCount, pageSize, queryKey]);
 
     const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
     const hasMore = currentPage < totalPages;
 
-    const nextPage = useCallback(() => {
-        if (hasMore && !loading && !loadingMore) {
-            fetchPage(currentPage + 1, pageSize);
-        }
-    }, [hasMore, currentPage, pageSize, loading, loadingMore, fetchPage]);
-
-    const prevPage = useCallback(() => {
-        if (currentPage > 1 && !loading && !loadingMore) {
-            fetchPage(currentPage - 1, pageSize);
-        }
-    }, [currentPage, pageSize, loading, loadingMore, fetchPage]);
-
     const goToPage = useCallback((page: number) => {
         const targetPage = Math.max(1, Math.min(page, totalPages));
-        if (targetPage !== currentPage && !loading && !loadingMore) {
-            // Ensure we have cursors for pages up to targetPage
-            // If not, we have to reset or sequentially load (standard Firestore constraint)
-            if (pageCursorsRef.current[targetPage - 1] !== undefined || targetPage === 1) {
-                fetchPage(targetPage, pageSize);
-            } else {
-                // If cursor is missing, go to page 1
-                pageCursorsRef.current = [null];
-                fetchPage(1, pageSize);
+        if (targetPage === currentPage || loading || loadingMore) return;
+
+        void (async () => {
+            setLoadingMore(targetPage > 1);
+            try {
+                if (await ensureCursorForPage(targetPage, pageSize)) {
+                    await fetchPage(targetPage, pageSize);
+                }
+            } finally {
+                setLoadingMore(false);
             }
-        }
-    }, [currentPage, totalPages, pageSize, loading, loadingMore, fetchPage]);
+        })();
+    }, [currentPage, ensureCursorForPage, fetchPage, loading, loadingMore, pageSize, totalPages]);
+
+    const nextPage = useCallback(() => {
+        if (hasMore) goToPage(currentPage + 1);
+    }, [currentPage, goToPage, hasMore]);
+
+    const prevPage = useCallback(() => {
+        if (currentPage > 1) goToPage(currentPage - 1);
+    }, [currentPage, goToPage]);
 
     const handleSetPageSize = useCallback((size: number) => {
         setPageSize(size);
     }, []);
 
     const refresh = useCallback(() => {
-        fetchTotalCount();
-        fetchPage(currentPage, pageSize);
-    }, [currentPage, pageSize, fetchTotalCount, fetchPage]);
+        void fetchTotalCount();
+        void fetchPage(currentPage, pageSize);
+    }, [currentPage, fetchPage, fetchTotalCount, pageSize]);
 
     return {
         data,
@@ -179,6 +203,6 @@ export function useFirestorePaginated<T extends DocumentData>(
         prevPage,
         goToPage,
         setPageSize: handleSetPageSize,
-        refresh
+        refresh,
     };
 }

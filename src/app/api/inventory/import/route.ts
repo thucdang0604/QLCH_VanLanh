@@ -507,6 +507,7 @@ export async function POST(request: NextRequest) {
                         stock: newStock,
                         costPrice: newCostPrice,
                         held: workingProduct.held,
+                        inventoryTrackingMode: 'fifo',
                         updatedAt: FieldValue.serverTimestamp(),
                         ...buildReactivateOnImportUpdate({
                             status: String(pData.status || 'active') as 'active' | 'hidden' | 'inactive',

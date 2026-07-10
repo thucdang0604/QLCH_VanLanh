@@ -83,6 +83,32 @@
             ]
         },
         {
+            "collectionGroup": "orders",
+            "queryScope": "COLLECTION",
+            "fields": [
+                { "fieldPath": "customer_info.phone", "order": "ASCENDING" },
+                { "fieldPath": "createdAt", "order": "DESCENDING" }
+            ]
+        },
+        {
+            "collectionGroup": "orders",
+            "queryScope": "COLLECTION",
+            "fields": [
+                { "fieldPath": "customer_info.customerId", "order": "ASCENDING" },
+                { "fieldPath": "paymentStatus", "order": "ASCENDING" },
+                { "fieldPath": "createdAt", "order": "ASCENDING" }
+            ]
+        },
+        {
+            "collectionGroup": "orders",
+            "queryScope": "COLLECTION",
+            "fields": [
+                { "fieldPath": "customer_info.phone", "order": "ASCENDING" },
+                { "fieldPath": "paymentStatus", "order": "ASCENDING" },
+                { "fieldPath": "createdAt", "order": "ASCENDING" }
+            ]
+        },
+        {
             "collectionGroup": "product_reviews",
             "queryScope": "COLLECTION",
             "fields": [
@@ -114,6 +140,60 @@
             "fields": [
                 { "fieldPath": "status", "order": "ASCENDING" },
                 { "fieldPath": "searchKeywords", "arrayConfig": "CONTAINS" }
+            ]
+        },
+        {
+            "collectionGroup": "products",
+            "queryScope": "COLLECTION",
+            "fields": [
+                { "fieldPath": "status", "order": "ASCENDING" },
+                { "fieldPath": "searchCategoryKeywords", "arrayConfig": "CONTAINS" }
+            ]
+        },
+        {
+            "collectionGroup": "products",
+            "queryScope": "COLLECTION",
+            "fields": [
+                { "fieldPath": "status", "order": "ASCENDING" },
+                { "fieldPath": "condition", "order": "ASCENDING" },
+                { "fieldPath": "categoryIds", "arrayConfig": "CONTAINS" }
+            ]
+        },
+        {
+            "collectionGroup": "products",
+            "queryScope": "COLLECTION",
+            "fields": [
+                { "fieldPath": "status", "order": "ASCENDING" },
+                { "fieldPath": "condition", "order": "ASCENDING" },
+                { "fieldPath": "searchKeywords", "arrayConfig": "CONTAINS" }
+            ]
+        },
+        {
+            "collectionGroup": "products",
+            "queryScope": "COLLECTION",
+            "fields": [
+                { "fieldPath": "status", "order": "ASCENDING" },
+                { "fieldPath": "condition", "order": "ASCENDING" },
+                { "fieldPath": "searchCategoryKeywords", "arrayConfig": "CONTAINS" }
+            ]
+        },
+        {
+            "collectionGroup": "products",
+            "queryScope": "COLLECTION",
+            "fields": [
+                { "fieldPath": "status", "order": "ASCENDING" },
+                { "fieldPath": "category", "order": "ASCENDING" },
+                { "fieldPath": "createdAt", "order": "DESCENDING" }
+            ]
+        },
+        {
+            "collectionGroup": "products",
+            "queryScope": "COLLECTION",
+            "fields": [
+                { "fieldPath": "status", "order": "ASCENDING" },
+                { "fieldPath": "category", "order": "ASCENDING" },
+                { "fieldPath": "brand", "order": "ASCENDING" },
+                { "fieldPath": "createdAt", "order": "DESCENDING" }
             ]
         },
         {
@@ -157,6 +237,22 @@
             ]
         },
         {
+            "collectionGroup": "services",
+            "queryScope": "COLLECTION",
+            "fields": [
+                { "fieldPath": "isActive", "order": "ASCENDING" },
+                { "fieldPath": "categoryIds", "arrayConfig": "CONTAINS" }
+            ]
+        },
+        {
+            "collectionGroup": "services",
+            "queryScope": "COLLECTION",
+            "fields": [
+                { "fieldPath": "isActive", "order": "ASCENDING" },
+                { "fieldPath": "searchKeywords", "arrayConfig": "CONTAINS" }
+            ]
+        },
+        {
             "collectionGroup": "supplier_transactions",
             "queryScope": "COLLECTION",
             "fields": [
@@ -173,5 +269,41 @@
             ]
         }
     ],
-    "fieldOverrides": []
+    "fieldOverrides": [
+        {
+            "collectionGroup": "cashier_shift_tallies",
+            "fieldPath": "cashSalesAmount",
+            "indexes": []
+        },
+        {
+            "collectionGroup": "cashier_shift_tallies",
+            "fieldPath": "bankSalesAmount",
+            "indexes": []
+        },
+        {
+            "collectionGroup": "cashier_shift_tallies",
+            "fieldPath": "otherSalesAmount",
+            "indexes": []
+        },
+        {
+            "collectionGroup": "cashier_shift_tallies",
+            "fieldPath": "updatedAt",
+            "indexes": []
+        },
+        {
+            "collectionGroup": "cashier_shift_movements",
+            "fieldPath": "cashAmount",
+            "indexes": []
+        },
+        {
+            "collectionGroup": "cashier_shift_movements",
+            "fieldPath": "bankAmount",
+            "indexes": []
+        },
+        {
+            "collectionGroup": "cashier_shift_movements",
+            "fieldPath": "otherAmount",
+            "indexes": []
+        }
+    ]
 }

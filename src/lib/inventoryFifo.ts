@@ -14,6 +14,16 @@ export interface FifoDeductor {
     preferredLotCodes?: { lotCode: string; quantity: number }[];
 }
 
+export interface FifoReadMetric {
+    productId: string;
+    durationMs: number;
+    lotCount: number;
+}
+
+export interface FetchFifoLogsOptions {
+    onRead?: (metric: FifoReadMetric) => void;
+}
+
 /**
  * PHASE 1: Fetch FIFO lots (Reads)
  * Must be called during the transaction's READ phase.
@@ -21,21 +31,31 @@ export interface FifoDeductor {
 export async function fetchFifoLogsForDeduction(
     tx: Transaction,
     db: FirebaseFirestore.Firestore,
-    deductions: FifoDeductor[]
+    deductions: FifoDeductor[],
+    options: FetchFifoLogsOptions = {},
 ): Promise<Map<string, { ref: FirebaseFirestore.DocumentReference, data: FirebaseFirestore.DocumentData }[]>> {
     const lotsDataByProduct = new Map<string, { ref: FirebaseFirestore.DocumentReference, data: FirebaseFirestore.DocumentData }[]>();
 
-    for (const req of deductions) {
-        if (req.quantityToDeduct <= 0) continue;
-
-        const lotsQuery = db.collection('inventory_lots')
-            .where('productId', '==', req.productId)
-            .where('status', '==', 'active')
-            .orderBy('createdAt', 'asc');
-
-        const lotsSnap = await tx.get(lotsQuery);
+    const activeDeductions = deductions.filter(req => req.quantityToDeduct > 0);
+    const lotSnapshots = await Promise.all(activeDeductions.map(async (req) => {
+        const startedAt = Date.now();
+        const lotsSnap = await tx.get(
+            db.collection('inventory_lots')
+                .where('productId', '==', req.productId)
+                .where('status', '==', 'active')
+                .orderBy('createdAt', 'asc'),
+        );
+        options.onRead?.({
+            productId: req.productId,
+            durationMs: Date.now() - startedAt,
+            lotCount: lotsSnap.size,
+        });
+        return lotsSnap;
+    }));
+    activeDeductions.forEach((req, index) => {
+        const lotsSnap = lotSnapshots[index];
         lotsDataByProduct.set(req.productId, lotsSnap.docs.map(d => ({ ref: d.ref, data: d.data() })));
-    }
+    });
 
     return lotsDataByProduct;
 }

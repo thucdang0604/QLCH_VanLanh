@@ -259,6 +259,12 @@ service cloud.firestore {
     match /customer_ledger/{docId} {
       allow read, write: if false;
     }
+    match /cashier_shift_movements/{docId} {
+      allow read, write: if false;
+    }
+    match /cashier_shift_tallies/{docId} {
+      allow read, write: if false;
+    }
 
     // Expenses
     match /expenses/{expenseId} {

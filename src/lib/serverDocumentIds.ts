@@ -11,12 +11,25 @@ type ReserveSequentialDocumentIdInput = {
     padLength?: number;
 };
 
+export type SequentialDocumentIdReservationGroup = ReserveSequentialDocumentIdInput & {
+    key: string;
+    count: number;
+};
+
 export type ReservedSequentialDocumentId = {
     id: string;
     ref: DocumentReference;
     sequence: number;
     counterKey: string;
     commitCounter: () => void;
+};
+
+type PreparedReservationGroup = SequentialDocumentIdReservationGroup & {
+    dateKey: string;
+    prefix: string;
+    padLength: number;
+    counterKey: string;
+    counterRef: DocumentReference;
 };
 
 export function formatVietnamDateKey(date: Date = new Date()): string {
@@ -135,4 +148,106 @@ export async function reserveSequentialDocumentIds(
     }
 
     return allocations;
+}
+
+/**
+ * Batch-reserve independent sequential ID groups in the transaction read phase.
+ *
+ * POS checkout creates several document types at once. Reserving each group one
+ * by one turns counter reads and collision checks into serial network requests.
+ * This helper keeps the existing readable ID contract while batching those reads.
+ */
+export async function reserveSequentialDocumentIdGroups(
+    tx: Transaction,
+    db: Firestore,
+    groups: SequentialDocumentIdReservationGroup[],
+): Promise<Map<string, ReservedSequentialDocumentId[]>> {
+    const preparedGroups: PreparedReservationGroup[] = groups
+        .filter(group => Number.isInteger(group.count) && group.count > 0)
+        .map(group => {
+            const dateKey = formatVietnamDateKey(group.date || new Date());
+            const prefix = group.prefix.trim().toUpperCase();
+            const padLength = group.padLength || DEFAULT_PAD_LENGTH;
+            const counterKey = `${prefix}-${dateKey}`;
+            return {
+                ...group,
+                dateKey,
+                prefix,
+                padLength,
+                counterKey,
+                counterRef: db.collection('system_counters').doc(`document_ids_${counterKey}`),
+            };
+        });
+
+    if (preparedGroups.length === 0) return new Map();
+
+    const seenKeys = new Set<string>();
+    const seenCounters = new Set<string>();
+    for (const group of preparedGroups) {
+        if (!group.key.trim() || seenKeys.has(group.key)) {
+            throw new Error('Mỗi nhóm cấp mã chứng từ phải có key duy nhất.');
+        }
+        if (seenCounters.has(group.counterKey)) {
+            throw new Error(`Không thể cấp đồng thời hai nhóm dùng chung counter ${group.counterKey}.`);
+        }
+        seenKeys.add(group.key);
+        seenCounters.add(group.counterKey);
+    }
+
+    const counterSnapshots = await tx.getAll(...preparedGroups.map(group => group.counterRef));
+    const nextSequenceByKey = new Map<string, number>();
+    preparedGroups.forEach((group, index) => {
+        nextSequenceByKey.set(group.key, Math.max(0, Number(counterSnapshots[index].data()?.sequence) || 0) + 1);
+    });
+
+    const allocationsByKey = new Map<string, ReservedSequentialDocumentId[]>();
+    preparedGroups.forEach(group => allocationsByKey.set(group.key, []));
+
+    for (let attempt = 0; attempt < MAX_COLLISION_ATTEMPTS; attempt += 1) {
+        const candidates: Array<{ group: PreparedReservationGroup; sequence: number; ref: DocumentReference }> = [];
+        for (const group of preparedGroups) {
+            const allocations = allocationsByKey.get(group.key)!;
+            const remaining = group.count - allocations.length;
+            const nextSequence = nextSequenceByKey.get(group.key)!;
+            for (let offset = 0; offset < remaining; offset += 1) {
+                const sequence = nextSequence + offset;
+                candidates.push({
+                    group,
+                    sequence,
+                    ref: db.collection(group.collectionName).doc(buildDocumentId(group.prefix, group.dateKey, sequence, group.padLength)),
+                });
+            }
+            nextSequenceByKey.set(group.key, nextSequence + remaining);
+        }
+
+        if (candidates.length === 0) break;
+
+        const candidateSnapshots = await tx.getAll(...candidates.map(candidate => candidate.ref));
+        candidates.forEach((candidate, index) => {
+            if (candidateSnapshots[index].exists) return;
+            const allocations = allocationsByKey.get(candidate.group.key)!;
+            if (allocations.length >= candidate.group.count) return;
+            allocations.push({
+                id: candidate.ref.id,
+                ref: candidate.ref,
+                sequence: candidate.sequence,
+                counterKey: candidate.group.counterKey,
+                commitCounter: () => {
+                    tx.set(candidate.group.counterRef, {
+                        prefix: candidate.group.prefix,
+                        dateKey: candidate.group.dateKey,
+                        sequence: allocations.at(-1)?.sequence || candidate.sequence,
+                        updatedAt: FieldValue.serverTimestamp(),
+                    }, { merge: true });
+                },
+            });
+        });
+
+        if (preparedGroups.every(group => allocationsByKey.get(group.key)!.length === group.count)) {
+            return allocationsByKey;
+        }
+    }
+
+    const unresolvedGroup = preparedGroups.find(group => allocationsByKey.get(group.key)!.length !== group.count);
+    throw new Error(`Khong the tao ${unresolvedGroup?.count || 0} ma ${unresolvedGroup?.prefix || ''} moi sau ${MAX_COLLISION_ATTEMPTS} lan kiem tra trung.`);
 }

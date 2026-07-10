@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { Loader2, Plus } from 'lucide-react';
 import CurrencyInput from '@/components/admin/CurrencyInput';
 import { orderBy } from 'firebase/firestore';
-import { generateSearchKeywords } from '@/lib/utils';
+import { buildCategorySearchKeywords, generateSearchKeywords } from '@/lib/utils';
 import { useFirestoreCollection } from '@/lib/useFirestore';
 import { triggerRevalidate } from '@/lib/revalidate';
 import { normalizeDocId } from '@/lib/idNormalizer';
@@ -211,6 +211,7 @@ export default function UniversalProductModal({
             images,
             specs: initialData?.specs || {},
             searchKeywords,
+            searchCategoryKeywords: buildCategorySearchKeywords(form.categoryIds, searchKeywords),
         };
         const qrCodes = [productCode];
 
@@ -259,6 +260,7 @@ export default function UniversalProductModal({
             images,
             specs: {},
             searchKeywords,
+            searchCategoryKeywords: buildCategorySearchKeywords(form.categoryIds, searchKeywords),
         };
         const qrCodes = [productCode];
 

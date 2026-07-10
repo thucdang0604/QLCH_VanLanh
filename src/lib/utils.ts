@@ -88,3 +88,41 @@ export function generateSearchKeywords(name: string): string[] {
     // Cap at 60 to avoid Firestore limits
     return Array.from(keywords).slice(0, 60);
 }
+
+/**
+ * Pick the most specific indexed token for a user-entered catalog search.
+ * Multi-word phrases are stored by generateSearchKeywords, so keep the full
+ * phrase when available instead of widening every "iPhone 15" query to
+ * "iPhone".
+ */
+export function getSearchKeywordQuery(value: string): string {
+    const normalized = value
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/đ/gi, 'd')
+        .toLowerCase()
+        .trim()
+        .replace(/\s+/g, ' ');
+
+    if (!normalized) return '';
+    const keywords = generateSearchKeywords(value);
+    return keywords.includes(normalized) ? normalized : (keywords[0] || normalized);
+}
+
+/**
+ * Pre-compute category-and-token entries so an admin search can combine a
+ * category with a text token in one Firestore array-contains query.
+ */
+export function buildCategorySearchKeywords(categoryIds: string[] | undefined, searchKeywords: string[]): string[] {
+    const categories = Array.from(new Set((categoryIds || []).filter(Boolean)));
+    const keywords = Array.from(new Set(searchKeywords.filter(Boolean)));
+    const entries = new Set<string>();
+
+    for (const categoryId of categories) {
+        for (const keyword of keywords) {
+            entries.add(`${categoryId}::${keyword}`);
+        }
+    }
+
+    return Array.from(entries).slice(0, 500);
+}

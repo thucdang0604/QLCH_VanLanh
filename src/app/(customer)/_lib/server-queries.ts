@@ -86,9 +86,10 @@ export const fetchCategoryItems = unstable_cache(
         } else {
             queryRef = queryRef.where('status', '==', 'active');
             
-            if (categoryId && categoryId !== 'all') {
-                queryRef = queryRef.where('categoryIds', 'array-contains', categoryId);
-            }
+        }
+
+        if (categoryId && categoryId !== 'all') {
+            queryRef = queryRef.where('categoryIds', 'array-contains', categoryId);
         }
 
         const snapshot = await queryRef.limit(200).get();

@@ -1,9 +1,15 @@
 {
   "_meta": {
     "description": "Bản đồ trí tuệ mã nguồn — tự động tích lũy khi AI đọc/sửa code. Giúp AI sau chỉ cần đọc file này là hiểu ngay cấu trúc, liên kết, và cách sửa.",
-    "lastUpdated": "2026-07-07T00:00:00.000+07:00",
-    "version": 63,
+    "lastUpdated": "2026-07-10T00:00:00.000+07:00",
+    "version": 69,
     "changelog": [
+      "v69: POS no longer reloads cashier-shift after a checkout that did not change the shift (including DEBT); cash/bank refreshes remain. GET /api/pos/cashier-shift returns active shift by default and loads the 10 closed-shift history documents only for the Cashier tab, reducing both post-checkout and initial POS read cost.",
+      "v68: POS checkout starts readable-ID reservation while FIFO lots are loading, then reports reserveIdsWait (critical path) separately from reserveIdsTotal (overlapped duration). Auth telemetry splits Firebase token verification and users/{uid} profile read; the checkout no longer re-reads that user document in its Firestore transaction. scripts/backfill-product-inventory-tracking.mjs safely classifies previously unmarked products with a read-only default and per-product transaction guard.",
+      "v67: Products now persist inventoryTrackingMode. New imports set fifo; an older product is classified from its first completed checkout, and known legacy products skip empty inventory_lots queries while still emitting LEGACY_STOCK audit entries.",
+      "v66: POS checkout telemetry now separates workflow, repair-product, FIFO preparation and FIFO read timing. Each FIFO query reports product id, duration and returned lot count before any query limit is considered, preserving FIFO correctness while identifying costly lot histories.",
+      "v65: POS checkout includes operation_requests idempotency in its first core getAll batch. A completed replay intentionally reads that same batch before returning its cached result, eliminating one normal-checkout Firestore round trip.",
+      "v64: POS checkout hot path now emits per-transaction-attempt timings, batches core reads/FIFO/ID reservations, reuses commission product snapshots, merges revenue deltas, and moves newly opened cashier shifts to deterministic payment movements plus 16 tally shards. Legacy open shifts retain direct totals until close.",
       "v63: Reconciled file line counts after major refactoring. types.ts is now a barrel re-export (10 lines) split into src/lib/types/ (10 files: common, catalog, commerce, content, repair, inventory, finance, voucher, workflow, contact). parts/page.tsx refactored from ~2005 to ~354 lines with logic extracted to src/features/parts/ (ImportReceiptModals, importReceiptTypes, importReceiptUtils). repairs/page.tsx refactored from ~2852 to ~1435 with 12 sub-components extracted to src/features/repairs/. pos/page.tsx corrected to ~2220 with PosCartPanel and posTypes extracted to src/features/pos/. New src/features/ directory houses modular feature components for parts, pos, repairs, technician, articles, and excel-import.",
       "v62: Closed the system and POS audit trackers after all concrete open BUG entries in the 2026-07-03 pass were fixed. Remaining roadmap items are features or performance follow-ups requiring production timing samples, not open bug regressions; manifest openBugs is now 0.",
       "v61: Repair editor save is now atomic. /api/repairs/edit performs profile, device, checklist, media, staff, timing, and payment updates in one Admin SDK transaction with manage_repairs auth, idempotency, ticketVersion, terminal-state, and paid/refunded guards. Admin repairs edit submit no longer calls payment-edit followed by a client transaction.",
@@ -78,6 +84,7 @@
         "openingBankAmount",
         "cashSalesAmount",
         "bankSalesAmount",
+        "tallyVersion",
         "expectedCashAmount",
         "expectedBankAmount",
         "openedBy",
@@ -91,9 +98,50 @@
         "api/pos/checkout/route.ts"
       ],
       "changeLog": [
+        "v64: Newly opened shifts aggregate checkout movements through 16 deterministic tally shards; close snapshots the tallies into cashSalesAmount/bankSalesAmount for history.",
         "v27: GET /api/pos/cashier-shift returns recent closed shifts; POS cashier tab displays closed-shift history for reconciliation.",
         "v26: Checkout increments cash/bank shift totals with the retained amount from current order plus old-debt payment, excluding change due.",
         "v25: Added active cashier shift tracking. Cash/bank/Momo POS payments require an open shift and increment shift totals in checkout transaction."
+      ]
+    },
+    "cashier_shift_movements": {
+      "description": "Immutable POS payment movement per cashier shift. Document ID is deterministic from shiftId and idempotency operation key, so transaction retries cannot double-count a payment.",
+      "keyFields": [
+        "shiftId",
+        "operationKey",
+        "orderId",
+        "paymentMethod",
+        "cashAmount",
+        "bankAmount",
+        "otherAmount",
+        "actorId",
+        "createdAt"
+      ],
+      "usedIn": [
+        "api/pos/checkout/route.ts",
+        "lib/cashierShiftTallyServer.ts"
+      ],
+      "changeLog": [
+        "v64: Added as the idempotent payment audit record for new cashier shifts."
+      ]
+    },
+    "cashier_shift_tallies": {
+      "description": "Sixteen deterministic aggregate shards per new cashier shift. Checkout increments exactly one shard; GET and close sum all shards instead of repeatedly updating the active shift document.",
+      "keyFields": [
+        "shiftId",
+        "shardId",
+        "cashSalesAmount",
+        "bankSalesAmount",
+        "otherSalesAmount",
+        "updatedAt"
+      ],
+      "usedIn": [
+        "api/pos/checkout/route.ts",
+        "api/pos/cashier-shift/route.ts",
+        "lib/cashierShiftTallyServer.ts"
+      ],
+      "changeLog": [
+        "v64: Added to remove the active cashier shift document as a high-frequency checkout write target."
       ]
     },
     "products": {
@@ -110,6 +158,7 @@
         "costPrice",
         "stock",
         "held",
+        "inventoryTrackingMode",
         "isProposed",
         "supplier"
       ],
@@ -1689,7 +1738,7 @@
       "/api/orders/transition": "POST: Cập nhật trạng thái đơn hàng (VD: Pending -> Confirmed -> Shipping)."
     },
     "pos": {
-      "/api/pos/checkout": "POST: Bán hàng tại quầy (POS). Tạo Order, trừ kho, ghi nhận doanh thu và dòng tiền (PaymentHistory).",
+      "/api/pos/checkout": "POST: Bán hàng tại quầy (POS). Tạo Order, trừ kho, ghi nhận doanh thu và dòng tiền (PaymentHistory). Client mới gửi cashierShiftId để route batch-validate trực tiếp ca hiện hành; transaction batch-read operation_requests idempotency cùng core docs, phân loại legacy/FIFO an toàn, và trả FIFO telemetry theo callback/product khi chậm.",
       "/api/pos/cashier-shift": "GET/POST/PATCH: Lay ca thu ngan dang mo, mo ca voi so dau ca da khoa, va chot ca. POS checkout cong cash/bank vao ca dang mo."
     },
     "products": {

@@ -3,6 +3,16 @@ import type { Commission, CommissionRule, Order, RepairTicket, Product } from '@
 import { incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 
+export type CommissionCalculationOptions = {
+    activeRules?: CommissionRule[];
+    productMap?: Record<string, Product>;
+    skipRevenueAggregate?: boolean;
+};
+
+export type CommissionCalculationResult = {
+    commissionCost: number;
+};
+
 function getSafePercentage(rule: CommissionRule): number | null {
     const pct = typeof rule.percentage === 'number' ? rule.percentage : Number(rule.percentage);
     if (!Number.isFinite(pct)) return null;
@@ -104,8 +114,9 @@ export async function calculateAndSaveCommissionsServer(
     tx: Transaction,
     staff: { uid: string; displayName: string },
     docType: 'order' | 'repair',
-    docData: Order | RepairTicket
-) {
+    docData: Order | RepairTicket,
+    options: CommissionCalculationOptions = {},
+): Promise<CommissionCalculationResult> {
     try {
         const db = getAdminDb();
         
@@ -113,18 +124,18 @@ export async function calculateAndSaveCommissionsServer(
         if (docType === 'repair') {
             const paymentStatus = (docData as RepairTicket).payment?.status;
             if (paymentStatus !== 'paid') {
-                return;
+                return { commissionCost: 0 };
             }
         }
         if (docType === 'order') {
             const orderStatus = (docData as Order).status;
             if (orderStatus !== 'Completed') {
-                return;
+                return { commissionCost: 0 };
             }
         }
 
-        const rules = await getActiveRulesServer();
-        if (rules.length === 0) return;
+        const rules = options.activeRules || await getActiveRulesServer();
+        if (rules.length === 0) return { commissionCost: 0 };
 
         const commissionsToSave: Array<Omit<Commission, 'id'>> = [];
 
@@ -137,11 +148,11 @@ export async function calculateAndSaveCommissionsServer(
 
             // Dùng getCommissionRecipient để xác định người nhận
             const recipient = getCommissionRecipient(order);
-            if (!recipient) return; // Không có người nhận hợp lệ -> Không tính HH
+            if (!recipient) return { commissionCost: 0 }; // Không có người nhận hợp lệ -> Không tính HH
 
             // Fetch product categories for order items
             const productIds = orderItems.map(i => i.productId).filter(Boolean);
-            const productMap: Record<string, Product> = {};
+            const productMap: Record<string, Product> = { ...(options.productMap || {}) };
             
             for (const pid of productIds) {
                 if (!productMap[pid]) {
@@ -194,11 +205,11 @@ export async function calculateAndSaveCommissionsServer(
             // Repair ticket commission goes to assignedTechnician
             const techUid = repair.staff?.assignedTechnician;
             const techName = repair.staff?.assignedTechnicianName;
-            if (!techUid) return;
+            if (!techUid) return { commissionCost: 0 };
             
             if (rule) {
                 const baseAmount = safeNumber(repair.payment?.amount) - safeNumber(repair.payment?.giftDiscount);
-                if (baseAmount <= 0) return;
+                if (baseAmount <= 0) return { commissionCost: 0 };
 
                 const commissionAmount = calculateCommissionAmount(rule, baseAmount);
 
@@ -218,12 +229,17 @@ export async function calculateAndSaveCommissionsServer(
         }
 
         // Save all calculated commissions via transaction
+        let commissionCost = 0;
         for (const comm of commissionsToSave) {
             const baseId = `${comm.sourceType}_${comm.sourceId}_${comm.ruleId}_${comm.staffId}`;
             const ref = db.collection('commissions').doc(baseId);
             tx.set(ref, comm);
-            incrementRevenueAggregates(tx, db, { commissionCost: safeNumber(comm.amount) });
+            commissionCost += safeNumber(comm.amount);
         }
+        if (commissionCost > 0 && !options.skipRevenueAggregate) {
+            incrementRevenueAggregates(tx, db, { commissionCost });
+        }
+        return { commissionCost };
 
     } catch (error) {
         console.error('Error calculating commissions server:', error);

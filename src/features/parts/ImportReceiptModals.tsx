@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import type React from 'react';
 import { Building2, CheckCircle2, ChevronDown, Loader2, PackagePlus, Plus, Save, Search, Trash2 } from 'lucide-react';
 import { collection, doc, getDoc, getDocs, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
@@ -16,8 +16,6 @@ import { createProductWithCodes } from '@/lib/productCodeRegistry';
 import { buildInlineSupplierContactInput, buildSupplierContactDocumentFields, reserveSupplierDocumentId } from '@/lib/supplierDocumentIds';
 import { toastError, toastSuccess } from '@/lib/toast';
 import type { ImportPreviewState, ImportReceiptItem, SupplierOption } from './importReceiptTypes';
-import { isPartCategory } from '@/lib/constants';
-import { generateSearchKeywords } from '@/lib/utils';
 
 function buildImportReceiptBaseId() {
     const now = new Date();
