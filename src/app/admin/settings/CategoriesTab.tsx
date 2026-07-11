@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { doc } from 'firebase/firestore';
 import { getDoc } from '@/lib/firestoreLogger';
 import { useFirestoreCollection, updateDocument, deleteDocument, addDocumentWithId } from '@/lib/useFirestore';
-import { db } from '@/lib/firebase';
+import { db, getAuthInstance } from '@/lib/firebase';
 import { Brand, TaxonomyNode } from '@/lib/types';
 import { useConfig } from '@/lib/ConfigContext';
 import Modal from '@/components/admin/Modal';
@@ -61,14 +61,13 @@ export default function CategoriesTab() {
 }
 
 function CategoriesList() {
-    const { config, updateConfig } = useConfig();
+    const { config } = useConfig();
     const taxonomy = config.taxonomy || { retail: [], service: [], component: [] };
     const [filterType, setFilterType] = useState<'retail' | 'service' | 'component'>('retail');
     
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingNode, setEditingNode] = useState<TaxonomyNode | null>(null);
     const [parentPath, setParentPath] = useState<string[] | null>(null);
-    const [actionIndexPath, setActionIndexPath] = useState<number[] | null>(null);
     const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
 
     const toggleExpand = (id: string) => {
@@ -80,81 +79,42 @@ function CategoriesList() {
         });
     };
 
-    const handleOpenModal = (node?: TaxonomyNode, pPath?: string[] | null, indexPath?: number[] | null) => {
+    const handleOpenModal = (node?: TaxonomyNode, pPath?: string[] | null) => {
         setEditingNode(node || null);
         setParentPath(pPath || null);
-        setActionIndexPath(indexPath || null);
         setIsModalOpen(true);
     };
 
-    const handleDelete = async (indexPath: number[]) => {
-        if (!confirm('Bạn có chắc muốn xoá danh mục này và tất cả danh mục con?')) return;
-        
-        const newTax = JSON.parse(JSON.stringify(taxonomy));
-        const list = newTax[filterType] as TaxonomyNode[];
-        
-        if (indexPath.length === 1) {
-            list.splice(indexPath[0], 1);
-        } else if (indexPath.length === 2) {
-            const p1 = list[indexPath[0]];
-            if (p1 && p1.children) {
-                p1.children.splice(indexPath[1], 1);
-            }
-        } else if (indexPath.length === 3) {
-            const p1 = list[indexPath[0]];
-            if (p1 && p1.children) {
-                const p2 = p1.children[indexPath[1]];
-                if (p2 && p2.children) {
-                    p2.children.splice(indexPath[2], 1);
-                }
-            }
+    const mutateTaxonomy = async (payload: Record<string, unknown>) => {
+        const auth = await getAuthInstance();
+        const token = await auth.currentUser?.getIdToken();
+        if (!token) throw new Error('Bạn cần đăng nhập quản trị để thay đổi taxonomy.');
+
+        const response = await fetch('/api/admin/taxonomy', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify(payload),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || !result.success) {
+            throw new Error(typeof result.error === 'string' ? result.error : 'Không thể cập nhật taxonomy.');
         }
-        
-        await updateConfig({ taxonomy: newTax });
+    };
+
+    const handleDelete = async (nodeId: string) => {
+        if (!confirm('Bạn có chắc muốn xoá danh mục này và tất cả danh mục con?')) return;
+
+        await mutateTaxonomy({ action: 'delete', taxonomyType: filterType, nodeId });
         toastSuccess('Đã xoá danh mục');
     };
 
     const handleSaveNode = async (nodeData: Omit<TaxonomyNode, 'id'>) => {
-        const newTax = JSON.parse(JSON.stringify(taxonomy));
-        const list = newTax[filterType] as TaxonomyNode[];
-        
-        // Construct the full id based on parentPath
-        let newId = nodeData.slug;
-        if (parentPath && parentPath.length > 0) {
-            newId = `${parentPath.join('/')}/${nodeData.slug}`;
-        }
-        
-        const newNode: TaxonomyNode = {
-            id: newId,
-            ...nodeData,
-            children: editingNode?.children || []
-        };
-
-        if (editingNode && actionIndexPath) {
-            // EDIT EXISTING NODE
-            if (actionIndexPath.length === 1) {
-                list[actionIndexPath[0]] = newNode;
-            } else if (actionIndexPath.length === 2) {
-                list[actionIndexPath[0]].children![actionIndexPath[1]] = newNode;
-            } else if (actionIndexPath.length === 3) {
-                list[actionIndexPath[0]].children![actionIndexPath[1]].children![actionIndexPath[2]] = newNode;
-            }
-        } else {
-            // ADD NEW NODE
-            if (!actionIndexPath || actionIndexPath.length === 0) {
-                list.push(newNode);
-            } else if (actionIndexPath.length === 1) {
-                const p1 = list[actionIndexPath[0]];
-                p1.children = p1.children || [];
-                p1.children.push(newNode);
-            } else if (actionIndexPath.length === 2) {
-                const p2 = list[actionIndexPath[0]].children![actionIndexPath[1]];
-                p2.children = p2.children || [];
-                p2.children.push(newNode);
-            }
-        }
-        
-        await updateConfig({ taxonomy: newTax });
+        await mutateTaxonomy(editingNode
+            ? { action: 'update', taxonomyType: filterType, nodeId: editingNode.id, node: nodeData }
+            : { action: 'create', taxonomyType: filterType, parentId: parentPath?.at(-1) ?? null, node: nodeData });
         toastSuccess(editingNode ? 'Đã cập nhật danh mục' : 'Đã thêm danh mục mới');
         setIsModalOpen(false);
     };
@@ -202,14 +162,14 @@ function CategoriesList() {
                     
                     <div className="flex items-center gap-1">
                         {canAddChild && (
-                            <button title="Thêm danh mục con" onClick={() => handleOpenModal(undefined, currentPath, indexPath)} className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors">
+                            <button title="Thêm danh mục con" onClick={() => handleOpenModal(undefined, currentPath)} className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors">
                                 <Plus size={15} />
                             </button>
                         )}
-                        <button title="Sửa" onClick={() => handleOpenModal(node, pPath, indexPath)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+                        <button title="Sửa" onClick={() => handleOpenModal(node, pPath)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
                             <Edit size={15} />
                         </button>
-                        <button title="Xoá" onClick={() => handleDelete(indexPath)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                        <button title="Xoá" onClick={() => handleDelete(node.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
                             <Trash2 size={15} />
                         </button>
                     </div>
@@ -366,9 +326,11 @@ function CategoryModal({ isOpen, onClose, initialData, onSave }: { isOpen: boole
                             required
                             value={formData.slug}
                             onChange={(e) => setFormData(prev => ({ ...prev, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') }))}
-                            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 bg-gray-50"
+                            disabled={Boolean(initialData)}
+                            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 bg-gray-50 disabled:cursor-not-allowed disabled:opacity-70"
                             placeholder="dien-thoai"
                         />
+                        {initialData && <p className="mt-1 text-xs text-gray-500">Slug được giữ cố định để không làm đứt liên kết catalog và workflow.</p>}
                     </div>
                 </div>
 

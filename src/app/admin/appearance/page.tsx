@@ -1,10 +1,9 @@
 'use client';
 
 /* eslint-disable @next/next/no-img-element */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
     useConfig,
-    DEFAULT_CONFIG,
     type SiteConfig,
     type HeroBanner,
     type HomepagePricingCategory,
@@ -15,16 +14,17 @@ import MediaManager from '@/components/admin/MediaManager';
 import {
     Palette, Type, LayoutDashboard, Save, Loader2,
     Trash2, Plus, GripVertical, Eye, EyeOff, ArrowUp, ArrowDown,
-    CheckCircle2, X, RotateCcw, MapPin, Edit2, ImageIcon, Star
+    CheckCircle2, AlertCircle, X, RotateCcw, MapPin, Edit2, ImageIcon, Star,
+    ExternalLink, SlidersHorizontal
 } from 'lucide-react';
 
 // ========= Toast =========
-function Toast({ message, onClose }: { message: string; onClose: () => void }) {
+function Toast({ message, variant = 'success', onClose }: { message: string; variant?: 'success' | 'error'; onClose: () => void }) {
     useEffect(() => { const t = setTimeout(onClose, 3000); return () => clearTimeout(t); }, [onClose]);
     return (
         <div className="fixed top-6 right-6 z-[100] animate-[fadeIn_0.3s_ease-in-out]">
-            <div className="bg-green-500 text-white px-6 py-4 rounded-xl shadow-2xl flex items-center gap-3 max-w-sm">
-                <CheckCircle2 size={20} className="flex-shrink-0" />
+            <div className={`${variant === 'success' ? 'bg-emerald-600' : 'bg-red-600'} text-white px-6 py-4 rounded-xl shadow-2xl flex items-center gap-3 max-w-sm`} role="status">
+                {variant === 'success' ? <CheckCircle2 size={20} className="flex-shrink-0" /> : <AlertCircle size={20} className="flex-shrink-0" />}
                 <span className="text-sm font-medium">{message}</span>
                 <button title="Đóng" onClick={onClose} className="ml-2 hover:bg-green-600 rounded p-0.5"><X size={16} /></button>
             </div>
@@ -33,15 +33,18 @@ function Toast({ message, onClose }: { message: string; onClose: () => void }) {
 }
 
 // ========= Section Card =========
-function SectionCard({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
+function SectionCard({ id, title, description, icon, children }: { id?: string; title: string; description?: string; icon: React.ReactNode; children: React.ReactNode }) {
     return (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <section id={id} className="scroll-mt-6 bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
             <div className="px-6 py-4 bg-gray-50 border-b flex items-center gap-3">
-                <span className="text-orange-500">{icon}</span>
-                <h3 className="font-semibold text-gray-800">{title}</h3>
+                <span className="rounded-lg bg-orange-100 p-2 text-orange-600">{icon}</span>
+                <div>
+                    <h3 className="font-semibold text-gray-800">{title}</h3>
+                    {description && <p className="mt-0.5 text-xs text-gray-500">{description}</p>}
+                </div>
             </div>
             <div className="p-6">{children}</div>
-        </div>
+        </section>
     );
 }
 
@@ -74,7 +77,7 @@ export default function AdminAppearancePage() {
     const { config, updateConfig } = useConfig();
     const [local, setLocal] = useState<SiteConfig>(config);
     const [saving, setSaving] = useState(false);
-    const [toast, setToast] = useState<string | null>(null);
+    const [toast, setToast] = useState<{ message: string; variant: 'success' | 'error' } | null>(null);
     const [mediaOpen, setMediaOpen] = useState(false);
     const [mediaTarget, setMediaTarget] = useState<string | null>(null);
 
@@ -83,9 +86,13 @@ export default function AdminAppearancePage() {
 
     useEffect(() => { setLocal(config); }, [config]);
 
-    const showToast = (msg: string) => setToast(msg);
+    const isDirty = useMemo(() => JSON.stringify(local) !== JSON.stringify(config), [local, config]);
+    const visibleSectionCount = local.homeSections.filter(section => section.visible).length;
+
+    const showToast = (message: string, variant: 'success' | 'error' = 'success') => setToast({ message, variant });
 
     const save = async (partial: Partial<SiteConfig>, msg: string) => {
+        if (saving) return;
         setSaving(true);
         try {
             // Strip undefined values to prevent Firebase "Unsupported field value: undefined" errors
@@ -93,9 +100,29 @@ export default function AdminAppearancePage() {
             await updateConfig(cleanPartial);
             showToast(msg);
         }
-        catch (e) { console.error(e); }
-        setSaving(false);
+        catch (error) {
+            console.error(error);
+            showToast(error instanceof Error ? `Không thể lưu: ${error.message}` : 'Không thể lưu thay đổi. Vui lòng thử lại.', 'error');
+        } finally {
+            setSaving(false);
+        }
     };
+
+    const saveAllHomepageSettings = () => save({
+        primaryColor: local.primaryColor,
+        primaryColorDark: local.primaryColorDark,
+        primaryColorLight: local.primaryColorLight,
+        topBarText: local.topBarText,
+        topBarEnabled: local.topBarEnabled,
+        logoUrl: local.logoUrl,
+        headerBg: local.headerBg,
+        hero_banners: local.hero_banners,
+        background_config: local.background_config,
+        store_branches: local.store_branches,
+        homepagePricing: local.homepagePricing,
+        homepageReviews: local.homepageReviews,
+        homeSections: local.homeSections,
+    }, 'Đã lưu toàn bộ cấu hình trang chủ!');
 
     // ---- Media Manager handlers ----
     const openMediaFor = (target: string) => {
@@ -146,6 +173,21 @@ export default function AdminAppearancePage() {
         if (newIndex < 0 || newIndex >= items.length) return;
         [items[index], items[newIndex]] = [items[newIndex], items[index]];
         setLocal({ ...local, homeSections: items.map((item, i) => ({ ...item, order: i })) });
+    };
+
+    const moveBanner = (index: number, direction: 'up' | 'down') => {
+        const items = [...local.hero_banners];
+        const nextIndex = direction === 'up' ? index - 1 : index + 1;
+        if (nextIndex < 0 || nextIndex >= items.length) return;
+        [items[index], items[nextIndex]] = [items[nextIndex], items[index]];
+        setLocal({ ...local, hero_banners: items });
+    };
+
+    const updateBanner = (bannerId: string, partial: Partial<HeroBanner>) => {
+        setLocal({
+            ...local,
+            hero_banners: local.hero_banners.map(banner => banner.id === bannerId ? { ...banner, ...partial } : banner),
+        });
     };
 
     // ---- Branch CRUD ----
@@ -202,7 +244,7 @@ export default function AdminAppearancePage() {
 
     return (
         <div className="space-y-6">
-            {toast && <Toast message={toast} onClose={() => setToast(null)} />}
+            {toast && <Toast message={toast.message} variant={toast.variant} onClose={() => setToast(null)} />}
             <MediaManager
                 isOpen={mediaOpen}
                 onClose={() => setMediaOpen(false)}
@@ -217,18 +259,56 @@ export default function AdminAppearancePage() {
             />
 
             {/* Page Header */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-2xl font-bold text-gray-800">Giao diện & Cấu hình</h1>
-                    <p className="text-sm text-gray-500 mt-1">Tùy chỉnh giao diện, banner, background và chi nhánh</p>
+            <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-700 px-5 py-6 text-white sm:px-7">
+                    <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+                        <div>
+                            <div className="mb-2 flex items-center gap-2 text-sm font-medium text-orange-200">
+                                <SlidersHorizontal size={16} /> Trang chủ
+                            </div>
+                            <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Giao diện & cấu hình</h1>
+                            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">Quản lý nhận diện, nội dung nổi bật và thứ tự hiển thị của trang chủ từ một nơi.</p>
+                        </div>
+                        <div className="flex flex-wrap gap-2 xl:justify-end">
+                            <a href="/" target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-lg border border-white/20 bg-white/10 px-3.5 py-2.5 text-sm font-medium text-white transition hover:bg-white/20">
+                                Xem trang chủ <ExternalLink size={15} />
+                            </a>
+                            <button
+                                onClick={() => { setLocal(config); showToast('Đã hoàn tác các thay đổi chưa lưu'); }}
+                                disabled={!isDirty || saving}
+                                className="inline-flex items-center gap-2 rounded-lg border border-white/20 px-3.5 py-2.5 text-sm font-medium text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                                <RotateCcw size={16} /> Hoàn tác
+                            </button>
+                            <button
+                                onClick={saveAllHomepageSettings}
+                                disabled={!isDirty || saving}
+                                className="inline-flex items-center gap-2 rounded-lg bg-orange-500 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-orange-950/20 transition hover:bg-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                                Lưu tất cả
+                            </button>
+                        </div>
+                    </div>
                 </div>
-                <button onClick={() => { setLocal(DEFAULT_CONFIG); showToast('Đã reset (chưa lưu)'); }} className="flex items-center gap-2 px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-600">
-                    <RotateCcw size={16} /> Reset mặc định
-                </button>
-            </div>
+                <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-7">
+                    <div className={`inline-flex w-fit items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold ${isDirty ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-700'}`}>
+                        {isDirty ? <AlertCircle size={14} /> : <CheckCircle2 size={14} />}
+                        {isDirty ? 'Có thay đổi chưa lưu' : 'Tất cả thay đổi đã được lưu'}
+                    </div>
+                    <p className="text-xs text-gray-500">Đang hiển thị <strong className="text-gray-700">{visibleSectionCount}/{local.homeSections.length}</strong> khối trên trang chủ · <strong className="text-gray-700">{local.hero_banners.length}</strong> banner</p>
+                </div>
+                <nav aria-label="Đi đến khu vực cấu hình" className="flex gap-2 overflow-x-auto border-t border-slate-100 px-5 py-3 sm:px-7">
+                    {[
+                        ['#theme', 'Màu sắc'], ['#brand', 'Thương hiệu'], ['#banners', 'Banner'], ['#pricing', 'Bảng giá'], ['#reviews', 'Review'], ['#layout', 'Bố cục'],
+                    ].map(([href, label]) => (
+                        <a key={href} href={href} className="whitespace-nowrap rounded-full border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 transition hover:border-orange-300 hover:bg-orange-50 hover:text-orange-700">{label}</a>
+                    ))}
+                </nav>
+            </section>
 
             {/* 1. Theme Color */}
-            <SectionCard title="Màu chủ đạo" icon={<Palette size={20} />}>
+            <SectionCard id="theme" title="Màu chủ đạo" description="Màu thương hiệu áp dụng cho nút, liên kết và các điểm nhấn." icon={<Palette size={20} />}>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">Màu chính</label>
@@ -263,7 +343,7 @@ export default function AdminAppearancePage() {
             </SectionCard>
 
             {/* 2. Top Bar */}
-            <SectionCard title="Thông báo đầu trang" icon={<Type size={20} />}>
+            <SectionCard id="announcement" title="Thông báo đầu trang" description="Thanh thông tin nhỏ phía trên header." icon={<Type size={20} />}>
                 <div className="space-y-4">
                     <div className="flex items-center gap-3">
                         <label className="relative inline-flex items-center cursor-pointer">
@@ -281,7 +361,7 @@ export default function AdminAppearancePage() {
             </SectionCard>
 
             {/* 2b. Logo & Header */}
-            <SectionCard title="Logo & Nền Header" icon={<ImageIcon size={20} />}>
+            <SectionCard id="brand" title="Logo & Nền Header" description="Nhận diện và nền của thanh điều hướng." icon={<ImageIcon size={20} />}>
                 <p className="text-sm text-gray-500 mb-4">Logo hiển thị và màu nền chính của thanh tiêu đề.</p>
                 <div className="space-y-4">
                     {local.logoUrl ? (
@@ -324,7 +404,7 @@ export default function AdminAppearancePage() {
             </SectionCard>
 
             {/* 3. Hero Banners */}
-            <SectionCard title="Banner trang chủ (Hero)" icon={<ImageIcon size={20} />}>
+            <SectionCard id="banners" title="Banner trang chủ (Hero)" description="Thứ tự tại đây chính là thứ tự slide hiển thị trên trang chủ." icon={<ImageIcon size={20} />}>
                 <div className="space-y-4">
                     <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
                         Khung banner trang chu dung ty le rong:cao 16:9 (cao:rong 9:16). Anh upload moi trong thu muc Banner se duoc toi uu dung luong nhung giu nguyen noi dung anh; hay dung anh gan 1920x1080, 1600x900 hoac 1280x720 de khong bi crop khi hien thi.
@@ -336,15 +416,18 @@ export default function AdminAppearancePage() {
                         <p className="text-center text-gray-400 py-4">Chưa có banner — Thêm ảnh để hiện trên trang chủ</p>
                     ) : (
                         <div className="space-y-3">
-                            {/* eslint-disable-next-line @typescript-eslint/no-unused-vars */}
-                            {local.hero_banners.map((b, _i) => (
-                                <div key={b.id} className="flex flex-col gap-3 p-3 border rounded-lg bg-gray-50 md:flex-row md:items-center">
+                            {local.hero_banners.map((b, index) => (
+                                <div key={b.id} className="flex flex-col gap-3 rounded-xl border border-gray-200 bg-gray-50 p-3 md:flex-row md:items-center">
                                     <div className="w-full md:w-40 flex-shrink-0">
                                         <div className="aspect-video overflow-hidden rounded-lg bg-gray-100">
-                                            <img src={b.imageUrl} alt={b.alt} className="h-full w-full object-cover" onError={(e) => { (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><rect fill="%23eee" width="200" height="100"/><text fill="%23999" x="50%" y="50%" text-anchor="middle" dy=".3em" font-size="14">No Image</text></svg>'; }} />
+                                            <img src={b.imageUrl} alt={b.alt || `Banner ${index + 1}`} className="h-full w-full object-cover" onError={(e) => { (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><rect fill="%23eee" width="200" height="100"/><text fill="%23999" x="50%" y="50%" text-anchor="middle" dy=".3em" font-size="14">No Image</text></svg>'; }} />
                                         </div>
                                     </div>
                                     <div className="flex-1 space-y-1.5">
+                                        <div className="flex items-center justify-between gap-3">
+                                            <p className="text-xs font-semibold text-gray-700">Slide {index + 1} / {local.hero_banners.length}</p>
+                                            {b.link && <span className="max-w-[55%] truncate text-[11px] text-gray-400">{b.link}</span>}
+                                        </div>
                                         {(() => {
                                             const status = getBannerRatioStatus(b.width, b.height);
                                             if (!status) {
@@ -356,12 +439,16 @@ export default function AdminAppearancePage() {
                                                 </p>
                                             );
                                         })()}
-                                        <input type="text" value={b.alt} onChange={(e) => { const u = local.hero_banners.map(x => x.id === b.id ? { ...x, alt: e.target.value } : x); setLocal({ ...local, hero_banners: u }); }} placeholder="Mô tả banner" className="w-full px-3 py-1.5 border rounded text-sm" />
-                                        <input type="text" value={b.link || ''} onChange={(e) => { const u = local.hero_banners.map(x => x.id === b.id ? { ...x, link: e.target.value } : x); setLocal({ ...local, hero_banners: u }); }} placeholder="Link khi click (tùy chọn)" className="w-full px-3 py-1.5 border rounded text-sm" />
+                                        <input type="text" value={b.alt} onChange={(e) => updateBanner(b.id, { alt: e.target.value })} placeholder="Mô tả banner (hỗ trợ SEO và trợ năng)" className="w-full px-3 py-1.5 border rounded text-sm" />
+                                        <input type="text" value={b.link || ''} onChange={(e) => updateBanner(b.id, { link: e.target.value })} placeholder="Link khi click (tùy chọn)" className="w-full px-3 py-1.5 border rounded text-sm" />
                                     </div>
-                                    <button title="Xóa banner" onClick={() => setLocal({ ...local, hero_banners: local.hero_banners.filter(x => x.id !== b.id) })} className="text-red-400 hover:text-red-600 p-2">
-                                        <Trash2 size={18} />
-                                    </button>
+                                    <div className="flex items-center self-end md:self-center">
+                                        <button title="Đưa banner lên trước" onClick={() => moveBanner(index, 'up')} disabled={index === 0} className="rounded p-2 text-gray-500 transition hover:bg-white hover:text-orange-600 disabled:cursor-not-allowed disabled:opacity-30"><ArrowUp size={17} /></button>
+                                        <button title="Đưa banner xuống sau" onClick={() => moveBanner(index, 'down')} disabled={index === local.hero_banners.length - 1} className="rounded p-2 text-gray-500 transition hover:bg-white hover:text-orange-600 disabled:cursor-not-allowed disabled:opacity-30"><ArrowDown size={17} /></button>
+                                        <button title="Xóa banner" onClick={() => setLocal({ ...local, hero_banners: local.hero_banners.filter(x => x.id !== b.id) })} className="rounded p-2 text-red-400 transition hover:bg-red-50 hover:text-red-600">
+                                            <Trash2 size={18} />
+                                        </button>
+                                    </div>
                                 </div>
                             ))}
                         </div>
@@ -371,7 +458,7 @@ export default function AdminAppearancePage() {
             </SectionCard>
 
             {/* 4. Background Config */}
-            <SectionCard title="Background trang web" icon={<ImageIcon size={20} />}>
+            <SectionCard id="background" title="Background trang web" description="Nền chung phía sau nội dung toàn website." icon={<ImageIcon size={20} />}>
                 <div className="space-y-4">
                     <div className="flex items-center gap-3">
                         <label className="relative inline-flex items-center cursor-pointer">
@@ -413,7 +500,7 @@ export default function AdminAppearancePage() {
             </SectionCard>
 
             {/* 4.5. Image Optimization */}
-            <SectionCard title="Tối ưu ảnh & Proxy (Kill-Switch)" icon={<ImageIcon size={20} />}>
+            <SectionCard id="image-proxy" title="Tối ưu ảnh & Proxy (Kill-Switch)" description="Chỉ dùng khi cần chẩn đoán sự cố tải ảnh." icon={<ImageIcon size={20} />}>
                 <div className="space-y-4 p-4 border rounded-lg bg-gray-50">
                     <div className="flex items-start gap-3">
                         <label className="relative inline-flex items-center cursor-pointer mt-1">
@@ -430,7 +517,7 @@ export default function AdminAppearancePage() {
             </SectionCard>
 
             {/* 5. Store Branches */}
-            <SectionCard title="Quản lý chi nhánh" icon={<MapPin size={20} />}>
+            <SectionCard id="branches" title="Quản lý chi nhánh" description="Thông tin hiển thị trong khu vực hỗ trợ và bản đồ." icon={<MapPin size={20} />}>
                 <div className="space-y-4">
                     {local.store_branches.map((branch) => (
                         <div key={branch.id} className="flex gap-4 p-4 border rounded-lg bg-gray-50">
@@ -469,7 +556,7 @@ export default function AdminAppearancePage() {
             </SectionCard>
 
             {/* 6. Homepage Pricing */}
-            <SectionCard title="Bảng giá sửa chữa trang chủ" icon={<Type size={20} />}>
+            <SectionCard id="pricing" title="Bảng giá sửa chữa trang chủ" description="Nhóm dịch vụ được lấy động từ Firestore theo từ khóa." icon={<Type size={20} />}>
                 <div className="space-y-4">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         <input value={local.homepagePricing.title} onChange={e => setLocal({ ...local, homepagePricing: { ...local.homepagePricing, title: e.target.value } })} placeholder="Tiêu đề thường" className="px-3 py-2 border rounded-lg text-sm" />
@@ -520,7 +607,7 @@ export default function AdminAppearancePage() {
             </SectionCard>
 
             {/* 7. Homepage Reviews */}
-            <SectionCard title="Đánh giá khách hàng trang chủ" icon={<Star size={20} />}>
+            <SectionCard id="reviews" title="Đánh giá khách hàng trang chủ" description="Điều khiển tiêu đề và nguồn Google Place của khu vực đánh giá." icon={<Star size={20} />}>
                 <div className="space-y-4">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         <input value={local.homepageReviews.eyebrow} onChange={e => setLocal({ ...local, homepageReviews: { ...local.homepageReviews, eyebrow: e.target.value } })} placeholder="Nhãn nhỏ phía trên" className="px-3 py-2 border rounded-lg text-sm" />
@@ -533,7 +620,7 @@ export default function AdminAppearancePage() {
             </SectionCard>
 
             {/* 8. Homepage Section Layout */}
-            <SectionCard title="Sắp xếp & Giao diện trang chủ" icon={<LayoutDashboard size={20} />}>
+            <SectionCard id="layout" title="Sắp xếp & Giao diện trang chủ" description="Bật/tắt, thay đổi thứ tự và nền riêng của từng khối." icon={<LayoutDashboard size={20} />}>
                 <p className="text-sm text-gray-500 mb-4">Sắp xếp thứ tự, bật/tắt và tuỳ chỉnh nền cho từng khối.</p>
                 <div className="space-y-3">
                     {[...local.homeSections].sort((a, b) => a.order - b.order).map((section, index) => {

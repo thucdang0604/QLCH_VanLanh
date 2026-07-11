@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import {
-    Save, Loader2, Image as ImageIcon, Plus, Trash2, RotateCcw, Printer, X
+    Save, Loader2, Image as ImageIcon, Plus, Trash2, Printer, X
 } from 'lucide-react';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { getDoc } from '@/lib/firestoreLogger';
@@ -185,12 +185,6 @@ export default function ReceiptSettingsPanel() {
         }
     };
 
-    // ── Reset to defaults ──
-    const handleReset = () => {
-        if (!confirm('Khôi phục về mặc định? Dữ liệu hiện tại sẽ bị ghi đè khi Lưu.')) return;
-        setConfig(defaultConfig);
-    };
-
     // ── Note helpers ──
     const updateNote = (index: number, value: string) => {
         setConfig(prev => ({
@@ -226,10 +220,6 @@ export default function ReceiptSettingsPanel() {
                     <p className="text-sm text-gray-500 mt-0.5">Tuỳ chỉnh nội dung, logo và khung biên nhận in</p>
                 </div>
                 <div className="flex gap-2">
-                    <button onClick={handleReset}
-                        className="flex items-center gap-2 px-4 py-2.5 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-colors text-sm font-semibold">
-                        <RotateCcw size={16} /> Mặc định
-                    </button>
                     <button onClick={handleSave} disabled={saving}
                         className="flex items-center gap-2 px-6 py-2.5 bg-green-500 text-white rounded-xl font-bold hover:bg-green-600 shadow-lg shadow-green-200/50 disabled:opacity-50 transition-all active:scale-95">
                         {saving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}

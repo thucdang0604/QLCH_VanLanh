@@ -2,8 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useConfig, DEFAULT_CONFIG, type ContactInfo, type GeofenceConfig } from '@/lib/ConfigContext';
-import { Save, RotateCcw, Loader2, Store, Phone, Mail, MapPin, Facebook, MessageCircle, CheckCircle2, AlertCircle, ShieldCheck, Navigation, KeyRound, Printer } from 'lucide-react';
-import { getAuthInstance } from '@/lib/firebase';
+import { Save, Loader2, Store, Phone, Mail, MapPin, Facebook, MessageCircle, CheckCircle2, AlertCircle, ShieldCheck, Navigation, KeyRound, Printer } from 'lucide-react';
 
 import CategoriesTab from './CategoriesTab';
 import NavigationTab from './NavigationTab';
@@ -21,7 +20,6 @@ export default function SettingsPage() {
     const [forbiddenWords, setForbiddenWords] = useState('');
     const [geofence, setGeofence] = useState<GeofenceConfig>(DEFAULT_CONFIG.geofence);
     const [saving, setSaving] = useState(false);
-    const [seeding, setSeeding] = useState(false);
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
 
     // Sync state with config when loaded
@@ -64,39 +62,6 @@ export default function SettingsPage() {
             setMessage({ type: 'error', text: 'Lỗi khi lưu cài đặt. Vui lòng thử lại.' });
         } finally {
             setSaving(false);
-        }
-    };
-
-    const handleSeed = async () => {
-        if (!confirm('Bạn có chắc muốn khôi phục lại cài đặt gốc? Dữ liệu hiện tại sẽ bị ghi đè.')) return;
-
-        setSeeding(true);
-        setMessage(null);
-        try {
-            const auth = await getAuthInstance();
-            const user = auth.currentUser;
-            if (!user) {
-                setMessage({ type: 'error', text: 'Bạn chưa đăng nhập. Vui lòng đăng nhập lại.' });
-                setSeeding(false);
-                return;
-            }
-            const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
-            const res = await fetch('/api/seed-config', {
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${idToken}` },
-            });
-            const data = await res.json();
-            if (data.success) {
-                setMessage({ type: 'success', text: 'Đã khôi phục cài đặt gốc!' });
-                // ConfigContext listens to Firestore, so it should auto-update
-            } else {
-                throw new Error(data.error);
-            }
-        } catch (error) {
-            console.error('Seed error:', error);
-            setMessage({ type: 'error', text: `Lỗi: ${error instanceof Error ? error.message : 'Unknown error'}` });
-        } finally {
-            setSeeding(false);
         }
     };
 
@@ -203,14 +168,6 @@ export default function SettingsPage() {
                             <h1 className="text-2xl font-bold text-gray-900">Cài đặt chung</h1>
                             <p className="text-gray-500 mt-1">Quản lý thông tin liên hệ và cấu hình toàn trang</p>
                         </div>
-                        <button
-                            onClick={handleSeed}
-                            disabled={seeding || saving}
-                            className="flex items-center gap-2 px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-600 transition-colors disabled:opacity-50"
-                        >
-                            {seeding ? <Loader2 size={16} className="animate-spin" /> : <RotateCcw size={16} />}
-                            Khôi phục mặc định
-                        </button>
                     </div>
 
                     {/* Notification */}

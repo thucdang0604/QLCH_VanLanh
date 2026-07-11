@@ -34,6 +34,14 @@ Open deploy debt: <code>BUG-DEPLOY-007</code> đang theo dõi warning Firebase C
 
 ## Scaling Roadmap
 
+### 2026-07-11 - CONFIG SEED OVERWRITE HARDENING
+- **Color:** success
+- **Status:** CODED, VALIDATED
+- **Summary:** Xóa toàn bộ route/nút reset seed mặc định có thể ghi đè config khởi tạo. `ConfigContext` chỉ fallback đọc khi thiếu document, không tự ghi Firestore và từ chối mọi client write trước khi tải đủ cấu hình; cấu hình hạng cũng chỉ lưu sau snapshot hợp lệ.
+- **Taxonomy:** Client bị chặn write trực tiếp bằng Firestore Rules. `/api/admin/taxonomy` yêu cầu admin, transaction trên cây hiện hữu, từ chối config thiếu hoặc đổi slug, và giữ nguyên children khi cập nhật node.
+- **Safety:** Không có thay đổi dữ liệu Firebase trong đợt sửa. Cần khôi phục `system_config/taxonomy_settings` từ PITR/backup trước khi chỉnh sửa nếu document hiện tại không đúng.
+- **Xác minh:** Unit test taxonomy mutation, TypeScript và `git diff --check` pass.
+
 ### 2026-07-11 - POS CHECKOUT FIRESTORE COST & LATENCY HANDOFF
 - **Color:** success
 - **Status:** CODED, VALIDATED, PENDING NORMAL DEPLOYMENT
