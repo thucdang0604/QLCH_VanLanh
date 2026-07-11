@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { FieldValue } from 'firebase-admin/firestore';
 import { requirePermission } from '@/lib/apiAuth';
 import { getAdminDb } from '@/lib/firebaseAdmin';
+import { readCashierShiftTallyTotals, type CashierShiftTallyTotals } from '@/lib/cashierShiftTallyServer';
 
 type CashierShiftData = FirebaseFirestore.DocumentData & {
     status?: string;
@@ -13,6 +14,7 @@ type CashierShiftData = FirebaseFirestore.DocumentData & {
     openedByName?: string;
     closingCashAmount?: number;
     closingBankAmount?: number;
+    tallyVersion?: number;
 };
 
 const ACTIVE_SHIFT_LOCK_COLLECTION = 'system_counters';
@@ -31,12 +33,16 @@ function timestampToIso(value: unknown) {
     return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
-function serializeShift(id: string, data: CashierShiftData) {
+function usesShardedTally(data: CashierShiftData) {
+    return Number(data.tallyVersion) >= 1;
+}
+
+function serializeShift(id: string, data: CashierShiftData, liveTotals?: CashierShiftTallyTotals) {
     const openingCashAmount = asAmount(data.openingCashAmount);
     const openingBankAmount = asAmount(data.openingBankAmount);
-    const cashSalesAmount = asAmount(data.cashSalesAmount);
-    const bankSalesAmount = asAmount(data.bankSalesAmount);
-    const otherSalesAmount = asAmount(data.otherSalesAmount);
+    const cashSalesAmount = liveTotals ? asAmount(liveTotals.cashSalesAmount) : asAmount(data.cashSalesAmount);
+    const bankSalesAmount = liveTotals ? asAmount(liveTotals.bankSalesAmount) : asAmount(data.bankSalesAmount);
+    const otherSalesAmount = liveTotals ? asAmount(liveTotals.otherSalesAmount) : asAmount(data.otherSalesAmount);
     const expectedCashAmount = openingCashAmount + cashSalesAmount;
     const expectedBankAmount = openingBankAmount + bankSalesAmount;
 
@@ -74,17 +80,25 @@ export async function GET(request: NextRequest) {
     try {
         await requirePermission(request, 'manage_orders');
         const db = getAdminDb();
-        const [activeShift, historySnap] = await Promise.all([
-            getActiveShiftSnap(db),
-            db.collection('cashier_shifts')
+        const includeHistory = request.nextUrl.searchParams.get('includeHistory') === 'true';
+        const historyPromise = includeHistory
+            ? db.collection('cashier_shifts')
                 .orderBy('closedAt', 'desc')
                 .limit(10)
-                .get(),
+                .get()
+            : null;
+        const [activeShift, historySnap] = await Promise.all([
+            getActiveShiftSnap(db),
+            historyPromise,
         ]);
+        const activeShiftData = activeShift?.data() as CashierShiftData | undefined;
+        const liveTotals = activeShift && activeShiftData && usesShardedTally(activeShiftData)
+            ? await readCashierShiftTallyTotals(db, db, activeShift.id)
+            : undefined;
         return NextResponse.json({
             success: true,
-            shift: activeShift ? serializeShift(activeShift.id, activeShift.data()) : null,
-            history: historySnap.docs.map(doc => serializeShift(doc.id, doc.data())),
+            shift: activeShift ? serializeShift(activeShift.id, activeShift.data(), liveTotals) : null,
+            history: historySnap?.docs.map(doc => serializeShift(doc.id, doc.data())) || [],
         });
     } catch (error: unknown) {
         console.error('Get cashier shift API error:', error);
@@ -135,6 +149,7 @@ export async function POST(request: NextRequest) {
                 cashSalesAmount: 0,
                 bankSalesAmount: 0,
                 otherSalesAmount: 0,
+                tallyVersion: 1,
                 openedBy: caller.uid,
                 openedByName,
                 openedAt: FieldValue.serverTimestamp(),
@@ -154,6 +169,7 @@ export async function POST(request: NextRequest) {
                 cashSalesAmount: 0,
                 bankSalesAmount: 0,
                 otherSalesAmount: 0,
+                tallyVersion: 1,
                 expectedCashAmount: openingCashAmount,
                 expectedBankAmount: openingBankAmount,
                 openedBy: caller.uid,
@@ -208,17 +224,26 @@ export async function PATCH(request: NextRequest) {
             }
 
             const shiftData = activeDoc.data() as CashierShiftData;
+            const liveTotals = usesShardedTally(shiftData)
+                ? await readCashierShiftTallyTotals(tx, db, activeDoc.id)
+                : undefined;
             const userData = userSnap.data();
             const closedByName = typeof userData?.displayName === 'string'
                 ? userData.displayName
                 : typeof userData?.name === 'string'
                     ? userData.name
                     : caller.uid;
-            const expectedCashAmount = asAmount(shiftData.openingCashAmount) + asAmount(shiftData.cashSalesAmount);
-            const expectedBankAmount = asAmount(shiftData.openingBankAmount) + asAmount(shiftData.bankSalesAmount);
+            const cashSalesAmount = liveTotals ? liveTotals.cashSalesAmount : asAmount(shiftData.cashSalesAmount);
+            const bankSalesAmount = liveTotals ? liveTotals.bankSalesAmount : asAmount(shiftData.bankSalesAmount);
+            const otherSalesAmount = liveTotals ? liveTotals.otherSalesAmount : asAmount(shiftData.otherSalesAmount);
+            const expectedCashAmount = asAmount(shiftData.openingCashAmount) + cashSalesAmount;
+            const expectedBankAmount = asAmount(shiftData.openingBankAmount) + bankSalesAmount;
 
             tx.update(activeDoc.ref, {
                 status: 'closed',
+                cashSalesAmount,
+                bankSalesAmount,
+                otherSalesAmount,
                 expectedCashAmount,
                 expectedBankAmount,
                 closingCashAmount: expectedCashAmount,
@@ -239,6 +264,9 @@ export async function PATCH(request: NextRequest) {
                 ...serializeShift(activeDoc.id, {
                     ...shiftData,
                     status: 'closed',
+                    cashSalesAmount,
+                    bankSalesAmount,
+                    otherSalesAmount,
                     closedBy: caller.uid,
                     closedByName,
                 }),

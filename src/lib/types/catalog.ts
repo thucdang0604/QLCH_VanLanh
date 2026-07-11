@@ -55,6 +55,8 @@ export interface Product {
     brand: string;
     category: typeof import('../constants').RETAIL_CATEGORIES[number] | string;
     categoryIds?: string[]; // E.g., ['dien-thoai', 'dien-thoai/iphone', 'dien-thoai/iphone/16']
+    searchKeywords?: string[];
+    searchCategoryKeywords?: string[];
     subCategory?: string;
     price_original: number;
     price_promo: number;
@@ -78,6 +80,7 @@ export interface Product {
     videoEmbedUrl?: string;
     stock?: number;
     held?: number;
+    inventoryTrackingMode?: 'legacy' | 'fifo';
     isProposed?: boolean; // Added for proposed products not yet in stock
     // ── Variant Grouping (hiển thị kiểu Điện Thoại Vui) ──
     seriesId?: string;           // Nhóm sản phẩm cùng dòng (e.g., 'iphone-16-pro-max')

@@ -1,18 +1,18 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Image from 'next/image';
 import firebaseImageLoader from '@/lib/imageLoader';
 import { useRouter } from 'next/navigation';
 import { Archive, Plus, Search, Edit, Package, Loader2, QrCode, PackagePlus } from 'lucide-react';
-import { useFirestoreCollection, updateDocument } from '@/lib/useFirestore';
+import { updateDocument } from '@/lib/useFirestore';
+import { useFirestorePaginated } from '@/lib/firestoreQueryHelper';
+import { getSearchKeywordQuery, getCategoryPath, collectAllNodeIds } from '@/lib/utils';
 
-import { collection, limit, orderBy, serverTimestamp, query, QuerySnapshot, QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
+import { collection, limit, orderBy, serverTimestamp, query, QuerySnapshot, QueryDocumentSnapshot, DocumentData, where, QueryConstraint } from 'firebase/firestore';
 import { getDocs } from '@/lib/firestoreLogger';
 import { toastError } from '@/lib/toast';
-import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
-import { triggerRevalidate } from '@/lib/revalidate';
 import UniversalProductModal from '@/components/admin/UniversalProductModal';
 import CategoryTaxonomySelector from '@/components/admin/CategoryTaxonomySelector';
 import ProductQrLabelModal from '@/components/admin/ProductQrLabelModal';
@@ -21,10 +21,9 @@ import { CreateReceiptModal } from '@/features/parts/ImportReceiptModals';
 import type { SupplierOption } from '@/features/parts/importReceiptTypes';
 import type { Product } from '@/lib/types';
 import { useConfig } from '@/lib/ConfigContext';
-import { getCategoryPath, collectAllNodeIds } from '@/lib/utils';
 import { isPartCategory } from '@/lib/constants';
 import { productCodeSearchText } from '@/lib/productCodes';
-import { buildArchiveUpdate, getArchiveBlockReason, isProductArchived } from '@/lib/productLifecycle';
+import { buildArchiveUpdate, getArchiveBlockReason } from '@/lib/productLifecycle';
 import { useAuth } from '@/lib/AuthContext';
 import { db } from '@/lib/firebase';
 
@@ -41,9 +40,7 @@ export default function ProductsPage() {
     const { user } = useAuth();
     const router = useRouter();
     const { config } = useConfig();
-    const { data: products, loading } = useFirestoreCollection<Product>('products', [orderBy('createdAt', 'desc'), limit(50)]);
     const [searchQuery, setSearchQuery] = useState('');
-
     const [filterCategoryIds, setFilterCategoryIds] = useState<string[]>([]);
     const [filterCondition, setFilterCondition] = useState('');
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -52,12 +49,80 @@ export default function ProductsPage() {
 
     const [isCreateReceiptOpen, setIsCreateReceiptOpen] = useState(false);
     const [supplierList, setSupplierList] = useState<SupplierOption[]>([]);
+    const [retailProducts, setRetailProducts] = useState<(Product & { id: string })[]>([]);
+
+    const whereConstraints = useMemo(() => {
+        const constraints: QueryConstraint[] = [];
+        constraints.push(where('status', '==', 'active'));
+        const categoryId = filterCategoryIds.at(-1) || '';
+        const trimmedSearch = searchQuery.trim();
+        const searchToken = trimmedSearch.length >= 2 ? getSearchKeywordQuery(trimmedSearch) : '';
+
+        if (filterCondition) {
+            constraints.push(where('condition', '==', filterCondition));
+        }
+
+        if (categoryId && searchToken) {
+            constraints.push(where('searchCategoryKeywords', 'array-contains', `${categoryId}::${searchToken}`));
+        } else if (categoryId) {
+            constraints.push(where('categoryIds', 'array-contains', categoryId));
+        } else if (searchToken) {
+            constraints.push(where('searchKeywords', 'array-contains', searchToken));
+        }
+
+        return constraints;
+    }, [filterCategoryIds, filterCondition, searchQuery]);
+
+    const orderByConstraints = useMemo(() => {
+        const hasSearch = getSearchKeywordQuery(searchQuery).length >= 2;
+        const hasCategory = filterCategoryIds.length > 0;
+        if (hasSearch || hasCategory || filterCondition) return [];
+        return [orderBy('createdAt', 'desc')];
+    }, [searchQuery, filterCategoryIds, filterCondition]);
+
+    const {
+        data: products,
+        loading,
+        totalCount,
+        currentPage,
+        totalPages,
+        pageSize,
+        goToPage,
+        setPageSize,
+        refresh
+    } = useFirestorePaginated<Product>('products', {
+        queryKey: JSON.stringify({
+            categoryId: filterCategoryIds.at(-1) || '',
+            condition: filterCondition,
+            search: searchQuery.trim().length >= 2 ? getSearchKeywordQuery(searchQuery) : '',
+            sort: orderByConstraints.length ? 'createdAt-desc' : 'none',
+        }),
+        whereConstraints,
+        orderByConstraints,
+        pageSize: 20
+    });
+
+    const setPage = goToPage;
 
     useEffect(() => {
         getDocs(query(collection(db, 'suppliers'), limit(100))).then((snapshot: QuerySnapshot<DocumentData>) => {
             setSupplierList(snapshot.docs.map((docSnap: QueryDocumentSnapshot<DocumentData>) => ({ id: docSnap.id, ...docSnap.data() } as SupplierOption)));
         }).catch((err: Error) => console.error('Failed to load suppliers', err));
     }, []);
+
+    useEffect(() => {
+        if (!isCreateReceiptOpen) return;
+        const q = query(
+            collection(db, 'products'),
+            where('status', '==', 'active'),
+            limit(200)
+        );
+        getDocs(q).then((snapshot: QuerySnapshot<DocumentData>) => {
+            const list = snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Product & { id: string }));
+            const filtered = list.filter(p => !isPartCategory(p.category, p.categoryIds));
+            setRetailProducts(filtered);
+        }).catch((err: Error) => console.error('Failed to load retail products for receipt', err));
+    }, [isCreateReceiptOpen]);
 
     useEffect(() => {
         if (typeof window === 'undefined') return;
@@ -75,37 +140,28 @@ export default function ProductsPage() {
         if (confirm(`Lưu trữ "${product.name}"? Sản phẩm sẽ ẩn khỏi bán lẻ/POS nhưng vẫn giữ lịch sử và mã hàng.`)) {
             try {
                 await updateDocument('products', product.id, buildArchiveUpdate(serverTimestamp()));
-                // Trigger revalidation
-                await triggerRevalidate(['/', `/product/${product.id}`, '/flash-sale', '/search', '/sitemap.xml'], ['products']);
+                refresh();
             } catch {
                 toastError('Lỗi khi lưu trữ sản phẩm!');
             }
         }
     };
 
-    const filteredProducts = products.filter((p) => {
-        if (isProductArchived(p)) return false; // Hide archived products
-        if (isPartCategory(p.category, p.categoryIds)) return false; // Linh kiện managed separately in /admin/parts
-        const normalizedQuery = searchQuery.toLowerCase();
-        const matchSearch = p.name.toLowerCase().includes(normalizedQuery) || productCodeSearchText(p as Product & { id: string }).includes(normalizedQuery);
+    const filteredProducts = useMemo(() => {
+        return products.filter((p) => {
+            if (isPartCategory(p.category, p.categoryIds)) return false;
+            const normalizedQuery = searchQuery.toLowerCase().trim();
+            if (normalizedQuery.length > 0 && normalizedQuery.length < 2) {
+                return p.name.toLowerCase().includes(normalizedQuery) || productCodeSearchText(p as Product & { id: string }).includes(normalizedQuery);
+            }
+            return true;
+        });
+    }, [products, searchQuery]);
 
-        let matchCategory = true;
-        if (filterCategoryIds.length > 0) {
-            const targetId = filterCategoryIds[filterCategoryIds.length - 1];
-            matchCategory = p.categoryIds?.includes(targetId) || false;
-        }
-
-        const matchCondition = !filterCondition || p.condition === filterCondition;
-        return matchSearch && matchCategory && matchCondition;
-    });
-    const retailProducts = products.filter((p) => {
-        const firstCatId = p.categoryIds?.[0] || '';
-        const isService = p.category === 'service' || firstCatId.startsWith('sua-chua');
-        return !isProductArchived(p) && !isPartCategory(p.category, p.categoryIds) && !isService;
-    }) as (Product & { id: string })[];
-
-    // --- ORPHAN CATEGORY DETECTION (ID-based) ---
     const retailTaxonomy = config?.taxonomy?.retail || [];
+    const paginatedProducts = filteredProducts;
+    const totalFiltered = totalCount;
+
     const validNodeIds = collectAllNodeIds(retailTaxonomy);
 
     const getOrphanStatus = (product: Product): 'valid' | 'orphan' | 'unassigned' => {
@@ -115,12 +171,6 @@ export default function ProductsPage() {
         const deepestId = product.categoryIds[product.categoryIds.length - 1];
         return validNodeIds.has(deepestId) ? 'valid' : 'orphan';
     };
-    // ---------------------------------
-
-    const { paginatedData: paginatedProducts, currentPage, totalPages, pageSize, totalFiltered, setPage, setPageSize, resetPage } = useClientPagination(filteredProducts, 20);
-
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    useEffect(() => { resetPage(); }, [searchQuery, filterCategoryIds, filterCondition]);
 
     const formatPrice = (price: number) => {
         return new Intl.NumberFormat('vi-VN').format(price) + 'đ';
@@ -132,7 +182,7 @@ export default function ProductsPage() {
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
                     <h1 className="text-lg font-bold text-gray-900">Quản lý sản phẩm</h1>
-                    <p className="text-gray-500">{products.length} sản phẩm</p>
+                    <p className="text-gray-500">{totalCount} sản phẩm</p>
                 </div>
                 <div className="flex gap-2">
                     <button
@@ -406,9 +456,8 @@ export default function ProductsPage() {
                         <PaginationBar
                             currentPage={currentPage}
                             totalPages={totalPages}
-                            pageSize={pageSize}
+                            pageSize={pageSize as 20 | 50 | 100}
                             totalFiltered={totalFiltered}
-                            totalAll={products.length}
                             onPageChange={setPage}
                             onPageSizeChange={setPageSize}
                             entityLabel="sản phẩm"

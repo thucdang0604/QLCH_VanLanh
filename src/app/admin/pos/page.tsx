@@ -306,7 +306,7 @@ export default function POSPage() {
         fetchBankConfig();
     }, []);
 
-    const loadCashierShift = useCallback(async () => {
+    const loadCashierShift = useCallback(async (includeHistory = false) => {
         setCashierLoading(true);
         try {
             const auth = await getAuthInstance();
@@ -315,13 +315,15 @@ export default function POSPage() {
                 setCashierShift(null);
                 return;
             }
-            const res = await fetch('/api/pos/cashier-shift', {
+            const res = await fetch(`/api/pos/cashier-shift${includeHistory ? '?includeHistory=true' : ''}`, {
                 headers: { Authorization: `Bearer ${idToken}` },
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || 'Không thể tải ca thu ngân');
             setCashierShift(data.shift || null);
-            setCashierShiftHistory(Array.isArray(data.history) ? data.history : []);
+            if (includeHistory) {
+                setCashierShiftHistory(Array.isArray(data.history) ? data.history : []);
+            }
         } catch (err) {
             console.error(err);
             toastError(err instanceof Error ? err.message : 'Không thể tải ca thu ngân');
@@ -333,6 +335,10 @@ export default function POSPage() {
     useEffect(() => {
         void loadCashierShift();
     }, [loadCashierShift]);
+
+    useEffect(() => {
+        if (posTab === 'cashier') void loadCashierShift(true);
+    }, [loadCashierShift, posTab]);
 
     const handleOpenCashierShift = async () => {
         if (cashierSaving) return;
@@ -1315,6 +1321,7 @@ export default function POSPage() {
                 deposit_amount: deposit,
                 use_surplus_to_pay_debt: useSurplusToPayDebt,
                 payment_method: paymentMethod === 'cash' ? 'CASH' : paymentMethod === 'bank' ? 'BANK' : paymentMethod === 'installment' ? 'INSTALLMENT' : paymentMethod === 'debt' ? 'DEBT' : 'MOMO',
+                ...(requiresCashierShift && activeCashierShift ? { cashierShiftId: activeCashierShift.id } : {}),
                 ...(appliedVoucher ? { voucherCode: appliedVoucher.code } : {}),
             };
 
@@ -1382,7 +1389,7 @@ export default function POSPage() {
             setVoucherCode('');
             setAppliedVoucher(null);
             setVoucherStatus(null);
-            void loadCashierShift();
+            if (data.cashierShiftChanged === true) void loadCashierShift();
         } catch (err: unknown) {
             console.error(err);
             toastError(err instanceof Error ? err.message : 'Lỗi khi tạo đơn hàng!');

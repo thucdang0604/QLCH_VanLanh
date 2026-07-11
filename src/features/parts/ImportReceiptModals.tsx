@@ -494,31 +494,31 @@ export function CreateReceiptModal({ isOpen, onClose, parts, retailProducts, onC
         >
             <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-6 pb-48">
                 {!lockReceiptType && (
-                <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Loại phiếu nhập</label>
-                    <div className="flex gap-2">
-                        <button
-                            type="button"
-                            onClick={() => { setReceiptType('component'); setItems([]); setSearch(''); }}
-                            className={`px-4 py-2 text-sm font-medium rounded-xl border transition-all ${receiptType === 'component'
-                                ? 'bg-orange-50 border-orange-300 text-orange-700 shadow-sm'
-                                : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-                                }`}
-                        >
-                            🔧 Linh kiện
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => { setReceiptType('retail'); setItems([]); setSearch(''); }}
-                            className={`px-4 py-2 text-sm font-medium rounded-xl border transition-all ${receiptType === 'retail'
-                                ? 'bg-blue-50 border-blue-300 text-blue-700 shadow-sm'
-                                : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-                                }`}
-                        >
-                            📦 Sản phẩm bán lẻ
-                        </button>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Loại phiếu nhập</label>
+                        <div className="flex gap-2">
+                            <button
+                                type="button"
+                                onClick={() => { setReceiptType('component'); setItems([]); setSearch(''); }}
+                                className={`px-4 py-2 text-sm font-medium rounded-xl border transition-all ${receiptType === 'component'
+                                    ? 'bg-orange-50 border-orange-300 text-orange-700 shadow-sm'
+                                    : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                                    }`}
+                            >
+                                🔧 Linh kiện
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => { setReceiptType('retail'); setItems([]); setSearch(''); }}
+                                className={`px-4 py-2 text-sm font-medium rounded-xl border transition-all ${receiptType === 'retail'
+                                    ? 'bg-blue-50 border-blue-300 text-blue-700 shadow-sm'
+                                    : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                                    }`}
+                            >
+                                📦 Sản phẩm bán lẻ
+                            </button>
+                        </div>
                     </div>
-                </div>
                 )}
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Ghi chú</label>

@@ -10,7 +10,6 @@ type PublicSearchResult =
 const RATE_LIMIT_MAX = 10;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RESULT_LIMIT = 20;
-const SERVICE_FALLBACK_LIMIT = 50;
 const MIN_QUERY_LENGTH = 2;
 
 function normalizeSearchText(value: string): string {
@@ -24,23 +23,8 @@ function normalizeSearchText(value: string): string {
 }
 
 function searchTokens(query: string): string[] {
-    return Array.from(new Set([
-        query.toLowerCase().trim(),
-        normalizeSearchText(query),
-    ].filter(token => token.length >= MIN_QUERY_LENGTH))).slice(0, 2);
-}
-
-function matchesKeyword(item: Record<string, unknown>, keyword: string): boolean {
-    const haystack = [
-        item.name,
-        item.title,
-        item.category,
-        item.brand,
-        item.description,
-        ...(Array.isArray(item.tags) ? item.tags : []),
-    ].join(' ').toLowerCase();
-
-    return normalizeSearchText(haystack).includes(keyword);
+    const token = normalizeSearchText(query);
+    return token.length >= MIN_QUERY_LENGTH ? [token] : [];
 }
 
 export async function GET(request: NextRequest) {
@@ -65,23 +49,19 @@ export async function GET(request: NextRequest) {
         }
 
         const tokens = searchTokens(q);
-        const primaryToken = tokens[0] || normalizeSearchText(q);
         const db = getAdminDb();
 
-        const [productSnaps, serviceKeywordSnaps, serviceFallbackSnap] = await Promise.all([
+        const [productSnaps, serviceKeywordSnaps] = await Promise.all([
             Promise.all(tokens.map(token => db.collection('products')
                 .where('status', '==', 'active')
                 .where('searchKeywords', 'array-contains', token)
                 .limit(RESULT_LIMIT)
                 .get())),
             Promise.all(tokens.map(token => db.collection('services')
+                .where('isActive', '==', true)
                 .where('searchKeywords', 'array-contains', token)
                 .limit(RESULT_LIMIT)
                 .get())),
-            db.collection('services')
-                .orderBy('name', 'asc')
-                .limit(SERVICE_FALLBACK_LIMIT)
-                .get(),
         ]);
 
         const results = new Map<string, PublicSearchResult>();
@@ -94,17 +74,7 @@ export async function GET(request: NextRequest) {
 
         serviceKeywordSnaps.flatMap(snap => snap.docs).forEach(doc => {
             const data = doc.data();
-            if (data.isActive === false) return;
             results.set(`service:${doc.id}`, { ...toPublicService(doc.id, data), _type: 'service' });
-        });
-
-        serviceFallbackSnap.docs.forEach(doc => {
-            if (results.size >= RESULT_LIMIT) return;
-            const data = doc.data();
-            if (data.isActive === false) return;
-            const publicService = toPublicService(doc.id, data);
-            if (!matchesKeyword(publicService, primaryToken)) return;
-            results.set(`service:${doc.id}`, { ...publicService, _type: 'service' });
         });
 
         return NextResponse.json({ results: Array.from(results.values()).slice(0, RESULT_LIMIT) });

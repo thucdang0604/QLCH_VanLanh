@@ -14,6 +14,17 @@
 - POS customer repair lookup is bounded by `createdAt desc limit(20)`.
 - Related mutation/idempotency and completed-order refund bugs in this audit pass are closed in `BUG-POS-019`, `BUG-POS-020`, `BUG-ORD-021`, `BUG-ORD-022`, and `BUG-ORD-023`.
 - Remaining deep latency work requires real `debugTiming` samples from slow production cases and is tracked as performance tuning, not an open correctness bug.
+### Performance implementation 2026-07-10
+- Checkout now records every Firestore transaction callback attempt and its phase timings, so retry/commit wait is no longer hidden by the final callback timing.
+- `operation_requests` idempotency, product, taxonomy, staff, customer, repair, payable-order and new-client cashier-shift reads are batched in one initial read phase; FIFO product queries run in parallel. Completed idempotency replays deliberately perform this same batch before returning the cached result, removing one normal-checkout round trip.
+- Checkout telemetry now separates workflow, repair-product and FIFO preparation/read phases; each FIFO product query reports duration and returned lot count so slow lot histories can be optimized without weakening FIFO correctness.
+- Products now persist `inventoryTrackingMode`: legacy products skip empty `inventory_lots` queries while retaining `LEGACY_STOCK` audit entries; the first completed checkout safely classifies older products and `complete_import` always sets FIFO mode.
+- POS preserves readable sequential document IDs but batches counter/candidate reads across inventory log, ledger, customer transaction and order reservations.
+- FIFO lot reads and the independent readable-ID reservation now overlap inside the transaction read phase. Telemetry keeps `reserveIdsTotal` for full work and `reserveIdsWait` for only the remaining critical-path wait; checkout also reports token verification and `users/{uid}` profile-read time separately and reuses that profile name instead of a transaction staff re-read.
+- `scripts/backfill-product-inventory-tracking.mjs` defaults to dry-run and can safely label historic products by active lot presence; its per-product transaction never overwrites a mode supplied by a concurrent completed import.
+- A DEBT checkout that does not move cash/bank no longer reloads `/api/pos/cashier-shift`; the route fetches closed-shift history only when the Cashier tab explicitly requests it. Cash/bank checkout continues to refresh the active shift total.
+- New cashier shifts use deterministic idempotent payment movements plus 16 tally shards. Existing open shifts retain the legacy aggregate update until they are closed, then the next shift automatically uses shards.
+- Revenue deltas and commission cost are merged into one daily/monthly aggregate update per POS checkout.
 
 ## BUG-POS-019: POS checkout doc cashier shift bang query thay vi active lock
 - **Status:** fixed

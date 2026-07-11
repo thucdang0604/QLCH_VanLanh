@@ -71,7 +71,7 @@ export const fetchNavConfig = unstable_cache(
 );
 
 export const fetchCategoryItems = unstable_cache(
-    async (isRepair: boolean) => {
+    async (isRepair: boolean, categoryId?: string, condition?: string) => {
         if (!isAdminAvailable()) return [];
 
         const db = getAdminDb();
@@ -85,16 +85,32 @@ export const fetchCategoryItems = unstable_cache(
             queryRef = queryRef.where('isActive', '==', true);
         } else {
             queryRef = queryRef.where('status', '==', 'active');
-            // Không gọi orderBy ở đây để tránh lỗi Missing Index.
-            // Sắp xếp (sort) sẽ được Client/Server xử lý trên bộ nhớ RAM (In-memory sorting)
+            
+        }
+
+        if (categoryId && categoryId !== 'all') {
+            queryRef = queryRef.where('categoryIds', 'array-contains', categoryId);
         }
 
         const snapshot = await queryRef.limit(200).get();
 
-        const items = snapshot.docs.map(doc => {
+        let items = snapshot.docs.map(doc => {
             const data = doc.data();
             return isRepair ? toPublicService(doc.id, data) : toPublicProduct(doc.id, data);
         });
+
+        // In-memory filter for condition if specified
+        if (!isRepair && condition) {
+            items = items.filter(p => {
+                const cond = (p as { condition?: string }).condition;
+                if (condition === 'new') {
+                    return cond === 'new';
+                } else if (condition === 'used') {
+                    return cond === 'used' || cond === 'like-new';
+                }
+                return true;
+            });
+        }
 
         return items;
     },

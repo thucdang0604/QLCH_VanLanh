@@ -60,6 +60,7 @@ function normalize(str: string): string {
 
 type CategoryItem = {
     id: string;
+    categoryIds?: string[];
     name?: string;
     title?: string;
     category?: string;
@@ -82,6 +83,11 @@ type CategoryItem = {
     stock?: number;
     videoEmbedUrl?: string;
 };
+
+function matchesSelectedCategory(item: CategoryItem, categoryConfig?: DynamicCategory): boolean {
+    if (!categoryConfig) return true;
+    return Array.isArray(item.categoryIds) && item.categoryIds.includes(categoryConfig.id);
+}
 
 const formatPrice = (p: number) => new Intl.NumberFormat('vi-VN').format(p) + 'đ';
 
@@ -117,13 +123,7 @@ export default function CategoryClient({
             // Filter active services only
             list = list.filter(s => s.isActive !== false);
 
-            // Match dynamic category keywords
-            if (categoryConfig && categoryConfig.keywords && categoryConfig.keywords.length > 0) {
-                list = list.filter(s => {
-                    const haystack = normalize([s.name, s.category, s.description, ...(s.tags || [])].join(' '));
-                    return categoryConfig.keywords.some(kw => haystack.includes(normalize(kw)));
-                });
-            }
+            list = list.filter(s => matchesSelectedCategory(s, categoryConfig));
 
             // Price filter
             if (filterPrice === '0-5') list = list.filter(p => (p.price_promo ?? p.price_original ?? p.price ?? 0) < 5_000_000);
@@ -161,13 +161,7 @@ export default function CategoryClient({
                 list = list.filter(p => (p.category || '').toLowerCase().includes('phụ kiện') || (p.category || '').toLowerCase().includes('phu kien') || p.category === 'Phụ kiện');
             }
 
-            // Match dynamic category keywords for specific product categories (e.g. Dien thoai, Laptop)
-            if (categoryConfig && categoryConfig.keywords && categoryConfig.keywords.length > 0) {
-                list = list.filter(p => {
-                    const haystack = normalize([p.name, p.category, p.description, ...(p.tags || [])].join(' '));
-                    return categoryConfig.keywords.some(kw => haystack.includes(normalize(kw)));
-                });
-            }
+            list = list.filter(p => matchesSelectedCategory(p, categoryConfig));
 
             // Sidebar filters
             if (sidebarBrands.length > 0) list = list.filter(p => typeof p.brand === 'string' && sidebarBrands.includes(p.brand));
@@ -195,12 +189,7 @@ export default function CategoryClient({
         if (navInfo?.condition === 'new') source = items.filter(p => p.condition === 'new');
         else if (navInfo?.condition === 'used') source = items.filter(p => p.condition === 'used' || p.condition === 'like-new');
         
-        if (categoryConfig && categoryConfig.keywords && categoryConfig.keywords.length > 0) {
-            source = source.filter(p => {
-                const haystack = normalize([p.name, p.category, p.description, ...(p.tags || [])].join(' '));
-                return categoryConfig.keywords.some(kw => haystack.includes(normalize(kw)));
-            });
-        }
+        source = source.filter(p => matchesSelectedCategory(p, categoryConfig));
         
         const set = new Set(source.map(p => p.brand).filter((v): v is string => typeof v === 'string' && v.length > 0));
         return Array.from(set).sort();
@@ -213,12 +202,7 @@ export default function CategoryClient({
         if (navInfo?.condition === 'new') source = items.filter(p => p.condition === 'new');
         else if (navInfo?.condition === 'used') source = items.filter(p => p.condition === 'used' || p.condition === 'like-new');
         
-        if (categoryConfig && categoryConfig.keywords && categoryConfig.keywords.length > 0) {
-            source = source.filter(p => {
-                const haystack = normalize([p.name, p.category, p.description, ...(p.tags || [])].join(' '));
-                return categoryConfig.keywords.some(kw => haystack.includes(normalize(kw)));
-            });
-        }
+        source = source.filter(p => matchesSelectedCategory(p, categoryConfig));
         
         const set = new Set(source.map(p => p.condition).filter((v): v is string => typeof v === 'string' && v.length > 0));
         return Array.from(set);
@@ -229,12 +213,7 @@ export default function CategoryClient({
         if (!isRepair) return [];
         
         let source = items.filter(s => s.isActive !== false);
-        if (categoryConfig && categoryConfig.keywords && categoryConfig.keywords.length > 0) {
-            source = source.filter(s => {
-                const haystack = normalize([s.name, s.category, s.description, ...(s.tags || [])].join(' '));
-                return categoryConfig.keywords.some(kw => haystack.includes(normalize(kw)));
-            });
-        }
+        source = source.filter(s => matchesSelectedCategory(s, categoryConfig));
 
         const found = new Set<string>();
         source.forEach(s => {
@@ -253,12 +232,7 @@ export default function CategoryClient({
         if (!isRepair) return [];
         
         let source = items.filter(s => s.isActive !== false);
-        if (categoryConfig && categoryConfig.keywords && categoryConfig.keywords.length > 0) {
-            source = source.filter(s => {
-                const haystack = normalize([s.name, s.category, s.description, ...(s.tags || [])].join(' '));
-                return categoryConfig.keywords.some(kw => haystack.includes(normalize(kw)));
-            });
-        }
+        source = source.filter(s => matchesSelectedCategory(s, categoryConfig));
 
         return KNOWN_PARTS.filter(part => {
             return source.some(s => {
@@ -275,12 +249,7 @@ export default function CategoryClient({
         if (navInfo?.condition === 'new') source = items.filter(p => p.condition === 'new');
         else if (navInfo?.condition === 'used') source = items.filter(p => p.condition === 'used' || p.condition === 'like-new');
         
-        if (categoryConfig && categoryConfig.keywords && categoryConfig.keywords.length > 0) {
-            source = source.filter(p => {
-                const haystack = normalize([p.name, p.category, p.description, ...(p.tags || [])].join(' '));
-                return categoryConfig.keywords.some(kw => haystack.includes(normalize(kw)));
-            });
-        }
+        source = source.filter(p => matchesSelectedCategory(p, categoryConfig));
 
         const set = new Set(source.map(p => p.category).filter((v): v is string => typeof v === 'string' && v.length > 0));
         return Array.from(set).sort();

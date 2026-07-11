@@ -27,7 +27,7 @@ import { PART_CATEGORY_LABEL } from '@/lib/constants';
 import { buildProductCodeFromId, normalizeProductCode } from '@/lib/productCodes';
 import { buildClientDocumentId } from '@/lib/clientDocumentIds';
 import { buildContactMethods, buildContactSearchKeywords, getPrimaryContact, hasDebtSafeContact, hasProfileContact, mergeContactMethods } from '@/lib/contactIdentity';
-import { generateSearchKeywords, generateSlug } from '@/lib/utils';
+import { buildCategorySearchKeywords, generateSearchKeywords, generateSlug } from '@/lib/utils';
 import { triggerRevalidate } from '@/lib/revalidate';
 import {
     ADDRESS_HEADERS,
@@ -1120,6 +1120,7 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
             status: 'active',
             sold: 0,
             searchKeywords,
+            searchCategoryKeywords: buildCategorySearchKeywords(row.categoryIds, searchKeywords),
             videoEmbedUrl: getValue(row.data, ['Video', 'Video URL']),
             warrantyMonths: getNumber(row.data, ['Bảo hành tháng', 'Warranty Months']),
         };

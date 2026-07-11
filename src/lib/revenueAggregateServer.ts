@@ -3,6 +3,7 @@ import type { Order } from '@/lib/types';
 import {
     getRevenueAggregateIds,
     normalizeRevenueAggregateDelta,
+    REVENUE_AGGREGATE_NUMERIC_FIELDS,
     type RevenueAggregateDelta,
 } from '@/lib/revenueAggregate';
 
@@ -37,6 +38,20 @@ function buildIncrementPayload(delta: RevenueAggregateDelta, period: 'daily' | '
     }
 
     return payload;
+}
+
+/** Gộp delta thô trước khi ghi aggregate để một checkout chỉ chạm mỗi aggregate một lần. */
+export function mergeRevenueAggregateDeltas(...deltas: RevenueAggregateDelta[]): RevenueAggregateDelta {
+    const merged: RevenueAggregateDelta = {};
+    for (const delta of deltas) {
+        for (const field of REVENUE_AGGREGATE_NUMERIC_FIELDS) {
+            const value = safeNumber(delta[field]);
+            if (value !== 0) {
+                merged[field] = safeNumber(merged[field]) + value;
+            }
+        }
+    }
+    return merged;
 }
 
 export function incrementRevenueAggregates(

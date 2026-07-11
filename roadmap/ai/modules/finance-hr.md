@@ -15,6 +15,9 @@ Tach pure calculation va transaction write, truyen product metadata da doc san t
 ### Fix 2026-07-04
 - `calculateAndSaveCommissionsServer` now rethrows after logging, so POS checkout, order transition, and repair handover transactions cannot succeed while silently dropping commission writes or `commissionCost` aggregate increments.
 - Product metadata reuse and active rule caching remain in the POS latency phase because they need real checkout timing evidence before changing the hot path.
+### Performance implementation 2026-07-10
+- POS checkout starts the active-rule read once after authorization, reuses transaction-read product metadata for order commissions, and passes both snapshots into the commission helper.
+- The helper now returns total commission cost; POS merges it with retail, repair and debt-collection deltas before one aggregate write, while other callers retain the existing aggregate behavior.
 
 ## BUG-REV-004: Revenue page van fallback scan raw collections
 - **Status:** fixed

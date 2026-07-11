@@ -75,15 +75,17 @@ async function resolveSlug(slugSegments: string[]): Promise<ResolvedInfo | null>
         const ft = mapFilterType(navItem.filterType);
         const info: ResolvedInfo = { label: navItem.label || navItem.name || 'Danh mục', ...ft };
 
-        // If nav item has taxonomyRef, resolve it for keyword filtering
-        if (navItem.taxonomyRef) {
+        // A navigation item may omit taxonomyRef even though its slug is a
+        // taxonomy node. Resolve that slug before returning a broad fallback.
+        const taxonomyRef = navItem.taxonomyRef || resolvedSegments[resolvedSegments.length - 1];
+        if (taxonomyRef) {
             const taxonomy = await fetchTaxonomyConfig();
             const trees = [
                 { type: 'service', nodes: taxonomy.service || [] },
                 { type: 'retail', nodes: taxonomy.retail || [] },
                 { type: 'component', nodes: taxonomy.component || [] },
             ];
-            const found = findTaxonomyNode([navItem.taxonomyRef], trees);
+            const found = findTaxonomyNode([taxonomyRef], trees);
             if (found) {
                 const keywords = [found.node.name, found.node.slug, ...(found.node.seoKeywords?.split(',').map((k: string) => k.trim()) || [])];
                 info.categoryConfig = { id: found.node.id, slug: found.node.slug, name: found.node.name, type: found.type as 'retail' | 'service' | 'component', keywords, isActive: true };
@@ -169,7 +171,7 @@ export default async function CategoryPage({ params }: { params: Promise<{ slug:
     const isRepair = !!info.isRepair;
 
     // Fetch data from server
-    const items = await fetchCategoryItems(isRepair);
+    const items = await fetchCategoryItems(isRepair, info.categoryConfig?.id, info.condition);
 
     const seoDescription = isRepair
         ? `Dịch vụ ${info.label} chính hãng tại ${identity.siteName}. Linh kiện chính hãng, bảo hành trọn đời, xong trong 30 phút. Hotline: ${identity.formattedPhone}`

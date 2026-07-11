@@ -3,13 +3,16 @@ import {
     getDocs as originalGetDocs, 
     getDoc as originalGetDoc, 
     onSnapshot as originalOnSnapshot,
+    getCountFromServer as originalGetCountFromServer,
     Query,
     DocumentReference,
     QuerySnapshot,
     DocumentSnapshot,
     DocumentData,
     Unsubscribe,
-    FirestoreError
+    FirestoreError,
+    AggregateQuerySnapshot,
+    AggregateField
 } from 'firebase/firestore';
 
 /**
@@ -121,4 +124,24 @@ export function onSnapshot(
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
     // @ts-ignore
     return originalOnSnapshot(reference, ...args);
+}
+
+export async function getCountFromServer<T = DocumentData, R extends DocumentData = DocumentData>(
+    query: Query<T, R>
+): Promise<AggregateQuerySnapshot<{ count: AggregateField<number> }, T, R>> {
+    const start = performance.now();
+    const snapshot = await originalGetCountFromServer(query);
+    const end = performance.now();
+    const time = (end - start).toFixed(0);
+
+    if (process.env.NODE_ENV === 'development') {
+        const coll = extractCollectionName(query);
+        console.groupCollapsed(`%c🚨 [FIRESTORE READ] getCountFromServer: ${coll}`, logStyle);
+        console.log(`Số lượng đếm (Count): %c${snapshot.data().count}`, countStyle);
+        console.log(`Thời gian query: ${time}ms`);
+        console.trace('Nguồn gọi query (Stack trace):');
+        console.groupEnd();
+    }
+
+    return snapshot;
 }

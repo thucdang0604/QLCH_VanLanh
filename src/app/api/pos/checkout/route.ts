@@ -3,17 +3,20 @@ import { NextResponse, NextRequest } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requirePermission } from '@/lib/apiAuth';
 import { FieldValue } from 'firebase-admin/firestore';
-import { calculateAndSaveCommissionsServer } from '@/lib/commissionCalcServer';
-import type { Order, RepairTicket, WorkflowNode } from '@/lib/types';
+import { calculateAndSaveCommissionsServer, getActiveRulesServer } from '@/lib/commissionCalcServer';
+import type { Order, Product, RepairTicket, WorkflowNode } from '@/lib/types';
 import { PRODUCT_STATUS, isProductArchived } from '@/lib/productLifecycle';
 import { normalizeVietnamPhone } from '@/lib/phone';
 import { buildContactMethods, buildContactSearchKeywords, buildContactlessDocumentBaseId, getPrimaryContact, hasDebtSafeContact, mergeContactMethods } from '@/lib/contactIdentity';
 import type { ContactMethod, ContactMethodType } from '@/lib/types/contact';
-import { fetchFifoLogsForDeduction, executeFifoDeductionsWrites, type FifoDeductionResult, type FifoDeductor } from '@/lib/inventoryFifo';
-import { buildCompletedOrderRevenueDelta, buildPaymentChannelRevenueDelta, incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
-import { loadRepairWorkflow, requireWorkflowNode, workflowNodeHasFeature } from '@/lib/repairWorkflowServer';
+import { fetchFifoLogsForDeduction, executeFifoDeductionsWrites, type FifoDeductionResult, type FifoDeductor, type FifoReadMetric } from '@/lib/inventoryFifo';
+import { buildCompletedOrderRevenueDelta, buildPaymentChannelRevenueDelta, incrementRevenueAggregates, mergeRevenueAggregateDeltas } from '@/lib/revenueAggregateServer';
+import { getWorkflowFromSettings, requireWorkflowNode, workflowNodeHasFeature } from '@/lib/repairWorkflowServer';
 import { isSelectedRepairPart } from '@/lib/repairStatus';
-import { reserveSequentialDocumentId, reserveSequentialDocumentIds, type ReservedSequentialDocumentId } from '@/lib/serverDocumentIds';
+import { reserveSequentialDocumentIdGroups, type ReservedSequentialDocumentId } from '@/lib/serverDocumentIds';
+import { queueCashierShiftTally } from '@/lib/cashierShiftTallyServer';
+import type { RepairWorkflowSettings } from '@/lib/repairWorkflowConfig';
+import type { RevenueAggregateDelta } from '@/lib/revenueAggregate';
 
 type CheckoutItemInput = Record<string, unknown> & {
     isRepairTicket?: boolean;
@@ -134,29 +137,62 @@ function getRepairPaymentAmount(ticket: RepairTicket, ticketId: string): number 
 
 export async function POST(request: NextRequest) {
     const startedAt = Date.now();
-    const debugTiming: Record<string, number | Record<string, number>> = {};
+    const debugTiming: Record<string, unknown> = {};
     let lastTimingMark = startedAt;
     const markTiming = (key: string) => {
         const now = Date.now();
         debugTiming[key] = now - lastTimingMark;
         lastTimingMark = now;
     };
-    const transactionTiming: Record<string, number> = {};
-    let lastTransactionMark = startedAt;
-    const resetTransactionTiming = () => {
-        lastTransactionMark = Date.now();
+    const transactionAttempts: Array<{ attempt: number; steps: Record<string, number>; fifoReads: FifoReadMetric[]; fifoSkippedLegacyProductIds: string[]; callbackMs: number }> = [];
+    let activeTransactionAttempt: { attempt: number; startedAt: number; lastMark: number; steps: Record<string, number>; fifoReads: FifoReadMetric[]; fifoSkippedLegacyProductIds: string[] } | null = null;
+    const beginTransactionAttempt = () => {
+        const now = Date.now();
+        activeTransactionAttempt = {
+            attempt: transactionAttempts.length + 1,
+            startedAt: now,
+            lastMark: now,
+            steps: {},
+            fifoReads: [],
+            fifoSkippedLegacyProductIds: [],
+        };
     };
     const markTransaction = (key: string) => {
+        if (!activeTransactionAttempt) return;
         const now = Date.now();
-        transactionTiming[key] = now - lastTransactionMark;
-        lastTransactionMark = now;
+        activeTransactionAttempt.steps[key] = now - activeTransactionAttempt.lastMark;
+        activeTransactionAttempt.lastMark = now;
+    };
+    const recordTransactionDuration = (key: string, durationMs: number) => {
+        if (!activeTransactionAttempt) return;
+        activeTransactionAttempt.steps[key] = durationMs;
+    };
+    const recordFifoRead = (metric: FifoReadMetric) => {
+        activeTransactionAttempt?.fifoReads.push(metric);
+    };
+    const recordSkippedLegacyFifoProduct = (productId: string) => {
+        if (!activeTransactionAttempt || activeTransactionAttempt.fifoSkippedLegacyProductIds.includes(productId)) return;
+        activeTransactionAttempt.fifoSkippedLegacyProductIds.push(productId);
+    };
+    const finishTransactionAttempt = () => {
+        if (!activeTransactionAttempt) return;
+        transactionAttempts.push({
+            attempt: activeTransactionAttempt.attempt,
+            steps: activeTransactionAttempt.steps,
+            fifoReads: activeTransactionAttempt.fifoReads.sort((left, right) => left.productId.localeCompare(right.productId)),
+            fifoSkippedLegacyProductIds: activeTransactionAttempt.fifoSkippedLegacyProductIds.sort(),
+            callbackMs: Date.now() - activeTransactionAttempt.startedAt,
+        });
+        activeTransactionAttempt = null;
     };
     try {
-        const caller = await requirePermission(request, 'manage_orders');
+        const caller = await requirePermission(request, 'manage_orders', (authSteps) => {
+            debugTiming.authSteps = authSteps;
+        });
         markTiming('auth');
 
         const body = await request.json();
-        const { idempotencyKey, repairTicketId, repairTicketIds, customer_info, items, discount_amount, total_amount, deposit_amount, payment_method, voucherCode, use_surplus_to_pay_debt } = body;
+        const { idempotencyKey, repairTicketId, repairTicketIds, customer_info, items, discount_amount, total_amount, deposit_amount, payment_method, voucherCode, use_surplus_to_pay_debt, cashierShiftId } = body;
         markTiming('parseBody');
 
         if (!Array.isArray(items) || items.length === 0) {
@@ -194,26 +230,93 @@ export async function POST(request: NextRequest) {
             return Math.max(Number(data.deposit_amount) || 0, paidFromHistory);
         };
 
-        resetTransactionTiming();
+        const customerInfoRecord = (customer_info && typeof customer_info === 'object' ? customer_info : {}) as Record<string, unknown>;
+        const incomingContactInput = buildIncomingCustomerContact(customerInfoRecord);
+        const incomingContactMethods = buildContactMethods(incomingContactInput);
+        const incomingPrimaryContact = getPrimaryContact(incomingContactMethods);
+        const requestedCustomerId = readString(customerInfoRecord.customerId || customerInfoRecord.id);
+        const rawPhone = incomingContactInput.phone;
+        const normalizedPhoneResult = rawPhone ? normalizeVietnamPhone(rawPhone) : null;
+        const resolvedCustomerId = normalizedPhoneResult?.local
+            || requestedCustomerId
+            || (
+                incomingContactMethods.length > 0 && incomingContactInput.name && incomingContactInput.name !== 'Khách lẻ'
+                    ? buildContactlessDocumentBaseId('KH', incomingContactInput)
+                    : ''
+            );
+        const requestedCashierShiftId = readString(cashierShiftId);
+        const repairIdSet = new Set<string>();
+        if (repairTicketId) repairIdSet.add(normalizeRepairTicketId(repairTicketId));
+        if (Array.isArray(repairTicketIds)) {
+            repairTicketIds.forEach((id: unknown) => {
+                const normalized = normalizeRepairTicketId(id);
+                if (normalized) repairIdSet.add(normalized);
+            });
+        }
+        for (const item of checkoutItems) {
+            if (!item.isRepairTicket) continue;
+            const normalized = normalizeRepairTicketId(item.repairTicketId || item.productId);
+            if (normalized) repairIdSet.add(normalized);
+        }
+        const orderPaymentIdSet = new Set<string>();
+        for (const item of checkoutItems) {
+            if (!item.isOrderPayment) continue;
+            const normalized = normalizeOrderPaymentId(item.orderPaymentId || item.productId);
+            if (normalized) orderPaymentIdSet.add(normalized);
+        }
+        const retailProductIds = Array.from(new Set(checkoutItems
+            .filter(item => !item.isRepairTicket && !item.isOrderPayment)
+            .map(item => String(item.productId || ''))));
+        const shouldCalculateCommission = checkoutItems.some(item => !item.isOrderPayment);
+        let activeCommissionRulesPromise: ReturnType<typeof getActiveRulesServer> | null = null;
+
         const result = await db.runTransaction(async (tx) => {
-            resetTransactionTiming();
-            if (idempotencyKey) {
-                const opRef = db.collection('operation_requests').doc(idempotencyKey);
-                const opSnap = await tx.get(opRef);
-                if (opSnap.exists) {
-                    const data = opSnap.data();
-                    if (data?.status === 'completed' && data.referenceId) {
-                        return {
-                            success: true,
-                            fromCache: true,
-                            orderId: data.referenceId,
-                            debtOnly: data.debtOnly === true,
-                            updatedOrderIds: Array.isArray(data.updatedOrderIds) ? data.updatedOrderIds : [],
-                        };
-                    }
+            beginTransactionAttempt();
+            try {
+            const opRef = idempotencyKey ? db.collection('operation_requests').doc(idempotencyKey) : null;
+            const productRefs = retailProductIds.map(productId => db.collection('products').doc(productId));
+            const customerRef = resolvedCustomerId ? db.collection('customers').doc(resolvedCustomerId) : null;
+            const repairRefs = Array.from(repairIdSet, id => db.collection('repairs').doc(id));
+            const orderPaymentRefs = Array.from(orderPaymentIdSet, id => db.collection('orders').doc(id));
+            const requestedCashierShiftRef = requestedCashierShiftId
+                ? db.collection('cashier_shifts').doc(requestedCashierShiftId)
+                : null;
+            const activeShiftLockRef = db.collection(ACTIVE_SHIFT_LOCK_COLLECTION).doc(ACTIVE_SHIFT_LOCK_ID);
+            const taxonomyRef = db.collection('system_config').doc('taxonomy_settings');
+            const repairSettingsRef = repairRefs.length > 0 ? db.collection('system_config').doc('repairs') : null;
+            const coreReadRefs = [
+                ...(opRef ? [opRef] : []),
+                taxonomyRef,
+                ...productRefs,
+                ...(customerRef ? [customerRef] : []),
+                ...repairRefs,
+                ...orderPaymentRefs,
+                ...(requestedCashierShiftRef ? [activeShiftLockRef] : []),
+                ...(requestedCashierShiftRef ? [requestedCashierShiftRef] : []),
+                ...(repairSettingsRef ? [repairSettingsRef] : []),
+            ];
+            const coreSnapshots = await tx.getAll(...coreReadRefs);
+            const snapshotsByPath = new Map(coreSnapshots.map(snapshot => [snapshot.ref.path, snapshot]));
+            const getCoreSnapshot = (ref: FirebaseFirestore.DocumentReference) => snapshotsByPath.get(ref.path);
+            markTransaction('readCoreDocuments');
+
+            const opSnap = opRef ? getCoreSnapshot(opRef) : null;
+            if (opSnap?.exists) {
+                const data = opSnap.data();
+                if (data?.status === 'completed' && data.referenceId) {
+                    return {
+                        success: true,
+                        fromCache: true,
+                        orderId: data.referenceId,
+                        debtOnly: data.debtOnly === true,
+                        cashierShiftChanged: data.cashierShiftChanged === true,
+                        updatedOrderIds: Array.isArray(data.updatedOrderIds) ? data.updatedOrderIds : [],
+                    };
                 }
             }
-            markTransaction('idempotency');
+            if (shouldCalculateCommission && !activeCommissionRulesPromise) {
+                activeCommissionRulesPromise = getActiveRulesServer();
+            }
 
             // Pre-aggregate for overall stock check
             const preAggregatedForStock = new Map<string, number>();
@@ -246,23 +349,42 @@ export async function POST(request: NextRequest) {
             let fifoResultsMap = new Map<string, FifoDeductionResult[]>();
             let fifoLogsDataMap: Awaited<ReturnType<typeof fetchFifoLogsForDeduction>> = new Map();
             let fifoDeductors: FifoDeductor[] = [];
+            let fifoLotReadDeductors: FifoDeductor[] = [];
+            const inventoryTrackingModeUpdates = new Map<string, 'legacy' | 'fifo'>();
 
-            // Fetch products
             const productDocs = new Map<string, { ref: FirebaseFirestore.DocumentReference; data: FirebaseFirestore.DocumentData }>();
-            for (const productId of preAggregatedForStock.keys()) {
-                const pRef = db.collection('products').doc(productId);
-                const pSnap = await tx.get(pRef);
-                if (!pSnap.exists) {
-                    throw new Error(`Sản phẩm (ID: ${productId}) không tồn tại.`);
+            for (const pRef of productRefs) {
+                const pSnap = getCoreSnapshot(pRef);
+                if (!pSnap?.exists) {
+                    throw new Error(`Sản phẩm (ID: ${pRef.id}) không tồn tại.`);
                 }
-                productDocs.set(productId, { ref: pRef, data: (pSnap.data() || {}) as FirebaseFirestore.DocumentData });
+                productDocs.set(pRef.id, { ref: pRef, data: (pSnap.data() || {}) as FirebaseFirestore.DocumentData });
             }
-            markTransaction('readProducts');
-
-            // Fetch taxonomy for warranty config
-            const taxonomySnap = await tx.get(db.collection('system_config').doc('taxonomy_settings'));
-            const retailTrees = taxonomySnap.data()?.taxonomy?.retail || [];
-            markTransaction('readTaxonomy');
+            const taxonomySnap = getCoreSnapshot(taxonomyRef);
+            const retailTrees = taxonomySnap?.data()?.taxonomy?.retail || [];
+            const createdByName = caller.displayName || caller.name || (caller as { email?: string }).email || caller.uid;
+            const custRef = customerRef;
+            const custSnap = customerRef ? getCoreSnapshot(customerRef) || null : null;
+            const incomingName = customerRef ? incomingContactInput.name : '';
+            const repairDocs = new Map<string, { ref: FirebaseFirestore.DocumentReference; snap: FirebaseFirestore.DocumentSnapshot }>();
+            for (const ref of repairRefs) {
+                const snap = getCoreSnapshot(ref);
+                if (!snap?.exists) {
+                    throw new Error(`Phieu sua chua #${ref.id.slice(-6)} khong ton tai.`);
+                }
+                repairDocs.set(ref.id, { ref, snap });
+            }
+            const orderPaymentDocs = new Map<string, { ref: FirebaseFirestore.DocumentReference; snap: FirebaseFirestore.DocumentSnapshot }>();
+            for (const ref of orderPaymentRefs) {
+                const snap = getCoreSnapshot(ref);
+                if (!snap?.exists) {
+                    throw new Error(`Đơn hàng #${ref.id.slice(-6)} không tồn tại.`);
+                }
+                orderPaymentDocs.set(ref.id, { ref, snap });
+            }
+            const requestedCashierShiftSnap = requestedCashierShiftRef ? getCoreSnapshot(requestedCashierShiftRef) || null : null;
+            const activeShiftLockSnap = getCoreSnapshot(activeShiftLockRef) || null;
+            const repairSettingsSnap = repairSettingsRef ? getCoreSnapshot(repairSettingsRef) || null : null;
 
             function resolveWarranty(productData: { warrantyType?: string; warrantyMonths?: string | number; category?: string;[key: string]: unknown }): { warrantyType: string, warrantyMonths: number } | null {
                 if (productData.warrantyType && productData.warrantyType !== 'none') {
@@ -472,61 +594,6 @@ export async function POST(request: NextRequest) {
                 throw new Error('Thu nợ đơn hàng phải thanh toán ngay bằng tiền mặt, chuyển khoản hoặc ví.');
             }
 
-            // ── Pre-fetch for Transaction Reads ──
-            const staffSnap = await tx.get(db.collection('users').doc(caller.uid));
-            const sData = staffSnap.data();
-            const createdByName = sData?.displayName || sData?.name || (caller as { email?: string }).email || caller.uid;
-
-            let custRef: FirebaseFirestore.DocumentReference | null = null;
-            let custSnap: FirebaseFirestore.DocumentSnapshot | null = null;
-            let incomingName = '';
-            const customerInfoRecord = (customer_info && typeof customer_info === 'object' ? customer_info : {}) as Record<string, unknown>;
-            const incomingContactInput = buildIncomingCustomerContact(customerInfoRecord);
-            const incomingContactMethods = buildContactMethods(incomingContactInput);
-            const incomingPrimaryContact = getPrimaryContact(incomingContactMethods);
-            const requestedCustomerId = readString(customerInfoRecord.customerId || customerInfoRecord.id);
-            const rawPhone = incomingContactInput.phone;
-            const normalizedPhoneResult = rawPhone ? normalizeVietnamPhone(rawPhone) : null;
-            const resolvedCustomerId = normalizedPhoneResult?.local
-                || requestedCustomerId
-                || (
-                    incomingContactMethods.length > 0 && incomingContactInput.name && incomingContactInput.name !== 'Khách lẻ'
-                        ? buildContactlessDocumentBaseId('KH', incomingContactInput)
-                        : ''
-                );
-
-            if (resolvedCustomerId) {
-                custRef = db.collection('customers').doc(resolvedCustomerId);
-                custSnap = await tx.get(custRef);
-                incomingName = incomingContactInput.name;
-            }
-            markTransaction('readStaffCustomer');
-
-            const repairIdSet = new Set<string>();
-            if (repairTicketId) repairIdSet.add(normalizeRepairTicketId(repairTicketId));
-            if (Array.isArray(repairTicketIds)) {
-                repairTicketIds.forEach((id: unknown) => {
-                    const normalized = normalizeRepairTicketId(id);
-                    if (normalized) repairIdSet.add(normalized);
-                });
-            }
-            for (const item of checkoutItems) {
-                if (!item.isRepairTicket) continue;
-                const normalized = normalizeRepairTicketId(item.repairTicketId || item.productId);
-                if (normalized) repairIdSet.add(normalized);
-            }
-
-            const repairDocs = new Map<string, { ref: FirebaseFirestore.DocumentReference; snap: FirebaseFirestore.DocumentSnapshot }>();
-            for (const id of repairIdSet) {
-                const ref = db.collection('repairs').doc(id);
-                const snap = await tx.get(ref);
-                if (!snap.exists) {
-                    throw new Error(`Phieu sua chua #${id.slice(-6)} khong ton tai.`);
-                }
-                repairDocs.set(id, { ref, snap });
-            }
-            markTransaction('readRepairs');
-
             const repairPaymentRequestedTotals = new Map<string, number>();
             const repairPaymentTotals = new Map<string, number>();
             for (const item of checkoutItems) {
@@ -552,24 +619,6 @@ export async function POST(request: NextRequest) {
                 }
                 repairPaymentTotals.set(id, expectedAmount);
             }
-
-            const orderPaymentIdSet = new Set<string>();
-            for (const item of checkoutItems) {
-                if (!item.isOrderPayment) continue;
-                const normalized = normalizeOrderPaymentId(item.orderPaymentId || item.productId);
-                if (normalized) orderPaymentIdSet.add(normalized);
-            }
-
-            const orderPaymentDocs = new Map<string, { ref: FirebaseFirestore.DocumentReference; snap: FirebaseFirestore.DocumentSnapshot }>();
-            for (const id of orderPaymentIdSet) {
-                const ref = db.collection('orders').doc(id);
-                const snap = await tx.get(ref);
-                if (!snap.exists) {
-                    throw new Error(`Đơn hàng #${id.slice(-6)} không tồn tại.`);
-                }
-                orderPaymentDocs.set(id, { ref, snap });
-            }
-            markTransaction('readPayableOrders');
 
             const orderPaymentRequestedTotals = new Map<string, number>();
             for (const item of checkoutItems) {
@@ -675,14 +724,22 @@ export async function POST(request: NextRequest) {
                 ? 0
                 : (paidNow + orderPaymentTotal);
             let cashierShiftRef: FirebaseFirestore.DocumentReference | null = null;
+            let cashierShiftUsesTally = false;
 
             if (cashierShiftCollectedAmount > 0) {
-                const activeShiftLockSnap = await tx.get(db.collection(ACTIVE_SHIFT_LOCK_COLLECTION).doc(ACTIVE_SHIFT_LOCK_ID));
-                const activeShiftId = typeof activeShiftLockSnap.data()?.activeShiftId === 'string'
-                    ? String(activeShiftLockSnap.data()?.activeShiftId)
+                let activeShiftDoc = requestedCashierShiftSnap;
+                const verifiedActiveShiftLockSnap = activeShiftLockSnap || await tx.get(activeShiftLockRef);
+                const activeShiftId = typeof verifiedActiveShiftLockSnap.data()?.activeShiftId === 'string'
+                    ? String(verifiedActiveShiftLockSnap.data()?.activeShiftId)
                     : '';
-                const activeShiftRef = activeShiftId ? db.collection('cashier_shifts').doc(activeShiftId) : null;
-                const activeShiftDoc = activeShiftRef ? await tx.get(activeShiftRef) : null;
+                if (activeShiftDoc && activeShiftId !== activeShiftDoc.id) {
+                    throw new Error('Ca thu ngan tren may da khong con la ca dang mo. Vui long tai lai POS truoc khi thanh toan.');
+                }
+                if (!activeShiftDoc) {
+                    // Tương thích client cũ trong thời gian rollout; bundle mới gửi cashierShiftId.
+                    const activeShiftRef = activeShiftId ? db.collection('cashier_shifts').doc(activeShiftId) : null;
+                    activeShiftDoc = activeShiftRef ? await tx.get(activeShiftRef) : null;
+                }
                 if (!activeShiftDoc) {
                     throw new Error('Vui lòng mở ca thu ngân trước khi thanh toán tiền mặt hoặc chuyển khoản tại POS.');
                 }
@@ -690,14 +747,19 @@ export async function POST(request: NextRequest) {
                     throw new Error('Ca thu ngan dang mo khong hop le. Vui long chot/mo lai ca truoc khi thanh toan.');
                 }
                 cashierShiftRef = activeShiftDoc.ref;
+                cashierShiftUsesTally = Number(activeShiftDoc.data()?.tallyVersion) >= 1;
             }
+            const cashierShiftChanged = Boolean(cashierShiftRef && cashierShiftCollectedAmount > 0);
             markTransaction('readCashierShift');
 
             const repairCompletionTargets = new Map<string, { targetStatus: string; shouldCountCompletion: boolean }>();
             for (const [id, repairDoc] of repairDocs.entries()) {
                 if (!repairPaymentTotals.has(id)) continue;
                 const repairTicket = repairDoc.snap.data() as RepairTicket;
-                const workflow = await loadRepairWorkflow(tx, db, repairTicket);
+                if (!repairSettingsSnap?.exists) {
+                    throw new Error('Không tìm thấy cấu hình workflow sửa chữa trong Firebase.');
+                }
+                const workflow = getWorkflowFromSettings((repairSettingsSnap.data() || {}) as RepairWorkflowSettings, repairTicket);
                 const completionTarget = resolvePaymentCompletionTarget(workflow, repairTicket.status);
                 repairCompletionTargets.set(id, completionTarget);
                 if (!completionTarget.shouldCountCompletion) continue;
@@ -722,15 +784,23 @@ export async function POST(request: NextRequest) {
             }
 
             // ── Construct Order Object ──
-            for (const productId of repairAggregatedForStock.keys()) {
-                if (productDocs.has(productId)) continue;
-                const pRef = db.collection('products').doc(productId);
-                const pSnap = await tx.get(pRef);
-                if (!pSnap.exists) {
-                    throw new Error(`Linh kiện sửa chữa (ID: ${productId}) không tồn tại.`);
-                }
-                productDocs.set(productId, { ref: pRef, data: (pSnap.data() || {}) as FirebaseFirestore.DocumentData });
+            markTransaction('workflow');
+
+            const repairProductRefs = Array.from(repairAggregatedForStock.keys())
+                .filter(productId => !productDocs.has(productId))
+                .map(productId => db.collection('products').doc(productId));
+            if (repairProductRefs.length > 0) {
+                const repairProductSnaps = await tx.getAll(...repairProductRefs);
+                repairProductRefs.forEach((pRef, index) => {
+                    const pSnap = repairProductSnaps[index];
+                    if (!pSnap.exists) {
+                        throw new Error(`Linh kiện sửa chữa (ID: ${pRef.id}) không tồn tại.`);
+                    }
+                    productDocs.set(pRef.id, { ref: pRef, data: (pSnap.data() || {}) as FirebaseFirestore.DocumentData });
+                });
             }
+
+            markTransaction('readRepairProducts');
 
             for (const [productId, repairQty] of repairAggregatedForStock.entries()) {
                 const productDoc = productDocs.get(productId);
@@ -748,14 +818,13 @@ export async function POST(request: NextRequest) {
                 quantityToDeduct: x.quantity,
                 preferredLotCodes: Array.from(x.preferredLotCodes.entries()).map(([lotCode, quantity]) => ({ lotCode, quantity }))
             }));
-            if (fifoDeductors.length > 0) {
-                            fifoLogsDataMap = await fetchFifoLogsForDeduction(tx, db, fifoDeductors);
-            }
-            markTransaction('workflowAndFifo');
-
+            fifoLotReadDeductors = fifoDeductors.filter((deductor) => {
+                if (productDocs.get(deductor.productId)?.data.inventoryTrackingMode !== 'legacy') return true;
+                recordSkippedLegacyFifoProduct(deductor.productId);
+                return false;
+            });
             const stockProductIds = new Set([...preAggregatedForStock.keys(), ...repairAggregatedForStock.keys()]);
             const newDebt = !isDebtCollectionOnly ? Math.max(0, currentOrderTotal - paidNow) : 0;
-
             const isDebt = paymentMethodCode === 'DEBT' || newDebt > 0;
             const existingCustomerContactMethods = getCustomerContactMethodsFromData(custSnap?.data());
             const hasIncomingDebtSafeContact = hasDebtSafeContact(incomingContactMethods);
@@ -767,20 +836,14 @@ export async function POST(request: NextRequest) {
             const deltaDebt = isDebtCollectionOnly
                 ? -orderPaymentTotal
                 : (newDebt - orderPaymentTotal);
-
             let customerLedgerCount = 0;
             if (custRef) {
                 if (!isDebtCollectionOnly) {
                     customerLedgerCount += 1; // purchase_order
-                    if (paidNow > 0) {
-                        customerLedgerCount += 1; // purchase_payment
-                    }
+                    if (paidNow > 0) customerLedgerCount += 1; // purchase_payment
                 }
-                if (orderPaymentTotal > 0) {
-                    customerLedgerCount += 1; // thu nợ đơn cũ / cấn tiền dư
-                }
+                if (orderPaymentTotal > 0) customerLedgerCount += 1; // thu nợ đơn cũ / cấn tiền dư
             }
-
             const inventoryLogCount = isPending
                 ? 0
                 : Array.from(stockProductIds).reduce((count, productId) => {
@@ -788,37 +851,49 @@ export async function POST(request: NextRequest) {
                     const repairQty = repairAggregatedForStock.get(productId)?.quantity || 0;
                     return count + (retailQty > 0 ? 1 : 0) + (repairQty > 0 ? 1 : 0);
                 }, 0);
-            const customerTransactionCount = resolvedCustomerId && orderPaymentTotal > 0
-                ? 1
-                : 0;
-            const inventoryLogAllocations = await reserveSequentialDocumentIds(tx, db, {
-                collectionName: 'inventory_logs',
-                prefix: 'IL',
-                count: inventoryLogCount,
-            });
-            const customerLedgerAllocations = await reserveSequentialDocumentIds(tx, db, {
-                collectionName: 'customer_ledger',
-                prefix: 'CL',
-                count: customerLedgerCount,
-            });
-            const customerTransactionAllocations = await reserveSequentialDocumentIds(tx, db, {
-                collectionName: 'customer_transactions',
-                prefix: 'CT',
-                count: customerTransactionCount,
-            });
+            const customerTransactionCount = resolvedCustomerId && orderPaymentTotal > 0 ? 1 : 0;
+            const reservationStartedAt = Date.now();
+            const reservedIdGroupsPromise = reserveSequentialDocumentIdGroups(tx, db, [
+                { key: 'inventoryLogs', collectionName: 'inventory_logs', prefix: 'IL', count: inventoryLogCount },
+                { key: 'customerLedger', collectionName: 'customer_ledger', prefix: 'CL', count: customerLedgerCount },
+                { key: 'customerTransactions', collectionName: 'customer_transactions', prefix: 'CT', count: customerTransactionCount },
+                { key: 'order', collectionName: 'orders', prefix: 'DH', count: isDebtCollectionOnly ? 0 : 1 },
+            ]);
+            markTransaction('prepareFifo');
+            try {
+                if (fifoLotReadDeductors.length > 0) {
+                    const fifoReadMetrics = new Map<string, FifoReadMetric>();
+                    fifoLogsDataMap = await fetchFifoLogsForDeduction(tx, db, fifoLotReadDeductors, {
+                        onRead: (metric) => {
+                            recordFifoRead(metric);
+                            fifoReadMetrics.set(metric.productId, metric);
+                        },
+                    });
+                    for (const deductor of fifoLotReadDeductors) {
+                        const productData = productDocs.get(deductor.productId)?.data;
+                        const metric = fifoReadMetrics.get(deductor.productId);
+                        if (productData?.inventoryTrackingMode === undefined && metric) {
+                            inventoryTrackingModeUpdates.set(deductor.productId, metric.lotCount > 0 ? 'fifo' : 'legacy');
+                        }
+                    }
+                }
+            } catch (error) {
+                await reservedIdGroupsPromise.catch(() => undefined);
+                throw error;
+            }
+            markTransaction('fifoRead');
+            const reservedIdGroups = await reservedIdGroupsPromise;
+            markTransaction('reserveIdsWait');
+            recordTransactionDuration('reserveIdsTotal', Date.now() - reservationStartedAt);
+            const inventoryLogAllocations = reservedIdGroups.get('inventoryLogs') || [];
+            const customerLedgerAllocations = reservedIdGroups.get('customerLedger') || [];
+            const customerTransactionAllocations = reservedIdGroups.get('customerTransactions') || [];
             let inventoryLogAllocationIndex = 0;
             let customerLedgerAllocationIndex = 0;
 
-            let orderAllocation: ReservedSequentialDocumentId | null = null;
-            if (!isDebtCollectionOnly) {
-                orderAllocation = await reserveSequentialDocumentId(tx, db, {
-                    collectionName: 'orders',
-                    prefix: 'DH',
-                });
-            }
+            const orderAllocation: ReservedSequentialDocumentId | null = reservedIdGroups.get('order')?.[0] || null;
             const orderRef = orderAllocation?.ref || null;
             const orderId = orderAllocation?.id || '';
-            markTransaction('reserveIds');
             const debtPaymentReferenceId = updatedOrderIds.length === 1
                 ? updatedOrderIds[0]
                 : (idempotencyKey || orderId || `DEBT-${updatedOrderIds.map(id => id.slice(-6)).join('-')}`);
@@ -866,17 +941,28 @@ export async function POST(request: NextRequest) {
                 createdByName
             };
 
-            // ── Commission Server-Side Calculation (Reads inside) ──
+            // ── Commission Server-Side Calculation ──
             const commissionableItems = orderItems;
             const commissionableTotal = currentOrderTotal;
+            const activeCommissionRules = activeCommissionRulesPromise ? await activeCommissionRulesPromise : [];
+            const commissionProductMap = Array.from(productDocs.entries()).reduce<Record<string, Product>>((map, [productId, productDoc]) => {
+                map[productId] = productDoc.data as Product;
+                return map;
+            }, {});
+            let commissionCost = 0;
             if (!isDebtCollectionOnly && !isPending && commissionableItems.length > 0 && commissionableTotal > 0) {
-                await calculateAndSaveCommissionsServer(tx, { uid: caller.uid, displayName: createdByName as string }, 'order', {
+                const commissionResult = await calculateAndSaveCommissionsServer(tx, { uid: caller.uid, displayName: createdByName as string }, 'order', {
                     id: orderId,
                     ...order,
                     items: commissionableItems,
                     subtotal_amount: discountableSubtotal,
                     total_amount: commissionableTotal,
-                } as unknown as Order);
+                } as unknown as Order, {
+                    activeRules: activeCommissionRules,
+                    productMap: commissionProductMap,
+                    skipRevenueAggregate: true,
+                });
+                commissionCost += commissionResult.commissionCost;
             }
             if (!isPending && repairPaymentTotals.size > 0) {
                 for (const [id, repairPrice] of repairPaymentTotals.entries()) {
@@ -884,7 +970,7 @@ export async function POST(request: NextRequest) {
                     const completionTarget = repairCompletionTargets.get(id);
                     if (!repairDoc || !completionTarget) continue;
                     const repairTicket = repairDoc.snap.data() as RepairTicket;
-                    await calculateAndSaveCommissionsServer(tx, { uid: caller.uid, displayName: createdByName as string }, 'repair', {
+                    const commissionResult = await calculateAndSaveCommissionsServer(tx, { uid: caller.uid, displayName: createdByName as string }, 'repair', {
                         ...repairTicket,
                         id,
                         status: completionTarget.targetStatus,
@@ -893,9 +979,14 @@ export async function POST(request: NextRequest) {
                             status: 'paid',
                             amount: repairPrice,
                         },
-                    } as RepairTicket);
+                    } as RepairTicket, {
+                        activeRules: activeCommissionRules,
+                        skipRevenueAggregate: true,
+                    });
+                    commissionCost += commissionResult.commissionCost;
                 }
             }
+            markTransaction('commission');
 
             // ==========================================
             // ── ALL WRITES START HERE ──
@@ -932,15 +1023,18 @@ export async function POST(request: NextRequest) {
                 const repairQty = repairAggregatedForStock.get(productId)?.quantity || 0;
                 const repairReservedQty = repairAggregatedForStock.get(productId)?.reservedQuantity || 0;
                 const totalQty = retailQty + repairQty;
+                const inventoryTrackingMode = inventoryTrackingModeUpdates.get(productId);
 
                 if (isPending) {
                     tx.update(pSnap.ref, {
-                        held: currentHeld + retailQty
+                        held: currentHeld + retailQty,
+                        ...(inventoryTrackingMode ? { inventoryTrackingMode } : {}),
                     });
                 } else {
                     tx.update(pSnap.ref, {
                         stock: currentStock - totalQty,
-                        held: Math.max(0, currentHeld - repairReservedQty)
+                        held: Math.max(0, currentHeld - repairReservedQty),
+                        ...(inventoryTrackingMode ? { inventoryTrackingMode } : {}),
                     });
 
                     if (retailQty > 0) {
@@ -982,6 +1076,7 @@ export async function POST(request: NextRequest) {
                 orderAllocation.commitCounter();
                 tx.set(orderRef, order);
             }
+            const revenueDeltas: RevenueAggregateDelta[] = [];
             if (!isDebtCollectionOnly && !isPending) {
                 const retailItems = normalizedItems.filter((item) => !item.isRepairTicket && !item.isOrderPayment);
                 const retailSubtotal = retailItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
@@ -990,10 +1085,7 @@ export async function POST(request: NextRequest) {
                 const repairRevenue = Array.from(repairPaymentTotals.values()).reduce((sum, amount) => sum + amount, 0);
 
                 if (retailItems.length > 0) {
-                    incrementRevenueAggregates(
-                        tx,
-                        db,
-                        buildCompletedOrderRevenueDelta({
+                    revenueDeltas.push(buildCompletedOrderRevenueDelta({
                             id: orderId,
                             ...order,
                             items: retailItems,
@@ -1007,14 +1099,13 @@ export async function POST(request: NextRequest) {
                                 timestamp: Date.now(),
                                 note: `Doanh thu POS retail - ${payment_method || 'CASH'}`
                             }] : [],
-                        } as unknown as Order),
-                    );
+                        } as unknown as Order));
                 }
                 if (repairRevenue > 0) {
                     const repairCount = Array.from(repairCompletionTargets.values())
                         .filter(target => target.shouldCountCompletion)
                         .length;
-                    incrementRevenueAggregates(tx, db, { repairRevenue, repairCount });
+                    revenueDeltas.push({ repairRevenue, repairCount });
                 }
             }
             if (!isPending && orderPaymentTotal > 0) {
@@ -1025,25 +1116,41 @@ export async function POST(request: NextRequest) {
                     if (source === 'pos') debtCollectionPosRevenue += paymentAmount;
                     else debtCollectionWebRevenue += paymentAmount;
                 }
-                incrementRevenueAggregates(tx, db, {
+                revenueDeltas.push({
                     orderRevenue: orderPaymentTotal,
                     ...buildPaymentChannelRevenueDelta(orderPaymentTotal, payment_method || paymentMethodCode),
                     posOrderRevenue: debtCollectionPosRevenue,
                     webOrderRevenue: debtCollectionWebRevenue,
                 });
             }
+            if (commissionCost > 0) {
+                revenueDeltas.push({ commissionCost });
+            }
+            incrementRevenueAggregates(tx, db, mergeRevenueAggregateDeltas(...revenueDeltas));
 
             if (cashierShiftRef && cashierShiftCollectedAmount > 0) {
-                tx.update(cashierShiftRef, {
-                    ...(cashierShiftChannel === 'cash'
-                        ? { cashSalesAmount: FieldValue.increment(cashierShiftCollectedAmount) }
-                        : { bankSalesAmount: FieldValue.increment(cashierShiftCollectedAmount) }),
-                    lastPaymentAmount: cashierShiftCollectedAmount,
-                    lastPaymentMethod: paymentMethodCode,
-                    lastOrderId: isDebtCollectionOnly ? debtPaymentReferenceId : orderId,
-                    lastPaymentAt: FieldValue.serverTimestamp(),
-                    updatedAt: FieldValue.serverTimestamp(),
-                });
+                if (cashierShiftUsesTally) {
+                    queueCashierShiftTally(tx, db, {
+                        shiftId: cashierShiftRef.id,
+                        operationKey: readString(idempotencyKey) || orderId || debtPaymentReferenceId,
+                        orderId: isDebtCollectionOnly ? debtPaymentReferenceId : orderId,
+                        paymentMethod: paymentMethodCode,
+                        cashAmount: cashierShiftChannel === 'cash' ? cashierShiftCollectedAmount : 0,
+                        bankAmount: cashierShiftChannel === 'bank' ? cashierShiftCollectedAmount : 0,
+                        actorId: caller.uid,
+                    });
+                } else {
+                    tx.update(cashierShiftRef, {
+                        ...(cashierShiftChannel === 'cash'
+                            ? { cashSalesAmount: FieldValue.increment(cashierShiftCollectedAmount) }
+                            : { bankSalesAmount: FieldValue.increment(cashierShiftCollectedAmount) }),
+                        lastPaymentAmount: cashierShiftCollectedAmount,
+                        lastPaymentMethod: paymentMethodCode,
+                        lastOrderId: isDebtCollectionOnly ? debtPaymentReferenceId : orderId,
+                        lastPaymentAt: FieldValue.serverTimestamp(),
+                        updatedAt: FieldValue.serverTimestamp(),
+                    });
+                }
             }
 
             // ── Increment Voucher Usage ──
@@ -1260,6 +1367,7 @@ export async function POST(request: NextRequest) {
                     type: isDebtCollectionOnly ? 'pos_debt_collection' : 'pos_checkout',
                     referenceId: isDebtCollectionOnly ? debtPaymentReferenceId : orderId,
                     debtOnly: isDebtCollectionOnly,
+                    cashierShiftChanged,
                     updatedOrderIds
                 });
             }
@@ -1273,18 +1381,36 @@ export async function POST(request: NextRequest) {
                 orderId: isDebtCollectionOnly ? debtPaymentReferenceId : orderId,
                 updatedOrderIds,
                 debtOnly: isDebtCollectionOnly,
+                cashierShiftChanged,
                 warnings: checkoutWarnings
             };
+            } finally {
+                finishTransactionAttempt();
+            }
         });
         markTiming('transaction');
-        debugTiming.transactionSteps = transactionTiming;
+        debugTiming.transactionAttempts = transactionAttempts;
+        debugTiming.transactionAttemptCount = transactionAttempts.length;
+        debugTiming.transactionSteps = transactionAttempts.at(-1)?.steps || {};
+        debugTiming.fifoReads = transactionAttempts.at(-1)?.fifoReads || [];
+        debugTiming.fifoSkippedLegacyProductIds = transactionAttempts.at(-1)?.fifoSkippedLegacyProductIds || [];
         debugTiming.total = Date.now() - startedAt;
         if (Number(debugTiming.total) > 1500) {
             console.warn('POS checkout API timing', debugTiming);
+            const fifoReads = transactionAttempts.at(-1)?.fifoReads || [];
+            const fifoSkippedLegacyProductIds = transactionAttempts.at(-1)?.fifoSkippedLegacyProductIds || [];
+            if (fifoReads.length > 0 || fifoSkippedLegacyProductIds.length > 0) {
+                console.warn('POS checkout FIFO tracking', JSON.stringify({ fifoReads, fifoSkippedLegacyProductIds }));
+            }
         }
 
         return NextResponse.json({ ...result, debugTiming });
     } catch (error: unknown) {
+        debugTiming.transactionAttempts = transactionAttempts;
+        debugTiming.transactionAttemptCount = transactionAttempts.length;
+        debugTiming.transactionSteps = transactionAttempts.at(-1)?.steps || {};
+        debugTiming.fifoReads = transactionAttempts.at(-1)?.fifoReads || [];
+        debugTiming.fifoSkippedLegacyProductIds = transactionAttempts.at(-1)?.fifoSkippedLegacyProductIds || [];
         debugTiming.total = Date.now() - startedAt;
         console.error('POS checkout API timing before error:', debugTiming);
         console.error('POS Checkout API error:', error);

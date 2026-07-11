@@ -11,6 +11,33 @@
   "constraints": [],
   "aiPlans": [
     {
+      "id": "plan-pos-checkout-hot-path-20260710",
+      "title": "Tối ưu hot path POS checkout: batch reads, telemetry và cashier tally shards",
+      "date": "10.07.2026",
+      "status": "in_progress",
+      "planFile": "data/ai_plans/plan_pos_checkout_hot_path_20260710.md",
+      "taskFile": "",
+      "walkthroughFile": "",
+      "scope": [
+        "src/app/api/pos/checkout/route.ts",
+        "src/app/api/pos/cashier-shift/route.ts",
+        "src/app/admin/pos/page.tsx",
+        "src/lib/serverDocumentIds.ts",
+        "src/lib/cashierShiftTallyServer.ts",
+        "src/lib/commissionCalcServer.ts",
+        "src/lib/inventoryFifo.ts",
+        "src/lib/revenueAggregateServer.ts",
+        "firestore.indexes.json"
+      ],
+      "decisions": [
+        "Giữ nguyên transaction lõi và mã chứng từ tuần tự",
+        "Gộp các read độc lập bằng Transaction.getAll và Promise.all",
+        "Ca mới dùng movement idempotent cùng tally shards; ca cũ giữ tương thích đến khi chốt",
+        "Aggregate doanh thu vẫn đồng bộ nhưng chỉ ghi một delta tổng hợp cho mỗi checkout"
+      ],
+      "updatedAt": "2026-07-10T00:00:00.000+07:00"
+    },
+    {
       "id": "plan-ux-ui-optimization-20260703",
       "title": "Kế hoạch Tối ưu UX/UI toàn diện (Responsive, Skeleton, Nav, Interaction)",
       "date": "03.07.2026",
