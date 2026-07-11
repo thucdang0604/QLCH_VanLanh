@@ -149,56 +149,11 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         const docNames = ['main_settings', 'layout_settings', 'navigation_settings', 'taxonomy_settings'];
         let loadedCount = 0;
 
-        const seedDocument = async (docName: string) => {
-            let seedData: Record<string, unknown> = {};
-            if (docName === 'taxonomy_settings') {
-                seedData = { taxonomy: DEFAULT_CONFIG.taxonomy };
-            } else if (docName === 'navigation_settings') {
-                seedData = {
-                    headerNav: DEFAULT_CONFIG.headerNav,
-                    sidebarMenu: DEFAULT_CONFIG.sidebarMenu,
-                    footerServices: DEFAULT_CONFIG.footerServices,
-                    homeServiceCategories: DEFAULT_CONFIG.homeServiceCategories,
-                };
-            } else if (docName === 'layout_settings') {
-                seedData = {
-                    hero_banners: DEFAULT_CONFIG.hero_banners,
-                    homeSections: DEFAULT_CONFIG.homeSections,
-                    store_branches: DEFAULT_CONFIG.store_branches,
-                    homepagePricing: DEFAULT_CONFIG.homepagePricing,
-                    homepageReviews: DEFAULT_CONFIG.homepageReviews,
-                    background_config: DEFAULT_CONFIG.background_config,
-                    geofence: DEFAULT_CONFIG.geofence,
-                };
-            } else if (docName === 'main_settings') {
-                seedData = {
-                    primaryColor: DEFAULT_CONFIG.primaryColor,
-                    primaryColorDark: DEFAULT_CONFIG.primaryColorDark,
-                    primaryColorLight: DEFAULT_CONFIG.primaryColorLight,
-                    contact_info: DEFAULT_CONFIG.contact_info,
-                    siteName: DEFAULT_CONFIG.siteName,
-                    logoUrl: DEFAULT_CONFIG.logoUrl,
-                    headerBg: DEFAULT_CONFIG.headerBg,
-                    topBarText: DEFAULT_CONFIG.topBarText,
-                    topBarEnabled: DEFAULT_CONFIG.topBarEnabled,
-                    forbiddenWords: DEFAULT_CONFIG.forbiddenWords,
-                };
-            }
-            try {
-                await setDoc(doc(db, 'system_config', docName), { ...seedData, updatedAt: serverTimestamp() }, { merge: true });
-            } catch (err) {
-                console.error(`Error seeding ${docName}:`, err);
-            }
-        };
-
         const unsubs = docNames.map(docName => {
             return onSnapshot(
                 doc(db, 'system_config', docName),
                 (snapshot) => {
-                    if (!snapshot.exists()) {
-                        // Seed document if it doesn't exist
-                        seedDocument(docName);
-                    } else {
+                    if (snapshot.exists()) {
                         const data = snapshot.data();
                         setConfig(prev => {
                             const next = { ...prev };
@@ -260,7 +215,14 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
 
     // Update config in Firestore, split into appropriate documents
     const updateConfig = async (partial: Partial<SiteConfig>) => {
+        if (loading) {
+            throw new Error('Configuration is still loading. Refusing to persist fallback defaults.');
+        }
+
         const cleanedPartial = cleanUndefined(partial);
+        if (Object.prototype.hasOwnProperty.call(cleanedPartial, 'taxonomy')) {
+            throw new Error('Taxonomy must be changed through the protected taxonomy API.');
+        }
         const updatesByDoc: Record<string, Record<string, unknown>> = {
             main_settings: {},
             layout_settings: {},

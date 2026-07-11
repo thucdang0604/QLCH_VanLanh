@@ -412,6 +412,7 @@ export default function DiscountRulesTab() {
 
     // Tiers State
     const [tiers, setTiers] = useState<TierConfig[]>(TIER_CONFIGS);
+    const [tiersLoaded, setTiersLoaded] = useState(false);
     const [savingTiers, setSavingTiers] = useState(false);
     const [expandedTier, setExpandedTier] = useState<string | null>(null);
     const [loadingTierName, setLoadingTierName] = useState<string | null>(null);
@@ -497,12 +498,24 @@ export default function DiscountRulesTab() {
     useEffect(() => {
         // Fetch Tier Settings
         const unsubTiers = onSnapshot(doc(db, 'system_config', 'tier_settings'), snap => {
-            if (snap.exists() && snap.data().tiers) {
-                setTiers(snap.data().tiers);
+            if (!snap.exists()) {
+                setTiersLoaded(true);
+                return;
+            }
+
+            const storedTiers = snap.data().tiers;
+            if (Array.isArray(storedTiers)) {
+                setTiers(storedTiers);
                 setLoadedTierCustomers({});
                 setTierCustomers({});
                 setExpandedTier(null);
+                setTiersLoaded(true);
+                return;
             }
+
+            console.error('Tier settings document has no valid tiers array. Refusing to save fallback defaults.');
+        }, error => {
+            console.error('Unable to load tier settings. Refusing to save fallback defaults.', error);
         });
 
         return () => { unsubTiers(); };
@@ -545,6 +558,11 @@ export default function DiscountRulesTab() {
     };
 
     const handleSaveTiers = async () => {
+        if (!tiersLoaded) {
+            toast.error('Chưa tải được cấu hình hạng hiện tại; không thể lưu dữ liệu mặc định.');
+            return;
+        }
+
         setSavingTiers(true);
         try {
             await setDoc(doc(db, 'system_config', 'tier_settings'), {
@@ -683,7 +701,7 @@ export default function DiscountRulesTab() {
                             <button
                                 title="Lưu cấu hình hạng"
                                 onClick={handleSaveTiers}
-                                disabled={savingTiers}
+                                disabled={savingTiers || !tiersLoaded}
                                 className="bg-orange-500 text-white px-5 py-2 rounded-lg font-medium hover:bg-orange-600 disabled:opacity-50"
                             >
                                 {savingTiers ? 'Đang lưu...' : 'Lưu cấu hình hạng'}
