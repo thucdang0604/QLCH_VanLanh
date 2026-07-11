@@ -2,6 +2,20 @@
 
 ## Lỗi thuộc Module: hardcode
 # 🐛 Bugs
+## BUG-CONFIG-OVERWRITE-001: Seed/default config có thể ghi đè cấu hình khởi tạo
+- **Status:** fixed
+- **Severity:** critical
+- **Module:** Settings / Security
+- **Files:** src/lib/ConfigContext.tsx, src/app/admin/settings/page.tsx, src/app/admin/appearance/page.tsx, src/app/api/admin/taxonomy/route.ts, src/lib/taxonomyMutation.ts, firestore.rules
+### Symptom
+Một route seed hoặc thao tác client trên tree taxonomy có thể ghi lại toàn bộ cấu hình mặc định, khiến dữ liệu taxonomy hiện hữu bị thay bằng `DEFAULT_CONFIG`.
+### Cause
+`ConfigContext` tự seed khi thiếu document; `seed-config`/`seed-taxonomy` có write default; trang Settings/Appearance có reset default; CategoriesTab clone và client-write toàn bộ tree taxonomy, không có transaction chống stale overwrite.
+### Solution
+Xóa seed endpoints và mọi UI reset mặc định của cấu hình. Missing config chỉ fallback để đọc; mọi client write bị từ chối trước khi tải đủ bốn document cấu hình, còn hạng thành viên phải có snapshot hợp lệ. Chặn client write `taxonomy_settings`; mutation taxonomy chạy Admin SDK transaction trên dữ liệu hiện hữu, không seed khi thiếu document và không cho đổi slug làm mất liên kết.
+### Verification
+2026-07-11: `corepack pnpm exec tsx --test src/lib/taxonomyMutation.test.ts`, `corepack pnpm typecheck`, `pnpm lint`, `git diff --check` pass; request không có Bearer token tới `/api/admin/taxonomy` bị từ chối `401`. Không có Firestore write trong quá trình sửa.
+
 ## BUG-HARDCODE-001: Hardcode còn rải rác trong secret, storefront fallback, business identity và workflow status
 - **Status:** fixed
 - **Severity:** high

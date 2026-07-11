@@ -95,10 +95,17 @@ service cloud.firestore {
       allow write: if hasPermission('manage_articles');
     }
     
-    // System Config - public read, admin only write
+    // Taxonomy writes only go through the Admin SDK transaction endpoint.
+    // A client must never be able to overwrite the full taxonomy tree.
+    match /system_config/taxonomy_settings {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Remaining system config is public read, admin-only write.
     match /system_config/{docId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if isAdmin() && docId != 'taxonomy_settings';
     }
 
     // Private server-side configuration. Access only through Admin SDK APIs.

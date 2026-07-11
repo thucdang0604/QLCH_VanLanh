@@ -1393,13 +1393,13 @@
       "module": "HACK",
       "severity": "critical",
       "status": "fixed",
-      "title": "Hardcoded Fallback Secret trong API tạo Admin",
+      "title": "Hardcoded Fallback Secret trong API tạo Admin (seed endpoint đã bị xóa)",
       "workflowId": "system-content",
       "affectedFiles": [],
-      "description": "<b>Hiện tượng</b>: API <code>/api/seed-admin</code> sử dụng một chuỗi bí mật cố định làm giá trị dự phòng nếu biến môi trường không được cấu hình.<br><b>Hệ lụy</b>: Kẻ tấn công có thể sử dụng chuỗi bí mật này để tự cấp quyền Admin cho tài khoản của mình, chiếm toàn quyền điều khiển hệ thống.<br><br>✅ <b>Đã vá ngày 17.05.2026</b>: Xóa fallback. Bắt buộc đọc từ biến môi trường <code>ADMIN_SEED_SECRET</code>. Thiếu → 500, sai → 401.",
+      "description": "<b>Hiện tượng</b>: API <code>/api/seed-admin</code> từng dùng chuỗi bí mật cố định làm fallback.<br><b>Hệ lụy</b>: Có thể dẫn đến tự cấp quyền Admin.<br><br>✅ <b>Trạng thái hiện tại</b>: endpoint seed-admin đã bị xóa hoàn toàn ngày 11.07.2026; không còn bề mặt runtime để tạo Admin bằng seed.",
       "cause": "<b>Phân tích</b>: Đoạn code <code>const validSecret = process.env.ADMIN_SEED_SECRET || 'vanlanh-admin-secret-2024';</code> để lộ thông tin bí mật trong mã nguồn.",
-      "solution": "<b>Giải pháp đã áp dụng</b>: Xóa fallback hoàn toàn. Bắt buộc đọc từ biến môi trường, trả 500 nếu thiếu, 401 nếu sai.",
-      "code": "// ✅ Code đã áp dụng (src/app/api/seed-admin/route.ts)\nconst validSecret = process.env.ADMIN_SEED_SECRET;\nif (!validSecret) {\n    console.error('CRITICAL: ADMIN_SEED_SECRET is not configured');\n    return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });\n}\nif (secret !== validSecret) {\n    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });\n}",
+      "solution": "<b>Giải pháp đã áp dụng</b>: Xóa fallback trước đây, sau đó xóa hoàn toàn endpoint seed-admin vì không còn cần thiết ở runtime.",
+      "code": "// 2026-07-11: src/app/api/seed-admin/route.ts was removed.",
       "fixedAt": "17.05.2026"
     },
     {
@@ -2024,10 +2024,10 @@
         "src/lib/apiAuth.ts"
       ],
       "symptom": "Seed/migration endpoints dung Admin SDK co nguy co mutate DB neu public.",
-      "description": "seed-taxonomy hien la POST + requireAdmin + production guard. Hai route dev cu da bi xoa khoi working tree.",
+      "description": "seed-taxonomy đã bị xóa hoàn toàn ngày 11.07.2026. Taxonomy chỉ còn mutation route transaction admin-only trên dữ liệu hiện hữu.",
       "cause": "Route Admin SDK mutation thieu auth/guard trong ban cu.",
-      "solution": "Moi endpoint mutation dung Admin SDK phai co requireAdmin/requireAdminOrStaff va production guard, hoac chuyen thanh CLI script noi bo.",
-      "verificationNotes": "Source verified 2026-05-23: seed-taxonomy imports requireAdmin and blocks NODE_ENV production. /api/dev/migrate-prices and /api/dev/seed-data are deleted in current working tree.",
+      "solution": "Xóa endpoint seed/migration runtime. Mutation taxonomy dùng Admin SDK transaction, yêu cầu admin và từ chối seed/default payload.",
+      "verificationNotes": "Source verified 2026-07-11: seed-taxonomy, seed-config và seed-admin đã bị xóa; Firestore Rules chặn client write taxonomy_settings.",
       "fixedAt": "2026-05-21"
     },
     {
@@ -2073,16 +2073,16 @@
       "severity": "medium",
       "status": "fixed",
       "workflowId": "system-content",
-      "title": "Settings seed-config da gui Bearer token",
+      "title": "Settings seed-config overwrite path đã bị xóa",
       "affectedFiles": [
         "src/app/admin/settings/page.tsx",
         "src/app/api/seed-config/route.ts"
       ],
-      "symptom": "Nut khoi phuc mac dinh goi protected API nhung thieu Authorization.",
-      "description": "Settings page lay Firebase currentUser idToken qua getAuthInstance va gui Authorization Bearer khi POST /api/seed-config.",
+      "symptom": "Nút khôi phục mặc định có thể gọi API seed config và ghi đè cấu hình hiện hữu.",
+      "description": "Ngày 11.07.2026 đã xóa nút khôi phục mặc định cùng /api/seed-config để loại bỏ hoàn toàn đường ghi DEFAULT_CONFIG runtime.",
       "cause": "Client caller thieu token trong khi API requireAdminOrStaff.",
-      "solution": "Gui Firebase ID token; API tiep tuc verify role/permission server-side.",
-      "verificationNotes": "Source verified 2026-05-23: settings page gui Authorization Bearer token.",
+      "solution": "Không duy trì endpoint seed config runtime. Config thiếu chỉ fallback để đọc và không tự write Firestore.",
+      "verificationNotes": "Source verified 2026-07-11: settings page và API seed-config đã bị xóa.",
       "fixedAt": "2026-05-21"
     },
     {

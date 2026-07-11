@@ -2,8 +2,9 @@
   "_meta": {
     "description": "Bản đồ trí tuệ mã nguồn — tự động tích lũy khi AI đọc/sửa code. Giúp AI sau chỉ cần đọc file này là hiểu ngay cấu trúc, liên kết, và cách sửa.",
     "lastUpdated": "2026-07-11T00:00:00.000+07:00",
-    "version": 70,
+    "version": 71,
     "changelog": [
+      "v71: Removed all default-config seed endpoints (/api/seed-admin, /api/seed-config, /api/admin/seed-taxonomy) and every config-wide default-reset caller. ConfigContext now reads missing documents without writing defaults and refuses every client write until all config reads finish; member tiers also wait for a valid snapshot. Taxonomy client writes are denied by Firestore Rules; /api/admin/taxonomy is admin-only, reads the existing tree in a transaction, refuses missing config and slug renames, and preserves descendants/concurrent edits.",
       "v70: Final POS hot-path handoff: a measured DEBT checkout with a legacy SKU logged total 3639ms (down from 7646ms), transaction callback 2193ms (down from 4608ms), and zero FIFO reads. The remaining 1397ms reserveIdsWait is intentional readable-ID collision protection, not a cache candidate. Firebase qlch-vanlanh now has all 20 products classified (18 migrated legacy); implementation is commit 5509e6ac and draft PR #20.",
       "v69: POS no longer reloads cashier-shift after a checkout that did not change the shift (including DEBT); cash/bank refreshes remain. GET /api/pos/cashier-shift returns active shift by default and loads the 10 closed-shift history documents only for the Cashier tab, reducing both post-checkout and initial POS read cost.",
       "v68: POS checkout starts readable-ID reservation while FIFO lots are loading, then reports reserveIdsWait (critical path) separately from reserveIdsTotal (overlapped duration). Auth telemetry splits Firebase token verification and users/{uid} profile read; the checkout no longer re-reads that user document in its Firestore transaction. scripts/backfill-product-inventory-tracking.mjs safely classifies previously unmarked products with a read-only default and per-product transaction guard.",
@@ -551,7 +552,6 @@
         "socialLinks"
       ],
       "usedIn": [
-        "seed-config/route.ts",
         "reviews/route.ts",
         "ConfigContext.tsx"
       ]
@@ -1709,7 +1709,7 @@
       "/api/admin/chat/rooms/[roomId]/facebook-profile": "POST: Lấy thông tin public profile của khách từ Facebook Graph API.",
       "/api/admin/chat/rooms/[roomId]/media/[messageId]/[attachmentIndex]": "GET: Proxy tải ảnh/video đính kèm từ chat platform để tránh lỗi CORS.",
       "/api/admin/chat/send": "POST: Nhận tin nhắn từ Admin/Staff và đẩy ra API của Facebook/Zalo.",
-      "/api/admin/seed-taxonomy": "POST: Khởi tạo dữ liệu danh mục tĩnh (Taxonomy) cho hệ thống."
+      "/api/admin/taxonomy": "POST: Mutation taxonomy admin-only; transaction trên cây hiện có, không seed hoặc cho phép client ghi đè toàn bộ default."
     },
     "ai": {
       "/api/ai": "POST: Xử lý request từ client tới AI."
@@ -1767,12 +1767,6 @@
     },
     "services": {
       "/api/services/homepage-pricing": "GET: Lấy dịch vụ active và giá thật từ collection services cho bảng giá homepage."
-    },
-    "seed-admin": {
-      "/api/seed-admin": "GET/POST: Tạo tài khoản Admin đầu tiên để khởi tạo hệ thống."
-    },
-    "seed-config": {
-      "/api/seed-config": "GET/POST: Tạo các Config cơ bản (main_settings, repairs workflow) lần đầu."
     },
     "tracking": {
       "/api/tracking": "POST: Khách hàng tự tra cứu tiến độ sửa chữa/đơn hàng bằng số điện thoại."
@@ -1878,12 +1872,12 @@
       "description": "Auto-mapped from app/api/admin/fix-held/route.ts",
       "file": "src/app/api/admin/fix-held/route.ts"
     },
-    "/api/admin/seed-taxonomy": {
+    "/api/admin/taxonomy": {
       "methods": [
         "POST"
       ],
-      "description": "Auto-mapped from app/api/admin/seed-taxonomy/route.ts",
-      "file": "src/app/api/admin/seed-taxonomy/route.ts"
+      "description": "Admin-only transactional taxonomy mutation. It refuses missing configuration and never seeds DEFAULT_CONFIG.",
+      "file": "src/app/api/admin/taxonomy/route.ts"
     },
     "/api/ai": {
       "methods": [
@@ -2121,22 +2115,6 @@
       ],
       "description": "Admin/staff global search for catalog plus masked order/repair exact or phone lookup.",
       "file": "src/app/api/admin/search/route.ts"
-    },
-    "/api/seed-admin": {
-      "methods": [
-        "POST",
-        "GET"
-      ],
-      "description": "Auto-mapped from app/api/seed-admin/route.ts",
-      "file": "src/app/api/seed-admin/route.ts"
-    },
-    "/api/seed-config": {
-      "methods": [
-        "POST",
-        "GET"
-      ],
-      "description": "Auto-mapped from app/api/seed-config/route.ts",
-      "file": "src/app/api/seed-config/route.ts"
     },
     "/api/services/homepage-pricing": {
       "methods": [
