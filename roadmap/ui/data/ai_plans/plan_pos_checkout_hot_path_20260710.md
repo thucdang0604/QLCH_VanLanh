@@ -23,3 +23,12 @@
 - Unit test reservation batch và cashier tally idempotent.
 - ESLint, TypeScript, build, Firestore indexes dry-run.
 - Đo lại checkout trên một ca mới để so sánh `transactionAttemptCount`, `fifoSkippedLegacyProductIds`, `reserveIdsWait`, các phase và transaction total.
+
+## Kết quả và bàn giao 2026-07-11
+
+- Mẫu DEBT sau migration: `total` 3,639ms (mẫu chậm trước là 7,646ms), callback 2,193ms (trước là 4,608ms), FIFO rỗng đã biến mất.
+- Firebase `qlch-vanlanh`: 18/18 sản phẩm cũ được đặt `inventoryTrackingMode: legacy`; dry-run sau apply xác nhận 20/20 sản phẩm đã có mode. Không đổi stock, inventory lot, order, công nợ hay ledger.
+- Còn lại `reserveIdsWait` khoảng 1.4s là chi phí cần thiết cho counter và kiểm tra va chạm ID tuần tự. Không tối ưu bằng cache trong process vì phá vỡ concurrency/idempotency nhiều thu ngân.
+- Tách request Thu ngân: checkout không đổi dòng tiền không tải lại ca; lịch sử 10 ca chỉ tải khi người dùng mở tab Thu ngân.
+- Đã kiểm tra TypeScript, ESLint, unit test, JSON roadmap, Firestore dry-run và guardrail. Full build chờ khi dev server không còn dùng `.next`.
+- Commit: `5509e6ac`; draft PR: #20. Code cần đi qua deploy pipeline trước khi áp dụng production.

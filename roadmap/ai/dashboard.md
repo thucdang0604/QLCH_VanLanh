@@ -34,6 +34,17 @@ Open deploy debt: <code>BUG-DEPLOY-007</code> đang theo dõi warning Firebase C
 
 ## Scaling Roadmap
 
+### 2026-07-11 - POS CHECKOUT FIRESTORE COST & LATENCY HANDOFF
+- **Color:** success
+- **Status:** CODED, VALIDATED, PENDING NORMAL DEPLOYMENT
+- **Summary:** Hoàn tất tối ưu hot path POS và ghi lại số đo thực tế để không lặp lại các tối ưu rủi ro cho mã chứng từ.
+- <b>Kết quả đo:</b> Mẫu thanh toán ghi nợ sau migration giảm <code>total</code> từ 7.646ms xuống 3.639ms và callback transaction từ 4.608ms xuống 2.193ms. SKU legacy không còn query FIFO rỗng.
+- <b>Đã triển khai:</b> Batch read transaction, overlap FIFO/ID reservation, commission/revenue reuse, tally shard idempotent, lazy cashier history và bỏ refresh ca với checkout không đổi tiền mặt/chuyển khoản.
+- <b>Dữ liệu Firebase:</b> `qlch-vanlanh` đã classify 20/20 sản phẩm; 18 sản phẩm cũ là <code>inventoryTrackingMode: legacy</code>. Migration chỉ ghi trường mode, không đổi stock/lot/order/debt/ledger.
+- <b>Không tối ưu tiếp tùy tiện:</b> <code>reserveIdsWait</code> ~1.4s còn lại là bảo vệ counter + collision cho mã tuần tự đọc được. Cache counter trong server process hoặc bỏ kiểm tra trùng sẽ gây lỗi concurrency giữa thu ngân.
+- <b>Xác minh:</b> TypeScript, ESLint không error, unit test ID/tally, JSON roadmap, Firestore rules/index dry-run và guardrail pass; full build chờ dừng dev server để không ghi đè `.next`.
+- <b>Handoff:</b> Commit <code>5509e6ac</code>, branch <code>codex/system-bug-performance-audit-20260703</code>, draft PR <a href="https://github.com/thucdang0604/QLCH_VanLanh/pull/20">#20</a>. Cần chạy deploy pipeline bình thường trước khi coi code là production.
+
 ### Customer UX Optimization
 - **Status:** DONE
 - **Color:** success

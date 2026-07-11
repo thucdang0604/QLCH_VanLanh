@@ -25,6 +25,13 @@
 - A DEBT checkout that does not move cash/bank no longer reloads `/api/pos/cashier-shift`; the route fetches closed-shift history only when the Cashier tab explicitly requests it. Cash/bank checkout continues to refresh the active shift total.
 - New cashier shifts use deterministic idempotent payment movements plus 16 tally shards. Existing open shifts retain the legacy aggregate update until they are closed, then the next shift automatically uses shards.
 - Revenue deltas and commission cost are merged into one daily/monthly aggregate update per POS checkout.
+### Final verification and handoff 2026-07-11
+- Measured DEBT checkout after migration: `total` 3,639ms versus 7,646ms from the earlier slow sample; transaction callback 2,193ms versus 4,608ms; `fifoReads: []` and `fifoSkippedLegacyProductIds: ['PK-bo-chuyen-doi-otg']` confirm the empty-lot read was removed.
+- The Firebase `qlch-vanlanh` migration dry-run found 20 products, 18 unclassified and no active lots; apply set exactly 18 to `inventoryTrackingMode: legacy`, then a repeat dry-run reported 20 already classified. It changed no stock, lot, order, debt, or ledger data.
+- The remaining `reserveIdsWait: 1,397ms` is the two-stage counter/collision read required to preserve daily readable sequential IDs under concurrent cashiers. Do not add process-local caching or remove collision checking; any future change needs a separate ID-contract/concurrency design.
+- `GET /api/pos/cashier-shift` was an independent post-checkout request. DEBT checkout now skips it; cash/bank checkout still refreshes current totals, while closed-shift history is lazy. Do not treat the old GET duration as checkout transaction latency.
+- Validation: TypeScript, targeted and full-repository ESLint (no errors), tally/ID unit tests, roadmap JSON parse, `git diff --check`, AI guard with reviewed protected scope, and `firebase deploy --only firestore:indexes --dry-run` passed. Full build was intentionally not run while `next dev` owned `.next`.
+- Handoff: committed and pushed as `5509e6ac` on `codex/system-bug-performance-audit-20260703`; draft PR [#20](https://github.com/thucdang0604/QLCH_VanLanh/pull/20). Source code still requires the normal deployment pipeline before production uses this revision.
 
 ## BUG-POS-019: POS checkout doc cashier shift bang query thay vi active lock
 - **Status:** fixed

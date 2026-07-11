@@ -1,9 +1,10 @@
 {
   "_meta": {
     "description": "Bản đồ trí tuệ mã nguồn — tự động tích lũy khi AI đọc/sửa code. Giúp AI sau chỉ cần đọc file này là hiểu ngay cấu trúc, liên kết, và cách sửa.",
-    "lastUpdated": "2026-07-10T00:00:00.000+07:00",
-    "version": 69,
+    "lastUpdated": "2026-07-11T00:00:00.000+07:00",
+    "version": 70,
     "changelog": [
+      "v70: Final POS hot-path handoff: a measured DEBT checkout with a legacy SKU logged total 3639ms (down from 7646ms), transaction callback 2193ms (down from 4608ms), and zero FIFO reads. The remaining 1397ms reserveIdsWait is intentional readable-ID collision protection, not a cache candidate. Firebase qlch-vanlanh now has all 20 products classified (18 migrated legacy); implementation is commit 5509e6ac and draft PR #20.",
       "v69: POS no longer reloads cashier-shift after a checkout that did not change the shift (including DEBT); cash/bank refreshes remain. GET /api/pos/cashier-shift returns active shift by default and loads the 10 closed-shift history documents only for the Cashier tab, reducing both post-checkout and initial POS read cost.",
       "v68: POS checkout starts readable-ID reservation while FIFO lots are loading, then reports reserveIdsWait (critical path) separately from reserveIdsTotal (overlapped duration). Auth telemetry splits Firebase token verification and users/{uid} profile read; the checkout no longer re-reads that user document in its Firestore transaction. scripts/backfill-product-inventory-tracking.mjs safely classifies previously unmarked products with a read-only default and per-product transaction guard.",
       "v67: Products now persist inventoryTrackingMode. New imports set fifo; an older product is classified from its first completed checkout, and known legacy products skip empty inventory_lots queries while still emitting LEGACY_STOCK audit entries.",

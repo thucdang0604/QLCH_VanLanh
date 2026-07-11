@@ -1,6 +1,6 @@
 {
   "projectName": "QLCH_VanLanh",
-  "lastSync": "2026-07-04T00:00:00.000+07:00",
+  "lastSync": "2026-07-11T00:00:00.000+07:00",
   "stats": {
     "completionPercent": 97,
     "openP0": 0,
@@ -14,7 +14,7 @@
       "id": "plan-pos-checkout-hot-path-20260710",
       "title": "Tối ưu hot path POS checkout: batch reads, telemetry và cashier tally shards",
       "date": "10.07.2026",
-      "status": "in_progress",
+      "status": "completed",
       "planFile": "data/ai_plans/plan_pos_checkout_hot_path_20260710.md",
       "taskFile": "",
       "walkthroughFile": "",
@@ -27,15 +27,20 @@
         "src/lib/commissionCalcServer.ts",
         "src/lib/inventoryFifo.ts",
         "src/lib/revenueAggregateServer.ts",
-        "firestore.indexes.json"
+        "src/lib/apiAuth.ts",
+        "scripts/backfill-product-inventory-tracking.mjs",
+        "firestore.indexes.json",
+        "firestore.rules"
       ],
       "decisions": [
         "Giữ nguyên transaction lõi và mã chứng từ tuần tự",
         "Gộp các read độc lập bằng Transaction.getAll và Promise.all",
         "Ca mới dùng movement idempotent cùng tally shards; ca cũ giữ tương thích đến khi chốt",
-        "Aggregate doanh thu vẫn đồng bộ nhưng chỉ ghi một delta tổng hợp cho mỗi checkout"
+        "Aggregate doanh thu vẫn đồng bộ nhưng chỉ ghi một delta tổng hợp cho mỗi checkout",
+        "Giữ reserveIdsWait để bảo toàn mã chứng từ tuần tự; không cache counter giữa các thu ngân",
+        "Checkout không đổi cash/bank không gọi lại cashier-shift; lịch sử ca chỉ tải theo tab"
       ],
-      "updatedAt": "2026-07-10T00:00:00.000+07:00"
+      "updatedAt": "2026-07-11T00:00:00.000+07:00"
     },
     {
       "id": "plan-ux-ui-optimization-20260703",
