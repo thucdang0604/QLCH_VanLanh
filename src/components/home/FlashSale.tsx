@@ -16,7 +16,7 @@ const brandTabs = [
 function SkeletonCard() {
     return (
         <div className="bg-white rounded-xl overflow-hidden border border-gray-100">
-            <div className="aspect-square bg-gray-200 skeleton-wave" />
+            <div className="aspect-[4/3] bg-gray-200 skeleton-wave" />
             <div className="p-3 space-y-2">
                 <div className="h-4 bg-gray-200 rounded w-full skeleton-wave" />
                 <div className="h-4 bg-gray-200 rounded w-3/4 skeleton-wave" />
@@ -75,19 +75,19 @@ export default function FlashSale({ ssrLatestProducts = [] }: { ssrLatestProduct
 
     return (
         <section className="py-2">
-            <div className="max-w-[1200px] mx-auto px-2 md:px-4">
-                <div className="rounded-xl shadow-lg p-4 sm:p-6" style={{ backgroundColor: 'var(--card-bg, white)' }}>
-                    <div className="flex items-center gap-2 mb-6">
-                        <Zap size={24} className="text-accent fill-accent" />
-                        <h2 className="text-2xl font-bold text-dark">Flash Sale</h2>
+            <div className="mx-auto max-w-[1080px] px-2 md:px-4">
+                <div className="home-section-card rounded-xl border border-gray-100 p-3 shadow-sm sm:p-4" style={{ backgroundColor: 'var(--card-bg, white)' }}>
+                    <div className="mb-3 flex items-center gap-2">
+                        <Zap size={20} className="fill-accent text-accent" />
+                        <h2 className="text-xl font-bold text-dark">Flash Sale</h2>
                     </div>
 
-                    <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-4">
+                    <div className="flex gap-2 overflow-x-auto pb-3 scrollbar-hide">
                         {brandTabs.map((tab) => (
                             <button
                                 key={tab.value}
                                 onClick={() => setActiveBrand(tab.value)}
-                                className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all ${
+                                className={`rounded-full px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-all ${
                                     activeBrand === tab.value
                                         ? 'bg-dark text-white shadow-md'
                                         : 'bg-white text-gray-600 border border-gray-200 hover:border-copper hover:text-copper'
@@ -99,7 +99,7 @@ export default function FlashSale({ ssrLatestProducts = [] }: { ssrLatestProduct
                     </div>
 
                     {loading ? (
-                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
+                        <div className="home-layout-grid grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 md:grid-cols-4 lg:grid-cols-5">
                             {[...Array(10)].map((_, i) => (
                                 <SkeletonCard key={i} />
                             ))}
@@ -110,7 +110,7 @@ export default function FlashSale({ ssrLatestProducts = [] }: { ssrLatestProduct
                             <p className="text-sm mt-1">Thử chọn danh mục khác</p>
                         </div>
                     ) : (
-                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
+                        <div className="home-layout-grid grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 md:grid-cols-4 lg:grid-cols-5">
                             {products.map((product) => (
                                 <ServiceCard
                                     key={String(product.id)}
@@ -126,13 +126,14 @@ export default function FlashSale({ ssrLatestProducts = [] }: { ssrLatestProduct
                                     rating={numberValue(product.rating)}
                                     reviewCount={numberValue(product.reviewCount)}
                                     isFlashSale={product.isFlashSale === true}
+                                    compact
                                 />
                             ))}
                         </div>
                     )}
 
-                    <div className="text-center mt-6">
-                        <a href="/flash-sale" className="inline-flex px-8 py-2.5 border-2 border-dark text-dark font-semibold rounded-lg hover:bg-dark hover:text-white transition-all">
+                    <div className="mt-4 text-center">
+                        <a href="/flash-sale" className="inline-flex rounded-lg border border-dark px-5 py-2 text-sm font-semibold text-dark transition-all hover:bg-dark hover:text-white">
                             Xem tất cả Flash Sale
                         </a>
                     </div>

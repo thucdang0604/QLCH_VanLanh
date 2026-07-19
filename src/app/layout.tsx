@@ -7,6 +7,23 @@ import { SITE_URL } from "@/lib/constants";
 import { getBusinessIdentity } from "@/lib/businessIdentity";
 import type { SiteConfig } from "@/lib/config-defaults";
 import FirebasePerformance from "@/components/FirebasePerformance";
+import AppDialogProvider from "@/components/AppDialogProvider";
+import { ThemeProvider } from "@/lib/ThemeContext";
+
+const themeInitializationScript = `
+(() => {
+  try {
+    const storedTheme = localStorage.getItem('qlch_theme_mode');
+    const theme = storedTheme === 'light' || storedTheme === 'dark'
+      ? storedTheme
+      : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme;
+  } catch {
+    document.documentElement.dataset.theme = 'light';
+    document.documentElement.style.colorScheme = 'light';
+  }
+})();`;
 
 const inter = Inter({
   subsets: ["latin", "vietnamese"],
@@ -92,6 +109,7 @@ export default function RootLayout({
   return (
     <html lang="vi" suppressHydrationWarning>
       <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInitializationScript }} />
         <meta name="zalo-platform-site-verification" content="NeUWSQoo8IzmZQqmegKTPdgmkMcMncinCZ8s" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -104,10 +122,14 @@ export default function RootLayout({
         <link rel="dns-prefetch" href="https://firebasestorage.googleapis.com" />
       </head>
       <body className={`${inter.variable} font-sans antialiased`}>
-        <AuthProvider>
-          {children}
-          <FirebasePerformance />
-        </AuthProvider>
+        <ThemeProvider>
+          <AuthProvider>
+            <AppDialogProvider>
+              {children}
+              <FirebasePerformance />
+            </AppDialogProvider>
+          </AuthProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

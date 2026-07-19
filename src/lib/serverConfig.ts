@@ -5,6 +5,7 @@ import {
     normalizeHomepagePricing,
     normalizeHomepageReviews,
     type HomeSectionItem,
+    type HomepageLayoutProfile,
     type SiteConfig,
 } from '@/lib/config-defaults';
 
@@ -30,6 +31,18 @@ function mergeHomeSections(value: unknown): HomeSectionItem[] {
     ];
 }
 
+function normalizeLayoutProfiles(value: unknown): HomepageLayoutProfile[] {
+    if (!Array.isArray(value)) return [];
+
+    return value.filter((profile): profile is HomepageLayoutProfile => {
+        if (!profile || typeof profile !== 'object') return false;
+        const candidate = profile as Partial<HomepageLayoutProfile>;
+        return typeof candidate.id === 'string'
+            && typeof candidate.name === 'string'
+            && Array.isArray(candidate.homeSections);
+    });
+}
+
 export async function fetchServerConfigData(): Promise<SiteConfig> {
     if (!isAdminAvailable()) {
         return DEFAULT_CONFIG;
@@ -52,6 +65,14 @@ export async function fetchServerConfigData(): Promise<SiteConfig> {
             return DEFAULT_CONFIG;
         }
 
+        const layoutProfiles = normalizeLayoutProfiles(data.layoutProfiles);
+        const activeLayoutProfileId = typeof data.activeLayoutProfileId === 'string'
+            ? data.activeLayoutProfileId
+            : undefined;
+        const activeProfile = activeLayoutProfileId
+            ? layoutProfiles.find((profile) => profile.id === activeLayoutProfileId)
+            : undefined;
+
         return {
             ...DEFAULT_CONFIG,
             primaryColor: (data.primaryColor as string) || DEFAULT_CONFIG.primaryColor,
@@ -68,7 +89,11 @@ export async function fetchServerConfigData(): Promise<SiteConfig> {
             store_branches: (data.store_branches as SiteConfig['store_branches']) || DEFAULT_CONFIG.store_branches,
             homepagePricing: normalizeHomepagePricing(data.homepagePricing),
             homepageReviews: normalizeHomepageReviews(data.homepageReviews),
+            // The storefront renders the published snapshot in homeSections. Profiles are a
+            // separate draft library, so saving a draft can never alter the live homepage.
             homeSections: mergeHomeSections(data.homeSections),
+            layoutProfiles,
+            activeLayoutProfileId: activeProfile?.id,
             forbiddenWords: (data.forbiddenWords as string[]) || DEFAULT_CONFIG.forbiddenWords,
             geofence: { ...DEFAULT_CONFIG.geofence, ...(data.geofence as Record<string, unknown> | undefined) },
             headerNav: (data.headerNav as SiteConfig['headerNav']) || DEFAULT_CONFIG.headerNav,

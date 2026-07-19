@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import Image from 'next/image';
 import { Shield, Clock, Zap, Star, Flame } from 'lucide-react';
+import CatalogImage from '@/components/customer/CatalogImage';
 
 interface ServiceCardProps {
     id: string;
@@ -20,6 +20,7 @@ interface ServiceCardProps {
     reviewCount?: number;
     isFlashSale?: boolean;
     type?: 'product' | 'service';
+    compact?: boolean;
 }
 
 export default function ServiceCard({
@@ -38,6 +39,7 @@ export default function ServiceCard({
     reviewCount,
     isFlashSale,
     type,
+    compact = false,
 }: ServiceCardProps) {
     // Null-safe price resolution: support both old schema (price) and new (price_original/price_promo)
     const originalPrice = price_original ?? price ?? 0;
@@ -70,21 +72,14 @@ export default function ServiceCard({
             className="group block bg-white rounded-xl overflow-hidden border border-gray-100 hover:shadow-lg hover:border-copper/30 transition-all duration-300"
         >
             {/* Image */}
-            <div className="relative aspect-square bg-gray-50 overflow-hidden">
-                {displayImage ? (
-                    <Image
-                        src={displayImage}
-                        alt={name}
-                        fill
-                        sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
-                        quality={75}
-                        className="object-cover group-hover:scale-105 transition-transform duration-500"
-                    />
-                ) : (
-                    <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-gray-100 to-gray-50">
-                        <span className="text-4xl">🔧</span>
-                    </div>
-                )}
+            <div className={`relative overflow-hidden bg-gray-50 ${compact ? 'aspect-[4/3]' : 'aspect-square'}`}>
+                <CatalogImage
+                    src={displayImage}
+                    alt={name || 'Sản phẩm'}
+                    sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
+                    imageClassName={`${compact ? 'object-contain p-2' : 'object-cover'} transition-transform duration-500 group-hover:scale-105`}
+                    logoClassName="h-full w-full object-contain p-3"
+                />
 
                 {/* Discount Badge (top-left) */}
                 {discount > 0 && (

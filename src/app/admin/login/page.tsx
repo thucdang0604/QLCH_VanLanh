@@ -9,6 +9,7 @@ import { useAuth } from '@/lib/AuthContext';
 import { Lock, Mail, Loader2, AlertCircle, ShieldCheck } from 'lucide-react';
 import { useConfig } from '@/lib/ConfigContext';
 import { useEffect } from 'react';
+import ThemeToggle from '@/components/ThemeToggle';
 
 export default function AdminLoginPage() {
     const [email, setEmail] = useState('');
@@ -119,6 +120,7 @@ export default function AdminLoginPage() {
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center p-4">
+            <ThemeToggle className="absolute right-4 top-4 z-10 h-10 w-10 bg-white/10 text-white hover:bg-white/20 hover:text-white" />
             {/* Background decorations */}
             <div className="absolute inset-0 overflow-hidden pointer-events-none">
                 <div className="absolute -top-40 -right-40 w-80 h-80 bg-orange-500/10 rounded-full blur-3xl" />

@@ -13,6 +13,7 @@ import { useCart } from '@/lib/CartContext';
 import { getIcon } from '@/lib/icon-map';
 import { getBusinessIdentity } from '@/lib/businessIdentity';
 import TrackingModal from '@/components/TrackingModal';
+import ThemeToggle from '@/components/ThemeToggle';
 
 export default function Header() {
     const pathname = usePathname();
@@ -117,6 +118,7 @@ export default function Header() {
                             <MapPin size={15} />
                             <span>Cửa hàng</span>
                         </Link>
+                        <ThemeToggle className="h-8 w-8" />
                         <button onClick={(e) => { e.preventDefault(); setIsDrawerOpen(true); }} aria-label="Giỏ hàng" className="relative flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-gray-600 hover:text-copper hover:bg-gray-50 transition-colors">
                             <ShoppingCart size={15} />
                             <span className="hidden sm:inline">Giỏ hàng</span>
