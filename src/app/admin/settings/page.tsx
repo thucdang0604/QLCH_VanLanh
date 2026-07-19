@@ -10,6 +10,7 @@ import BankIntegrationConfig from '@/components/admin/settings/BankIntegrationCo
 import ChatIntegrationsTab from '@/components/admin/settings/ChatIntegrationsTab';
 import RepairsConfigTab from '@/components/admin/settings/RepairsConfigTab';
 import ReceiptSettingsPanel from './ReceiptSettingsPanel';
+import { appAlert } from '@/lib/appDialog';
 
 export default function SettingsPage() {
     const { config, updateConfig, loading } = useConfig();
@@ -383,9 +384,9 @@ export default function SettingsPage() {
                                     <button
                                         type="button"
                                         title="Lấy vị trí hiện tại"
-                                        onClick={() => {
+                                        onClick={async () => {
                                             if (!navigator.geolocation) {
-                                                alert('Trình duyệt không hỗ trợ định vị.');
+                                                await appAlert('Trình duyệt không hỗ trợ định vị.', { title: 'Không hỗ trợ định vị' });
                                                 return;
                                             }
                                             navigator.geolocation.getCurrentPosition(
@@ -397,7 +398,7 @@ export default function SettingsPage() {
                                                     }));
                                                     setMessage({ type: 'success', text: 'Đã cập nhật toạ độ từ vị trí hiện tại!' });
                                                 },
-                                                () => alert('Không thể lấy vị trí. Vui lòng kiểm tra quyền truy cập GPS.'),
+                                                () => { void appAlert('Không thể lấy vị trí. Vui lòng kiểm tra quyền truy cập GPS.', { title: 'Không lấy được vị trí' }); },
                                                 { enableHighAccuracy: true }
                                             );
                                         }}

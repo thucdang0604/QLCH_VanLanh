@@ -11,6 +11,7 @@ import Modal from '@/components/admin/Modal';
 import { collection, query, orderBy, limit, startAfter, DocumentSnapshot, where, doc } from 'firebase/firestore';
 import { onSnapshot, getDocs, getDoc } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
+import { appAlert } from '@/lib/appDialog';
 import PrintableWarranty, { WarrantyPrintPayload } from '@/components/admin/PrintableWarranty';
 import type { ReceiptConfig } from '@/components/admin/PrintableReceipt';
 import type { WarrantyTemplateConfig } from '@/app/admin/settings/receipt/WarrantyComponents';
@@ -242,7 +243,7 @@ export default function OrdersPage() {
 
     const searchInDatabase = async () => {
         if (!searchQuery.trim()) {
-            alert('Vui lòng nhập SĐT để tìm kiếm trên Server');
+            await appAlert('Vui lòng nhập SĐT để tìm kiếm trên Server', { title: 'Thiếu số điện thoại' });
             return;
         }
         setIsSearchingDB(true);
@@ -273,11 +274,11 @@ export default function OrdersPage() {
                      return [...prev, ...newOrders];
                  });
             } else {
-                alert('Không tìm thấy dữ liệu trên máy chủ cho SĐT này.');
+                await appAlert('Không tìm thấy dữ liệu trên máy chủ cho SĐT này.', { title: 'Không tìm thấy đơn hàng' });
             }
         } catch (error) {
             console.error("Lỗi khi tìm kiếm trên database", error);
-            alert('Có lỗi khi tìm kiếm.');
+            await appAlert('Có lỗi khi tìm kiếm.', { title: 'Tìm kiếm thất bại' });
         } finally {
             setIsSearchingDB(false);
         }

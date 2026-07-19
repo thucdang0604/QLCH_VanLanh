@@ -10,13 +10,14 @@ import { collection, query, doc, where, orderBy, limit } from 'firebase/firestor
 import { onSnapshot, getDocs } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
+import { appConfirm } from '@/lib/appDialog';
 import { isChecklistComplete, areAllPartsReady } from '@/lib/workflowFeatures';
 import type { RepairTicket, Product, WorkflowNode } from '@/lib/types';
 import { toastError, toastSuccess, toastWarning } from '@/lib/toast';
 import { PART_CATEGORY_LABEL, isPartCategory } from '@/lib/constants';
 import { REPAIR_PART_STATUS, REPAIR_STATUS, isPendingRepairPart, isRepairPartStatus, isRepairStatus } from '@/lib/repairStatus';
 import { isRepairManager } from '@/lib/repairAccess';
-import { normalizeRepairWorkflow, normalizeWarrantyWorkflow } from '@/lib/repairWorkflowConfig';
+import { getAllowedNextWorkflowNodes, normalizeRepairWorkflow, normalizeWarrantyWorkflow } from '@/lib/repairWorkflowConfig';
 import { isSelectedRepairPart } from '@/lib/repairStatus';
 import {
     TechnicianWorkflowModals,
@@ -330,7 +331,7 @@ export default function TechnicianPage() {
     };
 
     const handleRemovePart = async (ticket: RepairTicket, partIndex: number) => {
-        if (!confirm('Bạn có chắc chắn muốn xóa linh kiện này khỏi phiếu?')) return;
+        if (!await appConfirm('Bạn có chắc chắn muốn xóa linh kiện này khỏi phiếu?', { title: 'Xóa linh kiện', confirmText: 'Xóa', destructive: true })) return;
         try {
             const partLineId = ticket.parts?.[partIndex]?.partLineId;
             if (!partLineId) {
@@ -502,36 +503,13 @@ export default function TechnicianPage() {
             const ticket = tickets.find(t => t.id === partsVerificationModalPayload.ticketId);
             if (!ticket) throw new Error('Phiếu không tồn tại');
 
-            const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
-
-            const rejectCommands = Object.entries(partsVerificationSelections)
-                .filter(([, action]) => action === 'return')
-                .map(([partLineId]) => ({
-                    type: 'reject_request',
-                    partLineId
-                }));
-
-            if (rejectCommands.length > 0) {
-                const res = await fetch('/api/repairs/confirm-parts', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${idToken}`
-                    },
-                    body: JSON.stringify({
-                        ticketId: ticket.id,
-                        ticketVersion: ticket.version || 0,
-                        operationKey: crypto.randomUUID(),
-                        commands: rejectCommands
-                    })
-                });
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.error || 'Lỗi trả linh kiện Test');
-
-                ticket.version = (ticket.version || 0) + 1;
-            }
-
-            await finalizeStatusChange(ticket, partsVerificationModalPayload.newStatus);
+            const didTransition = await finalizeStatusChange(
+                ticket,
+                partsVerificationModalPayload.newStatus,
+                undefined,
+                partsVerificationSelections,
+            );
+            if (!didTransition) return;
             setPartsVerificationModalPayload(null);
             setPartsVerificationSelections({});
         } catch (err: unknown) {
@@ -544,6 +522,10 @@ export default function TechnicianPage() {
     const handleStatusChange = async (ticketId: string, newStatus: string) => {
         const ticket = tickets.find(t => t.id === ticketId);
         if (!ticket) return;
+        if (ticket.status === newStatus) {
+            toastWarning('Phiếu đang ở trạng thái này, không có thay đổi để thực hiện.');
+            return;
+        }
         const workflow = getWorkflowForTicket(ticket);
         const currentCfg = workflow.find(s => s.id === ticket.status);
         if (currentCfg?.isTerminal) {
@@ -554,7 +536,12 @@ export default function TechnicianPage() {
         setStatusConfirmModal({ ticketId, newStatus: String(newStatus) });
     };
 
-    const finalizeStatusChange = async (ticket: RepairTicket, newStatus: string, newTechNote?: string) => {
+    const finalizeStatusChange = async (
+        ticket: RepairTicket,
+        newStatus: string,
+        newTechNote?: string,
+        partVerification?: Record<string, TechnicianPartVerificationSelection>,
+    ): Promise<boolean> => {
         try {
             const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
             const res = await fetch('/api/repairs/transition', {
@@ -569,6 +556,7 @@ export default function TechnicianPage() {
                     idempotencyKey: crypto.randomUUID(),
                     targetStatus: newStatus,
                     technicianNote: newTechNote || '',
+                    partVerification,
                     source: 'technician'
                 })
             });
@@ -580,9 +568,11 @@ export default function TechnicianPage() {
             if (selectedTicket?.id === ticket.id) {
                 setSelectedTicket({ ...ticket, status: newStatus, version: (ticket.version || 0) + 1 });
             }
+            return true;
         } catch (err: unknown) {
             console.error('Status update error:', err);
             toastError((err as Error)?.message || 'Lỗi khi cập nhật trạng thái.');
+            return false;
         }
     };
 
@@ -663,7 +653,8 @@ export default function TechnicianPage() {
     };
 
     const handleTransferCancel = async (ticket: RepairTicket) => {
-        if (!ticket.pendingTechnicianTransfer || !confirm('Hủy yêu cầu chuyển KTV đang chờ?')) return;
+        if (!ticket.pendingTechnicianTransfer) return;
+        if (!await appConfirm('Hủy yêu cầu chuyển KTV đang chờ?', { title: 'Hủy yêu cầu chuyển KTV', confirmText: 'Hủy yêu cầu', destructive: true })) return;
         try {
             const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
             const res = await fetch('/api/repairs/technician/transfer', {
@@ -989,11 +980,11 @@ export default function TechnicianPage() {
                                                         const hasRequestedParts = ticket.parts?.some(p => isRepairPartStatus(p.status, REPAIR_PART_STATUS.REQUESTED) || isRepairPartStatus(p.status, REPAIR_PART_STATUS.ORDERED));
                                                         const targetStatusId = hasRequestedParts ? 'dang_tim_linh_kien' : 'dang_sua_chua';
 
-                                                        const useDynamic = st?.allowedFeatures?.includes('allowPartsSelection') && ticket.status !== targetStatusId;
+                                                        const allowedNextStatuses = getAllowedNextWorkflowNodes(workflow, ticket.status);
+                                                        const targetStatus = allowedNextStatuses.find((status) => status.id === targetStatusId);
+                                                        const useDynamic = st?.allowedFeatures?.includes('allowPartsSelection') && !!targetStatus;
 
                                                         if (useDynamic) {
-                                                            const targetStatus = workflow.find(ds => ds.id === targetStatusId);
-                                                            if (!targetStatus) return null;
                                                             return (
                                                                 <button onClick={(e) => { e.stopPropagation(); handleStatusChange(ticket.id, targetStatus.id); }}
                                                                     className={`col-span-2 min-h-12 w-full py-3 bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-xl font-bold text-base shadow-md hover:shadow-orange-500/25 active:scale-[0.98] transition-all flex items-center gap-2 justify-center`}>
@@ -1002,13 +993,11 @@ export default function TechnicianPage() {
                                                             );
                                                         }
 
-                                                        if (st?.allowedNext && st.allowedNext.length > 0) {
-                                                            return st.allowedNext.map((nextId: string) => {
-                                                                const nextCfg = workflow.find(ds => ds.id === nextId);
-                                                                if (!nextCfg) return null;
+                                                        if (allowedNextStatuses.length > 0) {
+                                                            return allowedNextStatuses.map((nextCfg) => {
                                                                 return (
-                                                                    <button key={nextId} onClick={(e) => { e.stopPropagation(); handleStatusChange(ticket.id, nextId); }}
-                                                                        className={`col-span-2 min-h-12 w-full py-3 text-white rounded-xl font-bold text-base shadow-md active:scale-[0.98] transition-all flex items-center gap-2 justify-center ${nextId === 'refund' ? 'bg-red-500 hover:bg-red-600' : nextId === 'out' ? 'bg-gray-700 hover:bg-gray-800' : 'bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700'}`}>
+                                                                    <button key={nextCfg.id} onClick={(e) => { e.stopPropagation(); handleStatusChange(ticket.id, nextCfg.id); }}
+                                                                        className={`col-span-2 min-h-12 w-full py-3 text-white rounded-xl font-bold text-base shadow-md active:scale-[0.98] transition-all flex items-center gap-2 justify-center ${nextCfg.id === 'refund' ? 'bg-red-500 hover:bg-red-600' : nextCfg.id === 'out' ? 'bg-gray-700 hover:bg-gray-800' : 'bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700'}`}>
                                                                         Chuyển → {nextCfg.label}
                                                                     </button>
                                                                 );
@@ -1141,14 +1130,14 @@ export default function TechnicianPage() {
                                                     return (
                                                         <>
                                                             {(() => {
-                                                                const hasRequestedParts = ticket.parts && ticket.parts.length > 0 && ticket.parts.some(p => isRepairPartStatus(p.status, REPAIR_PART_STATUS.REQUESTED));
+                                                                const hasRequestedParts = ticket.parts && ticket.parts.length > 0 && ticket.parts.some(p => isRepairPartStatus(p.status, REPAIR_PART_STATUS.REQUESTED) || isRepairPartStatus(p.status, REPAIR_PART_STATUS.ORDERED));
                                                                 const targetStatusId = hasRequestedParts ? 'dang_tim_linh_kien' : 'dang_sua_chua';
 
-                                                                const useDynamic = st?.allowedFeatures?.includes('allowPartsSelection') && ticket.status !== targetStatusId;
+                                                                const allowedNextStatuses = getAllowedNextWorkflowNodes(workflow, ticket.status);
+                                                                const targetStatus = allowedNextStatuses.find((status) => status.id === targetStatusId);
+                                                                const useDynamic = st?.allowedFeatures?.includes('allowPartsSelection') && !!targetStatus;
 
                                                                 if (useDynamic) {
-                                                                    const targetStatus = workflow.find(ds => ds.id === targetStatusId);
-                                                                    if (!targetStatus) return null;
                                                                     return (
                                                                         <div className="mt-3 pt-3 border-t flex flex-col gap-1.5">
                                                                             <button onClick={(e) => { e.stopPropagation(); handleStatusChange(ticket.id, targetStatus.id); }}
@@ -1159,15 +1148,13 @@ export default function TechnicianPage() {
                                                                     );
                                                                 }
 
-                                                                if (st?.allowedNext && st.allowedNext.length > 0) {
+                                                                if (allowedNextStatuses.length > 0) {
                                                                     return (
                                                                         <div className="mt-3 pt-3 border-t flex flex-col gap-1.5">
-                                                                            {st?.allowedNext?.map((nextId: string) => {
-                                                                                const nextCfg = workflow.find(ds => ds.id === nextId);
-                                                                                if (!nextCfg) return null;
+                                                                            {allowedNextStatuses.map((nextCfg) => {
                                                                                 return (
-                                                                                    <button key={nextId} onClick={(e) => { e.stopPropagation(); handleStatusChange(ticket.id, nextId); }}
-                                                                                        className={`w-full justify-center flex items-center gap-2 text-sm px-4 py-3 rounded-xl font-bold transition-all shadow-md ${nextId === 'refund' ? 'bg-red-500 text-white hover:bg-red-600' : nextId === 'out' ? 'bg-gray-700 text-white hover:bg-gray-800' : 'bg-orange-500 text-white hover:bg-orange-600'}`}>
+                                                                                    <button key={nextCfg.id} onClick={(e) => { e.stopPropagation(); handleStatusChange(ticket.id, nextCfg.id); }}
+                                                                                        className={`w-full justify-center flex items-center gap-2 text-sm px-4 py-3 rounded-xl font-bold transition-all shadow-md ${nextCfg.id === 'refund' ? 'bg-red-500 text-white hover:bg-red-600' : nextCfg.id === 'out' ? 'bg-gray-700 text-white hover:bg-gray-800' : 'bg-orange-500 text-white hover:bg-orange-600'}`}>
                                                                                         Chuyển → {nextCfg.label}
                                                                                     </button>
                                                                                 );

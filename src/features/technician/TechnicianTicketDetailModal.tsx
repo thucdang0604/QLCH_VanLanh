@@ -3,11 +3,12 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { useEffect, useState } from 'react';
-import { AlertCircle, CheckCircle2, Clock, Image as ImageIcon, Loader2, Package, Search, Video } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Clock, Image as ImageIcon, Loader2, Package, Search, Trash2, Video } from 'lucide-react';
 import Modal from '@/components/admin/Modal';
 import type { Product, RepairTicket, User, WorkflowNode } from '@/lib/types';
 import { getYouTubeEmbedUrl, isYouTubeUrl } from '@/lib/workflowFeatures';
 import { REPAIR_PART_STATUS, REPAIR_STATUS, isRepairPartStatus, isRepairStatus } from '@/lib/repairStatus';
+import { getAllowedNextWorkflowNodes } from '@/lib/repairWorkflowConfig';
 
 const checklistLabels: Record<string, string> = {
     body: 'Vỏ máy', screen: 'Màn hình', touch: 'Cảm ứng', camera: 'Camera',
@@ -59,6 +60,7 @@ export function TechnicianTicketDetailModal({
     getTimelineTimestamp,
     formatPrice,
     handleTransferResponse,
+    handleRemovePart,
     handleAddPart,
     handleRequestPart,
     handleAddCustomPart,
@@ -71,6 +73,17 @@ export function TechnicianTicketDetailModal({
     }, [selectedTicket?.id]);
 
     if (!selectedTicket) return null;
+
+    const selectedTicketWorkflow = getWorkflowForTicket(selectedTicket);
+    const selectedTicketCurrentNode = selectedTicketWorkflow.find((node) => node.id === selectedTicket.status);
+    const selectedTicketNextNodes = getAllowedNextWorkflowNodes(selectedTicketWorkflow, selectedTicket.status);
+    const isSelectedTicketTerminal = isRepairStatus(selectedTicket.status, REPAIR_STATUS.CUSTOMER_HANDOVER)
+        || !!selectedTicketCurrentNode?.isTerminal;
+    const isSelectedTicketAssignedToMe = selectedTicket.staff?.assignedTechnician === user?.uid;
+    const isSelectedTicketIncomingTransfer = selectedTicket.pendingTechnicianTransfer?.toTechnicianId === user?.uid
+        && selectedTicket.pendingTechnicianTransfer?.status === 'pending';
+    const canManageSelectedTicketParts = !isSelectedTicketTerminal
+        && (user?.role === 'admin' || (isSelectedTicketAssignedToMe && !isSelectedTicketIncomingTransfer));
 
     return (
 <Modal
@@ -208,24 +221,36 @@ export function TechnicianTicketDetailModal({
                                             ) : null}
                                         </p>
                                     </div>
-                                    <span
-                                        className={`mt-2 w-fit text-[10px] font-bold px-2 py-1 rounded-md border sm:mt-0 ${isRepairPartStatus(p.status, REPAIR_PART_STATUS.SELECTED)
-                                                ? 'bg-green-50 text-green-700 border-green-200'
+                                    <div className="mt-2 flex w-fit items-center gap-2 sm:mt-0">
+                                        <span
+                                            className={`w-fit text-[10px] font-bold px-2 py-1 rounded-md border ${isRepairPartStatus(p.status, REPAIR_PART_STATUS.SELECTED)
+                                                    ? 'bg-green-50 text-green-700 border-green-200'
+                                                    : isRepairPartStatus(p.status, REPAIR_PART_STATUS.IN_STOCK)
+                                                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                                        : isRepairPartStatus(p.status, REPAIR_PART_STATUS.UNAVAILABLE)
+                                                            ? 'bg-red-50 text-red-600 border-red-200'
+                                                            : 'bg-yellow-50 text-yellow-700 border-yellow-200'
+                                                }`}
+                                        >
+                                            {isRepairPartStatus(p.status, REPAIR_PART_STATUS.SELECTED)
+                                                ? 'Đã sử dụng'
                                                 : isRepairPartStatus(p.status, REPAIR_PART_STATUS.IN_STOCK)
-                                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                                    : p.status === 'unavailable'
-                                                        ? 'bg-red-50 text-red-600 border-red-200'
-                                                        : 'bg-yellow-50 text-yellow-700 border-yellow-200'
-                                            }`}
-                                    >
-                                        {isRepairPartStatus(p.status, REPAIR_PART_STATUS.SELECTED)
-                                            ? 'Đã sử dụng'
-                                            : isRepairPartStatus(p.status, REPAIR_PART_STATUS.IN_STOCK)
-                                                ? 'Đã chọn test'
-                                                : p.status === 'unavailable'
-                                                    ? 'Không có hàng'
-                                                    : 'Đang yêu cầu'}
-                                    </span>
+                                                    ? 'Đã chọn test'
+                                                    : isRepairPartStatus(p.status, REPAIR_PART_STATUS.UNAVAILABLE)
+                                                        ? 'Không có hàng'
+                                                        : 'Đang yêu cầu'}
+                                        </span>
+                                        {canManageSelectedTicketParts && isRepairPartStatus(p.status, REPAIR_PART_STATUS.UNAVAILABLE) && (
+                                            <button
+                                                type="button"
+                                                onClick={() => handleRemovePart(selectedTicket, pIdx)}
+                                                className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-white px-2 py-1 text-[10px] font-bold text-red-600 hover:bg-red-50"
+                                                title="Loại trừ linh kiện không có hàng"
+                                            >
+                                                <Trash2 size={12} /> Loại trừ
+                                            </button>
+                                        )}
+                                    </div>
                                 </div>
                             ))}
                         </div>
@@ -436,41 +461,44 @@ export function TechnicianTicketDetailModal({
                 )}
 
                 {(() => {
-                    const workflow = getWorkflowForTicket(selectedTicket);
-                    const currentStatusCfg = workflow.find(s => s.id === selectedTicket.status);
-                    const isTerminal = isRepairStatus(selectedTicket.status, REPAIR_STATUS.CUSTOMER_HANDOVER) || !!currentStatusCfg?.isTerminal;
-                    const isAssignedToMe = selectedTicket.staff?.assignedTechnician === user?.uid;
-                    const isIncomingTransferToMe = selectedTicket.pendingTechnicianTransfer?.toTechnicianId === user?.uid && selectedTicket.pendingTechnicianTransfer?.status === 'pending';
-                    const isKtvLocked = user?.role !== 'admin' && (!isAssignedToMe || isIncomingTransferToMe);
-                    const isReadOnly = isTerminal || isKtvLocked;
-                    if (isReadOnly) return null;
-                    if (currentStatusCfg?.allowedFeatures?.includes('allowPartsSelection')) {
-                        const hasRequestedParts = selectedTicket.parts?.some(p => isRepairPartStatus(p.status, REPAIR_PART_STATUS.REQUESTED) || isRepairPartStatus(p.status, REPAIR_PART_STATUS.ORDERED));
-                        const targetStatusId = hasRequestedParts ? 'dang_tim_linh_kien' : 'dang_sua_chua';
-                        const targetStatus = workflow.find(ds => ds.id === targetStatusId);
+                    if (!canManageSelectedTicketParts) return null;
 
-                        if (!targetStatus) return null;
+                    if (selectedTicketCurrentNode?.allowedFeatures?.includes('allowPartsSelection')) {
+                        const hasRequestedParts = selectedTicket.parts?.some(p => isRepairPartStatus(p.status, REPAIR_PART_STATUS.REQUESTED) || isRepairPartStatus(p.status, REPAIR_PART_STATUS.ORDERED));
+                        const preferredStatusId = hasRequestedParts ? 'dang_tim_linh_kien' : 'dang_sua_chua';
+                        const preferredTarget = selectedTicketNextNodes.find((node) => node.id === preferredStatusId);
+                        const transitionTargets = preferredTarget ? [preferredTarget] : selectedTicketNextNodes;
+
+                        if (transitionTargets.length === 0) return null;
                         return (
                             <div className="pt-3 border-t flex gap-2">
-                                <button onClick={() => { handleStatusChange(selectedTicket.id, targetStatus.id); setSelectedTicket(null); }}
-                                    className="flex-1 py-2.5 bg-orange-500 text-white rounded-xl text-sm font-semibold hover:bg-orange-600 transition-all shadow-md shadow-orange-200/50">
-                                    Chuyển → {hasRequestedParts ? 'Tìm linh kiện' : targetStatus.label}
-                                </button>
-                            </div>
-                        );
-                    } else {
-                        const ticketIdx = workflow.findIndex(s => s.id === selectedTicket.status);
-                        const nextStatus = ticketIdx !== -1 && ticketIdx < workflow.length - 1 ? workflow[ticketIdx + 1] : null;
-                        if (!nextStatus) return null;
-                        return (
-                            <div className="pt-3 border-t flex gap-2">
-                                <button onClick={() => { handleStatusChange(selectedTicket.id, nextStatus.id); setSelectedTicket(null); }}
-                                    className="flex-1 py-2.5 bg-orange-500 text-white rounded-xl text-sm font-semibold hover:bg-orange-600 transition-all shadow-md shadow-orange-200/50">
-                                    Chuyển → {nextStatus.label}
-                                </button>
+                                {transitionTargets.map((targetStatus) => (
+                                    <button
+                                        key={targetStatus.id}
+                                        onClick={() => { handleStatusChange(selectedTicket.id, targetStatus.id); setSelectedTicket(null); }}
+                                        className="flex-1 py-2.5 bg-orange-500 text-white rounded-xl text-sm font-semibold hover:bg-orange-600 transition-all shadow-md shadow-orange-200/50"
+                                    >
+                                        Chuyển → {targetStatus.label}
+                                    </button>
+                                ))}
                             </div>
                         );
                     }
+
+                    if (selectedTicketNextNodes.length === 0) return null;
+                    return (
+                        <div className="pt-3 border-t flex gap-2">
+                            {selectedTicketNextNodes.map((nextStatus) => (
+                                <button
+                                    key={nextStatus.id}
+                                    onClick={() => { handleStatusChange(selectedTicket.id, nextStatus.id); setSelectedTicket(null); }}
+                                    className="flex-1 py-2.5 bg-orange-500 text-white rounded-xl text-sm font-semibold hover:bg-orange-600 transition-all shadow-md shadow-orange-200/50"
+                                >
+                                    Chuyển → {nextStatus.label}
+                                </button>
+                            ))}
+                        </div>
+                    );
                 })()}
             </div>
         </Modal>

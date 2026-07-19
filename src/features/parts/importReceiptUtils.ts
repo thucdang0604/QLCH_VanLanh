@@ -29,7 +29,10 @@ export function buildImportPreviewState(receipt: ImportReceipt, parts: ProductWi
     const newParts: Record<string, NewPartInfo> = {};
     for (const item of importableItems) {
         const existingPart = parts.find((part) => part.id === item.productId);
-        if (!item.productId || !existingPart || existingPart.isProposed) {
+        // A receipt line with productId is already linked to a catalog record.
+        // Missing records are handled before this preview is opened; only an
+        // unlinked line or a proposed catalog entry needs product details.
+        if (!item.productId || existingPart?.isProposed) {
             const partKey = item.productId || item.partLineId || crypto.randomUUID();
             newParts[partKey] = {
                 model: '',

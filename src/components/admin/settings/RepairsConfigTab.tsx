@@ -9,6 +9,7 @@ import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { getDoc } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import { WORKFLOW_FEATURES } from '@/lib/workflowFeatures';
+import { appConfirm } from '@/lib/appDialog';
 import {
     normalizeRepairWorkflow,
     normalizeWarrantyWorkflow,
@@ -37,7 +38,7 @@ const defaultStatuses: WorkflowNode[] = [
     { id: 'doi_khach_phan_hoi', label: 'Đợi Khách Phản Hồi', color: 'bg-purple-100 text-purple-800', allowedNext: ['tim_linh_kien', 'dang_sua_chua', 'refund', 'out'] },
     { id: 'tim_linh_kien', label: 'Tìm Linh Kiện', color: 'bg-cyan-100 text-cyan-800', allowedNext: ['da_dat_linh_kien', 'refund', 'out'] },
     { id: 'da_dat_linh_kien', label: 'Đã Đặt LK', color: 'bg-teal-100 text-teal-800', allowedNext: ['dang_sua_chua'], allowedFeatures: ['requirePartsReady'] },
-    { id: 'dang_sua_chua', label: 'Đang Sửa Chữa', color: 'bg-orange-100 text-orange-800', allowedNext: ['done', 'refund'] },
+    { id: 'dang_sua_chua', label: 'Đang Sửa Chữa', color: 'bg-orange-100 text-orange-800', allowedNext: ['done', 'refund'], allowedFeatures: ['reserveSelectedParts'] },
     { id: 'done', label: 'Hoàn Thành', color: 'bg-green-100 text-green-800', allowedNext: [], isTerminal: true },
     { id: 'out', label: 'Trả Máy', color: 'bg-gray-100 text-gray-800', allowedNext: [], isTerminal: true },
     { id: 'refund', label: 'Hoàn Phí', color: 'bg-red-100 text-red-800', allowedNext: [], isTerminal: true }
@@ -46,7 +47,7 @@ const defaultStatuses: WorkflowNode[] = [
 const defaultWarrantyStatuses: WorkflowNode[] = [
     { id: 'bh_tiep_nhan', label: 'Tiếp nhận BH', color: 'bg-yellow-100 text-yellow-800', allowedNext: ['bh_dang_kiem_tra'], allowedFeatures: ['allowAssignTech'], isTerminal: false },
     { id: 'bh_dang_kiem_tra', label: 'Đang kiểm tra BH', color: 'bg-blue-100 text-blue-800', allowedNext: ['bh_dang_sua', 'bh_tu_choi'], allowedFeatures: ['requireAssignedTechnician', 'requireChecklist'], isTerminal: false },
-    { id: 'bh_dang_sua', label: 'Đang sửa BH', color: 'bg-orange-100 text-orange-800', allowedNext: ['bh_hoan_tat', 'bh_refund'], allowedFeatures: ['allowPartsSelection'], isTerminal: false },
+    { id: 'bh_dang_sua', label: 'Đang sửa BH', color: 'bg-orange-100 text-orange-800', allowedNext: ['bh_hoan_tat', 'bh_refund'], allowedFeatures: ['allowPartsSelection', 'reserveSelectedParts'], isTerminal: false },
     { id: 'bh_hoan_tat', label: 'Hoàn tất BH', color: 'bg-green-100 text-green-800', allowedNext: [], allowedFeatures: [], isTerminal: true },
     { id: 'bh_tu_choi', label: 'Từ chối BH', color: 'bg-gray-100 text-gray-800', allowedNext: [], allowedFeatures: [], isTerminal: true },
     { id: 'bh_refund', label: 'Hoàn phí BH', color: 'bg-red-100 text-red-800', allowedNext: [], allowedFeatures: ['enableTechnicianCommission'], isTerminal: true }
@@ -171,8 +172,8 @@ export default function RepairsConfigTab() {
         setShowAddModal(false);
     };
 
-    const handleDeleteStatus = (id: string) => {
-        if (!confirm(`Xóa trạng thái "${id}"? Lưu ý: Cần gỡ khỏi nhóm tra cứu (nếu có) trước khi lưu.`)) return;
+    const handleDeleteStatus = async (id: string) => {
+        if (!await appConfirm(`Xóa trạng thái "${id}"? Lưu ý: Cần gỡ khỏi nhóm tra cứu (nếu có) trước khi lưu.`, { title: 'Xóa trạng thái', confirmText: 'Xóa', destructive: true })) return;
         setActiveStatuses(prev => prev.filter(s => s.id !== id));
         // Remove from tracking groups as well
         setTrackingGroups(prev => prev.map(g => ({
@@ -231,8 +232,8 @@ export default function RepairsConfigTab() {
         setShowAddGroupModal(false);
     };
 
-    const handleDeleteGroup = (id: string) => {
-        if (!confirm('Xóa nhóm tra cứu này?')) return;
+    const handleDeleteGroup = async (id: string) => {
+        if (!await appConfirm('Xóa nhóm tra cứu này?', { title: 'Xóa nhóm tra cứu', confirmText: 'Xóa', destructive: true })) return;
         setTrackingGroups(prev => prev.filter(g => g.id !== id));
     };
 

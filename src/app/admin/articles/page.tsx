@@ -10,6 +10,7 @@ import { onSnapshot } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import Image from 'next/image';
 import { toastError } from '@/lib/toast';
+import { appConfirm } from '@/lib/appDialog';
 import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
 import { triggerRevalidate } from '@/lib/revalidate';
@@ -41,7 +42,7 @@ export default function ArticlesPage() {
     }, []);
 
     const deleteArticle = async (id: string) => {
-        if (!confirm('Bạn có chắc muốn xóa bài viết này?')) return;
+        if (!await appConfirm('Bạn có chắc muốn xóa bài viết này?', { title: 'Xóa bài viết', confirmText: 'Xóa', destructive: true })) return;
         try {
             await deleteDoc(doc(db, 'articles', id));
             await triggerRevalidate(['/', `/tin-tuc/${id}`, '/tin-tuc', '/sitemap.xml'], ['articles']);

@@ -16,6 +16,8 @@ import type { Product } from '@/lib/types';
 import { PART_CATEGORY_LABEL } from '@/lib/constants';
 import { buildProductCodeFromId, getPrimaryProductCode, getProductCodeKind } from '@/lib/productCodes';
 import { createProductWithCodes, updateProductWithCodes } from '@/lib/productCodeRegistry';
+import { useAuth } from '@/lib/AuthContext';
+import { canEditProductField, type ProductEditableField } from '@/lib/catalogEditPolicy';
 
 // €€ Shared Constants €€
 
@@ -85,18 +87,36 @@ export default function UniversalProductModal({
     submitLabel,
 }: UniversalProductModalProps) {
     const isEditing = !!initialData;
+    const { user } = useAuth();
+    const editorRole = user?.role;
+    const grantedFields = mode === 'retail'
+        ? user?.catalogFieldPermissions?.products || []
+        : user?.catalogFieldPermissions?.parts || [];
+
+    const storedValue = (field: ProductEditableField): unknown => {
+        if (!initialData) return undefined;
+        if (field === 'images') {
+            return initialData.images?.length ? initialData.images : (initialData.imageUrl ? [initialData.imageUrl] : []);
+        }
+        return (initialData as unknown as Record<string, unknown>)[field];
+    };
+    const canEdit = (field: ProductEditableField) => canEditProductField(editorRole, isEditing, field, storedValue(field), grantedFields);
+    const editableFields: ProductEditableField[] = mode === 'retail'
+        ? ['name', 'price_original', 'price_promo', 'category', 'subCategory', 'categoryIds', 'brand', 'description', 'status', 'condition', 'isFlashSale', 'images']
+        : ['name', 'price_original', 'price_promo', 'categoryIds', 'description', 'status', 'quality', 'partType', 'supplier', 'images'];
+    const canSubmit = editorRole === 'admin' || (!isEditing ? false : editableFields.some(canEdit));
 
     // €€ Retail Form State €€
     const [retailForm, setRetailForm] = useState<RetailFormData>({
         name: initialData?.name || '',
-        price_original: initialData?.price_original || '' as number | '',
-        price_promo: initialData?.price_promo || '' as number | '',
+        price_original: initialData?.price_original ?? '' as number | '',
+        price_promo: initialData?.price_promo ?? '' as number | '',
         category: initialData?.category || '',
         subCategory: initialData?.subCategory || '',
         categoryIds: initialData?.categoryIds || [],
         brand: initialData?.brand || '',
         description: initialData?.description || '',
-        stock: initialData?.stock ?? '' as number | '',
+        stock: initialData?.stock ?? 0,
         status: initialData?.status || 'active',
         condition: initialData?.condition || 'new',
         isFlashSale: initialData?.isFlashSale || false,
@@ -105,11 +125,11 @@ export default function UniversalProductModal({
     // €€ Component Form State €€
     const [componentForm, setComponentForm] = useState<ComponentFormData>({
         name: initialData?.name || '',
-        price_original: initialData?.price_original || '' as number | '',
-        price_promo: initialData?.price_promo || '' as number | '',
+        price_original: initialData?.price_original ?? '' as number | '',
+        price_promo: initialData?.price_promo ?? '' as number | '',
         categoryIds: initialData?.categoryIds || [],
         description: initialData?.description || '',
-        stock: initialData?.stock ?? '' as number | '',
+        stock: initialData?.stock ?? 0,
         status: initialData?.status || 'active',
         quality: initialData?.quality || 'Zin',
         partType: initialData?.partType || '',
@@ -131,25 +151,25 @@ export default function UniversalProductModal({
         if (isOpen) {
             setRetailForm({
                 name: initialData?.name || '',
-                price_original: initialData?.price_original || '' as number | '',
-                price_promo: initialData?.price_promo || '' as number | '',
+                price_original: initialData?.price_original ?? '' as number | '',
+                price_promo: initialData?.price_promo ?? '' as number | '',
                 category: initialData?.category || '',
                 subCategory: initialData?.subCategory || '',
                 categoryIds: initialData?.categoryIds || [],
                 brand: initialData?.brand || '',
                 description: initialData?.description || '',
-                stock: initialData?.stock ?? '' as number | '',
+                stock: initialData?.stock ?? 0,
                 status: initialData?.status || 'active',
                 condition: initialData?.condition || 'new',
                 isFlashSale: initialData?.isFlashSale || false,
             });
             setComponentForm({
                 name: initialData?.name || '',
-                price_original: initialData?.price_original || '' as number | '',
-                price_promo: initialData?.price_promo || '' as number | '',
+                price_original: initialData?.price_original ?? '' as number | '',
+                price_promo: initialData?.price_promo ?? '' as number | '',
                 categoryIds: initialData?.categoryIds || [],
                 description: initialData?.description || '',
-                stock: initialData?.stock ?? '' as number | '',
+                stock: initialData?.stock ?? 0,
                 status: initialData?.status || 'active',
                 quality: initialData?.quality || 'Zin',
                 partType: initialData?.partType || '',
@@ -158,6 +178,47 @@ export default function UniversalProductModal({
             setImages(initialData?.images?.length ? initialData.images : (initialData?.imageUrl ? [initialData.imageUrl] : []));
         }
     }, [isOpen, initialData]);
+
+    const buildAllowedUpdateData = (data: Record<string, unknown>) => {
+        if (!initialData) return { ...data, stock: 0 };
+
+        const allowed = { ...data };
+        const fieldKeys: Array<[ProductEditableField, string[]]> = [
+            ['name', ['name']],
+            ['price_original', ['price_original']],
+            ['price_promo', ['price_promo']],
+            ['category', ['category']],
+            ['subCategory', ['subCategory']],
+            ['categoryIds', ['categoryIds']],
+            ['brand', ['brand']],
+            ['description', ['description']],
+            ['status', ['status']],
+            ['condition', ['condition']],
+            ['isFlashSale', ['isFlashSale']],
+            ['quality', ['quality']],
+            ['partType', ['partType']],
+            ['supplier', ['supplier']],
+            ['images', ['images', 'imageUrl']],
+        ];
+
+        fieldKeys.forEach(([field, keys]) => {
+            if (!canEdit(field)) keys.forEach((key) => delete allowed[key]);
+        });
+        if (!canEdit('name')) delete allowed.searchKeywords;
+        if (!canEdit('categoryIds')) delete allowed.searchCategoryKeywords;
+
+        // Identity and stock are operational values, never direct catalog-form updates.
+        delete allowed.stock;
+        delete allowed.sku;
+        delete allowed.barcode;
+        delete allowed.productCode;
+        delete allowed.specs;
+        if (mode === 'component') {
+            delete allowed.category;
+            delete allowed.brand;
+        }
+        return allowed;
+    };
 
     // €€ Submit Form €€
     const handleSubmit = async (e: React.FormEvent) => {
@@ -216,8 +277,8 @@ export default function UniversalProductModal({
         const qrCodes = [productCode];
 
         if (isEditing && initialData) {
-            data.sold = initialData?.sold || 0;
-            await updateProductWithCodes(initialData.id, qrCodes, data);
+            const updateData = buildAllowedUpdateData(data);
+            await updateProductWithCodes(initialData.id, qrCodes, updateData);
             await triggerRevalidate(['/', `/product/${initialData.id}`, '/flash-sale', '/search', '/sitemap.xml'], ['products']);
             onUpdated?.();
         } else {
@@ -265,7 +326,7 @@ export default function UniversalProductModal({
         const qrCodes = [productCode];
 
         if (isEditing && initialData) {
-            await updateProductWithCodes(initialData.id, qrCodes, data);
+            await updateProductWithCodes(initialData.id, qrCodes, buildAllowedUpdateData(data));
             onUpdated?.();
         } else {
             data.sold = 0;
@@ -303,7 +364,14 @@ export default function UniversalProductModal({
                         onChange={setImages}
                         emptyText={mode === 'retail' ? 'Chọn ảnh sản phẩm từ thư viện' : 'Chọn ảnh linh kiện từ thư viện'}
                         defaultFolder={mode === 'retail' ? 'products' : 'parts'}
+                        disabled={!canEdit('images')}
                     />
+
+                    {editorRole === 'staff' && isEditing && (
+                        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                            Nhân viên chỉ có thể sửa trường được admin cấp quyền hoặc bổ sung trường đang trống. Số lượng tồn kho chỉ thay đổi qua nhập kho hoặc kiểm kê.
+                        </p>
+                    )}
 
                     {/* Mode-specific Fields €€ */}
                     {mode === 'retail' ? (
@@ -311,12 +379,14 @@ export default function UniversalProductModal({
                             form={retailForm}
                             setForm={setRetailForm}
                             brands={brands}
+                            canEdit={canEdit}
                         />
                     ) : (
                         <ComponentFields
                             form={componentForm}
                             setForm={setComponentForm}
                             partTypeOptions={partTypeOptions}
+                            canEdit={canEdit}
                         />
                     )}
 
@@ -331,7 +401,7 @@ export default function UniversalProductModal({
                         </button>
                         <button
                             type="submit"
-                            disabled={isSubmitting}
+                            disabled={isSubmitting || !canSubmit}
                             className="flex-1 py-3 bg-orange-500 text-white rounded-xl font-bold hover:bg-orange-600 disabled:opacity-50 flex items-center justify-center gap-2 shadow-sm transition-all"
                         >
                             {isSubmitting ? <Loader2 size={18} className="animate-spin" /> : <Plus size={18} />}
@@ -349,10 +419,12 @@ function RetailFields({
     form,
     setForm,
     brands,
+    canEdit,
 }: {
     form: RetailFormData;
     setForm: React.Dispatch<React.SetStateAction<RetailFormData>>;
     brands: string[];
+    canEdit: (field: ProductEditableField) => boolean;
 }) {
     return (
         <>
@@ -364,6 +436,7 @@ function RetailFields({
                     value={form.name}
                     onChange={(e) => setForm(p => ({ ...p, name: e.target.value }))}
                     required
+                    disabled={!canEdit('name')}
                     className="w-full h-11 px-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-shadow"
                     placeholder="iPhone 15 Pro Max 256GB"
                 />
@@ -378,6 +451,7 @@ function RetailFields({
                         onChange={(v) => setForm(p => ({ ...p, price_original: v || '' }))}
                         required
                         min={0}
+                        disabled={!canEdit('price_original')}
                         className="w-full h-11 px-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-shadow"
                         placeholder="0"
                     />
@@ -388,6 +462,7 @@ function RetailFields({
                         value={form.price_promo}
                         onChange={(v) => setForm(p => ({ ...p, price_promo: v || '' }))}
                         min={0}
+                        disabled={!canEdit('price_promo')}
                         className="w-full h-11 px-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-shadow"
                         placeholder="0"
                     />
@@ -408,6 +483,7 @@ function RetailFields({
                             subCategory: subCat
                         }));
                     }}
+                    disabled={!canEdit('categoryIds')}
                 />
             </div>
 
@@ -419,6 +495,7 @@ function RetailFields({
                         value={form.brand}
                         onChange={(e) => setForm(p => ({ ...p, brand: e.target.value }))}
                         required
+                        disabled={!canEdit('brand')}
                         className="w-full h-11 px-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-shadow"
                         aria-label="Thương hiệu"
                         title="Thương hiệu"
@@ -447,6 +524,7 @@ function RetailFields({
                                 value={c.value}
                                 checked={form.condition === c.value}
                                 onChange={() => setForm(p => ({ ...p, condition: c.value }))}
+                                disabled={!canEdit('condition')}
                                 className="accent-orange-500"
                             />
                             <span className="text-xs font-medium">{c.label}</span>
@@ -464,6 +542,7 @@ function RetailFields({
                         value={form.stock}
                         onChange={(e) => setForm(p => ({ ...p, stock: e.target.value ? Number(e.target.value) : '' }))}
                         min={0}
+                        disabled
                         className="w-full h-11 px-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-shadow"
                         placeholder="0"
                     />
@@ -473,6 +552,7 @@ function RetailFields({
                     <select
                         value={form.status}
                         onChange={(e) => setForm(p => ({ ...p, status: e.target.value }))}
+                        disabled={!canEdit('status')}
                         className="w-full h-11 px-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-shadow"
                         aria-label="Trạng thái"
                         title="Trạng thái"
@@ -490,6 +570,7 @@ function RetailFields({
                         type="checkbox"
                         checked={form.isFlashSale}
                         onChange={(e) => setForm(p => ({ ...p, isFlashSale: e.target.checked }))}
+                        disabled={!canEdit('isFlashSale')}
                         className="w-5 h-5 accent-orange-500"
                     />
                     <span className="text-sm font-medium">Hiển thị trong Flash Sale</span>
@@ -503,6 +584,7 @@ function RetailFields({
                     value={form.description}
                     onChange={(e) => setForm(p => ({ ...p, description: e.target.value }))}
                     rows={4}
+                    disabled={!canEdit('description')}
                     className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 resize-none transition-shadow"
                     placeholder="Mô tả chi tiết sản phẩm..."
                 />
@@ -517,10 +599,12 @@ function ComponentFields({
     form,
     setForm,
     partTypeOptions,
+    canEdit,
 }: {
     form: ComponentFormData;
     setForm: React.Dispatch<React.SetStateAction<ComponentFormData>>;
     partTypeOptions: string[];
+    canEdit: (field: ProductEditableField) => boolean;
 }) {
     return (
         <>
@@ -532,6 +616,7 @@ function ComponentFields({
                     value={form.name}
                     onChange={(e) => setForm(p => ({ ...p, name: e.target.value }))}
                     required
+                    disabled={!canEdit('name')}
                     className="w-full h-11 px-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-shadow"
                     placeholder="Vd: Màn hình iPhone 13 Pro Max"
                 />
@@ -549,6 +634,7 @@ function ComponentFields({
                             categoryIds: ids
                         }));
                     }}
+                    disabled={!canEdit('categoryIds')}
                 />
             </div>
 
@@ -559,6 +645,7 @@ function ComponentFields({
                     type="text"
                     value={form.description}
                     onChange={(e) => setForm(p => ({ ...p, description: e.target.value }))}
+                    disabled={!canEdit('description')}
                     className="w-full h-11 px-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-shadow"
                     placeholder="Vd: iPhone 13 Pro, iPhone 13 Pro Max"
                 />
@@ -571,6 +658,7 @@ function ComponentFields({
                     type="text"
                     value={form.supplier}
                     onChange={(e) => setForm(p => ({ ...p, supplier: e.target.value }))}
+                    disabled={!canEdit('supplier')}
                     className="w-full h-11 px-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-shadow"
                     placeholder="Vd: Quán A, Web B..."
                 />
@@ -583,6 +671,7 @@ function ComponentFields({
                     <select
                         value={form.quality}
                         onChange={(e) => setForm(p => ({ ...p, quality: e.target.value }))}
+                        disabled={!canEdit('quality')}
                         className="w-full h-11 px-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-shadow"
                         aria-label="Phân loại/Chất lượng"
                         title="Phân loại/Chất lượng"
@@ -597,6 +686,7 @@ function ComponentFields({
                     <select
                         value={form.partType}
                         onChange={(e) => setForm(p => ({ ...p, partType: e.target.value }))}
+                        disabled={!canEdit('partType')}
                         className="w-full h-11 px-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-shadow"
                         aria-label="Loại linh kiện"
                         title="Loại linh kiện"
@@ -614,8 +704,9 @@ function ComponentFields({
                 <input
                     type="number"
                     value={form.stock}
-                    onChange={(e) => setForm(p => ({ ...p, stock: e.target.value ? Number(e.target.value) : '' }))}
-                    min={0}
+                        onChange={(e) => setForm(p => ({ ...p, stock: e.target.value ? Number(e.target.value) : '' }))}
+                        min={0}
+                        disabled
                     className="w-full h-11 px-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-shadow"
                     placeholder="0"
                 />
@@ -631,6 +722,7 @@ function ComponentFields({
                         onChange={(v) => setForm(p => ({ ...p, price_original: v || '' }))}
                         required
                         min={0}
+                        disabled={!canEdit('price_original')}
                         className="w-full h-11 px-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-shadow"
                         placeholder="0"
                     />
@@ -642,6 +734,7 @@ function ComponentFields({
                         onChange={(v) => setForm(p => ({ ...p, price_promo: v || '' }))}
                         required
                         min={0}
+                        disabled={!canEdit('price_promo')}
                         className="w-full h-11 px-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-shadow font-semibold text-orange-600"
                         placeholder="0"
                     />
@@ -655,6 +748,7 @@ function ComponentFields({
                         type="checkbox"
                         checked={form.status === 'active'}
                         onChange={(e) => setForm(p => ({ ...p, status: e.target.checked ? 'active' : 'inactive' }))}
+                        disabled={!canEdit('status')}
                         className="w-5 h-5 accent-orange-500 rounded"
                     />
                     <div className="flex flex-col">

@@ -11,6 +11,7 @@ import { getDocs, getDoc } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
 import { useRouter } from 'next/navigation';
+import { appConfirm } from '@/lib/appDialog';
 import type { CommissionRule, Commission, CommissionPriceRange, FirestoreWriteTimestamp } from '@/lib/types';
 import { toastError } from '@/lib/toast';
 import { useClientPagination } from '@/lib/useClientPagination';
@@ -214,7 +215,7 @@ export default function CommissionsPage() {
 
     // ── Delete rule ──
     const handleDeleteRule = async (id: string) => {
-        if (!confirm('Xóa quy tắc này?')) return;
+        if (!await appConfirm('Xóa quy tắc này?', { title: 'Xóa quy tắc', confirmText: 'Xóa', destructive: true })) return;
         await deleteDoc(doc(db, 'commission_rules', id));
         setRules(prev => prev.filter(r => r.id !== id));
     };

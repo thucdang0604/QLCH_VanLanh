@@ -32,6 +32,12 @@ export const WORKFLOW_FEATURES: WorkflowFeature[] = [
         scope: ['admin', 'technician'],
     },
     {
+        id: 'reserveSelectedParts',
+        label: 'Giữ tạm linh kiện khi vào trạng thái này',
+        description: 'Khi phiếu chuyển vào trạng thái này, hệ thống đối soát và giữ các linh kiện đã chọn để tồn khả dụng giảm chính xác.',
+        scope: ['admin', 'technician'],
+    },
+    {
         id: 'allowPartsSelection',
         label: 'Cho phép chọn hiển thị/xin phần cứng thay thế',
         description: 'Hiển thị UI chọn linh kiện. Nếu linh kiện không có sẵn, tạo phiếu nhập tổng hợp',

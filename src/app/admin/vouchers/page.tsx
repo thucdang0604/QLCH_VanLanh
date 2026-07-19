@@ -6,6 +6,7 @@ import { getDocs } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import { Ticket, Plus, Edit2, Trash2, ToggleLeft, ToggleRight, X, Copy, Check, Settings, Target } from 'lucide-react';
 import { toast } from 'sonner';
+import { appConfirm } from '@/lib/appDialog';
 import type { Voucher } from '@/lib/types';
 import DiscountRulesTab from './DiscountRulesTab';
 import { useConfig } from '@/lib/ConfigContext';
@@ -398,7 +399,7 @@ export default function VouchersPage() {
     };
 
     const handleDelete = async (id: string) => {
-        if (!confirm('Xóa Voucher này?')) return;
+        if (!await appConfirm('Xóa Voucher này?', { title: 'Xóa voucher', confirmText: 'Xóa', destructive: true })) return;
         await callVoucherApi('DELETE', undefined, id);
         toast.success('Đã xóa Voucher');
         await loadVouchers();

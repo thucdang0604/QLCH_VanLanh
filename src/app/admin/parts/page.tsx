@@ -29,10 +29,16 @@ import { useFirestoreCollection, updateDocument } from '@/lib/useFirestore';
 import { buildArchiveUpdate, getArchiveBlockReason, isProductArchived } from '@/lib/productLifecycle';
 import { formatReceiptPrice } from '@/features/parts/importReceiptUtils';
 import { toastError } from '@/lib/toast';
+import { useAuth } from '@/lib/AuthContext';
 
 type StatusFilter = 'all' | 'out_of_stock' | 'bestseller';
 
+const getPartHeld = (part: Product) => Math.max(0, Number(part.held) || 0);
+const getPartAvailable = (part: Product) => Math.max(0, (Number(part.stock) || 0) - getPartHeld(part));
+
 export default function PartsPage() {
+    const { user } = useAuth();
+    const isAdmin = user?.role === 'admin';
     const { data: products, loading } = useFirestoreCollection<Product>('products', [orderBy('createdAt', 'desc'), limit(50)]);
     const [searchQuery, setSearchQuery] = useState('');
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -76,7 +82,7 @@ export default function PartsPage() {
                     || part.partType?.toLowerCase().includes(queryText);
 
                 if (!matchesSearch) return false;
-                if (statusFilter === 'out_of_stock') return Number(part.stock) <= 0;
+                if (statusFilter === 'out_of_stock') return getPartAvailable(part) <= 0;
                 if (statusFilter === 'bestseller') return Number(part.sold || 0) > 0;
                 return true;
             })
@@ -102,6 +108,7 @@ export default function PartsPage() {
     }, [resetPage, searchQuery, statusFilter]);
 
     const handleArchive = (part: Product) => {
+        if (!isAdmin) return;
         const blockReason = getArchiveBlockReason(part);
         if (blockReason) {
             toastError(`Khong the luu tru "${part.name}" vi ${blockReason}.`);
@@ -149,23 +156,27 @@ export default function PartsPage() {
                         <Search size={14} />
                         Tra ma lo
                     </button>
-                    <button
-                        onClick={() => setShowFixHidden(true)}
-                        className="flex items-center gap-2 border-2 border-amber-300 text-amber-700 px-3 py-1.5 text-xs rounded-lg font-medium hover:bg-amber-50 transition-colors text-sm"
-                    >
-                        <AlertTriangle size={18} />
-                        Khoi phuc an
-                    </button>
-                    <button
-                        onClick={() => {
-                            setEditingPart(null);
-                            setIsModalOpen(true);
-                        }}
-                        className="flex items-center gap-2 bg-orange-500 text-white px-3 py-1.5 text-xs rounded-lg font-medium hover:bg-orange-600 transition-colors shadow-sm"
-                    >
-                        <Plus size={18} />
-                        Thêm linh kiện
-                    </button>
+                    {isAdmin && (
+                        <>
+                            <button
+                                onClick={() => setShowFixHidden(true)}
+                                className="flex items-center gap-2 border-2 border-amber-300 text-amber-700 px-3 py-1.5 text-xs rounded-lg font-medium hover:bg-amber-50 transition-colors text-sm"
+                            >
+                                <AlertTriangle size={18} />
+                                Khoi phuc an
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setEditingPart(null);
+                                    setIsModalOpen(true);
+                                }}
+                                className="flex items-center gap-2 bg-orange-500 text-white px-3 py-1.5 text-xs rounded-lg font-medium hover:bg-orange-600 transition-colors shadow-sm"
+                            >
+                                <Plus size={18} />
+                                Thêm linh kiện
+                            </button>
+                        </>
+                    )}
                 </div>
             </div>
 
@@ -209,16 +220,20 @@ export default function PartsPage() {
                 ) : (
                     <>
                         <div className="lg:hidden divide-y divide-gray-100">
-                            {paginatedParts.map(part => (
+                            {paginatedParts.map(part => {
+                                const held = getPartHeld(part);
+                                const available = getPartAvailable(part);
+                                return (
                                 <div key={part.id} className="p-4 space-y-3">
                                     <div className="flex items-start justify-between gap-3">
                                         <div>
                                             <p className="font-semibold text-gray-900">{part.name}</p>
                                             <p className="text-xs text-gray-500">{getPartModel(part) || PART_CATEGORY_LABEL} {part.partType ? `- ${part.partType}` : ''}</p>
                                         </div>
-                                        <span className={`px-2 py-1 rounded text-xs font-semibold ${Number(part.stock) > 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
-                                            Tồn: {Number(part.stock) || 0}
-                                        </span>
+                                        <div className="flex flex-col items-end gap-1 text-[11px] font-semibold">
+                                            <span className={available > 0 ? 'text-emerald-700' : 'text-red-600'}>Khả dụng: {available}</span>
+                                            <span className="text-gray-500">Tồn: {Number(part.stock) || 0} · Giữ: <span className="text-violet-700">{held}</span></span>
+                                        </div>
                                     </div>
                                     <div className="grid grid-cols-2 gap-2 text-xs text-gray-600">
                                         <div>
@@ -239,7 +254,8 @@ export default function PartsPage() {
                                         </button>
                                     </div>
                                 </div>
-                            ))}
+                                );
+                            })}
                         </div>
 
                         <div className="hidden lg:block overflow-x-auto">
@@ -249,6 +265,8 @@ export default function PartsPage() {
                                         <th className="px-4 py-3">Linh kiện</th>
                                         <th className="px-4 py-3">Phân loại</th>
                                         <th className="px-4 py-3 text-center">Tồn</th>
+                                        <th className="px-4 py-3 text-center">Tạm giữ</th>
+                                        <th className="px-4 py-3 text-center">Khả dụng</th>
                                         <th className="px-4 py-3 text-right">Giá vốn</th>
                                         <th className="px-4 py-3 text-right">Giá bán</th>
                                         <th className="px-4 py-3 text-center">Đã dùng</th>
@@ -256,7 +274,10 @@ export default function PartsPage() {
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
-                                    {paginatedParts.map(part => (
+                                    {paginatedParts.map(part => {
+                                        const held = getPartHeld(part);
+                                        const available = getPartAvailable(part);
+                                        return (
                                         <tr key={part.id} className="hover:bg-gray-50 transition-colors duration-200">
                                             <td className="px-4 py-3">
                                                 <p className="font-semibold text-gray-900">{part.name}</p>
@@ -271,6 +292,10 @@ export default function PartsPage() {
                                                     {Number(part.stock) || 0}
                                                 </span>
                                             </td>
+                                            <td className="px-4 py-3 text-center text-sm font-semibold text-violet-700">{held}</td>
+                                            <td className="px-4 py-3 text-center">
+                                                <span className={`text-sm font-bold ${available > 0 ? 'text-emerald-700' : 'text-red-600'}`}>{available}</span>
+                                            </td>
                                             <td className="px-4 py-3 text-right text-sm">{formatReceiptPrice(part.costPrice || 0)}</td>
                                             <td className="px-4 py-3 text-right text-sm font-semibold text-gray-900">{formatReceiptPrice(part.price_promo || part.price_original || 0)}</td>
                                             <td className="px-4 py-3 text-center text-sm">{Number(part.sold) || 0}</td>
@@ -282,13 +307,16 @@ export default function PartsPage() {
                                                     <button onClick={() => { setEditingPart(part); setIsModalOpen(true); }} className="p-2 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded-lg transition-all active:scale-95" title="Sửa">
                                                         <Edit size={16} />
                                                     </button>
-                                                    <button onClick={() => handleArchive(part)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all active:scale-95" title="Lưu trữ">
-                                                        <Archive size={16} />
-                                                    </button>
+                                                    {isAdmin && (
+                                                        <button onClick={() => handleArchive(part)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all active:scale-95" title="Lưu trữ">
+                                                            <Archive size={16} />
+                                                        </button>
+                                                    )}
                                                 </div>
                                             </td>
                                         </tr>
-                                    ))}
+                                        );
+                                    })}
                                 </tbody>
                             </table>
                         </div>
@@ -346,7 +374,7 @@ export default function PartsPage() {
             </Modal>
 
             {qrPart && <ProductQrLabelModal product={qrPart} onClose={() => setQrPart(null)} />}
-            <FixHiddenProductsModal isOpen={showFixHidden} onClose={() => setShowFixHidden(false)} products={products} />
+            {isAdmin && <FixHiddenProductsModal isOpen={showFixHidden} onClose={() => setShowFixHidden(false)} products={products} />}
             <LotTrackingModal isOpen={isLotTrackingOpen} onClose={() => setIsLotTrackingOpen(false)} />
         </div>
     );

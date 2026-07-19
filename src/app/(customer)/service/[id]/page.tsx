@@ -25,7 +25,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
         openGraph: {
             title: `${data.name} | Dịch vụ sửa chữa tại ${identity.siteName}`,
             description: shortDescription,
-            images: String((Array.isArray(data.images) ? data.images[0] : '') || data.imageUrl || data.image || ''),
+            images: String((Array.isArray(data.images) ? data.images[0] : '') || data.imageUrl || data.image || identity.logoUrl || ''),
         }
     };
 }

@@ -1,10 +1,10 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { X, ShoppingBag, Minus, Plus, Trash2, ArrowRight } from 'lucide-react';
+import CatalogImage from '@/components/customer/CatalogImage';
 import { useCart } from '@/lib/CartContext';
 
 const formatPrice = (price: number) => {
@@ -88,12 +88,12 @@ export default function CartDrawer() {
                         items.map((item) => (
                             <div key={item.id} className="flex gap-3 bg-white p-3 rounded-xl border border-gray-100 shadow-sm relative group">
                                 <div className="w-20 h-20 relative rounded-lg overflow-hidden flex-shrink-0 bg-gray-50">
-                                    <Image 
-                                        src={item.image || '/placeholder-image.png'} 
+                                    <CatalogImage
+                                        src={item.image}
                                         alt={item.name} 
-                                        fill 
-                                        className="object-cover" 
                                         sizes="(max-width: 80px) 100vw, 80px"
+                                        imageClassName="object-cover"
+                                        logoClassName="h-full w-full object-contain p-2"
                                     />
                                 </div>
                                 <div className="flex-1 flex flex-col min-w-0">

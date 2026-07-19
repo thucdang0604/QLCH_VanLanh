@@ -6,6 +6,7 @@ import { Loader2, MessageCircle, Save, Star, Trash2, X } from 'lucide-react';
 import Modal from '@/components/admin/Modal';
 import { db } from '@/lib/firebase';
 import { toastError } from '@/lib/toast';
+import { appConfirm } from '@/lib/appDialog';
 import type { Article, ArticleComment } from './articleTypes';
 
 export function CommentsModal({ article, onClose }: { article: Article, onClose: () => void }) {
@@ -36,7 +37,7 @@ export function CommentsModal({ article, onClose }: { article: Article, onClose:
     };
 
     const handleDelete = async (id: string) => {
-        if (!confirm('Bạn có chắc muốn xóa bình luận này?')) return;
+        if (!await appConfirm('Bạn có chắc muốn xóa bình luận này?', { title: 'Xóa bình luận', confirmText: 'Xóa', destructive: true })) return;
         await deleteDoc(doc(db, 'article_comments', id));
     };
 
@@ -61,7 +62,7 @@ export function CommentsModal({ article, onClose }: { article: Article, onClose:
     };
 
     const handleDeleteReply = async (id: string) => {
-        if (!confirm('Bạn có chắc muốn xóa phản hồi này?')) return;
+        if (!await appConfirm('Bạn có chắc muốn xóa phản hồi này?', { title: 'Xóa phản hồi', confirmText: 'Xóa', destructive: true })) return;
         await updateDoc(doc(db, 'article_comments', id), {
             reply: null
         });
@@ -234,7 +235,7 @@ export function GlobalCommentsTab({ articles }: { articles: Article[] }) {
     };
 
     const handleDelete = async (id: string) => {
-        if (!confirm('Bạn có chắc muốn xóa bình luận này?')) return;
+        if (!await appConfirm('Bạn có chắc muốn xóa bình luận này?', { title: 'Xóa bình luận', confirmText: 'Xóa', destructive: true })) return;
         await deleteDoc(doc(db, 'article_comments', id));
     };
 
@@ -259,7 +260,7 @@ export function GlobalCommentsTab({ articles }: { articles: Article[] }) {
     };
 
     const handleDeleteReply = async (id: string) => {
-        if (!confirm('Bạn có chắc muốn xóa phản hồi này?')) return;
+        if (!await appConfirm('Bạn có chắc muốn xóa phản hồi này?', { title: 'Xóa phản hồi', confirmText: 'Xóa', destructive: true })) return;
         await updateDoc(doc(db, 'article_comments', id), {
             reply: null
         });

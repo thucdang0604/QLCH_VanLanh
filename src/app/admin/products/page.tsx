@@ -1,21 +1,23 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import Image from 'next/image';
 import firebaseImageLoader from '@/lib/imageLoader';
 import { useRouter } from 'next/navigation';
 import { Archive, Plus, Search, Edit, Package, Loader2, QrCode, PackagePlus } from 'lucide-react';
 import { updateDocument } from '@/lib/useFirestore';
 import { useFirestorePaginated } from '@/lib/firestoreQueryHelper';
-import { getSearchKeywordQuery, getCategoryPath, collectAllNodeIds } from '@/lib/utils';
+import { buildCategorySearchKeywords, generateSearchKeywords, getSearchKeywordQuery, getCategoryPath, collectAllNodeIds } from '@/lib/utils';
+import { getCatalogCategoryKey, getCatalogCategoryStatus } from '@/lib/catalogCategory';
 
 import { collection, limit, orderBy, serverTimestamp, query, QuerySnapshot, QueryDocumentSnapshot, DocumentData, where, QueryConstraint } from 'firebase/firestore';
 import { getDocs } from '@/lib/firestoreLogger';
-import { toastError } from '@/lib/toast';
+import { toastError, toastSuccess, toastWarning } from '@/lib/toast';
 import PaginationBar from '@/components/admin/PaginationBar';
 import UniversalProductModal from '@/components/admin/UniversalProductModal';
 import CategoryTaxonomySelector from '@/components/admin/CategoryTaxonomySelector';
 import ProductQrLabelModal from '@/components/admin/ProductQrLabelModal';
+import Modal from '@/components/admin/Modal';
 
 import { CreateReceiptModal } from '@/features/parts/ImportReceiptModals';
 import type { SupplierOption } from '@/features/parts/importReceiptTypes';
@@ -26,6 +28,8 @@ import { productCodeSearchText } from '@/lib/productCodes';
 import { buildArchiveUpdate, getArchiveBlockReason } from '@/lib/productLifecycle';
 import { useAuth } from '@/lib/AuthContext';
 import { db } from '@/lib/firebase';
+import { triggerRevalidate } from '@/lib/revalidate';
+import { appConfirm } from '@/lib/appDialog';
 
 // Product is now imported from @/lib/types
 
@@ -38,14 +42,24 @@ const CONDITIONS: { value: Product['condition'] | ''; label: string; color: stri
 
 export default function ProductsPage() {
     const { user } = useAuth();
+    const isAdmin = user?.role === 'admin';
     const router = useRouter();
-    const { config } = useConfig();
+    const { config, loading: configLoading } = useConfig();
     const [searchQuery, setSearchQuery] = useState('');
     const [filterCategoryIds, setFilterCategoryIds] = useState<string[]>([]);
     const [filterCondition, setFilterCondition] = useState('');
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingProduct, setEditingProduct] = useState<Product | null>(null);
     const [qrProduct, setQrProduct] = useState<(Product & { id: string }) | null>(null);
+    const [showReassign, setShowReassign] = useState(false);
+    const [reassignFrom, setReassignFrom] = useState('');
+    const [reassignTo, setReassignTo] = useState('');
+    const [reassignToIds, setReassignToIds] = useState<string[]>([]);
+    const [isReassigning, setIsReassigning] = useState(false);
+    const [reassignProgress, setReassignProgress] = useState<{ current: number; total: number } | null>(null);
+    const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
+    const [categoryAuditLoading, setCategoryAuditLoading] = useState(false);
+    const [categoryAuditLoaded, setCategoryAuditLoaded] = useState(false);
 
     const [isCreateReceiptOpen, setIsCreateReceiptOpen] = useState(false);
     const [supplierList, setSupplierList] = useState<SupplierOption[]>([]);
@@ -104,6 +118,20 @@ export default function ProductsPage() {
 
     const setPage = goToPage;
 
+    const refreshCategoryAudit = useCallback(async () => {
+        setCategoryAuditLoading(true);
+        try {
+            const snapshot = await getDocs(query(collection(db, 'products'), where('status', '==', 'active')));
+            setCatalogProducts(snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Product)));
+            setCategoryAuditLoaded(true);
+        } catch (err) {
+            console.error('Failed to audit product categories', err);
+            toastError('Không thể kiểm tra danh mục sản phẩm. Vui lòng thử lại.');
+        } finally {
+            setCategoryAuditLoading(false);
+        }
+    }, []);
+
     useEffect(() => {
         getDocs(query(collection(db, 'suppliers'), limit(100))).then((snapshot: QuerySnapshot<DocumentData>) => {
             setSupplierList(snapshot.docs.map((docSnap: QueryDocumentSnapshot<DocumentData>) => ({ id: docSnap.id, ...docSnap.data() } as SupplierOption)));
@@ -132,18 +160,18 @@ export default function ProductsPage() {
     }, []);
 
     const handleArchive = async (product: Product) => {
+        if (!isAdmin) return;
         const blockReason = getArchiveBlockReason(product);
         if (blockReason) {
             toastError(`Không thể lưu trữ "${product.name}" vì ${blockReason}.`);
             return;
         }
-        if (confirm(`Lưu trữ "${product.name}"? Sản phẩm sẽ ẩn khỏi bán lẻ/POS nhưng vẫn giữ lịch sử và mã hàng.`)) {
-            try {
-                await updateDocument('products', product.id, buildArchiveUpdate(serverTimestamp()));
-                refresh();
-            } catch {
-                toastError('Lỗi khi lưu trữ sản phẩm!');
-            }
+        if (!await appConfirm(`Lưu trữ "${product.name}"? Sản phẩm sẽ ẩn khỏi bán lẻ/POS nhưng vẫn giữ lịch sử và mã hàng.`, { title: 'Lưu trữ sản phẩm', confirmText: 'Lưu trữ', destructive: true })) return;
+        try {
+            await updateDocument('products', product.id, buildArchiveUpdate(serverTimestamp()));
+            refresh();
+        } catch {
+            toastError('Lỗi khi lưu trữ sản phẩm!');
         }
     };
 
@@ -164,12 +192,93 @@ export default function ProductsPage() {
 
     const validNodeIds = collectAllNodeIds(retailTaxonomy);
 
-    const getOrphanStatus = (product: Product): 'valid' | 'orphan' | 'unassigned' => {
-        if (!product.categoryIds || product.categoryIds.length === 0) {
-            return product.category ? 'orphan' : 'unassigned';
+    const getOrphanStatus = (product: Product) => getCatalogCategoryStatus(product, validNodeIds);
+    const orphanRetailProducts = catalogProducts.filter(product => (
+        !isPartCategory(product.category, product.categoryIds) && getOrphanStatus(product) === 'orphan'
+    ));
+    const missingCategoryCount = orphanRetailProducts.length;
+    const missingCategories = Array.from(new Set(
+        orphanRetailProducts.map(getCatalogCategoryKey).filter(Boolean)
+    ));
+    const reassignTargets = reassignFrom
+        ? orphanRetailProducts.filter(product => getCatalogCategoryKey(product) === reassignFrom)
+        : [];
+
+    const resetReassignState = () => {
+        setReassignFrom('');
+        setReassignTo('');
+        setReassignToIds([]);
+        setReassignProgress(null);
+    };
+
+    const openReassignModal = (categoryKey: string) => {
+        if (!isAdmin) return;
+        resetReassignState();
+        setReassignFrom(categoryKey);
+        setShowReassign(true);
+    };
+
+    const closeReassignModal = () => {
+        if (isReassigning) return;
+        setShowReassign(false);
+        resetReassignState();
+    };
+
+    const handleBatchReassign = async () => {
+        if (!isAdmin) return;
+        if (!reassignFrom || !reassignTo || reassignToIds.length === 0) return;
+        if (reassignTargets.length === 0) {
+            toastWarning('Không còn sản phẩm thuộc danh mục bị mất này. Danh sách có thể vừa được cập nhật.');
+            closeReassignModal();
+            return;
         }
-        const deepestId = product.categoryIds[product.categoryIds.length - 1];
-        return validNodeIds.has(deepestId) ? 'valid' : 'orphan';
+
+        setIsReassigning(true);
+        try {
+            setReassignProgress({ current: 0, total: reassignTargets.length });
+
+            let successCount = 0;
+            let errorCount = 0;
+
+            for (let i = 0; i < reassignTargets.length; i++) {
+                const product = reassignTargets[i];
+                const searchKeywords = product.searchKeywords?.length
+                    ? product.searchKeywords
+                    : generateSearchKeywords(product.name);
+
+                try {
+                    await updateDocument('products', product.id, {
+                        category: reassignTo,
+                        categoryIds: reassignToIds,
+                        searchCategoryKeywords: buildCategorySearchKeywords(reassignToIds, searchKeywords),
+                    });
+                    successCount++;
+                } catch (err) {
+                    console.error(`Error updating product ${product.id}:`, err);
+                    errorCount++;
+                }
+                setReassignProgress({ current: i + 1, total: reassignTargets.length });
+            }
+
+            if (successCount > 0) {
+                await triggerRevalidate(['/', '/flash-sale', '/search', '/sitemap.xml'], ['products']);
+                refresh();
+                await refreshCategoryAudit();
+            }
+
+            if (errorCount > 0) {
+                toastWarning(`Hoàn tất gán lại ${successCount}/${reassignTargets.length} sản phẩm (${errorCount} lỗi)`);
+            } else {
+                toastSuccess(`Đã gán lại thành công ${successCount} sản phẩm từ "${reassignFrom}" sang "${reassignTo}"`);
+            }
+
+            setShowReassign(false);
+            resetReassignState();
+        } catch {
+            toastError('Lỗi khi gán lại danh mục!');
+        } finally {
+            setIsReassigning(false);
+        }
     };
 
     const formatPrice = (price: number) => {
@@ -185,6 +294,16 @@ export default function ProductsPage() {
                     <p className="text-gray-500">{totalCount} sản phẩm</p>
                 </div>
                 <div className="flex gap-2">
+                    {isAdmin && (
+                        <button
+                            onClick={() => { void refreshCategoryAudit(); }}
+                            disabled={categoryAuditLoading}
+                            className="flex items-center gap-1.5 border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-60"
+                        >
+                            {categoryAuditLoading && <Loader2 size={15} className="animate-spin" />}
+                            Kiểm tra danh mục
+                        </button>
+                    )}
                     <button
                         onClick={() => setIsCreateReceiptOpen(true)}
                         className="flex items-center gap-1.5 bg-blue-500 text-white px-3 py-1.5 rounded-lg font-medium hover:bg-blue-600 active:scale-95 transition-all text-xs"
@@ -192,15 +311,41 @@ export default function ProductsPage() {
                         <PackagePlus size={15} />
                         Tạo đề xuất nhập
                     </button>
-                    <button
-                        onClick={() => { setEditingProduct(null); setIsModalOpen(true); }}
-                        className="flex items-center gap-1.5 bg-orange-500 text-white px-3 py-1.5 rounded-lg font-medium hover:bg-orange-600 active:scale-95 transition-all text-xs"
-                    >
-                        <Plus size={15} />
-                        Thêm sản phẩm
-                    </button>
+                    {isAdmin && (
+                        <button
+                            onClick={() => { setEditingProduct(null); setIsModalOpen(true); }}
+                            className="flex items-center gap-1.5 bg-orange-500 text-white px-3 py-1.5 rounded-lg font-medium hover:bg-orange-600 active:scale-95 transition-all text-xs"
+                        >
+                            <Plus size={15} />
+                            Thêm sản phẩm
+                        </button>
+                    )}
                 </div>
             </div>
+
+            {isAdmin && categoryAuditLoaded && !categoryAuditLoading && !configLoading && missingCategories.length > 0 && (
+                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex flex-col sm:flex-row items-start justify-between gap-3">
+                    <div>
+                        <p className="font-medium flex items-center gap-2">
+                            Có {missingCategoryCount} sản phẩm đang bị mất danh mục!
+                        </p>
+                        <p className="text-sm mt-1 text-red-600">
+                            Các danh mục không tồn tại: {missingCategories.join(', ')}.
+                        </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                        {missingCategories.map(categoryKey => (
+                            <button
+                                key={categoryKey}
+                                onClick={() => openReassignModal(categoryKey)}
+                                className="px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 text-sm font-medium rounded-md transition-colors"
+                            >
+                                Gán lại &quot;{categoryKey}&quot;
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             {/* Filters */}
             <div className="flex flex-col gap-2">
@@ -353,13 +498,15 @@ export default function ProductsPage() {
                                                     >
                                                         <Edit size={18} />
                                                     </button>
-                                                    <button
-                                                        onClick={() => handleArchive(product)}
-                                                        className="p-2 hover:bg-red-100 text-red-600 rounded-lg transition-colors active:scale-90"
-                                                        title="Lưu trữ sản phẩm"
-                                                    >
-                                                        <Archive size={18} />
-                                                    </button>
+                                                    {isAdmin && (
+                                                        <button
+                                                            onClick={() => handleArchive(product)}
+                                                            className="p-2 hover:bg-red-100 text-red-600 rounded-lg transition-colors active:scale-90"
+                                                            title="Lưu trữ sản phẩm"
+                                                        >
+                                                            <Archive size={18} />
+                                                        </button>
+                                                    )}
                                                 </div>
                                             </td>
                                         </tr>
@@ -440,13 +587,15 @@ export default function ProductsPage() {
                                                 <Edit size={14} />
                                                 Sửa
                                             </button>
-                                            <button
-                                                onClick={() => handleArchive(product)}
-                                                className="flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-xl transition-all active:scale-95"
-                                            >
-                                                <Archive size={14} />
-                                                Lưu trữ
-                                            </button>
+                                            {isAdmin && (
+                                                <button
+                                                    onClick={() => handleArchive(product)}
+                                                    className="flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-xl transition-all active:scale-95"
+                                                >
+                                                    <Archive size={14} />
+                                                    Lưu trữ
+                                                </button>
+                                            )}
                                         </div>
                                     </div>
                                 </div>
@@ -476,6 +625,38 @@ export default function ProductsPage() {
                 onUpdated={() => setIsModalOpen(false)}
             />
             <ProductQrLabelModal product={qrProduct} onClose={() => setQrProduct(null)} />
+
+            <Modal isOpen={showReassign} onClose={closeReassignModal} title="Gán lại danh mục hàng loạt" size="md">
+                <div className="p-6 space-y-4">
+                    <p className="text-sm text-gray-600">
+                        Chọn danh mục mới cho <strong className="text-gray-900">{reassignTargets.length} sản phẩm</strong> đang thuộc danh mục <strong className="text-gray-900">&quot;{reassignFrom}&quot;</strong>.
+                    </p>
+                    <div>
+                        <label className="block text-sm font-medium mb-1">Danh mục mới *</label>
+                        <CategoryTaxonomySelector
+                            type="retail"
+                            value={reassignToIds}
+                            onChange={(ids, categoryName) => {
+                                setReassignTo(categoryName || '');
+                                setReassignToIds(ids);
+                            }}
+                        />
+                    </div>
+                    <div className="flex gap-3 pt-4">
+                        <button onClick={closeReassignModal} disabled={isReassigning} className="flex-1 py-2.5 border rounded-lg hover:bg-gray-50 font-medium disabled:opacity-50">Hủy</button>
+                        <button
+                            onClick={handleBatchReassign}
+                            disabled={!reassignTo || reassignToIds.length === 0 || reassignTargets.length === 0 || isReassigning}
+                            className="flex-1 py-2.5 bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-medium disabled:opacity-50 flex justify-center items-center gap-2"
+                        >
+                            {isReassigning && <Loader2 size={16} className="animate-spin" />}
+                            {isReassigning
+                                ? (reassignProgress ? `Đang xử lý ${reassignProgress.current}/${reassignProgress.total}...` : 'Đang xử lý...')
+                                : 'Xác nhận gán lại'}
+                        </button>
+                    </div>
+                </div>
+            </Modal>
 
             {isCreateReceiptOpen && (
                 <CreateReceiptModal

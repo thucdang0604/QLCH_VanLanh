@@ -30,6 +30,7 @@ const typeConfig: Record<string, { label: string; color: string }> = {
     Promo: { label: 'Khuyến mãi', color: 'bg-red-100 text-red-700' },
     News: { label: 'Tin tức', color: 'bg-blue-100 text-blue-700' },
     Tips: { label: 'Mẹo hay', color: 'bg-green-100 text-green-700' },
+    Training: { label: 'Đào Tạo', color: 'bg-purple-100 text-purple-700' },
 };
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {

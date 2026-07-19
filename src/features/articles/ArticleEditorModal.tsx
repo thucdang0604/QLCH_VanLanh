@@ -1103,6 +1103,7 @@ export function ArticleModal({
                                 <option value="News">Tin tức</option>
                                 <option value="Promo">Khuyến mãi</option>
                                 <option value="Tips">Mẹo hay</option>
+                                <option value="Training">Đào Tạo</option>
                             </select>
                         </div>
                         <div>

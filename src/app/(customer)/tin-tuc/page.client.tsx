@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo, useEffect } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { ChevronRight, Eye, Clock, Tag, FileText, Loader2 } from 'lucide-react';
@@ -13,6 +14,7 @@ const typeConfig: Record<string, { label: string; color: string }> = {
     Promo: { label: 'Khuyến mãi', color: 'bg-red-100 text-red-700' },
     News: { label: 'Tin tức', color: 'bg-blue-100 text-blue-700' },
     Tips: { label: 'Mẹo hay', color: 'bg-green-100 text-green-700' },
+    Training: { label: 'Đào Tạo', color: 'bg-purple-100 text-purple-700' },
 };
 
 const tabs = [
@@ -20,6 +22,7 @@ const tabs = [
     { key: 'Promo', label: '🔥 Khuyến mãi' },
     { key: 'News', label: '📰 Tin tức' },
     { key: 'Tips', label: '💡 Mẹo hay' },
+    { key: 'Training', label: '🎓 Đào Tạo' },
 ];
 
 function formatDate(d: unknown): string {
@@ -47,7 +50,32 @@ type ArticleDoc = {
 };
 
 export default function TinTucPage({ initialArticles = [] }: { initialArticles?: ArticleDoc[] }) {
-    const [activeTab, setActiveTab] = useState('all');
+    const searchParams = useSearchParams();
+    const router = useRouter();
+    const tabFromUrl = searchParams.get('tab');
+    const validTabKeys = tabs.map(t => t.key);
+    const initialTab = tabFromUrl && validTabKeys.includes(tabFromUrl) ? tabFromUrl : 'all';
+    const [activeTab, setActiveTab] = useState(initialTab);
+
+    // Sync tab state when URL changes externally
+    useEffect(() => {
+        const t = searchParams.get('tab');
+        const resolved = t && validTabKeys.includes(t) ? t : 'all';
+        setActiveTab(resolved);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [searchParams]);
+
+    const handleTabChange = (key: string) => {
+        setActiveTab(key);
+        const params = new URLSearchParams(searchParams.toString());
+        if (key === 'all') {
+            params.delete('tab');
+        } else {
+            params.set('tab', key);
+        }
+        const qs = params.toString();
+        router.replace(`/tin-tuc${qs ? `?${qs}` : ''}`, { scroll: false });
+    };
 
     const loading = false;
     const articles = initialArticles;
@@ -136,7 +164,7 @@ export default function TinTucPage({ initialArticles = [] }: { initialArticles?:
                 {tabs.map(tab => (
                     <button
                         key={tab.key}
-                        onClick={() => setActiveTab(tab.key)}
+                        onClick={() => handleTabChange(tab.key)}
                         className={`px-5 py-2.5 rounded-full text-sm font-medium whitespace-nowrap transition-all duration-200 ${activeTab === tab.key
                             ? 'bg-orange-500 text-white shadow-md shadow-orange-500/20'
                             : 'bg-gray-100 text-gray-600 hover:bg-gray-200'

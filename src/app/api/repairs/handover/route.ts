@@ -5,6 +5,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 import type { RepairTicket } from '@/lib/types';
 import { calculateAndSaveCommissionsServer } from '@/lib/commissionCalcServer';
 import { REPAIR_STATUS, isSelectedRepairPart, isWarrantyEligibleRepairPart } from '@/lib/repairStatus';
+import { isInventoryConsumedRepairPart } from '@/lib/repairPartConsumption';
 import { getConfiguredWorkflow } from '@/lib/repairWorkflowConfig';
 import { fetchFifoLogsForDeduction, executeFifoDeductionsWrites, type FifoDeductionResult, type FifoDeductor } from '@/lib/inventoryFifo';
 import { incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
@@ -134,6 +135,9 @@ export async function POST(request: NextRequest) {
 
             // Check if any selected part missing priceConfirmedAt
             const selectedParts = (ticket.parts || []).filter(isSelectedRepairPart);
+            // Parts can be deducted when the repair is completed (before customer handover).
+            // Keep them in selectedParts for pricing/warranty, but never deduct inventory twice.
+            const partsToDeduct = selectedParts.filter((part) => !isInventoryConsumedRepairPart(part));
             const missingSnapshot = selectedParts.find(p => !p.priceConfirmedAt);
             if (missingSnapshot) {
                 throw new Error(`Linh kiá»‡n "${missingSnapshot.productName}" chÆ°a cĂ³ snapshot giĂ¡. YĂªu cáº§u quáº£n trá»‹ viĂªn Ä‘á»‘i soĂ¡t trÆ°á»›c khi bĂ n giao.`);
@@ -185,9 +189,9 @@ export async function POST(request: NextRequest) {
 
 
                 // Read products
-                if (selectedParts.length > 0) {
+                if (partsToDeduct.length > 0) {
                     const deductions: (FifoDeductor & { lotCode?: string })[] = [];
-                    for (const p of selectedParts) {
+                    for (const p of partsToDeduct) {
                         if (p.productId && !productDocs.has(p.productId)) {
                             const pRef = db.collection('products').doc(p.productId);
                             const pSnap = await tx.get(pRef);
@@ -228,7 +232,7 @@ export async function POST(request: NextRequest) {
             // --- END READ PHASE ---
 
             const partsToLog = !isWarranty
-                ? selectedParts.filter(part => part.productId && productDocs.has(part.productId))
+                ? partsToDeduct.filter(part => part.productId && productDocs.has(part.productId))
                 : [];
             const inventoryLogAllocations = await reserveSequentialDocumentIds(tx, db, {
                 collectionName: 'inventory_logs',
@@ -285,8 +289,8 @@ export async function POST(request: NextRequest) {
                 }
 
                 // Stock Deduction
-                if (selectedParts.length > 0) {
-                    for (const p of selectedParts) {
+                if (partsToDeduct.length > 0) {
+                    for (const p of partsToDeduct) {
                         if (!p.productId) continue;
                         const pData = productDocs.get(p.productId);
                         if (!pData) continue;

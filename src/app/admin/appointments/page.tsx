@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { collection, query, orderBy, doc, updateDoc, serverTimestamp, where, limit, startAfter, DocumentSnapshot, QuerySnapshot, DocumentData } from 'firebase/firestore';
 import { onSnapshot, getDocs } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
+import { appAlert } from '@/lib/appDialog';
 import {
     Clock,
     Search,
@@ -132,7 +133,7 @@ export default function AppointmentsPage() {
 
     const searchInDatabase = async () => {
         if (!searchQuery.trim()) {
-            alert('Vui lòng nhập số điện thoại hoặc tên để tìm trên máy chủ.');
+            await appAlert('Vui lòng nhập số điện thoại hoặc tên để tìm trên máy chủ.', { title: 'Thiếu thông tin tìm kiếm' });
             return;
         }
         setIsSearchingDB(true);
@@ -149,11 +150,11 @@ export default function AppointmentsPage() {
                     return [...prev, ...newItems];
                 });
             } else {
-                alert('Không tìm thấy dữ liệu trên máy chủ!');
+                await appAlert('Không tìm thấy dữ liệu trên máy chủ!', { title: 'Không tìm thấy dữ liệu' });
             }
         } catch (e) {
             console.error('Lỗi tìm kiếm DB', e);
-            alert('Lỗi tìm kiếm!');
+            await appAlert('Lỗi tìm kiếm!', { title: 'Tìm kiếm thất bại' });
         }
         setIsSearchingDB(false);
     };

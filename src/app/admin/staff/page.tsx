@@ -12,6 +12,11 @@ import { db } from '@/lib/firebase';
 import { AppUser } from '@/lib/AuthContext';
 import { toastError, toastSuccess } from '@/lib/toast';
 import { ADMIN_ROLE_PRESETS, PERMISSIONS_REGISTRY as PERMISSIONS } from '@/lib/adminModules';
+import {
+    CATALOG_FIELD_PERMISSION_GROUPS,
+    type CatalogFieldPermissions,
+    type CatalogPermissionScope,
+} from '@/lib/catalogEditPolicy';
 
 // Using centralized PERMISSIONS from @/lib/permissions
 export default function StaffPage() {
@@ -33,7 +38,8 @@ export default function StaffPage() {
         phone: '',
         password: '', // Only for creation
         role: 'staff',
-        permissions: [] as string[]
+        permissions: [] as string[],
+        catalogFieldPermissions: {} as CatalogFieldPermissions,
     });
 
     const [processing, setProcessing] = useState(false);
@@ -62,7 +68,8 @@ export default function StaffPage() {
             phone: '',
             password: '',
             role: 'staff',
-            permissions: []
+            permissions: [],
+            catalogFieldPermissions: {},
         });
         setEditingUser(null);
     };
@@ -76,7 +83,8 @@ export default function StaffPage() {
                 phone: user.phone || '',
                 password: '',
                 role: user.role,
-                permissions: user.permissions || []
+                permissions: user.permissions || [],
+                catalogFieldPermissions: user.catalogFieldPermissions || {},
             });
         } else {
             resetForm();
@@ -86,15 +94,35 @@ export default function StaffPage() {
 
     const togglePermission = (permId: string) => {
         setFormData(prev => {
-            const perms = prev.permissions.includes(permId)
+            const isRemoving = prev.permissions.includes(permId);
+            const perms = isRemoving
                 ? prev.permissions.filter(p => p !== permId)
                 : [...prev.permissions, permId];
-            return { ...prev, permissions: perms };
+            const group = CATALOG_FIELD_PERMISSION_GROUPS.find((item) => item.modulePermission === permId);
+            const catalogFieldPermissions = { ...prev.catalogFieldPermissions };
+            if (isRemoving && group) delete catalogFieldPermissions[group.scope];
+            return { ...prev, permissions: perms, catalogFieldPermissions };
         });
     };
 
     const applyPreset = (permissions: readonly string[]) => {
-        setFormData(prev => ({ ...prev, permissions: [...permissions] }));
+        setFormData(prev => ({ ...prev, permissions: [...permissions], catalogFieldPermissions: {} }));
+    };
+
+    const toggleCatalogFieldPermission = (scope: CatalogPermissionScope, field: string) => {
+        setFormData(prev => {
+            const current = prev.catalogFieldPermissions[scope] || [];
+            const next = current.includes(field)
+                ? current.filter((item) => item !== field)
+                : [...current, field];
+            return {
+                ...prev,
+                catalogFieldPermissions: {
+                    ...prev.catalogFieldPermissions,
+                    [scope]: next,
+                },
+            };
+        });
     };
 
     const isPresetSelected = (permissions: readonly string[]) => (
@@ -114,7 +142,8 @@ export default function StaffPage() {
                     displayName: formData.displayName,
                     phone: formData.phone,
                     role: formData.role,
-                    permissions: formData.permissions
+                    permissions: formData.permissions,
+                    catalogFieldPermissions: formData.catalogFieldPermissions,
                 });
                 toastSuccess('Cập nhật nhân viên thành công!');
             } else {
@@ -466,6 +495,9 @@ export default function StaffPage() {
                             {formData.role === 'staff' && (
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-3">Phân quyền</label>
+                                    <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+                                        Quyền chức năng cho phép nhân viên bổ sung trường đang thiếu. Muốn sửa dữ liệu đã có, admin cấp thêm từng trường ở phần bên dưới. Nguồn cung cấp chỉ điền một lần và số lượng tồn kho chỉ thay đổi qua nhập kho hoặc kiểm kê.
+                                    </p>
                                     <div className="mb-4">
                                         <div className="flex items-center justify-between gap-3 mb-2">
                                             <p className="text-sm font-medium text-gray-700">Preset vai trò</p>
@@ -520,6 +552,40 @@ export default function StaffPage() {
                                             </label>
                                         ))}
                                     </div>
+
+                                    {CATALOG_FIELD_PERMISSION_GROUPS.some((group) => formData.permissions.includes(group.modulePermission)) && (
+                                        <div className="mt-5 rounded-xl border border-blue-200 bg-blue-50/50 p-4">
+                                            <p className="text-sm font-semibold text-blue-900">Quyền sửa dữ liệu đã có</p>
+                                            <p className="mt-1 text-xs leading-5 text-blue-800">
+                                                Mặc định nhân viên chỉ bổ sung ô trống. Tick trường bên dưới để cho phép sửa cả dữ liệu đã có. Nguồn cung cấp và số lượng tồn kho không thể cấp quyền sửa.
+                                            </p>
+                                            <div className="mt-4 space-y-4">
+                                                {CATALOG_FIELD_PERMISSION_GROUPS
+                                                    .filter((group) => formData.permissions.includes(group.modulePermission))
+                                                    .map((group) => (
+                                                        <div key={group.scope} className="rounded-lg border border-blue-100 bg-white p-3">
+                                                            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-blue-800">{group.title}</p>
+                                                            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                                                {group.fields.map((field) => {
+                                                                    const checked = formData.catalogFieldPermissions[group.scope]?.includes(field.id) || false;
+                                                                    return (
+                                                                        <label key={field.id} className={`flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-2 text-sm transition-colors ${checked ? 'border-blue-300 bg-blue-50 text-blue-900' : 'border-gray-200 text-gray-700 hover:border-gray-300'}`}>
+                                                                            <input
+                                                                                type="checkbox"
+                                                                                checked={checked}
+                                                                                onChange={() => toggleCatalogFieldPermission(group.scope, field.id)}
+                                                                                className="h-4 w-4 accent-orange-500"
+                                                                            />
+                                                                            {field.label}
+                                                                        </label>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             )}
 

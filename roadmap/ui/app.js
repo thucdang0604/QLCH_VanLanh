@@ -865,13 +865,51 @@ function renderBug(id) {
             </div>
             
             <div style="margin-top: 30px;">
-                ${bug.status !== 'fixed' && bug.status !== 'verified' ? `<button class="btn" style="background:var(--success); border-color:var(--success);" onclick="alert('Tính năng cập nhật trạng thái sẽ tích hợp sau')">Đánh dấu đã Vá (Fixed)</button>` : `<div style="color:var(--success); font-weight:bold;">✅ Bug này đã được vá</div>`}
+                ${bug.status !== 'fixed' && bug.status !== 'verified' ? `<button class="btn" style="background:var(--success); border-color:var(--success);" onclick="showDashboardPopup('Tính năng cập nhật trạng thái sẽ tích hợp sau')">Đánh dấu đã Vá (Fixed)</button>` : `<div style="color:var(--success); font-weight:bold;">✅ Bug này đã được vá</div>`}
             </div>
         </div>
     `;
 
     content.innerHTML = html;
 }
+
+function showDashboardPopup(message) {
+    const existing = document.getElementById('dashboard-notice-popup');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'dashboard-notice-popup';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(15,23,42,.72);';
+
+    const panel = document.createElement('div');
+    panel.style.cssText = 'width:min(420px,100%);border:1px solid rgba(148,163,184,.35);border-radius:12px;background:#1e293b;color:#f8fafc;box-shadow:0 20px 50px rgba(0,0,0,.4);padding:24px;';
+    const title = document.createElement('h3');
+    title.textContent = 'Thông báo';
+    title.style.cssText = 'margin:0 0 12px;font-size:18px;';
+    const content = document.createElement('p');
+    content.textContent = message;
+    content.style.cssText = 'margin:0;line-height:1.6;color:#cbd5e1;white-space:pre-line;';
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;justify-content:flex-end;margin-top:22px;';
+    const closeButton = document.createElement('button');
+    closeButton.type = 'button';
+    closeButton.className = 'btn';
+    closeButton.textContent = 'Đã hiểu';
+    closeButton.style.cssText = 'background:var(--accent-color);border-color:var(--accent-color);';
+    closeButton.addEventListener('click', () => overlay.remove());
+
+    actions.appendChild(closeButton);
+    panel.append(title, content, actions);
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+    closeButton.focus();
+}
+
+// renderBug uses this from an inline click handler, so keep the function
+// explicitly available even if the dashboard script is later loaded as a module.
+window.showDashboardPopup = showDashboardPopup;
 
 // Render Bugs View
 function renderBugsView() {

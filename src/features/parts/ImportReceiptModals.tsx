@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type React from 'react';
 import { Building2, CheckCircle2, ChevronDown, Loader2, PackagePlus, Plus, Save, Search, Trash2 } from 'lucide-react';
 import { collection, doc, getDoc, getDocs, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
@@ -11,6 +11,7 @@ import Modal from '@/components/admin/Modal';
 import { db } from '@/lib/firebase';
 import type { Product } from '@/lib/types';
 import { normalizeDocId } from '@/lib/idNormalizer';
+import { appPrompt } from '@/lib/appDialog';
 import { buildProductCodeFromId } from '@/lib/productCodes';
 import { createProductWithCodes } from '@/lib/productCodeRegistry';
 import { buildInlineSupplierContactInput, buildSupplierContactDocumentFields, reserveSupplierDocumentId } from '@/lib/supplierDocumentIds';
@@ -378,9 +379,23 @@ interface CreateReceiptModalProps {
     suppliers: SupplierOption[];
     initialReceiptType?: 'component' | 'retail';
     lockReceiptType?: boolean;
+    outOfStockSuggestions?: (Product & { id: string })[];
+    isLoadingOutOfStockSuggestions?: boolean;
 }
 // Create Receipt Modal
-export function CreateReceiptModal({ isOpen, onClose, parts, retailProducts, onCreated, currentUser, suppliers, initialReceiptType = 'component', lockReceiptType = false }: CreateReceiptModalProps) {
+export function CreateReceiptModal({
+    isOpen,
+    onClose,
+    parts,
+    retailProducts,
+    onCreated,
+    currentUser,
+    suppliers,
+    initialReceiptType = 'component',
+    lockReceiptType = false,
+    outOfStockSuggestions = [],
+    isLoadingOutOfStockSuggestions = false,
+}: CreateReceiptModalProps) {
     const [search, setSearch] = useState('');
     const [items, setItems] = useState<ImportReceiptItem[]>([]);
     const [note, setNote] = useState('');
@@ -389,19 +404,32 @@ export function CreateReceiptModal({ isOpen, onClose, parts, retailProducts, onC
     // Per-item supplier dropdown state
     const [activeSupplierIdx, setActiveSupplierIdx] = useState<number | null>(null);
     const [itemSupplierSearch, setItemSupplierSearch] = useState('');
+    useEffect(() => {
+        if (!isOpen) return;
+        setReceiptType(initialReceiptType);
+        setSearch('');
+        setItems([]);
+        setNote('');
+        setActiveSupplierIdx(null);
+        setItemSupplierSearch('');
+    }, [initialReceiptType, isOpen]);
+
     const searchSource = receiptType === 'component' ? parts : (retailProducts || []);
+    const knownCatalogProducts = [...searchSource, ...outOfStockSuggestions];
     const filteredOptions = search.length > 1
         ? searchSource.filter((p: Product & { id: string }) => p.name.toLowerCase().includes(search.toLowerCase()))
         : [];
     const addItem = (part: Product & { id: string }) => {
-        if (items.find(i => i.productId === part.id)) return;
-        setItems([...items, {
+        setItems(currentItems => {
+            if (currentItems.some(item => item.productId === part.id)) return currentItems;
+            return [...currentItems, {
             productId: part.id,
             productName: part.name,
             quantity: 1,
             importPrice: part.costPrice || part.price_original || 0,
             quality: part.quality || 'Zin'
-        }]);
+            }];
+        });
         setSearch('');
     };
     const addCustomItem = async () => {
@@ -528,6 +556,56 @@ export function CreateReceiptModal({ isOpen, onClose, parts, retailProducts, onC
                         placeholder="Vd: Nhập hàng gấp cho iPhone 13"
                     />
                 </div>
+                <div className={`rounded-xl border p-4 ${receiptType === 'retail' ? 'border-blue-100 bg-blue-50/50' : 'border-orange-100 bg-orange-50/50'}`}>
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                        <div>
+                            <h4 className="text-sm font-semibold text-gray-800">
+                                {receiptType === 'retail' ? 'Gợi ý sản phẩm hết hàng' : 'Gợi ý linh kiện hết hàng'}
+                            </h4>
+                            <p className="mt-0.5 text-xs text-gray-500">Chọn nhanh các mặt hàng có tồn kho bằng 0 để thêm vào phiếu.</p>
+                        </div>
+                        {outOfStockSuggestions.length > 0 && (
+                            <span className={`rounded-full px-2 py-1 text-xs font-semibold ${receiptType === 'retail' ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'}`}>
+                                {outOfStockSuggestions.length}
+                            </span>
+                        )}
+                    </div>
+                    {isLoadingOutOfStockSuggestions ? (
+                        <div className="flex items-center gap-2 py-3 text-sm text-gray-500">
+                            <Loader2 size={16} className="animate-spin" /> Đang tải gợi ý hết hàng...
+                        </div>
+                    ) : outOfStockSuggestions.length > 0 ? (
+                        <div className="grid max-h-52 grid-cols-1 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+                            {outOfStockSuggestions.map((product) => {
+                                const isSelected = items.some(item => item.productId === product.id);
+                                return (
+                                    <button
+                                        key={product.id}
+                                        type="button"
+                                        onClick={() => addItem(product)}
+                                        aria-pressed={isSelected}
+                                        className={`flex min-w-0 items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors ${isSelected
+                                            ? receiptType === 'retail'
+                                                ? 'border-blue-300 bg-blue-100 text-blue-800'
+                                                : 'border-orange-300 bg-orange-100 text-orange-800'
+                                            : 'border-white bg-white text-gray-700 hover:border-gray-300 hover:shadow-sm'
+                                            }`}
+                                    >
+                                        <span className="min-w-0">
+                                            <span className="block truncate text-sm font-medium">{product.name}</span>
+                                            <span className="mt-0.5 block text-xs text-gray-500">Tồn kho: 0 · Giá nhập gần nhất: {new Intl.NumberFormat('vi-VN').format(product.costPrice || product.price_original || 0)}đ</span>
+                                        </span>
+                                        {isSelected
+                                            ? <CheckCircle2 size={18} className={receiptType === 'retail' ? 'shrink-0 text-blue-600' : 'shrink-0 text-orange-600'} />
+                                            : <Plus size={18} className="shrink-0 text-gray-400" />}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    ) : (
+                        <p className="py-2 text-sm text-gray-500">Không có mặt hàng hết tồn trong danh sách gợi ý. Bạn vẫn có thể tìm và thêm mặt hàng bên dưới.</p>
+                    )}
+                </div>
                 <div className="relative">
                     <label className="block text-sm font-medium text-gray-700 mb-1">{receiptType === 'retail' ? 'Tìm sản phẩm cần nhập' : 'Tìm linh kiện cần nhập'}</label>
                     <div className="relative">
@@ -586,7 +664,7 @@ export function CreateReceiptModal({ isOpen, onClose, parts, retailProducts, onC
                                         <tr key={idx}>
                                             <td className="px-4 py-3">
                                                 <p className="font-medium">{item.productName}</p>
-                                                {!parts.find((p) => p.id === item.productId && !p.isProposed) && <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">Mới</span>}
+                                                {!knownCatalogProducts.find((product) => product.id === item.productId && !product.isProposed) && <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">Mới</span>}
                                             </td>
                                             <td className="px-4 py-3">
                                                 <input
@@ -645,7 +723,7 @@ export function CreateReceiptModal({ isOpen, onClose, parts, retailProducts, onC
                                                                 onClick={async () => {
                                                                     const nm = (itemSupplierSearch || '').trim();
                                                                     try {
-                                                                        const contactValue = window.prompt('Nhap SDT, Zalo, Facebook hoac lien he khac cho NCC (co the bo trong):') || '';
+                                                                        const contactValue = await appPrompt('Nhập SĐT, Zalo, Facebook hoặc liên hệ khác cho nhà cung cấp (có thể bỏ trống):', { title: 'Thêm nhà cung cấp', placeholder: 'SĐT, Zalo hoặc Facebook' }) || '';
                                                                         const contactInput = buildInlineSupplierContactInput(nm, contactValue);
                                                                         const supplierId = await reserveSupplierDocumentId(contactInput);
                                                                         await setDoc(doc(db, 'suppliers', supplierId), {

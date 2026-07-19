@@ -60,6 +60,144 @@ service cloud.firestore {
           || request.resource.data.stock >= request.resource.data.held);
     }
 
+    function isNamedStaff() {
+      return isAuthenticated()
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'staff';
+    }
+
+    // Empty text/list values are incomplete. Numeric 0 and false are valid stored values.
+    function catalogValueIsMissing(data, field) {
+      return !(field in data)
+        || data[field] == null
+        || (data[field] is string && data[field].size() == 0)
+        || (data[field] is list && data[field].size() == 0);
+    }
+
+    function hasCatalogFieldGrant(scope, field) {
+      let currentUser = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return 'catalogFieldPermissions' in currentUser
+        && scope in currentUser.catalogFieldPermissions
+        && currentUser.catalogFieldPermissions[scope] is list
+        && currentUser.catalogFieldPermissions[scope].hasAny([field]);
+    }
+
+    function storedProductIsPart() {
+      return (('category' in resource.data)
+          && resource.data.category is string
+          && resource.data.category in ['component', 'Linh kiện', 'linh-kien'])
+        || (('categoryIds' in resource.data)
+          && resource.data.categoryIds is list
+          && resource.data.categoryIds.size() > 0
+          && resource.data.categoryIds[0] is string
+          && (resource.data.categoryIds[0] == 'component'
+            || resource.data.categoryIds[0].matches('^linh-kien.*')));
+    }
+
+    function hasProductFieldGrant(field) {
+      return (storedProductIsPart() && hasCatalogFieldGrant('parts', field))
+        || (!storedProductIsPart() && hasCatalogFieldGrant('products', field));
+    }
+
+    function staffCanChangeProductField(field) {
+      return catalogValueIsMissing(resource.data, field) || hasProductFieldGrant(field);
+    }
+
+    function staffCanChangeProductCategoryField(field) {
+      return catalogValueIsMissing(resource.data, field) || hasProductFieldGrant('categoryIds');
+    }
+
+    function staffCanChangeProductImageField(field) {
+      return catalogValueIsMissing(resource.data, field) || hasProductFieldGrant('images');
+    }
+
+    function staffCanChangeServiceField(field) {
+      return catalogValueIsMissing(resource.data, field) || hasCatalogFieldGrant('services', field);
+    }
+
+    function staffCanChangeServiceCategoryField(field) {
+      return catalogValueIsMissing(resource.data, field) || hasCatalogFieldGrant('services', 'categoryIds');
+    }
+
+    function staffCanChangeServiceImageField(field) {
+      return catalogValueIsMissing(resource.data, field) || hasCatalogFieldGrant('services', 'images');
+    }
+
+    function productSupplierIsUnchangedOrFilledOnce() {
+      let changed = request.resource.data.diff(resource.data).changedKeys();
+      return !changed.hasAny(['supplier'])
+        || (catalogValueIsMissing(resource.data, 'supplier')
+          && request.resource.data.supplier is string
+          && request.resource.data.supplier.size() > 0);
+    }
+
+    function productStockIsUnchanged() {
+      return !request.resource.data.diff(resource.data).changedKeys().hasAny(['stock']);
+    }
+
+    function staffProductUpdateIsAllowed() {
+      let changed = request.resource.data.diff(resource.data).changedKeys();
+      let editable = [
+        'name', 'price_original', 'price_promo', 'category', 'subCategory', 'categoryIds', 'brand',
+        'description', 'status', 'condition', 'isFlashSale', 'quality', 'partType', 'supplier',
+        'imageUrl', 'images', 'searchKeywords', 'searchCategoryKeywords', 'updatedAt', 'qrCodes'
+      ];
+      let sourceFields = [
+        'name', 'price_original', 'price_promo', 'category', 'subCategory', 'categoryIds', 'brand',
+        'description', 'status', 'condition', 'isFlashSale', 'quality', 'partType', 'supplier', 'imageUrl', 'images'
+      ];
+      return changed.hasOnly(editable)
+        && changed.hasAny(sourceFields)
+        && (!changed.hasAny(['name']) || staffCanChangeProductField('name'))
+        && (!changed.hasAny(['price_original']) || staffCanChangeProductField('price_original'))
+        && (!changed.hasAny(['price_promo']) || staffCanChangeProductField('price_promo'))
+        && (!changed.hasAny(['category']) || staffCanChangeProductCategoryField('category'))
+        && (!changed.hasAny(['subCategory']) || staffCanChangeProductCategoryField('subCategory'))
+        && (!changed.hasAny(['categoryIds']) || staffCanChangeProductCategoryField('categoryIds'))
+        && (!changed.hasAny(['brand']) || staffCanChangeProductField('brand'))
+        && (!changed.hasAny(['description']) || staffCanChangeProductField('description'))
+        && (!changed.hasAny(['status']) || staffCanChangeProductField('status'))
+        && (!changed.hasAny(['condition']) || staffCanChangeProductField('condition'))
+        && (!changed.hasAny(['isFlashSale']) || staffCanChangeProductField('isFlashSale'))
+        && (!changed.hasAny(['quality']) || staffCanChangeProductField('quality'))
+        && (!changed.hasAny(['partType']) || staffCanChangeProductField('partType'))
+        && (!changed.hasAny(['supplier']) || catalogValueIsMissing(resource.data, 'supplier'))
+        && (!changed.hasAny(['imageUrl']) || staffCanChangeProductImageField('imageUrl'))
+        && (!changed.hasAny(['images']) || staffCanChangeProductImageField('images'));
+    }
+
+    function staffServiceUpdateIsAllowed() {
+      let changed = request.resource.data.diff(resource.data).changedKeys();
+      let editable = [
+        'name', 'description', 'price_original', 'price_promo', 'hidePrice', 'device_model', 'category',
+        'categoryIds', 'linkedProductCategoryIds', 'recommendedPartCategoryIds', 'isActive', 'warranty_text',
+        'repair_time', 'seoDescription', 'tags', 'imageUrl', 'images', 'searchKeywords', 'updatedAt'
+      ];
+      let sourceFields = [
+        'name', 'description', 'price_original', 'price_promo', 'hidePrice', 'device_model', 'category',
+        'categoryIds', 'linkedProductCategoryIds', 'recommendedPartCategoryIds', 'isActive', 'warranty_text',
+        'repair_time', 'seoDescription', 'tags', 'imageUrl', 'images'
+      ];
+      return changed.hasOnly(editable)
+        && changed.hasAny(sourceFields)
+        && (!changed.hasAny(['name']) || staffCanChangeServiceField('name'))
+        && (!changed.hasAny(['description']) || staffCanChangeServiceField('description'))
+        && (!changed.hasAny(['price_original']) || staffCanChangeServiceField('price_original'))
+        && (!changed.hasAny(['price_promo']) || staffCanChangeServiceField('price_promo'))
+        && (!changed.hasAny(['hidePrice']) || staffCanChangeServiceField('hidePrice'))
+        && (!changed.hasAny(['device_model']) || staffCanChangeServiceField('device_model'))
+        && (!changed.hasAny(['category']) || staffCanChangeServiceCategoryField('category'))
+        && (!changed.hasAny(['categoryIds']) || staffCanChangeServiceCategoryField('categoryIds'))
+        && (!changed.hasAny(['linkedProductCategoryIds']) || staffCanChangeServiceField('linkedProductCategoryIds'))
+        && (!changed.hasAny(['recommendedPartCategoryIds']) || staffCanChangeServiceField('recommendedPartCategoryIds'))
+        && (!changed.hasAny(['isActive']) || staffCanChangeServiceField('isActive'))
+        && (!changed.hasAny(['warranty_text']) || staffCanChangeServiceField('warranty_text'))
+        && (!changed.hasAny(['repair_time']) || staffCanChangeServiceField('repair_time'))
+        && (!changed.hasAny(['seoDescription']) || staffCanChangeServiceField('seoDescription'))
+        && (!changed.hasAny(['tags']) || staffCanChangeServiceField('tags'))
+        && (!changed.hasAny(['imageUrl']) || staffCanChangeServiceImageField('imageUrl'))
+        && (!changed.hasAny(['images']) || staffCanChangeServiceImageField('images'));
+    }
+
     // Helper: Owner
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
@@ -69,11 +207,19 @@ service cloud.firestore {
     match /products/{productId} {
       allow read: if true;
       allow create: if productStockCoversHeld()
-        && (hasPermission('manage_products') || hasPermission('manage_inventory')
-          || (hasPermission('manage_repairs') && request.resource.data.isProposed == true && request.resource.data.stock == 0));
-      allow update: if (hasPermission('manage_products') || hasPermission('manage_inventory'))
-        && productStockCoversHeld();
-      allow delete: if hasPermission('manage_products') || hasPermission('manage_inventory');
+        && request.resource.data.stock == 0
+        && (isAdmin()
+          || ((hasPermission('manage_inventory') || hasPermission('manage_repairs'))
+            && request.resource.data.isProposed == true));
+      allow update: if productStockCoversHeld()
+        && productStockIsUnchanged()
+        && productSupplierIsUnchangedOrFilledOnce()
+        && (isAdmin()
+          || (isNamedStaff()
+            && ((storedProductIsPart() && hasPermission('manage_inventory'))
+              || (!storedProductIsPart() && hasPermission('manage_products')))
+            && staffProductUpdateIsAllowed()));
+      allow delete: if isAdmin();
     }
 
     // Unique product-code claims used by QR, barcode and SKU flows
@@ -86,7 +232,11 @@ service cloud.firestore {
     // Services - same
     match /services/{serviceId} {
       allow read: if true;
-      allow write: if hasPermission('manage_services');
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin()
+        || (isNamedStaff()
+          && hasPermission('manage_services')
+          && staffServiceUpdateIsAllowed());
     }
     
     // Articles - same

@@ -12,7 +12,6 @@ import {
     X,
     Clock,
     Shield,
-    Wrench,
     Star,
     ChevronLeft,
     ChevronRight,
@@ -20,6 +19,7 @@ import {
 import Image from 'next/image';
 import Link from 'next/link';
 import { useConfig } from '@/lib/ConfigContext';
+import CatalogImage from '@/components/customer/CatalogImage';
 import VideoEmbed from '@/components/VideoEmbed';
 
 export interface ServiceData {
@@ -227,21 +227,15 @@ export default function ServiceDetailClient({ service, variants = [] }: { servic
                 {/* Image */}
                 <div className="bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-100">
                     <div className="relative aspect-[16/10] bg-gray-100">
-                        {displayImage ? (
-                            <Image
-                                src={displayImage}
-                                alt={service.name}
-                                fill
-                                priority
-                                unoptimized
-                                className="object-cover"
-                                sizes="(max-width: 1024px) 100vw, 60vw"
-                            />
-                        ) : (
-                            <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-copper/10 to-copper/5">
-                                <Wrench size={64} className="text-copper/30" />
-                            </div>
-                        )}
+                        <CatalogImage
+                            src={displayImage}
+                            alt={service.name}
+                            sizes="(max-width: 1024px) 100vw, 60vw"
+                            priority
+                            unoptimized
+                            imageClassName="object-cover"
+                            logoClassName="h-full w-full object-contain p-8"
+                        />
                         {discount > 0 && (
                             <span className="absolute top-4 left-4 bg-accent text-white text-sm font-bold px-3 py-1.5 rounded-lg">
                                 -{discount}%

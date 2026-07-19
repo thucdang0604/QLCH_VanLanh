@@ -1,6 +1,5 @@
 'use client';
 
-import Image from 'next/image';
 import Link from 'next/link';
 import {
     Trash2,
@@ -12,6 +11,7 @@ import {
     Truck
 } from 'lucide-react';
 import { useCart } from '@/lib/CartContext';
+import CatalogImage from '@/components/customer/CatalogImage';
 import { SITE_URL } from "@/lib/constants";
 import { useState } from 'react';
 
@@ -103,18 +103,13 @@ export default function CartPage() {
                                 {/* Product Image */}
                                 <Link href={`/product/${item.id}`} className="flex-shrink-0">
                                     <div className="relative w-24 h-24 md:w-32 md:h-32 rounded-lg overflow-hidden border bg-white">
-                                        {item.image ? (
-                                            <Image
-                                                src={item.image}
-                                                alt={item.name}
-                                                fill
-                                                className="object-cover p-1"
-                                            />
-                                        ) : (
-                                            <div className="w-full h-full flex items-center justify-center bg-gray-50">
-                                                <ShoppingBag size={32} className="text-gray-300" />
-                                            </div>
-                                        )}
+                                        <CatalogImage
+                                            src={item.image}
+                                            alt={item.name}
+                                            sizes="(max-width: 768px) 96px, 128px"
+                                            imageClassName="object-cover p-1"
+                                            logoClassName="h-full w-full object-contain p-3"
+                                        />
                                     </div>
                                 </Link>
 

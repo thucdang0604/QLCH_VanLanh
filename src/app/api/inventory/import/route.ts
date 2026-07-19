@@ -9,7 +9,7 @@ import { REPAIR_PART_STATUS, isRepairPartStatus, isSelectedRepairPart } from '@/
 import { buildReactivateOnImportUpdate } from '@/lib/productLifecycle';
 import { applyProductImport, assertStockCoversHeld, planRepairImportAllocation } from '@/lib/inventoryImportAllocation';
 import { incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
-import { reserveSequentialDocumentIds } from '@/lib/serverDocumentIds';
+import { reserveSequentialDocumentIdGroups } from '@/lib/serverDocumentIds';
 
 type RepairLine = NonNullable<RepairTicket['parts']>[number];
 type ReceiptItem = ImportReceiptItem & {
@@ -94,13 +94,69 @@ function normalizeImportPaymentMethod(value: unknown): ImportPaymentMethod {
 }
 
 export async function POST(request: NextRequest) {
+    const startedAt = Date.now();
+    const debugTiming: Record<string, unknown> = {};
+    let lastRequestMark = startedAt;
+    let actionForTiming = '';
+    let receiptIdForTiming = '';
+    const markRequest = (key: string) => {
+        const now = Date.now();
+        debugTiming[key] = now - lastRequestMark;
+        lastRequestMark = now;
+    };
+    const transactionAttempts: Array<{ attempt: number; steps: Record<string, number>; callbackMs: number }> = [];
+    let activeTransactionAttempt: { attempt: number; startedAt: number; lastMark: number; steps: Record<string, number> } | null = null;
+    const beginTransactionAttempt = () => {
+        const now = Date.now();
+        activeTransactionAttempt = {
+            attempt: transactionAttempts.length + 1,
+            startedAt: now,
+            lastMark: now,
+            steps: {},
+        };
+    };
+    const markTransaction = (key: string) => {
+        if (!activeTransactionAttempt) return;
+        const now = Date.now();
+        activeTransactionAttempt.steps[key] = now - activeTransactionAttempt.lastMark;
+        activeTransactionAttempt.lastMark = now;
+    };
+    const recordTransactionDuration = (key: string, duration: number) => {
+        if (!activeTransactionAttempt) return;
+        activeTransactionAttempt.steps[key] = duration;
+    };
+    const finishTransactionAttempt = () => {
+        if (!activeTransactionAttempt) return;
+        transactionAttempts.push({
+            attempt: activeTransactionAttempt.attempt,
+            steps: activeTransactionAttempt.steps,
+            callbackMs: Date.now() - activeTransactionAttempt.startedAt,
+        });
+        activeTransactionAttempt = null;
+    };
+    const logTiming = (outcome: 'success' | 'error') => {
+        debugTiming.action = actionForTiming || 'unknown';
+        debugTiming.receiptId = receiptIdForTiming || 'unknown';
+        debugTiming.transactionAttempts = transactionAttempts;
+        debugTiming.transactionAttemptCount = transactionAttempts.length;
+        debugTiming.transactionSteps = transactionAttempts.at(-1)?.steps || {};
+        debugTiming.total = Date.now() - startedAt;
+        console.warn(`Inventory import API timing (${outcome})`, debugTiming);
+    };
     try {
-        const caller = await requirePermission(request, 'manage_inventory');
+        const caller = await requirePermission(request, 'manage_inventory', (authSteps) => {
+            debugTiming.authSteps = authSteps;
+        });
+        markRequest('auth');
 
         const body = await request.json();
         const { action, receiptId, receiptVersion, idempotencyKey } = body;
+        actionForTiming = typeof action === 'string' ? action : '';
+        receiptIdForTiming = typeof receiptId === 'string' ? receiptId : '';
+        markRequest('parseBody');
 
         if (!action || !receiptId) {
+            logTiming('success');
             return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
         }
         const operationType = `inventory_import_${action}`;
@@ -111,9 +167,15 @@ export async function POST(request: NextRequest) {
         const db = getAdminDb();
 
         const result = await db.runTransaction(async (tx) => {
-            if (idempotencyKey) {
-                const opRef = db.collection('operation_requests').doc(idempotencyKey);
-                const opSnap = await tx.get(opRef);
+            beginTransactionAttempt();
+            try {
+            const receiptRef = db.collection('import_receipts').doc(receiptId);
+            const operationRef = idempotencyKey ? db.collection('operation_requests').doc(idempotencyKey) : null;
+            let receiptSnap: FirebaseFirestore.DocumentSnapshot;
+
+            if (operationRef) {
+                const [opSnap, loadedReceiptSnap] = await tx.getAll(operationRef, receiptRef);
+                receiptSnap = loadedReceiptSnap;
                 if (opSnap.exists) {
                     const data = opSnap.data();
                     if (data?.status === 'completed') {
@@ -124,13 +186,14 @@ export async function POST(request: NextRequest) {
                         ) {
                             throw new Error('Idempotency key da duoc dung cho thao tac khac.');
                         }
+                        markTransaction('readCoreDocuments');
                         return { success: true, fromCache: true };
                     }
                 }
+            } else {
+                receiptSnap = await tx.get(receiptRef);
             }
-
-            const receiptRef = db.collection('import_receipts').doc(receiptId);
-            const receiptSnap = await tx.get(receiptRef);
+            markTransaction('readCoreDocuments');
 
             if (!receiptSnap.exists) {
                 throw new Error('Phiếu nhập không tồn tại.');
@@ -187,6 +250,7 @@ export async function POST(request: NextRequest) {
                     updatedAt: FieldValue.serverTimestamp(),
                 });
 
+                markTransaction('patchItem');
                 return { success: true, items, totalAmount, version: (receipt.version || 0) + 1 };
             }
 
@@ -201,14 +265,117 @@ export async function POST(request: NextRequest) {
                 }
             }
 
+            const relatedProductRefs = Array.from(relatedProductIds, (productId) => ({
+                id: productId,
+                ref: db.collection('products').doc(productId),
+            }));
+            const relatedTicketRefs = Array.from(relatedTicketIds, (ticketId) => ({
+                id: ticketId,
+                ref: db.collection('repairs').doc(ticketId),
+            }));
+            const relatedDocumentRefs = [...relatedProductRefs, ...relatedTicketRefs];
+            const relatedDocumentSnapshotsPromise = relatedDocumentRefs.length > 0
+                ? tx.getAll(...relatedDocumentRefs.map((entry) => entry.ref))
+                : Promise.resolve([]);
             const pSnaps = new Map<string, FirebaseFirestore.DocumentSnapshot>();
-            for (const pid of relatedProductIds) {
-                pSnaps.set(pid, await tx.get(db.collection('products').doc(pid)));
+            const tSnaps = new Map<string, FirebaseFirestore.DocumentSnapshot>();
+            let relatedDocumentsLoaded = false;
+            const loadRelatedDocuments = async () => {
+                if (relatedDocumentsLoaded) return;
+                const snapshots = await relatedDocumentSnapshotsPromise;
+                snapshots.forEach((snapshot, index) => {
+                    const relatedRef = relatedDocumentRefs[index];
+                    if (index < relatedProductRefs.length) {
+                        pSnaps.set(relatedRef.id, snapshot);
+                    } else {
+                        tSnaps.set(relatedRef.id, snapshot);
+                    }
+                });
+                relatedDocumentsLoaded = true;
+                markTransaction('readRelatedDocuments');
+            };
+
+            const prepareCompletionReservation = () => {
+                    const newParts = body.newParts || {};
+                    const paymentMethod = requestedPaymentMethod;
+                    if (!paymentMethod) {
+                        throw new Error('Phương thức thanh toán phiếu nhập không hợp lệ.');
+                    }
+                    if (receipt.status !== 'ordered') {
+                        throw new Error('Chỉ có thể hoàn tất phiếu nhập ở trạng thái đã đặt hàng.');
+                    }
+
+                    const missingSupplier = (receipt.items || []).filter((item) => item.status !== 'unavailable' && !item.supplier && !item.supplierId && !receipt.supplierId);
+                    if (missingSupplier.length > 0) {
+                        throw new Error('Thiếu nhà cung cấp. Vui lòng gán nhà cung cấp cho tất cả linh kiện cần nhập.');
+                    }
+
+                    const completedReceiptItems = (receipt.items || []).map((item) =>
+                        item.status === 'unavailable' ? item : validateImportItemValues(item),
+                    );
+                    const importedItems = completedReceiptItems.filter((item): item is ValidatedReceiptItem => item.status !== 'unavailable');
+                    if (importedItems.length === 0) {
+                        throw new Error('Không có linh kiện nào để nhập kho (tất cả đều không khả dụng).');
+                    }
+
+                    const totalAmount = calculateImportTotal(importedItems);
+                    const newProductPartKeys = importedItems
+                        .map((item) => item.productId ? '' : (item.productId || item.partLineId || ''))
+                        .filter((partKey) => partKey && newParts?.[partKey]);
+                    const uniqueNewProductPartKeys = [...new Set(newProductPartKeys)];
+                    const debtBySupplier = new Map<string, number>();
+                    if (paymentMethod === 'debt') {
+                        for (const item of importedItems) {
+                            const supplierId = item.supplierId || receipt.supplierId;
+                            if (!supplierId) {
+                                throw new Error(`Không thể ghi công nợ: Sản phẩm "${item.productName}" chưa được gán Nhà cung cấp hợp lệ từ hệ thống.`);
+                            }
+                            const itemTotal = (item.importPrice || 0) * item.quantity;
+                            debtBySupplier.set(supplierId, (debtBySupplier.get(supplierId) || 0) + itemTotal);
+                        }
+                    }
+
+                    const reserveIdsStartedAt = Date.now();
+                    const reservedIdGroupsPromise = reserveSequentialDocumentIdGroups(tx, db, [
+                        {
+                            key: 'newProducts',
+                            collectionName: 'products',
+                            prefix: receipt.receiptType === 'retail' ? 'SP' : 'LK',
+                            count: uniqueNewProductPartKeys.length,
+                        },
+                        { key: 'lots', collectionName: 'inventory_lots', prefix: 'LOT', count: importedItems.length },
+                        { key: 'inventoryLogs', collectionName: 'inventory_logs', prefix: 'IL', count: importedItems.length },
+                        { key: 'supplierTransactions', collectionName: 'supplier_transactions', prefix: 'ST', count: debtBySupplier.size },
+                        { key: 'expense', collectionName: 'expenses', prefix: 'CP', count: paymentMethod === 'debt' ? 0 : 1 },
+                    ]);
+
+                return {
+                    newParts,
+                    paymentMethod,
+                    completedReceiptItems,
+                    importedItems,
+                    totalAmount,
+                    uniqueNewProductPartKeys,
+                    debtBySupplier,
+                    reserveIdsStartedAt,
+                    reservedIdGroupsPromise,
+                };
+            };
+            let completionReservation: ReturnType<typeof prepareCompletionReservation> | null = null;
+            try {
+                if (action === 'complete_import') {
+                    completionReservation = prepareCompletionReservation();
+                }
+            } catch (error) {
+                await relatedDocumentSnapshotsPromise.catch(() => undefined);
+                throw error;
             }
 
-            const tSnaps = new Map<string, FirebaseFirestore.DocumentSnapshot>();
-            for (const tid of relatedTicketIds) {
-                tSnaps.set(tid, await tx.get(db.collection('repairs').doc(tid)));
+            try {
+                await loadRelatedDocuments();
+            } catch (error) {
+                await completionReservation?.reservedIdGroupsPromise.catch(() => undefined);
+                throw error;
             }
 
             const pendingTicketUpdates = new Map<string, RepairUpdateData>();
@@ -341,71 +508,33 @@ export async function POST(request: NextRequest) {
                     });
                 }
             } else if (action === 'complete_import') {
-                const { newParts = {} } = body;
-                const paymentMethod = requestedPaymentMethod;
-
-                if (receipt.status !== 'ordered') {
-                    throw new Error('Chỉ có thể hoàn tất phiếu nhập ở trạng thái đã đặt hàng.');
+                const completion = completionReservation;
+                if (!completion) {
+                    throw new Error('Không thể khởi tạo dữ liệu nhập kho.');
                 }
+                const {
+                    newParts,
+                    paymentMethod,
+                    completedReceiptItems,
+                    importedItems,
+                    totalAmount,
+                    uniqueNewProductPartKeys,
+                    debtBySupplier,
+                    reserveIdsStartedAt,
+                    reservedIdGroupsPromise,
+                } = completion;
+                const reservedIdGroups = await reservedIdGroupsPromise;
+                markTransaction('reserveIdsWait');
+                recordTransactionDuration('reserveIdsTotal', Date.now() - reserveIdsStartedAt);
 
-                const missingSupplier = (receipt.items || []).filter((item) => item.status !== 'unavailable' && !item.supplier && !item.supplierId && !receipt.supplierId);
-                if (missingSupplier.length > 0) {
-                    throw new Error('Thiếu nhà cung cấp. Vui lòng gán nhà cung cấp cho tất cả linh kiện cần nhập.');
-                }
-
-                // Calculate actual imported items
-                const completedReceiptItems = (receipt.items || []).map((item) =>
-                    item.status === 'unavailable' ? item : validateImportItemValues(item),
-                );
-                const importedItems = completedReceiptItems.filter((i): i is ValidatedReceiptItem => i.status !== 'unavailable');
-                if (importedItems.length === 0) {
-                    throw new Error('Không có linh kiện nào để nhập kho (tất cả đều không khả dụng).');
-                }
-
-                const totalAmount = calculateImportTotal(importedItems);
-                const newProductPartKeys = importedItems
-                    .map((item) => item.productId ? '' : (item.productId || item.partLineId || ''))
-                    .filter((partKey) => partKey && newParts?.[partKey]);
-                const uniqueNewProductPartKeys = [...new Set(newProductPartKeys)];
-                const newProductAllocations = await reserveSequentialDocumentIds(tx, db, {
-                    collectionName: 'products',
-                    prefix: receipt.receiptType === 'retail' ? 'SP' : 'LK',
-                    count: uniqueNewProductPartKeys.length,
-                });
+                const newProductAllocations = reservedIdGroups.get('newProducts') || [];
+                const lotAllocations = reservedIdGroups.get('lots') || [];
+                const inventoryLogAllocations = reservedIdGroups.get('inventoryLogs') || [];
+                const supplierTransactionAllocations = reservedIdGroups.get('supplierTransactions') || [];
+                const expenseAllocations = reservedIdGroups.get('expense') || [];
                 const newProductIdsByPartKey = new Map<string, string>();
                 uniqueNewProductPartKeys.forEach((partKey, index) => {
                     newProductIdsByPartKey.set(partKey, newProductAllocations[index].id);
-                });
-                const lotAllocations = await reserveSequentialDocumentIds(tx, db, {
-                    collectionName: 'inventory_lots',
-                    prefix: 'LOT',
-                    count: importedItems.length,
-                });
-                const inventoryLogAllocations = await reserveSequentialDocumentIds(tx, db, {
-                    collectionName: 'inventory_logs',
-                    prefix: 'IL',
-                    count: importedItems.length,
-                });
-                const debtBySupplier = new Map<string, number>();
-                if (paymentMethod === 'debt') {
-                    for (const item of importedItems) {
-                        const sId = item.supplierId || receipt.supplierId;
-                        if (!sId) {
-                            throw new Error(`KhĂ´ng thá»ƒ ghi cĂ´ng ná»£: Sáº£n pháº©m "${item.productName}" chÆ°a Ä‘Æ°á»£c gĂ¡n NhĂ  cung cáº¥p há»£p lá»‡ tá»« há»‡ thá»‘ng.`);
-                        }
-                        const itemTotal = (item.importPrice || 0) * item.quantity;
-                        debtBySupplier.set(sId, (debtBySupplier.get(sId) || 0) + itemTotal);
-                    }
-                }
-                const supplierTransactionAllocations = await reserveSequentialDocumentIds(tx, db, {
-                    collectionName: 'supplier_transactions',
-                    prefix: 'ST',
-                    count: debtBySupplier.size,
-                });
-                const expenseAllocations = await reserveSequentialDocumentIds(tx, db, {
-                    collectionName: 'expenses',
-                    prefix: 'CP',
-                    count: paymentMethod === 'debt' ? 0 : 1,
                 });
 
                 const lotCode = 'PN-' + new Date().toISOString().slice(2, 7).replace('-', '') + '-' + Math.floor(1000 + Math.random() * 9000);
@@ -523,7 +652,10 @@ export async function POST(request: NextRequest) {
                     updateData.productCode = productCode;
                     updateData.qrCodes = [productCode];
 
-                    if (newParts && newParts[partKey]) {
+                    // Only a brand-new product or an explicit proposed catalog record
+                    // may receive catalog details from the "new item" form. A stale
+                    // client preview must never overwrite a confirmed product.
+                    if ((workingProduct.isNew || pData.isProposed === true) && newParts && newParts[partKey]) {
                         const info = newParts[partKey];
                         const categoryIds = Array.isArray(info.categoryIds)
                             ? info.categoryIds.filter((value: unknown) => typeof value === 'string' && value.trim())
@@ -705,6 +837,7 @@ export async function POST(request: NextRequest) {
                 throw new Error('Action không hợp lệ.');
             }
 
+            markTransaction('actionAndWrites');
             // Apply all pending ticket updates
             for (const [tid, updateData] of pendingTicketUpdates.entries()) {
                 tx.update(db.collection('repairs').doc(tid), updateData);
@@ -720,11 +853,19 @@ export async function POST(request: NextRequest) {
                 });
             }
 
+            markTransaction('queueFinalWrites');
             return generatedLotsToReturn ? { success: true, generatedLots: generatedLotsToReturn } : { success: true };
+            } finally {
+                finishTransactionAttempt();
+            }
         });
 
+        markRequest('transaction');
+        logTiming('success');
         return NextResponse.json(result);
     } catch (error: unknown) {
+        finishTransactionAttempt();
+        logTiming('error');
         console.error('Inventory import API error:', error);
         const message = errorMessage(error);
         return NextResponse.json(

@@ -5,6 +5,7 @@ import { FieldValue, type DocumentReference } from 'firebase-admin/firestore';
 import type { FirestoreDateValue, RepairTicket } from '@/lib/types';
 import { loadRepairWorkflow, requireWorkflowNode } from '@/lib/repairWorkflowServer';
 import { REPAIR_PART_STATUS, isSelectedRepairPart } from '@/lib/repairStatus';
+import { findSelectedRepairPartIndex, increaseSelectedRepairPartQuantity } from '@/lib/repairPartSelection';
 import { randomUUID } from 'crypto';
 import { reserveSequentialDocumentId, type ReservedSequentialDocumentId } from '@/lib/serverDocumentIds';
 
@@ -189,19 +190,28 @@ export async function POST(request: NextRequest) {
 
                     updateProductHeld(productId, quantity);
 
-                    parts.push({
-                        partLineId: randomUUID(),
-                        productId,
-                        productName: String(pData.name || 'Unknown'),
-                        quantity,
-                        reservedQuantity: quantity,
-                        status: REPAIR_PART_STATUS.SELECTED,
-                        quality: String(pData.quality || ''),
-                        partType: getProductPartType(pData),
-                        unitPriceAtUse: Number(pData.price_promo) || Number(pData.price_original) || 0,
-                        unitCostAtUse: Number(pData.costPrice) || 0,
-                        priceConfirmedAt: arrayTimestampValue()
-                    });
+                    const existingSelectedPartIndex = findSelectedRepairPartIndex(parts, productId);
+                    if (existingSelectedPartIndex >= 0) {
+                        // Repeated selection remains one repair line. The original price snapshot is retained.
+                        parts[existingSelectedPartIndex] = increaseSelectedRepairPartQuantity(
+                            parts[existingSelectedPartIndex],
+                            quantity,
+                        );
+                    } else {
+                        parts.push({
+                            partLineId: randomUUID(),
+                            productId,
+                            productName: String(pData.name || 'Unknown'),
+                            quantity,
+                            reservedQuantity: quantity,
+                            status: REPAIR_PART_STATUS.SELECTED,
+                            quality: String(pData.quality || ''),
+                            partType: getProductPartType(pData),
+                            unitPriceAtUse: Number(pData.price_promo) || Number(pData.price_original) || 0,
+                            unitCostAtUse: Number(pData.costPrice) || 0,
+                            priceConfirmedAt: arrayTimestampValue()
+                        });
+                    }
 
                     if (!partsLockedAt) {
                         partsLockedAt = documentTimestampValue();

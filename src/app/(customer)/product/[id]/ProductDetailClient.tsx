@@ -11,13 +11,13 @@ import {
     RefreshCw,
     Minus,
     Plus,
-    Package,
     Calendar,
     Wrench,
     Star,
     MessageSquare,
 } from 'lucide-react';
 import VideoEmbed from '@/components/VideoEmbed';
+import CatalogImage from '@/components/customer/CatalogImage';
 import { useCart } from '@/lib/CartContext';
 
 // Format price to VND
@@ -106,20 +106,14 @@ export default function ProductDetailClient({ data, variants = [] }: ProductDeta
             {/* Product Gallery */}
             <div className="space-y-4">
                 <div className="relative aspect-square rounded-xl overflow-hidden bg-gray-50 border">
-                    {images.length > 0 ? (
-                        <Image
-                            src={images[activeImage]}
-                            alt={data.name ?? 'Sản phẩm'}
-                            fill
-                            className="object-contain p-4"
-                            priority
-                        />
-                    ) : (
-                        <div className="w-full h-full flex flex-col items-center justify-center text-gray-300">
-                            {isService ? <Wrench size={64} /> : <Package size={64} />}
-                            <span className="mt-2 text-sm">Chưa có ảnh</span>
-                        </div>
-                    )}
+                    <CatalogImage
+                        src={images[activeImage]}
+                        alt={data.name ?? 'Sản phẩm'}
+                        sizes="(max-width: 1024px) 100vw, 50vw"
+                        priority
+                        imageClassName="object-contain p-4"
+                        logoClassName="h-full w-full object-contain p-8"
+                    />
                 </div>
 
                 {images.length > 1 && (

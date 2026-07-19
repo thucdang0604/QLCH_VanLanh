@@ -1,7 +1,6 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import Image from 'next/image';
 import Link from 'next/link';
 import { getApps, initializeApp } from 'firebase/app';
 import { getAuth, onAuthStateChanged, type Auth, type User as FirebaseUser } from 'firebase/auth';
@@ -21,6 +20,7 @@ import {
     Trash2
 } from 'lucide-react';
 import { useCart } from '@/lib/CartContext';
+import CatalogImage from '@/components/customer/CatalogImage';
 import { SITE_URL } from "@/lib/constants";
 
 const formatPrice = (price: number) =>
@@ -291,13 +291,13 @@ export default function CheckoutPage() {
                                 {cartItems.map((item) => (
                                     <div key={item.id} className="flex gap-3 p-3 bg-gray-50 rounded-xl relative group">
                                         <div className="relative w-16 h-16 md:w-20 md:h-20 rounded-lg overflow-hidden flex-shrink-0 bg-white border">
-                                            {item.image ? (
-                                                <Image src={item.image} alt={item.name} fill className="object-cover p-1" />
-                                            ) : (
-                                                <div className="w-full h-full flex items-center justify-center bg-gray-50">
-                                                    <ShoppingBag size={24} className="text-gray-300" />
-                                                </div>
-                                            )}
+                                            <CatalogImage
+                                                src={item.image}
+                                                alt={item.name}
+                                                sizes="(max-width: 80px) 100vw, 80px"
+                                                imageClassName="object-cover p-1"
+                                                logoClassName="h-full w-full object-contain p-2"
+                                            />
                                         </div>
                                         <div className="flex-1 min-w-0 flex flex-col justify-between">
                                             <div className="pr-8">

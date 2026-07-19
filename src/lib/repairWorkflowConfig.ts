@@ -11,15 +11,15 @@ const REQUIRED_REPAIR_FEATURES: Record<string, string[]> = {
     bao_tinh_trang_va_gia: ['allowPartsSelection'],
     dang_tim_linh_kien: ['allowPartsSelection'],
     da_dat_linh_kien: ['requirePartsReady'],
-    dang_sua_chua: ['requireTechnicianNote'],
-    cho_ban_giao_khach: ['requirePaymentGate'],
+    dang_sua_chua: ['requireTechnicianNote', 'reserveSelectedParts'],
+    cho_ban_giao_khach: ['requirePaymentGate', 'consumeSelectedParts'],
     done: ['enableTechnicianCommission', 'enableSellerCommission'],
 };
 
 const REQUIRED_WARRANTY_FEATURES: Record<string, string[]> = {
     bh_tiep_nhan: ['allowAssignTech', 'requireAssignedTechnician'],
     bh_dang_kiem_tra: ['requireChecklist', 'requireTechnicianNote'],
-    bh_dang_sua: ['allowPartsSelection'],
+    bh_dang_sua: ['allowPartsSelection', 'reserveSelectedParts'],
     bh_refund: ['enableTechnicianCommission'],
 };
 
@@ -66,6 +66,25 @@ export function getConfiguredWorkflow(
     return ticketType === 'warranty'
         ? normalizeWarrantyWorkflow(settings.warrantyStatuses)
         : normalizeRepairWorkflow(settings.repairStatuses);
+}
+
+/**
+ * Resolves only real, configured outgoing transitions for a workflow node.
+ * Invalid, duplicate and self-referential IDs are ignored defensively so the UI
+ * can never offer a transition back to the ticket's current status.
+ */
+export function getAllowedNextWorkflowNodes(
+    workflow: WorkflowNode[],
+    currentStatusId: string,
+): WorkflowNode[] {
+    const currentNode = workflow.find((node) => node.id === currentStatusId);
+    if (!currentNode) return [];
+
+    const nodesById = new Map(workflow.map((node) => [node.id, node]));
+    return unique(currentNode.allowedNext)
+        .filter((nextId) => nextId !== currentStatusId)
+        .map((nextId) => nodesById.get(nextId))
+        .filter((node): node is WorkflowNode => Boolean(node));
 }
 
 export function validateWorkflow(workflow: WorkflowNode[], name: string): string[] {
