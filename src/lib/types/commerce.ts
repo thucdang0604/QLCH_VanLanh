@@ -78,6 +78,7 @@ export interface Order {
     status: 'Pending' | 'Confirmed' | 'Shipping' | 'Completed' | 'Cancelled';
     is_vat_exported: boolean;
     payment_method?: 'COD' | 'Bank' | 'Momo' | 'Card' | 'Installment' | 'Debt' | 'QR';
+    deposit_payment_method?: 'CASH' | 'BANK' | 'MOMO' | 'QR' | 'CARD';
     paymentStatus?: 'paid' | 'unpaid' | 'debt' | 'refunded';
     shippingFee?: number;
     linkedRepairIds?: string[];

@@ -184,7 +184,10 @@ export default function RevenuePage() {
         const load = async () => {
             setLoading(true);
             const { from, to } = getDateRange();
-            const canUseAggregates = isAggregateRangeAvailable(from);
+            // Khoảng mới vẫn đọc chứng từ gốc để số thực thu phản ánh ngay cả dữ liệu
+            // đã được tạo trước khi aggregate được sửa. Khoảng dài hơn dùng aggregate.
+            const rangeDays = Math.ceil((to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24));
+            const canUseAggregates = isAggregateRangeAvailable(from) && rangeDays > 32;
 
             const loadSourceCollections = async () => {
                 const diffTime = to.getTime() - from.getTime();
@@ -659,12 +662,12 @@ export default function RevenuePage() {
                 <div className="bg-gradient-to-br from-green-500 to-emerald-600 rounded-2xl p-5 text-white shadow-lg shadow-green-200/50 flex flex-col justify-between">
                     <div>
                         <div className="flex items-center gap-2 text-green-100 text-sm mb-1">
-                            <ArrowUpRight size={18} /> THỰC THU
+                            <ArrowUpRight size={18} /> THỰC THU (ĐÃ NHẬN)
                         </div>
                         <p className="text-3xl font-bold">{formatPrice(calculations.totalRevenue)}</p>
                         {calculations.debtRevenue > 0 && (
                             <p className="text-sm text-orange-200 mt-1 font-medium border-t border-white/20 pt-1">
-                                + Ghi nợ: {formatPrice(calculations.debtRevenue)}
+                                Còn phải thu (ghi nợ): {formatPrice(calculations.debtRevenue)}
                             </p>
                         )}
                     </div>

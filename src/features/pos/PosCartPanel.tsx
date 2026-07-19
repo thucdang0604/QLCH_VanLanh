@@ -55,6 +55,8 @@ interface PosCartPanelProps {
     setDiscount: Dispatch<SetStateAction<number>>;
     paymentMethod: string;
     setPaymentMethod: (value: string) => void;
+    depositPaymentMethod: string;
+    setDepositPaymentMethod: (value: string) => void;
     discount: number;
     voucherCode: string;
     setVoucherCode: (value: string) => void;
@@ -110,6 +112,8 @@ export function PosCartPanel({
     setDiscount,
     paymentMethod,
     setPaymentMethod,
+    depositPaymentMethod,
+    setDepositPaymentMethod,
     discount,
     voucherCode,
     setVoucherCode,
@@ -169,7 +173,10 @@ export function PosCartPanel({
     const hasStoredContactDetails = Boolean(
         customerId.trim() || customerZalo.trim() || customerFacebook.trim() || customerOtherContact.trim()
     );
-    const requiresCashierShift = ['cash', 'bank', 'momo'].includes(paymentMethod)
+    const receivedPaymentMethod = paymentMethod === 'debt' && deposit > 0
+        ? depositPaymentMethod
+        : paymentMethod;
+    const requiresCashierShift = ['cash', 'bank', 'momo'].includes(receivedPaymentMethod)
         && cart.length > 0
         && total > 0;
     const missingCashierShift = requiresCashierShift && !cashierShiftOpen;
@@ -622,6 +629,27 @@ export function PosCartPanel({
                         </button>
                     ))}
                 </div>
+                {paymentMethod === 'debt' && deposit > 0 && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-2">
+                        <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-amber-800">Kênh tiền đã nhận</p>
+                        <div className="grid grid-cols-2 gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setDepositPaymentMethod('cash')}
+                                className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${depositPaymentMethod === 'cash' ? 'bg-amber-500 text-white shadow-sm' : 'bg-white text-amber-800 ring-1 ring-amber-200 hover:bg-amber-100'}`}
+                            >
+                                <Banknote size={15} /> Tiền mặt
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setDepositPaymentMethod('bank')}
+                                className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${depositPaymentMethod === 'bank' ? 'bg-amber-500 text-white shadow-sm' : 'bg-white text-amber-800 ring-1 ring-amber-200 hover:bg-amber-100'}`}
+                            >
+                                <CreditCard size={15} /> Chuyển khoản/QR
+                            </button>
+                        </div>
+                    </div>
+                )}
                 <label className="block rounded-lg border border-orange-200 bg-orange-50/60 p-2">
                     <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-orange-700">Khách đưa</span>
                     <CurrencyInput
@@ -686,7 +714,7 @@ export function PosCartPanel({
                         <span>{formatPrice(total)}</span>
                     </div>
                     {selectedDebtTotal > 0 && <div className="flex justify-between text-amber-600"><span>Thu nợ đã chọn</span><span>{formatPrice(selectedDebtTotal)}</span></div>}
-                    {deposit > 0 && <div className="flex justify-between text-blue-600 pt-1"><span>Đã nhận</span><span>{formatPrice(deposit)}</span></div>}
+                    {deposit > 0 && <div className="flex justify-between text-blue-600 pt-1"><span>Đã nhận ({receivedPaymentMethod === 'cash' ? 'tiền mặt' : 'chuyển khoản/QR'})</span><span>{formatPrice(deposit)}</span></div>}
                     {selectedDebtCovered > 0 && <div className="flex justify-between text-amber-700"><span>Đã phân bổ thu nợ</span><span>{formatPrice(selectedDebtCovered)}</span></div>}
                     {autoDebtOffset > 0 && <div className="flex justify-between text-blue-700"><span>Cấn nợ cũ</span><span>{formatPrice(autoDebtOffset)}</span></div>}
                     {deposit > 0 && remainingCurrentPayment > 0 && <div className="flex justify-between font-bold text-red-600 pt-1"><span>CÒN LẠI</span><span>{formatPrice(remainingCurrentPayment)}</span></div>}

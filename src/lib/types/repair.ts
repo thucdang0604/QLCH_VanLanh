@@ -155,6 +155,8 @@ export interface RepairTicket {
         quality: string;
         quantity: number;
         reservedQuantity?: number; // Số lượng đã giữ trong kho cho dòng sửa chữa
+        /** Time this line was converted from a stock hold to actual stock usage. */
+        inventoryDeductedAt?: FirestoreDateValue;
         partType?: string;  // Loại linh kiện: Màn hình, Pin, Camera, Mainboard…
         // Legacy unit price (backward-compat)
         price?: number;
@@ -195,6 +197,11 @@ export interface RepairTicket {
         giftItems?: GiftItem[];  // Danh sách sản phẩm quà tặng đã chọn
         amount: number;       // Auto = partsCost + laborCost + additionalFees - discountAmount
         depositAmount: number;
+        method?: string;
+        paidAt?: FirestoreDateValue;
+        /** Hóa đơn POS đang quản lý phần công nợ còn lại của phiếu. */
+        outstandingOrderId?: string;
+        outstandingAmount?: number;
     };
     paymentHistory?: PaymentHistoryEntry[];
     staff: {

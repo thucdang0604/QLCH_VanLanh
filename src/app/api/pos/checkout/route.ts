@@ -135,6 +135,14 @@ function getRepairPaymentAmount(ticket: RepairTicket, ticketId: string): number 
     return amount;
 }
 
+function getRepairPaidAmount(ticket: RepairTicket): number {
+    const paidFromHistory = (ticket.paymentHistory || []).reduce((sum, payment) => {
+        const amount = Math.max(0, Number(payment.amount) || 0);
+        return payment.type === 'refund' ? sum - amount : sum + amount;
+    }, 0);
+    return Math.max(0, Math.max(Number(ticket.payment?.depositAmount) || 0, paidFromHistory));
+}
+
 export async function POST(request: NextRequest) {
     const startedAt = Date.now();
     const debugTiming: Record<string, unknown> = {};
@@ -192,7 +200,7 @@ export async function POST(request: NextRequest) {
         markTiming('auth');
 
         const body = await request.json();
-        const { idempotencyKey, repairTicketId, repairTicketIds, customer_info, items, discount_amount, total_amount, deposit_amount, payment_method, voucherCode, use_surplus_to_pay_debt, cashierShiftId } = body;
+        const { idempotencyKey, repairTicketId, repairTicketIds, customer_info, items, discount_amount, total_amount, deposit_amount, deposit_payment_method, payment_method, voucherCode, use_surplus_to_pay_debt, cashierShiftId } = body;
         markTiming('parseBody');
 
         if (!Array.isArray(items) || items.length === 0) {
@@ -513,13 +521,20 @@ export async function POST(request: NextRequest) {
             const currentOrderTotal = Math.max(0, discountableSubtotal - serverDiscount);
             const serverTotal = currentOrderTotal + orderPaymentSubtotal;
             const isDebtCollectionOnly = orderPaymentSubtotal > 0 && discountableSubtotal === 0;
-            const hasRepairPayment = normalizedItems.some(item => item.isRepairTicket);
             const paymentMethodCode = String(payment_method || 'CASH').toUpperCase();
             // If payment method is not DEBT, and deposit is not provided/0, treat as fully paid for the whole POS receipt.
             const paymentReceived = (paymentMethodCode !== 'DEBT' && submittedDepositAmount === 0)
                 ? serverTotal
                 : submittedDepositAmount;
             const paidNow = !isDebtCollectionOnly ? Math.min(paymentReceived, currentOrderTotal) : 0;
+            const depositPaymentMethodCode = String(deposit_payment_method || '').trim().toUpperCase();
+            const receivedPaymentMethodCode = paymentMethodCode === 'DEBT' && paidNow > 0
+                ? depositPaymentMethodCode
+                : paymentMethodCode;
+
+            if (paymentMethodCode === 'DEBT' && paidNow > 0 && !['CASH', 'BANK', 'MOMO', 'QR', 'CARD'].includes(receivedPaymentMethodCode)) {
+                throw new Error('Vui lòng chọn kênh tiền mặt hoặc chuyển khoản/QR cho khoản khách đã đưa.');
+            }
 
             if (paymentMethodCode === 'DEBT' && orderPaymentSubtotal > 0 && discountableSubtotal > 0) {
                 throw new Error('Vui lòng tách thu nợ đơn cũ và bán hàng mới thành 2 lần thanh toán riêng.');
@@ -528,13 +543,6 @@ export async function POST(request: NextRequest) {
                 throw new Error('Không áp dụng voucher cho khoản thu nợ đơn cũ.');
             }
 
-            // ── Voucher Validation for POS ──
-            if (hasRepairPayment && !['CASH', 'BANK', 'MOMO'].includes(paymentMethodCode)) {
-                throw new Error('Thanh toán phiếu sửa chữa phải thu ngay bằng tiền mặt, chuyển khoản hoặc ví.');
-            }
-            if (hasRepairPayment && paidNow + 1 < currentOrderTotal) {
-                throw new Error(`Thanh toán phiếu sửa chữa còn thiếu ${(currentOrderTotal - paidNow).toLocaleString('vi-VN')}đ. Vui lòng thu đủ trước khi hoàn tất.`);
-            }
             markTransaction('normalizeTotals');
 
             let voucherRef: FirebaseFirestore.DocumentReference | null = null;
@@ -612,6 +620,9 @@ export async function POST(request: NextRequest) {
                 const repairTicket = repairDoc.snap.data() as RepairTicket;
                 if (repairTicket.payment?.status === 'paid') {
                     throw new Error(`Phieu sua chua #${id.slice(-6)} da thanh toan.`);
+                }
+                if (repairTicket.payment?.outstandingOrderId) {
+                    throw new Error(`Phieu sua chua #${id.slice(-6)} da co hoa don ghi no. Vui long thu no tren hoa don da tao de tranh thu trung.`);
                 }
                 const expectedAmount = getRepairPaymentAmount(repairTicket, id);
                 if (Math.abs(requestedAmount - expectedAmount) > 1) {
@@ -719,7 +730,33 @@ export async function POST(request: NextRequest) {
 
             const orderPaymentTotal = Array.from(orderPaymentTotals.values()).reduce((sum, amount) => sum + amount, 0);
             const updatedOrderIds = Array.from(orderPaymentTotals.keys());
-            const cashierShiftChannel = getCashierShiftChannel(paymentMethodCode);
+            const settledRepairRefs = new Map<string, { orderId: string; ref: FirebaseFirestore.DocumentReference }>();
+            for (const [id, paymentAmount] of orderPaymentTotals.entries()) {
+                const orderPaymentDoc = orderPaymentDocs.get(id);
+                const orderData = orderPaymentDoc?.snap.data() || {};
+                const totalOrderAmount = Number(orderData.total_amount) || 0;
+                const paidAfter = Math.min(totalOrderAmount, getPaidAmount(orderData) + paymentAmount);
+                if (paidAfter + 1 < totalOrderAmount) continue;
+
+                for (const repairId of Array.isArray(orderData.repairTicketIds) ? orderData.repairTicketIds : []) {
+                    const normalizedRepairId = readString(repairId);
+                    if (!normalizedRepairId) continue;
+                    settledRepairRefs.set(normalizedRepairId, {
+                        orderId: id,
+                        ref: db.collection('repairs').doc(normalizedRepairId),
+                    });
+                }
+            }
+            const settledRepairSnapshots = settledRepairRefs.size > 0
+                ? await tx.getAll(...Array.from(settledRepairRefs.values()).map(entry => entry.ref))
+                : [];
+            const settledRepairDocs = new Map<string, { orderId: string; ticket: RepairTicket }>();
+            settledRepairSnapshots.forEach((snapshot, index) => {
+                if (!snapshot.exists) return;
+                const entry = Array.from(settledRepairRefs.values())[index];
+                settledRepairDocs.set(snapshot.id, { orderId: entry.orderId, ticket: snapshot.data() as RepairTicket });
+            });
+            const cashierShiftChannel = getCashierShiftChannel(receivedPaymentMethodCode);
             const cashierShiftCollectedAmount = cashierShiftChannel === 'none'
                 ? 0
                 : (paidNow + orderPaymentTotal);
@@ -825,6 +862,18 @@ export async function POST(request: NextRequest) {
             });
             const stockProductIds = new Set([...preAggregatedForStock.keys(), ...repairAggregatedForStock.keys()]);
             const newDebt = !isDebtCollectionOnly ? Math.max(0, currentOrderTotal - paidNow) : 0;
+            const retailItemsForPayment = normalizedItems.filter((item) => !item.isRepairTicket && !item.isOrderPayment);
+            const retailSubtotalForPayment = retailItemsForPayment.reduce((sum, item) => sum + item.price * item.quantity, 0);
+            const retailDiscountForPayment = Math.min(serverDiscount, retailSubtotalForPayment);
+            const retailTotalForPayment = Math.max(0, retailSubtotalForPayment - retailDiscountForPayment);
+            const paidRetailNow = Math.min(paidNow, retailTotalForPayment);
+            let remainingPaymentForRepairs = Math.max(0, paidNow - paidRetailNow);
+            const repairPaidNowById = new Map<string, number>();
+            for (const [id, repairPrice] of repairPaymentTotals.entries()) {
+                const paidForRepair = Math.min(repairPrice, remainingPaymentForRepairs);
+                repairPaidNowById.set(id, paidForRepair);
+                remainingPaymentForRepairs -= paidForRepair;
+            }
             const isDebt = paymentMethodCode === 'DEBT' || newDebt > 0;
             const existingCustomerContactMethods = getCustomerContactMethodsFromData(custSnap?.data());
             const hasIncomingDebtSafeContact = hasDebtSafeContact(incomingContactMethods);
@@ -925,18 +974,20 @@ export async function POST(request: NextRequest) {
                 orderPaymentIds: Array.from(orderPaymentTotals.keys()),
                 is_vat_exported: false,
                 payment_method: payment_method || 'CASH',
+                ...(paymentMethodCode === 'DEBT' && paidNow > 0 ? { deposit_payment_method: receivedPaymentMethodCode } : {}),
                 paymentStatus: newDebt > 0 ? 'debt' : 'paid',
                 createdAt: FieldValue.serverTimestamp(),
                 updatedAt: FieldValue.serverTimestamp(),
                 completedAt: FieldValue.serverTimestamp(),
-                paymentHistory: [{
+                paymentHistory: paidNow > 0 ? [{
                     type: newDebt > 0 ? 'deposit' : 'full',
                     amount: Math.min(paidNow, currentOrderTotal),
+                    method: receivedPaymentMethodCode,
                     timestamp: Date.now(),
                     note: newDebt > 0
                         ? `Thanh toán một phần POS (${paidNow.toLocaleString('vi-VN')}đ) — nợ lại ${newDebt.toLocaleString('vi-VN')}đ — ${payment_method}`
                         : `Thanh toán POS — ${payment_method}`
-                }],
+                }] : [],
                 createdBy: caller.uid,
                 createdByName
             };
@@ -993,6 +1044,9 @@ export async function POST(request: NextRequest) {
             // ==========================================
 
             const checkoutWarnings: string[] = [];
+            if (repairPaymentTotals.size > 0 && newDebt > 0) {
+                checkoutWarnings.push(`Phiếu sửa chữa đã được hoàn tất với thực thu ${paidNow.toLocaleString('vi-VN')}đ; còn ghi nợ ${newDebt.toLocaleString('vi-VN')}đ.`);
+            }
 
             if (!isPending && fifoDeductors.length > 0) {
                 fifoResultsMap = executeFifoDeductionsWrites(tx, fifoDeductors, fifoLogsDataMap);
@@ -1078,34 +1132,33 @@ export async function POST(request: NextRequest) {
             }
             const revenueDeltas: RevenueAggregateDelta[] = [];
             if (!isDebtCollectionOnly && !isPending) {
-                const retailItems = normalizedItems.filter((item) => !item.isRepairTicket && !item.isOrderPayment);
-                const retailSubtotal = retailItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
-                const retailDiscount = Math.min(serverDiscount, retailSubtotal);
-                const retailTotal = Math.max(0, retailSubtotal - retailDiscount);
-                const repairRevenue = Array.from(repairPaymentTotals.values()).reduce((sum, amount) => sum + amount, 0);
+                const repairRevenue = Array.from(repairPaidNowById.values()).reduce((sum, amount) => sum + amount, 0);
+                const repairDebt = Array.from(repairPaymentTotals.entries())
+                    .reduce((sum, [id, amount]) => sum + Math.max(0, amount - (repairPaidNowById.get(id) || 0)), 0);
 
-                if (retailItems.length > 0) {
+                if (retailItemsForPayment.length > 0) {
                     revenueDeltas.push(buildCompletedOrderRevenueDelta({
                             id: orderId,
                             ...order,
-                            items: retailItems,
-                            subtotal_amount: retailSubtotal,
-                            discount_amount: retailDiscount,
-                            total_amount: retailTotal,
-                            paymentHistory: retailTotal > 0 ? [{
-                                type: 'full',
-                                amount: retailTotal,
-                                method: payment_method || 'CASH',
+                            items: retailItemsForPayment,
+                            subtotal_amount: retailSubtotalForPayment,
+                            discount_amount: retailDiscountForPayment,
+                            total_amount: retailTotalForPayment,
+                            paymentStatus: paidRetailNow + 1 < retailTotalForPayment ? 'debt' : 'paid',
+                            paymentHistory: paidRetailNow > 0 ? [{
+                                type: paidRetailNow + 1 < retailTotalForPayment ? 'deposit' : 'full',
+                                amount: paidRetailNow,
+                                method: receivedPaymentMethodCode,
                                 timestamp: Date.now(),
-                                note: `Doanh thu POS retail - ${payment_method || 'CASH'}`
+                                note: `Doanh thu POS retail thực thu - ${payment_method || 'CASH'}`
                             }] : [],
                         } as unknown as Order));
                 }
-                if (repairRevenue > 0) {
+                if (repairRevenue > 0 || repairDebt > 0) {
                     const repairCount = Array.from(repairCompletionTargets.values())
                         .filter(target => target.shouldCountCompletion)
                         .length;
-                    revenueDeltas.push({ repairRevenue, repairCount });
+                    revenueDeltas.push({ repairRevenue, debtRevenue: repairDebt, repairCount });
                 }
             }
             if (!isPending && orderPaymentTotal > 0) {
@@ -1118,7 +1171,7 @@ export async function POST(request: NextRequest) {
                 }
                 revenueDeltas.push({
                     orderRevenue: orderPaymentTotal,
-                    ...buildPaymentChannelRevenueDelta(orderPaymentTotal, payment_method || paymentMethodCode),
+                    ...buildPaymentChannelRevenueDelta(orderPaymentTotal, receivedPaymentMethodCode),
                     posOrderRevenue: debtCollectionPosRevenue,
                     webOrderRevenue: debtCollectionWebRevenue,
                 });
@@ -1134,7 +1187,7 @@ export async function POST(request: NextRequest) {
                         shiftId: cashierShiftRef.id,
                         operationKey: readString(idempotencyKey) || orderId || debtPaymentReferenceId,
                         orderId: isDebtCollectionOnly ? debtPaymentReferenceId : orderId,
-                        paymentMethod: paymentMethodCode,
+                        paymentMethod: receivedPaymentMethodCode,
                         cashAmount: cashierShiftChannel === 'cash' ? cashierShiftCollectedAmount : 0,
                         bankAmount: cashierShiftChannel === 'bank' ? cashierShiftCollectedAmount : 0,
                         actorId: caller.uid,
@@ -1145,7 +1198,7 @@ export async function POST(request: NextRequest) {
                             ? { cashSalesAmount: FieldValue.increment(cashierShiftCollectedAmount) }
                             : { bankSalesAmount: FieldValue.increment(cashierShiftCollectedAmount) }),
                         lastPaymentAmount: cashierShiftCollectedAmount,
-                        lastPaymentMethod: paymentMethodCode,
+                        lastPaymentMethod: receivedPaymentMethodCode,
                         lastOrderId: isDebtCollectionOnly ? debtPaymentReferenceId : orderId,
                         lastPaymentAt: FieldValue.serverTimestamp(),
                         updatedAt: FieldValue.serverTimestamp(),
@@ -1269,12 +1322,23 @@ export async function POST(request: NextRequest) {
                     const completionTarget = repairCompletionTargets.get(id);
                     if (!repairDoc) continue;
                     if (!completionTarget) continue;
+                    const repairPaidNow = repairPaidNowById.get(id) || 0;
+                    const repairDebt = Math.max(0, repairPrice - repairPaidNow);
+                    const isRepairFullyPaid = repairDebt <= 1;
                     tx.update(repairDoc.ref, {
-                        'payment.status': 'paid',
+                        'payment.status': isRepairFullyPaid ? 'paid' : 'pay_later',
                         status: completionTarget.targetStatus,
-                        'payment.method': payment_method || 'CASH',
+                        'payment.method': repairPaidNow > 0 ? receivedPaymentMethodCode : paymentMethodCode,
                         'payment.amount': repairPrice,
-                        'payment.paidAt': FieldValue.serverTimestamp(),
+                        'payment.depositAmount': repairPaidNow,
+                        ...(isRepairFullyPaid ? {
+                            'payment.paidAt': FieldValue.serverTimestamp(),
+                            'payment.outstandingOrderId': FieldValue.delete(),
+                            'payment.outstandingAmount': 0,
+                        } : {
+                            'payment.outstandingOrderId': orderId,
+                            'payment.outstandingAmount': repairDebt,
+                        }),
                         completedAt: FieldValue.serverTimestamp(),
                         'timing.completedAt': FieldValue.serverTimestamp(),
                         updatedAt: FieldValue.serverTimestamp(),
@@ -1290,15 +1354,19 @@ export async function POST(request: NextRequest) {
                             toStatus: completionTarget.targetStatus,
                             source: 'pos',
                             requestId: idempotencyKey || null,
-                            note: `Thanh toán POS #${orderId.slice(-6)}`
+                            note: isRepairFullyPaid
+                                ? `Thanh toán POS #${orderId.slice(-6)}`
+                                : `Hoàn tất sửa chữa, thực thu ${repairPaidNow.toLocaleString('vi-VN')}đ; ghi nợ ${repairDebt.toLocaleString('vi-VN')}đ qua POS #${orderId.slice(-6)}`
                         }),
-                        paymentHistory: FieldValue.arrayUnion({
+                        ...(repairPaidNow > 0 ? { paymentHistory: FieldValue.arrayUnion({
                             type: 'full',
-                            amount: repairPrice,
-                            method: payment_method || 'CASH',
+                            amount: repairPaidNow,
+                            method: receivedPaymentMethodCode,
                             timestamp: Date.now(),
-                            note: `Thanh toán gộp hóa đơn POS #${orderId.slice(-6)}`
-                        })
+                            note: isRepairFullyPaid
+                                ? `Thanh toán gộp hóa đơn POS #${orderId.slice(-6)}`
+                                : `Thanh toán một phần POS #${orderId.slice(-6)}; còn nợ ${repairDebt.toLocaleString('vi-VN')}đ`
+                        }) } : {})
                     });
                 }
             }
@@ -1339,6 +1407,33 @@ export async function POST(request: NextRequest) {
                             remainingAfter: remainingAfterPayment,
                             note: `Thu nợ tại POS lần ${paymentIndex}: ${paymentAmount.toLocaleString('vi-VN')}đ`
                         })
+                    });
+                }
+
+                for (const [repairId, settlement] of settledRepairDocs.entries()) {
+                    const outstandingOrderId = settlement.ticket.payment?.outstandingOrderId;
+                    if (outstandingOrderId !== settlement.orderId) continue;
+
+                    const repairAmount = getRepairPaymentAmount(settlement.ticket, repairId);
+                    const paidBefore = getRepairPaidAmount(settlement.ticket);
+                    const remainingRepairDebt = Math.max(0, repairAmount - paidBefore);
+                    tx.update(db.collection('repairs').doc(repairId), {
+                        'payment.status': 'paid',
+                        'payment.depositAmount': repairAmount,
+                        'payment.paidAt': FieldValue.serverTimestamp(),
+                        'payment.outstandingOrderId': FieldValue.delete(),
+                        'payment.outstandingAmount': 0,
+                        updatedAt: FieldValue.serverTimestamp(),
+                        ...(remainingRepairDebt > 0 ? {
+                            paymentHistory: FieldValue.arrayUnion({
+                                type: 'debt_payment',
+                                amount: remainingRepairDebt,
+                                method: payment_method || 'CASH',
+                                timestamp: Date.now(),
+                                referenceId: idempotencyKey || null,
+                                note: `Thu nợ hóa đơn POS #${settlement.orderId.slice(-6)}`,
+                            }),
+                        } : {}),
                     });
                 }
 
