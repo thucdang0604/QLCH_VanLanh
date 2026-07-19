@@ -11,11 +11,13 @@ import {
     type StoreBranch
 } from '@/lib/ConfigContext';
 import MediaManager from '@/components/admin/MediaManager';
+import HomepageLayoutStudio from '@/components/admin/appearance/HomepageLayoutStudio';
+import { updateHomepageLayoutProfile } from '@/lib/homeLayoutProfiles';
 import {
     Palette, Type, LayoutDashboard, Save, Loader2,
     Trash2, Plus, GripVertical, Eye, EyeOff, ArrowUp, ArrowDown,
     CheckCircle2, AlertCircle, X, RotateCcw, MapPin, Edit2, ImageIcon, Star,
-    ExternalLink, SlidersHorizontal
+    ExternalLink, SlidersHorizontal, ChevronDown, ChevronUp
 } from 'lucide-react';
 
 // ========= Toast =========
@@ -35,15 +37,15 @@ function Toast({ message, variant = 'success', onClose }: { message: string; var
 // ========= Section Card =========
 function SectionCard({ id, title, description, icon, children }: { id?: string; title: string; description?: string; icon: React.ReactNode; children: React.ReactNode }) {
     return (
-        <section id={id} className="scroll-mt-6 bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
-            <div className="px-6 py-4 bg-gray-50 border-b flex items-center gap-3">
-                <span className="rounded-lg bg-orange-100 p-2 text-orange-600">{icon}</span>
+        <section id={id} className="scroll-mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white">
+            <div className="flex items-center gap-2.5 border-b border-slate-100 bg-slate-50 px-4 py-3">
+                <span className="rounded-md bg-orange-100 p-1.5 text-orange-600">{icon}</span>
                 <div>
                     <h3 className="font-semibold text-gray-800">{title}</h3>
                     {description && <p className="mt-0.5 text-xs text-gray-500">{description}</p>}
                 </div>
             </div>
-            <div className="p-6">{children}</div>
+            <div className="p-4 sm:p-5">{children}</div>
         </section>
     );
 }
@@ -52,7 +54,7 @@ function SectionCard({ id, title, description, icon, children }: { id?: string; 
 function SaveBtn({ onClick, saving, label = 'Lưu' }: { onClick: () => void; saving: boolean; label?: string }) {
     return (
         <div className="mt-4 flex justify-end">
-            <button onClick={onClick} disabled={saving} className="flex items-center gap-2 px-5 py-2.5 bg-orange-500 text-white rounded-lg hover:bg-orange-600 disabled:opacity-50 transition-colors">
+            <button onClick={onClick} disabled={saving} className="flex items-center gap-2 rounded-lg bg-orange-500 px-4 py-2 text-sm text-white transition-colors hover:bg-orange-600 disabled:opacity-50">
                 {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
                 {label}
             </button>
@@ -80,6 +82,7 @@ export default function AdminAppearancePage() {
     const [toast, setToast] = useState<{ message: string; variant: 'success' | 'error' } | null>(null);
     const [mediaOpen, setMediaOpen] = useState(false);
     const [mediaTarget, setMediaTarget] = useState<string | null>(null);
+    const [expandedHomeSectionId, setExpandedHomeSectionId] = useState<string | null>(null);
 
     const [editBranch, setEditBranch] = useState<StoreBranch | null>(null);
     const [branchForm, setBranchForm] = useState({ name: '', address: '', phone: '', mapLink: '' });
@@ -92,20 +95,37 @@ export default function AdminAppearancePage() {
     const showToast = (message: string, variant: 'success' | 'error' = 'success') => setToast({ message, variant });
 
     const save = async (partial: Partial<SiteConfig>, msg: string) => {
-        if (saving) return;
+        if (saving) return false;
         setSaving(true);
         try {
             // Strip undefined values to prevent Firebase "Unsupported field value: undefined" errors
             const cleanPartial = JSON.parse(JSON.stringify(partial));
             await updateConfig(cleanPartial);
             showToast(msg);
+            return true;
         }
         catch (error) {
             console.error(error);
             showToast(error instanceof Error ? `Không thể lưu: ${error.message}` : 'Không thể lưu thay đổi. Vui lòng thử lại.', 'error');
+            return false;
         } finally {
             setSaving(false);
         }
+    };
+
+    const savePublishedHomeSections = (homeSections: SiteConfig['homeSections'], msg: string) => {
+        const activeProfileId = local.activeLayoutProfileId;
+        const activeProfile = local.layoutProfiles?.find((profile) => profile.id === activeProfileId);
+        const layoutProfiles = activeProfile
+            ? local.layoutProfiles?.map((profile) => profile.id === activeProfile.id
+                ? updateHomepageLayoutProfile(profile, homeSections)
+                : profile)
+            : local.layoutProfiles;
+
+        return save({
+            homeSections,
+            ...(layoutProfiles ? { layoutProfiles } : {}),
+        }, msg);
     };
 
     const saveAllHomepageSettings = () => save({
@@ -259,9 +279,9 @@ export default function AdminAppearancePage() {
             />
 
             {/* Page Header */}
-            <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-700 px-5 py-6 text-white sm:px-7">
-                    <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+            <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+                <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-700 px-5 py-4 text-white sm:px-6">
+                    <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                         <div>
                             <div className="mb-2 flex items-center gap-2 text-sm font-medium text-orange-200">
                                 <SlidersHorizontal size={16} /> Trang chủ
@@ -291,14 +311,14 @@ export default function AdminAppearancePage() {
                         </div>
                     </div>
                 </div>
-                <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-7">
+                <div className="flex flex-col gap-2 px-5 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
                     <div className={`inline-flex w-fit items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold ${isDirty ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-700'}`}>
                         {isDirty ? <AlertCircle size={14} /> : <CheckCircle2 size={14} />}
                         {isDirty ? 'Có thay đổi chưa lưu' : 'Tất cả thay đổi đã được lưu'}
                     </div>
                     <p className="text-xs text-gray-500">Đang hiển thị <strong className="text-gray-700">{visibleSectionCount}/{local.homeSections.length}</strong> khối trên trang chủ · <strong className="text-gray-700">{local.hero_banners.length}</strong> banner</p>
                 </div>
-                <nav aria-label="Đi đến khu vực cấu hình" className="flex gap-2 overflow-x-auto border-t border-slate-100 px-5 py-3 sm:px-7">
+                <nav aria-label="Đi đến khu vực cấu hình" className="flex gap-2 overflow-x-auto border-t border-slate-100 px-5 py-2.5 sm:px-6">
                     {[
                         ['#theme', 'Màu sắc'], ['#brand', 'Thương hiệu'], ['#banners', 'Banner'], ['#pricing', 'Bảng giá'], ['#reviews', 'Review'], ['#layout', 'Bố cục'],
                     ].map(([href, label]) => (
@@ -309,25 +329,25 @@ export default function AdminAppearancePage() {
 
             {/* 1. Theme Color */}
             <SectionCard id="theme" title="Màu chủ đạo" description="Màu thương hiệu áp dụng cho nút, liên kết và các điểm nhấn." icon={<Palette size={20} />}>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">Màu chính</label>
                         <div className="flex items-center gap-3">
-                            <input type="color" title="Chọn màu chính" value={local.primaryColor} onChange={(e) => handlePrimaryColorChange(e.target.value)} className="w-12 h-12 rounded-lg cursor-pointer border-2 border-gray-200" />
+                            <input type="color" title="Chọn màu chính" value={local.primaryColor} onChange={(e) => handlePrimaryColorChange(e.target.value)} className="h-10 w-10 cursor-pointer rounded-md border border-gray-200" />
                             <input type="text" title="Nhập màu chính" value={local.primaryColor} onChange={(e) => handlePrimaryColorChange(e.target.value)} className="w-28 px-3 py-2 border rounded-lg text-sm font-mono" />
                         </div>
                     </div>
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">Màu tối (auto)</label>
                         <div className="flex items-center gap-3">
-                            <div title="Màu tối" className="w-12 h-12 rounded-lg border-2 border-gray-200" style={{ backgroundColor: local.primaryColorDark }} />
+                            <div title="Màu tối" className="h-10 w-10 rounded-md border border-gray-200" style={{ backgroundColor: local.primaryColorDark }} />
                             <span className="text-sm font-mono text-gray-500">{local.primaryColorDark}</span>
                         </div>
                     </div>
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">Màu sáng (auto)</label>
                         <div className="flex items-center gap-3">
-                            <div title="Màu sáng" className="w-12 h-12 rounded-lg border-2 border-gray-200" style={{ backgroundColor: local.primaryColorLight }} />
+                            <div title="Màu sáng" className="h-10 w-10 rounded-md border border-gray-200" style={{ backgroundColor: local.primaryColorLight }} />
                             <span className="text-sm font-mono text-gray-500">{local.primaryColorLight}</span>
                         </div>
                     </div>
@@ -365,8 +385,8 @@ export default function AdminAppearancePage() {
                 <p className="text-sm text-gray-500 mb-4">Logo hiển thị và màu nền chính của thanh tiêu đề.</p>
                 <div className="space-y-4">
                     {local.logoUrl ? (
-                        <div className="flex items-center gap-4 p-4 border rounded-lg bg-gray-50">
-                            <img src={local.logoUrl} alt="Logo preview" className="h-12 object-contain rounded" />
+                        <div className="flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
+                            <img src={local.logoUrl} alt="Logo preview" className="h-10 max-w-28 object-contain rounded" />
                             <div className="flex-1">
                                 <p className="text-sm text-gray-700 font-medium">Logo hiện tại</p>
                                 <p className="text-xs text-gray-400 truncate max-w-xs">{local.logoUrl}</p>
@@ -376,12 +396,12 @@ export default function AdminAppearancePage() {
                             </button>
                         </div>
                     ) : (
-                        <div className="p-6 border-2 border-dashed border-gray-200 rounded-lg text-center">
-                            <ImageIcon size={32} className="mx-auto text-gray-300 mb-2" />
+                        <div className="rounded-lg border border-dashed border-gray-200 p-4 text-center">
+                            <ImageIcon size={26} className="mx-auto mb-1.5 text-gray-300" />
                             <p className="text-sm text-gray-400">Chưa có logo — Đang dùng tên cửa hàng dạng text</p>
                         </div>
                     )}
-                    <button title="Chọn ảnh từ thư viện" onClick={() => openMediaFor('logo')} className="flex items-center gap-2 px-4 py-2.5 border-2 border-dashed border-gray-300 rounded-lg hover:border-orange-400 hover:bg-orange-50 text-gray-600 transition-colors w-full justify-center">
+                    <button title="Chọn ảnh từ thư viện" onClick={() => openMediaFor('logo')} className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-orange-400 hover:bg-orange-50">
                         <ImageIcon size={16} /> Chọn ảnh từ thư viện
                     </button>
                 </div>
@@ -392,7 +412,7 @@ export default function AdminAppearancePage() {
                     </div>
                     <div className="flex items-center gap-2">
                         <input type="color" title="Chọn màu nền Header" value={local.headerBg || '#ffffff'} onChange={e => setLocal({ ...local, headerBg: e.target.value })}
-                            className="w-10 h-10 rounded-lg cursor-pointer border-2 border-gray-200 flex-shrink-0" />
+                            className="h-9 w-9 flex-shrink-0 cursor-pointer rounded-md border border-gray-200" />
                         <input type="text" title="Nhập màu nền Header" value={local.headerBg || '#ffffff'} onChange={e => setLocal({ ...local, headerBg: e.target.value })}
                             className="w-24 px-2 py-1.5 border rounded-lg text-sm font-mono" />
                         {local.headerBg && local.headerBg !== '#ffffff' && (
@@ -409,7 +429,7 @@ export default function AdminAppearancePage() {
                     <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
                         Khung banner trang chu dung ty le rong:cao 16:9 (cao:rong 9:16). Anh upload moi trong thu muc Banner se duoc toi uu dung luong nhung giu nguyen noi dung anh; hay dung anh gan 1920x1080, 1600x900 hoac 1280x720 de khong bi crop khi hien thi.
                     </div>
-                    <button title="Chọn ảnh từ thư viện" onClick={() => openMediaFor('banner')} className="flex items-center gap-2 px-4 py-2.5 border-2 border-dashed border-gray-300 rounded-lg hover:border-orange-400 hover:bg-orange-50 text-gray-600 transition-colors w-full justify-center">
+                    <button title="Chọn ảnh từ thư viện" onClick={() => openMediaFor('banner')} className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-orange-400 hover:bg-orange-50">
                         <Plus size={16} /> Chọn ảnh từ thư viện
                     </button>
                     {local.hero_banners.length === 0 ? (
@@ -418,8 +438,8 @@ export default function AdminAppearancePage() {
                         <div className="space-y-3">
                             {local.hero_banners.map((b, index) => (
                                 <div key={b.id} className="flex flex-col gap-3 rounded-xl border border-gray-200 bg-gray-50 p-3 md:flex-row md:items-center">
-                                    <div className="w-full md:w-40 flex-shrink-0">
-                                        <div className="aspect-video overflow-hidden rounded-lg bg-gray-100">
+                                    <div className="w-32 flex-shrink-0 self-start sm:w-36 md:w-40">
+                                        <div className="aspect-video overflow-hidden rounded-md bg-gray-100">
                                             <img src={b.imageUrl} alt={b.alt || `Banner ${index + 1}`} className="h-full w-full object-cover" onError={(e) => { (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><rect fill="%23eee" width="200" height="100"/><text fill="%23999" x="50%" y="50%" text-anchor="middle" dy=".3em" font-size="14">No Image</text></svg>'; }} />
                                         </div>
                                     </div>
@@ -477,17 +497,17 @@ export default function AdminAppearancePage() {
                     </div>
                     {local.background_config.type === 'color' ? (
                         <div className="flex items-center gap-3">
-                            <input type="color" title="Chọn màu nền" value={local.background_config.value || '#f9fafb'} onChange={(e) => setLocal({ ...local, background_config: { ...local.background_config, value: e.target.value } })} className="w-12 h-12 rounded-lg cursor-pointer border-2" />
+                            <input type="color" title="Chọn màu nền" value={local.background_config.value || '#f9fafb'} onChange={(e) => setLocal({ ...local, background_config: { ...local.background_config, value: e.target.value } })} className="h-10 w-10 cursor-pointer rounded-md border border-gray-200" />
                             <input type="text" title="Nhập màu nền" value={local.background_config.value} onChange={(e) => setLocal({ ...local, background_config: { ...local.background_config, value: e.target.value } })} className="w-28 px-3 py-2 border rounded-lg text-sm font-mono" />
                         </div>
                     ) : (
                         <div className="space-y-3">
-                            <button onClick={() => openMediaFor('background')} className="flex items-center gap-2 px-4 py-2.5 border-2 border-dashed border-gray-300 rounded-lg hover:border-orange-400 hover:bg-orange-50 text-gray-600 w-full justify-center">
+                            <button onClick={() => openMediaFor('background')} className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 px-4 py-2 text-gray-600 hover:border-orange-400 hover:bg-orange-50">
                                 <ImageIcon size={16} /> Chọn ảnh nền từ thư viện
                             </button>
                             {local.background_config.value && local.background_config.value.startsWith('http') && (
                                 <div className="relative">
-                                    <img src={local.background_config.value} alt="Background preview" className="w-full h-32 object-cover rounded-lg" />
+                                    <img src={local.background_config.value} alt="Background preview" className="h-20 w-full rounded-md object-cover" />
                                     <button title="Xóa ảnh nền" onClick={() => setLocal({ ...local, background_config: { ...local.background_config, value: '' } })} className="absolute top-2 right-2 bg-red-500 text-white w-7 h-7 rounded-full flex items-center justify-center hover:bg-red-600">
                                         <X size={14} />
                                     </button>
@@ -599,7 +619,7 @@ export default function AdminAppearancePage() {
                         </div>
                     ))}
 
-                    <button onClick={addPricingCategory} className="flex items-center gap-2 px-4 py-2.5 border-2 border-dashed border-gray-300 rounded-lg hover:border-orange-400 hover:bg-orange-50 text-gray-600 transition-colors w-full justify-center">
+                    <button onClick={addPricingCategory} className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-orange-400 hover:bg-orange-50">
                         <Plus size={16} /> Thêm nhóm bảng giá
                     </button>
                 </div>
@@ -619,12 +639,25 @@ export default function AdminAppearancePage() {
                 <SaveBtn onClick={() => save({ homepageReviews: local.homepageReviews }, 'Đã lưu đánh giá trang chủ!')} saving={saving} label="Lưu đánh giá" />
             </SectionCard>
 
-            {/* 8. Homepage Section Layout */}
-            <SectionCard id="layout" title="Sắp xếp & Giao diện trang chủ" description="Bật/tắt, thay đổi thứ tự và nền riêng của từng khối." icon={<LayoutDashboard size={20} />}>
+            {/* 8. Homepage Layout Studio */}
+            <SectionCard id="layout" title="Layout Studio trang chủ" description="Soạn bản nháp, kéo thả responsive và chỉ phát hành khi admin áp dụng." icon={<LayoutDashboard size={20} />}>
+                <HomepageLayoutStudio
+                    profiles={local.layoutProfiles || []}
+                    activeProfileId={local.activeLayoutProfileId}
+                    activeHomeSections={local.homeSections}
+                    previewConfig={local}
+                    saving={saving}
+                    onPersist={(payload, message) => save(payload, message)}
+                />
+            </SectionCard>
+
+            {/* 9. Active Homepage Section Backgrounds */}
+            <SectionCard id="section-backgrounds" title="Nền & khung của cấu hình đang áp dụng" description="Giữ các tuỳ chỉnh nền hiện có; khi lưu sẽ đồng bộ lại profile đang phát hành." icon={<LayoutDashboard size={20} />}>
                 <p className="text-sm text-gray-500 mb-4">Sắp xếp thứ tự, bật/tắt và tuỳ chỉnh nền cho từng khối.</p>
                 <div className="space-y-3">
                     {[...local.homeSections].sort((a, b) => a.order - b.order).map((section, index) => {
                         const bg = section.sectionBg || { type: 'none' as const };
+                        const isExpanded = expandedHomeSectionId === section.id;
                         const updateBg = (partial: Partial<typeof bg>) => {
                             const u = local.homeSections.map(s =>
                                 s.id === section.id ? { ...s, sectionBg: { ...bg, ...partial } } : s
@@ -645,6 +678,14 @@ export default function AdminAppearancePage() {
                                         </span>
                                     )}
                                     <div className="flex items-center gap-1">
+                                        <button
+                                            title={isExpanded ? 'Thu gọn tùy chỉnh nền' : 'Mở tùy chỉnh nền'}
+                                            aria-expanded={isExpanded}
+                                            onClick={() => setExpandedHomeSectionId(isExpanded ? null : section.id)}
+                                            className={`flex items-center gap-1 rounded px-2 py-1.5 text-xs font-medium transition ${isExpanded ? 'bg-orange-50 text-orange-700' : 'text-gray-500 hover:bg-gray-100'}`}
+                                        >
+                                            <span className="hidden sm:inline">Nền</span>{isExpanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+                                        </button>
                                         <button title="Di chuyển lên" onClick={() => moveSection(index, 'up')} disabled={index === 0} className="p-1.5 rounded hover:bg-gray-100 disabled:opacity-30 text-gray-500"><ArrowUp size={16} /></button>
                                         <button title="Di chuyển xuống" onClick={() => moveSection(index, 'down')} disabled={index === local.homeSections.length - 1} className="p-1.5 rounded hover:bg-gray-100 disabled:opacity-30 text-gray-500"><ArrowDown size={16} /></button>
                                         <button title="Hiển thị/ẩn khối" onClick={() => { const u = local.homeSections.map(s => s.id === section.id ? { ...s, visible: !s.visible } : s); setLocal({ ...local, homeSections: u }); }}
@@ -654,8 +695,8 @@ export default function AdminAppearancePage() {
                                     </div>
                                 </div>
 
-                                {/* Background editor (always expanded) */}
-                                <div className="px-4 pb-4 pt-2 bg-gray-50/60 border-t border-gray-100 space-y-3">
+                                {/* Background editor */}
+                                {isExpanded && <div className="space-y-3 border-t border-gray-100 bg-gray-50/60 px-4 pb-4 pt-3">
                                     <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Nền khối</p>
 
                                     {/* Type selector */}
@@ -704,7 +745,7 @@ export default function AdminAppearancePage() {
                                     {bg.type === 'color' && (
                                         <div className="flex items-center gap-3">
                                             <input type="color" title="Chọn màu nền" value={bg.color || '#ffffff'} onChange={e => updateBg({ color: e.target.value })}
-                                                className="w-10 h-10 rounded-lg cursor-pointer border-2 border-gray-200 flex-shrink-0" />
+                                                className="h-9 w-9 flex-shrink-0 cursor-pointer rounded-md border border-gray-200" />
                                             <input type="text" title="Nhập màu nền" value={bg.color || '#ffffff'} onChange={e => updateBg({ color: e.target.value })}
                                                 className="w-28 px-3 py-1.5 border rounded-lg text-sm font-mono" />
                                             <div className="w-10 h-10 rounded-lg border" style={{ backgroundColor: bg.color || '#ffffff' }} />
@@ -715,12 +756,12 @@ export default function AdminAppearancePage() {
                                     {bg.type === 'image' && (
                                         <div className="space-y-2">
                                             <button title="Chọn ảnh nền từ thư viện" onClick={() => { setMediaTarget(`section_bg_${section.id}` as 'banner'); setMediaOpen(true); }}
-                                                className="flex items-center gap-2 px-3 py-2 border-2 border-dashed border-gray-300 rounded-lg hover:border-orange-400 hover:bg-orange-50 text-gray-600 text-sm w-full justify-center transition-colors">
+                                                className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 px-3 py-2 text-sm text-gray-600 transition-colors hover:border-orange-400 hover:bg-orange-50">
                                                 <ImageIcon size={14} /> {bg.imageUrl ? 'Đổi ảnh nền' : 'Chọn ảnh nền từ thư viện'}
                                             </button>
                                             {bg.imageUrl && (
                                                 <div className="relative">
-                                                    <img src={bg.imageUrl} alt="bg preview" className="w-full h-24 object-cover rounded-lg" />
+                                                    <img src={bg.imageUrl} alt="bg preview" className="h-16 w-full rounded-md object-cover" />
                                                     <button title="Xóa ảnh nền" onClick={() => updateBg({ imageUrl: '' })}
                                                         className="absolute top-1 right-1 bg-red-500 text-white w-6 h-6 rounded-full flex items-center justify-center hover:bg-red-600">
                                                         <X size={12} />
@@ -749,12 +790,12 @@ export default function AdminAppearancePage() {
                                         <div className="border-t pt-3 space-y-2">
                                             <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Khung viền trang trí (tuỳ chọn)</p>
                                             <button title="Chọn ảnh khung từ thư viện" onClick={() => { setMediaTarget(`section_frame_${section.id}` as 'banner'); setMediaOpen(true); }}
-                                                className="flex items-center gap-2 px-3 py-2 border-2 border-dashed border-purple-200 rounded-lg hover:border-purple-400 hover:bg-purple-50 text-gray-600 text-sm w-full justify-center transition-colors">
+                                                className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-purple-200 px-3 py-2 text-sm text-gray-600 transition-colors hover:border-purple-400 hover:bg-purple-50">
                                                 <ImageIcon size={14} /> {bg.frameUrl ? 'Đổi ảnh khung' : 'Chọn ảnh khung từ thư viện'}
                                             </button>
                                             {bg.frameUrl && (
                                                 <div className="relative">
-                                                    <img src={bg.frameUrl} alt="frame preview" className="w-full h-20 object-fill rounded-lg border" />
+                                                    <img src={bg.frameUrl} alt="frame preview" className="h-14 w-full rounded-md border object-fill" />
                                                     <button title="Xóa ảnh khung" onClick={() => updateBg({ frameUrl: '' })}
                                                         className="absolute top-1 right-1 bg-red-500 text-white w-6 h-6 rounded-full flex items-center justify-center hover:bg-red-600">
                                                         <X size={12} />
@@ -763,12 +804,12 @@ export default function AdminAppearancePage() {
                                             )}
                                         </div>
                                     )}
-                                </div>
+                                </div>}
                             </div>
                         );
                     })}
                 </div>
-                <SaveBtn onClick={() => save({ homeSections: local.homeSections }, 'Đã lưu bố cục!')} saving={saving} label="Lưu bố cục & nền" />
+                <SaveBtn onClick={() => savePublishedHomeSections(local.homeSections, 'Đã lưu nền và đồng bộ cấu hình đang áp dụng!')} saving={saving} label="Lưu nền & đồng bộ profile" />
             </SectionCard>
         </div>
     );

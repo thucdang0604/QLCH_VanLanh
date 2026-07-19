@@ -8,6 +8,9 @@ import dynamic from "next/dynamic";
 import { SITE_URL } from "@/lib/constants";
 import type { SSRHomeConfig } from './page';
 import type { HeroBanner, StoreBranch } from '@/lib/ConfigContext';
+import type { CSSProperties } from 'react';
+import type { HomeSectionItem, LayoutBreakpoint } from '@/lib/config-defaults';
+import { GRID_SECTION_COMPONENTS, LAYOUT_BREAKPOINTS, getSectionColumnSpan, getSectionLayoutOverride } from '@/lib/homeLayoutProfiles';
 
 
 // ===== Dynamic section components map =====
@@ -29,6 +32,42 @@ const SECTION_COMPONENTS: Record<string, React.ComponentType<Record<string, unkn
   google_reviews: GoogleReviewsSection,
   articles: ArticleBlock,
 };
+
+type LayoutStyle = CSSProperties & Record<`--${string}`, string | number>;
+
+const GRID_DEFAULT_COLUMNS: Partial<Record<HomeSectionItem['component'], Record<LayoutBreakpoint, number>>> = {
+  categories: { desktop: 6, tablet: 4, mobile: 2 },
+  flash_sale: { desktop: 5, tablet: 4, mobile: 2 },
+  suggested: { desktop: 5, tablet: 4, mobile: 2 },
+};
+
+function isVisibleAtAnyBreakpoint(section: HomeSectionItem) {
+  return LAYOUT_BREAKPOINTS.some(({ id }) => getSectionLayoutOverride(section, id).visible !== false);
+}
+
+function getSectionLayoutStyle(section: HomeSectionItem, totalSections: number): LayoutStyle {
+  const desktop = getSectionLayoutOverride(section, 'desktop');
+  const tablet = getSectionLayoutOverride(section, 'tablet');
+  const mobile = getSectionLayoutOverride(section, 'mobile');
+  const hasGridOverride = GRID_SECTION_COMPONENTS.has(section.component)
+    && [desktop, tablet, mobile].some((layout) => typeof layout.columns === 'number');
+  const gridDefaults = GRID_DEFAULT_COLUMNS[section.component];
+
+  return {
+    zIndex: totalSections - (desktop.order ?? section.order ?? 0),
+    '--home-section-order-desktop': desktop.order ?? section.order,
+    '--home-section-order-tablet': tablet.order ?? section.order,
+    '--home-section-order-mobile': mobile.order ?? section.order,
+    '--home-section-span-desktop': getSectionColumnSpan(section, 'desktop'),
+    '--home-section-span-tablet': getSectionColumnSpan(section, 'tablet'),
+    '--home-section-span-mobile': getSectionColumnSpan(section, 'mobile'),
+    ...(hasGridOverride && gridDefaults ? {
+      '--home-section-columns-desktop': desktop.columns ?? gridDefaults.desktop,
+      '--home-section-columns-tablet': tablet.columns ?? gridDefaults.tablet,
+      '--home-section-columns-mobile': mobile.columns ?? gridDefaults.mobile,
+    } : {}),
+  };
+}
 
 
 // ===== Main Homepage =====
@@ -61,7 +100,7 @@ export default function Home({ ssrConfig }: { ssrConfig: SSRHomeConfig }) {
   // Sort visible sections by order
   const resolvedSections = Array.isArray(homeSections) ? homeSections : (ssrConfig?.homeSections || []);
   const visibleSections = [...resolvedSections]
-    .filter(s => s.visible)
+    .filter(isVisibleAtAnyBreakpoint)
     .sort((a, b) => a.order - b.order);
 
   return (
@@ -74,12 +113,18 @@ export default function Home({ ssrConfig }: { ssrConfig: SSRHomeConfig }) {
         dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteSchema) }}
       />
 
-      {visibleSections.map((section, index) => {
+      <div className="home-layout-flow">
+      {visibleSections.map((section) => {
         const Component = SECTION_COMPONENTS[section.component];
         if (!Component) return null;
 
         const bg = section.sectionBg;
         const hasBg = bg && bg.type !== 'none';
+        const desktopLayout = getSectionLayoutOverride(section, 'desktop');
+        const tabletLayout = getSectionLayoutOverride(section, 'tablet');
+        const mobileLayout = getSectionLayoutOverride(section, 'mobile');
+        const hasGridOverride = GRID_SECTION_COMPONENTS.has(section.component)
+          && [desktopLayout, tabletLayout, mobileLayout].some((layout) => typeof layout.columns === 'number');
 
         // Build wrapper style
         const wrapperStyle: React.CSSProperties = {};
@@ -97,9 +142,20 @@ export default function Home({ ssrConfig }: { ssrConfig: SSRHomeConfig }) {
         return (
           <div
             key={section.id}
-            className="relative"
+            className="home-layout-section relative"
+            data-desktop-visible={desktopLayout.visible !== false}
+            data-tablet-visible={tabletLayout.visible !== false}
+            data-mobile-visible={mobileLayout.visible !== false}
+            data-section-component={section.component}
+            data-desktop-column-span={getSectionColumnSpan(section, 'desktop')}
+            data-tablet-column-span={getSectionColumnSpan(section, 'tablet')}
+            data-mobile-column-span={getSectionColumnSpan(section, 'mobile')}
+            data-desktop-spacing={desktopLayout.spacing || 'comfortable'}
+            data-tablet-spacing={tabletLayout.spacing || desktopLayout.spacing || 'comfortable'}
+            data-mobile-spacing={mobileLayout.spacing || tabletLayout.spacing || desktopLayout.spacing || 'comfortable'}
+            data-grid-layout={hasGridOverride || undefined}
             style={{
-              zIndex: visibleSections.length - index,
+              ...getSectionLayoutStyle(section, visibleSections.length),
               ...wrapperStyle,
               ...(bg?.cardBg ? { '--card-bg': bg.cardBg } as React.CSSProperties : {}),
               ...(bg?.outerBg ? { '--outer-bg': bg.outerBg } as React.CSSProperties : {}),
@@ -117,7 +173,7 @@ export default function Home({ ssrConfig }: { ssrConfig: SSRHomeConfig }) {
               <img
                 src={bg.frameUrl}
                 alt=""
-                className="absolute inset-0 w-full h-full object-fill pointer-events-none z-10"
+                className="home-layout-frame absolute inset-0 z-10 h-full w-full pointer-events-none object-fill"
               />
             )}
             <div className="relative z-[1]">
@@ -132,6 +188,7 @@ export default function Home({ ssrConfig }: { ssrConfig: SSRHomeConfig }) {
           </div>
         );
       })}
+      </div>
     </>
   );
 }

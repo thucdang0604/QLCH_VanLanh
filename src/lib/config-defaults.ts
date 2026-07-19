@@ -65,6 +65,17 @@ export interface SectionBackground {
     outerBg?: string;   // outer card background (replaces bg-dark etc.)
 }
 
+export type LayoutBreakpoint = 'desktop' | 'tablet' | 'mobile';
+
+export interface HomeSectionLayoutOverride {
+    visible?: boolean;
+    order?: number;
+    /** Number of columns a section occupies in the 12-column homepage grid. */
+    columnSpan?: number;
+    columns?: number;
+    spacing?: 'compact' | 'comfortable' | 'spacious';
+}
+
 export interface HomeSectionItem {
     id: string;
     component: 'hero' | 'categories' | 'flash_sale' | 'suggested' | 'booking' | 'articles' | 'pricing_table' | 'google_reviews';
@@ -72,6 +83,17 @@ export interface HomeSectionItem {
     visible: boolean;
     order: number;
     sectionBg?: SectionBackground;
+    responsive?: Partial<Record<LayoutBreakpoint, HomeSectionLayoutOverride>>;
+}
+
+export interface HomepageLayoutProfile {
+    id: string;
+    name: string;
+    description?: string;
+    version: number;
+    createdAt: string;
+    updatedAt: string;
+    homeSections: HomeSectionItem[];
 }
 
 export interface ContactInfo {
@@ -166,6 +188,8 @@ export interface SiteConfig {
 
     // Homepage layout
     homeSections: HomeSectionItem[];
+    layoutProfiles?: HomepageLayoutProfile[];
+    activeLayoutProfileId?: string;
     homepagePricing: HomepagePricingConfig;
     homepageReviews: HomepageReviewsConfig;
 

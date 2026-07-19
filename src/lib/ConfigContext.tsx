@@ -15,6 +15,9 @@ import {
     type StoreBranch,
     type SectionBackground,
     type HomeSectionItem,
+    type HomepageLayoutProfile,
+    type LayoutBreakpoint,
+    type HomeSectionLayoutOverride,
     type ContactInfo,
     type GeofenceConfig,
     type SiteConfig,
@@ -33,6 +36,9 @@ export type {
     StoreBranch,
     SectionBackground,
     HomeSectionItem,
+    HomepageLayoutProfile,
+    LayoutBreakpoint,
+    HomeSectionLayoutOverride,
     ContactInfo,
     GeofenceConfig,
     SiteConfig
@@ -114,6 +120,8 @@ const KEY_MAP: Record<string, string> = {
     // layout_settings
     hero_banners: 'layout_settings',
     homeSections: 'layout_settings',
+    layoutProfiles: 'layout_settings',
+    activeLayoutProfileId: 'layout_settings',
     store_branches: 'layout_settings',
     homepagePricing: 'layout_settings',
     homepageReviews: 'layout_settings',
@@ -273,6 +281,22 @@ export function ServerConfigProvider({ children, initialConfig }: { children: Re
 
     return (
         <ConfigContext.Provider value={{ config: initialConfig, loading: false, updateConfig, formatHotline }}>
+            {children}
+        </ConfigContext.Provider>
+    );
+}
+
+// =========== Preview Config Provider (In-memory only) ===========
+// Used by Appearance Studio's isolated storefront preview. Unlike the server
+// provider, it deliberately does not inject CSS or backgrounds into the parent
+// admin document and it can never write to Firestore.
+export function ConfigPreviewProvider({ children, previewConfig }: { children: ReactNode; previewConfig: SiteConfig }) {
+    const updateConfig = async () => {
+        throw new Error('Preview configuration is read-only. Apply the draft from Appearance Studio to publish it.');
+    };
+
+    return (
+        <ConfigContext.Provider value={{ config: previewConfig, loading: false, updateConfig, formatHotline }}>
             {children}
         </ConfigContext.Provider>
     );

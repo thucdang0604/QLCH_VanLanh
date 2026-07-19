@@ -1,8 +1,11 @@
 import { NextResponse } from 'next/server';
+import { unstable_cache } from 'next/cache';
 import { DEFAULT_CONFIG } from '@/lib/config-defaults';
 import { getAdminDb, isAdminAvailable } from '@/lib/firebaseAdmin';
 
-async function getConfiguredPlaceId() {
+const GOOGLE_PLACES_TIMEOUT_MS = 8000;
+
+async function readConfiguredPlaceId() {
     const fallbackPlaceId = process.env.GOOGLE_PLACE_ID || DEFAULT_CONFIG.homepageReviews.googlePlaceId;
     if (!isAdminAvailable()) return fallbackPlaceId;
 
@@ -17,6 +20,15 @@ async function getConfiguredPlaceId() {
         return fallbackPlaceId;
     }
 }
+
+// The public reviews endpoint can be requested by every homepage visit. Keep
+// its single Firestore configuration read in the Next data cache and share the
+// existing `config` invalidation tag used by Appearance saves.
+const getConfiguredPlaceId = unstable_cache(
+    readConfiguredPlaceId,
+    ['google-reviews-place-id'],
+    { tags: ['config'], revalidate: 3600 },
+);
 
 interface GooglePlacesReview {
     authorAttribution?: {
@@ -60,15 +72,23 @@ export async function GET(request: Request) {
         const refererUrl = clientReferer || fallbackReferer;
 
         const url = new URL(`https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}`);
-        const res = await fetch(url, {
-            headers: {
-                'X-Goog-Api-Key': apiKey,
-                'X-Goog-FieldMask': 'rating,userRatingCount,reviews',
-                'Accept-Language': 'vi',
-                ...(refererUrl ? { 'Referer': refererUrl } : {}),
-            },
-            next: { revalidate: 86400 } // Cache for one day.
-        });
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), GOOGLE_PLACES_TIMEOUT_MS);
+        let res: Response;
+        try {
+            res = await fetch(url, {
+                headers: {
+                    'X-Goog-Api-Key': apiKey,
+                    'X-Goog-FieldMask': 'rating,userRatingCount,reviews',
+                    'Accept-Language': 'vi',
+                    ...(refererUrl ? { 'Referer': refererUrl } : {}),
+                },
+                next: { revalidate: 86400 }, // Cache for one day.
+                signal: controller.signal,
+            });
+        } finally {
+            clearTimeout(timeoutId);
+        }
 
         if (!res.ok) {
             const details = await res.json().catch(() => null) as GoogleApiError | null;
@@ -106,7 +126,16 @@ export async function GET(request: Request) {
                 providerStatus: 'provider_error',
                 errorDetails: errMsg 
             },
-            { status: 503 }
+            {
+                status: 503,
+                headers: {
+                    // Avoid a request storm while an upstream credential or
+                    // provider outage is being fixed, without hiding recovery
+                    // for long from visitors.
+                    'Cache-Control': 'public, max-age=30, s-maxage=60, stale-while-revalidate=60',
+                    'Retry-After': '60',
+                },
+            }
         );
     }
 }

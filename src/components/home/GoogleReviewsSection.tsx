@@ -18,6 +18,8 @@ interface ReviewsData {
     reviews: GoogleApiReview[];
 }
 
+const REVIEWS_REQUEST_TIMEOUT_MS = 8000;
+
 function getGoogleMapsUrl(placeId: string | undefined, siteName: string) {
     const params = new URLSearchParams({
         api: '1',
@@ -38,9 +40,12 @@ export default function GoogleReviewsSection() {
 
     useEffect(() => {
         let cancelled = false;
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => controller.abort(), REVIEWS_REQUEST_TIMEOUT_MS);
+
         const fetchReviews = async () => {
             try {
-                const res = await fetch('/api/reviews/google');
+                const res = await fetch('/api/reviews/google', { signal: controller.signal });
                 if (res.ok) {
                     const json = await res.json();
                     if (!json.error && !cancelled && Array.isArray(json.reviews) && json.reviews.length > 0) {
@@ -48,13 +53,20 @@ export default function GoogleReviewsSection() {
                     }
                 }
             } catch (err) {
-                console.error('Failed to load reviews:', err);
+                if ((err as DOMException).name !== 'AbortError') {
+                    console.error('Failed to load reviews:', err);
+                }
             } finally {
+                window.clearTimeout(timeoutId);
                 if (!cancelled) setLoading(false);
             }
         };
         fetchReviews();
-        return () => { cancelled = true; };
+        return () => {
+            cancelled = true;
+            window.clearTimeout(timeoutId);
+            controller.abort();
+        };
     }, [reviewsConfig.googlePlaceId]);
 
     const scroll = (direction: 'left' | 'right') => {
@@ -84,10 +96,10 @@ export default function GoogleReviewsSection() {
 
     if (!data || data.reviews.length === 0) {
         return (
-            <section className="py-16 bg-white overflow-hidden relative">
+            <section className="relative overflow-hidden bg-white py-10">
                 <div className="absolute top-0 right-0 w-64 h-64 bg-orange-50 rounded-full blur-3xl -z-10 -translate-y-1/2 translate-x-1/3"></div>
-                <div className="max-w-[1200px] mx-auto px-4 md:px-6">
-                    <div className="rounded-2xl border border-orange-100 bg-gradient-to-r from-orange-50 to-white p-6 md:p-8 flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+                <div className="mx-auto max-w-[1080px] px-3 md:px-4">
+                    <div className="flex flex-col gap-4 rounded-xl border border-orange-100 bg-gradient-to-r from-orange-50 to-white p-4 md:flex-row md:items-center md:justify-between">
                         <div>
                             <div className="flex items-center gap-2 mb-2">
                                 <MessageSquareQuote size={20} className="text-orange-500" />
@@ -115,19 +127,19 @@ export default function GoogleReviewsSection() {
     }
 
     return (
-        <section className="py-16 bg-white overflow-hidden relative">
+            <section className="relative overflow-hidden bg-white py-10">
             {/* Background elements */}
             <div className="absolute top-0 right-0 w-64 h-64 bg-orange-50 rounded-full blur-3xl -z-10 -translate-y-1/2 translate-x-1/3"></div>
             <div className="absolute bottom-0 left-0 w-80 h-80 bg-blue-50 rounded-full blur-3xl -z-10 translate-y-1/3 -translate-x-1/3"></div>
 
-            <div className="max-w-[1200px] mx-auto px-4 md:px-6">
-                <div className="flex flex-col md:flex-row md:items-end justify-between mb-10 gap-6">
+            <div className="mx-auto max-w-[1080px] px-3 md:px-4">
+                <div className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end">
                     <div>
                         <div className="flex items-center gap-2 mb-2">
                             <MessageSquareQuote size={20} className="text-orange-500" />
                             <span className="text-orange-600 font-bold text-sm tracking-wider uppercase">{reviewsConfig.eyebrow}</span>
                         </div>
-                        <h2 className="text-3xl md:text-4xl font-extrabold text-gray-900">
+                        <h2 className="text-2xl font-extrabold text-gray-900 md:text-3xl">
                             {reviewsConfig.title}
                         </h2>
                         
@@ -171,13 +183,13 @@ export default function GoogleReviewsSection() {
                 {/* Reviews Slider */}
                 <div 
                     ref={scrollContainerRef}
-                    className="flex overflow-x-auto hide-scrollbar gap-5 pb-8 snap-x"
+                    className="flex gap-3 overflow-x-auto pb-4 snap-x hide-scrollbar"
                     style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
                 >
                     {data.reviews.map((review, idx) => (
                         <div 
                             key={idx} 
-                            className="w-[300px] md:w-[380px] flex-shrink-0 snap-start bg-white rounded-2xl p-6 border border-gray-100 shadow-sm hover:shadow-xl transition-shadow relative"
+                            className="relative w-[280px] flex-shrink-0 snap-start rounded-xl border border-gray-100 bg-white p-4 shadow-sm transition-shadow hover:shadow-md md:w-[320px]"
                         >
                             <div className="flex items-center gap-4 mb-4">
                                 {review.profile_photo_url ? (
@@ -200,7 +212,7 @@ export default function GoogleReviewsSection() {
                                 &quot;{review.text}&quot;
                             </p>
                             
-                            <div className="absolute top-6 right-6 text-gray-200 opacity-50">
+                            <div className="absolute right-4 top-4 text-gray-200 opacity-50">
                                 <svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor">
                                     <path d="M14.017 21v-7.391c0-5.704 3.731-9.57 8.983-10.609l.995 2.151c-2.432.917-3.995 3.638-3.995 5.849h4v10h-9.983zm-14.017 0v-7.391c0-5.704 3.748-9.57 9-10.609l.996 2.151c-2.433.917-3.996 3.638-3.996 5.849h3.983v10h-9.983z" />
                                 </svg>

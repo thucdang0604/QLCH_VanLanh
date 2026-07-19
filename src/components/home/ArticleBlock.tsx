@@ -11,6 +11,7 @@ const typeConfig: Record<string, { label: string; color: string }> = {
     Promo: { label: 'Khuyến mãi', color: 'bg-red-100 text-red-700' },
     News: { label: 'Tin tức', color: 'bg-blue-100 text-blue-700' },
     Tips: { label: 'Mẹo hay', color: 'bg-green-100 text-green-700' },
+    Training: { label: 'Đào Tạo', color: 'bg-purple-100 text-purple-700' },
 };
 
 type ArticleDoc = {
@@ -23,12 +24,23 @@ type ArticleDoc = {
 
 function formatDate(d: unknown): string {
     if (!d) return '';
-    if (d instanceof Timestamp) return d.toDate().toLocaleDateString('vi-VN');
-    if (typeof d === 'object' && d !== null && 'seconds' in d) {
-        const seconds = (d as { seconds?: unknown }).seconds;
-        if (typeof seconds === 'number') return new Date(seconds * 1000).toLocaleDateString('vi-VN');
+    let date: Date | null = null;
+
+    if (d instanceof Timestamp) {
+        date = d.toDate();
+    } else if (d instanceof Date) {
+        date = d;
+    } else if (typeof d === 'number' || typeof d === 'string') {
+        date = new Date(d);
+    } else if (typeof d === 'object' && d !== null) {
+        const timestamp = d as { seconds?: unknown; _seconds?: unknown };
+        const seconds = timestamp.seconds ?? timestamp._seconds;
+        if (typeof seconds === 'number') {
+            date = new Date(seconds * 1000);
+        }
     }
-    return new Date(d as string | number | Date).toLocaleDateString('vi-VN');
+
+    return date && !Number.isNaN(date.getTime()) ? date.toLocaleDateString('vi-VN') : '';
 }
 
 function ArticleSkeleton() {
@@ -95,18 +107,18 @@ export default function ArticleBlock({ ssrArticles }: { ssrArticles?: ArticleDoc
     if (!loading && articles.length === 0) return null;
 
     return (
-        <section className="py-2">
-            <div className="max-w-[1200px] mx-auto px-2 md:px-4">
-                <div className="rounded-xl shadow-lg p-4 sm:p-6" style={{ backgroundColor: 'var(--card-bg, white)' }}>
+        <section className="home-articles-section py-2">
+            <div className="home-articles-container mx-auto max-w-[1080px] px-2 md:px-4">
+                <div className="home-articles-card home-section-card rounded-xl border border-gray-100 p-3 shadow-sm sm:p-4" style={{ backgroundColor: 'var(--card-bg, white)' }}>
                     {/* Header */}
-                    <div className="flex items-center justify-between mb-5">
-                        <h2 className="text-xl font-bold text-dark flex items-center gap-2">
+                    <div className="home-articles-header mb-3 flex items-center justify-between">
+                        <h2 className="home-articles-title text-xl font-bold text-dark flex items-center gap-2">
                             <FileText size={22} className="text-copper" />
                             Bài Viết Nổi Bật
                         </h2>
                         <Link
                             href="/tin-tuc"
-                            className="text-sm text-copper hover:text-copper-dark font-medium flex items-center gap-1 transition-colors"
+                            className="home-articles-cta text-sm text-copper hover:text-copper-dark font-medium flex items-center gap-1 transition-colors"
                         >
                             Xem tất cả <ArrowRight size={14} />
                         </Link>
@@ -114,11 +126,11 @@ export default function ArticleBlock({ ssrArticles }: { ssrArticles?: ArticleDoc
 
                     {/* Grid */}
                     {loading ? (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <div className="home-articles-grid grid grid-cols-2 gap-3 lg:grid-cols-4">
                             {[...Array(4)].map((_, i) => <ArticleSkeleton key={i} />)}
                         </div>
                     ) : (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <div className="home-articles-grid grid grid-cols-2 gap-3 lg:grid-cols-4">
                             {articles.map((article) => {
                                 const articleType = article.type || 'News';
                                 const typeInfo = typeConfig[articleType] || { label: articleType, color: 'bg-gray-100 text-gray-600' };
@@ -127,10 +139,10 @@ export default function ArticleBlock({ ssrArticles }: { ssrArticles?: ArticleDoc
                                     <Link
                                         key={article.id}
                                         href={`/tin-tuc/${article.id}`}
-                                        className="group bg-white rounded-xl overflow-hidden border border-gray-100 hover:shadow-lg hover:border-copper/20 transition-all duration-300"
+                                        className="home-articles-item group overflow-hidden rounded-lg border border-gray-100 bg-white transition-all duration-300 hover:border-copper/20 hover:shadow-md"
                                     >
                                         {/* Thumbnail */}
-                                        <div className="relative aspect-[16/9] bg-gray-50 overflow-hidden">
+                                            <div className="home-articles-thumbnail relative aspect-[4/3] overflow-hidden bg-gray-50">
                                             {article.thumbnail ? (
                                                 <Image
                                                     src={article.thumbnail}
@@ -146,17 +158,17 @@ export default function ArticleBlock({ ssrArticles }: { ssrArticles?: ArticleDoc
                                                 </div>
                                             )}
                                             {/* Type Badge */}
-                                            <span className={`absolute top-2 left-2 px-2 py-0.5 rounded-full text-[10px] font-semibold ${typeInfo.color}`}>
+                                            <span className={`home-articles-badge absolute top-2 left-2 px-2 py-0.5 rounded-full text-[10px] font-semibold ${typeInfo.color}`}>
                                                 {typeInfo.label}
                                             </span>
                                         </div>
 
                                         {/* Content */}
-                                        <div className="p-3">
-                                            <h3 className="text-sm font-bold text-gray-900 line-clamp-2 group-hover:text-copper transition-colors mb-2 min-h-[40px]">
+                                            <div className="home-articles-content p-2.5">
+                                            <h3 className="home-articles-item-title mb-1.5 line-clamp-2 min-h-[36px] text-xs font-bold text-gray-900 transition-colors group-hover:text-copper sm:text-sm">
                                                 {article.title || 'Bài viết'}
                                             </h3>
-                                            <div className="flex items-center gap-1 text-[11px] text-gray-400">
+                                            <div className="home-articles-meta flex items-center gap-1 text-[11px] text-gray-400">
                                                 <Clock size={11} />
                                                 {formatDate(article.createdAt)}
                                             </div>

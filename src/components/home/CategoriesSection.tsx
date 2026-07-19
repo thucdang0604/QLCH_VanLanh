@@ -18,42 +18,42 @@ export default function CategoriesSection({ ssrHomeServiceCategories }: { ssrHom
   if (!loading && visibleCategories.length === 0) return null;
 
   return (
-    <section className="py-4">
-      <div className="max-w-[1200px] mx-auto px-2 md:px-4">
-        <div className="rounded-2xl shadow-lg p-4 sm:p-6 lg:p-8" style={{ backgroundColor: 'var(--card-bg, white)' }}>
-          <h2 className="text-xl sm:text-2xl lg:text-3xl font-extrabold text-dark tracking-tight mb-6 sm:mb-8 text-center sm:text-left">
+    <section className="py-2">
+      <div className="mx-auto max-w-[1080px] px-2 md:px-4">
+        <div className="home-section-card rounded-xl border border-gray-100 p-3 shadow-sm sm:p-4 lg:p-5" style={{ backgroundColor: 'var(--card-bg, white)' }}>
+          <h2 className="mb-4 text-center text-lg font-extrabold tracking-tight text-dark sm:mb-5 sm:text-left sm:text-xl lg:text-2xl">
             Danh mục dịch vụ
           </h2>
-          <div className="grid grid-cols-2 min-[400px]:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 sm:gap-5">
+          <div className="home-layout-grid grid grid-cols-2 gap-2 min-[400px]:grid-cols-3 sm:gap-3 md:grid-cols-4 lg:grid-cols-6">
             {visibleCategories.map((cat) => (
               <Link
                 key={cat.id}
                 href={cat.isCustomLink ? cat.slug : `/category/${cat.slug}`}
-                className="group flex flex-col items-center p-4 sm:p-5 bg-white rounded-2xl shadow-sm hover:shadow-xl transition-all duration-300 border border-gray-100 hover:border-copper/40 hover:-translate-y-1.5 relative overflow-hidden"
+                className="group relative flex flex-col items-center overflow-hidden rounded-xl border border-gray-100 bg-white p-3 transition-all duration-300 hover:-translate-y-0.5 hover:border-copper/40 hover:shadow-md sm:p-3.5"
               >
                 <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-copper to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                 
-                <div className="w-16 h-16 sm:w-20 sm:h-20 lg:w-24 lg:h-24 mb-3 sm:mb-4 rounded-full bg-gray-50 group-hover:bg-copper/10 flex items-center justify-center transition-colors duration-300">
+                <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-gray-50 transition-colors duration-300 group-hover:bg-copper/10 sm:mb-2.5 sm:h-14 sm:w-14 lg:h-16 lg:w-16">
                   {cat.icon && (cat.icon.startsWith('http') || cat.icon.startsWith('/')) ? (
-                    <div className="relative w-10 h-10 sm:w-12 sm:h-12 lg:w-16 lg:h-16">
+                    <div className="relative h-8 w-8 sm:h-9 sm:w-9 lg:h-10 lg:w-10">
                       <Image 
                         src={cat.icon} 
                         alt={cat.name} 
                         fill
-                        sizes="64px"
+                        sizes="40px"
                         className="object-contain group-hover:scale-110 transition-transform duration-300" 
                       />
                     </div>
                   ) : (
-                    <span className="text-4xl sm:text-5xl lg:text-6xl group-hover:scale-110 transition-transform duration-300">{cat.icon}</span>
+                    <span className="text-3xl transition-transform duration-300 group-hover:scale-110 sm:text-4xl lg:text-5xl">{cat.icon}</span>
                   )}
                 </div>
                 
-                <span className="text-sm sm:text-base font-bold text-dark text-center leading-snug group-hover:text-copper transition-colors line-clamp-2 min-h-[2.5rem] flex items-center justify-center">
+                <span className="flex min-h-[2.25rem] items-center justify-center text-center text-xs font-bold leading-snug text-dark transition-colors group-hover:text-copper sm:text-sm">
                   {cat.name}
                 </span>
                 
-                <span className="text-[10px] sm:text-xs text-gray-600 mt-2 font-medium bg-gray-100 group-hover:bg-copper/5 group-hover:text-copper px-2.5 py-1 rounded-full transition-colors">
+                <span className="mt-1.5 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-600 transition-colors group-hover:bg-copper/5 group-hover:text-copper sm:text-xs">
                   {cat.count || 'Đang cập nhật'}
                 </span>
               </Link>

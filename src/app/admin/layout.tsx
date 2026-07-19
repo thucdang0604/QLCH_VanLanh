@@ -41,6 +41,7 @@ import { useAdminBadges } from '@/lib/useAdminBadges';
 import GlobalSearch from '@/components/admin/GlobalSearch';
 import PwaInstallPrompt from '@/components/admin/PwaInstallPrompt';
 import RefreshWebsiteButton from '@/components/admin/RefreshWebsiteButton';
+import ThemeToggle from '@/components/ThemeToggle';
 
 const iconMap: Record<AdminIconKey, LucideIcon> = {
     dashboard: LayoutDashboard,
@@ -476,6 +477,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                             </div>
 
                             <div className="flex items-center gap-3 md:hidden">
+                                <ThemeToggle className="h-10 w-10" />
                                 <RefreshWebsiteButton />
                                 <NotificationBell badges={badges} activities={activities} />
                                 <button
@@ -502,6 +504,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                         </div>
 
                         <div className="hidden md:flex items-center gap-3">
+                            <ThemeToggle className="h-10 w-10" />
                             <RefreshWebsiteButton />
                             <NotificationBell badges={badges} activities={activities} />
 

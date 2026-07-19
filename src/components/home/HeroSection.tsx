@@ -9,10 +9,10 @@ import { getIcon } from '@/lib/icon-map';
 import Link from 'next/link';
 
 const trustBadges = [
-    { icon: <Shield size={28} />, title: 'Bảo hành trọn đời', desc: 'Cho mọi dịch vụ' },
-    { icon: <Clock size={28} />, title: 'Xong trong 30 phút', desc: 'Nhanh chóng, tiện lợi' },
-    { icon: <Award size={28} />, title: 'Linh kiện chính hãng', desc: 'Cam kết 100%' },
-    { icon: <Wrench size={28} />, title: 'Kỹ thuật viên 10+ năm', desc: 'Chuyên môn cao' },
+    { icon: <Shield size={24} />, title: 'Bảo hành trọn đời', desc: 'Cho mọi dịch vụ' },
+    { icon: <Clock size={24} />, title: 'Xong trong 30 phút', desc: 'Nhanh chóng, tiện lợi' },
+    { icon: <Award size={24} />, title: 'Linh kiện chính hãng', desc: 'Cam kết 100%' },
+    { icon: <Wrench size={24} />, title: 'Kỹ thuật viên 10+ năm', desc: 'Chuyên môn cao' },
 ];
 
 // Skeleton loader for banner
@@ -157,14 +157,14 @@ export default function HeroSection({ initialBanners }: HeroSectionProps) {
 
     return (
         <section className="py-2">
-            <div className="max-w-[1200px] mx-auto px-2 md:px-4">
-                <div className="rounded-xl shadow-lg">
+            <div className="mx-auto max-w-[1080px] px-2 md:px-4">
+                <div className="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm">
 
                     {/* ===== 2-Column Layout: Sidebar + Slider ===== */}
                     <div className="flex">
 
                         {/* ── Sidebar Menu (25%) ── Hidden on mobile */}
-                        <div className="hidden lg:block w-[260px] flex-shrink-0 bg-white border-r border-gray-100 rounded-tl-xl overflow-visible relative z-20">
+                        <div className="relative z-20 hidden w-[220px] flex-shrink-0 overflow-visible border-r border-gray-100 bg-white lg:block">
                             <div className="py-2">
                                 <h3 className="px-4 py-2.5 text-sm font-bold text-dark flex items-center gap-2 border-b border-gray-50">
                                     <Wrench size={16} className="text-copper" />
@@ -182,7 +182,7 @@ export default function HeroSection({ initialBanners }: HeroSectionProps) {
                         </div>
 
                         {/* ── Banner Slider (75%) ── */}
-                        <div className="flex-1 min-w-0 relative bg-white overflow-hidden rounded-t-xl lg:rounded-tl-none lg:rounded-tr-xl">
+                        <div className="relative min-w-0 flex-1 overflow-hidden bg-white">
                             <div className="px-0">
                                 <div className="relative aspect-[16/9] w-full overflow-hidden bg-dark">
                                         {heroBanners.map((banner, i) => {
@@ -210,7 +210,7 @@ export default function HeroSection({ initialBanners }: HeroSectionProps) {
                                                                     height={banner.height}
                                                                     priority={isFirst || i === current}
                                                                     fetchPriority={isFirst || i === current ? "high" : "auto"}
-                                                                    sizes="(max-width: 1024px) 100vw, (max-width: 1200px) calc(100vw - 292px), 908px"
+                                                                    sizes="(max-width: 1024px) 100vw, (max-width: 1120px) calc(100vw - 252px), 860px"
                                                                     quality={60}
                                                                     unoptimized={isFirst}
                                                                     style={{ width: '100%', height: '100%', objectFit: 'cover' }}
@@ -224,7 +224,7 @@ export default function HeroSection({ initialBanners }: HeroSectionProps) {
                                                                 fill
                                                                 priority={isFirst || i === current}
                                                                 fetchPriority={isFirst || i === current ? "high" : "auto"}
-                                                                sizes="(max-width: 1024px) 100vw, (max-width: 1200px) calc(100vw - 292px), 908px"
+                                                                sizes="(max-width: 1024px) 100vw, (max-width: 1120px) calc(100vw - 252px), 860px"
                                                                 quality={60}
                                                                 unoptimized={isFirst}
                                                                 className="object-cover"
@@ -244,7 +244,7 @@ export default function HeroSection({ initialBanners }: HeroSectionProps) {
                                                             height={banner.height}
                                                             priority={isFirst || i === current}
                                                             fetchPriority={isFirst || i === current ? "high" : "auto"}
-                                                            sizes="(max-width: 1024px) 100vw, (max-width: 1200px) calc(100vw - 292px), 908px"
+                                                            sizes="(max-width: 1024px) 100vw, (max-width: 1120px) calc(100vw - 252px), 860px"
                                                             quality={60}
                                                             unoptimized={isFirst}
                                                             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
@@ -258,7 +258,7 @@ export default function HeroSection({ initialBanners }: HeroSectionProps) {
                                                             fill
                                                             priority={isFirst || i === current}
                                                             fetchPriority={isFirst || i === current ? "high" : "auto"}
-                                                            sizes="(max-width: 1024px) 100vw, (max-width: 1200px) calc(100vw - 292px), 908px"
+                                                            sizes="(max-width: 1024px) 100vw, (max-width: 1120px) calc(100vw - 252px), 860px"
                                                             quality={60}
                                                             unoptimized={isFirst}
                                                             className="object-cover"
@@ -286,7 +286,7 @@ export default function HeroSection({ initialBanners }: HeroSectionProps) {
                                                         aria-current={isActive ? 'true' : undefined}
                                                         aria-label={`Chuyển đến banner ${i + 1}: ${getBannerLabel(banner, i)}`}
                                                         onClick={() => setCurrent(i)}
-                                                        className={`relative min-w-0 px-2 py-3 text-center text-[10px] font-semibold uppercase leading-snug transition-colors sm:px-3 ${isActive ? 'text-dark' : 'text-gray-600 hover:text-copper'}`}
+                                                        className={`relative min-w-0 px-2 py-2 text-center text-[10px] font-semibold uppercase leading-snug transition-colors sm:px-3 ${isActive ? 'text-dark' : 'text-gray-600 hover:text-copper'}`}
                                                     >
                                                         <span className="block line-clamp-2">{getBannerLabel(banner, i)}</span>
                                                         <span className={`absolute bottom-0 left-3 right-3 h-0.5 rounded-full transition-colors ${isActive ? 'bg-copper' : 'bg-transparent'}`} />
@@ -301,14 +301,14 @@ export default function HeroSection({ initialBanners }: HeroSectionProps) {
                     </div>{/* end 2-column flex */}
 
                     {/* Trust Badges */}
-                    <div className="bg-white rounded-b-xl overflow-hidden">
-                        <div className="px-4 py-5">
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="overflow-hidden bg-white">
+                        <div className="px-3 py-3.5 sm:px-4">
+                            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
                                 {trustBadges.map((badge, i) => (
-                                    <div key={i} className="flex items-center gap-3 px-3">
+                                    <div key={i} className="flex items-center gap-2 px-2">
                                         <div className="text-copper flex-shrink-0">{badge.icon}</div>
                                         <div>
-                                            <span className="block text-sm font-bold text-dark">{badge.title}</span>
+                                            <span className="block text-xs font-bold text-dark sm:text-sm">{badge.title}</span>
                                             <span className="block text-xs text-gray-600">{badge.desc}</span>
                                         </div>
                                     </div>

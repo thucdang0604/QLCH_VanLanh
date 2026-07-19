@@ -92,7 +92,7 @@ export default function CustomerLayoutShell({
 
     return (
         <CartProvider>
-            <div className="min-h-screen w-full" style={wrapperStyle}>
+            <div className="theme-page-background min-h-screen w-full" style={wrapperStyle}>
                 {/* SEO: LocalBusiness Schema */}
                 <script
                     type="application/ld+json"

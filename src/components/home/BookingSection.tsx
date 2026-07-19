@@ -234,7 +234,7 @@ export default function BookingSection({ variant = 'section' }: BookingSectionPr
 
             <div className={isModal ? 'px-0' : 'mx-auto max-w-[1200px] px-2 md:px-4'}>
                 <div
-                    className={`relative overflow-hidden rounded-xl shadow-lg transition-all perspective-[1000px] ${isModal ? 'max-h-[calc(100dvh-120px)] overflow-y-auto px-4 py-5' : 'px-6 py-7 lg:px-8 lg:py-8'}`}
+                    className={`home-section-outer-card relative overflow-hidden rounded-xl border border-white/10 shadow-md transition-all perspective-[1000px] ${isModal ? 'max-h-[calc(100dvh-120px)] overflow-y-auto px-4 py-5' : 'px-4 py-5 lg:px-5 lg:py-6'}`}
                     style={{ backgroundColor: 'var(--outer-bg, #1a1a2e)' }}
                 >
                     
