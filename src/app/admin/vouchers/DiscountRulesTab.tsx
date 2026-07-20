@@ -626,7 +626,6 @@ export default function DiscountRulesTab() {
                             </thead>
                             <tbody className="divide-y divide-gray-100">
                                 {tiers.map((tier, idx) => {
-                                    const _customers = tierCustomers[tier.name] || [];
                                     const isExpanded = expandedTier === tier.name;
                                     const isLoaded = !!loadedTierCustomers[tier.name];
                                     const isLoading = loadingTierName === tier.name;

@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { FieldValue } from 'firebase-admin/firestore';
+import { revalidateTag } from 'next/cache';
 import { requireAdmin } from '@/lib/apiAuth';
 import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 import { getAdminDb } from '@/lib/firebaseAdmin';
@@ -30,6 +31,9 @@ export const POST = withApi({
             });
             return mutation;
         });
+
+        revalidateTag('config');
+        revalidateTag('layout');
 
         return context.json({ success: true, nodeId: result.nodeId });
 });

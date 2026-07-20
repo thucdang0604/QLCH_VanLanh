@@ -11,6 +11,7 @@
     "build": "next build",
     "typegen": "next typegen",
     "typecheck": "next typegen && tsc --noEmit",
+    "audit:system-config": "tsx scripts/audit-system-config.ts",
     "verify": "pnpm lint && pnpm typecheck && pnpm build",
     "ai:guard": "node scripts/ai-guard.mjs",
     "start": "next start",

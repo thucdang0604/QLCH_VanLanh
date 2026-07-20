@@ -1,7 +1,7 @@
 'use client';
 
 /* eslint-disable @next/next/no-img-element */
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
     useConfig,
     type SiteConfig,
@@ -78,18 +78,37 @@ function getBannerRatioStatus(width?: number, height?: number) {
 export default function AdminAppearancePage() {
     const { config, updateConfig } = useConfig();
     const [local, setLocal] = useState<SiteConfig>(config);
+    const [baseConfig, setBaseConfig] = useState<SiteConfig>(config);
     const [saving, setSaving] = useState(false);
     const [toast, setToast] = useState<{ message: string; variant: 'success' | 'error' } | null>(null);
     const [mediaOpen, setMediaOpen] = useState(false);
     const [mediaTarget, setMediaTarget] = useState<string | null>(null);
     const [expandedHomeSectionId, setExpandedHomeSectionId] = useState<string | null>(null);
+    const [remoteUpdatePending, setRemoteUpdatePending] = useState(false);
 
     const [editBranch, setEditBranch] = useState<StoreBranch | null>(null);
     const [branchForm, setBranchForm] = useState({ name: '', address: '', phone: '', mapLink: '' });
 
-    useEffect(() => { setLocal(config); }, [config]);
-
-    const isDirty = useMemo(() => JSON.stringify(local) !== JSON.stringify(config), [local, config]);
+    const configSignature = useMemo(() => JSON.stringify(config), [config]);
+    const baseConfigSignature = useMemo(() => JSON.stringify(baseConfig), [baseConfig]);
+    const localSignature = useMemo(() => JSON.stringify(local), [local]);
+    const isDirty = localSignature !== baseConfigSignature && localSignature !== configSignature;
+    const observedConfigSignature = useRef(configSignature);
+    useEffect(() => {
+        if (observedConfigSignature.current === configSignature) return;
+        observedConfigSignature.current = configSignature;
+        if (configSignature === baseConfigSignature) {
+            setRemoteUpdatePending(false);
+            return;
+        }
+        if (isDirty) {
+            setRemoteUpdatePending(true);
+            return;
+        }
+        setLocal(config);
+        setBaseConfig(config);
+        setRemoteUpdatePending(false);
+    }, [baseConfigSignature, config, configSignature, isDirty]);
     const visibleSectionCount = local.homeSections.filter(section => section.visible).length;
 
     const showToast = (message: string, variant: 'success' | 'error' = 'success') => setToast({ message, variant });
@@ -101,6 +120,7 @@ export default function AdminAppearancePage() {
             // Strip undefined values to prevent Firebase "Unsupported field value: undefined" errors
             const cleanPartial = JSON.parse(JSON.stringify(partial));
             await updateConfig(cleanPartial);
+            setBaseConfig((previous) => ({ ...previous, ...cleanPartial }));
             showToast(msg);
             return true;
         }
@@ -294,7 +314,7 @@ export default function AdminAppearancePage() {
                                 Xem trang chủ <ExternalLink size={15} />
                             </a>
                             <button
-                                onClick={() => { setLocal(config); showToast('Đã hoàn tác các thay đổi chưa lưu'); }}
+                                onClick={() => { setLocal(config); setBaseConfig(config); setRemoteUpdatePending(false); showToast('Đã hoàn tác các thay đổi chưa lưu'); }}
                                 disabled={!isDirty || saving}
                                 className="inline-flex items-center gap-2 rounded-lg border border-white/20 px-3.5 py-2.5 text-sm font-medium text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
                             >
@@ -318,6 +338,18 @@ export default function AdminAppearancePage() {
                     </div>
                     <p className="text-xs text-gray-500">Đang hiển thị <strong className="text-gray-700">{visibleSectionCount}/{local.homeSections.length}</strong> khối trên trang chủ · <strong className="text-gray-700">{local.hero_banners.length}</strong> banner</p>
                 </div>
+                {remoteUpdatePending && isDirty && (
+                    <div className="mx-5 mb-3 flex flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 sm:mx-6 sm:flex-row sm:items-center sm:justify-between">
+                        <span>Một quản trị viên khác vừa cập nhật cấu hình. Bản nháp của bạn vẫn được giữ; lưu để kiểm tra xung đột hoặc tải lại dữ liệu mới.</span>
+                        <button
+                            type="button"
+                            onClick={() => { setLocal(config); setBaseConfig(config); setRemoteUpdatePending(false); }}
+                            className="w-fit rounded border border-amber-300 bg-white px-2.5 py-1 font-semibold text-amber-800 hover:bg-amber-100"
+                        >
+                            Tải lại dữ liệu mới
+                        </button>
+                    </div>
+                )}
                 <nav aria-label="Đi đến khu vực cấu hình" className="flex gap-2 overflow-x-auto border-t border-slate-100 px-5 py-2.5 sm:px-6">
                     {[
                         ['#theme', 'Màu sắc'], ['#brand', 'Thương hiệu'], ['#banners', 'Banner'], ['#pricing', 'Bảng giá'], ['#reviews', 'Review'], ['#layout', 'Bố cục'],

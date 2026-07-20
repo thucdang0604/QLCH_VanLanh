@@ -91,7 +91,7 @@ export const POST = withApi({
                 : null;
 
             // Đọc mức giảm giá từ config
-            const configSnap = await transaction.get(db.collection('system_config').doc('site_config'));
+            const configSnap = await transaction.get(db.collection('system_config').doc('main_settings'));
             const configData = configSnap.exists ? configSnap.data() : {};
             const rewardType = (configData?.bountyRewardType as string) || 'fixed';
             const rewardValue = (configData?.bountyRewardValue as number) || 50000;

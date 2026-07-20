@@ -4,6 +4,7 @@ import { getAdminDb, isAdminAvailable } from '@/lib/firebaseAdmin';
 import { isRateLimited } from '@/lib/rateLimit';
 import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 import { reserveSequentialDocumentId } from '@/lib/serverDocumentIds';
+import { getCachedReviewVerificationState, verifyReviewPin } from '@/lib/reviewVerification';
 
 // ── Haversine distance (meters) ──
 function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -34,31 +35,10 @@ interface GeofenceData {
     lat: number;
     lng: number;
     radiusMeters: number;
-    pin: string;
 }
 
-const DEFAULT_GEOFENCE: GeofenceData = {
-    enabled: false,
-    lat: 10.8078,
-    lng: 106.7,
-    radiusMeters: 500,
-    pin: '2026',
-};
-
 async function getGeofenceConfig(): Promise<GeofenceData> {
-    try {
-        if (!isAdminAvailable()) return DEFAULT_GEOFENCE;
-        const snap = await getAdminDb().collection('system_config').doc('main_settings').get();
-        if (snap.exists) {
-            const data = snap.data();
-            if (data?.geofence) {
-                return { ...DEFAULT_GEOFENCE, ...data.geofence };
-            }
-        }
-    } catch (err) {
-        console.error('Failed to fetch geofence config:', err);
-    }
-    return DEFAULT_GEOFENCE;
+    return (await getCachedReviewVerificationState()).geofence;
 }
 
 // ═══ GET: Return public geofence config (for client pre-check) ═══
@@ -155,10 +135,16 @@ export const POST = withApi({
         }
 
         // ── 4. Geofence verification ──
-        const geo = await getGeofenceConfig();
+        const verificationState = await getCachedReviewVerificationState();
+        const geo = verificationState.geofence;
+        let verifiedWithPin = false;
         if (geo.enabled) {
             // PIN bypass: if client provides a valid PIN, skip geo check
-            if (pin && typeof pin === 'string' && pin === geo.pin) {
+            if (pin && typeof pin === 'string' && (
+                await verifyReviewPin(pin, verificationState.pinHash)
+                || (verificationState.legacyPin !== undefined && pin === verificationState.legacyPin)
+            )) {
+                verifiedWithPin = true;
                 // PIN verified — pass
             } else if (typeof lat === 'number' && typeof lng === 'number') {
                 // Geo check via Haversine
@@ -189,7 +175,7 @@ export const POST = withApi({
             status: 'pending',
             createdAt: FieldValue.serverTimestamp(),
             ...(geo.enabled && {
-                verification: pin ? 'pin' : 'geolocation',
+                verification: verifiedWithPin ? 'pin' : 'geolocation',
             }),
         };
 

@@ -32,6 +32,7 @@ export default function SettingsPage() {
     const [topBarText, setTopBarText] = useState('');
     const [forbiddenWords, setForbiddenWords] = useState('');
     const [geofence, setGeofence] = useState<GeofenceConfig>(DEFAULT_CONFIG.geofence);
+    const [reviewPin, setReviewPin] = useState('');
     const [saving, setSaving] = useState(false);
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
 
@@ -68,10 +69,15 @@ export default function SettingsPage() {
                 topBarText: topBarText,
                 forbiddenWords: fWords,
                 geofence: geofence,
-            });
+            }, { reviewPin });
+            setReviewPin('');
             setMessage({ type: 'success', text: 'Đã lưu cài đặt thành công!' });
         } catch (error) {
             console.error('Save settings error:', error);
+            if (error instanceof Error) {
+                setMessage({ type: 'error', text: error.message });
+                return;
+            }
             setMessage({ type: 'error', text: 'Lỗi khi lưu cài đặt. Vui lòng thử lại.' });
         } finally {
             setSaving(false);
@@ -427,10 +433,10 @@ export default function SettingsPage() {
                                         <input
                                             type="text"
                                             title="Mã PIN"
-                                            value={geofence.pin}
-                                            onChange={(e) => setGeofence(g => ({ ...g, pin: e.target.value }))}
+                                            value={reviewPin}
+                                            onChange={(e) => setReviewPin(e.target.value.replace(/\D/g, ''))}
                                             className="w-full max-w-xs px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all font-mono text-lg tracking-widest"
-                                            placeholder="2026"
+                                            placeholder="Nhập PIN mới"
                                             maxLength={8}
                                         />
                                         <p className="text-xs text-gray-400">Nhân viên sẽ cung cấp mã này cho khách khi khách không bật được GPS.</p>
@@ -450,6 +456,7 @@ export default function SettingsPage() {
                                     setTopBarText(config.topBarText || '');
                                     setForbiddenWords((config.forbiddenWords || []).join(', '));
                                     setGeofence(config.geofence || DEFAULT_CONFIG.geofence);
+                                    setReviewPin('');
                                 }}
                                 className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-200 rounded-lg transition-colors"
                             >

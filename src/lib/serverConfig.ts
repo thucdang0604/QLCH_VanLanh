@@ -8,8 +8,12 @@ import {
     type HomepageLayoutProfile,
     type SiteConfig,
 } from '@/lib/config-defaults';
-
-const SYSTEM_CONFIG_DOCS = ['main_settings', 'layout_settings', 'navigation_settings', 'taxonomy_settings'] as const;
+import {
+    CONFIG_METADATA_FIELDS,
+    SYSTEM_CONFIG_DOCUMENTS,
+    isFieldStoredInDocument,
+} from '@/lib/systemConfig';
+import { normalizePublicGeofence } from '@/lib/geofence';
 
 function mergeHomeSections(value: unknown): HomeSectionItem[] {
     if (!Array.isArray(value) || value.length === 0) {
@@ -50,16 +54,33 @@ export async function fetchServerConfigData(): Promise<SiteConfig> {
 
     try {
         const db = getAdminDb();
-        const refs = SYSTEM_CONFIG_DOCS.map((name) => db.collection('system_config').doc(name));
+        const refs = SYSTEM_CONFIG_DOCUMENTS.map((name) => db.collection('system_config').doc(name));
         const snapshots = await db.getAll(...refs);
 
-        let data: Record<string, unknown> = {};
-        snapshots.forEach((snap) => {
+        const data: Record<string, unknown> = {};
+        let legacyLayoutGeofence: unknown;
+        snapshots.forEach((snap, index) => {
             if (snap.exists) {
                 const snapData = JSON.parse(JSON.stringify(snap.data())) as Record<string, unknown>;
-                data = { ...data, ...snapData };
+                const documentName = SYSTEM_CONFIG_DOCUMENTS[index];
+                for (const [field, value] of Object.entries(snapData)) {
+                    if (CONFIG_METADATA_FIELDS.has(field)) continue;
+                    if (isFieldStoredInDocument(field, documentName)) {
+                        data[field] = value;
+                    }
+                }
+
+                // Read only for backwards compatibility while the first save
+                // moves legacy public geofence data into its canonical document.
+                if (documentName === 'layout_settings') {
+                    legacyLayoutGeofence = snapData.geofence;
+                }
             }
         });
+
+        if (!Object.hasOwn(data, 'geofence') && legacyLayoutGeofence !== undefined) {
+            data.geofence = legacyLayoutGeofence;
+        }
 
         if (Object.keys(data).length === 0) {
             return DEFAULT_CONFIG;
@@ -95,7 +116,7 @@ export async function fetchServerConfigData(): Promise<SiteConfig> {
             layoutProfiles,
             activeLayoutProfileId: activeProfile?.id,
             forbiddenWords: (data.forbiddenWords as string[]) || DEFAULT_CONFIG.forbiddenWords,
-            geofence: { ...DEFAULT_CONFIG.geofence, ...(data.geofence as Record<string, unknown> | undefined) },
+            geofence: normalizePublicGeofence(data.geofence),
             headerNav: (data.headerNav as SiteConfig['headerNav']) || DEFAULT_CONFIG.headerNav,
             sidebarMenu: (data.sidebarMenu as SiteConfig['sidebarMenu']) || DEFAULT_CONFIG.sidebarMenu,
             footerServices: (data.footerServices as SiteConfig['footerServices']) || DEFAULT_CONFIG.footerServices,
@@ -118,6 +139,6 @@ export const getCachedServerConfig = unstable_cache(
     ['layout-config-data'],
     {
         revalidate: 300,
-        tags: ['layout'],
+        tags: ['config', 'layout'],
     },
 );

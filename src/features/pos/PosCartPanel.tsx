@@ -161,17 +161,17 @@ export function PosCartPanel({
     const [customerQrScanning, setCustomerQrScanning] = useState(false);
     const customerQrVideoRef = useRef<HTMLVideoElement>(null);
     const customerQrControlsRef = useRef<{ stop: () => void } | null>(null);
-    const compactPrimaryContactType = customerContactOptions.some(option => option.type === customerPrimaryContactType)
-        ? customerPrimaryContactType as PosCustomerContactType
-        : 'other';
     const contactValues: Record<PosCustomerContactType, string> = {
         phone: customerPhone,
         zalo: customerZalo,
         facebook: customerFacebook,
         other: customerOtherContact,
     };
+    const primaryContactOption = customerContactOptions.find(option => option.type === customerPrimaryContactType)
+        ?? customerContactOptions[0];
+    const primaryContactValue = contactValues[primaryContactOption.type].trim();
     const hasStoredContactDetails = Boolean(
-        customerId.trim() || customerZalo.trim() || customerFacebook.trim() || customerOtherContact.trim()
+        customerId.trim() || primaryContactValue || customerZalo.trim() || customerFacebook.trim() || customerOtherContact.trim()
     );
     const receivedPaymentMethod = paymentMethod === 'debt' && deposit > 0
         ? depositPaymentMethod
@@ -426,8 +426,14 @@ export function PosCartPanel({
                             Liên hệ phụ: Zalo / Facebook / Mã KH{hasStoredContactDetails ? ' đã có' : ''}
                         </button>
                         {hasStoredContactDetails && (
-                            <span className="truncate text-[11px] font-medium text-gray-400">
-                                {[customerId && 'Mã KH', customerZalo && 'Zalo', customerFacebook && 'Facebook', customerOtherContact && 'Khác'].filter(Boolean).join(' · ')}
+                            <span
+                                className="truncate text-[11px] font-medium text-gray-400"
+                                title={primaryContactValue ? `Liên hệ chính: ${primaryContactOption.label}` : undefined}
+                            >
+                                {[customerId && 'Mã KH', primaryContactValue && primaryContactOption.label, customerZalo && 'Zalo', customerFacebook && 'Facebook', customerOtherContact && 'Khác']
+                                    .filter((label): label is string => Boolean(label))
+                                    .filter((label, index, labels) => labels.indexOf(label) === index)
+                                    .join(' · ')}
                             </span>
                         )}
                     </div>
