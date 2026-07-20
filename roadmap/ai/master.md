@@ -28,4 +28,5 @@
 - [agent-chat](modules/agent-chat.md)
 - [customer-web-qa](modules/customer-web-qa.md)
 - [System Performance Audit 2026-07-03](modules/system_performance_20260703.md)
+- [Firebase Cost & Performance Closeout 2026-07-20](modules/firebase_cost_performance_20260720.md)
 - [Bugs Khác](modules/other_bugs.md)

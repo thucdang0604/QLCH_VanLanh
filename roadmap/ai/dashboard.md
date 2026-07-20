@@ -53,6 +53,16 @@ Open deploy debt: <code>BUG-DEPLOY-007</code> đang theo dõi warning Firebase C
 - <b>Xác minh:</b> TypeScript, ESLint không error, unit test ID/tally, JSON roadmap, Firestore rules/index dry-run và guardrail pass; full build chờ dừng dev server để không ghi đè `.next`.
 - <b>Handoff:</b> Commit <code>5509e6ac</code>, branch <code>codex/system-bug-performance-audit-20260703</code>, draft PR <a href="https://github.com/thucdang0604/QLCH_VanLanh/pull/20">#20</a>. Cần chạy deploy pipeline bình thường trước khi coi code là production.
 
+### 2026-07-20 - FIREBASE COST & PERFORMANCE CLOSEOUT
+- **Color:** success
+- **Status:** CLOSED -> MONITORING
+- **Summary:** Đóng phạm vi tối ưu chi phí/hiệu suất đã triển khai; không tiếp tục tối ưu suy đoán khi chưa có timing production mới.
+- <b>POS evidence:</b> Mẫu DEBT giảm từ <code>7,646ms</code> xuống <code>3,639ms</code>; callback transaction giảm từ <code>4,608ms</code> xuống <code>2,193ms</code>. <code>reserveIdsWait</code> khoảng 1.4s được giữ vì bảo vệ mã chứng từ tuần tự và concurrency.
+- <b>Cost and runtime:</b> Giữ query bounded/deferred cho admin, <code>firestore.indexes.json</code> là nguồn index chuẩn, và 62 route API đã qua <code>withApi</code> với request ID, Server-Timing, log server-side và 500 response an toàn.
+- <b>Security:</b> Endpoint <code>/api/pos/payment-config</code> yêu cầu <code>manage_orders</code>, chỉ trả dữ liệu QR thanh toán. Lỗi 500 bất ngờ không còn trả nội dung nội bộ cho client.
+- <b>Validation:</b> ESLint không error, typecheck, 60 unit tests, AI guard, staged diff check và smoke local cho Settings/Inventory/POS/Suppliers đều pass. Còn 25 warning lint cũ ngoài phạm vi.
+- <b>Reopen rule:</b> Chỉ mở phase mới khi p95 production hoặc Firestore cost tái tăng, transaction retry xuất hiện, hoặc timing log chỉ ra một phase cụ thể. Chi tiết handoff: <a href="modules/firebase_cost_performance_20260720.md">module closeout</a>.
+
 ### Customer UX Optimization
 - **Status:** DONE
 - **Color:** success

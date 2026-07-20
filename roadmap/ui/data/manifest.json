@@ -1,6 +1,6 @@
 {
   "projectName": "QLCH_VanLanh",
-  "lastSync": "2026-07-11T00:00:00.000+07:00",
+  "lastSync": "2026-07-20T00:00:00.000+07:00",
   "stats": {
     "completionPercent": 97,
     "openP0": 0,
@@ -10,6 +10,34 @@
   },
   "constraints": [],
   "aiPlans": [
+    {
+      "id": "plan-firebase-cost-performance-closeout-20260720",
+      "title": "Firebase cost and performance closeout: code complete, production monitoring",
+      "date": "20.07.2026",
+      "status": "completed",
+      "planFile": "data/ai_plans/plan_firebase_cost_performance_closeout_20260720.md",
+      "taskFile": "data/ai_plans/task_firebase_cost_performance_closeout_20260720.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_firebase_cost_performance_closeout_20260720.md",
+      "scope": [
+        "src/app/api/pos/checkout/route.ts",
+        "src/app/api/inventory/import/route.ts",
+        "src/lib/api/handler.ts",
+        "src/app/api/pos/payment-config/route.ts",
+        "src/app/admin/pos/page.tsx",
+        "src/app/admin/inventory/page.tsx",
+        "src/app/admin/settings/page.tsx",
+        "src/app/admin/suppliers/page.tsx",
+        "firestore.indexes.json"
+      ],
+      "decisions": [
+        "Close implementation work and monitor production before any further optimization",
+        "Preserve atomic stock, debt, cashier, revenue, readable-ID, FIFO, and idempotency contracts",
+        "Keep reserveIdsWait as intentional sequential-ID collision protection",
+        "Use the shared API handler for request correlation, timing, and safe unexpected-error handling",
+        "Keep firestore.indexes.json as the documented index source of truth"
+      ],
+      "updatedAt": "2026-07-20T00:00:00.000+07:00"
+    },
     {
       "id": "plan-pos-checkout-hot-path-20260710",
       "title": "Tối ưu hot path POS checkout: batch reads, telemetry và cashier tally shards",
@@ -70,7 +98,7 @@
       "id": "plan-system-bug-performance-audit-20260703",
       "title": "System bug and performance audit: POS checkout latency and scale regressions",
       "date": "03.07.2026",
-      "status": "in_progress",
+      "status": "completed",
       "planFile": "data/ai_plans/plan_system_bug_performance_audit_20260703.md",
       "taskFile": "data/ai_plans/task_system_bug_performance_audit_20260703.md",
       "walkthroughFile": "",
@@ -145,7 +173,7 @@
         "Initial-data order/repair imports must use server APIs because orders and repairs are server-only collections",
         "Admin vouchers must not read 500 customers on the default voucher tab"
       ],
-      "updatedAt": "2026-07-04T00:00:00.000+07:00"
+      "updatedAt": "2026-07-20T00:00:00.000+07:00"
     },
     {
       "id": "plan-contactless-customer-supplier-identity-20260630",

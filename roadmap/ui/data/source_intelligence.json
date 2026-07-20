@@ -1,9 +1,10 @@
 {
   "_meta": {
     "description": "Bản đồ trí tuệ mã nguồn — tự động tích lũy khi AI đọc/sửa code. Giúp AI sau chỉ cần đọc file này là hiểu ngay cấu trúc, liên kết, và cách sửa.",
-    "lastUpdated": "2026-07-11T00:00:00.000+07:00",
-    "version": 71,
+    "lastUpdated": "2026-07-20T00:00:00.000+07:00",
+    "version": 72,
     "changelog": [
+      "v72: Firebase cost/performance closeout. The current 62 changed API routes use src/lib/api/handler.ts for request IDs, Server-Timing metadata, normalized parse/auth errors, structured server logs, and generic unexpected 500 responses. Added /api/pos/payment-config, which requires manage_orders and returns only payment QR data. Admin settings, inventory, POS, and suppliers defer non-critical code/data. This is CLOSED -> MONITORING: preserve POS/inventory transaction invariants and only reopen with real timing or Firebase cost evidence.",
       "v71: Removed all default-config seed endpoints (/api/seed-admin, /api/seed-config, /api/admin/seed-taxonomy) and every config-wide default-reset caller. ConfigContext now reads missing documents without writing defaults and refuses every client write until all config reads finish; member tiers also wait for a valid snapshot. Taxonomy client writes are denied by Firestore Rules; /api/admin/taxonomy is admin-only, reads the existing tree in a transaction, refuses missing config and slug renames, and preserves descendants/concurrent edits.",
       "v70: Final POS hot-path handoff: a measured DEBT checkout with a legacy SKU logged total 3639ms (down from 7646ms), transaction callback 2193ms (down from 4608ms), and zero FIFO reads. The remaining 1397ms reserveIdsWait is intentional readable-ID collision protection, not a cache candidate. Firebase qlch-vanlanh now has all 20 products classified (18 migrated legacy); implementation is commit 5509e6ac and draft PR #20.",
       "v69: POS no longer reloads cashier-shift after a checkout that did not change the shift (including DEBT); cash/bank refreshes remain. GET /api/pos/cashier-shift returns active shift by default and loads the 10 closed-shift history documents only for the Cashier tab, reducing both post-checkout and initial POS read cost.",
@@ -1739,6 +1740,7 @@
       "/api/orders/transition": "POST: Cập nhật trạng thái đơn hàng (VD: Pending -> Confirmed -> Shipping)."
     },
     "pos": {
+      "/api/pos/payment-config": "GET: Requires manage_orders and returns only the QR-payment bank projection needed by POS; no admin TOTP or unrelated bank configuration is exposed.",
       "/api/pos/checkout": "POST: Bán hàng tại quầy (POS). Tạo Order, trừ kho, ghi nhận doanh thu và dòng tiền (PaymentHistory). Client mới gửi cashierShiftId để route batch-validate trực tiếp ca hiện hành; transaction batch-read operation_requests idempotency cùng core docs, phân loại legacy/FIFO an toàn, và trả FIFO telemetry theo callback/product khi chậm.",
       "/api/pos/cashier-shift": "GET/POST/PATCH: Lay ca thu ngan dang mo, mo ca voi so dau ca da khoa, va chot ca. POS checkout cong cash/bank vao ca dang mo."
     },
