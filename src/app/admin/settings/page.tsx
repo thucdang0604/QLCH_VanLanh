@@ -431,7 +431,9 @@ export default function SettingsPage() {
                                             Mã PIN (fallback khi GPS bị từ chối)
                                         </label>
                                         <input
-                                            type="text"
+                                            type="password"
+                                            inputMode="numeric"
+                                            autoComplete="new-password"
                                             title="Mã PIN"
                                             value={reviewPin}
                                             onChange={(e) => setReviewPin(e.target.value.replace(/\D/g, ''))}

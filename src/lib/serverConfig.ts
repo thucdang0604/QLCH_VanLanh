@@ -10,7 +10,7 @@ import {
 } from '@/lib/config-defaults';
 import {
     CONFIG_METADATA_FIELDS,
-    SYSTEM_CONFIG_DOCUMENTS,
+    STOREFRONT_CONFIG_DOCUMENTS,
     isFieldStoredInDocument,
 } from '@/lib/systemConfig';
 import { normalizePublicGeofence } from '@/lib/geofence';
@@ -47,14 +47,14 @@ function normalizeLayoutProfiles(value: unknown): HomepageLayoutProfile[] {
     });
 }
 
-export async function fetchServerConfigData(): Promise<SiteConfig> {
+export async function fetchStorefrontConfigData(): Promise<SiteConfig> {
     if (!isAdminAvailable()) {
         return DEFAULT_CONFIG;
     }
 
     try {
         const db = getAdminDb();
-        const refs = SYSTEM_CONFIG_DOCUMENTS.map((name) => db.collection('system_config').doc(name));
+        const refs = STOREFRONT_CONFIG_DOCUMENTS.map((name) => db.collection('system_config').doc(name));
         const snapshots = await db.getAll(...refs);
 
         const data: Record<string, unknown> = {};
@@ -62,7 +62,7 @@ export async function fetchServerConfigData(): Promise<SiteConfig> {
         snapshots.forEach((snap, index) => {
             if (snap.exists) {
                 const snapData = JSON.parse(JSON.stringify(snap.data())) as Record<string, unknown>;
-                const documentName = SYSTEM_CONFIG_DOCUMENTS[index];
+                const documentName = STOREFRONT_CONFIG_DOCUMENTS[index];
                 for (const [field, value] of Object.entries(snapData)) {
                     if (CONFIG_METADATA_FIELDS.has(field)) continue;
                     if (isFieldStoredInDocument(field, documentName)) {
@@ -134,9 +134,9 @@ export async function fetchServerConfigData(): Promise<SiteConfig> {
     }
 }
 
-export const getCachedServerConfig = unstable_cache(
-    async () => fetchServerConfigData(),
-    ['layout-config-data'],
+export const getCachedStorefrontConfig = unstable_cache(
+    async () => fetchStorefrontConfigData(),
+    ['storefront-config-data'],
     {
         revalidate: 300,
         tags: ['config', 'layout'],

@@ -7,7 +7,7 @@ import MissionsWidget from '@/components/MissionsWidget';
 import { ServerConfigProvider } from '@/lib/ConfigContext';
 import { getBusinessIdentity } from '@/lib/businessIdentity';
 import type { FooterServiceLink, HomeServiceCategory, NavItem, SiteConfig } from '@/lib/config-defaults';
-import { getCachedServerConfig } from '@/lib/serverConfig';
+import { getCachedStorefrontConfig } from '@/lib/serverConfig';
 
 export const revalidate = 300;
 
@@ -97,7 +97,7 @@ function buildSuggestions(config: SiteConfig): SuggestedLink[] {
 }
 
 export async function generateMetadata(): Promise<Metadata> {
-  const config = await getCachedServerConfig();
+  const config = await getCachedStorefrontConfig();
   const identity = getBusinessIdentity(config);
 
   return {
@@ -111,7 +111,7 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function NotFound() {
-  const config = await getCachedServerConfig();
+  const config = await getCachedStorefrontConfig();
   const identity = getBusinessIdentity(config);
   const suggestions = buildSuggestions(config);
 

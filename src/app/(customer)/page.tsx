@@ -1,7 +1,7 @@
 import ClientPage from './page.client';
 import { isAdminAvailable, getAdminDb } from '@/lib/firebaseAdmin';
 import { DEFAULT_CONFIG, type HeroBanner, type HomeSectionItem, type StoreBranch, type HomeServiceCategory } from '@/lib/config-defaults';
-import { getCachedServerConfig } from '@/lib/serverConfig';
+import { getCachedStorefrontConfig } from '@/lib/serverConfig';
 import { toPublicProduct, toPublicService } from '@/lib/publicCatalog';
 
 import { unstable_cache } from 'next/cache';
@@ -44,7 +44,7 @@ const fetchHomeConfigData = async (): Promise<SSRHomeConfig> => {
     const db = getAdminDb();
     // Fetch system_config, products, articles and services in parallel
     const [siteConfig, productsSnapshot, articlesSnapshot, servicesSnapshot] = await Promise.all([
-      getCachedServerConfig(),
+      getCachedStorefrontConfig(),
       db.collection('products')
         .where('status', '==', 'active')
         .orderBy('createdAt', 'desc')

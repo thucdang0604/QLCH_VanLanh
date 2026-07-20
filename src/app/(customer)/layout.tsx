@@ -1,5 +1,5 @@
 import { ServerConfigProvider } from "@/lib/ConfigContext";
-import { getCachedServerConfig } from "@/lib/serverConfig";
+import { getCachedStorefrontConfig } from "@/lib/serverConfig";
 import CustomerLayoutShell from "./layout.shell";
 import MissionsWidget from "@/components/MissionsWidget";
 
@@ -18,7 +18,7 @@ export default async function CustomerLayout({
 }: Readonly<{
     children: React.ReactNode;
 }>) {
-    const config = await getCachedServerConfig();
+    const config = await getCachedStorefrontConfig();
 
     return (
         <ServerConfigProvider initialConfig={config}>

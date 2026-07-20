@@ -4,7 +4,8 @@ import { getAdminDb, isAdminAvailable } from '@/lib/firebaseAdmin';
 import { isRateLimited } from '@/lib/rateLimit';
 import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 import { reserveSequentialDocumentId } from '@/lib/serverDocumentIds';
-import { getCachedReviewVerificationState, verifyReviewPin } from '@/lib/reviewVerification';
+import { getCachedReviewVerificationState, isValidReviewPin, verifyReviewPin } from '@/lib/reviewVerification';
+import { isValidReviewCoordinates, parseReviewSubmission } from '@/lib/reviewSubmission';
 
 // ── Haversine distance (meters) ──
 function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -81,7 +82,11 @@ export const POST = withApi({
             );
         }
 
-        const body = await context.readJson(request);
+        const parsedSubmission = parseReviewSubmission(await context.readJson<unknown>(request));
+        if (!parsedSubmission.ok) {
+            return context.json({ error: parsedSubmission.error }, { status: 400 });
+        }
+        const body = parsedSubmission.value;
 
         // ── 2. Honeypot Check ──
         if (body.website) {
@@ -100,55 +105,22 @@ export const POST = withApi({
             );
         }
 
-        // ── 3. Validate required fields ──
-        if (!customerName || typeof customerName !== 'string' || customerName.trim().length < 2) {
-            return context.json(
-                { error: 'Vui lòng nhập tên (ít nhất 2 ký tự).' },
-                { status: 400 }
-            );
-        }
-
-        if (!phone || typeof phone !== 'string' || phone.trim().length < 4) {
-            return context.json(
-                { error: 'Số điện thoại không hợp lệ.' },
-                { status: 400 }
-            );
-        }
-
-        // Validate rating (1-5)
-        const ratingNum = Number(rating);
-        if (!ratingNum || ratingNum < 1 || ratingNum > 5 || !Number.isInteger(ratingNum)) {
-            return context.json(
-                { error: 'Đánh giá không hợp lệ (1-5 sao).' },
-                { status: 400 }
-            );
-        }
-
-        // Validate images (array of strings, max 5)
-        const validImages: string[] = [];
-        if (Array.isArray(images)) {
-            for (const img of images.slice(0, 5)) {
-                if (typeof img === 'string' && img.startsWith('http')) {
-                    validImages.push(img);
-                }
-            }
-        }
-
         // ── 4. Geofence verification ──
         const verificationState = await getCachedReviewVerificationState();
         const geo = verificationState.geofence;
+        const coordinates = { lat, lng };
         let verifiedWithPin = false;
         if (geo.enabled) {
             // PIN bypass: if client provides a valid PIN, skip geo check
-            if (pin && typeof pin === 'string' && (
+            if (typeof pin === 'string' && isValidReviewPin(pin) && (
                 await verifyReviewPin(pin, verificationState.pinHash)
                 || (verificationState.legacyPin !== undefined && pin === verificationState.legacyPin)
             )) {
                 verifiedWithPin = true;
                 // PIN verified — pass
-            } else if (typeof lat === 'number' && typeof lng === 'number') {
+            } else if (isValidReviewCoordinates(coordinates)) {
                 // Geo check via Haversine
-                const distance = haversineMeters(lat, lng, geo.lat, geo.lng);
+                const distance = haversineMeters(coordinates.lat, coordinates.lng, geo.lat, geo.lng);
                 if (distance > geo.radiusMeters) {
                     return context.json(
                         { error: `Bạn đang ngoài phạm vi cửa hàng (${Math.round(distance)}m). Vui lòng đến cửa hàng hoặc nhập mã PIN.` },
@@ -165,13 +137,13 @@ export const POST = withApi({
 
         // ── 5. Create review ──
         const review = {
-            referenceId: (referenceId || '').trim(),
-            type: type === 'repair' ? 'repair' : 'general',
-            customerName: customerName.trim(),
-            phone: phone.trim(),
-            rating: ratingNum,
-            content: (content || '').trim(),
-            images: validImages,
+            referenceId,
+            type,
+            customerName,
+            phone,
+            rating,
+            content,
+            images,
             status: 'pending',
             createdAt: FieldValue.serverTimestamp(),
             ...(geo.enabled && {

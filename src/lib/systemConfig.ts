@@ -15,6 +15,15 @@ export const SYSTEM_CONFIG_DOCUMENTS = [
 export type SystemConfigDocument = typeof SYSTEM_CONFIG_DOCUMENTS[number];
 export type ConfigField = keyof SiteConfig;
 
+/**
+ * Customer shells consume presentation, navigation and storefront settings.
+ * Taxonomy has its own server query on the category routes, so including the
+ * large taxonomy tree in every customer RSC payload is unnecessary.
+ */
+export const STOREFRONT_CONFIG_DOCUMENTS = SYSTEM_CONFIG_DOCUMENTS.filter(
+    (documentName) => documentName !== 'taxonomy_settings',
+);
+
 const TAXONOMY_ADMIN_ROUTE_PREFIXES = [
     '/admin/appearance',
     '/admin/initial-data',

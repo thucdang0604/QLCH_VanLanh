@@ -5,7 +5,7 @@ import { AuthProvider } from "@/lib/AuthContext";
 import { isAdminAvailable } from "@/lib/firebaseAdmin";
 import { SITE_URL } from "@/lib/constants";
 import { getBusinessIdentity } from "@/lib/businessIdentity";
-import { getCachedServerConfig } from "@/lib/serverConfig";
+import { getCachedStorefrontConfig } from "@/lib/serverConfig";
 import FirebasePerformance from "@/components/FirebasePerformance";
 import AppDialogProvider from "@/components/AppDialogProvider";
 import { ThemeProvider } from "@/lib/ThemeContext";
@@ -44,7 +44,7 @@ export async function generateMetadata(): Promise<Metadata> {
 
   if (isAdminAvailable()) {
     try {
-      const data = await getCachedServerConfig();
+      const data = await getCachedStorefrontConfig();
 
       if (Object.keys(data).length > 0) {
         const identity = getBusinessIdentity(data);

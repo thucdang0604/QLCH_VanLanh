@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { getConfigDocumentForField, getConfigDocumentsForAdminRoute, splitConfigPatch } from './systemConfig';
+import {
+    STOREFRONT_CONFIG_DOCUMENTS,
+    getConfigDocumentForField,
+    getConfigDocumentsForAdminRoute,
+    splitConfigPatch,
+} from './systemConfig';
 
 test('system config registry keeps each dynamic field in one canonical document', () => {
     assert.equal(getConfigDocumentForField('geofence'), 'main_settings');
@@ -24,4 +29,12 @@ test('taxonomy listener is only enabled on admin screens that need its tree', ()
     assert.equal(getConfigDocumentsForAdminRoute('/admin/appearance').includes('taxonomy_settings'), true);
     assert.equal(getConfigDocumentsForAdminRoute('/admin/products').includes('taxonomy_settings'), true);
     assert.equal(getConfigDocumentsForAdminRoute('/admin/settings').includes('taxonomy_settings'), true);
+});
+
+test('storefront config excludes the taxonomy tree from shared customer payloads', () => {
+    assert.deepEqual(STOREFRONT_CONFIG_DOCUMENTS, [
+        'main_settings',
+        'layout_settings',
+        'navigation_settings',
+    ]);
 });
