@@ -1,7 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { FieldValue } from 'firebase-admin/firestore';
 import { getAdminDb, isAdminAvailable } from '@/lib/firebaseAdmin';
 import { isRateLimited } from '@/lib/rateLimit';
+import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 import { reserveSequentialDocumentId } from '@/lib/serverDocumentIds';
 
 // ── Haversine distance (meters) ──
@@ -61,27 +62,32 @@ async function getGeofenceConfig(): Promise<GeofenceData> {
 }
 
 // ═══ GET: Return public geofence config (for client pre-check) ═══
-export async function GET() {
+export const GET = withApi({ name: 'reviews/geofence' }, async (_request, context) => {
     const geo = await getGeofenceConfig();
     // Only expose public fields — never expose PIN
-    return NextResponse.json({
+    return context.json({
         enabled: geo.enabled,
         lat: geo.lat,
         lng: geo.lng,
         radiusMeters: geo.radiusMeters,
     });
-}
+});
 
 // ═══ POST: Submit review ═══
-export async function POST(request: NextRequest) {
-    try {
+export const POST = withApi({
+    name: 'reviews/submit',
+    onError: (error, context) => {
+        const status = getApiErrorStatus(error);
+        return context.error(status < 500 ? getApiErrorMessage(error) : 'Lỗi hệ thống. Vui lòng thử lại sau.', status);
+    },
+}, async (request: NextRequest, context) => {
         // ── 1. Rate Limiting ──
         const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
             || request.headers.get('x-real-ip')
             || 'unknown';
 
         if (await isRateLimited(ip, 'reviews_minute', 3, 60_000)) {
-            return NextResponse.json(
+            return context.json(
                 { error: 'Bạn đang gửi quá nhiều yêu cầu. Vui lòng thử lại sau 1 phút.' },
                 { status: 429 }
             );
@@ -89,17 +95,17 @@ export async function POST(request: NextRequest) {
 
         const msUntilMidnight = Math.max(1000, getNextMidnightUTC7() - Date.now());
         if (await isRateLimited(ip, 'reviews_daily', 3, msUntilMidnight)) {
-            return NextResponse.json(
+            return context.json(
                 { error: 'Bạn đã đạt giới hạn đánh giá trong ngày. Vui lòng quay lại ngày mai.' },
                 { status: 429 }
             );
         }
 
-        const body = await request.json();
+        const body = await context.readJson(request);
 
         // ── 2. Honeypot Check ──
         if (body.website) {
-            return NextResponse.json(
+            return context.json(
                 { error: 'Invalid request' },
                 { status: 400 }
             );
@@ -108,7 +114,7 @@ export async function POST(request: NextRequest) {
         const { referenceId, type, customerName, phone, rating, content, images, lat, lng, pin } = body;
 
         if (!isAdminAvailable()) {
-            return NextResponse.json(
+            return context.json(
                 { error: 'Service unavailable' },
                 { status: 503 }
             );
@@ -116,14 +122,14 @@ export async function POST(request: NextRequest) {
 
         // ── 3. Validate required fields ──
         if (!customerName || typeof customerName !== 'string' || customerName.trim().length < 2) {
-            return NextResponse.json(
+            return context.json(
                 { error: 'Vui lòng nhập tên (ít nhất 2 ký tự).' },
                 { status: 400 }
             );
         }
 
         if (!phone || typeof phone !== 'string' || phone.trim().length < 4) {
-            return NextResponse.json(
+            return context.json(
                 { error: 'Số điện thoại không hợp lệ.' },
                 { status: 400 }
             );
@@ -132,7 +138,7 @@ export async function POST(request: NextRequest) {
         // Validate rating (1-5)
         const ratingNum = Number(rating);
         if (!ratingNum || ratingNum < 1 || ratingNum > 5 || !Number.isInteger(ratingNum)) {
-            return NextResponse.json(
+            return context.json(
                 { error: 'Đánh giá không hợp lệ (1-5 sao).' },
                 { status: 400 }
             );
@@ -158,13 +164,13 @@ export async function POST(request: NextRequest) {
                 // Geo check via Haversine
                 const distance = haversineMeters(lat, lng, geo.lat, geo.lng);
                 if (distance > geo.radiusMeters) {
-                    return NextResponse.json(
+                    return context.json(
                         { error: `Bạn đang ngoài phạm vi cửa hàng (${Math.round(distance)}m). Vui lòng đến cửa hàng hoặc nhập mã PIN.` },
                         { status: 403 }
                     );
                 }
             } else {
-                return NextResponse.json(
+                return context.json(
                     { error: 'Vui lòng bật định vị hoặc nhập mã PIN để xác minh.' },
                     { status: 403 }
                 );
@@ -198,16 +204,9 @@ export async function POST(request: NextRequest) {
             return reviewAllocation.id;
         });
 
-        return NextResponse.json({
+        return context.json({
             success: true,
             reviewId,
             message: 'Đánh giá đã được gửi thành công!',
         });
-    } catch (error) {
-        console.error('Review API error:', error);
-        return NextResponse.json(
-            { error: 'Lỗi hệ thống. Vui lòng thử lại sau.' },
-            { status: 500 }
-        );
-    }
-}
+});

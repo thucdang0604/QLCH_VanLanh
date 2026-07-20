@@ -1,6 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { FieldValue } from 'firebase-admin/firestore';
 import { requirePermission } from '@/lib/apiAuth';
+import { getApiErrorMessage, getApiErrorStatus, type ApiRouteContext, withApi } from '@/lib/api/handler';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { readCashierShiftTallyTotals, type CashierShiftTallyTotals } from '@/lib/cashierShiftTallyServer';
 
@@ -35,6 +36,16 @@ function timestampToIso(value: unknown) {
 
 function usesShardedTally(data: CashierShiftData) {
     return Number(data.tallyVersion) >= 1;
+}
+
+function cashierShiftFailure(error: unknown, context: ApiRouteContext, fallbackStatus: number, allowConflict = false) {
+    const message = getApiErrorMessage(error);
+    const derivedStatus = message.includes('Forbidden')
+        ? 403
+        : allowConflict && message === CASHIER_SHIFT_ALREADY_OPEN_MESSAGE
+            ? 409
+            : fallbackStatus;
+    return context.error(message, getApiErrorStatus(error, derivedStatus));
 }
 
 function serializeShift(id: string, data: CashierShiftData, liveTotals?: CashierShiftTallyTotals) {
@@ -76,8 +87,10 @@ async function getActiveShiftSnap(db: FirebaseFirestore.Firestore) {
     return snap.docs[0] || null;
 }
 
-export async function GET(request: NextRequest) {
-    try {
+export const GET = withApi({
+    name: 'pos/cashier-shift.get',
+    onError: (error, context) => cashierShiftFailure(error, context, 500),
+}, async (request: NextRequest, context) => {
         await requirePermission(request, 'manage_orders');
         const db = getAdminDb();
         const includeHistory = request.nextUrl.searchParams.get('includeHistory') === 'true';
@@ -95,25 +108,22 @@ export async function GET(request: NextRequest) {
         const liveTotals = activeShift && activeShiftData && usesShardedTally(activeShiftData)
             ? await readCashierShiftTallyTotals(db, db, activeShift.id)
             : undefined;
-        return NextResponse.json({
+        return context.json({
             success: true,
             shift: activeShift ? serializeShift(activeShift.id, activeShift.data(), liveTotals) : null,
             history: historySnap?.docs.map(doc => serializeShift(doc.id, doc.data())) || [],
         });
-    } catch (error: unknown) {
-        console.error('Get cashier shift API error:', error);
-        const message = error instanceof Error ? error.message : 'Internal server error';
-        return NextResponse.json({ error: message }, { status: message.includes('Forbidden') ? 403 : 500 });
-    }
-}
+    });
 
-export async function POST(request: NextRequest) {
-    try {
+export const POST = withApi({
+    name: 'pos/cashier-shift.open',
+    onError: (error, context) => cashierShiftFailure(error, context, 500, true),
+}, async (request: NextRequest, context) => {
         const caller = await requirePermission(request, 'manage_orders');
-        const body = await request.json() as {
+        const body = await context.readJson<{
             openingCashAmount?: unknown;
             openingBankAmount?: unknown;
-        };
+        }>(request);
         const openingCashAmount = asAmount(body.openingCashAmount);
         const openingBankAmount = asAmount(body.openingBankAmount);
         const db = getAdminDb();
@@ -178,21 +188,17 @@ export async function POST(request: NextRequest) {
             };
         });
 
-        return NextResponse.json({ success: true, shift: result });
-    } catch (error: unknown) {
-        console.error('Open cashier shift API error:', error);
-        const message = error instanceof Error ? error.message : 'Internal server error';
-        const status = message.includes('Forbidden') ? 403 : message === CASHIER_SHIFT_ALREADY_OPEN_MESSAGE ? 409 : 500;
-        return NextResponse.json({ error: message }, { status });
-    }
-}
+        return context.json({ success: true, shift: result });
+    });
 
-export async function PATCH(request: NextRequest) {
-    try {
+export const PATCH = withApi({
+    name: 'pos/cashier-shift.close',
+    onError: (error, context) => cashierShiftFailure(error, context, 500),
+}, async (request: NextRequest, context) => {
         const caller = await requirePermission(request, 'manage_orders');
-        const body = await request.json() as { action?: string };
+        const body = await context.readJson<{ action?: string }>(request);
         if (body.action !== 'close') {
-            return NextResponse.json({ error: 'Invalid cashier shift action' }, { status: 400 });
+            return context.error('Invalid cashier shift action', 400);
         }
 
         const db = getAdminDb();
@@ -278,10 +284,5 @@ export async function PATCH(request: NextRequest) {
             };
         });
 
-        return NextResponse.json({ success: true, shift: result });
-    } catch (error: unknown) {
-        console.error('Close cashier shift API error:', error);
-        const message = error instanceof Error ? error.message : 'Internal server error';
-        return NextResponse.json({ error: message }, { status: message.includes('Forbidden') ? 403 : 500 });
-    }
-}
+        return context.json({ success: true, shift: result });
+    });

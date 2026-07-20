@@ -1,5 +1,5 @@
 
-import { NextResponse, NextRequest } from 'next/server';
+import { NextRequest } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requirePermission } from '@/lib/apiAuth';
 import { FieldValue } from 'firebase-admin/firestore';
@@ -17,6 +17,7 @@ import { reserveSequentialDocumentIdGroups, type ReservedSequentialDocumentId } 
 import { queueCashierShiftTally } from '@/lib/cashierShiftTallyServer';
 import type { RepairWorkflowSettings } from '@/lib/repairWorkflowConfig';
 import type { RevenueAggregateDelta } from '@/lib/revenueAggregate';
+import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 
 type CheckoutItemInput = Record<string, unknown> & {
     isRepairTicket?: boolean;
@@ -143,7 +144,19 @@ function getRepairPaidAmount(ticket: RepairTicket): number {
     return Math.max(0, Math.max(Number(ticket.payment?.depositAmount) || 0, paidFromHistory));
 }
 
-export async function POST(request: NextRequest) {
+export const POST = withApi({
+    name: 'pos/checkout',
+    onError: (error, context) => {
+        const message = getApiErrorMessage(error);
+        const normalizedMessage = message.toLowerCase();
+        const fallbackStatus = normalizedMessage.includes('mở ca thu ngân') || normalizedMessage.includes('mo ca thu ngan')
+            ? 409
+            : normalizedMessage.includes('không') || normalizedMessage.includes('khong')
+                ? 400
+                : 500;
+        return context.error(message, getApiErrorStatus(error, fallbackStatus));
+    },
+}, async (request: NextRequest, context) => {
     const startedAt = Date.now();
     const debugTiming: Record<string, unknown> = {};
     let lastTimingMark = startedAt;
@@ -199,12 +212,12 @@ export async function POST(request: NextRequest) {
         });
         markTiming('auth');
 
-        const body = await request.json();
+        const body = await context.readJson(request);
         const { idempotencyKey, repairTicketId, repairTicketIds, customer_info, items, discount_amount, total_amount, deposit_amount, deposit_payment_method, payment_method, voucherCode, use_surplus_to_pay_debt, cashierShiftId } = body;
         markTiming('parseBody');
 
         if (!Array.isArray(items) || items.length === 0) {
-            return NextResponse.json({ error: 'Giỏ hàng trống' }, { status: 400 });
+            return context.error('Giỏ hàng trống');
         }
 
         const checkoutItems = items.map((item: unknown, index: number) => {
@@ -1499,7 +1512,7 @@ export async function POST(request: NextRequest) {
             }
         }
 
-        return NextResponse.json({ ...result, debugTiming });
+        return context.json({ ...result, debugTiming });
     } catch (error: unknown) {
         debugTiming.transactionAttempts = transactionAttempts;
         debugTiming.transactionAttemptCount = transactionAttempts.length;
@@ -1508,17 +1521,6 @@ export async function POST(request: NextRequest) {
         debugTiming.fifoSkippedLegacyProductIds = transactionAttempts.at(-1)?.fifoSkippedLegacyProductIds || [];
         debugTiming.total = Date.now() - startedAt;
         console.error('POS checkout API timing before error:', debugTiming);
-        console.error('POS Checkout API error:', error);
-        const message = error instanceof Error ? error.message : 'Internal server error';
-        const normalizedMessage = message.toLowerCase();
-        const status = normalizedMessage.includes('mở ca thu ngân') || normalizedMessage.includes('mo ca thu ngan')
-            ? 409
-            : normalizedMessage.includes('không') || normalizedMessage.includes('khong')
-                ? 400
-                : 500;
-        return NextResponse.json(
-            { error: message },
-            { status }
-        );
+        throw error;
     }
-}
+});

@@ -1,13 +1,12 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { FieldValue } from 'firebase-admin/firestore';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requirePermission } from '@/lib/apiAuth';
+import { type ApiRouteContext, getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 import { normalizeVoucherCode, voucherDocumentId } from '@/lib/voucherServer';
 
-function jsonError(error: unknown) {
-    const message = error instanceof Error ? error.message : 'Internal server error';
-    const status = message.includes('Forbidden') ? 403 : message.includes('Missing Authorization') ? 401 : 400;
-    return NextResponse.json({ error: message }, { status });
+function voucherErrorResponse(error: unknown, context: ApiRouteContext) {
+    return context.error(getApiErrorMessage(error), getApiErrorStatus(error, 400));
 }
 
 function parseDate(value: unknown): Date | null {
@@ -64,10 +63,9 @@ function normalizeVoucherPayload(input: Record<string, unknown>) {
     };
 }
 
-export async function POST(request: NextRequest) {
-    try {
+export const POST = withApi({ name: 'admin/vouchers/create', onError: voucherErrorResponse }, async (request: NextRequest, context) => {
         await requirePermission(request, 'manage_discounts');
-        const body = await request.json() as Record<string, unknown>;
+        const body = await context.readJson<Record<string, unknown>>(request);
         const payload = normalizeVoucherPayload(body);
         const db = getAdminDb();
         const docId = voucherDocumentId(payload.code);
@@ -95,16 +93,13 @@ export async function POST(request: NextRequest) {
             });
         });
 
-        return NextResponse.json({ success: true, id: docId, code: payload.code });
-    } catch (error) {
-        return jsonError(error);
-    }
-}
+        return context.json({ success: true, id: docId, code: payload.code });
+});
 
-export async function PATCH(request: NextRequest) {
-    try {
+
+export const PATCH = withApi({ name: 'admin/vouchers/update', onError: voucherErrorResponse }, async (request: NextRequest, context) => {
         await requirePermission(request, 'manage_discounts');
-        const body = await request.json() as Record<string, unknown>;
+        const body = await context.readJson<Record<string, unknown>>(request);
         const id = typeof body.id === 'string' ? body.id : '';
         if (!id) throw new Error('Voucher id is required.');
 
@@ -145,21 +140,15 @@ export async function PATCH(request: NextRequest) {
             }
         });
 
-        return NextResponse.json({ success: true, id: targetId, code: payload.code });
-    } catch (error) {
-        return jsonError(error);
-    }
-}
+        return context.json({ success: true, id: targetId, code: payload.code });
+});
 
-export async function DELETE(request: NextRequest) {
-    try {
+
+export const DELETE = withApi({ name: 'admin/vouchers/delete', onError: voucherErrorResponse }, async (request: NextRequest, context) => {
         await requirePermission(request, 'manage_discounts');
         const { searchParams } = new URL(request.url);
         const id = searchParams.get('id');
         if (!id) throw new Error('Voucher id is required.');
         await getAdminDb().collection('vouchers').doc(id).delete();
-        return NextResponse.json({ success: true });
-    } catch (error) {
-        return jsonError(error);
-    }
-}
+        return context.json({ success: true });
+});

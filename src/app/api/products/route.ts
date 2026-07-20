@@ -1,12 +1,18 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { getAdminDb, isAdminAvailable } from '@/lib/firebaseAdmin';
 import { toPublicProduct } from '@/lib/publicCatalog';
+import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;
 
-export async function GET(request: NextRequest) {
-    try {
+export const GET = withApi({
+    name: 'products',
+    onError: (error, context) => {
+        const status = getApiErrorStatus(error);
+        return context.error(status < 500 ? getApiErrorMessage(error) : 'Lỗi hệ thống. Vui lòng thử lại sau.', status);
+    },
+}, async (request: NextRequest, context) => {
         const { searchParams } = new URL(request.url);
         const category = searchParams.get('category');
         const brand = searchParams.get('brand');
@@ -16,7 +22,7 @@ export async function GET(request: NextRequest) {
             : DEFAULT_LIMIT;
 
         if (!isAdminAvailable()) {
-            return NextResponse.json(
+            return context.json(
                 { error: 'Service unavailable' },
                 { status: 503 }
             );
@@ -35,16 +41,9 @@ export async function GET(request: NextRequest) {
 
         const products = snapshot.docs.map(doc => toPublicProduct(doc.id, doc.data()));
 
-        return NextResponse.json({
+        return context.json({
             success: true,
             products,
             total: products.length
         });
-    } catch (error) {
-        console.error('Products API error:', error);
-        return NextResponse.json(
-            { error: 'Failed to fetch products' },
-            { status: 500 }
-        );
-    }
-}
+});

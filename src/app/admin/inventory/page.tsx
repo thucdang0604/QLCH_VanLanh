@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useState, useEffect } from 'react';
+import dynamic from 'next/dynamic';
+import { useCallback, useState, useEffect, useRef } from 'react';
 import {
     Package, Search, CheckCircle2, Clock,
     Loader2, ChevronDown, ChevronRight,
@@ -15,17 +16,26 @@ import type { ImportReceipt, Product } from '@/lib/types';
 import { toastError, toastSuccess } from '@/lib/toast';
 import { isPartCategory } from '@/lib/constants';
 import CurrencyInput from '@/components/admin/CurrencyInput';
-import LotTrackingModal from '@/components/admin/LotTrackingModal';
-import ProductQrLabelModal, { PrintBatchItem } from '@/components/admin/ProductQrLabelModal';
+import type { PrintBatchItem } from '@/components/admin/ProductQrLabelModal';
 import {
     calculateImportableTotal,
     getReceiptItemAvailability,
     isReceiptItemUnavailable,
 } from '@/lib/importReceiptAvailability';
 import { buildImportPreviewState } from '@/features/parts/importReceiptUtils';
-import { CreateReceiptModal, ImportPreviewModal } from '@/features/parts/ImportReceiptModals';
 import type { ImportPreviewState, ImportReceiptItem, SupplierOption } from '@/features/parts/importReceiptTypes';
 import { buildInlineSupplierContactInput, buildSupplierContactDocumentFields, reserveSupplierDocumentId } from '@/lib/supplierDocumentIds';
+
+const LotTrackingModal = dynamic(() => import('@/components/admin/LotTrackingModal'), { ssr: false });
+const ProductQrLabelModal = dynamic(() => import('@/components/admin/ProductQrLabelModal'), { ssr: false });
+const ImportPreviewModal = dynamic(
+    () => import('@/features/parts/ImportReceiptModals').then(module => module.ImportPreviewModal),
+    { ssr: false },
+);
+const CreateReceiptModal = dynamic(
+    () => import('@/features/parts/ImportReceiptModals').then(module => module.CreateReceiptModal),
+    { ssr: false },
+);
 
 // ── Status Config ──
 const statusConfig = {
@@ -86,6 +96,8 @@ export default function InventoryPage() {
     const [timeFilter, setTimeFilter] = useState<'all' | 'today' | 'week' | 'month'>('all');
     const [activeTab, setActiveTab] = useState<InventoryTab>('completed');
     const [supplierList, setSupplierList] = useState<SupplierOption[]>([]);
+    const [supplierListLoaded, setSupplierListLoaded] = useState(false);
+    const supplierListRequestRef = useRef<Promise<void> | null>(null);
     const [partTypeOptions, setPartTypeOptions] = useState<string[]>([]);
     const [editingPrices, setEditingPrices] = useState<Record<string, number[]>>({});
     const [editingQuantities, setEditingQuantities] = useState<Record<string, number[]>>({});
@@ -255,11 +267,31 @@ export default function InventoryPage() {
     }, []);
 
     const formatPrice = (n: number) => n.toLocaleString('vi-VN') + 'đ';
+    const loadSupplierList = useCallback(async () => {
+        if (supplierListLoaded) return;
+        if (supplierListRequestRef.current) return supplierListRequestRef.current;
+
+        const request = getDocs(query(collection(db, 'suppliers'), orderBy('name', 'asc'), limit(100)))
+            .then((snap: QuerySnapshot<DocumentData>) => {
+                setSupplierList(snap.docs.map((d: QueryDocumentSnapshot<DocumentData>) => ({ id: d.id, ...d.data() } as SupplierOption)));
+                setSupplierListLoaded(true);
+            })
+            .catch(err => console.error('Failed to load suppliers:', err))
+            .finally(() => {
+                supplierListRequestRef.current = null;
+            });
+
+        supplierListRequestRef.current = request;
+        return request;
+    }, [supplierListLoaded]);
+
+    const isExpandedDraftReceipt = Boolean(expandedId && receipts.some(receipt => receipt.id === expandedId && receipt.status === 'draft'));
+
     useEffect(() => {
-        getDocs(query(collection(db, 'suppliers'), orderBy('name', 'asc'), limit(100))).then((snap: QuerySnapshot<DocumentData>) => {
-            setSupplierList(snap.docs.map((d: QueryDocumentSnapshot<DocumentData>) => ({ id: d.id, ...d.data() } as SupplierOption)));
-        }).catch(err => console.error('Failed to load suppliers:', err));
-    }, []);
+        if (isCreateReceiptOpen || importPreviewModal.isOpen || isExpandedDraftReceipt) {
+            void loadSupplierList();
+        }
+    }, [importPreviewModal.isOpen, isCreateReceiptOpen, isExpandedDraftReceipt, loadSupplierList]);
 
     useEffect(() => {
         if (isCreateReceiptOpen || importPreviewModal.isOpen) {
@@ -886,11 +918,13 @@ export default function InventoryPage() {
             </div>
 
             {/* Lot Tracking Modal */}
-            <LotTrackingModal 
-                isOpen={!!trackingLotCode} 
-                onClose={() => setTrackingLotCode(null)} 
-                initialSearchCode={trackingLotCode || ''}
-            />
+            {trackingLotCode && (
+                <LotTrackingModal
+                    isOpen
+                    onClose={() => setTrackingLotCode(null)}
+                    initialSearchCode={trackingLotCode}
+                />
+            )}
 
             {importPreviewModal.isOpen && (
                 <ImportPreviewModal
@@ -903,23 +937,25 @@ export default function InventoryPage() {
                 />
             )}
 
-            <CreateReceiptModal
-                isOpen={isCreateReceiptOpen}
-                onClose={() => setIsCreateReceiptOpen(false)}
-                parts={parts}
-                retailProducts={retailProducts}
-                onCreated={async () => {
-                    setIsCreateReceiptOpen(false);
-                    setActiveTab('draft');
-                    await refreshReceipts();
-                }}
-                currentUser={user}
-                suppliers={supplierList}
-                initialReceiptType={createReceiptType}
-                lockReceiptType
-                outOfStockSuggestions={createReceiptType === 'retail' ? outOfStockRetailProducts : outOfStockParts}
-                isLoadingOutOfStockSuggestions={outOfStockSuggestionsLoading === createReceiptType}
-            />
+            {isCreateReceiptOpen && (
+                <CreateReceiptModal
+                    isOpen
+                    onClose={() => setIsCreateReceiptOpen(false)}
+                    parts={parts}
+                    retailProducts={retailProducts}
+                    onCreated={async () => {
+                        setIsCreateReceiptOpen(false);
+                        setActiveTab('draft');
+                        await refreshReceipts();
+                    }}
+                    currentUser={user}
+                    suppliers={supplierList}
+                    initialReceiptType={createReceiptType}
+                    lockReceiptType
+                    outOfStockSuggestions={createReceiptType === 'retail' ? outOfStockRetailProducts : outOfStockParts}
+                    isLoadingOutOfStockSuggestions={outOfStockSuggestionsLoading === createReceiptType}
+                />
+            )}
 
             {/* Print Batch Modal */}
             {printBatchLots && printBatchLots.length > 0 && (

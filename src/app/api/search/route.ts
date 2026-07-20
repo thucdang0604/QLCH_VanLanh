@@ -1,7 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { getAdminDb, isAdminAvailable } from '@/lib/firebaseAdmin';
 import { isRateLimited } from '@/lib/rateLimit';
 import { toPublicProduct, toPublicService } from '@/lib/publicCatalog';
+import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 
 type PublicSearchResult =
     | (ReturnType<typeof toPublicProduct> & { _type: 'product' })
@@ -27,25 +28,30 @@ function searchTokens(query: string): string[] {
     return token.length >= MIN_QUERY_LENGTH ? [token] : [];
 }
 
-export async function GET(request: NextRequest) {
-    try {
+export const GET = withApi({
+    name: 'search',
+    onError: (error, context) => {
+        const status = getApiErrorStatus(error);
+        return context.error(status < 500 ? getApiErrorMessage(error) : 'Lỗi hệ thống. Vui lòng thử lại sau.', status);
+    },
+}, async (request: NextRequest, context) => {
         const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
             || request.headers.get('x-real-ip')
             || 'unknown';
 
         if (await isRateLimited(ip, 'search', RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS)) {
-            return NextResponse.json({ error: 'Too many search requests' }, { status: 429 });
+            return context.json({ error: 'Too many search requests' }, { status: 429 });
         }
 
         const { searchParams } = new URL(request.url);
         const q = searchParams.get('q')?.trim() || '';
 
         if (q.length < MIN_QUERY_LENGTH) {
-            return NextResponse.json({ results: [] });
+            return context.json({ results: [] });
         }
 
         if (!isAdminAvailable()) {
-            return NextResponse.json({ error: 'Service unavailable' }, { status: 503 });
+            return context.json({ error: 'Service unavailable' }, { status: 503 });
         }
 
         const tokens = searchTokens(q);
@@ -77,9 +83,5 @@ export async function GET(request: NextRequest) {
             results.set(`service:${doc.id}`, { ...toPublicService(doc.id, data), _type: 'service' });
         });
 
-        return NextResponse.json({ results: Array.from(results.values()).slice(0, RESULT_LIMIT) });
-    } catch (error) {
-        console.error('Search API error:', error);
-        return NextResponse.json({ error: 'Search failed' }, { status: 500 });
-    }
-}
+        return context.json({ results: Array.from(results.values()).slice(0, RESULT_LIMIT) });
+});

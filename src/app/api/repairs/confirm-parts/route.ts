@@ -1,6 +1,7 @@
-import { NextResponse, NextRequest } from 'next/server';
+import { NextRequest } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requirePermission } from '@/lib/apiAuth';
+import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 import { FieldValue, type DocumentReference } from 'firebase-admin/firestore';
 import type { FirestoreDateValue, RepairTicket } from '@/lib/types';
 import { loadRepairWorkflow, requireWorkflowNode } from '@/lib/repairWorkflowServer';
@@ -39,6 +40,21 @@ type RequestedReceiptItem = {
     ticketId: string;
     requestKey: string;
 };
+type RepairPartCommand = {
+    type: string;
+    productId?: string;
+    customName?: string;
+    quantity: number;
+    quality?: string;
+    partLineId?: string;
+};
+type ConfirmPartsRequestBody = {
+    ticketId?: string;
+    ticketVersion?: number;
+    operationKey?: string;
+    command?: RepairPartCommand | RepairPartCommand[];
+    commands?: RepairPartCommand[];
+};
 
 function documentTimestampValue(): FirestoreDateValue {
     return FieldValue.serverTimestamp() as unknown as FirestoreDateValue;
@@ -48,26 +64,28 @@ function arrayTimestampValue(): FirestoreDateValue {
     return new Date() as unknown as FirestoreDateValue;
 }
 
-function errorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : 'Internal server error';
-}
-
 function getProductPartType(product: ProductData): string {
     return String(product.partType || '').trim();
 }
 
-export async function POST(request: NextRequest) {
-    try {
+export const POST = withApi({
+    name: 'repairs/confirm-parts',
+    onError: (error, context) => {
+        const message = getApiErrorMessage(error);
+        const legacyStatus = message.includes('không') || message.includes('mismatch') ? 400 : 500;
+        return context.error(message, getApiErrorStatus(error, legacyStatus));
+    },
+}, async (request: NextRequest, context) => {
         const caller = await requirePermission(request, 'manage_repairs');
 
-        const body = await request.json();
+        const body = await context.readJson<ConfirmPartsRequestBody>(request);
         // command có thể là 1 object hoặc mảng các object (batch processing)
         const { ticketId, ticketVersion, operationKey, command, commands } = body;
 
         const cmdList = commands || (command ? (Array.isArray(command) ? command : [command]) : []);
 
         if (!ticketId || !operationKey || cmdList.length === 0) {
-            return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
+            return context.error('Missing parameters');
         }
 
         const db = getAdminDb();
@@ -441,13 +459,5 @@ export async function POST(request: NextRequest) {
             return { success: true, parts, payment: paymentUpdate, partsLockedAt };
         });
 
-        return NextResponse.json(result);
-    } catch (error: unknown) {
-        console.error('Confirm parts API error:', error);
-        const message = errorMessage(error);
-        return NextResponse.json(
-            { error: message },
-            { status: message.includes('không') || message.includes('mismatch') ? 400 : 500 }
-        );
-    }
-}
+        return context.json(result);
+});

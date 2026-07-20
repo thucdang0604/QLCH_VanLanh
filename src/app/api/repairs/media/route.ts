@@ -1,10 +1,12 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { FieldValue } from 'firebase-admin/firestore';
 import { requirePermission } from '@/lib/apiAuth';
+import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { isYouTubeUrl } from '@/lib/workflowFeatures';
 
 const MEDIA_EDITABLE_STATUSES = new Set(['done', 'out', 'refund']);
+type RepairMediaRequestBody = { ticketId?: string; mediaUrl?: string; source?: 'upload' | 'youtube' };
 
 function isValidMediaUrl(value: string): boolean {
     if (value.length > 2048) return false;
@@ -16,22 +18,24 @@ function isValidMediaUrl(value: string): boolean {
     }
 }
 
-export async function POST(request: NextRequest) {
-    try {
+export const POST = withApi({
+    name: 'repairs/media',
+    onError: (error, context) => context.error(getApiErrorMessage(error), getApiErrorStatus(error, 400)),
+}, async (request: NextRequest, context) => {
         const caller = await requirePermission(request, 'manage_repairs');
-        const body = await request.json() as { ticketId?: string; mediaUrl?: string; source?: 'upload' | 'youtube' };
+        const body = await context.readJson<RepairMediaRequestBody>(request);
         const ticketId = typeof body.ticketId === 'string' ? body.ticketId.trim() : '';
         const mediaUrl = typeof body.mediaUrl === 'string' ? body.mediaUrl.trim() : '';
         const source = body.source || 'upload';
 
         if (!ticketId || !mediaUrl) {
-            return NextResponse.json({ error: 'Missing ticketId or mediaUrl' }, { status: 400 });
+            return context.error('Missing ticketId or mediaUrl');
         }
         if (!isValidMediaUrl(mediaUrl)) {
-            return NextResponse.json({ error: 'Media URL khong hop le.' }, { status: 400 });
+            return context.error('Media URL khong hop le.');
         }
         if (source === 'youtube' && !isYouTubeUrl(mediaUrl)) {
-            return NextResponse.json({ error: 'Link YouTube khong hop le.' }, { status: 400 });
+            return context.error('Link YouTube khong hop le.');
         }
 
         const db = getAdminDb();
@@ -60,10 +64,5 @@ export async function POST(request: NextRequest) {
             });
         });
 
-        return NextResponse.json({ success: true });
-    } catch (error) {
-        console.error('Repair media append error:', error);
-        const message = error instanceof Error ? error.message : 'Khong the them media ban giao.';
-        return NextResponse.json({ error: message }, { status: 400 });
-    }
-}
+        return context.json({ success: true });
+});

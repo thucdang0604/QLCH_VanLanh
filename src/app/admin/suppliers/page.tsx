@@ -1,11 +1,11 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { collection, query, orderBy, updateDoc, doc, serverTimestamp, where, limit, setDoc } from 'firebase/firestore';
+import { collection, query, orderBy, updateDoc, doc, serverTimestamp, where, limit, setDoc, startAfter, type QueryDocumentSnapshot } from 'firebase/firestore';
 import { getDocs } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
-import { Building2, Plus, Search, Phone, Mail, MapPin, CreditCard, Edit2, ChevronDown, ChevronUp, ArrowDownToLine, ArrowUpFromLine, X, Filter, Tags, Clock3 } from 'lucide-react';
+import { Building2, Plus, Search, Phone, Mail, MapPin, CreditCard, Edit2, ChevronDown, ChevronUp, ArrowDownToLine, ArrowUpFromLine, X, Filter, Tags, Clock3, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import CurrencyInput from '@/components/admin/CurrencyInput';
 import type { Supplier, SupplierTransaction } from '@/lib/types';
@@ -20,6 +20,7 @@ const fmtDate = (d: unknown) => {
     const ts = typeof (d as { toDate?: () => Date }).toDate === 'function' ? (d as { toDate: () => Date }).toDate() : new Date(d as string);
     return ts.toLocaleDateString('vi-VN');
 };
+const SUPPLIER_BATCH_SIZE = 50;
 
 // ── Supplier Form Modal ──
 
@@ -396,6 +397,10 @@ function SupplierDetailDrawer({
 export default function SuppliersPage() {
     useAuth();
     const [suppliers, setSuppliers] = useState<(Supplier & { id: string })[]>([]);
+    const [loadingSuppliers, setLoadingSuppliers] = useState(true);
+    const [loadingMoreSuppliers, setLoadingMoreSuppliers] = useState(false);
+    const [lastSupplierDoc, setLastSupplierDoc] = useState<QueryDocumentSnapshot | null>(null);
+    const [hasMoreSuppliers, setHasMoreSuppliers] = useState(true);
     const [search, setSearch] = useState('');
     const [supplierTypeFilter, setSupplierTypeFilter] = useState('');
     const [tagFilter, setTagFilter] = useState('');
@@ -408,10 +413,37 @@ export default function SuppliersPage() {
     const [loadingTx, setLoadingTx] = useState(false);
     const [paySupplier, setPaySupplier] = useState<Supplier | null>(null);
 
-    const loadSuppliers = useCallback(async () => {
-        const q = query(collection(db, 'suppliers'), orderBy('createdAt', 'desc'), limit(200));
-        const snap = await getDocs(q);
-        setSuppliers(snap.docs.map(d => ({ id: d.id, ...d.data() } as Supplier & { id: string })));
+    const loadSuppliers = useCallback(async (
+        mode: 'reset' | 'more' = 'reset',
+        cursor: QueryDocumentSnapshot | null = null,
+    ) => {
+        const isReset = mode === 'reset';
+        if (isReset) setLoadingSuppliers(true);
+        else setLoadingMoreSuppliers(true);
+
+        try {
+            const constraints = [
+                orderBy('createdAt', 'desc'),
+                ...(isReset || !cursor ? [] : [startAfter(cursor)]),
+                limit(SUPPLIER_BATCH_SIZE),
+            ];
+            const snap = await getDocs(query(collection(db, 'suppliers'), ...constraints));
+            const nextSuppliers = snap.docs.map(d => ({ id: d.id, ...d.data() } as Supplier & { id: string }));
+            setSuppliers(current => {
+                if (isReset) return nextSuppliers;
+                const merged = new Map(current.map(supplier => [supplier.id, supplier]));
+                nextSuppliers.forEach(supplier => merged.set(supplier.id, supplier));
+                return [...merged.values()];
+            });
+            setLastSupplierDoc(snap.docs[snap.docs.length - 1] || cursor);
+            setHasMoreSuppliers(snap.docs.length === SUPPLIER_BATCH_SIZE);
+        } catch (error) {
+            console.error('Failed to load suppliers:', error);
+            toast.error('Không thể tải danh sách nhà cung cấp');
+        } finally {
+            if (isReset) setLoadingSuppliers(false);
+            else setLoadingMoreSuppliers(false);
+        }
     }, []);
 
     useEffect(() => {
@@ -421,10 +453,17 @@ export default function SuppliersPage() {
     // Load transactions when expanded
     const loadTransactions = useCallback(async (supplierId: string) => {
         setLoadingTx(true);
-        const q = query(collection(db, 'supplier_transactions'), where('supplierId', '==', supplierId), orderBy('createdAt', 'desc'), limit(100));
-        const snap = await getDocs(q);
-        setTransactions(snap.docs.map(d => ({ id: d.id, ...d.data() } as SupplierTransaction)));
-        setLoadingTx(false);
+        try {
+            const q = query(collection(db, 'supplier_transactions'), where('supplierId', '==', supplierId), orderBy('createdAt', 'desc'), limit(100));
+            const snap = await getDocs(q);
+            setTransactions(snap.docs.map(d => ({ id: d.id, ...d.data() } as SupplierTransaction)));
+        } catch (error) {
+            console.error('Failed to load supplier transactions:', error);
+            toast.error('Không thể tải lịch sử giao dịch của nhà cung cấp');
+            setTransactions([]);
+        } finally {
+            setLoadingTx(false);
+        }
     }, []);
 
     const toggleExpand = (id: string) => {
@@ -535,7 +574,7 @@ export default function SuppliersPage() {
             <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
                 <div className="flex items-center gap-3 rounded-xl border bg-white p-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 text-blue-600"><Building2 size={20} /></div>
-                    <div><p className="text-xs text-gray-500">Tổng NCC</p><p className="text-lg font-bold text-gray-800">{stats.total}</p></div>
+                    <div><p className="text-xs text-gray-500">{hasMoreSuppliers ? 'NCC đã tải' : 'Tổng NCC'}</p><p className="text-lg font-bold text-gray-800">{stats.total}</p></div>
                 </div>
                 <div className="flex items-center gap-3 rounded-xl border bg-white p-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-100 text-green-600"><Clock3 size={20} /></div>
@@ -575,7 +614,7 @@ export default function SuppliersPage() {
                     <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
                         <Building2 className="text-orange-500" size={28} /> Nhà cung cấp
                     </h1>
-                    <p className="text-sm text-gray-500 mt-1">{suppliers.length} NCC · Tổng công nợ: <span className="font-bold text-orange-600">{fmt(totalDebt)}</span></p>
+                    <p className="text-sm text-gray-500 mt-1">{hasMoreSuppliers ? `Đã tải ${suppliers.length} NCC` : `${suppliers.length} NCC`} · {hasMoreSuppliers ? 'Công nợ đã tải' : 'Tổng công nợ'}: <span className="font-bold text-orange-600">{fmt(totalDebt)}</span></p>
                 </div>
                 <button onClick={() => { setEditSupplier(null); setShowModal(true); }}
                     className="flex items-center gap-2 bg-orange-500 text-white px-3 py-1.5 text-xs rounded-xl hover:bg-orange-600 font-medium">
@@ -586,12 +625,18 @@ export default function SuppliersPage() {
             {/* Search */}
             <div className="relative max-w-md">
                 <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                <input type="text" placeholder="Tìm tên, mã NCC, Zalo/Facebook, SĐT, MST..." value={search} onChange={e => setSearch(e.target.value)}
+                <input type="text" placeholder={hasMoreSuppliers ? 'Tìm trong NCC đã tải; tải thêm để mở rộng...' : 'Tìm tên, mã NCC, Zalo/Facebook, SĐT, MST...'} value={search} onChange={e => setSearch(e.target.value)}
                     className="w-full pl-10 pr-4 h-8 text-sm border rounded-xl focus:ring-2 focus:ring-orange-500 focus:outline-none" />
             </div>
 
             {/* List */}
             <div className="space-y-3">
+                {loadingSuppliers ? (
+                    <div className="flex min-h-48 items-center justify-center rounded-xl border bg-white text-sm text-gray-500">
+                        <Loader2 size={18} className="mr-2 animate-spin text-orange-500" /> Đang tải nhà cung cấp...
+                    </div>
+                ) : (
+                    <>
                 {filtered.map(s => (
                     <div key={s.id} onClick={() => openDetail(s)} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden cursor-pointer hover:border-orange-200 hover:shadow-md transition-all">
                         <div className="p-4 flex items-start gap-4">
@@ -685,6 +730,22 @@ export default function SuppliersPage() {
                     <div className="text-center py-16 bg-white rounded-xl">
                         <Building2 size={48} className="mx-auto text-gray-300 mb-3" />
                         <p className="text-gray-500">{search ? 'Không tìm thấy NCC phù hợp' : 'Chưa có nhà cung cấp nào'}</p>
+                    </div>
+                )}
+                    </>
+                )}
+                {hasMoreSuppliers && !loadingSuppliers && (
+                    <div className="rounded-xl border bg-white px-4 py-3 text-center">
+                        {search && <p className="mb-2 text-xs text-gray-500">Kết quả đang lọc trong {suppliers.length} NCC đã tải.</p>}
+                        <button
+                            type="button"
+                            onClick={() => void loadSuppliers('more', lastSupplierDoc)}
+                            disabled={loadingMoreSuppliers || !lastSupplierDoc}
+                            className="inline-flex items-center gap-2 rounded-lg border border-orange-200 bg-white px-4 py-2 text-sm font-semibold text-orange-700 hover:bg-orange-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                            {loadingMoreSuppliers && <Loader2 size={16} className="animate-spin" />}
+                            Tải thêm {SUPPLIER_BATCH_SIZE} NCC
+                        </button>
                     </div>
                 )}
             </div>

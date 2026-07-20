@@ -1,16 +1,28 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import dynamic from 'next/dynamic';
 import { useConfig, DEFAULT_CONFIG, type ContactInfo, type GeofenceConfig } from '@/lib/ConfigContext';
 import { Save, Loader2, Store, Phone, Mail, MapPin, Facebook, MessageCircle, CheckCircle2, AlertCircle, ShieldCheck, Navigation, KeyRound, Printer } from 'lucide-react';
 
-import CategoriesTab from './CategoriesTab';
-import NavigationTab from './NavigationTab';
-import BankIntegrationConfig from '@/components/admin/settings/BankIntegrationConfig';
-import ChatIntegrationsTab from '@/components/admin/settings/ChatIntegrationsTab';
-import RepairsConfigTab from '@/components/admin/settings/RepairsConfigTab';
-import ReceiptSettingsPanel from './ReceiptSettingsPanel';
 import { appAlert } from '@/lib/appDialog';
+
+function SettingsTabLoader() {
+    return (
+        <div className="flex min-h-48 items-center justify-center" aria-live="polite">
+            <Loader2 size={28} className="animate-spin text-orange-500" />
+            <span className="sr-only">Đang tải nội dung cài đặt</span>
+        </div>
+    );
+}
+
+// These panels are mutually exclusive. Splitting them keeps the initial Settings bundle focused on General.
+const CategoriesTab = dynamic(() => import('./CategoriesTab'), { loading: SettingsTabLoader });
+const NavigationTab = dynamic(() => import('./NavigationTab'), { loading: SettingsTabLoader });
+const BankIntegrationConfig = dynamic(() => import('@/components/admin/settings/BankIntegrationConfig'), { loading: SettingsTabLoader });
+const ChatIntegrationsTab = dynamic(() => import('@/components/admin/settings/ChatIntegrationsTab'), { loading: SettingsTabLoader });
+const RepairsConfigTab = dynamic(() => import('@/components/admin/settings/RepairsConfigTab'), { loading: SettingsTabLoader });
+const ReceiptSettingsPanel = dynamic(() => import('./ReceiptSettingsPanel'), { loading: SettingsTabLoader });
 
 export default function SettingsPage() {
     const { config, updateConfig, loading } = useConfig();

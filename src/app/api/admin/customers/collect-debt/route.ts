@@ -1,10 +1,19 @@
-import { NextResponse, NextRequest } from 'next/server';
+import { NextRequest } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requirePermission } from '@/lib/apiAuth';
+import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 import { FieldValue } from 'firebase-admin/firestore';
 import type { Order } from '@/lib/types';
 import { buildPaymentChannelRevenueDelta, incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 import { reserveSequentialDocumentId } from '@/lib/serverDocumentIds';
+
+type CollectDebtRequestBody = {
+    customerId?: string;
+    amount?: number;
+    paymentMethod?: string;
+    note?: string;
+    idempotencyKey?: string;
+};
 
 async function loadDebtOrderDocs(
     tx: FirebaseFirestore.Transaction,
@@ -49,20 +58,26 @@ async function loadDebtOrderDocs(
     return debtDocs;
 }
 
-export async function POST(request: NextRequest) {
-    try {
+export const POST = withApi({
+    name: 'admin/customers/collect-debt',
+    onError: (error, context) => {
+        const message = getApiErrorMessage(error);
+        const legacyStatus = /kh(?:\u00f4|\u0103\u00b4)ng/.test(message) ? 400 : 500;
+        return context.error(message, getApiErrorStatus(error, legacyStatus));
+    },
+}, async (request: NextRequest, context) => {
         const caller = await requirePermission(request, 'manage_customers');
 
-        const body = await request.json();
+        const body = await context.readJson<CollectDebtRequestBody>(request);
         const { customerId, amount, paymentMethod = 'CASH', note, idempotencyKey } = body;
         const operationKey = typeof idempotencyKey === 'string' ? idempotencyKey.trim() : '';
 
         const numAmount = Number(amount);
         if (!operationKey) {
-            return NextResponse.json({ error: 'Missing idempotencyKey' }, { status: 400 });
+            return context.error('Missing idempotencyKey');
         }
         if (!customerId || isNaN(numAmount) || numAmount <= 0) {
-            return NextResponse.json({ error: 'Dữ liệu không hợp lệ (customerId, amount > 0)' }, { status: 400 });
+            return context.error('Dữ liệu không hợp lệ (customerId, amount > 0)');
         }
 
         const db = getAdminDb();
@@ -216,10 +231,5 @@ export async function POST(request: NextRequest) {
             };
         });
 
-        return NextResponse.json(result);
-    } catch (error: unknown) {
-        console.error('Collect Debt API error:', error);
-        const message = error instanceof Error ? error.message : 'Internal server error';
-        return NextResponse.json({ error: message }, { status: message.includes('không') ? 400 : 500 });
-    }
-}
+        return context.json(result);
+});

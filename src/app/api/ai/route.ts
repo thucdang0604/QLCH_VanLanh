@@ -3,6 +3,7 @@ import { chatWithGemini } from '@/lib/gemini';
 import { toSafeRtdbKey } from '@/lib/chatChannels';
 import { getAdminAuth, getAdminDb, isAdminAvailable } from '@/lib/firebaseAdmin';
 import { isRateLimited } from '@/lib/rateLimit';
+import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 
 const RATE_LIMIT_MAX = 5;
 const RATE_LIMIT_WINDOW_MS = 60_000;
@@ -63,9 +64,19 @@ async function getRAGProducts(): Promise<RAGProduct[]> {
     return products;
 }
 
-export async function POST(request: NextRequest) {
-    const correlationId = request.headers.get('x-request-id') || crypto.randomUUID();
-    try {
+export const POST = withApi({
+    name: 'ai',
+    onError: (error, context) => {
+        const status = getApiErrorStatus(error);
+        return context.json(
+            status < 500
+                ? { error: getApiErrorMessage(error), correlationId: context.requestId }
+                : { error: 'AI generation failed', correlationId: context.requestId },
+            { status },
+        );
+    },
+}, async (request: NextRequest, apiContext) => {
+    const correlationId = apiContext.requestId;
         const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
             || request.headers.get('x-real-ip')
             || 'unknown';
@@ -77,7 +88,7 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const body = await request.json();
+        const body = await apiContext.readJson(request);
         const { prompt, context, history, roomId, pushToRtdb } = body;
 
         if (!prompt) {
@@ -184,11 +195,4 @@ export async function POST(request: NextRequest) {
             retryable: result.retryable,
             correlationId,
         }, { status: result.ok ? 200 : 503 });
-    } catch (error) {
-        console.error(`AI API error [${correlationId}]:`, error);
-        return NextResponse.json(
-            { error: 'AI generation failed', correlationId },
-            { status: 500 }
-        );
-    }
-}
+});

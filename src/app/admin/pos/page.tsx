@@ -1,6 +1,7 @@
 'use client';
 
 
+import dynamic from 'next/dynamic';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
@@ -14,7 +15,6 @@ import { appConfirm } from '@/lib/appDialog';
 
 import { useConfig } from '@/lib/ConfigContext';
 import Modal from '@/components/admin/Modal';
-import UniversalProductModal from '@/components/admin/UniversalProductModal';
 import Image from 'next/image';
 import { db, getAuthInstance } from '@/lib/firebase';
 import type { Product, TaxonomyNode } from '@/lib/types';
@@ -239,6 +239,8 @@ interface CashierShiftView {
     closedAt?: string | null;
 }
 
+const UniversalProductModal = dynamic(() => import('@/components/admin/UniversalProductModal'), { ssr: false });
+
 export default function POSPage() {
     const { config } = useConfig();
     const searchParams = useSearchParams();
@@ -286,6 +288,7 @@ export default function POSPage() {
     const [lastOrder, setLastOrder] = useState<LastOrderData | null>(null);
     const [showProductModal, setShowProductModal] = useState(false);
     const [bankConfig, setBankConfig] = useState<BankConfig | null>(null);
+    const bankConfigRequestRef = useRef<Promise<void> | null>(null);
     const [posTab, setPosTab] = useState<PosTab>('sales');
     const [cashierShift, setCashierShift] = useState<CashierShiftView | null>(null);
     const [cashierShiftHistory, setCashierShiftHistory] = useState<CashierShiftView[]>([]);
@@ -294,20 +297,40 @@ export default function POSPage() {
     const [openingCashAmount, setOpeningCashAmount] = useState(0);
     const [openingBankAmount, setOpeningBankAmount] = useState(0);
 
-    useEffect(() => {
-        async function fetchBankConfig() {
+    const loadBankConfig = useCallback(async () => {
+        if (bankConfig) return;
+        if (bankConfigRequestRef.current) return bankConfigRequestRef.current;
+
+        const request = (async () => {
             try {
-                const res = await fetch('/api/admin/bank-config');
+                const auth = await getAuthInstance();
+                const idToken = await auth.currentUser?.getIdToken();
+                if (!idToken) return;
+
+                const res = await fetch('/api/pos/payment-config', {
+                    headers: { Authorization: `Bearer ${idToken}` },
+                });
                 const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Không thể tải cấu hình thanh toán');
                 if (data.success && data.config) {
                     setBankConfig(data.config);
                 }
             } catch (err) {
                 console.error('Lỗi tải cấu hình ngân hàng:', err);
             }
-        }
-        fetchBankConfig();
-    }, []);
+        })().finally(() => {
+            bankConfigRequestRef.current = null;
+        });
+
+        bankConfigRequestRef.current = request;
+        return request;
+    }, [bankConfig]);
+
+    useEffect(() => {
+        const needsBankConfig = paymentMethod === 'bank'
+            || (showReceipt && lastOrder?.payment_method === 'BANK');
+        if (needsBankConfig) void loadBankConfig();
+    }, [lastOrder?.payment_method, loadBankConfig, paymentMethod, showReceipt]);
 
     const loadCashierShift = useCallback(async (includeHistory = false) => {
         setCashierLoading(true);
@@ -2223,13 +2246,15 @@ export default function POSPage() {
             )}
 
             {/* ═══ Quick Add Product Modal ═══ */}
-            <UniversalProductModal
-                isOpen={showProductModal}
-                onClose={() => setShowProductModal(false)}
-                mode="retail"
-                onCreated={reloadProducts}
-                submitLabel="Tạo & Đưa vào POS"
-            />
+            {showProductModal && (
+                <UniversalProductModal
+                    isOpen
+                    onClose={() => setShowProductModal(false)}
+                    mode="retail"
+                    onCreated={reloadProducts}
+                    submitLabel="Tạo & Đưa vào POS"
+                />
+            )}
         </div>
     );
 }

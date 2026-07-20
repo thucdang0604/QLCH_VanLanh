@@ -1,7 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { isRateLimited } from '@/lib/rateLimit';
 import { normalizeVietnamPhone } from '@/lib/phone';
+import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 
 const RATE_LIMIT_MAX = 5;
 const RATE_LIMIT_WINDOW_MS = 60_000;
@@ -52,26 +53,31 @@ function clientIp(request: NextRequest): string {
         || 'unknown';
 }
 
-export async function POST(request: NextRequest) {
-    try {
+export const POST = withApi({
+    name: 'tracking',
+    onError: (error, context) => {
+        const status = getApiErrorStatus(error);
+        return context.error(status < 500 ? getApiErrorMessage(error) : 'Loi he thong. Vui long thu lai sau.', status);
+    },
+}, async (request: NextRequest, context) => {
         const ip = clientIp(request);
         if (await isRateLimited(ip, 'tracking', RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS)) {
-            return NextResponse.json(
+            return context.json(
                 { error: 'Ban dang tra cuu qua nhieu lan. Vui long thu lai sau.' },
                 { status: 429 }
             );
         }
 
-        const body = await request.json();
+        const body = await context.readJson(request);
         const { phone } = body;
 
         if (!phone || typeof phone !== 'string') {
-            return NextResponse.json({ error: 'So dien thoai khong hop le.' }, { status: 400 });
+            return context.json({ error: 'So dien thoai khong hop le.' }, { status: 400 });
         }
 
         const normalizedPhone = normalizeVietnamPhone(phone);
         if (!normalizedPhone) {
-            return NextResponse.json({ error: 'So dien thoai khong hop le.' }, { status: 400 });
+            return context.json({ error: 'So dien thoai khong hop le.' }, { status: 400 });
         }
 
         const cleanPhone = normalizedPhone.local;
@@ -172,14 +178,10 @@ export async function POST(request: NextRequest) {
             };
         });
 
-        return NextResponse.json({
+        return context.json({
             success: true,
             appointments,
             repairs,
             orders,
         });
-    } catch (error: unknown) {
-        console.error('Tracking API error:', error);
-        return NextResponse.json({ error: 'Loi he thong. Vui long thu lai sau.' }, { status: 500 });
-    }
-}
+});

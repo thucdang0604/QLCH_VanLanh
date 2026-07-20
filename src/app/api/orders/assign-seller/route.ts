@@ -1,18 +1,26 @@
-import { NextResponse, NextRequest } from 'next/server';
+import { NextRequest } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requirePermission } from '@/lib/apiAuth';
 import { FieldValue } from 'firebase-admin/firestore';
 import type { Order } from '@/lib/types';
+import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 
-export async function POST(request: NextRequest) {
-    try {
+export const POST = withApi({
+    name: 'orders/assign-seller',
+    onError: (error, context) => {
+        const message = getApiErrorMessage(error);
+        const normalizedMessage = message.toLowerCase();
+        const fallbackStatus = normalizedMessage.includes('không') || normalizedMessage.includes('khong') ? 400 : 500;
+        return context.error(message, getApiErrorStatus(error, fallbackStatus));
+    },
+}, async (request: NextRequest, context) => {
         const caller = await requirePermission(request, 'manage_orders');
         
-        const body = await request.json();
+        const body = await context.readJson(request);
         const { orderId, sellerId } = body;
 
         if (!orderId || !sellerId) {
-            return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
+            return context.error('Missing parameters');
         }
 
         const db = getAdminDb();
@@ -55,13 +63,5 @@ export async function POST(request: NextRequest) {
             });
         });
 
-        return NextResponse.json({ success: true, message: 'Gán người phụ trách bán hàng thành công' });
-    } catch (error: unknown) {
-        console.error('Assign seller API error:', error);
-        const message = error instanceof Error ? error.message : 'Internal server error';
-        return NextResponse.json(
-            { error: message },
-            { status: message.includes('không') ? 400 : 500 }
-        );
-    }
-}
+        return context.json({ success: true, message: 'Gán người phụ trách bán hàng thành công' });
+});

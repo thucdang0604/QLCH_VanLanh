@@ -1,6 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { FieldValue, type DocumentSnapshot } from 'firebase-admin/firestore';
 import { requireAdmin } from '@/lib/apiAuth';
+import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { getWorkflowFromSettings } from '@/lib/repairWorkflowServer';
 import { getExpectedReservationQuantity } from '@/lib/repairPartReservations';
@@ -9,8 +10,14 @@ import type { RepairWorkflowSettings } from '@/lib/repairWorkflowConfig';
 
 const WRITE_BATCH_SIZE = 400;
 
-export async function POST(request: NextRequest) {
-    try {
+export const POST = withApi({
+    name: 'inventory/reconcile-held',
+    onError: (error, context) => {
+        const message = getApiErrorMessage(error);
+        const fallbackStatus = message.startsWith('Forbidden') ? 403 : 400;
+        return context.error(message, getApiErrorStatus(error, fallbackStatus));
+    },
+}, async (request: NextRequest, context) => {
         const caller = await requireAdmin(request);
         const db = getAdminDb();
 
@@ -81,15 +88,10 @@ export async function POST(request: NextRequest) {
         }
 
         const totalHeld = [...expectedHeld.values()].reduce((total, quantity) => total + quantity, 0);
-        return NextResponse.json({
+        return context.json({
             success: true,
             activeTickets,
             productsUpdated: updates.length,
             totalHeld,
         });
-    } catch (error: unknown) {
-        console.error('Inventory held reconciliation error:', error);
-        const message = error instanceof Error ? error.message : 'Internal server error';
-        return NextResponse.json({ error: message }, { status: message.startsWith('Forbidden') ? 403 : 400 });
-    }
-}
+    });

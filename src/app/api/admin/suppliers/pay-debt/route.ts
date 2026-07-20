@@ -1,9 +1,18 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { FieldValue } from 'firebase-admin/firestore';
 import { requirePermission } from '@/lib/apiAuth';
+import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 import { reserveSequentialDocumentId } from '@/lib/serverDocumentIds';
+
+type SupplierPaymentRequestBody = {
+    supplierId?: string;
+    amount?: number;
+    paymentMethod?: string;
+    note?: string;
+    idempotencyKey?: string;
+};
 
 function normalizePaymentMethod(value: unknown): 'cash' | 'bank' | 'other' {
     const raw = String(value || '')
@@ -22,10 +31,19 @@ function expenseChannelDelta(amount: number, method: 'cash' | 'bank' | 'other') 
     return {};
 }
 
-export async function POST(request: NextRequest) {
-    try {
+export const POST = withApi({
+    name: 'admin/suppliers/pay-debt',
+    onError: (error, context) => {
+        const message = getApiErrorMessage(error);
+        const lower = message.toLowerCase();
+        const legacyStatus = lower.includes('invalid') || lower.includes('not found') || lower.includes('debt') || lower.includes('exceeds')
+            ? 400
+            : 500;
+        return context.error(message, getApiErrorStatus(error, legacyStatus));
+    },
+}, async (request: NextRequest, context) => {
         const caller = await requirePermission(request, 'manage_inventory');
-        const body = await request.json().catch(() => ({}));
+        const body = await context.readJson<SupplierPaymentRequestBody>(request);
         const supplierId = typeof body.supplierId === 'string' ? body.supplierId.trim() : '';
         const amount = Number(body.amount);
         const paymentMethod = normalizePaymentMethod(body.paymentMethod);
@@ -33,10 +51,10 @@ export async function POST(request: NextRequest) {
         const idempotencyKey = typeof body.idempotencyKey === 'string' ? body.idempotencyKey.trim() : '';
 
         if (!supplierId || !Number.isFinite(amount) || amount <= 0) {
-            return NextResponse.json({ error: 'Invalid supplier payment payload' }, { status: 400 });
+            return context.error('Invalid supplier payment payload');
         }
         if (!idempotencyKey) {
-            return NextResponse.json({ error: 'Missing idempotencyKey' }, { status: 400 });
+            return context.error('Missing idempotencyKey');
         }
 
         const db = getAdminDb();
@@ -153,18 +171,5 @@ export async function POST(request: NextRequest) {
             };
         });
 
-        return NextResponse.json(result);
-    } catch (error: unknown) {
-        console.error('Supplier pay debt API error:', error);
-        const message = error instanceof Error ? error.message : 'Internal server error';
-        const lower = message.toLowerCase();
-        const status = lower.includes('missing authorization')
-            ? 401
-            : lower.includes('forbidden')
-                ? 403
-                : lower.includes('invalid') || lower.includes('not found') || lower.includes('debt') || lower.includes('exceeds')
-                    ? 400
-                    : 500;
-        return NextResponse.json({ error: message }, { status });
-    }
-}
+        return context.json(result);
+});

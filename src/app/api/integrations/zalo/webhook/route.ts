@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { upsertExternalInboundMessage } from '@/lib/chatServer';
 import { getEffectiveChatIntegrationConfig } from '@/lib/chatIntegrationConfig';
+import { getApiErrorMessage, getApiErrorStatus, withApi, type ApiRouteContext } from '@/lib/api/handler';
 
 export const runtime = 'nodejs';
 
@@ -59,8 +60,18 @@ function extractZaloMessage(body: Record<string, unknown>) {
   return { externalUserId, externalPageId, text, externalMessageId, timestamp };
 }
 
-export async function GET(request: NextRequest) {
-  try {
+function zaloHealthError(_error: unknown, context: ApiRouteContext) {
+  return context.json({ ok: false, error: 'Webhook unavailable' }, { status: 503 });
+}
+
+function zaloProcessingError(error: unknown, context: ApiRouteContext) {
+  const status = getApiErrorStatus(error);
+  return context.json({
+    error: status < 500 ? getApiErrorMessage(error) : 'Webhook processing failed',
+  }, { status });
+}
+
+export const GET = withApi({ name: 'integrations/zalo/webhook', onError: zaloHealthError }, async (request: NextRequest) => {
     const config = (await getEffectiveChatIntegrationConfig()).zalo;
     if (config.webhookSecret && !isAuthorized(request, config.webhookSecret)) {
       return NextResponse.json({ ok: false, error: 'Invalid webhook token' }, { status: 403 });
@@ -72,14 +83,9 @@ export async function GET(request: NextRequest) {
       enabled: config.enabled,
       configured: !!config.oaAccessToken,
     });
-  } catch (error) {
-    console.error('Zalo webhook health check failed:', error);
-    return NextResponse.json({ ok: false, error: 'Webhook unavailable' }, { status: 503 });
-  }
-}
+});
 
-export async function POST(request: NextRequest) {
-  try {
+export const POST = withApi({ name: 'integrations/zalo/webhook', onError: zaloProcessingError }, async (request: NextRequest, context) => {
     const config = (await getEffectiveChatIntegrationConfig()).zalo;
     if (!config.enabled) {
       return NextResponse.json({ success: true, skipped: 'zalo_disabled' });
@@ -90,7 +96,7 @@ export async function POST(request: NextRequest) {
 
     let body: Record<string, unknown>;
     try {
-      body = await request.json();
+      body = await context.readJson(request);
     } catch {
       return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
     }
@@ -119,8 +125,4 @@ export async function POST(request: NextRequest) {
 
     console.warn('Zalo webhook processed:', result);
     return NextResponse.json({ success: true, result });
-  } catch (error) {
-    console.error('Zalo webhook processing failed:', error);
-    return NextResponse.json({ error: 'Webhook processing failed' }, { status: 500 });
-  }
-}
+});

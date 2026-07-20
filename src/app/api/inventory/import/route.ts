@@ -1,4 +1,4 @@
-import { NextResponse, NextRequest } from 'next/server';
+import { NextRequest } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requirePermission } from '@/lib/apiAuth';
 import { FieldValue } from 'firebase-admin/firestore';
@@ -10,6 +10,7 @@ import { buildReactivateOnImportUpdate } from '@/lib/productLifecycle';
 import { applyProductImport, assertStockCoversHeld, planRepairImportAllocation } from '@/lib/inventoryImportAllocation';
 import { incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 import { reserveSequentialDocumentIdGroups } from '@/lib/serverDocumentIds';
+import { getApiErrorStatus, withApi } from '@/lib/api/handler';
 
 type RepairLine = NonNullable<RepairTicket['parts']>[number];
 type ReceiptItem = ImportReceiptItem & {
@@ -93,7 +94,14 @@ function normalizeImportPaymentMethod(value: unknown): ImportPaymentMethod {
     throw new Error('Phuong thuc thanh toan phieu nhap khong hop le.');
 }
 
-export async function POST(request: NextRequest) {
+export const POST = withApi({
+    name: 'inventory/import',
+    onError: (error, context) => {
+        const message = errorMessage(error);
+        const fallbackStatus = message.includes('không') || message.includes('Version') ? 400 : 500;
+        return context.error(message, getApiErrorStatus(error, fallbackStatus));
+    },
+}, async (request: NextRequest, context) => {
     const startedAt = Date.now();
     const debugTiming: Record<string, unknown> = {};
     let lastRequestMark = startedAt;
@@ -149,7 +157,7 @@ export async function POST(request: NextRequest) {
         });
         markRequest('auth');
 
-        const body = await request.json();
+        const body = await context.readJson(request);
         const { action, receiptId, receiptVersion, idempotencyKey } = body;
         actionForTiming = typeof action === 'string' ? action : '';
         receiptIdForTiming = typeof receiptId === 'string' ? receiptId : '';
@@ -157,7 +165,7 @@ export async function POST(request: NextRequest) {
 
         if (!action || !receiptId) {
             logTiming('success');
-            return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
+            return context.error('Missing parameters');
         }
         const operationType = `inventory_import_${action}`;
         const requestedPaymentMethod = action === 'complete_import'
@@ -862,15 +870,10 @@ export async function POST(request: NextRequest) {
 
         markRequest('transaction');
         logTiming('success');
-        return NextResponse.json(result);
+        return context.json(result);
     } catch (error: unknown) {
         finishTransactionAttempt();
         logTiming('error');
-        console.error('Inventory import API error:', error);
-        const message = errorMessage(error);
-        return NextResponse.json(
-            { error: message },
-            { status: message.includes('không') || message.includes('Version') ? 400 : 500 }
-        );
+        throw error;
     }
-}
+});

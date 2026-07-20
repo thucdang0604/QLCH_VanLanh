@@ -1,4 +1,4 @@
-import { NextResponse, NextRequest } from 'next/server';
+import { NextRequest } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requirePermission } from '@/lib/apiAuth';
 import { FieldValue, type DocumentReference } from 'firebase-admin/firestore';
@@ -11,6 +11,7 @@ import { getMissingReservationQuantity, getRecordedReservationQuantity } from '@
 import { isInventoryConsumedRepairPart, planRepairPartVerification, type RepairPartVerificationAction } from '@/lib/repairPartConsumption';
 import { executeFifoDeductionsWrites, fetchFifoLogsForDeduction, type FifoDeductionResult, type FifoDeductor } from '@/lib/inventoryFifo';
 import { reserveSequentialDocumentIds } from '@/lib/serverDocumentIds';
+import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 
 interface RepairTransitionRequest {
     ticketId?: string;
@@ -62,16 +63,23 @@ function getReservedReleaseQuantity(part: RepairPartLine) {
     return selectedQuantity;
 }
 
-export async function POST(request: NextRequest) {
-    try {
+export const POST = withApi({
+    name: 'repairs/transition',
+    onError: (error, context) => {
+        const message = getApiErrorMessage(error);
+        const normalizedMessage = message.toLocaleLowerCase('vi-VN');
+        const fallbackStatus = normalizedMessage.includes('không') || normalizedMessage.includes('vui lòng') ? 400 : 500;
+        return context.error(message, getApiErrorStatus(error, fallbackStatus));
+    },
+}, async (request: NextRequest, context) => {
         const caller = await requirePermission(request, 'manage_repairs');
 
-        const body = await request.json() as RepairTransitionRequest;
+        const body = await context.readJson<RepairTransitionRequest>(request);
         const { ticketId, targetStatus, technicianNote, ticketVersion, idempotencyKey, source, partVerification } = body;
         const technicianNoteText = technicianNote?.trim() || '';
 
         if (!ticketId || !targetStatus) {
-            return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
+            return context.error('Missing parameters');
         }
 
         const db = getAdminDb();
@@ -429,14 +437,5 @@ export async function POST(request: NextRequest) {
             return { success: true };
         });
 
-        return NextResponse.json(result);
-    } catch (error: unknown) {
-        console.error('Repair transition API error:', error);
-        const message = error instanceof Error ? error.message : 'Internal server error';
-        const normalizedMessage = message.toLocaleLowerCase('vi-VN');
-        return NextResponse.json(
-            { error: message },
-            { status: normalizedMessage.includes('không') || normalizedMessage.includes('vui lòng') ? 400 : 500 }
-        );
-    }
-}
+        return context.json(result);
+});

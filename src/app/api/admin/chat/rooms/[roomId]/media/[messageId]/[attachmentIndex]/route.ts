@@ -3,6 +3,7 @@ import { requirePermission } from '@/lib/apiAuth';
 import { isAllowedFacebookMediaUrl, type ChatAttachment } from '@/lib/chatServer';
 import { toSafeRtdbKey } from '@/lib/chatChannels';
 import { getAdminRtdb, getAdminStorage } from '@/lib/firebaseAdmin';
+import { getApiErrorMessage, getApiErrorStatus, withApi, type ApiRouteContext } from '@/lib/api/handler';
 
 export const runtime = 'nodejs';
 
@@ -31,13 +32,18 @@ function imageExtension(contentType: string): string {
   return 'jpg';
 }
 
-export async function GET(
+function mediaError(error: unknown, context: ApiRouteContext) {
+  const status = getApiErrorStatus(error);
+  return context.json({ error: status === 500 ? 'Media request failed' : getApiErrorMessage(error) }, { status });
+}
+
+export const GET = withApi({ name: 'admin/chat/room-media', onError: mediaError }, async (
   request: NextRequest,
-  context: { params: Promise<{ roomId: string; messageId: string; attachmentIndex: string }> },
-) {
-  try {
+  _context,
+  routeContext: { params: Promise<{ roomId: string; messageId: string; attachmentIndex: string }> },
+) => {
     await requirePermission(request, 'chat_support');
-    const { roomId, messageId, attachmentIndex } = await context.params;
+    const { roomId, messageId, attachmentIndex } = await routeContext.params;
     const safeRoomId = validRtdbKey(roomId);
     const safeMessageId = validRtdbKey(messageId);
     const index = Number(attachmentIndex);
@@ -96,13 +102,4 @@ export async function GET(
     }
 
     return mediaResponse(bytes, contentType);
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : '';
-    const status = message.toLowerCase().includes('missing authorization')
-      ? 401
-      : message.toLowerCase().includes('forbidden')
-        ? 403
-        : 500;
-    return NextResponse.json({ error: status === 500 ? 'Media request failed' : message }, { status });
-  }
-}
+});

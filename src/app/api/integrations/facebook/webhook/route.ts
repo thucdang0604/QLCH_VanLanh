@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchFacebookUserProfile, upsertExternalInboundMessage, type ChatAttachment } from '@/lib/chatServer';
 import { getEffectiveChatIntegrationConfig } from '@/lib/chatIntegrationConfig';
+import { withApi, type ApiRouteContext } from '@/lib/api/handler';
 
 export const runtime = 'nodejs';
 
@@ -51,8 +52,15 @@ function messageContentFromFacebook(message: Record<string, unknown>) {
   return { text: '', attachments };
 }
 
-export async function GET(request: NextRequest) {
-  try {
+function facebookVerificationError(_error: unknown, context: ApiRouteContext) {
+  return context.json({ error: 'Webhook verification unavailable' }, { status: 503 });
+}
+
+function facebookProcessingError(_error: unknown, context: ApiRouteContext) {
+  return context.json({ error: 'Webhook processing failed' }, { status: 500 });
+}
+
+export const GET = withApi({ name: 'integrations/facebook/webhook', onError: facebookVerificationError }, async (request: NextRequest) => {
     const token = request.nextUrl.searchParams.get('hub.verify_token');
     const challenge = request.nextUrl.searchParams.get('hub.challenge');
     const mode = request.nextUrl.searchParams.get('hub.mode');
@@ -63,14 +71,9 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json({ error: 'Invalid verify token' }, { status: 403 });
-  } catch (error) {
-    console.error('Facebook webhook verification failed:', error);
-    return NextResponse.json({ error: 'Webhook verification unavailable' }, { status: 503 });
-  }
-}
+});
 
-export async function POST(request: NextRequest) {
-  try {
+export const POST = withApi({ name: 'integrations/facebook/webhook', onError: facebookProcessingError }, async (request: NextRequest) => {
     const rawBody = await request.text();
     console.log('[FB Webhook] POST received, body length:', rawBody.length);
 
@@ -144,8 +147,4 @@ export async function POST(request: NextRequest) {
 
     console.log('[FB Webhook] Done. Processed rooms:', processed);
     return NextResponse.json({ success: true, processed });
-  } catch (error) {
-    console.error('[FB Webhook] Processing FAILED:', error);
-    return NextResponse.json({ error: 'Webhook processing failed' }, { status: 500 });
-  }
-}
+});

@@ -2,8 +2,17 @@ import { NextRequest, NextResponse } from 'next/server';
 import { upsertExternalInboundMessage } from '@/lib/chatServer';
 import { getEffectiveChatIntegrationConfig } from '@/lib/chatIntegrationConfig';
 import { requireAdmin } from '@/lib/apiAuth';
+import { getApiErrorMessage, getApiErrorStatus, withApi, type ApiRouteContext } from '@/lib/api/handler';
 
 export const runtime = 'nodejs';
+
+function diagnosticError(error: unknown, context: ApiRouteContext) {
+  const status = getApiErrorStatus(error);
+  return context.json({
+    success: false,
+    error: status < 500 ? getApiErrorMessage(error) : 'Webhook diagnostic failed',
+  }, { status });
+}
 
 /**
  * Diagnostic endpoint: simulate a Facebook inbound message.
@@ -11,10 +20,9 @@ export const runtime = 'nodejs';
  * Body: { text: "Hello from test" }
  * Requires admin auth.
  */
-export async function POST(request: NextRequest) {
-  try {
+export const POST = withApi({ name: 'integrations/facebook/webhook/test', onError: diagnosticError }, async (request: NextRequest, context) => {
     await requireAdmin(request);
-    const body = await request.json();
+    const body = await context.readJson(request);
     const text = typeof body.text === 'string' ? body.text : 'Test message from diagnostic';
 
     const config = await getEffectiveChatIntegrationConfig();
@@ -52,14 +60,9 @@ export async function POST(request: NextRequest) {
       upsertResult,
       message: 'Check /admin/chat for a Facebook test conversation',
     });
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
-  }
-}
+});
 
-export async function GET(request: NextRequest) {
-  try {
+export const GET = withApi({ name: 'integrations/facebook/webhook/test', onError: diagnosticError }, async (request: NextRequest) => {
     await requireAdmin(request);
     const config = await getEffectiveChatIntegrationConfig();
     return NextResponse.json({
@@ -76,8 +79,4 @@ export async function GET(request: NextRequest) {
         hasToken: !!config.zalo.oaAccessToken,
       },
     });
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
-  }
-}
+});
