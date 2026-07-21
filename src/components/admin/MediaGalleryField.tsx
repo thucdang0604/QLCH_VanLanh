@@ -12,6 +12,7 @@ interface MediaGalleryFieldProps {
     helperText?: string;
     emptyText?: string;
     defaultFolder?: string;
+    disabled?: boolean;
 }
 
 function normalizeImages(images: string[]): string[] {
@@ -26,11 +27,13 @@ export default function MediaGalleryField({
     helperText = 'Ảnh đầu tiên là ảnh chính. Có thể chọn lại ảnh chính, xóa khỏi item hoặc đổi thứ tự.',
     emptyText = 'Chưa có ảnh',
     defaultFolder,
+    disabled = false,
 }: MediaGalleryFieldProps) {
     const [mediaOpen, setMediaOpen] = useState(false);
     const images = normalizeImages(value);
 
     const updateImages = (nextImages: string[]) => {
+        if (disabled) return;
         onChange(normalizeImages(nextImages));
     };
 
@@ -67,7 +70,8 @@ export default function MediaGalleryField({
                 <button
                     type="button"
                     onClick={() => setMediaOpen(true)}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-orange-300 bg-orange-50 text-orange-700 text-sm font-medium hover:bg-orange-100 transition-colors shrink-0"
+                    disabled={disabled}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-orange-300 bg-orange-50 text-orange-700 text-sm font-medium hover:bg-orange-100 transition-colors shrink-0 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                     <Plus size={16} />
                     Thêm ảnh
@@ -78,7 +82,8 @@ export default function MediaGalleryField({
                 <button
                     type="button"
                     onClick={() => setMediaOpen(true)}
-                    className="w-full border-2 border-dashed border-gray-200 rounded-xl p-6 text-center text-gray-400 hover:border-orange-300 hover:bg-orange-50/30 transition-colors"
+                    disabled={disabled}
+                    className="w-full border-2 border-dashed border-gray-200 rounded-xl p-6 text-center text-gray-400 hover:border-orange-300 hover:bg-orange-50/30 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
                 >
                     <ImageIcon size={34} className="mx-auto mb-2" />
                     <span className="text-sm">{emptyText}</span>
@@ -97,6 +102,7 @@ export default function MediaGalleryField({
                                     <button
                                         type="button"
                                         onClick={() => setPrimary(index)}
+                                        disabled={disabled}
                                         className="p-1.5 bg-white text-amber-600 rounded-full hover:bg-amber-50"
                                         title="Đặt làm ảnh chính"
                                     >
@@ -106,7 +112,7 @@ export default function MediaGalleryField({
                                 <button
                                     type="button"
                                     onClick={() => moveImage(index, -1)}
-                                    disabled={index === 0}
+                                        disabled={disabled || index === 0}
                                     className="p-1.5 bg-white text-gray-700 rounded-full hover:bg-gray-100 disabled:opacity-40"
                                     title="Đưa ảnh lên trước"
                                 >
@@ -115,15 +121,16 @@ export default function MediaGalleryField({
                                 <button
                                     type="button"
                                     onClick={() => moveImage(index, 1)}
-                                    disabled={index === images.length - 1}
+                                        disabled={disabled || index === images.length - 1}
                                     className="p-1.5 bg-white text-gray-700 rounded-full hover:bg-gray-100 disabled:opacity-40"
                                     title="Đưa ảnh xuống sau"
                                 >
                                     <ArrowRight size={14} />
                                 </button>
                                 <button
-                                    type="button"
-                                    onClick={() => removeImage(index)}
+                                        type="button"
+                                        onClick={() => removeImage(index)}
+                                        disabled={disabled}
                                     className="p-1.5 bg-red-500 text-white rounded-full hover:bg-red-600"
                                     title="Xóa ảnh khỏi item"
                                 >
@@ -136,7 +143,7 @@ export default function MediaGalleryField({
             )}
 
             <MediaManager
-                isOpen={mediaOpen}
+                isOpen={mediaOpen && !disabled}
                 onClose={() => setMediaOpen(false)}
                 multiple
                 onSelectMultiple={addImages}

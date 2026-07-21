@@ -1,17 +1,20 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { requirePermission } from '@/lib/apiAuth';
+import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { authenticator } from 'otplib';
 import QRCode from 'qrcode';
 
-export async function GET(request: NextRequest) {
-    try {
+export const GET = withApi({
+    name: 'admin/bank-config/totp/setup',
+    onError: (error, context) => context.json({ success: false, error: getApiErrorMessage(error) }, { status: getApiErrorStatus(error) }),
+}, async (request: NextRequest, context) => {
         await requirePermission(request, 'manage_settings');
         const db = getAdminDb();
         const configDoc = await db.collection('settings').doc('bank_config').get();
         const configData = configDoc.data();
         if (configData?.totpEnabled && configData?.totpSecret) {
-            return NextResponse.json({ success: false, error: 'Authenticator da duoc thiet lap.' }, { status: 409 });
+            return context.json({ success: false, error: 'Authenticator da duoc thiet lap.' }, { status: 409 });
         }
         
         // Sinh secret mới
@@ -25,13 +28,9 @@ export async function GET(request: NextRequest) {
         // Tạo ảnh QR Code dạng Data URL (base64)
         const qrCodeUrl = await QRCode.toDataURL(otpauth);
 
-        return NextResponse.json({ 
+        return context.json({
             success: true, 
             secret, 
             qrCodeUrl 
         });
-    } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : 'Không thể khởi tạo TOTP.';
-        return NextResponse.json({ success: false, error: message }, { status: 500 });
-    }
-}
+});

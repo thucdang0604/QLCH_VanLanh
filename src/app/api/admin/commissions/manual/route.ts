@@ -1,18 +1,37 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { FieldValue } from 'firebase-admin/firestore';
 import { requireAdmin } from '@/lib/apiAuth';
+import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 import { reserveSequentialDocumentId } from '@/lib/serverDocumentIds';
+
+type ManualCommissionRequestBody = {
+    staffId?: string;
+    sourceType?: string;
+    sourceId?: string;
+    amount?: number;
+    baseAmount?: number;
+    idempotencyKey?: string;
+};
 
 function normalizeSourceType(value: unknown): 'repair' | 'order' {
     return value === 'order' ? 'order' : 'repair';
 }
 
-export async function POST(request: NextRequest) {
-    try {
+export const POST = withApi({
+    name: 'admin/commissions/manual',
+    onError: (error, context) => {
+        const message = getApiErrorMessage(error);
+        const lower = message.toLowerCase();
+        const legacyStatus = lower.includes('invalid') || lower.includes('not found') || lower.includes('recipient') || lower.includes('idempotency')
+            ? 400
+            : 500;
+        return context.error(message, getApiErrorStatus(error, legacyStatus));
+    },
+}, async (request: NextRequest, context) => {
         const caller = await requireAdmin(request);
-        const body = await request.json().catch(() => ({}));
+        const body = await context.readJson<ManualCommissionRequestBody>(request);
         const staffId = typeof body.staffId === 'string' ? body.staffId.trim() : '';
         const sourceType = normalizeSourceType(body.sourceType);
         const sourceId = typeof body.sourceId === 'string' && body.sourceId.trim()
@@ -23,10 +42,10 @@ export async function POST(request: NextRequest) {
         const idempotencyKey = typeof body.idempotencyKey === 'string' ? body.idempotencyKey.trim() : '';
 
         if (!staffId || !Number.isFinite(amount) || amount <= 0) {
-            return NextResponse.json({ error: 'Invalid manual commission payload' }, { status: 400 });
+            return context.error('Invalid manual commission payload');
         }
         if (!idempotencyKey) {
-            return NextResponse.json({ error: 'Missing idempotencyKey' }, { status: 400 });
+            return context.error('Missing idempotencyKey');
         }
 
         const db = getAdminDb();
@@ -118,18 +137,5 @@ export async function POST(request: NextRequest) {
             };
         });
 
-        return NextResponse.json(result);
-    } catch (error: unknown) {
-        console.error('Manual commission API error:', error);
-        const message = error instanceof Error ? error.message : 'Internal server error';
-        const lower = message.toLowerCase();
-        const status = lower.includes('missing authorization')
-            ? 401
-            : lower.includes('forbidden')
-                ? 403
-                : lower.includes('invalid') || lower.includes('not found') || lower.includes('recipient') || lower.includes('idempotency')
-                    ? 400
-                    : 500;
-        return NextResponse.json({ error: message }, { status });
-    }
-}
+        return context.json(result);
+});

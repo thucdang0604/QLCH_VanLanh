@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
+import { withApi } from '@/lib/api/handler';
 import { unstable_cache } from 'next/cache';
 import { DEFAULT_CONFIG } from '@/lib/config-defaults';
 import { getAdminDb, isAdminAvailable } from '@/lib/firebaseAdmin';
@@ -55,13 +56,18 @@ interface GoogleApiError {
     };
 }
 
-export async function GET(request: Request) {
-    try {
+export const GET = withApi({
+    name: 'reviews/google',
+    onError: (_error, context) => context.json({ configured: true, reviews: [], providerStatus: 'provider_error' }, {
+        status: 503,
+        headers: { 'Cache-Control': 'public, max-age=30, s-maxage=60, stale-while-revalidate=60', 'Retry-After': '60' },
+    }),
+}, async (request: NextRequest, context) => {
         const apiKey = process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_MAPS_API_KEY;
         const placeId = await getConfiguredPlaceId();
 
         if (!apiKey || !placeId) {
-            return NextResponse.json({ configured: false, reviews: [], providerStatus: 'unconfigured' });
+            return context.json({ configured: false, reviews: [], providerStatus: 'unconfigured' });
         }
 
         // Forward the client's referer to bypass Google API Key HTTP Referrer restrictions
@@ -105,7 +111,7 @@ export async function GET(request: Request) {
             profile_photo_url: review.authorAttribution?.photoUri,
         })).filter(review => review.text);
 
-        return NextResponse.json({
+        return context.json({
             configured: true,
             rating: data.rating || 0,
             total_ratings: data.userRatingCount || 0,
@@ -116,26 +122,4 @@ export async function GET(request: Request) {
             }
         });
 
-    } catch (error: unknown) {
-        const errMsg = (error as Error).message;
-        console.error('Google Reviews Error:', errMsg);
-        return NextResponse.json(
-            { 
-                configured: true, 
-                reviews: [], 
-                providerStatus: 'provider_error',
-                errorDetails: errMsg 
-            },
-            {
-                status: 503,
-                headers: {
-                    // Avoid a request storm while an upstream credential or
-                    // provider outage is being fixed, without hiding recovery
-                    // for long from visitors.
-                    'Cache-Control': 'public, max-age=30, s-maxage=60, stale-while-revalidate=60',
-                    'Retry-After': '60',
-                },
-            }
-        );
-    }
-}
+});

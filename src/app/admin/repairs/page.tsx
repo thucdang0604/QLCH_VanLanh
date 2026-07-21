@@ -11,6 +11,7 @@ import type { RepairTicket, RepairStatus, PaymentStatus, DeviceChecklist, Workfl
 import { isChecklistComplete, areAllPartsReady } from '@/lib/workflowFeatures';
 import { REPAIR_STATUS, isPendingRepairPart, isRepairStatus, isSelectedRepairPart, isWarrantyEligibleRepairPart } from '@/lib/repairStatus';
 import { normalizeVietnamPhone } from '@/lib/phone';
+import { appAlert } from '@/lib/appDialog';
 import {
     buildContactMethods,
     buildContactSearchKeywords,
@@ -1019,7 +1020,7 @@ export default function RepairPage() {
         if (formData.customerPhone) {
             const normalizedPhone = normalizeVietnamPhone(formData.customerPhone);
             if (!normalizedPhone) {
-                alert('Số điện thoại không hợp lệ. Vui lòng nhập đúng định dạng số điện thoại Việt Nam.');
+                await appAlert('Số điện thoại không hợp lệ. Vui lòng nhập đúng định dạng số điện thoại Việt Nam.', { title: 'Số điện thoại không hợp lệ' });
                 return;
             }
             normalizedCustomerPhone = normalizedPhone.local;

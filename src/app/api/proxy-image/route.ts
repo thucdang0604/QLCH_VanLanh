@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { withApi } from '@/lib/api/handler';
 
 const ALLOWED_HOSTS = new Set(['img.vietqr.io', 'api.vietqr.io']);
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 
-export async function GET(request: NextRequest) {
+export const GET = withApi({
+    name: 'proxy-image',
+    onError: (error) => new NextResponse(error instanceof TypeError ? 'Invalid URL' : 'Error proxying image', { status: error instanceof TypeError ? 400 : 500 }),
+}, async (request: NextRequest) => {
     const url = request.nextUrl.searchParams.get('url');
     if (!url) return new NextResponse('Missing URL', { status: 400 });
 
@@ -47,4 +51,4 @@ export async function GET(request: NextRequest) {
         }
         return new NextResponse('Error proxying image', { status: 500 });
     }
-}
+});

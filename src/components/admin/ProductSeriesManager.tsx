@@ -7,6 +7,7 @@ import { limit, orderBy } from 'firebase/firestore';
 import { Layers, Box, Link2Off, Link2, CheckSquare, Square, SearchIcon, Loader2 } from 'lucide-react';
 import Image from 'next/image';
 import { toastSuccess, toastError } from '@/lib/toast';
+import { appConfirm } from '@/lib/appDialog';
 
 const formatPrice = (p: number) => p > 0 ? p.toLocaleString('vi-VN') + 'đ' : '—';
 const getErrorMessage = (error: unknown) => error instanceof Error ? error.message : 'Lỗi không xác định';
@@ -75,7 +76,7 @@ export default function ProductSeriesManager() {
     };
 
     const handleRemoveFromGroup = async (product: Product) => {
-        if (!confirm(`Bạn có chắc muốn gỡ "${product.name}" khỏi nhóm biến thể không?`)) return;
+        if (!await appConfirm(`Bạn có chắc muốn gỡ "${product.name}" khỏi nhóm biến thể không?`, { title: 'Gỡ khỏi nhóm biến thể', confirmText: 'Gỡ', destructive: true })) return;
         try {
             await updateDocument('products', product.id, { seriesId: '' });
             toastSuccess('Đã gỡ sản phẩm khỏi nhóm biến thể.');

@@ -1,6 +1,7 @@
 import ClientPage from './page.client';
 import { isAdminAvailable, getAdminDb } from '@/lib/firebaseAdmin';
 import { DEFAULT_CONFIG, type HeroBanner, type HomeSectionItem, type StoreBranch, type HomeServiceCategory } from '@/lib/config-defaults';
+import { getCachedStorefrontConfig } from '@/lib/serverConfig';
 import { toPublicProduct, toPublicService } from '@/lib/publicCatalog';
 
 import { unstable_cache } from 'next/cache';
@@ -41,11 +42,9 @@ const fetchHomeConfigData = async (): Promise<SSRHomeConfig> => {
   // Khi Admin cập nhật, nút "Làm mới Website" sẽ xóa cache tag 'homepage'.
   try {
     const db = getAdminDb();
-    const configDoc = db.collection('system_config').doc('main_settings');
-
     // Fetch system_config, products, articles and services in parallel
-    const [configSnapshot, productsSnapshot, articlesSnapshot, servicesSnapshot] = await Promise.all([
-      configDoc.get(),
+    const [siteConfig, productsSnapshot, articlesSnapshot, servicesSnapshot] = await Promise.all([
+      getCachedStorefrontConfig(),
       db.collection('products')
         .where('status', '==', 'active')
         .orderBy('createdAt', 'desc')
@@ -75,22 +74,11 @@ const fetchHomeConfigData = async (): Promise<SSRHomeConfig> => {
     // Parse services
     const ssrPricingServices = servicesSnapshot.docs.map(doc => toPublicService(doc.id, doc.data()));
 
-    if (!configSnapshot.exists) {
-      return {
-        ...fallbackConfig,
-        ssrLatestProducts,
-        ssrArticles,
-        ssrPricingServices
-      };
-    }
+    const rawBanners = Array.isArray(siteConfig.hero_banners) ? siteConfig.hero_banners : [];
+    const rawBranches = Array.isArray(siteConfig.store_branches) ? siteConfig.store_branches : DEFAULT_CONFIG.store_branches;
+    const rawHomeServiceCategories: HomeServiceCategory[] = Array.isArray(siteConfig.homeServiceCategories) ? siteConfig.homeServiceCategories : DEFAULT_CONFIG.homeServiceCategories;
 
-    const data = JSON.parse(JSON.stringify(configSnapshot.data()!));
-
-    const rawBanners = Array.isArray(data.hero_banners) ? data.hero_banners : [];
-    const rawBranches = Array.isArray(data.store_branches) ? data.store_branches : DEFAULT_CONFIG.store_branches;
-    const rawHomeServiceCategories: HomeServiceCategory[] = Array.isArray(data.homeServiceCategories) ? data.homeServiceCategories : DEFAULT_CONFIG.homeServiceCategories;
-
-    const storedSections: HomeSectionItem[] = Array.isArray(data.homeSections) ? data.homeSections : [];
+    const storedSections: HomeSectionItem[] = Array.isArray(siteConfig.homeSections) ? siteConfig.homeSections : [];
     let homeSections = DEFAULT_CONFIG.homeSections;
     if (storedSections.length > 0) {
       const storedIds = new Set(storedSections.map(s => s.id));
@@ -106,7 +94,7 @@ const fetchHomeConfigData = async (): Promise<SSRHomeConfig> => {
     return {
       hero_banners: rawBanners.length > 0 ? rawBanners : DEFAULT_CONFIG.hero_banners,
       homeSections,
-      siteName: data.siteName || DEFAULT_CONFIG.siteName,
+      siteName: siteConfig.siteName || DEFAULT_CONFIG.siteName,
       store_branches: rawBranches,
       ssrLatestProducts,
       homeServiceCategories: rawHomeServiceCategories,
@@ -124,7 +112,7 @@ const getHomeConfig = unstable_cache(
   ['home-config-data'],
   {
     revalidate: 300,
-    tags: ['homepage', 'layout'] // Also tag with layout so it can be cleared easily
+    tags: ['config', 'homepage', 'layout'] // Also tag with layout so it can be cleared easily
   }
 );
 

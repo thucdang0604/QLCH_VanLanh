@@ -1,6 +1,7 @@
-import { NextResponse, NextRequest } from 'next/server';
+import { NextRequest } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requirePermission } from '@/lib/apiAuth';
+import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 import { loadRepairWorkflow } from '@/lib/repairWorkflowServer';
 import { FieldValue } from 'firebase-admin/firestore';
 import { Timestamp } from 'firebase-admin/firestore';
@@ -51,10 +52,12 @@ function normalizePaymentHistory(value: unknown): PaymentHistoryEntry[] | undefi
     });
 }
 
-export async function POST(request: NextRequest) {
-    try {
+export const POST = withApi({
+    name: 'repairs/create',
+    onError: (error, context) => context.error(getApiErrorMessage(error), getApiErrorStatus(error, 400)),
+}, async (request: NextRequest, context) => {
         const caller = await requirePermission(request, 'manage_repairs');
-        const body = await request.json() as CreateRepairBody;
+        const body = await context.readJson<CreateRepairBody>(request);
 
         const db = getAdminDb();
 
@@ -149,10 +152,5 @@ export async function POST(request: NextRequest) {
             return { id: ticketAllocation.id, status: entryNode.id };
         });
 
-        return NextResponse.json(result);
-    } catch (error: unknown) {
-        console.error('Create ticket API error:', error);
-        const message = error instanceof Error ? error.message : 'Không thể tạo phiếu sửa chữa.';
-        return NextResponse.json({ error: message }, { status: 400 });
-    }
-}
+        return context.json(result);
+});

@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useState, useEffect } from 'react';
+import dynamic from 'next/dynamic';
+import { useCallback, useState, useEffect, useRef } from 'react';
 import {
     Package, Search, CheckCircle2, Clock,
     Loader2, ChevronDown, ChevronRight,
@@ -10,21 +11,31 @@ import { collection, deleteDoc, doc, serverTimestamp, query, orderBy, setDoc, li
 import { getDocs, onSnapshot } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
+import { appConfirm, appPrompt } from '@/lib/appDialog';
 import type { ImportReceipt, Product } from '@/lib/types';
 import { toastError, toastSuccess } from '@/lib/toast';
 import { isPartCategory } from '@/lib/constants';
 import CurrencyInput from '@/components/admin/CurrencyInput';
-import LotTrackingModal from '@/components/admin/LotTrackingModal';
-import ProductQrLabelModal, { PrintBatchItem } from '@/components/admin/ProductQrLabelModal';
+import type { PrintBatchItem } from '@/components/admin/ProductQrLabelModal';
 import {
     calculateImportableTotal,
     getReceiptItemAvailability,
     isReceiptItemUnavailable,
 } from '@/lib/importReceiptAvailability';
 import { buildImportPreviewState } from '@/features/parts/importReceiptUtils';
-import { CreateReceiptModal, ImportPreviewModal } from '@/features/parts/ImportReceiptModals';
 import type { ImportPreviewState, ImportReceiptItem, SupplierOption } from '@/features/parts/importReceiptTypes';
 import { buildInlineSupplierContactInput, buildSupplierContactDocumentFields, reserveSupplierDocumentId } from '@/lib/supplierDocumentIds';
+
+const LotTrackingModal = dynamic(() => import('@/components/admin/LotTrackingModal'), { ssr: false });
+const ProductQrLabelModal = dynamic(() => import('@/components/admin/ProductQrLabelModal'), { ssr: false });
+const ImportPreviewModal = dynamic(
+    () => import('@/features/parts/ImportReceiptModals').then(module => module.ImportPreviewModal),
+    { ssr: false },
+);
+const CreateReceiptModal = dynamic(
+    () => import('@/features/parts/ImportReceiptModals').then(module => module.CreateReceiptModal),
+    { ssr: false },
+);
 
 // ── Status Config ──
 const statusConfig = {
@@ -34,9 +45,17 @@ const statusConfig = {
 };
 
 type ImportPaymentMethod = 'cash' | 'bank' | 'debt';
+type ReceiptProposalType = 'component' | 'retail';
 
 function receiptItemHasSupplier(receipt: ImportReceipt, item: ImportReceiptItem) {
     return Boolean(item.supplier || item.supplierId || receipt.supplierId);
+}
+
+function isRetailInventoryProduct(product: Product): boolean {
+    const firstCategoryId = product.categoryIds?.[0] || '';
+    return !isPartCategory(product.category, product.categoryIds)
+        && product.category !== 'service'
+        && !firstCategoryId.startsWith('sua-chua');
 }
 
 function supplierMatchesSearch(supplier: SupplierOption, search: string): boolean {
@@ -77,6 +96,8 @@ export default function InventoryPage() {
     const [timeFilter, setTimeFilter] = useState<'all' | 'today' | 'week' | 'month'>('all');
     const [activeTab, setActiveTab] = useState<InventoryTab>('completed');
     const [supplierList, setSupplierList] = useState<SupplierOption[]>([]);
+    const [supplierListLoaded, setSupplierListLoaded] = useState(false);
+    const supplierListRequestRef = useRef<Promise<void> | null>(null);
     const [partTypeOptions, setPartTypeOptions] = useState<string[]>([]);
     const [editingPrices, setEditingPrices] = useState<Record<string, number[]>>({});
     const [editingQuantities, setEditingQuantities] = useState<Record<string, number[]>>({});
@@ -85,7 +106,10 @@ export default function InventoryPage() {
     const [importPreviewModal, setImportPreviewModal] = useState<ImportPreviewState>({ isOpen: false, receipt: null, newParts: {} });
     const [forecastCostPrices, setForecastCostPrices] = useState<Map<string, number>>(new Map());
     const [isCreateReceiptOpen, setIsCreateReceiptOpen] = useState(false);
-    const [createReceiptType, setCreateReceiptType] = useState<'component' | 'retail'>('component');
+    const [createReceiptType, setCreateReceiptType] = useState<ReceiptProposalType>('component');
+    const [outOfStockRetailProducts, setOutOfStockRetailProducts] = useState<(Product & { id: string })[]>([]);
+    const [outOfStockParts, setOutOfStockParts] = useState<(Product & { id: string })[]>([]);
+    const [outOfStockSuggestionsLoading, setOutOfStockSuggestionsLoading] = useState<ReceiptProposalType | null>(null);
 
     // Expanded receipt
     const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -93,12 +117,7 @@ export default function InventoryPage() {
     const [printBatchLots, setPrintBatchLots] = useState<PrintBatchItem[] | null>(null);
 
     const parts = products.filter(product => isPartCategory(product.category, product.categoryIds));
-    const retailProducts = products.filter(product => {
-        const firstCatId = product.categoryIds?.[0] || '';
-        const isComponent = isPartCategory(product.category, product.categoryIds);
-        const isService = product.category === 'service' || firstCatId.startsWith('sua-chua');
-        return !isComponent && !isService;
-    });
+    const retailProducts = products.filter(isRetailInventoryProduct);
 
     const buildReceiptQueryConstraints = useCallback((cursor?: DocumentSnapshot | null): QueryConstraint[] => {
         const constraints: QueryConstraint[] = [orderBy('createdAt', 'desc')];
@@ -130,6 +149,72 @@ export default function InventoryPage() {
         setProducts(snap.docs.map(d => ({ id: d.id, ...d.data() } as Product & { id: string })));
     }, [products.length]);
 
+    const openImportProposal = useCallback(async (receiptType: ReceiptProposalType) => {
+        setCreateReceiptType(receiptType);
+        setIsCreateReceiptOpen(true);
+        setOutOfStockSuggestionsLoading(receiptType);
+
+        try {
+            const snapshot = await getDocs(query(
+                collection(db, 'products'),
+                where('stock', '<=', 0),
+                limit(100),
+            ));
+            const suggestions = snapshot.docs
+                .map(document => ({ id: document.id, ...document.data() } as Product & { id: string }))
+                .filter(product => product.status === 'active' && !product.isProposed)
+                .filter(product => receiptType === 'component'
+                    ? isPartCategory(product.category, product.categoryIds)
+                    : isRetailInventoryProduct(product),
+                );
+
+            setProducts(current => {
+                const merged = new Map(current.map(product => [product.id, product]));
+                suggestions.forEach(product => merged.set(product.id, product));
+                return [...merged.values()];
+            });
+            if (receiptType === 'component') {
+                setOutOfStockParts(suggestions);
+            } else {
+                setOutOfStockRetailProducts(suggestions);
+            }
+        } catch (error) {
+            console.error('Failed to load out-of-stock import suggestions', error);
+            toastError('Không thể tải gợi ý hàng hết tồn. Bạn vẫn có thể tìm thủ công.');
+            if (receiptType === 'component') {
+                setOutOfStockParts([]);
+            } else {
+                setOutOfStockRetailProducts([]);
+            }
+        } finally {
+            setOutOfStockSuggestionsLoading(null);
+        }
+    }, []);
+
+    const loadProductsByIds = useCallback(async (productIds: string[]) => {
+        const ids = [...new Set(productIds.filter(Boolean))];
+        const productsById = new Map(products.map(product => [product.id, product]));
+        const missingIds = ids.filter(productId => !productsById.has(productId));
+
+        for (let index = 0; index < missingIds.length; index += 30) {
+            const chunk = missingIds.slice(index, index + 30);
+            const snap = await getDocs(query(collection(db, 'products'), where('__name__', 'in', chunk)));
+            snap.docs.forEach((document) => {
+                productsById.set(document.id, { id: document.id, ...document.data() } as Product & { id: string });
+            });
+        }
+
+        const resolvedProducts = [...productsById.values()];
+        if (missingIds.length > 0) {
+            setProducts(current => {
+                const merged = new Map(current.map(product => [product.id, product]));
+                resolvedProducts.forEach(product => merged.set(product.id, product));
+                return [...merged.values()];
+            });
+        }
+        return resolvedProducts;
+    }, [products]);
+
     const loadInStockCount = useCallback(async () => {
         try {
             const snap = await getCountFromServer(query(collection(db, 'products'), where('stock', '>', 0)));
@@ -141,22 +226,7 @@ export default function InventoryPage() {
     }, []);
 
     const handlePrintLot = async (receipt: ImportReceipt & { id: string }) => {
-        let pool = products;
-        // If products not yet loaded, fetch only the ones we need (1 query, not full collection)
-        if (pool.length === 0) {
-            const neededIds = [...new Set(receipt.items.map(i => i.productId).filter(Boolean))];
-            if (neededIds.length > 0) {
-                // Firestore 'in' supports up to 30 values
-                const chunks: string[][] = [];
-                for (let i = 0; i < neededIds.length; i += 30) chunks.push(neededIds.slice(i, i + 30));
-                const fetched: (Product & { id: string })[] = [];
-                for (const chunk of chunks) {
-                    const snap = await getDocs(query(collection(db, 'products'), where('__name__', 'in', chunk)));
-                    snap.docs.forEach(d => fetched.push({ id: d.id, ...d.data() } as Product & { id: string }));
-                }
-                pool = fetched;
-            }
-        }
+        const pool = await loadProductsByIds(receipt.items.map(item => item.productId));
         const batchItems: PrintBatchItem[] = receipt.items.map(item => {
             const prod = pool.find(p => p.id === item.productId);
             if (!prod) return null;
@@ -197,11 +267,31 @@ export default function InventoryPage() {
     }, []);
 
     const formatPrice = (n: number) => n.toLocaleString('vi-VN') + 'đ';
+    const loadSupplierList = useCallback(async () => {
+        if (supplierListLoaded) return;
+        if (supplierListRequestRef.current) return supplierListRequestRef.current;
+
+        const request = getDocs(query(collection(db, 'suppliers'), orderBy('name', 'asc'), limit(100)))
+            .then((snap: QuerySnapshot<DocumentData>) => {
+                setSupplierList(snap.docs.map((d: QueryDocumentSnapshot<DocumentData>) => ({ id: d.id, ...d.data() } as SupplierOption)));
+                setSupplierListLoaded(true);
+            })
+            .catch(err => console.error('Failed to load suppliers:', err))
+            .finally(() => {
+                supplierListRequestRef.current = null;
+            });
+
+        supplierListRequestRef.current = request;
+        return request;
+    }, [supplierListLoaded]);
+
+    const isExpandedDraftReceipt = Boolean(expandedId && receipts.some(receipt => receipt.id === expandedId && receipt.status === 'draft'));
+
     useEffect(() => {
-        getDocs(query(collection(db, 'suppliers'), orderBy('name', 'asc'), limit(100))).then((snap: QuerySnapshot<DocumentData>) => {
-            setSupplierList(snap.docs.map((d: QueryDocumentSnapshot<DocumentData>) => ({ id: d.id, ...d.data() } as SupplierOption)));
-        }).catch(err => console.error('Failed to load suppliers:', err));
-    }, []);
+        if (isCreateReceiptOpen || importPreviewModal.isOpen || isExpandedDraftReceipt) {
+            void loadSupplierList();
+        }
+    }, [importPreviewModal.isOpen, isCreateReceiptOpen, isExpandedDraftReceipt, loadSupplierList]);
 
     useEffect(() => {
         if (isCreateReceiptOpen || importPreviewModal.isOpen) {
@@ -298,7 +388,7 @@ export default function InventoryPage() {
             toastError(`Còn ${missingSupplier.length} dòng chưa gắn NCC.`);
             return;
         }
-        if (!confirm('Chốt đặt hàng với nhà cung cấp?')) return;
+        if (!await appConfirm('Chốt đặt hàng với nhà cung cấp?', { title: 'Chốt đặt hàng', confirmText: 'Chốt đơn' })) return;
 
         setIsProcessing(true);
         try {
@@ -368,7 +458,16 @@ export default function InventoryPage() {
             toastError('Phiếu không có dòng hàng nào để nhập kho.');
             return;
         }
-        const { previewState, forecastCostPrices: forecasts } = buildImportPreviewState(receipt, products);
+        const linkedProductIds = [...new Set(importableItems.map(item => item.productId).filter(Boolean))];
+        const receiptProducts = await loadProductsByIds(linkedProductIds);
+        const loadedProductIds = new Set(receiptProducts.map(product => product.id));
+        const missingProductIds = linkedProductIds.filter(productId => !loadedProductIds.has(productId));
+        if (missingProductIds.length > 0) {
+            toastError(`Không thể nhập kho vì ${missingProductIds.length} linh kiện đã liên kết không còn tồn tại.`);
+            return;
+        }
+
+        const { previewState, forecastCostPrices: forecasts } = buildImportPreviewState(receipt, receiptProducts);
         setForecastCostPrices(forecasts);
         setImportPreviewModal(previewState);
     };
@@ -413,7 +512,7 @@ export default function InventoryPage() {
     };
 
     const handleDelete = async (id: string) => {
-        if (!confirm('Xóa phiếu này?')) return;
+        if (!await appConfirm('Xóa phiếu này?', { title: 'Xóa phiếu', confirmText: 'Xóa', destructive: true })) return;
         try {
             await deleteDoc(doc(db, 'import_receipts', id));
             setReceipts(prev => prev.filter(r => r.id !== id));
@@ -466,20 +565,14 @@ export default function InventoryPage() {
                 <div className="flex flex-col gap-2 sm:flex-row">
                     <button
                         type="button"
-                        onClick={() => {
-                            setCreateReceiptType('retail');
-                            setIsCreateReceiptOpen(true);
-                        }}
+                        onClick={() => { void openImportProposal('retail'); }}
                         className="flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 shadow-md shadow-blue-200/50 font-semibold text-sm transition-colors"
                     >
                         <ExternalLink size={18} /> Đề xuất sản phẩm
                     </button>
                     <button
                         type="button"
-                        onClick={() => {
-                            setCreateReceiptType('component');
-                            setIsCreateReceiptOpen(true);
-                        }}
+                        onClick={() => { void openImportProposal('component'); }}
                         className="flex items-center justify-center gap-2 px-4 py-2.5 bg-orange-500 text-white rounded-xl hover:bg-orange-600 shadow-md shadow-orange-200/50 font-semibold text-sm transition-colors"
                     >
                         <ExternalLink size={18} /> Đề xuất linh kiện
@@ -700,7 +793,7 @@ export default function InventoryPage() {
                                                                                         onMouseDown={async (event) => {
                                                                                             event.preventDefault();
                                                                                             const supplierName = (supplierSearch || '').trim();
-                                                                                            const contactValue = window.prompt('Nhap SDT, Zalo, Facebook hoac lien he khac cho NCC (co the bo trong):') || '';
+                                                                                            const contactValue = await appPrompt('Nhập SĐT, Zalo, Facebook hoặc liên hệ khác cho nhà cung cấp (có thể bỏ trống):', { title: 'Thêm nhà cung cấp', placeholder: 'SĐT, Zalo hoặc Facebook' }) || '';
                                                                                             const contactInput = buildInlineSupplierContactInput(supplierName, contactValue);
                                                                                             const supplierId = await reserveSupplierDocumentId(contactInput);
                                                                                             await setDoc(doc(db, 'suppliers', supplierId), {
@@ -825,11 +918,13 @@ export default function InventoryPage() {
             </div>
 
             {/* Lot Tracking Modal */}
-            <LotTrackingModal 
-                isOpen={!!trackingLotCode} 
-                onClose={() => setTrackingLotCode(null)} 
-                initialSearchCode={trackingLotCode || ''}
-            />
+            {trackingLotCode && (
+                <LotTrackingModal
+                    isOpen
+                    onClose={() => setTrackingLotCode(null)}
+                    initialSearchCode={trackingLotCode}
+                />
+            )}
 
             {importPreviewModal.isOpen && (
                 <ImportPreviewModal
@@ -842,21 +937,25 @@ export default function InventoryPage() {
                 />
             )}
 
-            <CreateReceiptModal
-                isOpen={isCreateReceiptOpen}
-                onClose={() => setIsCreateReceiptOpen(false)}
-                parts={parts}
-                retailProducts={retailProducts}
-                onCreated={async () => {
-                    setIsCreateReceiptOpen(false);
-                    setActiveTab('draft');
-                    await refreshReceipts();
-                }}
-                currentUser={user}
-                suppliers={supplierList}
-                initialReceiptType={createReceiptType}
-                lockReceiptType
-            />
+            {isCreateReceiptOpen && (
+                <CreateReceiptModal
+                    isOpen
+                    onClose={() => setIsCreateReceiptOpen(false)}
+                    parts={parts}
+                    retailProducts={retailProducts}
+                    onCreated={async () => {
+                        setIsCreateReceiptOpen(false);
+                        setActiveTab('draft');
+                        await refreshReceipts();
+                    }}
+                    currentUser={user}
+                    suppliers={supplierList}
+                    initialReceiptType={createReceiptType}
+                    lockReceiptType
+                    outOfStockSuggestions={createReceiptType === 'retail' ? outOfStockRetailProducts : outOfStockParts}
+                    isLoadingOutOfStockSuggestions={outOfStockSuggestionsLoading === createReceiptType}
+                />
+            )}
 
             {/* Print Batch Modal */}
             {printBatchLots && printBatchLots.length > 0 && (

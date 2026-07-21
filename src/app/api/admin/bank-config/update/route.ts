@@ -1,7 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { normalizeVietnamPhone } from '@/lib/phone';
 import { requirePermission } from '@/lib/apiAuth';
+import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 
 type BankAccountInput = {
     id?: string;
@@ -18,39 +19,43 @@ type BankConfigInput = {
     accountName?: string;
 };
 
-export async function POST(request: NextRequest) {
-    try {
+type BankConfigUpdateRequestBody = { phone?: string; config?: BankConfigInput; otpToken?: string };
+
+export const POST = withApi({
+    name: 'admin/bank-config/update',
+    onError: (error, context) => context.json({ success: false, error: getApiErrorMessage(error) }, { status: getApiErrorStatus(error) }),
+}, async (request: NextRequest, context) => {
         await requirePermission(request, 'manage_settings');
-        const body = await request.json() as { phone?: string; config?: BankConfigInput; otpToken?: string };
+        const body = await context.readJson<BankConfigUpdateRequestBody>(request);
         const { phone, config, otpToken } = body;
 
         if (!phone || !config) {
-            return NextResponse.json({ success: false, error: 'Thiếu thông tin bắt buộc.' }, { status: 400 });
+            return context.json({ success: false, error: 'Thiếu thông tin bắt buộc.' }, { status: 400 });
         }
 
         const db = getAdminDb();
         
         const normalizedInputPhone = normalizeVietnamPhone(phone)?.e164;
         if (!normalizedInputPhone) {
-            return NextResponse.json({ success: false, error: 'Số điện thoại không hợp lệ.' }, { status: 400 });
+            return context.json({ success: false, error: 'Số điện thoại không hợp lệ.' }, { status: 400 });
         }
 
         // 2. Kiểm tra TOTP nếu hệ thống đã bật
         const configDoc = await db.collection('settings').doc('bank_config').get();
         const configData = configDoc.data();
         if (!configData?.totpEnabled || !configData?.totpSecret) {
-            return NextResponse.json({ success: false, error: 'Vui lòng thiết lập Authenticator trước khi cập nhật cấu hình ngân hàng.' }, { status: 403 });
+            return context.json({ success: false, error: 'Vui lòng thiết lập Authenticator trước khi cập nhật cấu hình ngân hàng.' }, { status: 403 });
         }
         if (configData?.totpEnabled && configData?.totpSecret) {
             if (!otpToken) {
-                return NextResponse.json({ success: false, error: 'Yêu cầu mã xác thực TOTP.' }, { status: 400 });
+                return context.json({ success: false, error: 'Yêu cầu mã xác thực TOTP.' }, { status: 400 });
             }
             
             // Require otplib at runtime to avoid top-level import issues if not installed yet
             const { authenticator } = await import('otplib');
             const isValid = authenticator.verify({ token: otpToken, secret: configData.totpSecret });
             if (!isValid) {
-                return NextResponse.json({ success: false, error: 'Mã xác thực không hợp lệ.' }, { status: 400 });
+                return context.json({ success: false, error: 'Mã xác thực không hợp lệ.' }, { status: 400 });
             }
         }
 
@@ -82,9 +87,5 @@ export async function POST(request: NextRequest) {
 
         // 4. Xóa OTP (Không cần vì dùng Firebase Auth)
 
-        return NextResponse.json({ success: true, message: 'Cấu hình ngân hàng đã được cập nhật thành công.' });
-    } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : 'Không thể cập nhật cấu hình ngân hàng.';
-        return NextResponse.json({ success: false, error: message }, { status: 500 });
-    }
-}
+        return context.json({ success: true, message: 'Cấu hình ngân hàng đã được cập nhật thành công.' });
+});

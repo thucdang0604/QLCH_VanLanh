@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import type { User } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db, getAuthInstance } from './firebase';
+import type { CatalogFieldPermissions } from './catalogEditPolicy';
 
 // User type with role
 export interface AppUser {
@@ -15,6 +16,7 @@ export interface AppUser {
     phone?: string;
     role: 'admin' | 'customer' | 'staff';
     permissions?: string[];
+    catalogFieldPermissions?: CatalogFieldPermissions;
 }
 
 interface AuthContextType {
@@ -61,6 +63,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 phone: data.phone,
                 role: data.role || 'customer',
                 permissions: data.permissions || [],
+                catalogFieldPermissions: data.catalogFieldPermissions || {},
             };
         }
 

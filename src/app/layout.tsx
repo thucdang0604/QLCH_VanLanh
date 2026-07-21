@@ -2,10 +2,10 @@ import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/lib/AuthContext";
-import { getAdminDb, isAdminAvailable } from "@/lib/firebaseAdmin";
+import { isAdminAvailable } from "@/lib/firebaseAdmin";
 import { SITE_URL } from "@/lib/constants";
 import { getBusinessIdentity } from "@/lib/businessIdentity";
-import type { SiteConfig } from "@/lib/config-defaults";
+import { getCachedStorefrontConfig } from "@/lib/serverConfig";
 import FirebasePerformance from "@/components/FirebasePerformance";
 import AppDialogProvider from "@/components/AppDialogProvider";
 import { ThemeProvider } from "@/lib/ThemeContext";
@@ -44,21 +44,10 @@ export async function generateMetadata(): Promise<Metadata> {
 
   if (isAdminAvailable()) {
     try {
-      const db = getAdminDb();
-      const docNames = ['main_settings', 'layout_settings', 'navigation_settings', 'taxonomy_settings'];
-      const refs = docNames.map(name => db.collection('system_config').doc(name));
-      const snapshots = await db.getAll(...refs);
-      
-      let data: Record<string, unknown> = {};
-      snapshots.forEach(snap => {
-          if (snap.exists) {
-              const snapData = JSON.parse(JSON.stringify(snap.data()));
-              data = { ...data, ...snapData };
-          }
-      });
+      const data = await getCachedStorefrontConfig();
 
       if (Object.keys(data).length > 0) {
-        const identity = getBusinessIdentity(data as Partial<SiteConfig>);
+        const identity = getBusinessIdentity(data);
         title = `${identity.siteName} - Sửa chữa điện thoại, Laptop uy tín`;
       }
     } catch {

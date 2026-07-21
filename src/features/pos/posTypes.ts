@@ -65,6 +65,7 @@ export interface RepairTicketInfo {
     paymentAmount: number;
     paymentLaborCost: number;
     paymentStatus: string;
+    paymentOutstandingOrderId?: string;
     gifts?: string[];
     issues?: { label?: string; estimatedPrice?: number; categoryPath?: string[]; serviceName?: string }[];
 }

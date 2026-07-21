@@ -7,10 +7,12 @@ import Image from 'next/image';
 import {
     Search, Loader2, Calendar, Clock, MapPin, CheckCircle2, Phone,
     XCircle, User, Wrench, ShoppingCart, Package, AlertCircle,
-    Smartphone, Star, PlayCircle, Image as ImageIcon, CircleDot,
+    Smartphone, Star, PlayCircle, CircleDot,
     Camera, X, HeartHandshake, Shield
 } from 'lucide-react';
 import { useConfig } from '@/lib/ConfigContext';
+import { appAlert } from '@/lib/appDialog';
+import CatalogImage from '@/components/customer/CatalogImage';
 import { uploadMedia } from '@/lib/storage';
 import type { RepairTicket, TrackingGroup, FirestoreDateValue, WorkflowNode } from '@/lib/types';
 import { isYouTubeUrl, getYouTubeEmbedUrl } from '@/lib/workflowFeatures';
@@ -238,7 +240,7 @@ export default function TrackingPage() {
             const filesArray = Array.from(e.target.files);
             const validFiles = filesArray.filter(f => f.size <= 5 * 1024 * 1024);
             if (validFiles.length < filesArray.length) {
-                alert('Một số ảnh vượt quá dung lượng 5MB và đã bị loại bỏ.');
+                void appAlert('Một số ảnh vượt quá dung lượng 5MB và đã bị loại bỏ.', { title: 'Một số ảnh không hợp lệ' });
             }
             setImages(prev => [...prev, ...validFiles].slice(0, 5));
             validFiles.forEach(file => {
@@ -263,7 +265,7 @@ export default function TrackingPage() {
         if (!reviewModal) return;
 
         if (!content.trim() && images.length === 0 && rating < 5) {
-            alert('Vui lòng chia sẻ thêm nội dung đánh giá để chúng tôi phục vụ tốt hơn.');
+            await appAlert('Vui lòng chia sẻ thêm nội dung đánh giá để chúng tôi phục vụ tốt hơn.', { title: 'Cần thêm nội dung đánh giá' });
             return;
         }
 
@@ -291,16 +293,16 @@ export default function TrackingPage() {
             });
             const data = await res.json();
             if (!res.ok) {
-                alert(data.error || 'Có lỗi xảy ra khi gửi đánh giá. Vui lòng thử lại.');
+                await appAlert(data.error || 'Có lỗi xảy ra khi gửi đánh giá. Vui lòng thử lại.', { title: 'Gửi đánh giá thất bại' });
                 return;
             }
 
             setReviewedTickets(prev => [...prev, reviewModal.id]);
             setReviewModal(null);
-            alert('Cảm ơn bạn đã đánh giá dịch vụ!');
+            await appAlert('Cảm ơn bạn đã đánh giá dịch vụ!', { title: 'Cảm ơn bạn' });
         } catch (error) {
             console.error('Error submitting review:', error);
-            alert('Có lỗi xảy ra khi gửi đánh giá. Vui lòng thử lại.');
+            await appAlert('Có lỗi xảy ra khi gửi đánh giá. Vui lòng thử lại.', { title: 'Gửi đánh giá thất bại' });
         } finally {
             setSubmittingReview(false);
         }
@@ -844,11 +846,15 @@ export default function TrackingPage() {
                                                         <div className="space-y-3 mb-4">
                                                             {order.items?.map((item: OrderItem, idx: number) => (
                                                                 <div key={idx} className="flex gap-3 items-center bg-gray-50 p-2 rounded-lg">
-                                                                    {item.image ? (
-                                                                        <Image src={item.image} alt={item.productName} width={48} height={48} className="w-12 h-12 object-cover rounded-md flex-shrink-0" />
-                                                                    ) : (
-                                                                        <div className="w-12 h-12 bg-gray-200 rounded-md flex items-center justify-center flex-shrink-0"><ImageIcon size={16} className="text-gray-400" /></div>
-                                                                    )}
+                                                                    <div className="relative w-12 h-12 overflow-hidden rounded-md flex-shrink-0 bg-white">
+                                                                        <CatalogImage
+                                                                            src={item.image}
+                                                                            alt={item.productName}
+                                                                            sizes="48px"
+                                                                            imageClassName="object-cover"
+                                                                            logoClassName="h-full w-full object-contain p-1.5"
+                                                                        />
+                                                                    </div>
                                                                     <div className="flex-1 min-w-0">
                                                                         <p className="font-medium text-sm text-gray-900 truncate">{item.productName}</p>
                                                                         <div className="text-xs text-gray-500 mt-0.5">

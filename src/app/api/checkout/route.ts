@@ -7,6 +7,7 @@ import { calculateCustomerTier, getTierDiscountPercent } from '@/lib/customerTie
 import { normalizeVietnamPhone } from '@/lib/phone';
 import { reserveSequentialDocumentId } from '@/lib/serverDocumentIds';
 import { getUniqueActiveVoucherByCode } from '@/lib/voucherServer';
+import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 
 const RATE_LIMIT_MAX = 3;
 const RATE_LIMIT_WINDOW_MS = 60_000; // 1 phút
@@ -42,8 +43,13 @@ async function verifyVoucherProofPhone(token: unknown, expectedPhone: string) {
     return tokenPhone.local;
 }
 
-export async function POST(request: NextRequest) {
-    try {
+export const POST = withApi({
+    name: 'checkout',
+    onError: (error, context) => context.json(
+        { error: getApiErrorMessage(error, 'Lỗi hệ thống. Vui lòng thử lại sau.') },
+        { status: getApiErrorStatus(error, 400) },
+    ),
+}, async (request: NextRequest, context) => {
         // ── 1. Rate Limiting ──
         const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
             || request.headers.get('x-real-ip')
@@ -56,7 +62,7 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const body = await request.json();
+        const body = await context.readJson(request);
 
         // ── 2. Honeypot Check ──
         // Field "website" ẩn trong form, bot tự fill → reject
@@ -515,11 +521,4 @@ export async function POST(request: NextRequest) {
             fromCache: result.fromCache,
             message: 'Đặt hàng thành công!',
         });
-    } catch (error) {
-        console.error('Checkout error:', error);
-        return NextResponse.json(
-            { error: error instanceof Error ? error.message : 'Lỗi hệ thống. Vui lòng thử lại sau.' },
-            { status: 400 }
-        );
-    }
-}
+});

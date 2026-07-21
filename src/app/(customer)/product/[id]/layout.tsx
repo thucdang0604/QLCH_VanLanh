@@ -23,7 +23,7 @@ export async function generateMetadata(
     const { id } = await params;
     const identity = getBusinessIdentity();
     
-    let ogImage = `${SITE_URL}/logo.png`;
+    let ogImage = identity.logoUrl || `${SITE_URL}/logo.png`;
     const previousImages = (await parent).openGraph?.images || [];
     if (previousImages.length > 0) {
         // Fallback or handle later

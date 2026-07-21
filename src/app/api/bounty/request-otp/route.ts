@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminAuth, getAdminDb } from '@/lib/firebaseAdmin';
 import { normalizeVietnamPhone } from '@/lib/phone';
+import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 
 type BountyStatus = 'eligible' | 'already_claimed_unused' | 'already_claimed_used';
 
@@ -156,9 +157,18 @@ async function requireVerifiedPhoneForRecord(request: NextRequest, expectedPhone
     }
 }
 
-export async function POST(request: NextRequest) {
-    try {
-        const body = await request.json();
+export const POST = withApi({
+    name: 'bounty/request-otp',
+    onError: (error, context) => {
+        const status = getApiErrorStatus(error);
+        return context.json({
+            error: status < 500
+                ? getApiErrorMessage(error)
+                : 'Hệ thống đang bận. Vui lòng thử lại sau.',
+        }, { status });
+    },
+}, async (request: NextRequest, context) => {
+        const body = await context.readJson(request);
         const { phone, action = 'check' } = body;
 
         if (!phone || typeof phone !== 'string') {
@@ -231,11 +241,4 @@ export async function POST(request: NextRequest) {
             e164: normalizedPhone.e164,
             message: 'Được phép gửi SMS',
         });
-    } catch (error: unknown) {
-        console.error('Lỗi API request-otp:', error);
-        return NextResponse.json(
-            { error: 'Hệ thống đang bận. Vui lòng thử lại sau.' },
-            { status: 500 }
-        );
-    }
-}
+});

@@ -8,6 +8,7 @@ import {
   type ChatQuickReply,
 } from '@/lib/chatIntegrationConfig';
 import { getAdminDb } from '@/lib/firebaseAdmin';
+import { getApiErrorMessage, getApiErrorStatus, withApi, type ApiRouteContext } from '@/lib/api/handler';
 
 export const runtime = 'nodejs';
 
@@ -25,8 +26,12 @@ function cleanQuickReplies(value: unknown): ChatQuickReply[] | undefined {
   return Array.isArray(value) ? value as ChatQuickReply[] : undefined;
 }
 
-export async function GET(request: NextRequest) {
-  try {
+function integrationError(error: unknown, context: ApiRouteContext) {
+  const status = getApiErrorStatus(error);
+  return context.json({ success: false, error: getApiErrorMessage(error) }, { status });
+}
+
+export const GET = withApi({ name: 'admin/chat/integrations', onError: integrationError }, async (request: NextRequest) => {
     await requirePermission(request, 'manage_settings');
     const origin = request.nextUrl.origin;
     const config = await getEffectiveChatIntegrationConfig();
@@ -39,18 +44,11 @@ export async function GET(request: NextRequest) {
         zalo: `${origin}/api/integrations/zalo/webhook`,
       },
     });
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    const lower = message.toLowerCase();
-    const status = lower.includes('missing authorization') ? 401 : lower.includes('forbidden') ? 403 : 500;
-    return NextResponse.json({ success: false, error: message }, { status });
-  }
-}
+});
 
-export async function PUT(request: NextRequest) {
-  try {
+export const PUT = withApi({ name: 'admin/chat/integrations', onError: integrationError }, async (request: NextRequest, context) => {
     await requirePermission(request, 'manage_settings');
-    const body = await request.json();
+    const body = await context.readJson(request);
     const next: ChatIntegrationConfigPatch = {};
 
     if (typeof body.facebook === 'object' && body.facebook !== null) {
@@ -89,18 +87,11 @@ export async function PUT(request: NextRequest) {
 
     const saved = await saveChatIntegrationConfig(next);
     return NextResponse.json({ success: true, config: toPublicChatIntegrationConfig(saved) });
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    const lower = message.toLowerCase();
-    const status = lower.includes('missing authorization') ? 401 : lower.includes('forbidden') ? 403 : 500;
-    return NextResponse.json({ success: false, error: message }, { status });
-  }
-}
+});
 
-export async function POST(request: NextRequest) {
-  try {
+export const POST = withApi({ name: 'admin/chat/integrations', onError: integrationError }, async (request: NextRequest, context) => {
     await requirePermission(request, 'manage_settings');
-    const body = await request.json();
+    const body = await context.readJson(request);
     const channel = typeof body.channel === 'string' ? body.channel : '';
     const config = await getEffectiveChatIntegrationConfig();
 
@@ -134,10 +125,4 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({ success: false, error: 'Invalid channel' }, { status: 400 });
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    const lower = message.toLowerCase();
-    const status = lower.includes('missing authorization') ? 401 : lower.includes('forbidden') ? 403 : 500;
-    return NextResponse.json({ success: false, error: message }, { status });
-  }
-}
+});

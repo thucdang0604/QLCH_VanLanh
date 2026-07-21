@@ -11,6 +11,7 @@ import { uploadMedia } from '@/lib/storage';
 import { isYouTubeUrl } from '@/lib/workflowFeatures';
 import { REPAIR_STATUS, isPendingRepairPart, isRepairStatus, isSelectedRepairPart, isWarrantyEligibleRepairPart } from '@/lib/repairStatus';
 import { toastError } from '@/lib/toast';
+import { appPrompt } from '@/lib/appDialog';
 import type { WarrantyTemplateConfig } from '@/app/admin/settings/receipt/WarrantyComponents';
 import type { WarrantyPrintType } from '@/features/repairs/repairPageUtils';
 import { RepairPaginationFooter } from '@/features/repairs/RepairPaginationFooter';
@@ -418,7 +419,7 @@ export function RepairTicketBoard({
                                                             className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
                                                             title="Dán link YouTube"
                                                             onClick={async () => {
-                                                                const link = prompt('Dán link YouTube tại đây:\n\nVD: https://youtu.be/xxxxx hoặc https://youtube.com/watch?v=xxxxx');
+                                                                const link = await appPrompt('Dán link YouTube tại đây:\n\nVD: https://youtu.be/xxxxx hoặc https://youtube.com/watch?v=xxxxx', { title: 'Dán link YouTube', placeholder: 'https://youtu.be/...' });
                                                                 if (!link?.trim()) return;
                                                                 if (!isYouTubeUrl(link)) {
                                                                     toastError('Link không hợp lệ. Vui lòng dán link YouTube.');
@@ -469,7 +470,7 @@ export function RepairTicketBoard({
                                                             className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
                                                             title="Dán link YouTube (tiết kiệm dung lượng)"
                                                             onClick={async () => {
-                                                                const link = prompt('🎬 Dán link YouTube tại đây:\n\nVD: https://youtu.be/xxxxx hoặc https://youtube.com/watch?v=xxxxx\n\n💡 Sử dụng YouTube tiết kiệm chi phí lưu trữ!');
+                                                                const link = await appPrompt('Dán link YouTube tại đây:\n\nVD: https://youtu.be/xxxxx hoặc https://youtube.com/watch?v=xxxxx\n\nSử dụng YouTube giúp tiết kiệm chi phí lưu trữ.', { title: 'Dán link YouTube', placeholder: 'https://youtu.be/...' });
                                                                 if (!link?.trim()) return;
                                                                 if (!isYouTubeUrl(link)) {
                                                                     toastError('Link không hợp lệ. Vui lòng dán link YouTube.');

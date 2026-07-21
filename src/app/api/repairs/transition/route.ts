@@ -1,12 +1,17 @@
-import { NextResponse, NextRequest } from 'next/server';
+import { NextRequest } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requirePermission } from '@/lib/apiAuth';
 import { FieldValue, type DocumentReference } from 'firebase-admin/firestore';
 import type { RepairTicket } from '@/lib/types';
 import { loadRepairWorkflow, requireWorkflowNode, workflowNodeHasFeature } from '@/lib/repairWorkflowServer';
 import { isChecklistComplete } from '@/lib/workflowFeatures';
-import { REPAIR_STATUS, isPendingRepairPart, isSelectedRepairPart } from '@/lib/repairStatus';
+import { REPAIR_PART_STATUS, REPAIR_STATUS, isPendingRepairPart, isSelectedRepairPart } from '@/lib/repairStatus';
 import { isRepairManager } from '@/lib/repairAccess';
+import { getMissingReservationQuantity, getRecordedReservationQuantity } from '@/lib/repairPartReservations';
+import { isInventoryConsumedRepairPart, planRepairPartVerification, type RepairPartVerificationAction } from '@/lib/repairPartConsumption';
+import { executeFifoDeductionsWrites, fetchFifoLogsForDeduction, type FifoDeductionResult, type FifoDeductor } from '@/lib/inventoryFifo';
+import { reserveSequentialDocumentIds } from '@/lib/serverDocumentIds';
+import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 
 interface RepairTransitionRequest {
     ticketId?: string;
@@ -15,6 +20,7 @@ interface RepairTransitionRequest {
     ticketVersion?: number;
     idempotencyKey?: string;
     source?: 'repairs' | 'technician';
+    partVerification?: Record<string, RepairPartVerificationAction>;
 }
 
 type RepairPartLine = NonNullable<RepairTicket['parts']>[number];
@@ -50,22 +56,30 @@ function isCancelTerminalStatus(status: string) {
 }
 
 function getReservedReleaseQuantity(part: RepairPartLine) {
+    if (isInventoryConsumedRepairPart(part)) return 0;
     const selectedQuantity = isSelectedRepairPart(part) ? Math.max(0, Math.floor(Number(part.quantity) || 0)) : 0;
     const reservedQuantity = Math.max(0, Math.floor(Number(part.reservedQuantity) || 0));
     if (reservedQuantity > 0) return reservedQuantity;
     return selectedQuantity;
 }
 
-export async function POST(request: NextRequest) {
-    try {
+export const POST = withApi({
+    name: 'repairs/transition',
+    onError: (error, context) => {
+        const message = getApiErrorMessage(error);
+        const normalizedMessage = message.toLocaleLowerCase('vi-VN');
+        const fallbackStatus = normalizedMessage.includes('không') || normalizedMessage.includes('vui lòng') ? 400 : 500;
+        return context.error(message, getApiErrorStatus(error, fallbackStatus));
+    },
+}, async (request: NextRequest, context) => {
         const caller = await requirePermission(request, 'manage_repairs');
 
-        const body = await request.json() as RepairTransitionRequest;
-        const { ticketId, targetStatus, technicianNote, ticketVersion, idempotencyKey, source } = body;
+        const body = await context.readJson<RepairTransitionRequest>(request);
+        const { ticketId, targetStatus, technicianNote, ticketVersion, idempotencyKey, source, partVerification } = body;
         const technicianNoteText = technicianNote?.trim() || '';
 
         if (!ticketId || !targetStatus) {
-            return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
+            return context.error('Missing parameters');
         }
 
         const db = getAdminDb();
@@ -101,7 +115,9 @@ export async function POST(request: NextRequest) {
                 throw new Error('Dữ liệu đã bị thay đổi bởi người khác. Vui lòng tải lại trang.');
             }
 
-            if (ticket.status === targetStatus) return { success: true };
+            if (ticket.status === targetStatus) {
+                throw new Error('Không thể chuyển phiếu sang chính trạng thái hiện tại.');
+            }
 
             const workflow = await loadRepairWorkflow(tx, db, ticket);
             const currentNode = requireWorkflowNode(workflow, ticket.status);
@@ -109,6 +125,8 @@ export async function POST(request: NextRequest) {
             const isCurrentTerminal = !!currentNode.isTerminal;
             const isTargetTerminal = !!targetNode.isTerminal;
             const isTargetCancelTerminal = isTargetTerminal && isCancelTerminalStatus(targetStatus);
+            const shouldReserveSelectedParts = workflowNodeHasFeature(targetNode, 'reserveSelectedParts');
+            const shouldConsumeSelectedParts = workflowNodeHasFeature(targetNode, 'consumeSelectedParts');
             const isAllowed = currentNode.allowedNext?.includes(targetStatus) ?? false;
             const requireChecklist = workflowNodeHasFeature(currentNode, 'requireChecklist');
             const requirePartsReady = workflowNodeHasFeature(currentNode, 'requirePartsReady');
@@ -170,29 +188,84 @@ export async function POST(request: NextRequest) {
             }
 
             const shouldReleaseHeldParts = isTargetCancelTerminal;
-            const releaseParts = shouldReleaseHeldParts
+            const verificationPlan = shouldConsumeSelectedParts
+                ? planRepairPartVerification(ticket.parts || [], partVerification)
+                : { used: [], returned: [] };
+            const releaseCandidates = shouldReleaseHeldParts
+                ? (ticket.parts || []).map((part, index) => ({ part, index }))
+                : verificationPlan.returned;
+            const releaseParts = releaseCandidates
+                .map((entry) => ({
+                    ...entry,
+                    releaseQuantity: getReservedReleaseQuantity(entry.part),
+                }))
+                .filter(entry => entry.part.productId && entry.releaseQuantity > 0);
+            const consumedParts = verificationPlan.used;
+            const reserveParts = shouldReserveSelectedParts
                 ? (ticket.parts || [])
                     .map((part, index) => ({
                         part,
                         index,
-                        releaseQuantity: getReservedReleaseQuantity(part),
+                        reserveQuantity: getMissingReservationQuantity(part),
                     }))
-                    .filter(entry => entry.part.productId && entry.releaseQuantity > 0)
+                    .filter(entry => entry.part.productId && entry.reserveQuantity > 0)
                 : [];
-            const releaseProductDocs = new Map<string, { ref: DocumentReference; held: number }>();
-            for (const entry of releaseParts) {
-                const productId = entry.part.productId;
-                if (!productId || releaseProductDocs.has(productId)) continue;
+            const heldProductIds = new Set<string>();
+            releaseParts.forEach(entry => {
+                if (entry.part.productId) heldProductIds.add(entry.part.productId);
+            });
+            reserveParts.forEach(entry => {
+                if (entry.part.productId) heldProductIds.add(entry.part.productId);
+            });
+            consumedParts.forEach(entry => {
+                if (entry.part.productId) heldProductIds.add(entry.part.productId);
+            });
+            const heldProductDocs = new Map<string, { ref: DocumentReference; stock: number; held: number; costPrice: number }>();
+            for (const productId of heldProductIds) {
+                if (heldProductDocs.has(productId)) continue;
                 const productRef = db.collection('products').doc(productId);
                 const productSnap = await tx.get(productRef);
                 if (!productSnap.exists) {
-                    throw new Error(`Linh kien "${entry.part.productName}" khong con ton tai.`);
+                    throw new Error(`Linh kiện ${productId} không còn tồn tại.`);
                 }
-                releaseProductDocs.set(productId, {
+                heldProductDocs.set(productId, {
                     ref: productRef,
+                    stock: Math.max(0, Number(productSnap.data()?.stock) || 0),
                     held: Math.max(0, Number(productSnap.data()?.held) || 0),
+                    costPrice: Math.max(0, Number(productSnap.data()?.costPrice) || 0),
                 });
             }
+
+            const consumptionByProduct = new Map<string, number>();
+            const consumptionLotPreferences = new Map<string, Map<string, number>>();
+            for (const entry of consumedParts) {
+                const productId = entry.part.productId;
+                if (!productId) continue;
+                const quantity = Math.max(0, Math.floor(Number(entry.part.quantity) || 0));
+                if (quantity === 0) continue;
+
+                consumptionByProduct.set(productId, (consumptionByProduct.get(productId) || 0) + quantity);
+                if (entry.part.lotCode) {
+                    const productPreferences = consumptionLotPreferences.get(productId) || new Map<string, number>();
+                    productPreferences.set(entry.part.lotCode, (productPreferences.get(entry.part.lotCode) || 0) + quantity);
+                    consumptionLotPreferences.set(productId, productPreferences);
+                }
+            }
+            const consumptionFifoDeductors: FifoDeductor[] = [...consumptionByProduct.entries()].map(([productId, quantityToDeduct]) => ({
+                productId,
+                quantityToDeduct,
+                preferredLotCodes: [...(consumptionLotPreferences.get(productId) || new Map<string, number>()).entries()]
+                    .map(([lotCode, quantity]) => ({ lotCode, quantity })),
+            }));
+            const consumptionFifoLogs = consumptionFifoDeductors.length > 0
+                ? await fetchFifoLogsForDeduction(tx, db, consumptionFifoDeductors)
+                : new Map<string, { ref: DocumentReference; data: Record<string, unknown> }[]>();
+            const consumptionLogParts = consumedParts.filter((entry) => entry.part.productId && heldProductDocs.has(entry.part.productId));
+            const consumptionLogAllocations = await reserveSequentialDocumentIds(tx, db, {
+                collectionName: 'inventory_logs',
+                prefix: 'IL',
+                count: consumptionLogParts.length,
+            });
 
             // Calculate duration
             let newDuration = ticket.durationInMinutes || 0;
@@ -252,33 +325,104 @@ export async function POST(request: NextRequest) {
                 }
             }
 
-            if (releaseParts.length > 0) {
-                const releaseByProduct = new Map<string, number>();
+            if (releaseParts.length > 0 || reserveParts.length > 0 || consumedParts.length > 0) {
+                const heldDeltas = new Map<string, number>();
                 const updatedParts = [...(ticket.parts || [])];
+
                 for (const entry of releaseParts) {
                     const productId = entry.part.productId;
                     if (!productId) continue;
-                    releaseByProduct.set(productId, (releaseByProduct.get(productId) || 0) + entry.releaseQuantity);
+                    heldDeltas.set(productId, (heldDeltas.get(productId) || 0) - entry.releaseQuantity);
                     updatedParts[entry.index] = {
                         ...updatedParts[entry.index],
                         reservedQuantity: 0,
+                        ...(shouldConsumeSelectedParts ? { status: REPAIR_PART_STATUS.REJECTED } : {}),
                     };
                 }
 
-                for (const [productId, releaseQuantity] of releaseByProduct.entries()) {
-                    const productDoc = releaseProductDocs.get(productId);
+                for (const entry of consumedParts) {
+                    const productId = entry.part.productId;
+                    const quantity = Math.max(0, Math.floor(Number(entry.part.quantity) || 0));
+                    if (productId && quantity > 0) {
+                        heldDeltas.set(productId, (heldDeltas.get(productId) || 0) - quantity);
+                    }
+                    updatedParts[entry.index] = {
+                        ...updatedParts[entry.index],
+                        reservedQuantity: 0,
+                        inventoryDeductedAt: new Date(),
+                    };
+                }
+
+                for (const entry of reserveParts) {
+                    const productId = entry.part.productId;
+                    if (!productId) continue;
+                    heldDeltas.set(productId, (heldDeltas.get(productId) || 0) + entry.reserveQuantity);
+                    updatedParts[entry.index] = {
+                        ...updatedParts[entry.index],
+                        reservedQuantity: getRecordedReservationQuantity(entry.part) + entry.reserveQuantity,
+                    };
+                }
+
+                for (const [productId, heldDelta] of heldDeltas.entries()) {
+                    const productDoc = heldProductDocs.get(productId);
                     if (!productDoc) continue;
+                    const nextHeld = productDoc.held + heldDelta;
+                    const consumedQuantity = consumptionByProduct.get(productId) || 0;
+                    const nextStock = productDoc.stock - consumedQuantity;
+                    if (nextHeld < 0) {
+                        throw new Error(`Lỗi giữ chỗ: held < 0 cho ${productId}`);
+                    }
+                    if (nextStock < 0) {
+                        throw new Error(`Linh kiện ${productId} không đủ tồn kho để hoàn tất sửa chữa.`);
+                    }
+                    if (nextHeld > nextStock) {
+                        throw new Error(`Linh kiện ${productId} không đủ tồn khả dụng để tạm giữ.`);
+                    }
                     tx.update(productDoc.ref, {
-                        held: Math.max(0, productDoc.held - releaseQuantity),
+                        held: nextHeld,
+                        stock: nextStock,
                         updatedAt: FieldValue.serverTimestamp(),
                     });
                 }
 
+                let consumptionFifoResults = new Map<string, FifoDeductionResult[]>();
+                if (consumptionFifoDeductors.length > 0) {
+                    consumptionFifoResults = executeFifoDeductionsWrites(tx, consumptionFifoDeductors, consumptionFifoLogs);
+                }
+                consumptionLogParts.forEach((entry, index) => {
+                    const productId = entry.part.productId!;
+                    const productDoc = heldProductDocs.get(productId);
+                    const logAllocation = consumptionLogAllocations[index];
+                    if (!productDoc || !logAllocation) return;
+                    tx.set(logAllocation.ref, {
+                        productId,
+                        productName: entry.part.productName,
+                        quantity: -Math.max(0, Math.floor(Number(entry.part.quantity) || 0)),
+                        costPriceAtLog: productDoc.costPrice,
+                        type: 'REPAIR_CONSUMPTION',
+                        referenceId: ticketId,
+                        referenceType: 'repair',
+                        lotsDeducted: consumptionFifoResults.get(productId) || [],
+                        createdBy: caller.uid,
+                        createdAt: FieldValue.serverTimestamp(),
+                    });
+                });
+
                 updateData.parts = updatedParts;
-                updateData.partsReleasedAt = FieldValue.serverTimestamp();
+                if (releaseParts.length > 0) {
+                    updateData.partsReleasedAt = FieldValue.serverTimestamp();
+                }
+                if (reserveParts.length > 0 && !ticket.partsLockedAt) {
+                    updateData.partsLockedAt = FieldValue.serverTimestamp();
+                }
+                if (consumedParts.length > 0) {
+                    updateData.partsConsumedAt = FieldValue.serverTimestamp();
+                }
             }
 
             tx.update(ticketRef, updateData);
+
+            consumptionLogAllocations.at(-1)?.commitCounter();
 
             if (idempotencyKey) {
                 tx.set(db.collection('operation_requests').doc(idempotencyKey), {
@@ -293,13 +437,5 @@ export async function POST(request: NextRequest) {
             return { success: true };
         });
 
-        return NextResponse.json(result);
-    } catch (error: unknown) {
-        console.error('Repair transition API error:', error);
-        const message = error instanceof Error ? error.message : 'Internal server error';
-        return NextResponse.json(
-            { error: message },
-            { status: message.includes('không') || message.includes('Vui lòng') ? 400 : 500 }
-        );
-    }
-}
+        return context.json(result);
+});

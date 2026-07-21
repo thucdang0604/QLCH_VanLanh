@@ -1,15 +1,28 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import dynamic from 'next/dynamic';
 import { useConfig, DEFAULT_CONFIG, type ContactInfo, type GeofenceConfig } from '@/lib/ConfigContext';
 import { Save, Loader2, Store, Phone, Mail, MapPin, Facebook, MessageCircle, CheckCircle2, AlertCircle, ShieldCheck, Navigation, KeyRound, Printer } from 'lucide-react';
 
-import CategoriesTab from './CategoriesTab';
-import NavigationTab from './NavigationTab';
-import BankIntegrationConfig from '@/components/admin/settings/BankIntegrationConfig';
-import ChatIntegrationsTab from '@/components/admin/settings/ChatIntegrationsTab';
-import RepairsConfigTab from '@/components/admin/settings/RepairsConfigTab';
-import ReceiptSettingsPanel from './ReceiptSettingsPanel';
+import { appAlert } from '@/lib/appDialog';
+
+function SettingsTabLoader() {
+    return (
+        <div className="flex min-h-48 items-center justify-center" aria-live="polite">
+            <Loader2 size={28} className="animate-spin text-orange-500" />
+            <span className="sr-only">Đang tải nội dung cài đặt</span>
+        </div>
+    );
+}
+
+// These panels are mutually exclusive. Splitting them keeps the initial Settings bundle focused on General.
+const CategoriesTab = dynamic(() => import('./CategoriesTab'), { loading: SettingsTabLoader });
+const NavigationTab = dynamic(() => import('./NavigationTab'), { loading: SettingsTabLoader });
+const BankIntegrationConfig = dynamic(() => import('@/components/admin/settings/BankIntegrationConfig'), { loading: SettingsTabLoader });
+const ChatIntegrationsTab = dynamic(() => import('@/components/admin/settings/ChatIntegrationsTab'), { loading: SettingsTabLoader });
+const RepairsConfigTab = dynamic(() => import('@/components/admin/settings/RepairsConfigTab'), { loading: SettingsTabLoader });
+const ReceiptSettingsPanel = dynamic(() => import('./ReceiptSettingsPanel'), { loading: SettingsTabLoader });
 
 export default function SettingsPage() {
     const { config, updateConfig, loading } = useConfig();
@@ -19,6 +32,7 @@ export default function SettingsPage() {
     const [topBarText, setTopBarText] = useState('');
     const [forbiddenWords, setForbiddenWords] = useState('');
     const [geofence, setGeofence] = useState<GeofenceConfig>(DEFAULT_CONFIG.geofence);
+    const [reviewPin, setReviewPin] = useState('');
     const [saving, setSaving] = useState(false);
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
 
@@ -55,10 +69,15 @@ export default function SettingsPage() {
                 topBarText: topBarText,
                 forbiddenWords: fWords,
                 geofence: geofence,
-            });
+            }, { reviewPin });
+            setReviewPin('');
             setMessage({ type: 'success', text: 'Đã lưu cài đặt thành công!' });
         } catch (error) {
             console.error('Save settings error:', error);
+            if (error instanceof Error) {
+                setMessage({ type: 'error', text: error.message });
+                return;
+            }
             setMessage({ type: 'error', text: 'Lỗi khi lưu cài đặt. Vui lòng thử lại.' });
         } finally {
             setSaving(false);
@@ -383,9 +402,9 @@ export default function SettingsPage() {
                                     <button
                                         type="button"
                                         title="Lấy vị trí hiện tại"
-                                        onClick={() => {
+                                        onClick={async () => {
                                             if (!navigator.geolocation) {
-                                                alert('Trình duyệt không hỗ trợ định vị.');
+                                                await appAlert('Trình duyệt không hỗ trợ định vị.', { title: 'Không hỗ trợ định vị' });
                                                 return;
                                             }
                                             navigator.geolocation.getCurrentPosition(
@@ -397,7 +416,7 @@ export default function SettingsPage() {
                                                     }));
                                                     setMessage({ type: 'success', text: 'Đã cập nhật toạ độ từ vị trí hiện tại!' });
                                                 },
-                                                () => alert('Không thể lấy vị trí. Vui lòng kiểm tra quyền truy cập GPS.'),
+                                                () => { void appAlert('Không thể lấy vị trí. Vui lòng kiểm tra quyền truy cập GPS.', { title: 'Không lấy được vị trí' }); },
                                                 { enableHighAccuracy: true }
                                             );
                                         }}
@@ -412,12 +431,14 @@ export default function SettingsPage() {
                                             Mã PIN (fallback khi GPS bị từ chối)
                                         </label>
                                         <input
-                                            type="text"
+                                            type="password"
+                                            inputMode="numeric"
+                                            autoComplete="new-password"
                                             title="Mã PIN"
-                                            value={geofence.pin}
-                                            onChange={(e) => setGeofence(g => ({ ...g, pin: e.target.value }))}
+                                            value={reviewPin}
+                                            onChange={(e) => setReviewPin(e.target.value.replace(/\D/g, ''))}
                                             className="w-full max-w-xs px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all font-mono text-lg tracking-widest"
-                                            placeholder="2026"
+                                            placeholder="Nhập PIN mới"
                                             maxLength={8}
                                         />
                                         <p className="text-xs text-gray-400">Nhân viên sẽ cung cấp mã này cho khách khi khách không bật được GPS.</p>
@@ -437,6 +458,7 @@ export default function SettingsPage() {
                                     setTopBarText(config.topBarText || '');
                                     setForbiddenWords((config.forbiddenWords || []).join(', '));
                                     setGeofence(config.geofence || DEFAULT_CONFIG.geofence);
+                                    setReviewPin('');
                                 }}
                                 className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-200 rounded-lg transition-colors"
                             >

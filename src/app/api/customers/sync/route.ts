@@ -1,36 +1,43 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { FieldValue } from 'firebase-admin/firestore';
+import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 import { isRateLimited } from '@/lib/rateLimit';
 import { normalizeVietnamPhone } from '@/lib/phone';
 
 const RATE_LIMIT_MAX = 5;
 const RATE_LIMIT_WINDOW_MS = 60_000;
+type CustomerSyncRequestBody = { name?: string; phone?: string };
 
 /** Strip HTML tags to prevent Stored XSS (BUG-SEC-004). */
 function stripHtml(str: string): string {
     return str.replace(/<[^>]*>/g, '').trim();
 }
 
-export async function POST(request: NextRequest) {
-    try {
+export const POST = withApi({
+    name: 'customers/sync',
+    onError: (error, context) => {
+        const status = getApiErrorStatus(error);
+        return context.error(status < 500 ? getApiErrorMessage(error) : 'Lỗi hệ thống khi đồng bộ khách hàng.', status);
+    },
+}, async (request: NextRequest, context) => {
         const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || request.headers.get('x-real-ip') || 'unknown';
         if (await isRateLimited(ip, 'customer_sync', RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS)) {
-            return NextResponse.json({ error: 'Quá nhiều yêu cầu. Vui lòng thử lại sau.' }, { status: 429 });
+            return context.json({ error: 'Quá nhiều yêu cầu. Vui lòng thử lại sau.' }, { status: 429 });
         }
 
-        const body = await request.json().catch(() => ({}));
+        const body = await context.readJson<CustomerSyncRequestBody>(request);
         // BUG-SEC-004: forceUpdateName removed — public API must not allow
         // arbitrary name overwrite. Only update name when current is empty/generic.
         const { name, phone } = body;
 
         if (!phone || typeof phone !== 'string') {
-            return NextResponse.json({ error: 'Thiếu thông tin số điện thoại.' }, { status: 400 });
+            return context.json({ error: 'Thiếu thông tin số điện thoại.' }, { status: 400 });
         }
 
         const normalizedPhone = normalizeVietnamPhone(phone);
         if (!normalizedPhone) {
-            return NextResponse.json({ error: 'Số điện thoại không hợp lệ.' }, { status: 400 });
+            return context.json({ error: 'Số điện thoại không hợp lệ.' }, { status: 400 });
         }
 
         const customerName = typeof name === 'string' ? stripHtml(name).slice(0, 100) : '';
@@ -74,10 +81,5 @@ export async function POST(request: NextRequest) {
             }
         });
 
-        return NextResponse.json({ success: true });
-    } catch (error) {
-        console.error('Customer Sync Error:', error);
-        return NextResponse.json({ error: 'Lỗi hệ thống khi đồng bộ khách hàng.' }, { status: 500 });
-    }
-}
-
+        return context.json({ success: true });
+});

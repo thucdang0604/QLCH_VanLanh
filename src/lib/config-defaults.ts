@@ -109,7 +109,6 @@ export interface GeofenceConfig {
     lat: number;
     lng: number;
     radiusMeters: number;
-    pin: string;
 }
 
 // Navigation types (Menu Builder)
@@ -312,7 +311,6 @@ export const DEFAULT_CONFIG: SiteConfig = {
         lat: 10.8078,
         lng: 106.7000,
         radiusMeters: 500,
-        pin: '2026',
     },
     bountyMissions: [
         { id: 'facebook', url: 'https://www.facebook.com/vanlanh.vn', isActive: true },

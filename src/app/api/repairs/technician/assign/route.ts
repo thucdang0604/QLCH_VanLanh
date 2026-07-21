@@ -1,21 +1,27 @@
-import { NextResponse, NextRequest } from 'next/server';
+import { NextRequest } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requirePermission } from '@/lib/apiAuth';
 import { FieldValue } from 'firebase-admin/firestore';
 import type { RepairTicket } from '@/lib/types';
 import { isRepairManager, isTechnicianUser } from '@/lib/repairAccess';
+import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 
-export async function POST(request: NextRequest) {
-    try {
+export const POST = withApi({
+    name: 'repairs/technician/assign',
+    onError: (error, context) => context.error(
+        getApiErrorMessage(error),
+        getApiErrorStatus(error, 400),
+    ),
+}, async (request: NextRequest, context) => {
         const caller = await requirePermission(request, 'manage_repairs');
-        const body = await request.json();
+        const body = await context.readJson(request);
         const { ticketId, technicianId, ticketVersion, idempotencyKey } = body;
 
         if (!ticketId || !technicianId) {
-            return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
+            return context.error('Missing parameters');
         }
         if (!isRepairManager(caller)) {
-            return NextResponse.json({ error: 'Chỉ quản lý Sale hoặc Admin được gán KTV lần đầu.' }, { status: 403 });
+            return context.error('Chỉ quản lý Sale hoặc Admin được gán KTV lần đầu.', 403);
         }
 
         const db = getAdminDb();
@@ -96,10 +102,5 @@ export async function POST(request: NextRequest) {
             return { success: true };
         });
 
-        return NextResponse.json(result);
-    } catch (error: unknown) {
-        console.error('Assign technician API error:', error);
-        const message = error instanceof Error ? error.message : 'Internal server error';
-        return NextResponse.json({ error: message }, { status: 400 });
-    }
-}
+        return context.json(result);
+});

@@ -1,7 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { getAdminDb, isAdminAvailable } from '@/lib/firebaseAdmin';
 import { requireAdminOrStaff } from '@/lib/apiAuth';
 import { isRateLimited } from '@/lib/rateLimit';
+import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 
 type AdminSearchResult = {
     id: string;
@@ -55,22 +56,24 @@ function matchesKeyword(item: AdminSearchResult, keyword: string): boolean {
     ].join(' ').toLowerCase().includes(keyword);
 }
 
-export async function GET(request: NextRequest) {
-    try {
+export const GET = withApi({
+    name: 'admin/search',
+    onError: (error, context) => context.error(getApiErrorMessage(error), getApiErrorStatus(error)),
+}, async (request: NextRequest, context) => {
         const user = await requireAdminOrStaff(request);
 
         if (await isRateLimited(user.uid, 'admin-search', RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS)) {
-            return NextResponse.json({ error: 'Too many search requests' }, { status: 429 });
+            return context.json({ error: 'Too many search requests' }, { status: 429 });
         }
 
         if (!isAdminAvailable()) {
-            return NextResponse.json({ error: 'Service unavailable' }, { status: 503 });
+            return context.json({ error: 'Service unavailable' }, { status: 503 });
         }
 
         const { searchParams } = new URL(request.url);
         const q = searchParams.get('q')?.trim() || '';
         if (!q) {
-            return NextResponse.json({ results: [] });
+            return context.json({ results: [] });
         }
 
         const db = getAdminDb();
@@ -135,10 +138,5 @@ export async function GET(request: NextRequest) {
             });
         }
 
-        return NextResponse.json({ results: [...catalogResults, ...ordersResult, ...repairsResult] });
-    } catch (error) {
-        const message = error instanceof Error ? error.message : 'Search failed';
-        const status = message.startsWith('Forbidden') || message.startsWith('Missing Authorization') ? 403 : 500;
-        return NextResponse.json({ error: message }, { status });
-    }
-}
+        return context.json({ results: [...catalogResults, ...ordersResult, ...repairsResult] });
+});

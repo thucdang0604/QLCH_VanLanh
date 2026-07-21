@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { requirePermission } from '@/lib/apiAuth';
+import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import type { RepairTicket } from '@/lib/types';
 import { getConfiguredWorkflow, type RepairWorkflowSettings } from '@/lib/repairWorkflowConfig';
@@ -38,10 +39,12 @@ function isTerminalRepair(repair: RepairHeldData, settings: RepairWorkflowSettin
     return workflow.some(node => node.id === repair.status && node.isTerminal === true);
 }
 
-export async function POST(request: NextRequest) {
-    try {
+export const POST = withApi({
+    name: 'admin/fix-held',
+    onError: (error, context) => context.json({ success: false, error: getApiErrorMessage(error) }, { status: getApiErrorStatus(error) }),
+}, async (request: NextRequest, context) => {
         const caller = await requirePermission(request, 'manage_inventory');
-        const payload = await request.json().catch(() => ({})) as FixHeldPayload;
+        const payload = await context.readJson<FixHeldPayload>(request);
         const shouldApply = payload.apply === true && payload.confirm === 'FIX_HELD_APPLY';
         const db = getAdminDb();
         const [productsSnap, repairsSnap, configSnap] = await Promise.all([
@@ -99,7 +102,7 @@ export async function POST(request: NextRequest) {
             });
         }
 
-        return NextResponse.json({
+        return context.json({
             success: true,
             dryRun: !shouldApply,
             scannedProducts: productsSnap.size,
@@ -110,9 +113,4 @@ export async function POST(request: NextRequest) {
             heldByProduct: Object.fromEntries(heldMap),
             executedBy: caller.uid,
         });
-    } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : 'Internal server error';
-        const status = message.startsWith('Forbidden') || message.startsWith('Missing Authorization') ? 403 : 500;
-        return NextResponse.json({ success: false, error: message }, { status });
-    }
-}
+});

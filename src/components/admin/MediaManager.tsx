@@ -10,6 +10,7 @@ import { optimizeImage } from '@/lib/imageOptimizer';
 import { validateImageFile } from '@/lib/validateImage';
 import { cleanBrokenMedia } from '@/lib/storage';
 import { compressVideo } from '@/lib/videoOptimizer';
+import { appAlert, appConfirm } from '@/lib/appDialog';
 
 const MAX_VIDEO_SIZE_MB = 50;
 const MAX_VIDEO_SIZE_BYTES = MAX_VIDEO_SIZE_MB * 1024 * 1024;
@@ -408,7 +409,7 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
 
     // Delete handler: remove from Storage + Firestore
     const handleDelete = async (item: MediaItem) => {
-        if (!confirm(`Xóa "${item.name}"?`)) return;
+        if (!await appConfirm(`Xóa "${item.name}"?`, { title: 'Xóa media', confirmText: 'Xóa', destructive: true })) return;
         setDeleting(item.id);
         try {
             const storage = await getStorageInstance();
@@ -425,7 +426,7 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
 
     // Clean broken media entries
     const handleCleanBroken = async () => {
-        if (!confirm('Quét toàn bộ thư viện media.\nHệ thống sẽ kiểm tra từng file trên Storage và tự động xoá các bản ghi lỗi (ảnh đã bị mất).\n\nTiếp tục?')) return;
+        if (!await appConfirm('Quét toàn bộ thư viện media.\nHệ thống sẽ kiểm tra từng file trên Storage và tự động xoá các bản ghi lỗi (ảnh đã bị mất).\n\nTiếp tục?', { title: 'Quét thư viện media', confirmText: 'Bắt đầu quét', destructive: true })) return;
         setCleaning(true);
         setCleanProgress('Đang bắt đầu quét...');
         try {
@@ -661,7 +662,7 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                                             style={{ backgroundImage: 'linear-gradient(45deg, #f3f4f6 25%, transparent 25%), linear-gradient(-45deg, #f3f4f6 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #f3f4f6 75%), linear-gradient(-45deg, transparent 75%, #f3f4f6 75%)', backgroundPosition: '0 0, 0 10px, 10px -10px, -10px 0px' }}
                                             onClick={(e) => {
                                                 if (e.currentTarget.getAttribute('data-broken') === 'true') {
-                                                    alert('Ảnh này đã bị xoá trên bộ nhớ gốc (Storage). Vui lòng nhấn biểu tượng 🗑️ thùng rác để dọn dẹp nó khỏi hệ thống.');
+                                                    void appAlert('Ảnh này đã bị xoá trên bộ nhớ gốc (Storage). Vui lòng nhấn biểu tượng 🗑️ thùng rác để dọn dẹp nó khỏi hệ thống.', { title: 'Ảnh đã mất trên Storage' });
                                                     return;
                                                 }
                                                 if (multiple) {

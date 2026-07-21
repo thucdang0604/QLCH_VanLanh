@@ -6,6 +6,7 @@ import { onSnapshot, getDocs, getDoc } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import { Percent, Plus, Edit2, Trash2, ToggleLeft, ToggleRight, X, Tag, Medal, Users, ChevronDown, Search, ArrowDown, Zap, ShoppingBag } from 'lucide-react';
 import { toast } from 'sonner';
+import { appConfirm } from '@/lib/appDialog';
 import type { AccessoryDiscountRule } from '@/lib/types';
 import type { TaxonomyNode } from '@/lib/types/catalog';
 import { TIER_CONFIGS, TierConfig } from '@/lib/customerTiers';
@@ -541,7 +542,7 @@ export default function DiscountRulesTab() {
     };
 
     const handleDeleteAccessoryRule = async (id: string) => {
-        if (!confirm('Xóa rule này?')) return;
+        if (!await appConfirm('Xóa rule này?', { title: 'Xóa rule', confirmText: 'Xóa', destructive: true })) return;
         await deleteDoc(doc(db, 'accessory_discount_rules', id));
         toast.success('Đã xóa rule');
         await loadAccessoryRules();
@@ -625,7 +626,6 @@ export default function DiscountRulesTab() {
                             </thead>
                             <tbody className="divide-y divide-gray-100">
                                 {tiers.map((tier, idx) => {
-                                    const _customers = tierCustomers[tier.name] || [];
                                     const isExpanded = expandedTier === tier.name;
                                     const isLoaded = !!loadedTierCustomers[tier.name];
                                     const isLoading = loadingTierName === tier.name;

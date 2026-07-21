@@ -1,10 +1,12 @@
-import { NextResponse, NextRequest } from 'next/server';
+import { NextRequest } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requirePermission } from '@/lib/apiAuth';
+import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 import { FieldValue } from 'firebase-admin/firestore';
 import type { RepairTicket } from '@/lib/types';
 import { calculateAndSaveCommissionsServer } from '@/lib/commissionCalcServer';
 import { REPAIR_STATUS, isSelectedRepairPart, isWarrantyEligibleRepairPart } from '@/lib/repairStatus';
+import { isInventoryConsumedRepairPart } from '@/lib/repairPartConsumption';
 import { getConfiguredWorkflow } from '@/lib/repairWorkflowConfig';
 import { fetchFifoLogsForDeduction, executeFifoDeductionsWrites, type FifoDeductionResult, type FifoDeductor } from '@/lib/inventoryFifo';
 import { incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
@@ -12,6 +14,15 @@ import { stampRepairWarrantyOnParts } from '@/lib/repairWarrantyRules';
 import { reserveSequentialDocumentIds } from '@/lib/serverDocumentIds';
 
 const LEGACY_TERMINAL_STATUSES = [REPAIR_STATUS.DONE, REPAIR_STATUS.OUT, REPAIR_STATUS.REFUND, 'bh_hoan_tat', 'bh_tu_choi', 'bh_refund'];
+type HandoverRequestBody = {
+    ticketId?: string;
+    targetStatus?: string;
+    ticketVersion?: number;
+    laborCost?: number;
+    additionalFees?: number;
+    idempotencyKey?: string;
+    operationKey?: string;
+};
 
 function getTicketCustomerId(ticket: RepairTicket): string {
     return ticket.customer?.id || ticket.customer?.customerId || ticket.customer?.phone || '';
@@ -38,16 +49,22 @@ function resolveServiceWarrantyMonths(taxonomy: unknown, categoryPath: string[] 
     return months > 0 ? months : 3;
 }
 
-export async function POST(request: NextRequest) {
-    try {
+export const POST = withApi({
+    name: 'repairs/handover',
+    onError: (error, context) => {
+        const message = getApiErrorMessage(error);
+        const legacyStatus = /kh(?:\\u00f4|\\u0103\\u00b4)ng|Vui l(?:\\u00f2|\\u0103\\u00b2)ng/.test(message) ? 400 : 500;
+        return context.error(message, getApiErrorStatus(error, legacyStatus));
+    },
+}, async (request: NextRequest, context) => {
         const caller = await requirePermission(request, 'manage_repairs');
 
-        const body = await request.json();
+        const body = await context.readJson<HandoverRequestBody>(request);
         const { ticketId, targetStatus, ticketVersion, laborCost, additionalFees } = body;
         const idempotencyKey = body.idempotencyKey || body.operationKey;
 
         if (!ticketId || !targetStatus) {
-            return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
+            return context.error('Missing parameters');
         }
 
         const db = getAdminDb();
@@ -134,6 +151,9 @@ export async function POST(request: NextRequest) {
 
             // Check if any selected part missing priceConfirmedAt
             const selectedParts = (ticket.parts || []).filter(isSelectedRepairPart);
+            // Parts can be deducted when the repair is completed (before customer handover).
+            // Keep them in selectedParts for pricing/warranty, but never deduct inventory twice.
+            const partsToDeduct = selectedParts.filter((part) => !isInventoryConsumedRepairPart(part));
             const missingSnapshot = selectedParts.find(p => !p.priceConfirmedAt);
             if (missingSnapshot) {
                 throw new Error(`Linh kiá»‡n "${missingSnapshot.productName}" chÆ°a cĂ³ snapshot giĂ¡. YĂªu cáº§u quáº£n trá»‹ viĂªn Ä‘á»‘i soĂ¡t trÆ°á»›c khi bĂ n giao.`);
@@ -185,9 +205,9 @@ export async function POST(request: NextRequest) {
 
 
                 // Read products
-                if (selectedParts.length > 0) {
+                if (partsToDeduct.length > 0) {
                     const deductions: (FifoDeductor & { lotCode?: string })[] = [];
-                    for (const p of selectedParts) {
+                    for (const p of partsToDeduct) {
                         if (p.productId && !productDocs.has(p.productId)) {
                             const pRef = db.collection('products').doc(p.productId);
                             const pSnap = await tx.get(pRef);
@@ -228,7 +248,7 @@ export async function POST(request: NextRequest) {
             // --- END READ PHASE ---
 
             const partsToLog = !isWarranty
-                ? selectedParts.filter(part => part.productId && productDocs.has(part.productId))
+                ? partsToDeduct.filter(part => part.productId && productDocs.has(part.productId))
                 : [];
             const inventoryLogAllocations = await reserveSequentialDocumentIds(tx, db, {
                 collectionName: 'inventory_logs',
@@ -285,8 +305,8 @@ export async function POST(request: NextRequest) {
                 }
 
                 // Stock Deduction
-                if (selectedParts.length > 0) {
-                    for (const p of selectedParts) {
+                if (partsToDeduct.length > 0) {
+                    for (const p of partsToDeduct) {
                         if (!p.productId) continue;
                         const pData = productDocs.get(p.productId);
                         if (!pData) continue;
@@ -400,13 +420,5 @@ export async function POST(request: NextRequest) {
             return { success: true, warnings: checkoutWarnings };
         });
 
-        return NextResponse.json(result);
-    } catch (error: unknown) {
-        console.error('Handover API error:', error);
-        const message = error instanceof Error ? error.message : 'Internal server error';
-        return NextResponse.json(
-            { error: message },
-            { status: message.includes('khĂ´ng') || message.includes('Vui lĂ²ng') ? 400 : 500 }
-        );
-    }
-}
+        return context.json(result);
+});

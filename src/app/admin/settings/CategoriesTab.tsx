@@ -69,6 +69,8 @@ function CategoriesList() {
     const [editingNode, setEditingNode] = useState<TaxonomyNode | null>(null);
     const [parentPath, setParentPath] = useState<string[] | null>(null);
     const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
+    const [pendingDeleteNode, setPendingDeleteNode] = useState<TaxonomyNode | null>(null);
+    const [isDeletingNode, setIsDeletingNode] = useState(false);
 
     const toggleExpand = (id: string) => {
         setExpandedNodes(prev => {
@@ -104,11 +106,23 @@ function CategoriesList() {
         }
     };
 
-    const handleDelete = async (nodeId: string) => {
-        if (!confirm('Bạn có chắc muốn xoá danh mục này và tất cả danh mục con?')) return;
+    const handleDelete = (node: TaxonomyNode) => {
+        setPendingDeleteNode(node);
+    };
 
-        await mutateTaxonomy({ action: 'delete', taxonomyType: filterType, nodeId });
-        toastSuccess('Đã xoá danh mục');
+    const confirmDelete = async () => {
+        if (!pendingDeleteNode) return;
+
+        setIsDeletingNode(true);
+        try {
+            await mutateTaxonomy({ action: 'delete', taxonomyType: filterType, nodeId: pendingDeleteNode.id });
+            toastSuccess('Đã xoá danh mục');
+            setPendingDeleteNode(null);
+        } catch (error) {
+            toastError(error instanceof Error ? error.message : 'Lỗi khi xoá danh mục');
+        } finally {
+            setIsDeletingNode(false);
+        }
     };
 
     const handleSaveNode = async (nodeData: Omit<TaxonomyNode, 'id'>) => {
@@ -169,7 +183,7 @@ function CategoriesList() {
                         <button title="Sửa" onClick={() => handleOpenModal(node, pPath)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
                             <Edit size={15} />
                         </button>
-                        <button title="Xoá" onClick={() => handleDelete(node.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                        <button title="Xoá" onClick={() => handleDelete(node)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
                             <Trash2 size={15} />
                         </button>
                     </div>
@@ -241,7 +255,65 @@ function CategoriesList() {
                     onSave={handleSaveNode}
                 />
             )}
+            <DeleteConfirmModal
+                isOpen={Boolean(pendingDeleteNode)}
+                title="Xoá danh mục"
+                message={pendingDeleteNode
+                    ? `Bạn có chắc muốn xoá danh mục "${pendingDeleteNode.name}" và tất cả danh mục con?`
+                    : ''}
+                confirmText="Xoá danh mục"
+                isDeleting={isDeletingNode}
+                onClose={() => { if (!isDeletingNode) setPendingDeleteNode(null); }}
+                onConfirm={confirmDelete}
+            />
         </div>
+    );
+}
+
+function DeleteConfirmModal({
+    isOpen,
+    title,
+    message,
+    confirmText,
+    isDeleting,
+    onClose,
+    onConfirm,
+}: {
+    isOpen: boolean;
+    title: string;
+    message: string;
+    confirmText: string;
+    isDeleting: boolean;
+    onClose: () => void;
+    onConfirm: () => Promise<void>;
+}) {
+    return (
+        <Modal isOpen={isOpen} onClose={onClose} title={title} size="sm">
+            <div className="p-6 space-y-5">
+                <div className="rounded-lg border border-red-100 bg-red-50 p-3 text-sm text-red-800">
+                    <p className="font-semibold">Thao tác này không thể hoàn tác.</p>
+                    <p className="mt-1 leading-relaxed">{message}</p>
+                </div>
+                <div className="flex justify-end gap-3">
+                    <button
+                        type="button"
+                        onClick={onClose}
+                        disabled={isDeleting}
+                        className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg disabled:opacity-50"
+                    >
+                        Hủy
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => { void onConfirm(); }}
+                        disabled={isDeleting}
+                        className="px-4 py-2 text-sm font-semibold text-white bg-red-600 hover:bg-red-700 rounded-lg disabled:opacity-50"
+                    >
+                        {isDeleting ? 'Đang xóa...' : confirmText}
+                    </button>
+                </div>
+            </div>
+        </Modal>
     );
 }
 
@@ -444,20 +516,31 @@ function BrandsList() {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingItem, setEditingItem] = useState<Brand | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
+    const [pendingDeleteBrand, setPendingDeleteBrand] = useState<Brand | null>(null);
+    const [isDeletingBrand, setIsDeletingBrand] = useState(false);
 
     const handleOpenModal = (item?: Brand) => {
         setEditingItem(item || null);
         setIsModalOpen(true);
     };
 
-    const handleDelete = async (id: string) => {
-        if (!confirm('Bạn có chắc chắn muốn xoá thương hiệu này?')) return;
+    const handleDelete = (brand: Brand) => {
+        setPendingDeleteBrand(brand);
+    };
+
+    const confirmDelete = async () => {
+        if (!pendingDeleteBrand) return;
+
+        setIsDeletingBrand(true);
         try {
-            await deleteDocument('brands', id);
+            await deleteDocument('brands', pendingDeleteBrand.id);
             toastSuccess('Đã xoá thương hiệu');
             void requestRevalidate(['layout'], ['categories', 'config']);
+            setPendingDeleteBrand(null);
         } catch {
             toastError('Lỗi khi xoá thương hiệu');
+        } finally {
+            setIsDeletingBrand(false);
         }
     };
 
@@ -524,7 +607,7 @@ function BrandsList() {
                                     {/* Hover overlay */}
                                     <div className="absolute top-2 right-2">
                                         <button
-                                            onClick={(e) => { e.stopPropagation(); handleDelete(brand.id); }}
+                                            onClick={(e) => { e.stopPropagation(); handleDelete(brand); }}
                                             className="p-1.5 bg-white/90 text-gray-400 hover:text-red-600 rounded-lg shadow-sm border border-gray-100 transition-colors"
                                             title="Xoá"
                                         >
@@ -545,6 +628,15 @@ function BrandsList() {
                     initialData={editingItem}
                 />
             )}
+            <DeleteConfirmModal
+                isOpen={Boolean(pendingDeleteBrand)}
+                title="Xoá thương hiệu"
+                message={pendingDeleteBrand ? `Bạn có chắc muốn xoá thương hiệu "${pendingDeleteBrand.name}"?` : ''}
+                confirmText="Xoá thương hiệu"
+                isDeleting={isDeletingBrand}
+                onClose={() => { if (!isDeletingBrand) setPendingDeleteBrand(null); }}
+                onConfirm={confirmDelete}
+            />
         </div>
     );
 }

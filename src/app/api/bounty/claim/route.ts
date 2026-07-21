@@ -3,6 +3,7 @@ import { getAdminDb } from '@/lib/firebaseAdmin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { isRateLimited } from '@/lib/rateLimit';
 import { normalizeVietnamPhone } from '@/lib/phone';
+import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 
 const RATE_LIMIT_MAX = 2; // Chỉ gọi 2 lần/phút
 const RATE_LIMIT_WINDOW_MS = 60_000;
@@ -27,14 +28,23 @@ function isVoucherUnused(data: FirebaseFirestore.DocumentData | undefined) {
     return usageLimit <= 0 || usedCount < usageLimit;
 }
 
-export async function POST(request: NextRequest) {
-    try {
+export const POST = withApi({
+    name: 'bounty/claim',
+    onError: (error, context) => {
+        const status = getApiErrorStatus(error);
+        return context.json({
+            error: status < 500
+                ? getApiErrorMessage(error)
+                : 'Hệ thống đang bận. Vui lòng thử lại sau.',
+        }, { status });
+    },
+}, async (request: NextRequest, context) => {
         const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || request.headers.get('x-real-ip') || 'unknown';
         if (await isRateLimited(ip, 'bounty_claim', RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS)) {
             return NextResponse.json({ error: 'Quá nhiều yêu cầu. Vui lòng thử lại sau.' }, { status: 429 });
         }
 
-        const body = await request.json().catch(() => ({}));
+        const body = await context.readJson(request);
         const name = typeof body.name === 'string' ? body.name.trim() : '';
 
         const authHeader = request.headers.get('authorization');
@@ -81,7 +91,7 @@ export async function POST(request: NextRequest) {
                 : null;
 
             // Đọc mức giảm giá từ config
-            const configSnap = await transaction.get(db.collection('system_config').doc('site_config'));
+            const configSnap = await transaction.get(db.collection('system_config').doc('main_settings'));
             const configData = configSnap.exists ? configSnap.data() : {};
             const rewardType = (configData?.bountyRewardType as string) || 'fixed';
             const rewardValue = (configData?.bountyRewardValue as number) || 50000;
@@ -192,11 +202,4 @@ export async function POST(request: NextRequest) {
             result,
             { status: result.status === 'already_claimed_used' ? 409 : 200 }
         );
-    } catch (error: unknown) {
-        console.error('Bounty claim error:', error);
-        return NextResponse.json(
-            { error: 'Hệ thống đang bận. Vui lòng thử lại sau.' },
-            { status: 500 }
-        );
-    }
-}
+});

@@ -110,7 +110,8 @@
     },
     {
       "allowedFeatures": [
-        "requirePaymentGate"
+        "requirePaymentGate",
+        "consumeSelectedParts"
       ],
       "allowedNext": [
         "out",
@@ -359,7 +360,8 @@
         "done"
       ],
       "allowedFeatures": [
-        "requirePaymentGate"
+        "requirePaymentGate",
+        "consumeSelectedParts"
       ],
       "isTerminal": false
     },

@@ -2,6 +2,7 @@
 
 import { useEffect, useCallback, useRef, type ReactNode } from 'react';
 import { X } from 'lucide-react';
+import { appConfirm } from '@/lib/appDialog';
 
 /**
  * Modal — Component dùng chung cho toàn bộ popup trong Admin.
@@ -78,9 +79,13 @@ export default function Modal({
     mobileSheet = true,
     isDirty = false,
 }: ModalProps) {
-    const handleClose = useCallback(() => {
+    const handleClose = useCallback(async () => {
         if (isDirty) {
-            if (window.confirm('Bạn có thay đổi chưa lưu, bạn có chắc chắn muốn đóng?')) {
+            if (await appConfirm('Bạn có thay đổi chưa lưu, bạn có chắc chắn muốn đóng?', {
+                title: 'Bỏ thay đổi chưa lưu',
+                confirmText: 'Đóng',
+                destructive: true,
+            })) {
                 onClose();
             }
         } else {
@@ -90,7 +95,7 @@ export default function Modal({
 
     // Esc key handler
     const handleKeyDown = useCallback((e: KeyboardEvent) => {
-        if (e.key === 'Escape') handleClose();
+        if (e.key === 'Escape') void handleClose();
     }, [handleClose]);
 
     const backdropMouseDown = useRef(false);
@@ -126,7 +131,7 @@ export default function Modal({
             }}
             onClick={(e) => {
                 if (closeOnBackdrop && e.target === e.currentTarget && backdropMouseDown.current) {
-                    handleClose();
+                    void handleClose();
                 }
                 backdropMouseDown.current = false;
             }}
@@ -143,7 +148,7 @@ export default function Modal({
                     <div className="flex items-center justify-between px-6 py-4 border-b shrink-0 sticky top-0 bg-white z-10">
                         <h2 className="text-lg font-bold text-gray-900 truncate pr-4">{title}</h2>
                         <button
-                            onClick={handleClose}
+                            onClick={() => { void handleClose(); }}
                             className="p-2 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-gray-600 transition-colors shrink-0"
                             aria-label="Đóng"
                         >

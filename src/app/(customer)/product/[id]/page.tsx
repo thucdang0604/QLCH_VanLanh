@@ -5,7 +5,7 @@ import { SITE_URL } from "@/lib/constants";
 import { sanitizeHtml } from '@/lib/sanitizeHtml';
 import { fetchDetailItem, fetchProductVariants, fetchProductReviews, fetchRelatedItems } from '../../_lib/server-queries';
 import ProductDetailClient, { ProductReviews, type ProductData } from './ProductDetailClient';
-import Image from 'next/image';
+import CatalogImage from '@/components/customer/CatalogImage';
 import { getBusinessIdentity } from '@/lib/businessIdentity';
 
 export const revalidate = 30;
@@ -21,7 +21,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
     }
 
     const shortDescription = String(data.seoDescription || data.description || `Mua ${data.name} chính hãng, giá tốt, bảo hành uy tín tại ${identity.siteName}.`);
-    const imageUrl = ((data.images as string[])?.[0] || data.imageUrl || data.image || '') as string;
+    const imageUrl = ((data.images as string[])?.[0] || data.imageUrl || data.image || identity.logoUrl || '') as string;
 
     return {
         title: `${data.name} | Sản phẩm tại ${identity.siteName}`,
@@ -185,11 +185,15 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                                     {related.services.map((item) => (
                                         <Link key={item.id} href={`/product/${item.slug || item.id}`} className="group bg-white rounded-xl border border-gray-100 p-3 hover:border-orange-300 hover:shadow-md transition-all flex flex-col h-full">
-                                            {item.imageUrl && (
-                                                <div className="relative w-full aspect-square rounded-lg overflow-hidden bg-gray-50 mb-3">
-                                                    <Image src={item.imageUrl} alt={item.name} fill className="object-cover group-hover:scale-105 transition-transform" />
-                                                </div>
-                                            )}
+                                            <div className="relative w-full aspect-square rounded-lg overflow-hidden bg-gray-50 mb-3">
+                                                <CatalogImage
+                                                    src={item.imageUrl}
+                                                    alt={item.name}
+                                                    sizes="(max-width: 640px) 50vw, 25vw"
+                                                    imageClassName="object-cover group-hover:scale-105 transition-transform"
+                                                    logoClassName="h-full w-full object-contain p-3"
+                                                />
+                                            </div>
                                             <h4 className="font-semibold text-sm text-gray-800 line-clamp-2 mb-2 group-hover:text-orange-600 transition-colors">{item.name}</h4>
                                             <div className="mt-auto pt-2">
                                                 <p className="text-red-600 font-bold text-sm">
@@ -209,11 +213,15 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                                     {related.accessories.map((item) => (
                                         <Link key={item.id} href={`/product/${item.slug || item.id}`} className="group bg-white rounded-xl border border-gray-100 p-3 hover:border-orange-300 hover:shadow-md transition-all flex flex-col h-full">
-                                            {item.imageUrl && (
-                                                <div className="relative w-full aspect-square rounded-lg overflow-hidden bg-gray-50 mb-3">
-                                                    <Image src={item.imageUrl} alt={item.name} fill className="object-cover group-hover:scale-105 transition-transform" />
-                                                </div>
-                                            )}
+                                            <div className="relative w-full aspect-square rounded-lg overflow-hidden bg-gray-50 mb-3">
+                                                <CatalogImage
+                                                    src={item.imageUrl}
+                                                    alt={item.name}
+                                                    sizes="(max-width: 640px) 50vw, 25vw"
+                                                    imageClassName="object-cover group-hover:scale-105 transition-transform"
+                                                    logoClassName="h-full w-full object-contain p-3"
+                                                />
+                                            </div>
                                             <h4 className="font-semibold text-sm text-gray-800 line-clamp-2 mb-2 group-hover:text-orange-600 transition-colors">{item.name}</h4>
                                             <div className="mt-auto pt-2">
                                                 <p className="text-red-600 font-bold text-sm">

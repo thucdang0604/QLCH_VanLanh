@@ -68,13 +68,21 @@ const ACTIVITY_BADGE_DOC_LIMIT = 20;
 
 // Module-level cache for badges to prevent repeated reads on navigation
 let lastBadgeFetchTime = 0;
+let lastBadgeCacheKey = '';
 const BADGE_CACHE_TTL_MS = 120_000; // 2 minutes
 
 export function useAdminBadges(userUid?: string, userRole?: string, userPermissions?: string[]) {
+    const permissionCacheKey = useMemo(() => Array.from(new Set(userPermissions || []))
+        .filter((permission): permission is string => typeof permission === 'string')
+        .sort()
+        .join('|'), [userPermissions]);
+    const userPermissionSet = useMemo(() => new Set(permissionCacheKey ? permissionCacheKey.split('|') : []), [permissionCacheKey]);
+    const badgeCacheKey = `${userUid || ''}:${userRole || ''}:${permissionCacheKey}`;
+
     // Helper: check if user has permission (admin always has all)
     const hasPerm = useCallback((perm: string) => {
-        return userRole === 'admin' || (userPermissions?.includes(perm) ?? false);
-    }, [userRole, userPermissions]);
+        return userRole === 'admin' || userPermissionSet.has(perm);
+    }, [userRole, userPermissionSet]);
 
     const [pendingOrders, setPendingOrders] = useState(0);
     const [pendingAppointments, setPendingAppointments] = useState(0);
@@ -86,8 +94,8 @@ export function useAdminBadges(userUid?: string, userRole?: string, userPermissi
     
     const refreshFirestoreBadges = useCallback(async () => {
         const now = Date.now();
-        if (now - lastBadgeFetchTime < BADGE_CACHE_TTL_MS && (pendingOrders !== 0 || pendingRepairs !== 0)) {
-            // Already cached and populated, skip fetching to save reads
+        if (lastBadgeCacheKey === badgeCacheKey && now - lastBadgeFetchTime < BADGE_CACHE_TTL_MS) {
+            // Same access scope is already cached, including a legitimate zero-count state.
             return;
         }
 
@@ -145,7 +153,8 @@ export function useAdminBadges(userUid?: string, userRole?: string, userPermissi
 
         await Promise.all(tasks);
         lastBadgeFetchTime = Date.now();
-    }, [hasPerm]);
+        lastBadgeCacheKey = badgeCacheKey;
+    }, [badgeCacheKey, hasPerm]);
 
     useEffect(() => {
         let cancelled = false;

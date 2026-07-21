@@ -1,9 +1,17 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { doc, onSnapshot, setDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from './firebase';
-import { requestRevalidate } from './requestRevalidate';
+import { createContext, useContext, useState, useEffect, useMemo, useRef, ReactNode } from 'react';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { usePathname } from 'next/navigation';
+import { db, getAuthInstance } from './firebase';
+import {
+    CONFIG_METADATA_FIELDS,
+    getConfigDocumentsForAdminRoute,
+    getConfigDocumentForField,
+    isFieldStoredInDocument,
+    type SystemConfigDocument,
+} from './systemConfig';
+import { normalizePublicGeofence } from './geofence';
 
 import {
     type HeroBanner,
@@ -49,7 +57,7 @@ export { DEFAULT_CONFIG };
 interface ConfigContextType {
     config: SiteConfig;
     loading: boolean;
-    updateConfig: (partial: Partial<SiteConfig>) => Promise<void>;
+    updateConfig: (partial: Partial<SiteConfig>, options?: { reviewPin?: string }) => Promise<void>;
     formatHotline: (raw: string) => string;
 }
 
@@ -106,29 +114,6 @@ function formatHotline(raw: string) {
     return raw;
 }
 
-// =========== Split Config Definitions ===========
-const KEY_MAP: Record<string, string> = {
-    // taxonomy_settings
-    taxonomy: 'taxonomy_settings',
-    
-    // navigation_settings
-    headerNav: 'navigation_settings',
-    sidebarMenu: 'navigation_settings',
-    footerServices: 'navigation_settings',
-    homeServiceCategories: 'navigation_settings',
-    
-    // layout_settings
-    hero_banners: 'layout_settings',
-    homeSections: 'layout_settings',
-    layoutProfiles: 'layout_settings',
-    activeLayoutProfileId: 'layout_settings',
-    store_branches: 'layout_settings',
-    homepagePricing: 'layout_settings',
-    homepageReviews: 'layout_settings',
-    background_config: 'layout_settings',
-    geofence: 'layout_settings',
-};
-
 // =========== Helper to recursively remove undefined fields for Firestore compatibility ===========
 function cleanUndefined<T>(obj: T): T {
     if (Array.isArray(obj)) {
@@ -149,12 +134,25 @@ function cleanUndefined<T>(obj: T): T {
 
 // =========== Provider ===========
 export function ConfigProvider({ children }: { children: ReactNode }) {
+    const pathname = usePathname();
     const [config, setConfig] = useState<SiteConfig>(DEFAULT_CONFIG);
     const [loading, setLoading] = useState(true);
+    const [revisions, setRevisions] = useState<Record<SystemConfigDocument, number>>({
+        main_settings: 0,
+        layout_settings: 0,
+        navigation_settings: 0,
+        taxonomy_settings: 0,
+    });
+    const hasCanonicalGeofenceRef = useRef(false);
+    const documentNames = useMemo(
+        () => getConfigDocumentsForAdminRoute(pathname),
+        [pathname],
+    );
+    const documentNamesKey = documentNames.join('|');
 
     // Real-time listener on multiple system_config documents
     useEffect(() => {
-        const docNames = ['main_settings', 'layout_settings', 'navigation_settings', 'taxonomy_settings'];
+        const docNames = documentNames;
         let loadedCount = 0;
 
         const unsubs = docNames.map(docName => {
@@ -163,20 +161,25 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
                 (snapshot) => {
                     if (snapshot.exists()) {
                         const data = snapshot.data();
+                        if (docName === 'main_settings') {
+                            hasCanonicalGeofenceRef.current = Object.hasOwn(data, 'geofence');
+                        }
                         setConfig(prev => {
                             const next = { ...prev };
                             
                             // Merge data, but only for keys that belong to this docName
                             for (const key of Object.keys(data)) {
-                                if (key === 'updatedAt' || key === 'createdAt') continue;
-                                
-                                const targetDoc = KEY_MAP[key] || 'main_settings';
-                                if (targetDoc === docName) {
+                                if (CONFIG_METADATA_FIELDS.has(key)) continue;
+
+                                if (isFieldStoredInDocument(key, docName)) {
                                     (next as Record<string, unknown>)[key] = data[key];
                                 }
                             }
 
                             if (docName === 'layout_settings') {
+                                if (!hasCanonicalGeofenceRef.current && Object.hasOwn(data, 'geofence')) {
+                                    next.geofence = normalizePublicGeofence(data.geofence);
+                                }
                                 next.homepagePricing = normalizeHomepagePricing(next.homepagePricing);
                                 next.homepageReviews = normalizeHomepageReviews(next.homepageReviews);
                             }
@@ -202,6 +205,13 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
                         });
                     }
 
+                    setRevisions((previous) => ({
+                        ...previous,
+                        [docName]: typeof snapshot.data()?.configRevision === 'number'
+                            ? snapshot.data()!.configRevision
+                            : 0,
+                    }));
+
                     // Count loaded documents to remove loading state
                     loadedCount++;
                     if (loadedCount >= docNames.length) {
@@ -219,10 +229,10 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         });
 
         return () => unsubs.forEach(u => u());
-    }, []);
+    }, [documentNames, documentNamesKey]);
 
     // Update config in Firestore, split into appropriate documents
-    const updateConfig = async (partial: Partial<SiteConfig>) => {
+    const updateConfig = async (partial: Partial<SiteConfig>, options?: { reviewPin?: string }) => {
         if (loading) {
             throw new Error('Configuration is still loading. Refusing to persist fallback defaults.');
         }
@@ -231,30 +241,37 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         if (Object.prototype.hasOwnProperty.call(cleanedPartial, 'taxonomy')) {
             throw new Error('Taxonomy must be changed through the protected taxonomy API.');
         }
-        const updatesByDoc: Record<string, Record<string, unknown>> = {
-            main_settings: {},
-            layout_settings: {},
-            navigation_settings: {},
-            taxonomy_settings: {}
-        };
+        const targetDocuments = new Set<SystemConfigDocument>(
+            Object.keys(cleanedPartial).map(getConfigDocumentForField),
+        );
+        const auth = await getAuthInstance();
+        const token = await auth.currentUser?.getIdToken();
+        if (!token) throw new Error('Phiên đăng nhập quản trị không còn hợp lệ.');
 
-        for (const [key, value] of Object.entries(cleanedPartial)) {
-            const targetDoc = KEY_MAP[key] || 'main_settings';
-            updatesByDoc[targetDoc][key] = value;
-        }
-
-        const promises = Object.entries(updatesByDoc).map(([docName, data]) => {
-            if (Object.keys(data).length > 0) {
-                return setDoc(doc(db, 'system_config', docName), { ...data, updatedAt: serverTimestamp() }, { merge: true });
-            }
-            return Promise.resolve();
+        const response = await fetch('/api/admin/config', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+                patch: cleanedPartial,
+                expectedRevisions: Object.fromEntries(
+                    [...targetDocuments].map((documentName) => [documentName, revisions[documentName]]),
+                ),
+                ...(options?.reviewPin ? { reviewPin: options.reviewPin } : {}),
+            }),
         });
-
-        await Promise.all(promises);
-        
-        // Keep cache invalidation detached from the admin React tree. Calling a
-        // Server Action here can refresh the current admin route after saving.
-        void requestRevalidate(['layout'], ['config']);
+        const result = await response.json().catch(() => ({})) as {
+            error?: unknown;
+            revisions?: Partial<Record<SystemConfigDocument, number>>;
+        };
+        if (!response.ok) {
+            throw new Error(typeof result.error === 'string' ? result.error : 'Không thể lưu cấu hình.');
+        }
+        if (result.revisions) {
+            setRevisions((previous) => ({ ...previous, ...result.revisions }));
+        }
     };
 
     return (

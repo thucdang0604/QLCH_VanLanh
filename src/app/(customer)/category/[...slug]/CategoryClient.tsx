@@ -2,9 +2,9 @@
 
 import { useState, useMemo, useEffect } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
 import { ChevronRight, Filter, Package, X } from 'lucide-react';
 import { ProductCardSkeleton } from '@/components/ui/Skeleton';
+import CatalogImage from '@/components/customer/CatalogImage';
 import ServiceCard from '@/components/home/ServiceCard';
 import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
@@ -572,11 +572,13 @@ export default function CategoryClient({
                                     return (
                                         <Link key={product.id} href={`/product/${product.id}`} className="bg-white rounded-xl shadow-sm overflow-hidden group hover:shadow-xl hover:-translate-y-1 transition-all duration-300 border border-gray-100 flex flex-col h-full">
                                             <div className="relative aspect-square bg-gray-50 flex-shrink-0">
-                                                {product.imageUrl ? (
-                                                    <Image src={product.imageUrl} alt={product.name || 'Sản phẩm'} fill className="object-cover group-hover:scale-105 transition-transform duration-500" />
-                                                ) : (
-                                                    <Package size={32} className="absolute inset-0 m-auto text-gray-300" />
-                                                )}
+                                                <CatalogImage
+                                                    src={product.imageUrl || product.image}
+                                                    alt={product.name || 'Sản phẩm'}
+                                                    sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
+                                                    imageClassName="object-cover group-hover:scale-105 transition-transform duration-500"
+                                                    logoClassName="h-full w-full object-contain p-4"
+                                                />
                                                 {hasDiscount && <span className="absolute top-2 left-2 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-md shadow-sm z-10">-{discountPct}%</span>}
                                                 {cond && <span className={`absolute top-2 right-2 text-[10px] font-bold px-2 py-1 rounded-md shadow-sm z-10 ${cond.color}`}>{cond.label}</span>}
                                             </div>

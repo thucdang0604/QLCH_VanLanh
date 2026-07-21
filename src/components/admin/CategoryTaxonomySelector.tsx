@@ -8,9 +8,10 @@ interface CategoryTaxonomySelectorProps {
     value: string[]; // Array of selected node IDs, e.g. ['dien-thoai', 'dien-thoai/iphone']
     onChange: (ids: string[], legacyCategoryName: string, legacySubCategoryName: string) => void;
     compact?: boolean;
+    disabled?: boolean;
 }
 
-export default function CategoryTaxonomySelector({ type, value, onChange, compact }: CategoryTaxonomySelectorProps) {
+export default function CategoryTaxonomySelector({ type, value, onChange, compact, disabled = false }: CategoryTaxonomySelectorProps) {
     const { config } = useConfig();
     const tree = config.taxonomy?.[type] || [];
 
@@ -27,6 +28,7 @@ export default function CategoryTaxonomySelector({ type, value, onChange, compac
     const l3Options = l2Node?.children || [];
 
     const handleChange = (level: number, id: string) => {
+        if (disabled) return;
         let newIds: string[] = [];
         let catName = '';
         let subCatName = '';
@@ -76,6 +78,7 @@ export default function CategoryTaxonomySelector({ type, value, onChange, compac
                     title="Danh mục chính"
                     value={l1Id}
                     onChange={(e) => handleChange(1, e.target.value)}
+                    disabled={disabled}
                     className={selectCls}
                 >
                     <option value="">{compact ? 'Danh mục chính' : '-- Chọn danh mục chính --'}</option>
@@ -92,6 +95,7 @@ export default function CategoryTaxonomySelector({ type, value, onChange, compac
                         title="Danh mục cấp 2"
                         value={l2Id}
                         onChange={(e) => handleChange(2, e.target.value)}
+                        disabled={disabled}
                         className={selectCls}
                     >
                         <option value="">{compact ? 'Cấp 2' : '-- Chọn danh mục cấp 2 --'}</option>
@@ -109,6 +113,7 @@ export default function CategoryTaxonomySelector({ type, value, onChange, compac
                         title="Danh mục cấp 3"
                         value={l3Id}
                         onChange={(e) => handleChange(3, e.target.value)}
+                        disabled={disabled}
                         className={selectCls}
                     >
                         <option value="">{compact ? 'Cấp 3' : '-- Chọn danh mục cấp 3 --'}</option>

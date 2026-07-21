@@ -1,6 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { getAdminAuth, getAdminDb, getAdminRtdb, isAdminAvailable } from '@/lib/firebaseAdmin';
 import { signPayload, COOKIE_NAME } from '@/lib/sessionCookie';
+import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 
 const RTDB_ROLE_SYNC_TIMEOUT_MS = 10000;
 
@@ -15,11 +16,13 @@ function timeoutAfter(ms: number, message: string): Promise<never> {
  * Receives a Firebase ID token, verifies it, reads the user's role + permissions,
  * then sets a signed HttpOnly session cookie for middleware RBAC.
  */
-export async function POST(req: NextRequest) {
-  try {
-    const { idToken } = await req.json();
+export const POST = withApi({
+  name: 'auth/session',
+  onError: (error, context) => context.error(getApiErrorMessage(error, 'Session creation failed'), getApiErrorStatus(error, 401)),
+}, async (req: NextRequest, context) => {
+    const { idToken } = await context.readJson(req);
     if (!idToken || typeof idToken !== 'string') {
-      return NextResponse.json({ error: 'Missing idToken' }, { status: 400 });
+      return context.json({ error: 'Missing idToken' }, { status: 400 });
     }
 
     // Verify Firebase ID token. Revocation checks require extra Firebase Auth
@@ -66,7 +69,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const res = NextResponse.json({ success: true, role, rtdbRoleSynced, rtdbRoleSyncError });
+    const res = context.json({ success: true, role, rtdbRoleSynced, rtdbRoleSyncError });
     res.cookies.set(COOKIE_NAME, cookieValue, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -76,21 +79,14 @@ export async function POST(req: NextRequest) {
     });
 
     return res;
-  } catch (error: unknown) {
-    console.error('Session create error:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Session creation failed' },
-      { status: 401 },
-    );
-  }
-}
+});
 
 /**
  * DELETE /api/auth/session
  * Clears the session cookie.
  */
-export async function DELETE() {
-  const res = NextResponse.json({ success: true });
+export const DELETE = withApi({ name: 'auth/session/delete' }, async (_request, context) => {
+  const res = context.json({ success: true });
   res.cookies.set(COOKIE_NAME, '', {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
@@ -99,4 +95,4 @@ export async function DELETE() {
     maxAge: 0,
   });
   return res;
-}
+});

@@ -11,6 +11,7 @@ import {
 import { collection, query, orderBy, doc, updateDoc, deleteDoc, limit } from 'firebase/firestore';
 import { onSnapshot } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
+import { appConfirm } from '@/lib/appDialog';
 import { useAuth } from '@/lib/AuthContext';
 import type { FirestoreDateValue, Review, ProductReview } from '@/lib/types';
 import { toastError, toastSuccess } from '@/lib/toast';
@@ -119,7 +120,7 @@ export default function AdminReviewsPage() {
                 });
                 toastSuccess('Đã ẩn đánh giá!');
             } else {
-                if (window.confirm('Bạn có chắc chắn muốn xóa vĩnh viễn đánh giá rác này không?')) {
+                if (await appConfirm('Bạn có chắc chắn muốn xóa vĩnh viễn đánh giá rác này không?', { title: 'Xóa đánh giá', confirmText: 'Xóa vĩnh viễn', destructive: true })) {
                     await deleteDoc(doc(db, collectionName, id));
                     toastSuccess('Đã xoá đánh giá!');
                 }

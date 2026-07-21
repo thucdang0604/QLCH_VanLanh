@@ -1,6 +1,7 @@
 'use client';
 
 
+import dynamic from 'next/dynamic';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
@@ -10,10 +11,10 @@ import {
 } from 'lucide-react';
 import { collection, doc, limit, query, where, orderBy as fbOrderBy } from 'firebase/firestore';
 import { getDoc, getDocs } from '@/lib/firestoreLogger';
+import { appConfirm } from '@/lib/appDialog';
 
 import { useConfig } from '@/lib/ConfigContext';
 import Modal from '@/components/admin/Modal';
-import UniversalProductModal from '@/components/admin/UniversalProductModal';
 import Image from 'next/image';
 import { db, getAuthInstance } from '@/lib/firebase';
 import type { Product, TaxonomyNode } from '@/lib/types';
@@ -117,6 +118,7 @@ function mapRepairTicketInfo(id: string, data: Record<string, unknown>, fallback
         paymentAmount: Number(payment.amount || 0),
         paymentLaborCost: Number(payment.laborCost || 0),
         paymentStatus: String(payment.status || 'unpaid'),
+        paymentOutstandingOrderId: String(payment.outstandingOrderId || ''),
         issues: Array.isArray(data.issues) ? data.issues.map((issue) => {
             const item = (issue || {}) as Record<string, unknown>;
             return {
@@ -237,6 +239,8 @@ interface CashierShiftView {
     closedAt?: string | null;
 }
 
+const UniversalProductModal = dynamic(() => import('@/components/admin/UniversalProductModal'), { ssr: false });
+
 export default function POSPage() {
     const { config } = useConfig();
     const searchParams = useSearchParams();
@@ -267,6 +271,7 @@ export default function POSPage() {
     const [customerPrimaryContactType, setCustomerPrimaryContactType] = useState<ContactMethodType>('phone');
     const [customerDebt, setCustomerDebt] = useState<number>(0);
     const [paymentMethod, setPaymentMethod] = useState('cash');
+    const [depositPaymentMethod, setDepositPaymentMethod] = useState('cash');
     const [discount, setDiscount] = useState(0);
     const [deposit, setDeposit] = useState(0);
     const [shippingFee, setShippingFee] = useState(0);
@@ -283,6 +288,7 @@ export default function POSPage() {
     const [lastOrder, setLastOrder] = useState<LastOrderData | null>(null);
     const [showProductModal, setShowProductModal] = useState(false);
     const [bankConfig, setBankConfig] = useState<BankConfig | null>(null);
+    const bankConfigRequestRef = useRef<Promise<void> | null>(null);
     const [posTab, setPosTab] = useState<PosTab>('sales');
     const [cashierShift, setCashierShift] = useState<CashierShiftView | null>(null);
     const [cashierShiftHistory, setCashierShiftHistory] = useState<CashierShiftView[]>([]);
@@ -291,20 +297,40 @@ export default function POSPage() {
     const [openingCashAmount, setOpeningCashAmount] = useState(0);
     const [openingBankAmount, setOpeningBankAmount] = useState(0);
 
-    useEffect(() => {
-        async function fetchBankConfig() {
+    const loadBankConfig = useCallback(async () => {
+        if (bankConfig) return;
+        if (bankConfigRequestRef.current) return bankConfigRequestRef.current;
+
+        const request = (async () => {
             try {
-                const res = await fetch('/api/admin/bank-config');
+                const auth = await getAuthInstance();
+                const idToken = await auth.currentUser?.getIdToken();
+                if (!idToken) return;
+
+                const res = await fetch('/api/pos/payment-config', {
+                    headers: { Authorization: `Bearer ${idToken}` },
+                });
                 const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Không thể tải cấu hình thanh toán');
                 if (data.success && data.config) {
                     setBankConfig(data.config);
                 }
             } catch (err) {
                 console.error('Lỗi tải cấu hình ngân hàng:', err);
             }
-        }
-        fetchBankConfig();
-    }, []);
+        })().finally(() => {
+            bankConfigRequestRef.current = null;
+        });
+
+        bankConfigRequestRef.current = request;
+        return request;
+    }, [bankConfig]);
+
+    useEffect(() => {
+        const needsBankConfig = paymentMethod === 'bank'
+            || (showReceipt && lastOrder?.payment_method === 'BANK');
+        if (needsBankConfig) void loadBankConfig();
+    }, [lastOrder?.payment_method, loadBankConfig, paymentMethod, showReceipt]);
 
     const loadCashierShift = useCallback(async (includeHistory = false) => {
         setCashierLoading(true);
@@ -370,7 +396,7 @@ export default function POSPage() {
 
     const handleCloseCashierShift = async () => {
         if (cashierSaving || !cashierShift) return;
-        if (!confirm('Chốt ca thu ngân hiện tại? Sau khi chốt, POS sẽ cần mở ca mới để tiếp tục thu tiền mặt/chuyển khoản.')) return;
+        if (!await appConfirm('Chốt ca thu ngân hiện tại? Sau khi chốt, POS sẽ cần mở ca mới để tiếp tục thu tiền mặt/chuyển khoản.', { title: 'Chốt ca thu ngân', confirmText: 'Chốt ca', destructive: true })) return;
         setCashierSaving(true);
         try {
             const auth = await getAuthInstance();
@@ -1021,6 +1047,11 @@ export default function POSPage() {
             return;
         }
 
+        if (repair.paymentOutstandingOrderId) {
+            toastWarning('Phiếu này đã có hóa đơn ghi nợ. Vui lòng thu khoản còn lại từ danh sách đơn cần thanh toán để tránh thu trùng.');
+            return;
+        }
+
         const newItems: CartItem[] = [];
         let usedPartsCount = 0;
 
@@ -1125,11 +1156,11 @@ export default function POSPage() {
         );
     };
 
-    const updatePrice = (cartItemId: string, newPrice: number) => {
+    const updatePrice = async (cartItemId: string, newPrice: number) => {
         const item = cart.find(c => c.cartItemId === cartItemId);
         if (item?.isRepairTicket || item?.isOrderPayment) return;
         if (item && (item.costPrice || 0) > 0 && newPrice < (item.costPrice || 0) && newPrice > 0) {
-            if (!confirm(`Giá bán (${newPrice.toLocaleString('vi-VN')}đ) thấp hơn giá vốn (${(item.costPrice || 0).toLocaleString('vi-VN')}đ). Bạn sẽ lỗ ${((item.costPrice || 0) - newPrice).toLocaleString('vi-VN')}đ/sp. Tiếp tục?`)) {
+            if (!await appConfirm(`Giá bán (${newPrice.toLocaleString('vi-VN')}đ) thấp hơn giá vốn (${(item.costPrice || 0).toLocaleString('vi-VN')}đ). Bạn sẽ lỗ ${((item.costPrice || 0) - newPrice).toLocaleString('vi-VN')}đ/sp. Tiếp tục?`, { title: 'Xác nhận bán dưới giá vốn', confirmText: 'Tiếp tục', destructive: true })) {
                 return;
             }
         }
@@ -1203,19 +1234,25 @@ export default function POSPage() {
     // Auto-switch between debt and immediate payment based on the amount entered.
     useEffect(() => {
         if (deposit > 0 && deposit < total && paymentMethod !== 'debt') {
+            if (['cash', 'bank', 'momo'].includes(paymentMethod)) {
+                setDepositPaymentMethod(paymentMethod);
+            }
             setPaymentMethod('debt');
             toastWarning('Số tiền khách trả nhỏ hơn tổng tiền. Hệ thống tự động chuyển sang hình thức Ghi nợ.');
         }
         if (deposit >= total && paymentMethod === 'debt') {
-            setPaymentMethod('cash');
+            setPaymentMethod(depositPaymentMethod);
         }
-    }, [deposit, total, paymentMethod]);
+    }, [deposit, total, paymentMethod, depositPaymentMethod]);
 
     // ── Checkout ──
     const handleCheckout = async () => {
         if (cart.length === 0) return;
 
-        const requiresCashierShift = ['cash', 'bank', 'momo'].includes(paymentMethod)
+        const receivedPaymentMethod = paymentMethod === 'debt' && deposit > 0
+            ? depositPaymentMethod
+            : paymentMethod;
+        const requiresCashierShift = ['cash', 'bank', 'momo'].includes(receivedPaymentMethod)
             && total > 0;
         if (requiresCashierShift && !activeCashierShift) {
             setPosTab('cashier');
@@ -1270,17 +1307,6 @@ export default function POSPage() {
                 }
             }
 
-            const hasRepairPayment = cart.some(item => item.isRepairTicket);
-            if (hasRepairPayment && !['cash', 'bank', 'momo'].includes(paymentMethod)) {
-                toastError('Thanh toán phiếu sửa chữa phải thu ngay bằng tiền mặt, chuyển khoản hoặc ví.');
-                setIsProcessing(false);
-                return;
-            }
-            if (hasRepairPayment && deposit + 1 < total) {
-                toastError(`Thanh toán phiếu sửa chữa còn thiếu ${(total - deposit).toLocaleString('vi-VN')}đ. Vui lòng thu đủ trước khi hoàn tất.`);
-                setIsProcessing(false);
-                return;
-            }
             const operationKey = crypto.randomUUID();
 
             const repairTicketIds = Array.from(new Set(
@@ -1319,6 +1345,9 @@ export default function POSPage() {
                 subtotal_amount: subtotal,
                 shipping_fee: shippingFee,
                 deposit_amount: deposit,
+                deposit_payment_method: paymentMethod === 'debt' && deposit > 0
+                    ? (depositPaymentMethod === 'cash' ? 'CASH' : depositPaymentMethod === 'bank' ? 'BANK' : 'MOMO')
+                    : undefined,
                 use_surplus_to_pay_debt: useSurplusToPayDebt,
                 payment_method: paymentMethod === 'cash' ? 'CASH' : paymentMethod === 'bank' ? 'BANK' : paymentMethod === 'installment' ? 'INSTALLMENT' : paymentMethod === 'debt' ? 'DEBT' : 'MOMO',
                 ...(requiresCashierShift && activeCashierShift ? { cashierShiftId: activeCashierShift.id } : {}),
@@ -1384,6 +1413,7 @@ export default function POSPage() {
             setLinkedRepairs([]);
             setDiscount(0);
             setDeposit(0);
+            setDepositPaymentMethod('cash');
             setUseSurplusToPayDebt(false);
             setShippingFee(0);
             setVoucherCode('');
@@ -1449,6 +1479,8 @@ export default function POSPage() {
             setDiscount={setDiscount}
             paymentMethod={paymentMethod}
             setPaymentMethod={setPaymentMethod}
+            depositPaymentMethod={depositPaymentMethod}
+            setDepositPaymentMethod={setDepositPaymentMethod}
             discount={effectiveDiscount}
             voucherCode={voucherCode}
             setVoucherCode={setVoucherCode}
@@ -2214,13 +2246,15 @@ export default function POSPage() {
             )}
 
             {/* ═══ Quick Add Product Modal ═══ */}
-            <UniversalProductModal
-                isOpen={showProductModal}
-                onClose={() => setShowProductModal(false)}
-                mode="retail"
-                onCreated={reloadProducts}
-                submitLabel="Tạo & Đưa vào POS"
-            />
+            {showProductModal && (
+                <UniversalProductModal
+                    isOpen
+                    onClose={() => setShowProductModal(false)}
+                    mode="retail"
+                    onCreated={reloadProducts}
+                    submitLabel="Tạo & Đưa vào POS"
+                />
+            )}
         </div>
     );
 }

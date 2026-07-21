@@ -1,10 +1,16 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { isRateLimited } from '@/lib/rateLimit';
+import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 
-export async function POST(req: NextRequest) {
-    try {
+export const POST = withApi({
+    name: 'analytics/visit',
+    onError: (error, context) => {
+        const status = getApiErrorStatus(error);
+        return context.error(status < 500 ? getApiErrorMessage(error) : 'Lỗi hệ thống. Vui lòng thử lại sau.', status);
+    },
+}, async (req: NextRequest, context) => {
         // 1. Get Client IP for Rate Limiting
         const ip = req.headers.get('x-forwarded-for')?.split(',')[0] || 
                    req.headers.get('x-real-ip') || 
@@ -13,7 +19,7 @@ export async function POST(req: NextRequest) {
 
         // Rate Limit: Max 10 requests per minute per IP
         if (await isRateLimited(ip, 'analytics_visit', 10, 60000)) {
-            return NextResponse.json({ error: 'Too many requests' }, { status: 429 });
+            return context.json({ error: 'Too many requests' }, { status: 429 });
         }
 
         // 2. Device Identity & Visit Frequency Check via Cookies
@@ -26,7 +32,7 @@ export async function POST(req: NextRequest) {
         // We return success early to save database writes.
         if (visitCookie?.value === 'true') {
             // Just ensure device ID cookie is persisted if it was missing
-            const response = NextResponse.json({ success: true, message: 'Already tracked today' });
+            const response = context.json({ success: true, message: 'Already tracked today' });
             if (!deviceIdCookie) {
                 response.cookies.set('vl_device_id', deviceId, {
                     maxAge: 60 * 60 * 24 * 365, // 1 year
@@ -65,7 +71,7 @@ export async function POST(req: NextRequest) {
         await batch.commit();
 
         // 4. Set Response Cookies
-        const response = NextResponse.json({ success: true, message: 'Visit tracked' });
+        const response = context.json({ success: true, message: 'Visit tracked' });
         
         // Persistent device ID (1 year)
         if (!deviceIdCookie) {
@@ -91,8 +97,4 @@ export async function POST(req: NextRequest) {
 
         return response;
 
-    } catch (error) {
-        console.error('Analytics tracking error:', error);
-        return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
-    }
-}
+});

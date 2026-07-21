@@ -1,4 +1,4 @@
-import { NextResponse, NextRequest } from 'next/server';
+import { NextRequest } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requirePermission } from '@/lib/apiAuth';
 import { FieldValue, type DocumentReference } from 'firebase-admin/firestore';
@@ -6,6 +6,7 @@ import type { Order } from '@/lib/types';
 import { calculateAndSaveCommissionsServer, reverseCommissionServer } from '@/lib/commissionCalcServer';
 import { buildCompletedOrderRevenueDelta, incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 import { reserveSequentialDocumentIds } from '@/lib/serverDocumentIds';
+import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 
 type FirestoreData = Record<string, unknown>;
 type ProductDoc = { ref: DocumentReference; data: FirestoreData };
@@ -26,10 +27,6 @@ const ORDER_TRANSITIONS: Record<string, string[]> = {
     Completed: ['Cancelled'],
     Cancelled: [],
 };
-
-function errorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : 'Internal server error';
-}
 
 function isValidOrderStatus(status: unknown): status is Order['status'] {
     return typeof status === 'string' && ORDER_STATUSES.includes(status as Order['status']);
@@ -66,15 +63,22 @@ function getOrderRetailTotal(order: Order) {
     return Math.max(0, retailSubtotal - retailDiscount);
 }
 
-export async function POST(request: NextRequest) {
-    try {
+export const POST = withApi({
+    name: 'orders/transition',
+    onError: (error, context) => {
+        const message = getApiErrorMessage(error);
+        const normalizedMessage = message.toLowerCase();
+        const fallbackStatus = normalizedMessage.includes('không') || normalizedMessage.includes('khong') ? 400 : 500;
+        return context.error(message, getApiErrorStatus(error, fallbackStatus));
+    },
+}, async (request: NextRequest, context) => {
         const caller = await requirePermission(request, 'manage_orders');
         
-        const body = await request.json();
+        const body = await context.readJson(request);
         const { orderId, targetStatus, idempotencyKey } = body;
 
         if (!orderId || !targetStatus) {
-            return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
+            return context.error('Missing parameters');
         }
 
         const db = getAdminDb();
@@ -381,13 +385,5 @@ export async function POST(request: NextRequest) {
             customerLedgerAllocations.at(-1)?.commitCounter();
         });
 
-        return NextResponse.json({ success: true, message: 'Cập nhật trạng thái thành công' });
-    } catch (error: unknown) {
-        console.error('Order transition API error:', error);
-        const message = errorMessage(error);
-        return NextResponse.json(
-            { error: message },
-            { status: message.includes('không') ? 400 : 500 }
-        );
-    }
-}
+        return context.json({ success: true, message: 'Cập nhật trạng thái thành công' });
+});

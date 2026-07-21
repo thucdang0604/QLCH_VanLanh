@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Image from 'next/image';
 import {
     Plus,
@@ -10,12 +10,15 @@ import {
     Loader2,
     Wrench
 } from 'lucide-react';
-import { limit, orderBy } from 'firebase/firestore';
+import { collection, limit, orderBy } from 'firebase/firestore';
 import { useFirestoreCollection, addDocumentWithId, updateDocument, deleteDocument } from '@/lib/useFirestore';
+import { getDocs } from '@/lib/firestoreLogger';
 
 import { generateSearchKeywords, generateSlug } from '@/lib/utils';
 import type { FirestoreDateValue } from '@/lib/types';
 import { getCategoryPath, collectAllNodeIds } from '@/lib/utils';
+import { getCatalogCategoryKey, getCatalogCategoryStatus } from '@/lib/catalogCategory';
+import { appConfirm } from '@/lib/appDialog';
 import { toastError, toastSuccess, toastWarning } from '@/lib/toast';
 import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
@@ -25,6 +28,9 @@ import CategoryTaxonomySelector from '@/components/admin/CategoryTaxonomySelecto
 import CurrencyInput from '@/components/admin/CurrencyInput';
 import { useConfig } from '@/lib/ConfigContext';
 import MediaGalleryField from '@/components/admin/MediaGalleryField';
+import { useAuth } from '@/lib/AuthContext';
+import { canEditServiceField, type ServiceEditableField } from '@/lib/catalogEditPolicy';
+import { db } from '@/lib/firebase';
 
 interface Service {
     id: string;
@@ -60,6 +66,8 @@ function parseLegacyPrice(s?: string): number {
 }
 
 export default function ServicesPage() {
+    const { user } = useAuth();
+    const isAdmin = user?.role === 'admin';
     const { config, loading: configLoading } = useConfig();
     const { data: services, loading } = useFirestoreCollection<Service>('services', [orderBy('createdAt', 'desc'), limit(50)]);
     const [searchQuery, setSearchQuery] = useState('');
@@ -74,58 +82,32 @@ export default function ServicesPage() {
     const [reassignToIds, setReassignToIds] = useState<string[]>([]);
     const [isReassigning, setIsReassigning] = useState(false);
     const [reassignProgress, setReassignProgress] = useState<{current: number, total: number} | null>(null);
+    const [catalogServices, setCatalogServices] = useState<Service[]>([]);
+    const [categoryAuditLoading, setCategoryAuditLoading] = useState(false);
+    const [categoryAuditLoaded, setCategoryAuditLoaded] = useState(false);
+
+    const refreshCategoryAudit = useCallback(async () => {
+        setCategoryAuditLoading(true);
+        try {
+            const snapshot = await getDocs(collection(db, 'services'));
+            setCatalogServices(snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Service)));
+            setCategoryAuditLoaded(true);
+        } catch (err) {
+            console.error('Failed to audit service categories', err);
+            toastError('Không thể kiểm tra danh mục dịch vụ. Vui lòng thử lại.');
+        } finally {
+            setCategoryAuditLoading(false);
+        }
+    }, []);
 
     const handleDelete = async (service: Service) => {
-        if (confirm(`Bạn có chắc muốn xóa dịch vụ "${service.name}"?`)) {
-            try {
-                await deleteDocument('services', service.id);
-                await triggerRevalidate(['/', `/service/${service.id}`, '/category/sua-chua', '/sitemap.xml'], ['services']);
-            } catch {
-                toastError('Lỗi khi xóa dịch vụ!');
-            }
-        }
-    };
-
-    const handleBatchReassign = async () => {
-        if (!reassignFrom || !reassignTo) return;
-        setIsReassigning(true);
+        if (!isAdmin) return;
+        if (!await appConfirm(`Bạn có chắc muốn xóa dịch vụ "${service.name}"?`, { title: 'Xóa dịch vụ', confirmText: 'Xóa', destructive: true })) return;
         try {
-            const targets = services.filter(s => s.category === reassignFrom);
-            setReassignProgress({ current: 0, total: targets.length });
-            
-            let successCount = 0;
-            let errorCount = 0;
-            
-            for (let i = 0; i < targets.length; i++) {
-                const s = targets[i];
-                try {
-                    await updateDocument('services', s.id, { 
-                        category: reassignTo,
-                        categoryIds: reassignToIds 
-                    });
-                    successCount++;
-                } catch (err) {
-                    console.error(`Error updating service ${s.id}:`, err);
-                    errorCount++;
-                }
-                setReassignProgress({ current: i + 1, total: targets.length });
-            }
-
-            if (errorCount > 0) {
-                toastWarning(`Hoàn tất gán lại ${successCount}/${targets.length} dịch vụ (${errorCount} lỗi)`);
-            } else {
-                toastSuccess(`Đã gán lại thành công ${successCount} dịch vụ từ "${reassignFrom}" sang "${reassignTo}"`);
-            }
-            
-            setShowReassign(false);
-            setReassignFrom('');
-            setReassignTo('');
-            setReassignToIds([]);
-            setReassignProgress(null);
+            await deleteDocument('services', service.id);
+            await triggerRevalidate(['/', `/service/${service.id}`, '/category/sua-chua', '/sitemap.xml'], ['services']);
         } catch {
-            toastError('Lỗi khi gán lại danh mục!');
-        } finally {
-            setIsReassigning(false);
+            toastError('Lỗi khi xóa dịch vụ!');
         }
     };
 
@@ -147,23 +129,89 @@ export default function ServicesPage() {
     const componentTaxonomy = config?.taxonomy?.component || [];
     const validNodeIds = collectAllNodeIds(serviceTaxonomy);
 
-    const getOrphanStatus = (service: Service): 'valid' | 'orphan' | 'unassigned' => {
-        if (!service.categoryIds || service.categoryIds.length === 0) {
-            return service.category ? 'orphan' : 'unassigned'; // legacy string only = orphan
-        }
-        const deepestId = service.categoryIds[service.categoryIds.length - 1];
-        return validNodeIds.has(deepestId) ? 'valid' : 'orphan';
-    };
+    const getOrphanStatus = (service: Service) => getCatalogCategoryStatus(service, validNodeIds);
 
-    const orphanServices = services.filter(s => getOrphanStatus(s) === 'orphan');
+    const orphanServices = catalogServices.filter(s => getOrphanStatus(s) === 'orphan');
     const missingCategoryCount = orphanServices.length;
     const missingCategories = Array.from(new Set(
-        orphanServices.map(s => {
-            if (s.categoryIds?.length) return s.categoryIds[s.categoryIds.length - 1];
-            return s.category;
-        })
+        orphanServices.map(getCatalogCategoryKey).filter(Boolean)
     ));
     // ---------------------------------
+
+    const reassignTargets = reassignFrom
+        ? orphanServices.filter(service => getCatalogCategoryKey(service) === reassignFrom)
+        : [];
+
+    const resetReassignState = () => {
+        setReassignFrom('');
+        setReassignTo('');
+        setReassignToIds([]);
+        setReassignProgress(null);
+    };
+
+    const openReassignModal = (categoryKey: string) => {
+        if (!isAdmin) return;
+        resetReassignState();
+        setReassignFrom(categoryKey);
+        setShowReassign(true);
+    };
+
+    const closeReassignModal = () => {
+        if (isReassigning) return;
+        setShowReassign(false);
+        resetReassignState();
+    };
+
+    const handleBatchReassign = async () => {
+        if (!isAdmin) return;
+        if (!reassignFrom || !reassignTo || reassignToIds.length === 0) return;
+        if (reassignTargets.length === 0) {
+            toastWarning('Không còn dịch vụ thuộc danh mục bị mất này. Danh sách có thể vừa được cập nhật.');
+            closeReassignModal();
+            return;
+        }
+
+        setIsReassigning(true);
+        try {
+            setReassignProgress({ current: 0, total: reassignTargets.length });
+
+            let successCount = 0;
+            let errorCount = 0;
+
+            for (let i = 0; i < reassignTargets.length; i++) {
+                const service = reassignTargets[i];
+                try {
+                    await updateDocument('services', service.id, {
+                        category: reassignTo,
+                        categoryIds: reassignToIds,
+                    });
+                    successCount++;
+                } catch (err) {
+                    console.error(`Error updating service ${service.id}:`, err);
+                    errorCount++;
+                }
+                setReassignProgress({ current: i + 1, total: reassignTargets.length });
+            }
+
+            if (successCount > 0) {
+                await triggerRevalidate(['/', '/category/sua-chua', '/sitemap.xml'], ['services']);
+                await refreshCategoryAudit();
+            }
+
+            if (errorCount > 0) {
+                toastWarning(`Hoàn tất gán lại ${successCount}/${reassignTargets.length} dịch vụ (${errorCount} lỗi)`);
+            } else {
+                toastSuccess(`Đã gán lại thành công ${successCount} dịch vụ từ "${reassignFrom}" sang "${reassignTo}"`);
+            }
+
+            setShowReassign(false);
+            resetReassignState();
+        } catch {
+            toastError('Lỗi khi gán lại danh mục!');
+        } finally {
+            setIsReassigning(false);
+        }
+    };
 
     const { paginatedData: paginatedServices, currentPage, totalPages, pageSize, totalFiltered, setPage, setPageSize, resetPage } = useClientPagination(filteredServices, 20);
 
@@ -200,17 +248,29 @@ export default function ServicesPage() {
                     <h1 className="text-lg font-bold text-gray-900">Quản lý dịch vụ</h1>
                     <p className="text-gray-500">{services.length} dịch vụ</p>
                 </div>
-                <button
-                    onClick={() => { setEditingService(null); setIsModalOpen(true); }}
-                    className="flex items-center gap-2 bg-orange-500 text-white px-3 py-1.5 text-xs rounded-xl hover:bg-orange-600 font-medium transition-colors"
-                >
-                    <Plus size={20} />
-                    Thêm dịch vụ
-                </button>
+                {isAdmin && (
+                    <div className="flex gap-2">
+                        <button
+                            onClick={() => { void refreshCategoryAudit(); }}
+                            disabled={categoryAuditLoading}
+                            className="flex items-center gap-1.5 border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 rounded-xl hover:bg-gray-50 disabled:opacity-60"
+                        >
+                            {categoryAuditLoading && <Loader2 size={16} className="animate-spin" />}
+                            Kiểm tra danh mục
+                        </button>
+                        <button
+                            onClick={() => { setEditingService(null); setIsModalOpen(true); }}
+                            className="flex items-center gap-2 bg-orange-500 text-white px-3 py-1.5 text-xs rounded-xl hover:bg-orange-600 font-medium transition-colors"
+                        >
+                            <Plus size={20} />
+                            Thêm dịch vụ
+                        </button>
+                    </div>
+                )}
             </div>
 
             {/* Orphan Categories Warning */}
-            {(!loading && !configLoading && missingCategories.length > 0) && (
+            {(isAdmin && categoryAuditLoaded && !categoryAuditLoading && !loading && !configLoading && missingCategories.length > 0) && (
                 <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex flex-col sm:flex-row items-start justify-between gap-3">
                     <div>
                         <p className="font-medium flex items-center gap-2">
@@ -224,7 +284,7 @@ export default function ServicesPage() {
                         {missingCategories.map(cat => (
                             <button
                                 key={cat}
-                                onClick={() => { setReassignFrom(cat); setShowReassign(true); }}
+                                onClick={() => openReassignModal(cat)}
                                 className="px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 text-sm font-medium rounded-md transition-colors"
                             >
                                 Gán lại &quot;{cat}&quot;
@@ -298,13 +358,15 @@ export default function ServicesPage() {
                                     >
                                         <Edit size={16} />
                                     </button>
-                                    <button
-                                        title="Xóa dịch vụ"
-                                        onClick={() => handleDelete(service)}
-                                        className="p-2 hover:bg-red-100 text-red-600 rounded-lg"
-                                    >
-                                        <Trash2 size={16} />
-                                    </button>
+                                    {isAdmin && (
+                                        <button
+                                            title="Xóa dịch vụ"
+                                            onClick={() => handleDelete(service)}
+                                            className="p-2 hover:bg-red-100 text-red-600 rounded-lg"
+                                        >
+                                            <Trash2 size={16} />
+                                        </button>
+                                    )}
                                 </div>
                             </div>
                             <h3 className="font-semibold text-gray-900 mb-1">{service.name}</h3>
@@ -377,10 +439,10 @@ export default function ServicesPage() {
             />
 
             {/* Batch Reassign Modal */}
-            <Modal isOpen={showReassign} onClose={() => setShowReassign(false)} title="Gán lại danh mục hàng loạt" size="md">
+            <Modal isOpen={showReassign} onClose={closeReassignModal} title="Gán lại danh mục hàng loạt" size="md">
                 <div className="p-6 space-y-4">
                     <p className="text-sm text-gray-600">
-                        Chọn danh mục mới cho các dịch vụ đang thuộc danh mục <strong className="text-gray-900">&quot;{reassignFrom}&quot;</strong>.
+                        Chọn danh mục mới cho <strong className="text-gray-900">{reassignTargets.length} dịch vụ</strong> đang thuộc danh mục <strong className="text-gray-900">&quot;{reassignFrom}&quot;</strong>.
                     </p>
                     <div>
                         <label className="block text-sm font-medium mb-1">Danh mục mới *</label>
@@ -397,7 +459,7 @@ export default function ServicesPage() {
                         <button onClick={() => setShowReassign(false)} className="flex-1 py-2.5 border rounded-lg hover:bg-gray-50 font-medium">Há»§y</button>
                         <button 
                             onClick={handleBatchReassign} 
-                            disabled={!reassignTo || isReassigning}
+                            disabled={!reassignTo || reassignToIds.length === 0 || reassignTargets.length === 0 || isReassigning}
                             className="flex-1 py-2.5 bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-medium disabled:opacity-50 flex justify-center items-center gap-2"
                         >
                             {isReassigning && <Loader2 size={16} className="animate-spin" />}
@@ -424,6 +486,29 @@ function ServiceModal({
     onClose: () => void;
     existingIds: string[];
 }) {
+    const { user } = useAuth();
+    const editorRole = user?.role;
+    const isEditing = !!service;
+    const grantedFields = user?.catalogFieldPermissions?.services || [];
+    const storedValue = (field: string): unknown => {
+        if (!service) return undefined;
+        if (field === 'images') {
+            return service.images?.length ? service.images : (service.imageUrl ? [service.imageUrl] : []);
+        }
+        return (service as unknown as Record<string, unknown>)[field];
+    };
+    const canEdit = (field: string) => canEditServiceField(
+        editorRole,
+        isEditing,
+        field as ServiceEditableField,
+        storedValue(field),
+        grantedFields,
+    );
+    const editableFields = [
+        'name', 'description', 'price_original', 'price_promo', 'hidePrice', 'device_model', 'category', 'categoryIds',
+        'linkedProductCategoryIds', 'recommendedPartCategoryIds', 'isActive', 'warranty_text', 'repair_time', 'seoDescription', 'tags', 'images',
+    ];
+    const canSubmit = editorRole === 'admin' || (isEditing && editableFields.some(canEdit));
     const [formData, setFormData] = useState({
         name: '',
         description: '',
@@ -467,6 +552,38 @@ function ServiceModal({
     const [images, setImages] = useState<string[]>(service?.images?.length ? service.images : (service?.imageUrl ? [service.imageUrl] : []));
     const [isSubmitting, setIsSubmitting] = useState(false);
 
+    const buildAllowedUpdateData = (data: Record<string, unknown>) => {
+        if (!service || editorRole === 'admin') return data;
+
+        const allowed = { ...data };
+        const fieldKeys: Array<[string, string[]]> = [
+            ['name', ['name']],
+            ['description', ['description']],
+            ['price_original', ['price_original']],
+            ['price_promo', ['price_promo']],
+            ['hidePrice', ['hidePrice']],
+            ['device_model', ['device_model']],
+            ['category', ['category']],
+            ['categoryIds', ['categoryIds']],
+            ['linkedProductCategoryIds', ['linkedProductCategoryIds']],
+            ['recommendedPartCategoryIds', ['recommendedPartCategoryIds']],
+            ['isActive', ['isActive']],
+            ['warranty_text', ['warranty_text']],
+            ['repair_time', ['repair_time']],
+            ['seoDescription', ['seoDescription']],
+            ['tags', ['tags']],
+            ['images', ['images', 'imageUrl']],
+        ];
+        fieldKeys.forEach(([field, keys]) => {
+            if (!canEdit(field)) keys.forEach((key) => delete allowed[key]);
+        });
+        if (!canEdit('name') && !canEdit('device_model') && !canEdit('tags')) {
+            delete allowed.searchKeywords;
+        }
+        delete allowed.price;
+        return allowed;
+    };
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (formData.categoryIds.length === 0) {
@@ -507,12 +624,12 @@ function ServiceModal({
             };
 
             // Remove legacy string price field when saving new data
-            if (service?.price) {
+            if (service?.price && editorRole === 'admin') {
                 data.price = null; // clear legacy field
             }
 
             if (service) {
-                await updateDocument('services', service.id, data);
+                await updateDocument('services', service.id, buildAllowedUpdateData(data));
                 await triggerRevalidate(['/', `/service/${service.id}`, '/category/sua-chua', '/sitemap.xml'], ['services']);
             } else {
                 const docId = generateSlug(formData.name);
@@ -545,7 +662,14 @@ function ServiceModal({
                         onChange={setImages}
                         emptyText={'Chọn Ảnh dịch vụ từ thư viện'}
                         defaultFolder="services"
+                        disabled={!canEdit('images')}
                     />
+
+                    {editorRole === 'staff' && isEditing && (
+                        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                            Nhân viên chỉ có thể sửa trường được admin cấp quyền hoặc bổ sung trường đang trống.
+                        </p>
+                    )}
 
                     {/* Name */}
                     <div>
@@ -555,6 +679,7 @@ function ServiceModal({
                             value={formData.name}
                             onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                             required
+                            disabled={!canEdit('name')}
                             className="w-full h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
                             placeholder="Thay pin iPhone"
                         />
@@ -568,6 +693,7 @@ function ServiceModal({
                             list="device-model-suggestions"
                             value={formData.device_model}
                             onChange={(e) => setFormData({ ...formData, device_model: e.target.value })}
+                            disabled={!canEdit('device_model')}
                             className="w-full h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
                             placeholder="iPhone 15 Pro Max, Samsung S24 Ultra..."
                         />
@@ -597,6 +723,7 @@ function ServiceModal({
                                         const newVal = current ? `${current}, ${item}` : item;
                                         setFormData({ ...formData, device_model: newVal });
                                     }}
+                                    disabled={!canEdit('device_model')}
                                     className="px-2 py-0.5 text-xs bg-gray-100 hover:bg-orange-100 hover:text-orange-700 rounded-full border border-gray-200 transition-colors cursor-pointer"
                                 >
                                     {g.group} {item}
@@ -612,6 +739,7 @@ function ServiceModal({
                             <CurrencyInput
                                 value={formData.price_original || ''}
                                 onChange={(v) => setFormData({ ...formData, price_original: v })}
+                                disabled={!canEdit('price_original')}
                                 className="w-full h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
                                 placeholder="350.000"
                             />
@@ -621,6 +749,7 @@ function ServiceModal({
                             <CurrencyInput
                                 value={formData.price_promo || ''}
                                 onChange={(v) => setFormData({ ...formData, price_promo: v })}
+                                disabled={!canEdit('price_promo')}
                                 className="w-full h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
                                 placeholder="Để trống nếu không giảm"
                             />
@@ -631,6 +760,7 @@ function ServiceModal({
                             type="checkbox"
                             checked={formData.hidePrice}
                             onChange={(e) => setFormData({ ...formData, hidePrice: e.target.checked })}
+                            disabled={!canEdit('hidePrice')}
                             className="mt-0.5 w-5 h-5 accent-orange-500"
                         />
                         <span>
@@ -646,6 +776,7 @@ function ServiceModal({
                             type="service"
                             value={formData.categoryIds}
                             onChange={(ids, catName) => setFormData({ ...formData, categoryIds: ids, category: catName || formData.category })}
+                            disabled={!canEdit('categoryIds')}
                         />
                     </div>
 
@@ -675,6 +806,7 @@ function ServiceModal({
                                     type="retail"
                                     value={formData.linkedProductCategoryIds}
                                     onChange={(ids) => setFormData({ ...formData, linkedProductCategoryIds: ids })}
+                                    disabled={!canEdit('linkedProductCategoryIds')}
                                 />
                             </div>
                             <div>
@@ -683,6 +815,7 @@ function ServiceModal({
                                     type="component"
                                     value={formData.recommendedPartCategoryIds}
                                     onChange={(ids) => setFormData({ ...formData, recommendedPartCategoryIds: ids })}
+                                    disabled={!canEdit('recommendedPartCategoryIds')}
                                 />
                             </div>
                         </div>
@@ -695,6 +828,7 @@ function ServiceModal({
                             value={formData.description}
                             onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                             rows={3}
+                            disabled={!canEdit('description')}
                             className="w-full px-4 py-3 border rounded-lg focus:border-orange-500 focus:outline-none resize-none"
                             placeholder="Mô tả dịch vụ..."
                         />
@@ -710,6 +844,7 @@ function ServiceModal({
                                     type="text"
                                     value={formData.warranty_text}
                                     onChange={(e) => setFormData({ ...formData, warranty_text: e.target.value })}
+                                    disabled={!canEdit('warranty_text')}
                                     className="w-full h-10 px-3 text-sm border rounded-lg focus:border-orange-500 focus:outline-none"
                                     placeholder="BH 12 tháng"
                                 />
@@ -720,6 +855,7 @@ function ServiceModal({
                                     type="text"
                                     value={formData.repair_time}
                                     onChange={(e) => setFormData({ ...formData, repair_time: e.target.value })}
+                                    disabled={!canEdit('repair_time')}
                                     className="w-full h-10 px-3 text-sm border rounded-lg focus:border-orange-500 focus:outline-none"
                                     placeholder="30 phút"
                                 />
@@ -728,10 +864,11 @@ function ServiceModal({
                         <div className="mb-3">
                             <label className="block text-xs font-medium text-gray-600 mb-1">Mô tả SEO (hiển thị trên Google)</label>
                             <textarea
-                                value={formData.seoDescription}
-                                onChange={(e) => setFormData({ ...formData, seoDescription: e.target.value })}
-                                rows={2}
-                                maxLength={160}
+                                    value={formData.seoDescription}
+                                    onChange={(e) => setFormData({ ...formData, seoDescription: e.target.value })}
+                                    rows={2}
+                                    maxLength={160}
+                                    disabled={!canEdit('seoDescription')}
                                 className="w-full px-3 py-2 text-sm border rounded-lg focus:border-orange-500 focus:outline-none resize-none"
                                 placeholder="Mô tả ngắn gọn cho SEO (tối đa 160 ký tự)"
                             />
@@ -741,8 +878,9 @@ function ServiceModal({
                             <label className="block text-xs font-medium text-gray-600 mb-1">Tags (phân cách bằng dấu phẩy)</label>
                             <input
                                 type="text"
-                                value={formData.tags}
-                                onChange={(e) => setFormData({ ...formData, tags: e.target.value })}
+                                    value={formData.tags}
+                                    onChange={(e) => setFormData({ ...formData, tags: e.target.value })}
+                                    disabled={!canEdit('tags')}
                                 className="w-full h-10 px-3 text-sm border rounded-lg focus:border-orange-500 focus:outline-none"
                                 placeholder="thay pin, iphone, bảo hành"
                             />
@@ -756,6 +894,7 @@ function ServiceModal({
                                 type="checkbox"
                                 checked={formData.isActive}
                                 onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
+                                disabled={!canEdit('isActive')}
                                 className="w-5 h-5 accent-orange-500"
                             />
                             <span className="text-sm font-medium">Đang hoạt động</span>
@@ -769,7 +908,7 @@ function ServiceModal({
                         </button>
                         <button
                             type="submit"
-                            disabled={isSubmitting}
+                            disabled={isSubmitting || !canSubmit}
                             className="flex-1 py-3 bg-orange-500 text-white rounded-lg font-medium hover:bg-orange-600 disabled:opacity-50 flex items-center justify-center gap-2"
                         >
                             {isSubmitting && <Loader2 size={18} className="animate-spin" />}

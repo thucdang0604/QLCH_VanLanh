@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useMemo } from 'react';
-import { Archive, Package, Search, Loader2, ArrowUpDown, TrendingDown, TrendingUp } from 'lucide-react';
+import { Archive, Package, Search, Loader2, ArrowUpDown, TrendingDown, TrendingUp, RefreshCw } from 'lucide-react';
 import { collection, limit, orderBy, query, startAfter, where, type DocumentSnapshot, type QueryConstraint } from 'firebase/firestore';
 import { getDocs } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
@@ -10,6 +10,9 @@ import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
 import { isProductArchived } from '@/lib/productLifecycle';
 import { generateSearchKeywords } from '@/lib/utils';
+import { useAuth } from '@/lib/AuthContext';
+import { appConfirm } from '@/lib/appDialog';
+import { toastError, toastSuccess } from '@/lib/toast';
 
 const formatPrice = (n: number) => n.toLocaleString('vi-VN') + 'đ';
 
@@ -47,6 +50,7 @@ const mergeStockProduct = (
 };
 
 export default function StockPage() {
+    const { user } = useAuth();
     const [products, setProducts] = useState<(Product & { id: string })[]>([]);
     const [loading, setLoading] = useState(true);
     const [loadingMore, setLoadingMore] = useState(false);
@@ -58,6 +62,7 @@ export default function StockPage() {
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
     const [stockTab, setStockTab] = useState<'all' | 'retail' | 'component'>('all');
     const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'archived'>('all');
+    const [isReconcilingHeld, setIsReconcilingHeld] = useState(false);
 
     const buildStockQueryConstraints = useCallback((cursor?: DocumentSnapshot | null): QueryConstraint[] => {
         const trimmedSearch = debouncedSearchQuery.trim();
@@ -153,10 +158,18 @@ export default function StockPage() {
             return sortDir === 'asc' ? cmp : -cmp;
         });
 
-    const totalItems = statusFiltered.reduce((s, p) => s + (p.stock || 0), 0);
-    const totalValue = statusFiltered.reduce((s, p) => s + (p.stock || 0) * (p.costPrice || 0), 0);
-    const lowStock = statusFiltered.filter(p => (p.stock || 0) > 0 && (p.stock || 0) <= 3).length;
-    const outOfStock = statusFiltered.filter(p => (p.stock || 0) <= 0).length;
+    const totalItems = statusFiltered.reduce((s, p) => s + (Number(p.stock) || 0), 0);
+    const totalHeld = statusFiltered.reduce((s, p) => s + Math.max(0, Number(p.held) || 0), 0);
+    const totalAvailable = statusFiltered.reduce(
+        (s, p) => s + Math.max(0, (Number(p.stock) || 0) - (Number(p.held) || 0)),
+        0,
+    );
+    const totalValue = statusFiltered.reduce((s, p) => s + (Number(p.stock) || 0) * (Number(p.costPrice) || 0), 0);
+    const lowStock = statusFiltered.filter(p => {
+        const available = (Number(p.stock) || 0) - (Number(p.held) || 0);
+        return available > 0 && available <= 3;
+    }).length;
+    const outOfStock = statusFiltered.filter(p => (Number(p.stock) || 0) - (Number(p.held) || 0) <= 0).length;
     const archivedCount = tabFiltered.filter(isProductArchived).length;
 
     const toggleSort = (col: typeof sortBy) => {
@@ -168,6 +181,36 @@ export default function StockPage() {
 
     useEffect(() => { resetPage(); }, [searchQuery, stockTab, statusFilter, resetPage]);
 
+    const reconcileHeldInventory = async () => {
+        if (!await appConfirm(
+            'Hệ thống sẽ đối soát các phiếu sửa chữa chưa kết thúc và cập nhật lại số lượng tạm giữ. Tồn kho vật lý sẽ không thay đổi.',
+            { title: 'Đồng bộ tồn tạm giữ', confirmText: 'Đồng bộ' },
+        )) return;
+
+        setIsReconcilingHeld(true);
+        try {
+            const auth = await (await import('@/lib/firebase')).getAuthInstance();
+            const idToken = await auth.currentUser?.getIdToken();
+            const response = await fetch('/api/inventory/reconcile-held', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
+                },
+            });
+            const data = await response.json() as { error?: string; productsUpdated?: number; totalHeld?: number };
+            if (!response.ok) throw new Error(data.error || 'Không thể đồng bộ tồn tạm giữ.');
+
+            toastSuccess(`Đã đồng bộ ${data.productsUpdated || 0} mặt hàng; tổng tạm giữ: ${data.totalHeld || 0}.`);
+            await loadProducts('reset');
+        } catch (error) {
+            console.error('Held inventory reconciliation failed:', error);
+            toastError(error instanceof Error ? error.message : 'Không thể đồng bộ tồn tạm giữ.');
+        } finally {
+            setIsReconcilingHeld(false);
+        }
+    };
+
     if (loading) return (
         <div className="flex items-center justify-center h-[60vh]">
             <Loader2 className="animate-spin text-orange-500" size={40} />
@@ -176,11 +219,24 @@ export default function StockPage() {
 
     return (
         <div className="p-4 md:p-6 space-y-4">
-            <div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
                 <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
                     <Package className="text-orange-500" /> Tổng Tồn Kho
                 </h1>
                 <p className="text-sm text-gray-500 mt-0.5">{statusFiltered.length} mặt hàng đã tải{stockTab !== 'all' ? ` (${stockTab === 'retail' ? 'bán lẻ' : 'linh kiện'})` : ''}</p>
+                </div>
+                {user?.role === 'admin' && (
+                    <button
+                        type="button"
+                        onClick={reconcileHeldInventory}
+                        disabled={isReconcilingHeld}
+                        className="inline-flex items-center justify-center gap-2 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-xs font-semibold text-orange-700 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                        <RefreshCw size={15} className={isReconcilingHeld ? 'animate-spin' : ''} />
+                        Đồng bộ tạm giữ
+                    </button>
+                )}
             </div>
 
             {/* Stock Tab Filter */}
@@ -214,10 +270,18 @@ export default function StockPage() {
             </div>
 
             {/* Stats */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
                 <div className="bg-white rounded-xl border p-3">
                     <p className="text-xs text-gray-500">Tổng tồn kho</p>
                     <p className="text-lg font-bold text-gray-800">{totalItems}</p>
+                </div>
+                <div className="bg-white rounded-xl border p-3">
+                    <p className="text-xs text-gray-500">Tạm giữ</p>
+                    <p className="text-lg font-bold text-violet-600">{totalHeld}</p>
+                </div>
+                <div className="bg-white rounded-xl border p-3">
+                    <p className="text-xs text-gray-500">Khả dụng</p>
+                    <p className="text-lg font-bold text-emerald-600">{totalAvailable}</p>
                 </div>
                 <div className="bg-white rounded-xl border p-3">
                     <p className="text-xs text-gray-500">Giá trị tồn kho</p>
@@ -258,6 +322,8 @@ export default function StockPage() {
                                     onClick={() => toggleSort('stock')}>
                                     <span className="flex items-center justify-center gap-1">Tồn kho <ArrowUpDown size={12} /></span>
                                 </th>
+                                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Tạm giữ</th>
+                                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Khả dụng</th>
                                 <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase cursor-pointer hover:text-orange-600"
                                     onClick={() => toggleSort('costPrice')}>
                                     <span className="flex items-center justify-end gap-1">Giá vốn BQ <ArrowUpDown size={12} /></span>
@@ -269,13 +335,15 @@ export default function StockPage() {
                         </thead>
                         <tbody className="divide-y divide-gray-100">
                             {filtered.length === 0 ? (
-                                <tr><td colSpan={8} className="text-center py-12 text-gray-400">Không có sản phẩm nào</td></tr>
+                                <tr><td colSpan={10} className="text-center py-12 text-gray-400">Không có sản phẩm nào</td></tr>
                             ) : paginatedFiltered.map(p => {
-                                const stock = p.stock || 0;
-                                const costPrice = p.costPrice || 0;
+                                const stock = Number(p.stock) || 0;
+                                const held = Math.max(0, Number(p.held) || 0);
+                                const available = Math.max(0, stock - held);
+                                const costPrice = Number(p.costPrice) || 0;
                                 const stockValue = stock * costPrice;
                                 return (
-                                    <tr key={p.id} className={`transition-colors duration-200 hover:bg-gray-50 ${stock <= 0 ? 'bg-red-50/50' : stock <= 3 ? 'bg-amber-50/50' : ''}`}>
+                                    <tr key={p.id} className={`transition-colors duration-200 hover:bg-gray-50 ${available <= 0 ? 'bg-red-50/50' : available <= 3 ? 'bg-amber-50/50' : ''}`}>
                                         <td className="px-4 py-3 font-mono text-xs text-gray-500">#{p.id.slice(-6).toUpperCase()}</td>
                                         <td className="px-4 py-3">
                                             <p className="font-medium text-gray-900 text-sm">{p.name}</p>
@@ -288,6 +356,10 @@ export default function StockPage() {
                                                 {stock <= 0 ? <TrendingDown size={12} /> : stock <= 3 ? <TrendingDown size={12} /> : <TrendingUp size={12} />}
                                                 {stock}
                                             </span>
+                                        </td>
+                                        <td className="px-4 py-3 text-center text-sm font-semibold text-violet-700">{held}</td>
+                                        <td className="px-4 py-3 text-center">
+                                            <span className={`font-bold text-sm ${available <= 0 ? 'text-red-600' : available <= 3 ? 'text-amber-600' : 'text-emerald-600'}`}>{available}</span>
                                         </td>
                                         <td className="px-4 py-3 text-right text-sm text-gray-600">{costPrice > 0 ? formatPrice(costPrice) : '—'}</td>
                                         <td className="px-4 py-3 text-center">
@@ -332,11 +404,13 @@ export default function StockPage() {
                         {filtered.length === 0 ? (
                             <div className="text-center py-12 text-gray-400">Không có sản phẩm nào</div>
                         ) : paginatedFiltered.map(p => {
-                            const stock = p.stock || 0;
-                            const costPrice = p.costPrice || 0;
+                            const stock = Number(p.stock) || 0;
+                            const held = Math.max(0, Number(p.held) || 0);
+                            const available = Math.max(0, stock - held);
+                            const costPrice = Number(p.costPrice) || 0;
                             const stockValue = stock * costPrice;
                             return (
-                                <div key={p.id} className={`p-4 ${stock <= 0 ? 'bg-red-50/30' : stock <= 3 ? 'bg-amber-50/30' : ''}`}>
+                                <div key={p.id} className={`p-4 ${available <= 0 ? 'bg-red-50/30' : available <= 3 ? 'bg-amber-50/30' : ''}`}>
                                     <div className="flex items-start justify-between gap-3">
                                         <div className="min-w-0 flex-1">
                                             <p className="font-semibold text-gray-900 text-sm line-clamp-1">{p.name}</p>
@@ -356,12 +430,13 @@ export default function StockPage() {
                                                 )}
                                             </div>
                                         </div>
-                                        <span className={`inline-flex items-center gap-1 font-bold text-sm shrink-0 ${stock <= 0 ? 'text-red-600' : stock <= 3 ? 'text-amber-600' : 'text-green-600'}`}>
-                                            {stock <= 0 ? <TrendingDown size={12} /> : stock <= 3 ? <TrendingDown size={12} /> : <TrendingUp size={12} />}
-                                            {stock}
+                                        <span className={`inline-flex items-center gap-1 font-bold text-sm shrink-0 ${available <= 0 ? 'text-red-600' : available <= 3 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                                            {available <= 0 ? <TrendingDown size={12} /> : available <= 3 ? <TrendingDown size={12} /> : <TrendingUp size={12} />}
+                                            Khả dụng: {available}
                                         </span>
                                     </div>
                                     <div className="flex items-center justify-between mt-2 text-xs">
+                                        <span className="text-gray-500">Tồn / Giữ: <span className="font-medium text-gray-700">{stock}</span> / <span className="font-semibold text-violet-700">{held}</span></span>
                                         <span className="text-gray-500">Vốn: <span className="font-medium text-gray-700">{costPrice > 0 ? formatPrice(costPrice) : '—'}</span></span>
                                         <span className="text-gray-500">Bán: <span className="font-medium text-gray-900">{formatPrice(p.price_promo || p.price_original)}</span></span>
                                         <span className="text-gray-500">Giá trị: <span className="font-bold text-orange-600">{stockValue > 0 ? formatPrice(stockValue) : '—'}</span></span>

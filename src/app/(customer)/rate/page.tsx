@@ -9,6 +9,7 @@ import {
 import Image from 'next/image';
 import { uploadMedia } from '@/lib/storage';
 import { SITE_URL } from "@/lib/constants";
+import { appAlert } from '@/lib/appDialog';
 
 // ── Haversine distance (meters) ──
 function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -124,7 +125,7 @@ export default function RatePage() {
             // Check size (max 5MB)
             const validFiles = filesArray.filter(f => f.size <= 5 * 1024 * 1024);
             if (validFiles.length < filesArray.length) {
-                alert('Một số ảnh vượt quá dung lượng 5MB và đã bị loại bỏ.');
+                void appAlert('Một số ảnh vượt quá dung lượng 5MB và đã bị loại bỏ.', { title: 'Một số ảnh không hợp lệ' });
             }
 
             setImages(prev => [...prev, ...validFiles].slice(0, 5)); // Max 5
@@ -165,12 +166,12 @@ export default function RatePage() {
     const handleSubmitReview = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!name.trim() || !phone.trim() || phone.length < 8) {
-            alert('Vui lòng nhập đầy đủ Tên và Số điện thoại hợp lệ.');
+            await appAlert('Vui lòng nhập đầy đủ Tên và Số điện thoại hợp lệ.', { title: 'Thiếu thông tin' });
             return;
         }
 
         if (!content.trim() && images.length === 0 && rating < 5) {
-            alert('Vui lòng chia sẻ thêm nội dung đánh giá để chúng tôi phục vụ tốt hơn.');
+            await appAlert('Vui lòng chia sẻ thêm nội dung đánh giá để chúng tôi phục vụ tốt hơn.', { title: 'Cần thêm nội dung đánh giá' });
             return;
         }
 
@@ -210,14 +211,14 @@ export default function RatePage() {
             });
             const data = await res.json();
             if (!res.ok) {
-                alert(data.error || 'Có lỗi xảy ra khi gửi đánh giá. Vui lòng thử lại.');
+                await appAlert(data.error || 'Có lỗi xảy ra khi gửi đánh giá. Vui lòng thử lại.', { title: 'Gửi đánh giá thất bại' });
                 return;
             }
 
             setSuccess(true);
         } catch (error) {
             console.error('Error submitting review:', error);
-            alert('Có lỗi xảy ra khi gửi đánh giá. Vui lòng thử lại.');
+            await appAlert('Có lỗi xảy ra khi gửi đánh giá. Vui lòng thử lại.', { title: 'Gửi đánh giá thất bại' });
         } finally {
             setSubmitting(false);
         }

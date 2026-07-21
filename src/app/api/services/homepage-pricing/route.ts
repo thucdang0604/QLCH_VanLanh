@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 import { getAdminDb, isAdminAvailable } from '@/lib/firebaseAdmin';
 
 type PublicPricingService = {
@@ -57,10 +57,15 @@ function toPublicPricingService(id: string, data: Record<string, unknown>): Publ
     };
 }
 
-export async function GET() {
-    try {
+export const GET = withApi({
+    name: 'services/homepage-pricing',
+    onError: (error, context) => {
+        const status = getApiErrorStatus(error);
+        return context.error(status < 500 ? getApiErrorMessage(error) : 'Lỗi hệ thống. Vui lòng thử lại sau.', status);
+    },
+}, async (_request, context) => {
         if (!isAdminAvailable()) {
-            return NextResponse.json({ services: [] });
+            return context.json({ services: [] });
         }
 
         const snapshot = await getAdminDb()
@@ -70,12 +75,8 @@ export async function GET() {
             .get();
         const services = snapshot.docs.map(doc => toPublicPricingService(doc.id, doc.data()));
 
-        return NextResponse.json(
+        return context.json(
             { services },
             { headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60' } }
         );
-    } catch (error) {
-        console.error('Homepage pricing services API error:', error);
-        return NextResponse.json({ error: 'Failed to fetch homepage pricing services' }, { status: 500 });
-    }
-}
+});

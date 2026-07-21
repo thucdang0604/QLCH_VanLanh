@@ -6,6 +6,7 @@ import ServiceCard from '@/components/home/ServiceCard';
 import { Search, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import { SITE_URL } from "@/lib/constants";
+import { appAlert } from '@/lib/appDialog';
 
 function SkeletonCard() {
     return (
@@ -60,7 +61,7 @@ function SearchResults() {
                 const res = await fetch(`/api/search?q=${encodeURIComponent(searchQuery.trim())}`);
                 if (!res.ok) {
                     if (res.status === 429) {
-                        alert('Bạn đang tìm kiếm quá nhanh. Vui lòng thử lại sau.');
+                        await appAlert('Bạn đang tìm kiếm quá nhanh. Vui lòng thử lại sau.', { title: 'Vui lòng thử lại sau' });
                     }
                     setResults([]);
                     return;

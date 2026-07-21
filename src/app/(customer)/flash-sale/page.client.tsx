@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import Image from 'next/image';
 import { Zap, ChevronRight, Package } from 'lucide-react';
+import CatalogImage from '@/components/customer/CatalogImage';
 
 const formatPrice = (price: number) => new Intl.NumberFormat('vi-VN').format(price) + 'đ';
 
@@ -61,13 +61,13 @@ export default function FlashSaleClient({ products }: FlashSaleClientProps) {
                                     className="bg-white rounded-xl shadow-sm overflow-hidden group hover:shadow-lg transition-shadow"
                                 >
                                     <div className="relative aspect-square">
-                                        {product.imageUrl || product.image ? (
-                                            <Image src={product.imageUrl || product.image || ''} alt={product.name || 'Sản phẩm'} fill className="object-cover group-hover:scale-105 transition-transform" />
-                                        ) : (
-                                            <div className="w-full h-full flex items-center justify-center bg-gray-50">
-                                                <Package size={32} className="text-gray-300" />
-                                            </div>
-                                        )}
+                                        <CatalogImage
+                                            src={product.imageUrl || product.image}
+                                            alt={product.name || 'Sản phẩm'}
+                                            sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
+                                            imageClassName="object-cover group-hover:scale-105 transition-transform"
+                                            logoClassName="h-full w-full object-contain p-4"
+                                        />
                                         {hasDiscount && <div className="absolute top-2 left-2 bg-red-600 text-white text-xs font-bold px-2 py-1 rounded">-{discountPct}%</div>}
                                         {(product.sold || 0) > 100 && (
                                             <div className="absolute top-2 right-2 bg-orange-500 text-white text-xs font-bold px-2 py-1 rounded flex items-center gap-1">

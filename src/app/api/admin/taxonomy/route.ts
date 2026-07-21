@@ -1,23 +1,20 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { FieldValue } from 'firebase-admin/firestore';
+import { revalidateTag } from 'next/cache';
 import { requireAdmin } from '@/lib/apiAuth';
+import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { TaxonomyMutationError, type TaxonomyMutationRequest, mutateTaxonomy } from '@/lib/taxonomyMutation';
 
-function errorResponse(error: unknown) {
-    const message = error instanceof Error ? error.message : 'Internal server error';
-    const status = error instanceof TaxonomyMutationError
-        ? error.status
-        : message.includes('Forbidden') ? 403
-            : message.includes('Missing Authorization') ? 401
-                : 500;
-    return NextResponse.json({ success: false, error: message }, { status });
-}
-
-export async function POST(request: NextRequest) {
-    try {
+export const POST = withApi({
+    name: 'admin/taxonomy',
+    onError: (error, context) => {
+        const status = error instanceof TaxonomyMutationError ? error.status : getApiErrorStatus(error);
+        return context.json({ success: false, error: getApiErrorMessage(error) }, { status });
+    },
+}, async (request: NextRequest, context) => {
         await requireAdmin(request);
-        const body = await request.json() as TaxonomyMutationRequest;
+        const body = await context.readJson<TaxonomyMutationRequest>(request);
         const db = getAdminDb();
         const taxonomyRef = db.collection('system_config').doc('taxonomy_settings');
 
@@ -35,8 +32,8 @@ export async function POST(request: NextRequest) {
             return mutation;
         });
 
-        return NextResponse.json({ success: true, nodeId: result.nodeId });
-    } catch (error) {
-        return errorResponse(error);
-    }
-}
+        revalidateTag('config');
+        revalidateTag('layout');
+
+        return context.json({ success: true, nodeId: result.nodeId });
+});

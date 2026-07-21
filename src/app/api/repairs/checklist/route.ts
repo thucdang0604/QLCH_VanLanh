@@ -1,6 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { FieldValue } from 'firebase-admin/firestore';
 import { requirePermission } from '@/lib/apiAuth';
+import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { isRepairManager } from '@/lib/repairAccess';
 
@@ -16,29 +17,34 @@ type ChecklistPatchRequest = {
     value?: string | boolean;
 };
 
-export async function POST(request: NextRequest) {
-    try {
+export const POST = withApi({
+    name: 'repairs/checklist',
+    onError: (error, context) => context.error(
+        getApiErrorMessage(error, 'Khong the cap nhat checklist.'),
+        getApiErrorStatus(error, 400),
+    ),
+}, async (request: NextRequest, context) => {
         const caller = await requirePermission(request, 'manage_repairs');
-        const body = await request.json() as ChecklistPatchRequest;
+        const body = await context.readJson<ChecklistPatchRequest>(request);
         const ticketId = typeof body.ticketId === 'string' ? body.ticketId.trim() : '';
         const key = typeof body.key === 'string' ? body.key.trim() : '';
 
         if (!ticketId || !key) {
-            return NextResponse.json({ error: 'Missing ticketId or key' }, { status: 400 });
+            return context.error('Missing ticketId or key', 400);
         }
 
         const isChecklistKey = CHECKLIST_KEYS.has(key);
         const isHistoryKey = HISTORY_KEYS.has(key);
         if (!isChecklistKey && !isHistoryKey) {
-            return NextResponse.json({ error: 'Checklist field khong hop le.' }, { status: 400 });
+            return context.error('Checklist field khong hop le.', 400);
         }
 
         const nextValue = body.value;
         if (isChecklistKey && (typeof nextValue !== 'string' || !CHECKLIST_VALUES.has(nextValue))) {
-            return NextResponse.json({ error: 'Checklist value khong hop le.' }, { status: 400 });
+            return context.error('Checklist value khong hop le.', 400);
         }
         if (isHistoryKey && typeof nextValue !== 'boolean') {
-            return NextResponse.json({ error: 'History value khong hop le.' }, { status: 400 });
+            return context.error('History value khong hop le.', 400);
         }
 
         const db = getAdminDb();
@@ -81,10 +87,5 @@ export async function POST(request: NextRequest) {
             });
         });
 
-        return NextResponse.json({ success: true });
-    } catch (error) {
-        console.error('Repair checklist patch error:', error);
-        const message = error instanceof Error ? error.message : 'Khong the cap nhat checklist.';
-        return NextResponse.json({ error: message }, { status: 400 });
-    }
-}
+        return context.json({ success: true });
+    });

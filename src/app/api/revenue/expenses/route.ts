@@ -1,31 +1,31 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { FieldValue } from 'firebase-admin/firestore';
 import { requireAdmin } from '@/lib/apiAuth';
+import { getApiErrorStatus, withApi } from '@/lib/api/handler';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 import { reserveSequentialDocumentId } from '@/lib/serverDocumentIds';
 
 const EXPENSE_CATEGORIES = new Set(['rent', 'utilities', 'supplies', 'salary', 'other']);
+type ExpenseRequestBody = { category?: string; description?: string; amount?: unknown };
 
 function getErrorMessage(error: unknown): string {
     return error instanceof Error ? error.message : 'Internal server error';
 }
 
-export async function POST(request: NextRequest) {
-    try {
+export const POST = withApi({
+    name: 'revenue/expenses',
+    onError: (error, context) => context.error(getErrorMessage(error), getApiErrorStatus(error)),
+}, async (request: NextRequest, context) => {
         const caller = await requireAdmin(request);
-        const body = await request.json() as {
-            category?: string;
-            description?: string;
-            amount?: unknown;
-        };
+        const body = await context.readJson<ExpenseRequestBody>(request);
 
         const amount = Number(body.amount);
         const category = EXPENSE_CATEGORIES.has(String(body.category)) ? String(body.category) : 'other';
         const description = String(body.description || '').trim();
 
         if (!Number.isFinite(amount) || amount <= 0) {
-            return NextResponse.json({ error: 'Invalid expense amount' }, { status: 400 });
+            return context.error('Invalid expense amount');
         }
 
         const db = getAdminDb();
@@ -71,16 +71,5 @@ export async function POST(request: NextRequest) {
             };
         });
 
-        return NextResponse.json({ success: true, expense: result });
-    } catch (error: unknown) {
-        console.error('Create expense API error:', error);
-        const message = getErrorMessage(error);
-        const lower = message.toLowerCase();
-        const status = lower.includes('missing authorization')
-            ? 401
-            : lower.includes('forbidden')
-                ? 403
-                : 500;
-        return NextResponse.json({ error: message }, { status });
-    }
-}
+        return context.json({ success: true, expense: result });
+});

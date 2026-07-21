@@ -1,12 +1,20 @@
 import { createHash } from 'crypto';
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { requirePermission } from '@/lib/apiAuth';
+import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import type { RepairTicket } from '@/lib/types';
 import { loadRepairWorkflow, requireWorkflowNode } from '@/lib/repairWorkflowServer';
 
 const PAYMENT_SIGNATURE_FIELDS = ['deposit', 'quote', 'giftDiscount', 'additionalFees', 'laborCost', 'paymentMethod'] as const;
+type RepairEditRequestBody = {
+    ticketId?: string;
+    ticketVersion?: number;
+    idempotencyKey?: string;
+    paymentData?: Record<string, unknown>;
+    profileData?: Record<string, unknown>;
+};
 
 function stableSignature(value: unknown) {
     return createHash('sha256').update(JSON.stringify(value || {})).digest('hex');
@@ -29,16 +37,18 @@ function parseDate(value: unknown) {
     return null;
 }
 
-export async function POST(request: NextRequest) {
-    try {
+export const POST = withApi({
+    name: 'repairs/edit',
+    onError: (error, context) => context.error(getApiErrorMessage(error), getApiErrorStatus(error, 400)),
+}, async (request: NextRequest, context) => {
         const caller = await requirePermission(request, 'manage_repairs');
-        const body = await request.json();
+        const body = await context.readJson<RepairEditRequestBody>(request);
         const { ticketId, ticketVersion, idempotencyKey } = body;
         const paymentData = (body.paymentData || {}) as Record<string, unknown>;
         const profileData = (body.profileData || {}) as Record<string, unknown>;
 
         if (!ticketId || !profileData || !paymentData) {
-            return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
+            return context.error('Missing parameters');
         }
 
         const payloadSignature = paymentPayloadSignature(paymentData, profileData);
@@ -140,10 +150,5 @@ export async function POST(request: NextRequest) {
             return { success: true, version: nextVersion, payment: updatedPayment };
         });
 
-        return NextResponse.json(result);
-    } catch (error) {
-        console.error('Repair edit API error:', error);
-        const message = error instanceof Error ? error.message : 'Internal server error';
-        return NextResponse.json({ error: message }, { status: 400 });
-    }
-}
+        return context.json(result);
+});

@@ -1,19 +1,25 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requirePermission } from '@/lib/apiAuth';
+import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 
-export async function GET(request: NextRequest) {
-    try {
+export const GET = withApi({
+    name: 'admin/bank-config',
+    onError: (error, context) => context.json(
+        { success: false, error: getApiErrorMessage(error, 'Không thể tải cấu hình ngân hàng.') },
+        { status: getApiErrorStatus(error) },
+    ),
+}, async (request: NextRequest, context) => {
         await requirePermission(request, 'manage_settings');
         const db = getAdminDb();
         const snap = await db.collection('settings').doc('bank_config').get();
         
         if (!snap.exists) {
-            return NextResponse.json({ success: true, config: null });
+            return context.json({ success: true, config: null });
         }
         
         const data = snap.data();
-        return NextResponse.json({ 
+        return context.json({
             success: true, 
             config: {
                 adminPhone: data?.adminPhone || '',
@@ -24,8 +30,4 @@ export async function GET(request: NextRequest) {
                 totpEnabled: data?.totpEnabled === true,
             }
         });
-    } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : 'Không thể tải cấu hình ngân hàng.';
-        return NextResponse.json({ success: false, error: message }, { status: 500 });
-    }
-}
+});

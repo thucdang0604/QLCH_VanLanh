@@ -10,6 +10,7 @@ import {
 } from '@/lib/contactIdentity';
 import { getAdminDb, getAdminRtdb } from '@/lib/firebaseAdmin';
 import type { ContactMethod, ContactMethodType } from '@/lib/types/contact';
+import { getApiErrorMessage, getApiErrorStatus, withApi, type ApiRouteContext } from '@/lib/api/handler';
 
 export const runtime = 'nodejs';
 const ROOM_LINK_TIMEOUT_MS = 8000;
@@ -71,19 +72,13 @@ function getMetricPermissions(user: { role: string; permissions: string[] }) {
   };
 }
 
-function routeError(error: unknown) {
-  const message = error instanceof Error ? error.message : 'Unknown error';
-  const lower = message.toLowerCase();
-  const status = lower.includes('missing authorization')
-    ? 401
-    : lower.includes('forbidden')
-      ? 403
-      : 500;
+function routeError(error: unknown, context: ApiRouteContext) {
+  const status = getApiErrorStatus(error);
   if (status === 500) {
     console.error('[AdminChat] Customer API failed:', error);
-    return NextResponse.json({ success: false, error: 'Customer profile operation failed' }, { status });
+    return context.json({ success: false, error: 'Customer profile operation failed' }, { status });
   }
-  return NextResponse.json({ success: false, error: message }, { status });
+  return context.json({ success: false, error: getApiErrorMessage(error) }, { status });
 }
 
 function timeoutAfter(ms: number): Promise<never> {
@@ -137,13 +132,13 @@ function mergeContactMethods(existing: unknown, incoming: ContactMethod[]): Cont
   }));
 }
 
-export async function GET(
+export const GET = withApi({ name: 'admin/chat/room-customer', onError: routeError }, async (
   request: NextRequest,
-  context: { params: Promise<{ roomId: string }> },
-) {
-  try {
+  _context,
+  routeContext: { params: Promise<{ roomId: string }> },
+) => {
     const user = await requirePermission(request, 'chat_support');
-    const { roomId } = await context.params;
+    const { roomId } = await routeContext.params;
     if (!parseRoomId(roomId)) {
       return NextResponse.json({ success: false, error: 'Invalid roomId' }, { status: 400 });
     }
@@ -163,30 +158,27 @@ export async function GET(
       success: true,
       customer: storedCustomer(snapshot.id, snapshot.exists ? snapshot.data() : undefined, getMetricPermissions(user)),
     });
-  } catch (error: unknown) {
-    return routeError(error);
-  }
-}
+});
 
-export async function POST(
+export const POST = withApi({ name: 'admin/chat/room-customer', onError: routeError }, async (
   request: NextRequest,
-  context: { params: Promise<{ roomId: string }> },
-) {
-  try {
+  context,
+  routeContext: { params: Promise<{ roomId: string }> },
+) => {
     const user = await requirePermission(request, 'chat_support');
-    const { roomId } = await context.params;
+    const { roomId } = await routeContext.params;
     const safeRoomId = parseRoomId(roomId);
     if (!safeRoomId) {
       return NextResponse.json({ success: false, error: 'Invalid roomId' }, { status: 400 });
     }
 
-    const body = await request.json().catch(() => ({})) as Partial<{
+    const body = await context.readJson<Partial<{
       name: string;
       phone: string;
       customerId: string;
       channel: ChatChannel;
       externalUserId: string;
-    }>;
+    }>>(request);
     const name = typeof body.name === 'string' ? body.name.trim() : '';
     const phone = normalizePhone(body.phone);
     const requestedCustomerId = normalizeCustomerId(body.customerId);
@@ -259,7 +251,4 @@ export async function POST(
       primaryContactValue: primaryContact?.value || '',
     }, getMetricPermissions(user));
     return NextResponse.json({ success: true, customer, roomLinked });
-  } catch (error: unknown) {
-    return routeError(error);
-  }
-}
+});

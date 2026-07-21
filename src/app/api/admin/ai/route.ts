@@ -2,12 +2,22 @@ import { NextRequest, NextResponse } from 'next/server';
 import { generateContentStream, generateContent } from '@/lib/ollama';
 import { requireAdminOrStaff } from '@/lib/apiAuth';
 import { isRateLimited } from '@/lib/rateLimit';
+import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 
 const RATE_LIMIT_MAX = 5;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 
-export async function POST(request: NextRequest) {
-    try {
+export const POST = withApi({
+    name: 'admin/ai',
+    onError: (error, context) => {
+        const status = getApiErrorStatus(error);
+        return context.json({
+            error: status < 500
+                ? getApiErrorMessage(error)
+                : 'Giao tiếp với AI thất bại. Hãy kiểm tra xem Ollama đã được bật (ollama serve) chưa.',
+        }, { status });
+    },
+}, async (request: NextRequest, context) => {
         // ── Auth: chỉ admin hoặc staff mới được dùng ──
         try {
             await requireAdminOrStaff(request);
@@ -27,7 +37,7 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const { action, payload } = await request.json();
+        const { action, payload } = await context.readJson(request);
 
         if (!action || !payload) {
             return NextResponse.json({ error: 'Missing action or payload' }, { status: 400 });
@@ -545,11 +555,4 @@ LUẬT BẮT BUỘC:
             },
         });
 
-    } catch (error) {
-        console.error('Admin AI API error:', error);
-        return NextResponse.json(
-            { error: 'Giao tiếp với AI thất bại. Hãy kiểm tra xem Ollama đã được bật (ollama serve) chưa.' },
-            { status: 500 }
-        );
-    }
-}
+});

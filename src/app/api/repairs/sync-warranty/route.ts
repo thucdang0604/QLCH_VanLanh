@@ -1,10 +1,11 @@
-import { NextResponse, NextRequest } from 'next/server';
+import { NextRequest } from 'next/server';
 import { FieldValue } from 'firebase-admin/firestore';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requirePermission } from '@/lib/apiAuth';
 import type { RepairTicket } from '@/lib/types';
 import { loadRepairWorkflow, requireWorkflowNode } from '@/lib/repairWorkflowServer';
 import { stampRepairWarrantyOnParts } from '@/lib/repairWarrantyRules';
+import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 
 function getDateMillis(value: unknown): number {
     if (typeof value === 'number') return value;
@@ -14,15 +15,21 @@ function getDateMillis(value: unknown): number {
         || Date.now();
 }
 
-export async function POST(request: NextRequest) {
-    try {
+export const POST = withApi({
+    name: 'repairs/sync-warranty',
+    onError: (error, context) => {
+        const message = getApiErrorMessage(error);
+        const fallbackStatus = message.includes('không') || message.includes('Chỉ') ? 400 : 500;
+        return context.error(message, getApiErrorStatus(error, fallbackStatus));
+    },
+}, async (request: NextRequest, context) => {
         await requirePermission(request, 'manage_repairs');
 
-        const body = await request.json();
+        const body = await context.readJson(request);
         const { ticketId, ticketVersion } = body;
 
         if (!ticketId) {
-            return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
+            return context.error('Missing parameters');
         }
 
         const db = getAdminDb();
@@ -89,10 +96,5 @@ export async function POST(request: NextRequest) {
             };
         });
 
-        return NextResponse.json(result);
-    } catch (error: unknown) {
-        console.error('Sync repair warranty API error:', error);
-        const message = error instanceof Error ? error.message : 'Internal server error';
-        return NextResponse.json({ error: message }, { status: message.includes('không') || message.includes('Chỉ') ? 400 : 500 });
-    }
-}
+        return context.json(result);
+});
