@@ -1,43 +1,20 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { collection, query, orderBy, updateDoc, doc, deleteDoc, serverTimestamp, setDoc, limit, where, type QueryConstraint } from 'firebase/firestore';
+import { collection, query, orderBy, updateDoc, doc, deleteDoc, deleteField, serverTimestamp, setDoc, limit, where, type QueryConstraint } from 'firebase/firestore';
 import { onSnapshot, getDocs, getDoc } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import { Percent, Plus, Edit2, Trash2, ToggleLeft, ToggleRight, X, Tag, Medal, Users, ChevronDown, Search, ArrowDown, Zap, ShoppingBag } from 'lucide-react';
 import { toast } from 'sonner';
 import { appConfirm } from '@/lib/appDialog';
 import type { AccessoryDiscountRule } from '@/lib/types';
-import type { TaxonomyNode } from '@/lib/types/catalog';
 import { TIER_CONFIGS, TierConfig } from '@/lib/customerTiers';
 import { useConfig } from '@/lib/ConfigContext';
 import { generateSlug } from '@/lib/utils';
+import { flattenTaxonomyOptions, uniqueTaxonomyOptions, type FlatTaxonomyNode } from '@/lib/taxonomyOptions';
 
 const fmt = (n: number) => n.toLocaleString('vi-VN') + 'đ';
 const TIER_CUSTOMER_PREVIEW_LIMIT = 20;
-
-// ── Flatten taxonomy tree into searchable list ──
-interface FlatNode {
-    id: string;
-    name: string;
-    fullPath: string; // e.g. "Sửa chữa Điện thoại › Sửa iPhone"
-    depth: number;
-    seoKeywords?: string;
-}
-
-
-
-function flattenTaxonomy(nodes: TaxonomyNode[], parentPath = '', depth = 0): FlatNode[] {
-    const result: FlatNode[] = [];
-    for (const node of nodes) {
-        const fullPath = parentPath ? `${parentPath} › ${node.name}` : node.name;
-        result.push({ id: node.id, name: node.name, fullPath, depth, seoKeywords: node.seoKeywords });
-        if (node.children?.length) {
-            result.push(...flattenTaxonomy(node.children, fullPath, depth + 1));
-        }
-    }
-    return result;
-}
 
 function buildAccessoryRuleBaseId(data: Partial<AccessoryDiscountRule>): string {
     const nameSlug = generateSlug(String(data.name || 'rule'));
@@ -64,9 +41,9 @@ async function getAvailableDocId(collectionName: string, baseId: string): Promis
 
 // ── Searchable Taxonomy Dropdown ──
 function TaxonomyDropdown({ nodes, value, onChange, placeholder }: {
-    nodes: FlatNode[];
+    nodes: FlatTaxonomyNode[];
     value: string;
-    onChange: (nodeId: string, node: FlatNode | null) => void;
+    onChange: (nodeId: string, node: FlatTaxonomyNode | null) => void;
     placeholder: string;
 }) {
     const [open, setOpen] = useState(false);
@@ -211,8 +188,8 @@ function AccessoryRuleModal({ rule, onClose, onSave, serviceNodes, productNodes 
     rule: AccessoryDiscountRule | null;
     onClose: () => void;
     onSave: (data: Partial<AccessoryDiscountRule>) => Promise<void>;
-    serviceNodes: FlatNode[];
-    productNodes: FlatNode[];
+    serviceNodes: FlatTaxonomyNode[];
+    productNodes: FlatTaxonomyNode[];
 }) {
     const [form, setForm] = useState({
         name: rule?.name || '',
@@ -237,7 +214,7 @@ function AccessoryRuleModal({ rule, onClose, onSave, serviceNodes, productNodes 
         return `Khi dùng DV "${trigger}" → "${target}" giảm ${value}${unit}`;
     })();
 
-    const handleTriggerSelect = (nodeId: string, node: FlatNode | null) => {
+    const handleTriggerSelect = (nodeId: string, node: FlatTaxonomyNode | null) => {
         setForm(p => ({
             ...p,
             triggerServiceCategory: nodeId,
@@ -248,7 +225,7 @@ function AccessoryRuleModal({ rule, onClose, onSave, serviceNodes, productNodes 
         }));
     };
 
-    const handleTargetSelect = (nodeId: string, node: FlatNode | null) => {
+    const handleTargetSelect = (nodeId: string, node: FlatTaxonomyNode | null) => {
         setForm(p => ({
             ...p,
             targetProductCategory: nodeId,
@@ -265,7 +242,7 @@ function AccessoryRuleModal({ rule, onClose, onSave, serviceNodes, productNodes 
         if (!form.targetProductCategory && form.targetKeywords.length === 0) { toast.error('Chọn sản phẩm được giảm hoặc thêm từ khóa'); return; }
         setSaving(true);
         try {
-            await onSave({
+            const data: Partial<AccessoryDiscountRule> = {
                 name: form.name.trim(),
                 triggerServiceCategory: form.triggerServiceCategory,
                 triggerKeywords: form.triggerKeywords,
@@ -273,12 +250,19 @@ function AccessoryRuleModal({ rule, onClose, onSave, serviceNodes, productNodes 
                 discountValue: Number(form.discountValue),
                 targetProductCategory: form.targetProductCategory,
                 targetKeywords: form.targetKeywords,
-                maxDiscountAmount: form.maxDiscountAmount ? Number(form.maxDiscountAmount) : undefined,
                 isActive: true,
-            });
+            };
+            if (form.maxDiscountAmount) {
+                data.maxDiscountAmount = Number(form.maxDiscountAmount);
+            }
+            await onSave(data);
             onClose();
-        } catch { toast.error('Lỗi khi lưu'); }
-        setSaving(false);
+        } catch (error) {
+            console.error('Failed to save accessory discount rule:', error);
+            toast.error('Không thể lưu rule giảm giá. Vui lòng thử lại.');
+        } finally {
+            setSaving(false);
+        }
     };
 
     return (
@@ -426,11 +410,14 @@ export default function DiscountRulesTab() {
     const fmtCurrency = (n: number) => n.toLocaleString('vi-VN');
 
     // Flatten taxonomy nodes for dropdowns
-    const serviceNodes = useMemo(() => flattenTaxonomy(config.taxonomy?.service || []), [config.taxonomy]);
+    const serviceNodes = useMemo(
+        () => uniqueTaxonomyOptions(flattenTaxonomyOptions(config.taxonomy?.service || [])),
+        [config.taxonomy],
+    );
     const productNodes = useMemo(() => {
-        const retail = flattenTaxonomy(config.taxonomy?.retail || []);
-        const component = flattenTaxonomy(config.taxonomy?.component || []);
-        return [...retail, ...component];
+        const retail = flattenTaxonomyOptions(config.taxonomy?.retail || []);
+        const component = flattenTaxonomyOptions(config.taxonomy?.component || []);
+        return uniqueTaxonomyOptions([...retail, ...component]);
     }, [config.taxonomy]);
 
     // Build a lookup map for displaying node names in the rule list
@@ -524,12 +511,26 @@ export default function DiscountRulesTab() {
 
     // Handlers for Accessories
     const handleSaveAccessoryRule = async (data: Partial<AccessoryDiscountRule>) => {
+        const ruleData = Object.fromEntries(
+            Object.entries(data).filter(([, value]) => value !== undefined),
+        );
+
         if (editRule) {
-            await updateDoc(doc(db, 'accessory_discount_rules', editRule.id), { ...data, updatedAt: serverTimestamp() });
+            await updateDoc(doc(db, 'accessory_discount_rules', editRule.id), {
+                ...ruleData,
+                ...(data.maxDiscountAmount === undefined && editRule.maxDiscountAmount !== undefined
+                    ? { maxDiscountAmount: deleteField() }
+                    : {}),
+                updatedAt: serverTimestamp(),
+            });
             toast.success('Đã cập nhật rule phụ kiện');
         } else {
             const ruleId = await getAvailableDocId('accessory_discount_rules', buildAccessoryRuleBaseId(data));
-            await setDoc(doc(db, 'accessory_discount_rules', ruleId), { ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+            await setDoc(doc(db, 'accessory_discount_rules', ruleId), {
+                ...ruleData,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+            });
             toast.success('Đã thêm rule phụ kiện mới');
         }
         await loadAccessoryRules();

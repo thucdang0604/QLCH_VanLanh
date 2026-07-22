@@ -52,6 +52,8 @@ interface PosCartPanelProps {
     payableOrders: PayableOrderInfo[];
     discountDetails: DiscountDetail[];
     autoDiscountAmount: number;
+    autoDiscountApplied: boolean;
+    onApplyAutoDiscount: () => void;
     setDiscount: Dispatch<SetStateAction<number>>;
     paymentMethod: string;
     setPaymentMethod: (value: string) => void;
@@ -81,6 +83,7 @@ interface PosCartPanelProps {
     onUpdateQuantity: (cartItemId: string, delta: number) => void;
     onUpdatePrice: (cartItemId: string, newPrice: number) => void;
     onRemoveFromCart: (cartItemId: string) => void;
+    onRemoveRepairFromCart: (repairTicketId: string) => void;
     onCheckout: () => void;
     formatPrice: (value: number) => string;
 }
@@ -109,6 +112,8 @@ export function PosCartPanel({
     payableOrders,
     discountDetails,
     autoDiscountAmount,
+    autoDiscountApplied,
+    onApplyAutoDiscount,
     setDiscount,
     paymentMethod,
     setPaymentMethod,
@@ -138,6 +143,7 @@ export function PosCartPanel({
     onUpdateQuantity,
     onUpdatePrice,
     onRemoveFromCart,
+    onRemoveRepairFromCart,
     onCheckout,
     formatPrice,
 }: PosCartPanelProps) {
@@ -260,9 +266,11 @@ export function PosCartPanel({
                         <p className="text-sm">Chưa có sản phẩm</p>
                     </div>
                 )}
-                {cart.map(item => {
+                {cart.map((item, index) => {
                     const product = products.find(candidate => candidate.id === item.productId);
                     const isFixedPaymentItem = item.isRepairTicket || item.isOrderPayment;
+                    const isFirstRepairTicketLine = Boolean(item.isRepairTicket && item.repairTicketId)
+                        && cart.findIndex(candidate => candidate.repairTicketId === item.repairTicketId) === index;
                     return (
                         <div key={item.cartItemId} className="bg-gray-50 rounded-xl p-3 space-y-2">
                             <div className="flex items-start gap-2">
@@ -281,9 +289,26 @@ export function PosCartPanel({
                                         </span>
                                     )}
                                 </div>
-                                <button onClick={() => onRemoveFromCart(item.cartItemId)} className="text-red-400 hover:text-red-600 p-0.5" aria-label="Xóa khỏi giỏ" title="Xóa khỏi giỏ">
-                                    <Trash2 size={14} />
-                                </button>
+                                {item.isRepairTicket ? (
+                                    isFirstRepairTicketLine && item.repairTicketId ? (
+                                        <button
+                                            onClick={() => onRemoveRepairFromCart(item.repairTicketId!)}
+                                            className="text-red-400 hover:text-red-600 p-0.5 text-xs font-medium"
+                                            aria-label="Bỏ toàn bộ phiếu sửa chữa khỏi giỏ"
+                                            title="Bỏ toàn bộ phiếu sửa chữa"
+                                        >
+                                            Bỏ phiếu
+                                        </button>
+                                    ) : (
+                                        <span className="text-[10px] text-gray-400 whitespace-nowrap" title="Dòng thuộc phiếu sửa chữa không thể xóa riêng lẻ">
+                                            Theo phiếu
+                                        </span>
+                                    )
+                                ) : (
+                                    <button onClick={() => onRemoveFromCart(item.cartItemId)} className="text-red-400 hover:text-red-600 p-0.5" aria-label="Xóa khỏi giỏ" title="Xóa khỏi giỏ">
+                                        <Trash2 size={14} />
+                                    </button>
+                                )}
                             </div>
                             <div className="flex items-center gap-2">
                                 <div className="flex items-center gap-1 bg-white rounded-lg border">
@@ -617,8 +642,8 @@ export function PosCartPanel({
                                 {detail.productName}: -{detail.discountAmount.toLocaleString('vi-VN')}đ ({detail.ruleName})
                             </p>
                         ))}
-                        <button type="button" onClick={() => setDiscount(previous => Math.max(previous, autoDiscountAmount))} className="mt-1 w-full py-1.5 bg-green-600 text-white rounded-lg text-xs font-semibold hover:bg-green-700 transition-colors">
-                            Áp dụng giảm {autoDiscountAmount.toLocaleString('vi-VN')}đ
+                        <button type="button" onClick={onApplyAutoDiscount} disabled={autoDiscountApplied} className="mt-1 w-full py-1.5 bg-green-600 text-white rounded-lg text-xs font-semibold hover:bg-green-700 transition-colors disabled:cursor-not-allowed disabled:bg-green-300">
+                            {autoDiscountApplied ? 'Đã áp dụng giảm' : `Áp dụng giảm ${autoDiscountAmount.toLocaleString('vi-VN')}đ`}
                         </button>
                     </div>
                 )}
@@ -714,6 +739,7 @@ export function PosCartPanel({
                         <span>{formatPrice(subtotal)}</span>
                     </div>
                     {discount > 0 && <div className="flex justify-between text-green-600"><span>Giảm giá NV</span><span>-{formatPrice(discount)}</span></div>}
+                    {autoDiscountApplied && autoDiscountAmount > 0 && <div className="flex justify-between text-green-600"><span>Giảm phụ kiện</span><span>-{formatPrice(autoDiscountAmount)}</span></div>}
                     {voucherDiscountAmount > 0 && <div className="flex justify-between text-blue-600 font-medium"><span>Voucher giảm giá</span><span>-{formatPrice(voucherDiscountAmount)}</span></div>}
                     <div className="flex justify-between font-bold text-lg text-orange-600 pt-1 border-t">
                         <span>TỔNG</span>

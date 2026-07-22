@@ -52,6 +52,8 @@ temp_git_page.tsx
 
 # Firebase & Agents
 .firebase/
+.codex/
+.playwright-cli/
 
 # AI Cache & scratch files
 .ai_cache/

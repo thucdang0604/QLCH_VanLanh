@@ -2,7 +2,7 @@
 
 
 import dynamic from 'next/dynamic';
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
     Search, ShoppingCart, Plus, Receipt, X,
@@ -30,6 +30,8 @@ import { PRODUCT_STATUS, isProductSellable } from '@/lib/productLifecycle';
 import { generateSearchKeywords } from '@/lib/utils';
 import { extractZaloQrIdentity } from '@/lib/zaloContactCardImport';
 import { PosCartPanel } from '@/features/pos/PosCartPanel';
+import { calculatePosDiscountBreakdown } from '@/features/pos/posDiscountTotals';
+import { getRepairTicketIdsInCart, removeCartItem, removeRepairTicketFromCart } from '@/features/pos/posCartRules';
 import type { AppliedVoucher, CartItem, DiscountDetail, LastOrderData, OrderLineItem, PayableOrderInfo, RepairTicketInfo, VoucherStatus } from '@/features/pos/posTypes';
 import CurrencyInput from '@/components/admin/CurrencyInput';
 
@@ -432,6 +434,15 @@ export default function POSPage() {
     const [repairLoading, setRepairLoading] = useState(false);
     const [autoDiscountAmount, setAutoDiscountAmount] = useState(0);
     const [discountDetails, setDiscountDetails] = useState<DiscountDetail[]>([]);
+    const [autoDiscountApplied, setAutoDiscountApplied] = useState(false);
+    const repairDiscountContextKey = useMemo(
+        () => linkedRepairs.map(repair => repair.id).sort().join('|'),
+        [linkedRepairs],
+    );
+
+    useEffect(() => {
+        setAutoDiscountApplied(false);
+    }, [repairDiscountContextKey]);
 
     useEffect(() => {
         if (chatPrefillApplied.current || searchParams.get('source') !== 'chat') return;
@@ -619,21 +630,37 @@ export default function POSPage() {
 
     // Auto-calculate discount when cart or linked repair changes
     useEffect(() => {
-        if (linkedRepairs.length === 0 || cart.length === 0) {
+        let cancelled = false;
+        const resetAutoDiscount = () => {
+            if (cancelled) return;
             setAutoDiscountAmount(0);
             setDiscountDetails([]);
-            return;
+        };
+
+        resetAutoDiscount();
+        if (linkedRepairs.length === 0 || cart.length === 0) {
+            return () => { cancelled = true; };
         }
-        (async () => {
+        void (async () => {
             try {
                 const rules = await fetchActiveDiscountRules();
-                if (rules.length === 0) return;
+                if (rules.length === 0) {
+                    resetAutoDiscount();
+                    return;
+                }
+
+                const repairTicketIdsInCart = getRepairTicketIdsInCart(cart);
+                const repairsInCart = linkedRepairs.filter(repair => repairTicketIdsInCart.has(repair.id));
+                if (repairsInCart.length === 0) {
+                    resetAutoDiscount();
+                    return;
+                }
 
                 let allParts: { productName: string; partType?: string; unitPriceAtUse?: number; categoryIds?: string[] }[] = [];
-                linkedRepairs.forEach(r => {
+                repairsInCart.forEach(r => {
                     allParts = [...allParts, ...r.parts];
                 });
-                const repairContexts = linkedRepairs.map(repair => ({
+                const repairContexts = repairsInCart.map(repair => ({
                     serviceName: repair.serviceName,
                     categoryPath: repair.categoryPath,
                     issues: repair.issues,
@@ -641,11 +668,14 @@ export default function POSPage() {
 
                 if (allParts.length === 0 && repairContexts.every(repair =>
                     !repair.serviceName && !repair.categoryPath?.length && (!repair.issues || repair.issues.length === 0)
-                )) return;
+                )) {
+                    resetAutoDiscount();
+                    return;
+                }
 
                 const results = calculateAccessoryDiscounts(
                     allParts,
-                    cart.map(c => {
+                    cart.filter(item => !item.isRepairTicket && !item.isOrderPayment).map(c => {
                         const prod = products.find(p => p.id === c.productId);
                         return {
                             productId: c.productId,
@@ -659,10 +689,15 @@ export default function POSPage() {
                     repairContexts
                 );
                 const totalDisc = results.reduce((s, r) => s + r.discountAmount, 0);
+                if (cancelled) return;
                 setAutoDiscountAmount(totalDisc);
                 setDiscountDetails(results);
-            } catch { /* rules not configured yet */ }
+            } catch {
+                resetAutoDiscount();
+            }
         })();
+
+        return () => { cancelled = true; };
     }, [linkedRepairs, cart, products]);
 
     const searchRef = useRef<HTMLInputElement>(null);
@@ -1104,6 +1139,7 @@ export default function POSPage() {
                         sellingPrice: 0,
                         costPrice: 0, // Gift logic cost
                         quantity: 1,
+                        repairTicketId: repair.id,
                         isRepairTicket: false
                     });
                 }
@@ -1170,7 +1206,23 @@ export default function POSPage() {
     };
 
     const removeFromCart = (cartItemId: string) => {
-        setCart(prev => prev.filter(c => c.cartItemId !== cartItemId));
+        setCart(prev => removeCartItem(prev, cartItemId));
+        setAutoDiscountAmount(0);
+        setDiscountDetails([]);
+    };
+
+    const removeRepairFromCart = async (repairTicketId: string) => {
+        const repairItemCount = cart.filter(item => item.repairTicketId === repairTicketId).length;
+        if (repairItemCount === 0) return;
+
+        if (!await appConfirm(
+            `Bỏ toàn bộ ${repairItemCount} dòng thuộc phiếu sửa chữa này khỏi giỏ?`,
+            { title: 'Bỏ phiếu sửa chữa', confirmText: 'Bỏ toàn bộ phiếu', destructive: true },
+        )) return;
+
+        setCart(prev => removeRepairTicketFromCart(prev, repairTicketId));
+        setAutoDiscountAmount(0);
+        setDiscountDetails([]);
     };
 
     const subtotal = cart.reduce((sum, c) => sum + c.sellingPrice * c.quantity, 0);
@@ -1178,7 +1230,12 @@ export default function POSPage() {
         .filter(c => c.isOrderPayment)
         .reduce((sum, c) => sum + c.sellingPrice * c.quantity, 0);
     const discountableSubtotal = Math.max(0, subtotal - orderPaymentSubtotal);
-    const effectiveDiscount = Math.min(discount, discountableSubtotal);
+    const { effectiveDiscount } = calculatePosDiscountBreakdown({
+        discountableSubtotal,
+        manualDiscount: discount,
+        autoDiscountAmount,
+        autoDiscountApplied,
+    });
 
     // Calculate voucher discount automatically based on subtotal
     const voucherDiscountAmount = appliedVoucher ? (
@@ -1476,12 +1533,14 @@ export default function POSPage() {
             payableOrders={payableOrders}
             discountDetails={discountDetails}
             autoDiscountAmount={autoDiscountAmount}
+            autoDiscountApplied={autoDiscountApplied}
+            onApplyAutoDiscount={() => setAutoDiscountApplied(true)}
             setDiscount={setDiscount}
             paymentMethod={paymentMethod}
             setPaymentMethod={setPaymentMethod}
             depositPaymentMethod={depositPaymentMethod}
             setDepositPaymentMethod={setDepositPaymentMethod}
-            discount={effectiveDiscount}
+            discount={discount}
             voucherCode={voucherCode}
             setVoucherCode={setVoucherCode}
             voucherStatus={voucherStatus}
@@ -1505,6 +1564,7 @@ export default function POSPage() {
             onUpdateQuantity={updateQuantity}
             onUpdatePrice={updatePrice}
             onRemoveFromCart={removeFromCart}
+            onRemoveRepairFromCart={removeRepairFromCart}
             onCheckout={handleCheckout}
             formatPrice={formatPrice}
         />

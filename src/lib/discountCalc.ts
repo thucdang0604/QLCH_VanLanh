@@ -56,9 +56,7 @@ function matchesCategoryCandidate(value: string, ruleCategory: string): boolean 
         current === rule ||
         current === normalizedRule ||
         current.startsWith(rule + '/') ||
-        rule.startsWith(current + '/') ||
-        current.startsWith(normalizedRule + '/') ||
-        normalizedRule.startsWith(current + '/')
+        current.startsWith(normalizedRule + '/')
     );
 }
 
@@ -83,7 +81,8 @@ function matchesCategoryPath(categoryPath: string[] | undefined, ruleCategory: s
  *
  * Logic:
  * IF cart contains a repair service matching `triggerKeywords` or `triggerServiceCategory`
- * AND cart contains a product matching `targetKeywords` or `targetProductCategory`
+ * AND cart contains a product matching `targetProductCategory` when configured,
+ * or `targetKeywords` for keyword-only rules.
  * THEN apply discount to that product.
  *
  * Returns array of { productName, originalPrice, discountAmount, ruleName }
@@ -126,15 +125,17 @@ export function calculateAccessoryDiscounts(
         // Find matching cart items for discount
         for (const item of cartItems) {
             const itemText = `${item.productName} ${item.category || ''}`;
-            // 1. Keyword matching (primary)
-            const kwMatch = matchesKeywords(itemText, rule.targetKeywords);
-            // 2. CategoryIds matching
+            // A configured taxonomy is authoritative. Keywords populated from
+            // taxonomy metadata are often broad and must not discount products
+            // outside the selected category.
             const catMatch = matchesCategoryId(item.categoryIds, rule.targetProductCategory);
-            // 3. Legacy: category string includes
             const legacyCatMatch = !!(rule.targetProductCategory && item.category &&
                 item.category.toLowerCase().includes(rule.targetProductCategory.toLowerCase()));
+            const targetMatch = rule.targetProductCategory
+                ? catMatch || legacyCatMatch
+                : matchesKeywords(itemText, rule.targetKeywords);
 
-            if (!kwMatch && !catMatch && !legacyCatMatch) continue;
+            if (!targetMatch) continue;
 
             let discountAmount: number;
             if (rule.discountType === 'percentage') {

@@ -447,7 +447,7 @@ service cloud.firestore {
 
     // Accessory Discount Rules
     match /accessory_discount_rules/{ruleId} {
-      allow read, write: if hasPermission('manage_settings');
+      allow read, write: if hasPermission('manage_discounts');
     }
 
     // Vouchers (Mã giảm giá) — storefront/admin mutation đi qua server APIs.
