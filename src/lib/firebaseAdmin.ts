@@ -5,9 +5,11 @@ import { getDatabase, type Database } from 'firebase-admin/database';
 import { getStorage, type Storage } from 'firebase-admin/storage';
 import fs from 'node:fs';
 import path from 'node:path';
+import { shouldApplyRtdbProjection } from '@/lib/authorizationLifecycle';
+import { getE2EFirebaseEmulatorConfig, isE2ETestMode } from '@/lib/e2eTestMode';
 
 // Auto-load environment variables from .env.local for standalone scripts
-if (typeof window === 'undefined') {
+if (typeof window === 'undefined' && !isE2ETestMode()) {
   try {
     const envPath = path.resolve(process.cwd(), '.env.local');
     if (fs.existsSync(envPath)) {
@@ -85,6 +87,7 @@ function getServiceAccountFromEnv(): ServiceAccount | null {
  * Trả về false khi chạy local dev mà không có service account hoặc ADC.
  */
 export function isAdminAvailable(): boolean {
+  if (isE2ETestMode()) return Boolean(getE2EFirebaseEmulatorConfig());
   // Có service account credentials
   if (getServiceAccountFromEnv()) return true;
 
@@ -103,6 +106,15 @@ export function isAdminAvailable(): boolean {
 const ADMIN_APP_NAME = 'vanlanh-admin';
 
 function initAdminApp(): App {
+  const e2eEmulator = getE2EFirebaseEmulatorConfig();
+  if (e2eEmulator) {
+    return initializeApp({
+      projectId: e2eEmulator.projectId,
+      databaseURL: `http://${e2eEmulator.host}:${e2eEmulator.databasePort}?ns=${e2eEmulator.projectId}`,
+      storageBucket: `${e2eEmulator.projectId}.appspot.com`,
+    }, ADMIN_APP_NAME);
+  }
+
   const serviceAccount = getServiceAccountFromEnv();
   const projectId = serviceAccount?.projectId || getRequiredEnv('FIREBASE_ADMIN_PROJECT_ID');
   const fallbackProjectId = getRequiredEnv('NEXT_PUBLIC_FIREBASE_PROJECT_ID')
@@ -167,3 +179,50 @@ export function getAdminStorage(): Storage {
   return cachedAdminStorage;
 }
 
+export async function syncUserRtdbRoleGrant(
+  uid: string,
+  role: string,
+  permissions: string[],
+  authorizationVersion: number,
+  ttlMs: number = 20 * 60 * 1000
+): Promise<void> {
+  if (!isAdminAvailable()) {
+    throw new Error('Firebase Admin credentials are not configured for RTDB role sync.');
+  }
+  if (!Number.isSafeInteger(authorizationVersion) || authorizationVersion < 0) {
+    throw new Error('Invalid authorization version for RTDB role grant');
+  }
+
+  const rtdb = getAdminRtdb();
+  const ref = rtdb.ref(`admin_roles/${uid}`);
+  const now = Date.now();
+
+  const grant = role === 'admin' || role === 'staff'
+    ? {
+        role,
+        permissions: Object.fromEntries(permissions.map((permission) => [permission, true])),
+        expiresAt: now + ttlMs,
+        authorizationVersion,
+        updatedAt: now,
+      }
+    : {
+        // Keep a versioned tombstone instead of removing the node. A delayed
+        // request carrying an older version must never republish a revoked grant.
+        role: 'customer',
+        permissions: {},
+        expiresAt: 0,
+        authorizationVersion,
+        revokedAt: now,
+        updatedAt: now,
+      };
+
+  await ref.transaction((current: unknown) => {
+    const currentVersion = current
+      && typeof current === 'object'
+      && Number.isSafeInteger((current as { authorizationVersion?: unknown }).authorizationVersion)
+      ? (current as { authorizationVersion: number }).authorizationVersion
+      : -1;
+
+    return shouldApplyRtdbProjection(currentVersion, authorizationVersion) ? grant : current;
+  });
+}

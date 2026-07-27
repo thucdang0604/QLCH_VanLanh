@@ -15,6 +15,22 @@ These rules are mandatory for every coding task in this repository.
 5. Use `roadmap/ui/data/source_intelligence.json` as the first reference for database schema and API inventory, then verify live code when exact behavior matters.
 6. State the files inspected, applicable rules, and short plan before large or risky edits.
 
+## Strict Editing Safety Rules
+
+- Never run `git restore`, `git checkout --`, `git reset --hard`, `git clean`, `git stash pop`, or `git stash drop`.
+- Never overwrite an entire existing source file unless explicitly authorized.
+- Before editing any file, run:
+  - `git status --short`
+  - `git diff -- <file>`
+  - `git diff --cached -- <file>`
+- If the file contains uncommitted changes not created in this task, STOP and report the conflict. Do not edit or restore it.
+- Edit only exact, inspected regions using small patches. No broad replace-all, generated whole-file rewrites, or shell redirection into source files.
+- After every logical edit, run:
+  - `git diff --check -- <file>`
+  - `git diff -- <file>`
+- If your edit is wrong, revert only your own hunk with another patch. If ownership is uncertain, STOP and request Codex review.
+- Commit only focused, validated work. Never include unrelated changes.
+
 ## Editing Rules
 
 1. Make surgical changes only in files required by the task.

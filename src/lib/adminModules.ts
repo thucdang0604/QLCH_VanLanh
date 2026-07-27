@@ -207,9 +207,10 @@ export const ADMIN_ROLE_PRESETS: AdminRolePreset[] = [
 ];
 
 export function getMatchedAdminRoute(path: string): AdminRouteItem | undefined {
+    const cleanPath = (path || '').split('?')[0];
     return [...ADMIN_ROUTE_ITEMS]
         .sort((a, b) => b.href.length - a.href.length)
-        .find((item) => path === item.href || path.startsWith(`${item.href}/`));
+        .find((item) => cleanPath === item.href || cleanPath.startsWith(`${item.href}/`));
 }
 
 export function canStaffAccess(path: string, permissions?: string[]): boolean {
@@ -235,4 +236,59 @@ export function findFirstAccessibleRoute(permissions?: string[]): string {
     }
 
     return '/admin/login';
+}
+
+export function sanitizeAdminRedirectTarget(target?: string | null): string {
+    if (!target || typeof target !== 'string') return '';
+    const trimmed = target.trim();
+    if (!trimmed.startsWith('/admin')) return '';
+    if (trimmed.startsWith('//')) return '';
+    if (trimmed === '/admin/login' || trimmed.startsWith('/admin/login?')) return '';
+
+    try {
+        const parsed = new URL(trimmed, 'http://localhost');
+        if (parsed.origin !== 'http://localhost') return '';
+        if (!parsed.pathname.startsWith('/admin') || parsed.pathname.startsWith('//')) return '';
+        if (parsed.pathname === '/admin/login') return '';
+
+        parsed.searchParams.delete('from');
+        return parsed.pathname + parsed.search;
+    } catch {
+        return '';
+    }
+}
+
+export function resolveAdminTargetRoute(
+    role: 'admin' | 'staff' | 'customer',
+    permissions: string[] = [],
+    fromParam?: string | null
+): { target: string | null; error?: string } {
+    if (role === 'customer') {
+        return { target: null, error: 'Tài khoản này không có quyền truy cập hệ thống quản trị.' };
+    }
+
+    const sanitizedFrom = sanitizeAdminRedirectTarget(fromParam);
+
+    if (role === 'admin') {
+        if (sanitizedFrom) {
+            return { target: sanitizedFrom };
+        }
+        return { target: '/admin' };
+    }
+
+    // Staff role:
+    if (!permissions || permissions.length === 0) {
+        return { target: null, error: 'Tài khoản nhân viên chưa được phân quyền truy cập.' };
+    }
+
+    if (sanitizedFrom && canStaffAccess(sanitizedFrom, permissions)) {
+        return { target: sanitizedFrom };
+    }
+
+    const firstAccessible = findFirstAccessibleRoute(permissions);
+    if (firstAccessible === '/admin/login') {
+        return { target: null, error: 'Tài khoản nhân viên chưa được phân quyền truy cập.' };
+    }
+
+    return { target: firstAccessible };
 }

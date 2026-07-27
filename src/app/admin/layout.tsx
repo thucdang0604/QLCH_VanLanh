@@ -103,18 +103,27 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     useEffect(() => {
         if (loading) return;
 
+        // On login page, AdminLoginPage is the single authoritative owner of login redirects
         if (pathname === '/admin/login') {
-            if (user && (user.role === 'admin' || user.role === 'staff')) {
-                router.push(user.role === 'staff' ? findFirstAccessibleRoute(user.permissions) : '/admin');
-            }
             return;
         }
 
         if (!user) {
-            router.push('/admin/login');
+            router.push(`/admin/login?from=${encodeURIComponent(pathname)}`);
         } else if (user.role !== 'admin' && user.role !== 'staff') {
             toastError('Bạn không có quyền truy cập trang quản trị!');
             logout().then(() => router.push('/admin/login'));
+        } else if (user.role === 'staff') {
+            // Staff route protection check
+            if (!canStaffAccess(pathname, user.permissions)) {
+                const target = findFirstAccessibleRoute(user.permissions);
+                if (target === '/admin/login') {
+                    toastError('Tài khoản nhân viên chưa được phân quyền truy cập!');
+                    logout().then(() => router.push('/admin/login'));
+                } else {
+                    router.push(target);
+                }
+            }
         }
     }, [user, loading, router, pathname, logout]);
 

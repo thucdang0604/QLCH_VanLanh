@@ -1,9 +1,27 @@
 import { NextRequest } from 'next/server';
-import { getAdminAuth, getAdminDb, getAdminRtdb, isAdminAvailable } from '@/lib/firebaseAdmin';
-import { signPayload, COOKIE_NAME } from '@/lib/sessionCookie';
+import { FieldValue } from 'firebase-admin/firestore';
+import { getAdminAuth, getAdminDb } from '@/lib/firebaseAdmin';
+import {
+  getCurrentAuthorization,
+  isFirebaseTokenCurrent,
+  nextAuthorizationVersion,
+} from '@/lib/authorizationLifecycle';
+import {
+  AUTHORIZATION_PROJECTION_JOBS,
+  createPendingAuthorizationProjection,
+  markAuthorizationProjectionPending,
+  markAuthorizationProjectionSynced,
+  reconcilePendingAuthorizationProjections,
+  syncAuthorizationProjection,
+  type AuthorizationProjection,
+} from '@/lib/authorizationProjection';
+import { getCurrentServerSession } from '@/lib/serverSession';
+import { signPayload, verifyPayload, COOKIE_NAME } from '@/lib/sessionCookie';
 import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 
-const RTDB_ROLE_SYNC_TIMEOUT_MS = 10000;
+const SESSION_TTL_MS = 20 * 60 * 1000;
+const RTDB_ROLE_SYNC_TIMEOUT_MS = 10_000;
+const PENDING_PROJECTION_RECONCILE_TIMEOUT_MS = 1_500;
 
 function timeoutAfter(ms: number, message: string): Promise<never> {
   return new Promise((_, reject) => {
@@ -11,82 +29,189 @@ function timeoutAfter(ms: number, message: string): Promise<never> {
   });
 }
 
+function getBearerToken(request: NextRequest): string | null {
+  const header = request.headers.get('authorization');
+  const match = header?.match(/^Bearer\s+(.+)$/i);
+  return match?.[1]?.trim() || null;
+}
+
+async function resolveLogoutUid(request: NextRequest): Promise<string | null> {
+  const bearerToken = getBearerToken(request);
+  if (bearerToken) {
+    try {
+      return (await getAdminAuth().verifyIdToken(bearerToken)).uid;
+    } catch {
+      // A malformed bearer token must not prevent the valid cookie fallback.
+    }
+  }
+
+  const cookie = request.cookies.get(COOKIE_NAME)?.value;
+  const session = cookie ? await verifyPayload(cookie) : null;
+  return session?.uid || null;
+}
+
+/**
+ * GET /api/auth/session
+ * The Edge middleware uses this Node runtime route to verify that an otherwise
+ * valid cookie still matches current Firestore authorization state.
+ */
+export const GET = withApi({ name: 'auth/session/validate' }, async (request, context) => {
+  const session = await getCurrentServerSession(request.cookies.get(COOKIE_NAME)?.value);
+  if (!session || (session.session.role !== 'admin' && session.session.role !== 'staff')) {
+    return context.json({ valid: false }, {
+      status: 401,
+      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
+    });
+  }
+
+  return context.json({ valid: true }, {
+    headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
+  });
+});
+
 /**
  * POST /api/auth/session
- * Receives a Firebase ID token, verifies it, reads the user's role + permissions,
- * then sets a signed HttpOnly session cookie for middleware RBAC.
+ * Receives a Firebase ID token, verifies current authorization, and sets a
+ * short-lived signed cookie that includes the authoritative version fence.
  */
 export const POST = withApi({
   name: 'auth/session',
   onError: (error, context) => context.error(getApiErrorMessage(error, 'Session creation failed'), getApiErrorStatus(error, 401)),
 }, async (req: NextRequest, context) => {
-    const { idToken } = await context.readJson(req);
-    if (!idToken || typeof idToken !== 'string') {
-      return context.json({ error: 'Missing idToken' }, { status: 400 });
-    }
+  const { idToken } = await context.readJson(req);
+  if (!idToken || typeof idToken !== 'string') {
+    return context.json({ error: 'Missing idToken' }, { status: 400 });
+  }
 
-    // Verify Firebase ID token. Revocation checks require extra Firebase Auth
-    // IAM permissions on the Cloud Functions service account; the signed
-    // session cookie is short-lived and role authorization is read from
-    // Firestore below.
-    const decoded = await getAdminAuth().verifyIdToken(idToken);
-    const uid = decoded.uid;
+  const decoded = await getAdminAuth().verifyIdToken(idToken);
+  const uid = decoded.uid;
+  const snap = await getAdminDb().collection('users').doc(uid).get();
+  const authorization = getCurrentAuthorization(snap.exists ? (snap.data() ?? {}) : {});
 
-    // Read role + permissions from Firestore
-    const snap = await getAdminDb().collection('users').doc(uid).get();
-    const data = snap.exists ? (snap.data() as Partial<{ role: string; permissions: string[] }>) : {};
+  if (!isFirebaseTokenCurrent(decoded.auth_time, authorization)) {
+    return context.json({ error: 'Session token invalidated by logout' }, { status: 401 });
+  }
 
-    const roleRaw = typeof data.role === 'string' ? data.role : 'customer';
-    const role = roleRaw === 'admin' || roleRaw === 'staff' || roleRaw === 'customer' ? roleRaw : 'customer' as const;
-    const permissions = Array.isArray(data.permissions) ? data.permissions.filter((p) => typeof p === 'string') : [];
+  const iat = Date.now();
+  const exp = iat + SESSION_TTL_MS;
+  const cookieValue = await signPayload({
+    uid,
+    role: authorization.role,
+    permissions: authorization.permissions,
+    authorizationVersion: authorization.authorizationVersion,
+    iat,
+    exp,
+  });
 
-    // Sign and set cookie
-    const cookieValue = await signPayload({ role, permissions });
+  const projection: AuthorizationProjection = {
+    uid,
+    role: authorization.role,
+    permissions: authorization.permissions,
+    authorizationVersion: authorization.authorizationVersion,
+  };
 
-    let rtdbRoleSynced = false;
-    let rtdbRoleSyncError: string | null = null;
+  let rtdbRoleSynced = false;
+  let rtdbRoleSyncError: string | null = null;
+  try {
+    await Promise.race([
+      syncAuthorizationProjection(projection),
+      timeoutAfter(RTDB_ROLE_SYNC_TIMEOUT_MS, 'RTDB authorization projection timed out'),
+    ]);
+    rtdbRoleSynced = true;
+  } catch (projectionError) {
+    rtdbRoleSyncError = 'RTDB authorization projection is pending reconciliation.';
+    console.error('RTDB authorization projection failed during session bootstrap:', projectionError);
+  }
 
-    if (role === 'admin' || role === 'staff') {
-      const permissionMap = Object.fromEntries(permissions.map((permission) => [permission, true]));
-      if (!isAdminAvailable()) {
-        rtdbRoleSyncError = 'Firebase Admin credentials are not configured for RTDB role sync.';
-      } else {
-        try {
-          await Promise.race([
-            getAdminRtdb().ref(`admin_roles/${uid}`).set({
-              role,
-              permissions: permissionMap,
-              expiresAt: Date.now() + 1000 * 60 * 60 * 24 * 5,
-              updatedAt: Date.now(),
-            }),
-            timeoutAfter(RTDB_ROLE_SYNC_TIMEOUT_MS, 'RTDB admin role sync timed out'),
-          ]);
-          rtdbRoleSynced = true;
-        } catch (roleSyncError) {
-          console.error('Admin RTDB role sync failed:', roleSyncError);
-          rtdbRoleSyncError = roleSyncError instanceof Error ? roleSyncError.message : String(roleSyncError);
-        }
-      }
-    }
+  // Every successful bootstrap is also a bounded retry opportunity for durable
+  // revoke jobs. The authenticated internal endpoint can drain the same queue
+  // on a schedule when operations need faster recovery.
+  try {
+    await Promise.race([
+      reconcilePendingAuthorizationProjections(5),
+      timeoutAfter(PENDING_PROJECTION_RECONCILE_TIMEOUT_MS, 'Pending RTDB reconciliation timed out'),
+    ]);
+  } catch (reconcileError) {
+    console.warn('Pending RTDB authorization reconciliation was deferred:', reconcileError);
+  }
 
-    const res = context.json({ success: true, role, rtdbRoleSynced, rtdbRoleSyncError });
-    res.cookies.set(COOKIE_NAME, cookieValue, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      path: '/',
-      maxAge: 60 * 60 * 24 * 5, // 5 days
-    });
+  const res = context.json({
+    success: true,
+    role: authorization.role,
+    expiresAt: exp,
+    rtdbRoleSynced,
+    rtdbRoleSyncError,
+  });
+  res.cookies.set(COOKIE_NAME, cookieValue, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+    maxAge: SESSION_TTL_MS / 1000,
+  });
 
-    return res;
+  return res;
 });
 
 /**
  * DELETE /api/auth/session
- * Clears the session cookie.
+ * A Firebase bearer token is preferred so cleanup still works after the page
+ * cookie has expired. The authoritative version changes before any RTDB call.
  */
-export const DELETE = withApi({ name: 'auth/session/delete' }, async (_request, context) => {
-  const res = context.json({ success: true });
+export const DELETE = withApi({ name: 'auth/session/delete' }, async (request: NextRequest, context) => {
+  const uid = await resolveLogoutUid(request);
+  let rtdbRoleSynced = true;
+  let rtdbRoleSyncError: string | null = null;
+
+  if (uid) {
+    const db = getAdminDb();
+    const userRef = db.collection('users').doc(uid);
+    const jobRef = db.collection(AUTHORIZATION_PROJECTION_JOBS).doc(uid);
+    const now = Date.now();
+    const logoutAuthTime = Math.floor(now / 1000);
+    let projection: AuthorizationProjection | null = null;
+
+    await db.runTransaction(async (transaction) => {
+      const userSnap = await transaction.get(userRef);
+      const current = getCurrentAuthorization(userSnap.exists ? (userSnap.data() ?? {}) : {});
+      const authorizationVersion = nextAuthorizationVersion(current.authorizationVersion);
+
+      projection = {
+        uid,
+        role: 'customer',
+        permissions: [],
+        authorizationVersion,
+      };
+
+      transaction.set(userRef, {
+        authorizationVersion,
+        lastLogoutAt: now,
+        lastLogoutAuthTime: logoutAuthTime,
+        updatedAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+      transaction.set(jobRef, createPendingAuthorizationProjection(projection), { merge: true });
+    });
+
+    try {
+      await Promise.race([
+        syncAuthorizationProjection(projection!),
+        timeoutAfter(RTDB_ROLE_SYNC_TIMEOUT_MS, 'RTDB authorization revoke timed out'),
+      ]);
+      await markAuthorizationProjectionSynced(projection!);
+    } catch (projectionError) {
+      rtdbRoleSynced = false;
+      rtdbRoleSyncError = 'RTDB authorization revoke is pending reconciliation.';
+      console.error('RTDB authorization revoke is pending reconciliation:', projectionError);
+      await markAuthorizationProjectionPending(projection!, projectionError);
+    }
+  }
+
+  const res = context.json({
+    success: true,
+    serverCleanupCompleted: Boolean(uid),
+    rtdbRoleSynced,
+    rtdbRoleSyncError,
+  }, { status: rtdbRoleSynced ? 200 : 202 });
   res.cookies.set(COOKIE_NAME, '', {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',

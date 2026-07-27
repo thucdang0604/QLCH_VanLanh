@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
 import { usePathname } from 'next/navigation';
 import type { User } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
@@ -22,6 +22,9 @@ export interface AppUser {
 interface AuthContextType {
     user: AppUser | null;
     loading: boolean;
+    sessionBootstrapReady: boolean;
+    sessionBootstrapError: string | null;
+    retrySessionBootstrap: () => Promise<void>;
     login: (email: string, password: string) => Promise<void>;
     signup: (email: string, password: string, displayName: string, phone: string) => Promise<void>;
     logout: () => Promise<void>;
@@ -35,6 +38,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [user, setUser] = useState<AppUser | null>(null);
     const [loading, setLoading] = useState(true);
     const [shouldInitializeAuth, setShouldInitializeAuth] = useState(false);
+    const [sessionBootstrapReady, setSessionBootstrapReady] = useState(false);
+    const [sessionBootstrapError, setSessionBootstrapError] = useState<string | null>(null);
+
+    const sessionGenRef = useRef(0);
+    const activeAbortControllerRef = useRef<AbortController | null>(null);
+
+    const cancelInFlightRequests = useCallback(() => {
+        sessionGenRef.current += 1;
+        if (activeAbortControllerRef.current) {
+            activeAbortControllerRef.current.abort();
+            activeAbortControllerRef.current = null;
+        }
+    }, []);
 
     // Determine if we should lazy-load Auth based on pathname or history
     useEffect(() => {
@@ -86,9 +102,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return newUser;
     }, []);
 
+    const performSessionBootstrap = useCallback(async (firebaseUser: User, gen: number): Promise<boolean> => {
+        try {
+            const controller = new AbortController();
+            activeAbortControllerRef.current = controller;
+            const timeout = window.setTimeout(() => controller.abort(), 8000);
+
+            const idToken = await firebaseUser.getIdToken();
+            if (sessionGenRef.current !== gen) return false;
+
+            const sessionRes = await fetch('/api/auth/session', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ idToken }),
+                signal: controller.signal,
+            }).finally(() => {
+                window.clearTimeout(timeout);
+                if (activeAbortControllerRef.current === controller) {
+                    activeAbortControllerRef.current = null;
+                }
+            });
+
+            if (sessionGenRef.current !== gen) return false;
+            return sessionRes.ok;
+        } catch {
+            return false;
+        }
+    }, []);
+
     // Listen to auth state AND token refresh — lazily load firebase/auth only when needed.
-    // Uses onIdTokenChanged (superset of onAuthStateChanged) so session cookie
-    // auto-refreshes when Firebase token refreshes (~every 55 min). Fixes BUG-SEC-001.
     useEffect(() => {
         if (!shouldInitializeAuth) return;
 
@@ -105,9 +147,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
                 const localUnsubscribe = onIdTokenChanged(auth, async (firebaseUser) => {
                     if (firebaseUser) {
+                        const gen = ++sessionGenRef.current;
+                        const currentUid = firebaseUser.uid;
+
                         if (firebaseUser.isAnonymous) {
-                            if (isMounted) {
+                            if (isMounted && sessionGenRef.current === gen) {
                                 setUser(null);
+                                setSessionBootstrapReady(true);
+                                setSessionBootstrapError(null);
                                 setLoading(false);
                             }
                             initialAuthResolved = true;
@@ -115,43 +162,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                         }
                         localStorage.setItem('has_logged_in', 'true');
 
-                        // On first auth resolve, fetch user data + sync session.
-                        // On subsequent token refreshes, only re-sync session cookie.
                         if (!initialAuthResolved) {
                             try {
                                 const appUser = await fetchUserData(firebaseUser);
-                                if (isMounted) setUser(appUser);
-                                if (isMounted) setLoading(false);
+                                if (sessionGenRef.current !== gen) return;
 
-                                // Sync server-side session cookie for middleware RBAC.
-                                // This must not block rendering the admin UI.
                                 if (appUser.role === 'admin' || appUser.role === 'staff') {
-                                    const idToken = await firebaseUser.getIdToken();
-                                    const controller = new AbortController();
-                                    const timeout = window.setTimeout(() => controller.abort(), 5000);
-                                    fetch('/api/auth/session', {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ idToken }),
-                                        signal: controller.signal,
-                                    })
-                                        .then(async (sessionRes) => {
-                                            if (!sessionRes.ok) {
-                                                console.warn('Admin session sync failed:', await sessionRes.text().catch(() => ''));
-                                            }
-                                        })
-                                        .catch((error) => console.warn('Admin session sync failed:', error))
-                                        .finally(() => window.clearTimeout(timeout));
+                                    const bootstrapped = await performSessionBootstrap(firebaseUser, gen);
+                                    if (isMounted && sessionGenRef.current === gen && auth.currentUser?.uid === currentUid) {
+                                        if (bootstrapped) {
+                                            setUser(appUser);
+                                            setSessionBootstrapReady(true);
+                                            setSessionBootstrapError(null);
+                                        } else {
+                                            setUser(null);
+                                            setSessionBootstrapReady(false);
+                                            setSessionBootstrapError('Không thể khởi tạo phiên làm việc trên máy chủ. Vui lòng bấm thử lại.');
+                                        }
+                                    }
+                                } else {
+                                    if (isMounted && sessionGenRef.current === gen && auth.currentUser?.uid === currentUid) {
+                                        setUser(appUser);
+                                        setSessionBootstrapReady(true);
+                                        setSessionBootstrapError(null);
+                                    }
                                 }
                             } catch (error) {
                                 console.error('Error fetching user data:', error);
-                                if (isMounted) setUser(null);
+                                if (isMounted && sessionGenRef.current === gen) {
+                                    setUser(null);
+                                    setSessionBootstrapReady(false);
+                                }
                             }
+                            if (isMounted && sessionGenRef.current === gen) {
+                                setLoading(false);
+                            }
+                            initialAuthResolved = true;
                         } else {
-                            // Token refresh — re-sync session cookie only (no Firestore read).
+                            // Token refresh — re-sync session cookie
                             try {
                                 const idToken = await firebaseUser.getIdToken();
+                                if (sessionGenRef.current !== gen) return;
+
                                 const controller = new AbortController();
+                                activeAbortControllerRef.current = controller;
                                 const timeout = window.setTimeout(() => controller.abort(), 5000);
                                 fetch('/api/auth/session', {
                                     method: 'POST',
@@ -160,16 +214,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                                     signal: controller.signal,
                                 })
                                     .catch((error) => console.warn('Session refresh failed:', error))
-                                    .finally(() => window.clearTimeout(timeout));
+                                    .finally(() => {
+                                        window.clearTimeout(timeout);
+                                        if (activeAbortControllerRef.current === controller) {
+                                            activeAbortControllerRef.current = null;
+                                        }
+                                    });
                             } catch (error) {
                                 console.warn('Token refresh session sync error:', error);
                             }
                         }
                     } else {
-                        if (isMounted) setUser(null);
+                        cancelInFlightRequests();
+                        initialAuthResolved = false;
+                        if (isMounted) {
+                            setUser(null);
+                            setSessionBootstrapReady(true);
+                            setSessionBootstrapError(null);
+                            setLoading(false);
+                        }
                     }
-                    if (isMounted) setLoading(false);
-                    initialAuthResolved = true;
                 });
 
                 if (!isMounted) {
@@ -189,7 +253,91 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 unsubscribe();
             }
         };
-    }, [fetchUserData, shouldInitializeAuth]);
+    }, [cancelInFlightRequests, fetchUserData, performSessionBootstrap, shouldInitializeAuth]);
+
+    const retrySessionBootstrap = useCallback(async () => {
+        const gen = ++sessionGenRef.current;
+        setLoading(true);
+        setSessionBootstrapError(null);
+        try {
+            const auth = await getAuthInstance();
+            const currentUser = auth.currentUser;
+            if (!currentUser || sessionGenRef.current !== gen) {
+                setLoading(false);
+                return;
+            }
+            const appUser = await fetchUserData(currentUser);
+            if (sessionGenRef.current !== gen) return;
+
+            if (appUser.role === 'admin' || appUser.role === 'staff') {
+                const bootstrapped = await performSessionBootstrap(currentUser, gen);
+                if (sessionGenRef.current === gen && auth.currentUser?.uid === currentUser.uid) {
+                    if (bootstrapped) {
+                        setUser(appUser);
+                        setSessionBootstrapReady(true);
+                        setSessionBootstrapError(null);
+                    } else {
+                        setUser(null);
+                        setSessionBootstrapReady(false);
+                        setSessionBootstrapError('Không thể khởi tạo phiên làm việc trên máy chủ. Vui lòng bấm thử lại.');
+                    }
+                }
+            } else {
+                if (sessionGenRef.current === gen) {
+                    setUser(appUser);
+                    setSessionBootstrapReady(true);
+                    setSessionBootstrapError(null);
+                }
+            }
+        } catch {
+            if (sessionGenRef.current === gen) {
+                setSessionBootstrapError('Không thể khởi tạo phiên làm việc. Vui lòng thử lại.');
+            }
+        } finally {
+            if (sessionGenRef.current === gen) {
+                setLoading(false);
+            }
+        }
+    }, [fetchUserData, performSessionBootstrap]);
+
+    // Open-Tab Sliding Session Refresh: Active admin/staff tabs automatically
+    // refresh the page session cookie every 8 minutes while mounted to prevent
+    // 20-minute server-side exp expiration.
+    useEffect(() => {
+        if (!user || (user.role !== 'admin' && user.role !== 'staff')) return;
+
+        const REFRESH_INTERVAL_MS = 8 * 60 * 1000; // 8 minutes
+        const interval = setInterval(async () => {
+            try {
+                const gen = sessionGenRef.current;
+                const auth = await getAuthInstance();
+                const currentUser = auth.currentUser;
+                if (!currentUser || sessionGenRef.current !== gen) return;
+
+                const idToken = await currentUser.getIdToken();
+                if (sessionGenRef.current !== gen) return;
+
+                const controller = new AbortController();
+                activeAbortControllerRef.current = controller;
+                const timeout = window.setTimeout(() => controller.abort(), 8000);
+                await fetch('/api/auth/session', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ idToken }),
+                    signal: controller.signal,
+                }).finally(() => {
+                    window.clearTimeout(timeout);
+                    if (activeAbortControllerRef.current === controller) {
+                        activeAbortControllerRef.current = null;
+                    }
+                });
+            } catch (error) {
+                console.warn('Background session refresh failed:', error);
+            }
+        }, REFRESH_INTERVAL_MS);
+
+        return () => clearInterval(interval);
+    }, [user]);
 
     const triggerAuthInit = useCallback(() => {
         setShouldInitializeAuth(true);
@@ -234,16 +382,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // Logout
     const logout = useCallback(async (): Promise<void> => {
-        // Clear server-side session cookie before signing out
-        await fetch('/api/auth/session', { method: 'DELETE' }).catch(() => { /* non-blocking */ });
+        cancelInFlightRequests();
         const auth = await getAuthInstance();
+        const currentUser = auth.currentUser;
+        let serverCleanupFailed = false;
+
+        try {
+            const idToken = currentUser ? await currentUser.getIdToken() : null;
+            const response = await fetch('/api/auth/session', {
+                method: 'DELETE',
+                headers: idToken ? { Authorization: 'Bearer ' + idToken } : undefined,
+            });
+            if (!response.ok) {
+                serverCleanupFailed = true;
+                console.error('Logout server cleanup failed:', await response.text().catch(() => ''));
+            }
+        } catch (error) {
+            serverCleanupFailed = true;
+            console.error('Logout server cleanup failed:', error);
+        }
+
         const { signOut } = await import('firebase/auth');
         await signOut(auth);
         if (typeof window !== 'undefined') {
             localStorage.removeItem('has_logged_in');
         }
         setUser(null);
-    }, []);
+        setSessionBootstrapReady(true);
+        setSessionBootstrapError(serverCleanupFailed
+            ? 'Phiên cục bộ đã đăng xuất nhưng máy chủ chưa xác nhận thu hồi. Vui lòng đăng nhập lại để thử đồng bộ.'
+            : null);
+    }, [cancelInFlightRequests]);
 
     // Google Sign In
     const googleSignIn = useCallback(async (): Promise<void> => {
@@ -255,7 +424,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, [triggerAuthInit]);
 
     return (
-        <AuthContext.Provider value={{ user, loading, login, signup, logout, googleSignIn }}>
+        <AuthContext.Provider value={{ user, loading, sessionBootstrapReady, sessionBootstrapError, retrySessionBootstrap, login, signup, logout, googleSignIn }}>
             {children}
         </AuthContext.Provider>
     );

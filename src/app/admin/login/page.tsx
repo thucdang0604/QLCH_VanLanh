@@ -1,15 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { doc } from 'firebase/firestore';
 import { getDoc } from '@/lib/firestoreLogger';
 import { db, getAuthInstance } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
-import { Lock, Mail, Loader2, AlertCircle, ShieldCheck } from 'lucide-react';
+import { Lock, Mail, Loader2, AlertCircle, ShieldCheck, RefreshCw } from 'lucide-react';
 import { useConfig } from '@/lib/ConfigContext';
-import { useEffect } from 'react';
 import ThemeToggle from '@/components/ThemeToggle';
+import { resolveAdminTargetRoute } from '@/lib/adminModules';
 
 export default function AdminLoginPage() {
     const [email, setEmail] = useState('');
@@ -17,14 +17,29 @@ export default function AdminLoginPage() {
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
 
-    const { user, loading } = useAuth();
+    const { user, loading, sessionBootstrapError, retrySessionBootstrap } = useAuth();
     const router = useRouter();
     const { config } = useConfig();
 
-    // If already logged in as admin/staff, redirect away
+    const getFromParam = (): string | null => {
+        if (typeof window === 'undefined') return null;
+        const params = new URLSearchParams(window.location.search);
+        return params.get('from');
+    };
+
+    // If already logged in as admin/staff, resolve target route cleanly
     useEffect(() => {
         if (!loading && user && (user.role === 'admin' || user.role === 'staff')) {
-            router.replace('/admin');
+            const { target, error: resolveError } = resolveAdminTargetRoute(
+                user.role,
+                user.permissions,
+                getFromParam()
+            );
+            if (target) {
+                router.replace(target);
+            } else if (resolveError) {
+                setError(resolveError);
+            }
         }
     }, [user, loading, router]);
 
@@ -39,20 +54,40 @@ export default function AdminLoginPage() {
             const { signInWithEmailAndPassword } = await import('firebase/auth');
             const cred = await signInWithEmailAndPassword(auth, email, password);
 
-            // Step 2: Fetch role from Firestore
+            // Step 2: Fetch role + permissions from Firestore
             const userDoc = await getDoc(doc(db, 'users', cred.user.uid));
-            const role = userDoc.data()?.role;
+            const userData = userDoc.data() || {};
+            const role = userData.role;
+            const permissions = Array.isArray(userData.permissions) ? userData.permissions : [];
 
-            // Step 3: Check role
-            if (role === 'admin' || role === 'staff') {
-                // ✅ Authorized — redirect to dashboard
-                router.push('/admin');
-            } else {
-                // ❌ Not authorized — sign out immediately and show error
+            // Step 3: Resolve target route before setting session
+            const { target, error: resolveErr } = resolveAdminTargetRoute(
+                role,
+                permissions,
+                getFromParam()
+            );
+
+            if (!target || resolveErr) {
                 const { signOut } = await import('firebase/auth');
                 await signOut(auth);
-                setError('Tài khoản này không có quyền truy cập hệ thống quản trị.');
+                setError(resolveErr || 'Tài khoản này không có quyền truy cập hệ thống quản trị.');
+                return;
             }
+
+            // Step 4: Sync server-side session cookie BEFORE client navigation
+            const idToken = await cred.user.getIdToken();
+            const sessionRes = await fetch('/api/auth/session', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ idToken }),
+            });
+
+            if (!sessionRes.ok) {
+                throw new Error('Không thể khởi tạo phiên làm việc trên máy chủ. Vui lòng thử lại.');
+            }
+
+            // ✅ Authorized & session cookie set — redirect to target
+            router.push(target);
         } catch (err: unknown) {
             console.error(err);
             const code = (err as { code?: string }).code;
@@ -63,7 +98,8 @@ export default function AdminLoginPage() {
             ) {
                 setError('Email hoặc mật khẩu không chính xác.');
             } else {
-                setError('Đã xảy ra lỗi. Vui lòng thử lại.');
+                const message = err instanceof Error ? err.message : 'Đã xảy ra lỗi. Vui lòng thử lại.';
+                setError(message);
             }
         } finally {
             setIsLoading(false);
@@ -94,15 +130,35 @@ export default function AdminLoginPage() {
                 });
             }
 
-            const role = userDoc.exists() ? userDoc.data()?.role : 'customer';
+            const userData = userDoc.exists() ? userDoc.data() : {};
+            const role = userData?.role || 'customer';
+            const permissions = Array.isArray(userData?.permissions) ? userData.permissions : [];
 
-            if (role === 'admin' || role === 'staff') {
-                router.push('/admin');
-            } else {
+            const { target, error: resolveErr } = resolveAdminTargetRoute(
+                role,
+                permissions,
+                getFromParam()
+            );
+
+            if (!target || resolveErr) {
                 const { signOut: signOutFn } = await import('firebase/auth');
                 await signOutFn(auth);
-                setError('Tài khoản Google này không có quyền truy cập hệ thống quản trị. Tài khoản đã được tạo — hãy cấp quyền từ trang quản lý nhân viên.');
+                setError(resolveErr || 'Tài khoản Google này không có quyền truy cập hệ thống quản trị.');
+                return;
             }
+
+            const idToken = await cred.user.getIdToken();
+            const sessionRes = await fetch('/api/auth/session', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ idToken }),
+            });
+
+            if (!sessionRes.ok) {
+                throw new Error('Không thể khởi tạo phiên làm việc trên máy chủ. Vui lòng thử lại.');
+            }
+
+            router.push(target);
         } catch (err: unknown) {
             console.error('Google login error:', err);
             const code = (err as { code?: string }).code;
@@ -152,6 +208,24 @@ export default function AdminLoginPage() {
                             <div className="p-4 bg-red-500/10 border border-red-500/30 text-red-400 text-sm rounded-xl flex items-start gap-3">
                                 <AlertCircle size={16} className="mt-0.5 flex-shrink-0" />
                                 <span>{error}</span>
+                            </div>
+                        )}
+
+                        {/* Session Bootstrap Error message with Retry */}
+                        {sessionBootstrapError && !error && (
+                            <div className="p-4 bg-orange-500/10 border border-orange-500/30 text-orange-300 text-sm rounded-xl flex items-start justify-between gap-3">
+                                <div className="flex items-start gap-3">
+                                    <AlertCircle size={16} className="mt-0.5 flex-shrink-0 text-orange-400" />
+                                    <span>{sessionBootstrapError}</span>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={retrySessionBootstrap}
+                                    className="px-2.5 py-1 bg-orange-500/20 hover:bg-orange-500/30 text-orange-200 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"
+                                >
+                                    <RefreshCw size={12} />
+                                    Thử lại
+                                </button>
                             </div>
                         )}
 

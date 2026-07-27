@@ -6,7 +6,7 @@ import {
     Edit, Mail, Phone, Search
 } from 'lucide-react';
 import Modal from '@/components/admin/Modal';
-import { collection, query, where, doc, updateDoc } from 'firebase/firestore';
+import { collection, query, where } from 'firebase/firestore';
 import { getDocs } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import { AppUser } from '@/lib/AuthContext';
@@ -136,28 +136,30 @@ export default function StaffPage() {
 
         try {
             if (editingUser) {
-                // Update existing user
-                const userRef = doc(db, 'users', editingUser.uid);
-                await updateDoc(userRef, {
-                    displayName: formData.displayName,
-                    phone: formData.phone,
-                    role: formData.role,
-                    permissions: formData.permissions,
-                    catalogFieldPermissions: formData.catalogFieldPermissions,
+                // Update existing user via authoritative server API route
+                const res = await fetch('/api/admin/staff/update', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        uid: editingUser.uid,
+                        displayName: formData.displayName,
+                        phone: formData.phone,
+                        role: formData.role,
+                        permissions: formData.permissions,
+                        catalogFieldPermissions: formData.catalogFieldPermissions,
+                    }),
                 });
+
+                const data = await res.json().catch(() => ({}));
+                if (data.rtdbRoleSynced === false) {
+                    throw new Error(data.rtdbRoleSyncError || 'Quyền đã lưu nhưng đang chờ đồng bộ chat.');
+                }
+                if (!res.ok) {
+                    throw new Error(data.error || 'Cập nhật nhân viên thất bại!');
+                }
                 toastSuccess('Cập nhật nhân viên thành công!');
             } else {
-                // Create new user
-                // Note: Client-side creation has limitations. Ideally use Firebase Admin SDK via API Route.
-                // For now, we will just create the Firestore document and assume the Auth user is created separately 
-                // or guide the user to sign up first.
-                // BUT, to make it work seamlessly, we should probably use a secondary app instance or an API route.
-                // Given the constraints, let's just alert the limitation.
-
                 toastError('Tính năng tạo tài khoản trực tiếp cần API Backend (Firebase Admin SDK). Hiện tại vui lòng yêu cầu nhân viên Đăng ký tài khoản trước, sau đó Admin vào đây cấp quyền.');
-
-                // However, we CAN update permissions if we search by email.
-                // Let's implement searching for existing customer to promote to staff.
                 return;
             }
 
@@ -165,7 +167,7 @@ export default function StaffPage() {
             fetchStaffs();
         } catch (error) {
             console.error('Error saving staff:', error);
-            toastError('Có lỗi xảy ra!');
+            toastError(error instanceof Error ? error.message : 'Có lỗi xảy ra!');
         } finally {
             setProcessing(false);
         }

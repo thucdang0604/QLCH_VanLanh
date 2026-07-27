@@ -2,8 +2,12 @@
 // Edge-compatible: works in both Node.js API routes and Edge middleware
 
 export interface SessionPayload {
+  uid: string;
   role: 'admin' | 'staff' | 'customer';
   permissions: string[];
+  authorizationVersion: number;
+  iat: number; // epoch ms
+  exp: number; // epoch ms
 }
 
 const COOKIE_NAME = '__session';
@@ -43,7 +47,7 @@ export async function signPayload(data: SessionPayload): Promise<string> {
   return `${jsonB64}.${toBase64Url(sig)}`;
 }
 
-/** Verify + parse cookie value. Returns null if invalid/tampered. */
+/** Verify + parse cookie value. Returns null if invalid, tampered, or expired. */
 export async function verifyPayload(cookie: string): Promise<SessionPayload | null> {
   try {
     const [jsonB64, sigB64] = cookie.split('.');
@@ -59,7 +63,31 @@ export async function verifyPayload(cookie: string): Promise<SessionPayload | nu
     if (!valid) return null;
 
     const json = new TextDecoder().decode(fromBase64Url(jsonB64));
-    return JSON.parse(json) as SessionPayload;
+    const payload = JSON.parse(json) as Partial<SessionPayload>;
+
+    if (
+      !payload ||
+      typeof payload.uid !== 'string' ||
+      !payload.uid ||
+      (payload.role !== 'admin' && payload.role !== 'staff' && payload.role !== 'customer') ||
+      !Array.isArray(payload.permissions) ||
+      typeof payload.authorizationVersion !== 'number' ||
+      !Number.isSafeInteger(payload.authorizationVersion) ||
+      payload.authorizationVersion < 0 ||
+      typeof payload.iat !== 'number' ||
+      typeof payload.exp !== 'number' ||
+      !Number.isFinite(payload.iat) ||
+      !Number.isFinite(payload.exp) ||
+      payload.exp <= payload.iat
+    ) {
+      return null;
+    }
+
+    if (Date.now() > payload.exp) {
+      return null;
+    }
+
+    return payload as SessionPayload;
   } catch {
     return null;
   }
