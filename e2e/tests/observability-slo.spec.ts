@@ -1,72 +1,69 @@
 import { test, expect } from '@playwright/test';
-import { getRunId, getE2EAuthHeader } from '../../scripts/e2e/config';
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { getE2EBaseUrl, getRunId } from '../../scripts/e2e/config';
+import { bootstrapSession } from '../../scripts/e2e/session';
 
-test.describe('Phase 3 — Observability & SLO Baseline Benchmark', () => {
-  test('verifies x-request-id, 100% unauthorized block, and captures latency baselines', async ({ request }) => {
+const SAMPLE_COUNT = 20;
+const WARMUP_COUNT = 3;
+
+function percentile(samples: number[], p: number): number {
+  const sorted = [...samples].sort((left, right) => left - right);
+  return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * p) - 1)];
+}
+
+async function sample(run: () => Promise<void>): Promise<number[]> {
+  for (let index = 0; index < WARMUP_COUNT; index += 1) await run();
+  const samples: number[] = [];
+  for (let index = 0; index < SAMPLE_COUNT; index += 1) {
+    const startedAt = performance.now();
+    await run();
+    samples.push(performance.now() - startedAt);
+  }
+  return samples;
+}
+
+test.describe('Phase 3 — Observability & SLO Baseline', () => {
+  test('records reproducible p95 latency and a bounded authorization read count', async ({ request, playwright }) => {
     const runId = getRunId();
     const adminEmail = `e2e-${runId}-admin@example.test`;
-    const authHeaders = await getE2EAuthHeader(adminEmail);
+    await bootstrapSession(request, adminEmail, runId);
 
-    const latencies: Record<string, number> = {};
-
-    // 1. Security Enclosure: 100% unauthorized request must return 401 with 0 admin data
-    const startUnauth = Date.now();
-    const resUnauthorized = await request.post('/api/revalidate', {
-      headers: {
-        'x-e2e-run-id': runId,
-      },
-      data: {},
-    });
-    latencies['/api/revalidate (unauthorized 401)'] = Date.now() - startUnauth;
-    expect(resUnauthorized.status()).toBe(401);
-    const unauthBody = await resUnauthorized.json().catch(() => ({}));
-    expect(unauthBody).not.toHaveProperty('adminSecret');
-    expect(unauthBody).not.toHaveProperty('users');
-
-    // Verify x-request-id header is returned even on 401 responses
-    const unauthReqId = resUnauthorized.headers()['x-request-id'];
-    expect(unauthReqId).toBeTruthy();
-    expect(unauthReqId.startsWith('req_')).toBe(true);
-
-    // 2. Auth session check with bearer token
-    const startAuthSession = Date.now();
-    const resAuthSession = await request.get('/api/auth/session', {
-      headers: {
-        ...authHeaders,
-        'x-e2e-run-id': runId,
-      },
-    });
-    latencies['/api/auth/session (get)'] = Date.now() - startAuthSession;
-    // Unauthorized without cookie, returns 401 with { valid: false } and x-request-id header
-    expect(resAuthSession.status()).toBe(401);
-    const authSessionReqId = resAuthSession.headers()['x-request-id'];
-    expect(authSessionReqId).toBeTruthy();
-
-    // 3. Custom Request ID propagation check
-    const customReqId = `req_custom_e2e_${runId}_${Date.now()}`;
-    const startCustomReq = Date.now();
-    const resCustomReq = await request.post('/api/revalidate', {
-      headers: {
-        'x-request-id': customReqId,
-        'x-e2e-run-id': runId,
-      },
-      data: {},
-    });
-    latencies['/api/revalidate (custom req id)'] = Date.now() - startCustomReq;
-    expect(resCustomReq.headers()['x-request-id']).toBe(customReqId);
-
-    // Output Observability Baseline Summary Table
-    // eslint-disable-next-line no-console
-    console.log('\n======================================================');
-    // eslint-disable-next-line no-console
-    console.log('       OBSERVABILITY & SLO BASELINE LATENCY REPORT     ');
-    // eslint-disable-next-line no-console
-    console.log('======================================================');
-    for (const [endpoint, ms] of Object.entries(latencies)) {
-      // eslint-disable-next-line no-console
-      console.log(`  ${endpoint.padEnd(35)} : ${ms} ms`);
+    const customRequestId = `slo_${runId}_trace`;
+    const unauthenticated = await playwright.request.newContext({ baseURL: getE2EBaseUrl() });
+    try {
+      const unauthorized = await unauthenticated.post('/api/revalidate', {
+        headers: { 'x-request-id': customRequestId, 'x-e2e-run-id': runId },
+        data: { path: '/e2e-observability' },
+      });
+      expect(unauthorized.status()).toBe(401);
+      expect(unauthorized.headers()['x-request-id']).toBe(customRequestId);
+    } finally {
+      await unauthenticated.dispose();
     }
-    // eslint-disable-next-line no-console
-    console.log('======================================================\n');
+
+    const validationSamples = await sample(async () => {
+      const response = await request.get('/api/auth/session', { headers: { 'x-e2e-run-id': runId } });
+      expect(response.status()).toBe(200);
+      expect(response.headers()['x-e2e-firestore-read-count']).toBe('1');
+      expect(response.headers()['x-request-id']).toMatch(/^[A-Za-z0-9_-]{8,128}$/);
+    });
+
+    const report = {
+      endpoint: '/api/auth/session',
+      samples: SAMPLE_COUNT,
+      warmupSamples: WARMUP_COUNT,
+      authorizationFirestoreReadsPerRequest: 1,
+      minMs: Math.min(...validationSamples),
+      p50Ms: percentile(validationSamples, 0.5),
+      p95Ms: percentile(validationSamples, 0.95),
+      maxMs: Math.max(...validationSamples),
+    };
+    const p95LimitMs = Number(process.env.E2E_AUTH_SESSION_P95_MS || 2_500);
+    expect(report.p95Ms).toBeLessThanOrEqual(p95LimitMs);
+
+    const reportDirectory = path.join(process.cwd(), 'output', 'e2e', runId);
+    await mkdir(reportDirectory, { recursive: true });
+    await writeFile(path.join(reportDirectory, 'observability-slo.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8');
   });
 });

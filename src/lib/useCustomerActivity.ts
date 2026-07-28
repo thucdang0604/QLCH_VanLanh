@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { collection, doc, onSnapshot, query, where, getDocs, limit, QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
+import { collection, doc, query, where, getDocs, limit, QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
+import { onSnapshot } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import type { FirestoreDateValue, Order, RepairTicket, WorkflowNode } from '@/lib/types';
 import { normalizeRepairWorkflow, normalizeWarrantyWorkflow } from '@/lib/repairWorkflowConfig';

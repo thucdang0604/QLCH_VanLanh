@@ -1,9 +1,11 @@
 {
   "_meta": {
     "description": "Bản đồ trí tuệ mã nguồn — tự động tích lũy khi AI đọc/sửa code. Giúp AI sau chỉ cần đọc file này là hiểu ngay cấu trúc, liên kết, và cách sửa.",
-    "lastUpdated": "2026-07-20T00:00:00.000+07:00",
-    "version": 72,
+    "lastUpdated": "2026-07-28T00:00:00.000+07:00",
+    "version": 74,
     "changelog": [
+      "v74: Added roadmap/ai/START_HERE.md as the required task router. It defines evidence precedence, minimal task-specific bootstrap files, verified correction facts, and the handoff contract. Source intelligence is an architecture index, not standalone proof of current runtime behavior.",
+      "v73: Authorization/E2E/observability closeout. Session cookies and privileged mutations use a Firestore authorization version; role change/logout pre-revoke RTDB grants and persist reconciliation work. E2E now proves the default rules-backed RTDB namespace with stale-cookie, logout, and client permission_denied flows. Safe observability measured local session-validation p95 near 48ms with one profile read; this is an Emulator baseline, not production performance evidence. Phase 4 remains monitoring only. Pure POS checkout and repair-create validation moved to posCheckoutRules.ts and repairCreateInput.ts without changing Firestore transaction invariants.",
       "v72: Firebase cost/performance closeout. The current 62 changed API routes use src/lib/api/handler.ts for request IDs, Server-Timing metadata, normalized parse/auth errors, structured server logs, and generic unexpected 500 responses. Added /api/pos/payment-config, which requires manage_orders and returns only payment QR data. Admin settings, inventory, POS, and suppliers defer non-critical code/data. This is CLOSED -> MONITORING: preserve POS/inventory transaction invariants and only reopen with real timing or Firebase cost evidence.",
       "v71: Removed all default-config seed endpoints (/api/seed-admin, /api/seed-config, /api/admin/seed-taxonomy) and every config-wide default-reset caller. ConfigContext now reads missing documents without writing defaults and refuses every client write until all config reads finish; member tiers also wait for a valid snapshot. Taxonomy client writes are denied by Firestore Rules; /api/admin/taxonomy is admin-only, reads the existing tree in a transaction, refuses missing config and slug renames, and preserves descendants/concurrent edits.",
       "v70: Final POS hot-path handoff: a measured DEBT checkout with a legacy SKU logged total 3639ms (down from 7646ms), transaction callback 2193ms (down from 4608ms), and zero FIFO reads. The remaining 1397ms reserveIdsWait is intentional readable-ID collision protection, not a cache candidate. Firebase qlch-vanlanh now has all 20 products classified (18 migrated legacy); implementation is commit 5509e6ac and draft PR #20.",
@@ -612,6 +614,31 @@
     }
   },
   "files": {
+    "src/lib/posCheckoutRules.ts": {
+      "lines": 119,
+      "purpose": "Pure POS checkout policy: input validation, synthetic repair/debt line normalization, cashier channel classification, repair settlement arithmetic, and product/category warranty resolution.",
+      "guardrails": [
+        "No Firestore reads or writes",
+        "Checkout transaction remains the source of truth for stock, FIFO, debt, cashier, revenue, readable IDs, and idempotency",
+        "Debt status remains separate from the actual received cash/bank channel"
+      ],
+      "usedBy": [
+        "src/app/api/pos/checkout/route.ts",
+        "src/lib/posCheckoutRules.test.ts"
+      ]
+    },
+    "src/lib/repairCreateInput.ts": {
+      "lines": 55,
+      "purpose": "Pure repair intake parsing: validates client timestamp/payment history and removes server-managed fields from request data.",
+      "guardrails": [
+        "Route owns workflow lookup, authorization, sequential ID allocation, and transaction writes",
+        "Client cannot control status, version, status timeline, timestamps, or pending technician transfer"
+      ],
+      "usedBy": [
+        "src/app/api/repairs/create/route.ts",
+        "src/lib/repairCreateInput.test.ts"
+      ]
+    },
     "src/app/admin/parts/page.tsx": {
       "lines": "~354",
       "purpose": "Quản lý linh kiện. Đã tách ImportPreviewModal và CreateReceiptModal ra src/features/parts/ImportReceiptModals.tsx; logic hỗ trợ vào importReceiptUtils.ts và importReceiptTypes.ts.",
@@ -849,6 +876,10 @@
     }
   },
   "crossFileLinks": {
+    "authorization_session_projection": "session route + staff update route -> authorizationProjection -> Firestore users/{uid}.authorizationVersion and RTDB admin_roles/{uid}; stale sessions must be rejected by privileged mutations.",
+    "e2e_authorization_rules_proof": "scripts/e2e runner + authenticated Playwright session -> rules-backed ${projectId}-default-rtdb -> stale-cookie and client permission_denied assertions.",
+    "pos_checkout_rules_boundary": "posCheckoutRules.ts -> pos/checkout route; helper owns parsing/policy only while the route retains the Firestore transaction and financial/inventory side effects.",
+    "repair_create_input_boundary": "repairCreateInput.ts -> repairs/create route; helper sanitizes client payload while the route owns workflow/authorization/ID allocation and writes.",
     "import_receipt_to_repair": "parts/page.tsx executeFinalImport → repairs collection (if repairTicketId exists)",
     "pos_to_repairs": "pos/page.tsx lookupRepairByPhone() → queries repairs by customerPhone → auto-fill name + show ticket info + calculate discount",
     "product_to_variants": "page.tsx (server) deepest categoryIds → fetchProductVariants(categoryId) → ProductDetailClient variants prop → render variant cards with links",
@@ -868,6 +899,12 @@
     "chat_access_guardrail": "Web guest → Firebase Anonymous Auth → chats/{uid}; admin role sync → admin_roles/{uid}; API chat requires chat_support; IAM/credential failures must be fixed at runtime identity, never by widening RTDB public read."
   },
   "completedPhases": {
+    "authorization_e2e_observability_closeout_20260728": {
+      "status": "CODE_COMPLETE_MONITORING",
+      "date": "2026-07-28",
+      "summary": "Versioned authorization, fail-closed RTDB revocation, real rules-backed Emulator proof, safe local SLO baseline, evidence-led no-change performance decision, and tested POS/repair parsing boundaries.",
+      "reopenRule": "Require reproducible authorization failure or production timing/retry/Firebase-cost evidence before a new phase."
+    },
     "phase4_supplier_debt": {
       "status": "COMPLETED",
       "date": "2026-05-19",

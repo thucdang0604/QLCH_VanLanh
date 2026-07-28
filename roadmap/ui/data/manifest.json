@@ -1,6 +1,6 @@
 {
   "projectName": "QLCH_VanLanh",
-  "lastSync": "2026-07-20T00:00:00.000+07:00",
+  "lastSync": "2026-07-28T00:00:00.000+07:00",
   "stats": {
     "completionPercent": 97,
     "openP0": 0,
@@ -10,6 +10,34 @@
   },
   "constraints": [],
   "aiPlans": [
+    {
+      "id": "plan-authorization-e2e-observability-closeout-20260728",
+      "title": "Authorization, Emulator E2E, observability, and POS/Repair modularization closeout",
+      "date": "28.07.2026",
+      "status": "completed",
+      "planFile": "data/ai_plans/plan_authorization_e2e_observability_closeout_20260728.md",
+      "taskFile": "data/ai_plans/task_authorization_e2e_observability_closeout_20260728.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_authorization_e2e_observability_closeout_20260728.md",
+      "scope": [
+        "src/app/api/auth/session/route.ts",
+        "src/app/api/admin/staff/update/route.ts",
+        "src/lib/authorizationProjection.ts",
+        "scripts/e2e",
+        "e2e/tests/authorization-lifecycle.spec.ts",
+        "src/lib/observability.ts",
+        "src/app/api/pos/checkout/route.ts",
+        "src/lib/posCheckoutRules.ts",
+        "src/app/api/repairs/create/route.ts",
+        "src/lib/repairCreateInput.ts"
+      ],
+      "decisions": [
+        "Treat the local Emulator session p95 as a baseline, not production p95",
+        "Do not reopen Firebase performance work without production timing, retry, or Firebase cost evidence",
+        "Preserve fail-closed authorization revocation and all existing Firestore transaction invariants",
+        "Continue POS/Repair decomposition only as small test-protected refactors"
+      ],
+      "updatedAt": "2026-07-28T00:00:00.000+07:00"
+    },
     {
       "id": "plan-firebase-cost-performance-closeout-20260720",
       "title": "Firebase cost and performance closeout: code complete, production monitoring",

@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { collection, getCountFromServer, getDocs, limit, query, where, onSnapshot } from 'firebase/firestore';
+import { collection, getCountFromServer, getDocs, limit, query, where } from 'firebase/firestore';
+import { onSnapshot } from '@/lib/firestoreLogger';
 import { db, getRtdbInstance } from '@/lib/firebase';
 import type { FirestoreDateValue } from '@/lib/types';
 import { REPAIR_PART_STATUS, REPAIR_STATUS, isRepairPartStatus, isRepairStatus } from '@/lib/repairStatus';

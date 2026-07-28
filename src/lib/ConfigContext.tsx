@@ -1,7 +1,8 @@
 'use client';
 
 import { createContext, useContext, useState, useEffect, useMemo, useRef, ReactNode } from 'react';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc } from 'firebase/firestore';
+import { onSnapshot } from '@/lib/firestoreLogger';
 import { usePathname } from 'next/navigation';
 import { db, getAuthInstance } from './firebase';
 import {

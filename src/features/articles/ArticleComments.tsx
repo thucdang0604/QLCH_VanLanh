@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, updateDoc, where, limit, getDocs, QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
+import { collection, deleteDoc, doc, orderBy, query, serverTimestamp, updateDoc, where, limit, getDocs, QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
+import { onSnapshot } from '@/lib/firestoreLogger';
 import { Loader2, MessageCircle, Save, Star, Trash2, X } from 'lucide-react';
 import Modal from '@/components/admin/Modal';
 import { db } from '@/lib/firebase';

@@ -1,5 +1,8 @@
+const REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{8,128}$/;
+const requestIds = new WeakMap<object, string>();
+
 /**
- * Clean Request ID extractor/generator for API tracing across Edge Middleware and Node runtime endpoints.
+ * Extracts a bounded, non-sensitive caller trace ID or creates a UUID.
  */
 export function getOrCreateRequestId(headers?: Headers | Record<string, string | string[] | undefined> | null): string {
   if (!headers) {
@@ -20,15 +23,30 @@ export function getOrCreateRequestId(headers?: Headers | Record<string, string |
     }
   }
 
-  if (existingId && existingId.trim().length > 0) {
-    return existingId.trim();
+  if (existingId) {
+    const normalized = existingId.trim();
+    if (REQUEST_ID_PATTERN.test(normalized)) {
+      return normalized;
+    }
   }
 
-  const randomStr = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-    ? crypto.randomUUID().replace(/-/g, '').substring(0, 16)
-    : `${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 8)}`;
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
 
-  return `req_${randomStr}`;
+  const hex = () => Math.floor(Math.random() * 0x1_0000_0000).toString(16).padStart(8, '0');
+  return `${hex()}-${hex().slice(0, 4)}-4${hex().slice(0, 3)}-8${hex().slice(0, 3)}-${hex()}${hex().slice(0, 4)}`;
+}
+
+/** Binds one request ID to the request object for downstream helpers. */
+export function bindRequestId(request: { headers: Headers }): string {
+  const requestId = getOrCreateRequestId(request.headers);
+  requestIds.set(request, requestId);
+  return requestId;
+}
+
+export function getBoundRequestId(request: { headers: Headers }): string {
+  return requestIds.get(request) || getOrCreateRequestId(request.headers);
 }
 
 const PII_FIELDS = new Set([
@@ -101,15 +119,15 @@ export interface ApiMetricPayload {
   durationMs: number;
   verifyIdTokenMs?: number;
   readUserProfileMs?: number;
+  readUserProfileCount?: number;
   transactionRetries?: number;
-  meta?: Record<string, unknown>;
+  errorCode?: string;
 }
 
 /**
  * Zero-PII Structured JSON Metric Logger for Observability & SLO tracking.
  */
 export function logApiMetric(metric: ApiMetricPayload): void {
-  const sanitizedMeta = metric.meta ? sanitizePii(metric.meta) : undefined;
   const payload = {
     type: 'API_METRIC',
     timestamp: new Date().toISOString(),
@@ -120,8 +138,9 @@ export function logApiMetric(metric: ApiMetricPayload): void {
     durationMs: Math.round(metric.durationMs),
     verifyIdTokenMs: metric.verifyIdTokenMs !== undefined ? Math.round(metric.verifyIdTokenMs) : undefined,
     readUserProfileMs: metric.readUserProfileMs !== undefined ? Math.round(metric.readUserProfileMs) : undefined,
+    readUserProfileCount: metric.readUserProfileCount,
     transactionRetries: metric.transactionRetries ?? 0,
-    meta: sanitizedMeta,
+    errorCode: metric.errorCode,
   };
 
   if (process.env.NODE_ENV !== 'test') {

@@ -38,10 +38,10 @@ type ApiRouteHandler<TParams extends StaticRouteContext> = (
     routeContext: TParams,
 ) => Response | Promise<Response>;
 
-import { getOrCreateRequestId, logApiMetric } from '@/lib/observability';
+import { bindRequestId, logApiMetric } from '@/lib/observability';
 
 function createRequestId(request: NextRequest): string {
-    return getOrCreateRequestId(request.headers);
+    return bindRequestId(request);
 }
 
 function applyResponseMetadata(response: Response, context: ApiRouteContext): Response {
@@ -121,7 +121,7 @@ export function withApi<TParams extends StaticRouteContext = StaticRouteContext>
                 method: request.method,
                 statusCode: response.status,
                 durationMs: context.elapsedMs(),
-                meta: { error: message, code: getApiErrorCode(error) },
+                errorCode: getApiErrorCode(error),
             });
             return applyResponseMetadata(response, context);
         }

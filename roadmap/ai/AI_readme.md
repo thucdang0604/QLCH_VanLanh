@@ -1,6 +1,9 @@
 # 🤖 QUY ĐỊNH DÀNH RIÊNG CHO AI (ROADMAP V3 & SPA)
 
 > [!IMPORTANT]
+> **Bắt đầu task:** Đọc [START_HERE.md](START_HERE.md) trước. `source_intelligence.json` là chỉ mục kiến trúc; phải xác minh hành vi và rủi ro trong source, Firebase Rules, cấu hình và test hiện tại.
+
+> [!IMPORTANT]
 > 🚀 DÀNH CHO AI MỚI BẮT ĐẦU ĐỌC DỰ ÁN NÀY:
 > 1. Để hiểu toàn bộ kiến trúc Backend, **KHÔNG CẦN CRAWL MÃ NGUỒN**. Hãy mở ngay file `roadmap/ui/data/source_intelligence.json`! Đây là **Single Source of Truth** chứa 100% bản đồ Database Schema (TypeScript Interfaces) và toàn bộ các API Endpoints kèm giải thích nghiệp vụ chi tiết.
 > 2. Để nắm vững phong cách lập trình, design patterns (Firestore Transactions, ID Generation...) chuẩn của dự án, hãy đọc ngay [Codex Guidelines](CODEX_GUIDELINES.md).

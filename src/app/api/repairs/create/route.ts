@@ -4,54 +4,17 @@ import { requirePermission } from '@/lib/apiAuth';
 import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 import { loadRepairWorkflow } from '@/lib/repairWorkflowServer';
 import { FieldValue } from 'firebase-admin/firestore';
-import { Timestamp } from 'firebase-admin/firestore';
 import { isTechnicianUser } from '@/lib/repairAccess';
 import { incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 import { reserveSequentialDocumentId } from '@/lib/serverDocumentIds';
-import type { PaymentHistoryEntry } from '@/lib/types';
 import { getE2ERunMetadata } from '@/lib/e2eRunMetadata';
+import { buildSafeRepairCreateBody, normalizeRepairPaymentHistory, parseRepairClientTimestamp } from '@/lib/repairCreateInput';
 
 type CreateRepairBody = Record<string, unknown> & {
     ticketType?: 'repair' | 'warranty';
     timing?: Record<string, unknown>;
     staff?: Record<string, unknown>;
 };
-
-function parseClientTimestamp(value: unknown): Timestamp | null {
-    if (!value || typeof value !== 'object') return null;
-    const raw = value as { seconds?: unknown; nanoseconds?: unknown };
-    if (typeof raw.seconds !== 'number') return null;
-    return new Timestamp(raw.seconds, typeof raw.nanoseconds === 'number' ? raw.nanoseconds : 0);
-}
-
-function normalizePaymentHistory(value: unknown): PaymentHistoryEntry[] | undefined {
-    if (value === undefined) return undefined;
-    if (!Array.isArray(value)) {
-        throw new Error('Lich su thanh toan khong hop le.');
-    }
-
-    return value.map((entry, index) => {
-        if (!entry || typeof entry !== 'object') {
-            throw new Error(`Dong thanh toan #${index + 1} khong hop le.`);
-        }
-        const data = entry as Record<string, unknown>;
-        const amount = typeof data.amount === 'number' ? data.amount : Number(data.amount);
-        if (!Number.isFinite(amount) || amount < 0) {
-            throw new Error(`So tien thanh toan #${index + 1} khong hop le.`);
-        }
-        const type = typeof data.type === 'string' && data.type.trim()
-            ? data.type
-            : 'payment';
-        if (!['deposit', 'payment', 'full', 'additional', 'refund', 'debt_payment'].includes(type)) {
-            throw new Error(`Loai thanh toan #${index + 1} khong hop le.`);
-        }
-        return {
-            ...data,
-            type,
-            amount,
-        } as PaymentHistoryEntry;
-    });
-}
 
 export const POST = withApi({
     name: 'repairs/create',
@@ -90,19 +53,9 @@ export const POST = withApi({
                     : 'Kỹ thuật viên';
             }
 
-            const estimatedReturnAt = parseClientTimestamp(body.timing?.estimatedReturnAt);
-            const paymentHistory = normalizePaymentHistory(body.paymentHistory);
-            const safeBody = { ...body };
-            delete safeBody.createdAt;
-            delete safeBody.updatedAt;
-            delete safeBody.status;
-            delete safeBody.statusTimeline;
-            delete safeBody.version;
-            delete safeBody.pendingTechnicianTransfer;
-            delete safeBody.paymentHistory;
-            if (paymentHistory) {
-                safeBody.paymentHistory = paymentHistory;
-            }
+            const estimatedReturnAt = parseRepairClientTimestamp(body.timing?.estimatedReturnAt);
+            const paymentHistory = normalizeRepairPaymentHistory(body.paymentHistory);
+            const safeBody = buildSafeRepairCreateBody(body, paymentHistory);
 
             // Ép trạng thái về entry node
             const finalData = {

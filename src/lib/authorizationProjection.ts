@@ -10,6 +10,22 @@ export interface AuthorizationProjection {
   authorizationVersion: number;
 }
 
+export function grantsRtdbChatAccess(projection: Pick<AuthorizationProjection, 'role' | 'permissions'>): boolean {
+  return projection.role === 'admin'
+    || (projection.role === 'staff' && projection.permissions.includes('chat_support'));
+}
+
+/**
+ * A Firestore-to-RTDB authorization downgrade must revoke RTDB before the
+ * authoritative write commits, otherwise an older RTDB grant stays usable.
+ */
+export function requiresRtdbChatRevocation(
+  current: Pick<AuthorizationProjection, 'role' | 'permissions'>,
+  desired: Pick<AuthorizationProjection, 'role' | 'permissions'>,
+): boolean {
+  return grantsRtdbChatAccess(current) && !grantsRtdbChatAccess(desired);
+}
+
 export function createPendingAuthorizationProjection(projection: AuthorizationProjection) {
   return {
     ...projection,

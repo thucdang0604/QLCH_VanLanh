@@ -12,12 +12,13 @@ import {
   markAuthorizationProjectionPending,
   markAuthorizationProjectionSynced,
   reconcilePendingAuthorizationProjections,
+  grantsRtdbChatAccess,
   syncAuthorizationProjection,
   type AuthorizationProjection,
 } from '@/lib/authorizationProjection';
 import { getCurrentServerSession } from '@/lib/serverSession';
 import { signPayload, verifyPayload, COOKIE_NAME } from '@/lib/sessionCookie';
-import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
+import { ApiError, getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 
 const SESSION_TTL_MS = 20 * 60 * 1000;
 const RTDB_ROLE_SYNC_TIMEOUT_MS = 10_000;
@@ -65,7 +66,10 @@ export const GET = withApi({ name: 'auth/session/validate' }, async (request, co
   }
 
   return context.json({ valid: true }, {
-    headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
+    headers: {
+      'Cache-Control': 'no-store, no-cache, must-revalidate',
+      ...(process.env.E2E_TEST_MODE === '1' ? { 'x-e2e-firestore-read-count': '1' } : {}),
+    },
   });
 });
 
@@ -118,9 +122,11 @@ export const POST = withApi({
       timeoutAfter(RTDB_ROLE_SYNC_TIMEOUT_MS, 'RTDB authorization projection timed out'),
     ]);
     rtdbRoleSynced = true;
-  } catch (projectionError) {
+  } catch {
     rtdbRoleSyncError = 'RTDB authorization projection is pending reconciliation.';
-    console.error('RTDB authorization projection failed during session bootstrap:', projectionError);
+    console.error('RTDB authorization projection failed during session bootstrap.');
+    await getAdminDb().collection(AUTHORIZATION_PROJECTION_JOBS).doc(uid)
+      .set(createPendingAuthorizationProjection(projection), { merge: true });
   }
 
   // Every successful bootstrap is also a bounded retry opportunity for durable
@@ -131,17 +137,17 @@ export const POST = withApi({
       reconcilePendingAuthorizationProjections(5),
       timeoutAfter(PENDING_PROJECTION_RECONCILE_TIMEOUT_MS, 'Pending RTDB reconciliation timed out'),
     ]);
-  } catch (reconcileError) {
-    console.warn('Pending RTDB authorization reconciliation was deferred:', reconcileError);
+  } catch {
+    console.warn('Pending RTDB authorization reconciliation was deferred.');
   }
 
   const res = context.json({
-    success: true,
+    success: rtdbRoleSynced,
     role: authorization.role,
     expiresAt: exp,
     rtdbRoleSynced,
     rtdbRoleSyncError,
-  });
+  }, { status: rtdbRoleSynced ? 200 : 202 });
   res.cookies.set(COOKIE_NAME, cookieValue, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
@@ -169,28 +175,77 @@ export const DELETE = withApi({ name: 'auth/session/delete' }, async (request: N
     const jobRef = db.collection(AUTHORIZATION_PROJECTION_JOBS).doc(uid);
     const now = Date.now();
     const logoutAuthTime = Math.floor(now / 1000);
+    const userBeforeSnap = await userRef.get();
+    const userBefore = getCurrentAuthorization(userBeforeSnap.exists ? (userBeforeSnap.data() ?? {}) : {});
+    const anticipatedVersion = nextAuthorizationVersion(userBefore.authorizationVersion);
     let projection: AuthorizationProjection | null = null;
+    let preRevoked = false;
+    let transactionCommitted = false;
 
-    await db.runTransaction(async (transaction) => {
-      const userSnap = await transaction.get(userRef);
-      const current = getCurrentAuthorization(userSnap.exists ? (userSnap.data() ?? {}) : {});
-      const authorizationVersion = nextAuthorizationVersion(current.authorizationVersion);
+    if (grantsRtdbChatAccess(userBefore)) {
+      try {
+        await Promise.race([
+          syncAuthorizationProjection({
+            uid,
+            role: 'customer',
+            permissions: [],
+            authorizationVersion: anticipatedVersion,
+          }),
+          timeoutAfter(RTDB_ROLE_SYNC_TIMEOUT_MS, 'RTDB authorization revoke timed out'),
+        ]);
+        preRevoked = true;
+      } catch {
+        throw new ApiError('Unable to safely revoke chat access before logout', 503, 'rtdb_revocation_unavailable');
+      }
+    }
 
-      projection = {
-        uid,
-        role: 'customer',
-        permissions: [],
-        authorizationVersion,
-      };
+    try {
+      await db.runTransaction(async (transaction) => {
+        const userSnap = await transaction.get(userRef);
+        const current = getCurrentAuthorization(userSnap.exists ? (userSnap.data() ?? {}) : {});
+        if (preRevoked && current.authorizationVersion !== userBefore.authorizationVersion) {
+          throw new ApiError('Authorization changed; retry logout', 409, 'authorization_conflict');
+        }
+        const authorizationVersion = preRevoked
+          ? anticipatedVersion
+          : nextAuthorizationVersion(current.authorizationVersion);
 
-      transaction.set(userRef, {
-        authorizationVersion,
-        lastLogoutAt: now,
-        lastLogoutAuthTime: logoutAuthTime,
-        updatedAt: FieldValue.serverTimestamp(),
-      }, { merge: true });
-      transaction.set(jobRef, createPendingAuthorizationProjection(projection), { merge: true });
-    });
+        projection = {
+          uid,
+          role: 'customer',
+          permissions: [],
+          authorizationVersion,
+        };
+
+        transaction.set(userRef, {
+          authorizationVersion,
+          lastLogoutAt: now,
+          lastLogoutAuthTime: logoutAuthTime,
+          updatedAt: FieldValue.serverTimestamp(),
+        }, { merge: true });
+        transaction.set(jobRef, createPendingAuthorizationProjection(projection), { merge: true });
+      });
+      transactionCommitted = true;
+    } catch (error) {
+      if (preRevoked && !transactionCommitted) {
+        const latestUser = await userRef.get();
+        const latestAuthorization = getCurrentAuthorization(latestUser.exists ? (latestUser.data() ?? {}) : {});
+        if (latestAuthorization.authorizationVersion === userBefore.authorizationVersion) {
+          const restoreProjection: AuthorizationProjection = {
+            uid,
+            role: userBefore.role,
+            permissions: userBefore.permissions,
+            authorizationVersion: anticipatedVersion,
+          };
+          try {
+            await syncAuthorizationProjection(restoreProjection);
+          } catch {
+            await jobRef.set(createPendingAuthorizationProjection(restoreProjection), { merge: true });
+          }
+        }
+      }
+      throw error;
+    }
 
     try {
       await Promise.race([
@@ -201,7 +256,7 @@ export const DELETE = withApi({ name: 'auth/session/delete' }, async (request: N
     } catch (projectionError) {
       rtdbRoleSynced = false;
       rtdbRoleSyncError = 'RTDB authorization revoke is pending reconciliation.';
-      console.error('RTDB authorization revoke is pending reconciliation:', projectionError);
+      console.error('RTDB authorization revoke is pending reconciliation.');
       await markAuthorizationProjectionPending(projection!, projectionError);
     }
   }

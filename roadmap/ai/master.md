@@ -3,13 +3,14 @@
 > [!IMPORTANT]  
 > **HƯỚNG DẪN DÀNH CHO AI MỚI BẮT ĐẦU:**
 > Nếu bạn là một AI vừa được gắn vào dự án, hãy đọc theo trình tự sau để nắm bắt toàn bộ ngữ cảnh nhanh nhất:
-> 1. Đọc bộ quy tắc bắt buộc: [AI_readme.md](AI_readme.md)
-> 2. Đọc toàn bộ Database Schema và API Endpoints: `roadmap/ui/data/source_intelligence.json`
-> 3. Đọc tổng quan trạng thái dự án: [dashboard.md](dashboard.md)
+> 1. Đọc quy tắc repository: `AGENTS.md`.
+> 2. Đọc [START_HERE.md](START_HERE.md) để chọn đúng file theo loại task.
+> 3. Đọc tổng quan hiện tại: [dashboard.md](dashboard.md), sau đó dùng `roadmap/ui/data/source_intelligence.json` như chỉ mục và xác minh hành vi trong source hiện tại.
 
 > File này là gốc rễ điều hướng. Hãy bám theo các đường dẫn bên dưới để tìm thông tin chi tiết từng Module.
 
 - [Dashboard](dashboard.md)
+- [AI Task Router — START HERE](START_HERE.md)
 - [Codex Guidelines](CODEX_GUIDELINES.md)
 - [AI Safety Checklist](AI_SAFETY_CHECKLIST.md)
 - [Safe Code Edit Workflow](workflows/safe-code-edit.md)
@@ -29,4 +30,5 @@
 - [customer-web-qa](modules/customer-web-qa.md)
 - [System Performance Audit 2026-07-03](modules/system_performance_20260703.md)
 - [Firebase Cost & Performance Closeout 2026-07-20](modules/firebase_cost_performance_20260720.md)
+- [Authorization, E2E, Observability & Modularization Closeout 2026-07-28](modules/authorization_e2e_observability_closeout_20260728.md)
 - [Bugs Khác](modules/other_bugs.md)

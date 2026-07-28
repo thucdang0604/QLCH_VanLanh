@@ -1175,3 +1175,143 @@ The v3 diff correctly improves several earlier defects: the first-auth lifecycle
 - **Rollback Plan:** `git revert 2fc68ea0b7c3d2ab64ecb2c01fc195aa9cf3ddb3`.
 - **Review Requested:** `Codex review — Phase 3`. Decision requested from Codex: `APPROVED → Phase 4`.
 
+---
+
+## Codex implementation and review — Phases 1–3 remediation
+
+**Time:** `2026-07-28T12:11:55+07:00`
+
+**Decision:** `APPROVED — Phase 1, Phase 2, and Phase 3 are complete.`
+
+### Superseding phase state
+
+| Phase | Previous state | Final state |
+| --- | --- | --- |
+| 1 — Session lifecycle and RBAC | `APPROVED_TO_START` / later rejected resubmission | `APPROVED` |
+| 2 — Emulator E2E foundation | `BLOCKED_BY_REVIEW` | `APPROVED` |
+| 3 — Observability and SLO | `SUBMITTED` | `APPROVED` |
+
+### 1. Goal and inspected scope
+
+Completed the open Phase 1–3 findings rather than accepting the submitted Phase 3 claim as-is.
+
+Scope covered server session cookies, authoritative Firestore authorization, Firestore-to-RTDB projection, RTDB Rules, the Emulator runner, authenticated Playwright flows, API metrics, and direct `onSnapshot` call sites.
+
+### 2. Files changed and Git state
+
+The working tree contains the Phase 1–3 implementation only; no commit or deploy was created.
+
+`git diff --stat` reports 27 tracked files changed (537 insertions, 250 deletions), plus new helpers `e2e/tests/authorization-lifecycle.spec.ts` and `scripts/e2e/session.ts`.
+
+### 3. Business-logic and authorization impact
+
+- Privileged mutations re-read the acting Firestore role and authorization version inside the transaction; a signed but stale admin cookie is rejected.
+- Logout and role changes advance a server-authoritative authorization version. A copied or late cookie can exist in a browser but is not server-current.
+- RTDB chat revocation is fail-closed: write the versioned tombstone before the Firestore authority change; if that fails, return 503. Authority changes also persist a durable reconciliation job.
+- The E2E harness uses unique ports, run-scoped result artifacts, and the real default RTDB namespace `${projectId}-default-rtdb`. The former `demo-qlch-e2e` namespace was a separate open emulator instance, so it could not prove RTDB Rules; app, Admin SDK, and harness now use the rules-backed namespace.
+- Metrics permit only bounded safe request IDs and emit an allow-listed schema; raw exception messages and arbitrary metadata are excluded.
+
+### 4. Commands run and exact results
+
+- `pnpm verify` — PASSED: lint 0 errors (22 pre-existing warnings), typecheck passed, production build passed (116 pages).
+- Full `src/**/*.test.ts` Node command — PASSED: 123 total, 118 passed, 5 explicit Node module-mock skips, 0 failures.
+- `pnpm test:e2e` — PASSED with authenticated sessions, POS/repair invariants, stale-cookie denial, RTDB Rules denial, and SLO output.
+- `pnpm exec tsx scripts/e2e/prove-three-runs.ts` — PASSED: three consecutive isolated runs; each produced a matching run-scoped `result.json` only after seed, Playwright, and cleanup completed.
+- `git diff --check` — PASSED.
+
+### 5. Emulator and browser evidence
+
+- Two-admin flow: B demotes A; A's pre-issued cookie receives HTTP 403 on a subsequent staff mutation and the target Firestore document is unchanged.
+- RTDB Rules client flow: after demotion, A's authenticated client read and write to `/chats` are denied; every proof run logged `permission_denied` for the stale write.
+- Logout flow: a copied privileged cookie receives HTTP 401 and the Firebase token used before logout cannot bootstrap a new session.
+- SLO (20 samples + 3 warmups): p95 was 48.16ms, 47.67ms, and 48.03ms; every successful validation returned the E2E evidence header for exactly one Firestore user-profile read.
+
+### 6. Open assumptions, rollback, and handoff decision
+
+- No production deployment has been performed. Rollback is a focused revert of this uncommitted Phase 1–3 diff after preserving later user work.
+- The Next development-server `allowedDevOrigins` notice is a non-blocking development warning; production build and all required tests pass.
+- The runner accepts a pass only when child exit, run ID, and result artifact agree. A missing/mismatched artifact is a hard failure.
+- `APPROVED → Phase 4` may begin only with a new scoped proposal; no Phase 4–6 business behavior changed here.
+
+---
+
+## Codex implementation and review — Phases 4–6 closeout
+
+**Time:** `2026-07-28T14:00:00+07:00`
+
+**Decision:** `APPROVED — Phase 4, Phase 5, and Phase 6 are complete.`
+
+### Superseding phase state
+
+| Phase | Previous state | Final state |
+| --- | --- | --- |
+| 4 — Evidence-led performance | `BLOCKED_BY_REVIEW` | `APPROVED — monitoring only` |
+| 5 — POS/Repair modularization | `BLOCKED_BY_REVIEW` | `APPROVED — tested incremental boundary` |
+| 6 — Roadmap closeout | `BLOCKED_BY_REVIEW` | `APPROVED` |
+
+### 1. Goal and scope
+
+- Phase 4: measure the existing contract and make no config/auth performance change without a regression signal.
+- Phase 5: move only pure POS checkout and repair-intake policy into testable helpers, leaving Firestore transactions and all business side effects in their existing routes.
+- Phase 6: record the decisions, evidence, verification, and future-AI bootstrap in the canonical roadmap surfaces.
+
+### 2. Files changed and diff scope
+
+- `src/lib/posCheckoutRules.ts` and `src/lib/posCheckoutRules.test.ts` isolate checkout input validation, synthetic line IDs, cashier channel classification, repair payment arithmetic, and warranty resolution.
+- `src/lib/repairCreateInput.ts` and `src/lib/repairCreateInput.test.ts` isolate timestamp/payment-history validation and server-owned create-field stripping.
+- `src/app/api/pos/checkout/route.ts` is reduced from 1,537 to 1,444 lines; `src/app/api/repairs/create/route.ts` from 159 to 112 lines. Transaction body order and writes are unchanged.
+- Roadmap handoff: `roadmap/ai/modules/authorization_e2e_observability_closeout_20260728.md`, master/dashboard, UI plan/task/walkthrough, manifest, and source intelligence.
+
+### 3. Business, authorization, and performance impact
+
+- No stock, held, FIFO, debt, cashier, revenue, readable-ID, warranty, idempotency, or repair workflow rule changed.
+- Phase 4 is deliberately a **no-code decision**: the three isolated local SLO runs measured session-validation p95 at 48.16ms, 47.67ms, and 48.03ms with one profile read. This is an Emulator baseline, not production p95, so it does not justify speculative optimization.
+- The existing Firebase performance closeout remains `CLOSED -> MONITORING`; production timing/retry/Firebase-cost evidence is required to reopen it.
+
+### 4. Commands run and exact results
+
+- `pnpm exec tsx --test src/lib/posCheckoutRules.test.ts src/lib/repairCreateInput.test.ts` — PASSED: 8/8 tests.
+- `pnpm typecheck` — PASSED.
+- JSON parse of `roadmap/ui/data/manifest.json` and `roadmap/ui/data/source_intelligence.json` — PASSED.
+- `git diff --check` — PASSED before final Phase 6 documentation edits; it is repeated in the final verification pass.
+
+### 5. Evidence and review result
+
+- POS module tests cover synthetic repair/debt IDs, amount/quantity validation, repair refund arithmetic, warranty override/deep taxonomy, and cash/bank/debt classification.
+- Repair intake tests cover timestamp acceptance, payment-history type/amount validation, and stripping client-controlled status/version/timestamp fields.
+- The earlier authenticated Emulator proof remains the authorization evidence: stale cookies receive 403, RTDB client reads/writes receive `permission_denied` after demotion, and copied cookies receive 401 after logout.
+
+### 6. Assumptions, rollback, and handoff decision
+
+- **Assumption:** local Emulator timing remains a release-independent baseline only; no production latency claim is made.
+- **Rollback:** revert only the Phase 4–6 helper/roadmap files and restore the two route-local helper blocks; keep the already-completed Phase 1–3 authorization/E2E changes intact.
+- **No deploy or commit:** this working tree is intentionally left uncommitted for user review.
+- `APPROVED — closeout complete.` Future work must follow the roadmap reopen rules and stay in a separately tested slice.
+
+### Final validation evidence
+
+- `pnpm verify` — PASSED: lint 0 errors (22 existing warnings), typecheck passed, and production build completed 116 routes.
+- Full Node test suite — PASSED: 131 assertions, 126 passed, 5 explicit module-mock skips, 0 failures.
+- `pnpm test:e2e` — PASSED. The logged RTDB `permission_denied` is the expected post-demotion client-Rules assertion.
+- Final `git diff --check` and roadmap JSON parse — PASSED.
+
+---
+
+## Codex accepted external-audit correction — 2026-07-28
+
+### 1. Scope
+
+Reviewed the external AI's correction report against the current worktree. This entry records only verified corrections; the external 28 KB narrative is not canonical.
+
+### 2. Verified corrections
+
+- E2E entrypoint is `scripts/e2e/run.ts`; `scripts/e2e/runner.ts` does not exist.
+- `inventoryFifo.test.ts` and `commissionCalcServer.test.ts` do not exist. The absence of a direct FIFO test is a coverage boundary, not evidence that `posCheckoutRules.test.ts` covers FIFO writes.
+- `CustomerDetailDrawer` direct listeners are bounded to appointments/customer transactions with `limit(20)`; orders/repairs use bounded `useCustomerActivity` queries (`limit(50)`).
+- Demotion/logout pre-revokes RTDB before Firestore authority changes and returns 503 when pre-revocation fails; it is not a temporary privilege window.
+- POS authorizes the caller before its transaction and does not read `users/{uid}` in the checkout transaction.
+- Repair/warranty workflow status lists are dynamic configuration, not a fixed six-status model.
+
+### 3. Handoff decision
+
+- `APPROVED — facts above are durable roadmap input.` Future AI work must begin from `roadmap/ai/START_HERE.md`, then verify current source before reporting a finding.

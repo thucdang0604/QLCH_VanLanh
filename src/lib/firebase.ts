@@ -17,7 +17,7 @@ const firebaseConfig = {
     appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
     measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
     databaseURL: e2eEmulator
-        ? `http://${e2eEmulator.host}:${e2eEmulator.databasePort}?ns=${e2eEmulator.projectId}`
+        ? `http://${e2eEmulator.host}:${e2eEmulator.databasePort}?ns=${e2eEmulator.projectId}-default-rtdb`
         : `https://${process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID}-default-rtdb.asia-southeast1.firebasedatabase.app`,
 };
 

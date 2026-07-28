@@ -17,8 +17,13 @@ describe('Observability Module — Step 3.1', () => {
   });
 
   it('preserves existing x-request-id from record object', () => {
-    const reqId = getOrCreateRequestId({ 'x-request-id': 'req_custom_abc' });
-    assert.equal(reqId, 'req_custom_abc');
+    const reqId = getOrCreateRequestId({ 'x-request-id': 'custom_request_abc' });
+    assert.equal(reqId, 'custom_request_abc');
+  });
+
+  it('replaces invalid or PII-like caller request IDs with a UUID', () => {
+    const reqId = getOrCreateRequestId({ 'x-request-id': 'customer@example.test' });
+    assert.match(reqId, /^[a-f0-9-]{36}$/i);
   });
 
   it('sanitizes sensitive PII fields (tokens, phone numbers, email, password)', () => {
@@ -58,7 +63,7 @@ describe('Observability Module — Step 3.1', () => {
         verifyIdTokenMs: 12.1,
         readUserProfileMs: 8.5,
         transactionRetries: 0,
-        meta: { orderId: 'ORD_001', phone: '0901234567' },
+        errorCode: 'internal_error',
       });
     });
   });

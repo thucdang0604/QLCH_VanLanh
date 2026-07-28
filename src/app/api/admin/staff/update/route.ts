@@ -11,11 +11,12 @@ import {
   createPendingAuthorizationProjection,
   markAuthorizationProjectionPending,
   markAuthorizationProjectionSynced,
+  requiresRtdbChatRevocation,
   syncAuthorizationProjection,
   type AuthorizationProjection,
 } from '@/lib/authorizationProjection';
 import { verifyPayload, COOKIE_NAME } from '@/lib/sessionCookie';
-import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
+import { ApiError, getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 
 const RTDB_ROLE_SYNC_TIMEOUT_MS = 10_000;
 
@@ -64,33 +65,90 @@ export const POST = withApi({
   const actorRef = db.collection('users').doc(session.uid);
   const targetRef = db.collection('users').doc(uid);
   const jobRef = db.collection(AUTHORIZATION_PROJECTION_JOBS).doc(uid);
-  let projection: AuthorizationProjection | null = null;
+  const targetBeforeSnap = await targetRef.get();
+  const targetBefore = getCurrentAuthorization(targetBeforeSnap.exists ? (targetBeforeSnap.data() ?? {}) : {});
+  const anticipatedVersion = nextAuthorizationVersion(targetBefore.authorizationVersion);
+  const desiredProjection: AuthorizationProjection = {
+    uid,
+    role: roleClean,
+    permissions: permissionsClean,
+    authorizationVersion: anticipatedVersion,
+  };
+  const requiresPreRevocation = requiresRtdbChatRevocation(targetBefore, desiredProjection);
+  let preRevoked = false;
 
-  await db.runTransaction(async (transaction) => {
-    const actorSnap = await transaction.get(actorRef);
-    const actorAuthorization = getCurrentAuthorization(actorSnap.exists ? (actorSnap.data() ?? {}) : {});
-
-    if (actorAuthorization.role !== 'admin' || !isSessionCurrent(session, actorAuthorization)) {
-      throw new Error('Forbidden: administrator session is no longer current');
+  if (requiresPreRevocation) {
+    try {
+      await Promise.race([
+        syncAuthorizationProjection({
+          uid,
+          role: 'customer',
+          permissions: [],
+          authorizationVersion: anticipatedVersion,
+        }),
+        timeoutAfter(RTDB_ROLE_SYNC_TIMEOUT_MS, 'RTDB authorization revoke timed out'),
+      ]);
+      preRevoked = true;
+    } catch {
+      throw new ApiError('Unable to safely revoke chat access before changing staff authorization', 503, 'rtdb_revocation_unavailable');
     }
+  }
 
-    const targetSnap = await transaction.get(targetRef);
-    const targetAuthorization = getCurrentAuthorization(targetSnap.exists ? (targetSnap.data() ?? {}) : {});
-    const authorizationVersion = nextAuthorizationVersion(targetAuthorization.authorizationVersion);
+  let projection: AuthorizationProjection | null = null;
+  let transactionCommitted = false;
 
-    projection = {
-      uid,
-      role: roleClean,
-      permissions: permissionsClean,
-      authorizationVersion,
-    };
+  try {
+    await db.runTransaction(async (transaction) => {
+      const actorSnap = await transaction.get(actorRef);
+      const actorAuthorization = getCurrentAuthorization(actorSnap.exists ? (actorSnap.data() ?? {}) : {});
 
-    transaction.set(targetRef, {
-      ...updateData,
-      authorizationVersion,
-    }, { merge: true });
-    transaction.set(jobRef, createPendingAuthorizationProjection(projection), { merge: true });
-  });
+      if (actorAuthorization.role !== 'admin' || !isSessionCurrent(session, actorAuthorization)) {
+        throw new Error('Forbidden: administrator session is no longer current');
+      }
+
+      const targetSnap = await transaction.get(targetRef);
+      const targetAuthorization = getCurrentAuthorization(targetSnap.exists ? (targetSnap.data() ?? {}) : {});
+      if (preRevoked && targetAuthorization.authorizationVersion !== targetBefore.authorizationVersion) {
+        throw new ApiError('Target authorization changed; retry the staff update', 409, 'authorization_conflict');
+      }
+      const authorizationVersion = preRevoked
+        ? anticipatedVersion
+        : nextAuthorizationVersion(targetAuthorization.authorizationVersion);
+
+      projection = {
+        uid,
+        role: roleClean,
+        permissions: permissionsClean,
+        authorizationVersion,
+      };
+
+      transaction.set(targetRef, {
+        ...updateData,
+        authorizationVersion,
+      }, { merge: true });
+      transaction.set(jobRef, createPendingAuthorizationProjection(projection), { merge: true });
+    });
+    transactionCommitted = true;
+  } catch (error) {
+    if (preRevoked && !transactionCommitted) {
+      const latestTarget = await targetRef.get();
+      const latestAuthorization = getCurrentAuthorization(latestTarget.exists ? (latestTarget.data() ?? {}) : {});
+      if (latestAuthorization.authorizationVersion === targetBefore.authorizationVersion) {
+        const restoreProjection: AuthorizationProjection = {
+          uid,
+          role: targetBefore.role,
+          permissions: targetBefore.permissions,
+          authorizationVersion: anticipatedVersion,
+        };
+        try {
+          await syncAuthorizationProjection(restoreProjection);
+        } catch {
+          await jobRef.set(createPendingAuthorizationProjection(restoreProjection), { merge: true });
+        }
+      }
+    }
+    throw error;
+  }
 
   let rtdbRoleSynced = true;
   let rtdbRoleSyncError: string | null = null;
@@ -103,7 +161,7 @@ export const POST = withApi({
   } catch (projectionError) {
     rtdbRoleSynced = false;
     rtdbRoleSyncError = 'RTDB authorization projection is pending reconciliation.';
-    console.error('Staff role update RTDB projection is pending reconciliation:', projectionError);
+    console.error('Staff role update RTDB projection is pending reconciliation.');
     await markAuthorizationProjectionPending(projection!, projectionError);
   }
 

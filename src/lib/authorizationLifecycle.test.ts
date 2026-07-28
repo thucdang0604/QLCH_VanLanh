@@ -7,6 +7,7 @@ import {
   nextAuthorizationVersion,
   shouldApplyRtdbProjection,
 } from './authorizationLifecycle';
+import { requiresRtdbChatRevocation } from './authorizationProjection';
 
 const currentAdmin = getCurrentAuthorization({
   role: 'admin',
@@ -75,4 +76,19 @@ test('authorization lifecycle: rejects an older RTDB projection after a newer re
   assert.equal(shouldApplyRtdbProjection(8, 7), false);
   assert.equal(shouldApplyRtdbProjection(8, 8), true);
   assert.equal(shouldApplyRtdbProjection(undefined, 1), true);
+});
+
+test('authorization lifecycle: pre-revokes RTDB only when chat access is being removed', () => {
+  assert.equal(requiresRtdbChatRevocation(
+    { role: 'admin', permissions: [] },
+    { role: 'staff', permissions: ['manage_repairs'] },
+  ), true);
+  assert.equal(requiresRtdbChatRevocation(
+    { role: 'staff', permissions: ['chat_support'] },
+    { role: 'staff', permissions: ['manage_repairs'] },
+  ), true);
+  assert.equal(requiresRtdbChatRevocation(
+    { role: 'staff', permissions: ['manage_repairs'] },
+    { role: 'staff', permissions: ['chat_support'] },
+  ), false);
 });

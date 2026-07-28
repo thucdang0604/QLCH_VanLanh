@@ -28,6 +28,7 @@ const eslintConfig = [
       "out/**",
       "build/**",
       ".firebase/**",
+      "output/**",
       ".ai_cache/**",
       "scratch/**",
       "firebase-debug.log",

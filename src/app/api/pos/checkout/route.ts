@@ -19,20 +19,18 @@ import type { RepairWorkflowSettings } from '@/lib/repairWorkflowConfig';
 import type { RevenueAggregateDelta } from '@/lib/revenueAggregate';
 import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 import { getE2ERunMetadata } from '@/lib/e2eRunMetadata';
-
-type CheckoutItemInput = Record<string, unknown> & {
-    isRepairTicket?: boolean;
-    isOrderPayment?: boolean;
-    productId?: unknown;
-    quantity?: unknown;
-    price?: unknown;
-    lotCode?: unknown;
-    repairTicketId?: unknown;
-    orderPaymentId?: unknown;
-    productName?: unknown;
-    id?: unknown;
-    imeis?: unknown;
-};
+import {
+    getCashierShiftChannel,
+    getRepairPaidAmount,
+    getRepairPaymentAmount,
+    normalizeOrderPaymentId,
+    normalizeRepairTicketId,
+    readNonNegativeCheckoutAmount as readNonNegativeAmount,
+    readOptionalNonNegativeCheckoutAmount as readOptionalNonNegativeAmount,
+    readPositiveCheckoutQuantity as readPositiveQuantity,
+    resolveProductWarranty,
+    type CheckoutItemInput,
+} from '@/lib/posCheckoutRules';
 
 function readString(value: unknown): string {
     return typeof value === 'string' ? value.trim() : '';
@@ -70,13 +68,6 @@ function getCustomerContactMethodsFromData(data: FirebaseFirestore.DocumentData 
     return Array.isArray(data?.contactMethods) ? data.contactMethods as ContactMethod[] : [];
 }
 
-function getCashierShiftChannel(paymentMethodCode: string): 'cash' | 'bank' | 'none' {
-    const normalized = paymentMethodCode.trim().toUpperCase();
-    if (normalized === 'CASH') return 'cash';
-    if (normalized === 'BANK' || normalized === 'QR' || normalized === 'CARD' || normalized === 'MOMO') return 'bank';
-    return 'none';
-}
-
 const ACTIVE_SHIFT_LOCK_COLLECTION = 'system_counters';
 const ACTIVE_SHIFT_LOCK_ID = 'active_cashier_shift';
 
@@ -101,48 +92,6 @@ function resolvePaymentCompletionTarget(workflow: WorkflowNode[], currentStatus:
     }
 
     return { targetStatus: targetNode.id, shouldCountCompletion: true };
-}
-
-function readNonNegativeAmount(value: unknown, label: string): number {
-    const amount = typeof value === 'number' ? value : Number(value);
-    if (!Number.isFinite(amount) || amount < 0) {
-        throw new Error(`${label} khong hop le.`);
-    }
-    return amount;
-}
-
-function readOptionalNonNegativeAmount(value: unknown, label: string): number {
-    if (value === undefined || value === null || value === '') return 0;
-    return readNonNegativeAmount(value, label);
-}
-
-function readPositiveQuantity(value: unknown, label: string): number {
-    if (value === undefined || value === null || value === '') return 1;
-    const quantity = typeof value === 'number' ? value : Number(value);
-    if (!Number.isFinite(quantity) || quantity <= 0) {
-        throw new Error(`${label} khong hop le.`);
-    }
-    const normalizedQuantity = Math.floor(quantity);
-    if (normalizedQuantity <= 0) {
-        throw new Error(`${label} khong hop le.`);
-    }
-    return normalizedQuantity;
-}
-
-function getRepairPaymentAmount(ticket: RepairTicket, ticketId: string): number {
-    const amount = readNonNegativeAmount(ticket.payment?.amount, `So tien phieu sua chua #${ticketId.slice(-6)}`);
-    if (amount <= 0) {
-        throw new Error(`Phieu sua chua #${ticketId.slice(-6)} khong co so tien can thu hop le.`);
-    }
-    return amount;
-}
-
-function getRepairPaidAmount(ticket: RepairTicket): number {
-    const paidFromHistory = (ticket.paymentHistory || []).reduce((sum, payment) => {
-        const amount = Math.max(0, Number(payment.amount) || 0);
-        return payment.type === 'refund' ? sum - amount : sum + amount;
-    }, 0);
-    return Math.max(0, Math.max(Number(ticket.payment?.depositAmount) || 0, paidFromHistory));
 }
 
 export const POST = withApi({
@@ -235,18 +184,6 @@ export const POST = withApi({
             : readNonNegativeAmount(total_amount, 'Tong tien');
 
         const db = getAdminDb();
-        const normalizeRepairTicketId = (value: unknown) => {
-            const raw = String(value || '').trim();
-            if (!raw) return '';
-            const syntheticMatch = raw.match(/^(.+)_(?:part_\d+|labor)$/);
-            return syntheticMatch?.[1] || raw;
-        };
-        const normalizeOrderPaymentId = (value: unknown) => {
-            const raw = String(value || '').trim();
-            if (!raw) return '';
-            const syntheticMatch = raw.match(/^order_payment_(.+)$/);
-            return syntheticMatch?.[1] || raw;
-        };
         const getPaidAmount = (data: FirebaseFirestore.DocumentData) => {
             const history = Array.isArray(data.paymentHistory) ? data.paymentHistory : [];
             const paidFromHistory = history.reduce((sum, entry) => sum + (Number(entry?.amount) || 0), 0);
@@ -409,36 +346,6 @@ export const POST = withApi({
             const activeShiftLockSnap = getCoreSnapshot(activeShiftLockRef) || null;
             const repairSettingsSnap = repairSettingsRef ? getCoreSnapshot(repairSettingsRef) || null : null;
 
-            function resolveWarranty(productData: { warrantyType?: string; warrantyMonths?: string | number; category?: string;[key: string]: unknown }): { warrantyType: string, warrantyMonths: number } | null {
-                if (productData.warrantyType && productData.warrantyType !== 'none') {
-                    return { warrantyType: productData.warrantyType, warrantyMonths: Number(productData.warrantyMonths) || 0 };
-                }
-                if (productData.warrantyType === 'none') return null;
-
-                const categoryPath = productData.category || '';
-                if (!categoryPath) return null;
-
-                const segments = categoryPath.split('/');
-                let currentNodes = retailTrees;
-                let lastFoundWarranty: { warrantyType: string, warrantyMonths: number } | null = null;
-
-                for (let i = 0; i < segments.length; i++) {
-                    const partialId = segments.slice(0, i + 1).join('/');
-                    const node = currentNodes.find((n: { id?: string; slug?: string; warrantyType?: string; warrantyMonths?: string | number; children?: Record<string, unknown>[] }) => n.id === partialId || n.slug === segments[i]);
-                    if (!node) break;
-
-                    if (node.warrantyType && node.warrantyType !== 'none') {
-                        lastFoundWarranty = { warrantyType: node.warrantyType, warrantyMonths: Number(node.warrantyMonths) || 0 };
-                    } else if (node.warrantyType === 'none') {
-                        lastFoundWarranty = null;
-                    }
-
-                    if (!node.children || node.children.length === 0) break;
-                    currentNodes = node.children;
-                }
-                return lastFoundWarranty;
-            }
-
             // Verify stock
             for (const [productId, totalQty] of preAggregatedForStock.entries()) {
                 const pSnap = productDocs.get(productId)!;
@@ -498,7 +405,7 @@ export const POST = withApi({
                 const pSnap = productDocs.get(pid)!;
                 const d = pSnap.data;
 
-                const warrantyInfo = resolveWarranty(d);
+                const warrantyInfo = resolveProductWarranty(d, retailTrees);
                 const warrantyType = warrantyInfo?.warrantyType || 'none';
                 const warrantyMonths = warrantyInfo?.warrantyMonths || 0;
 

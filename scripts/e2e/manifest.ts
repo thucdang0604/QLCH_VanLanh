@@ -27,9 +27,6 @@ export async function writeManifest(manifest: E2EManifest): Promise<void> {
   const temporary = `${target}.tmp`;
   await writeFile(temporary, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
   await rename(temporary, target);
-
-  const currentPath = path.join(process.cwd(), 'output', 'e2e', 'current.json');
-  await writeFile(currentPath, `${JSON.stringify({ runId: manifest.runId })}\n`, 'utf8');
 }
 
 export async function recordDynamicDocument(documentPath: string): Promise<void> {

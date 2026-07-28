@@ -110,7 +110,7 @@ function initAdminApp(): App {
   if (e2eEmulator) {
     return initializeApp({
       projectId: e2eEmulator.projectId,
-      databaseURL: `http://${e2eEmulator.host}:${e2eEmulator.databasePort}?ns=${e2eEmulator.projectId}`,
+      databaseURL: `http://${e2eEmulator.host}:${e2eEmulator.databasePort}?ns=${e2eEmulator.projectId}-default-rtdb`,
       storageBucket: `${e2eEmulator.projectId}.appspot.com`,
     }, ADMIN_APP_NAME);
   }

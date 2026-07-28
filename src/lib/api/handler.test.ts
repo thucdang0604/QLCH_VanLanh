@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { NextRequest } from 'next/server';
 import { ApiError, getApiErrorCode, getApiErrorMessage, getApiErrorStatus, withApi } from './handler';
+import { getBoundRequestId } from '@/lib/observability';
 
 const staticRouteContext = { params: Promise.resolve({}) };
 
@@ -24,6 +25,18 @@ test('keeps a valid caller request id for cross-service tracing', async () => {
     }), staticRouteContext);
 
     assert.equal(response.headers.get('x-request-id'), 'checkout_20260720_001');
+});
+
+test('replaces an unsafe caller request id before it reaches the response or metric context', async () => {
+    const handler = withApi({ name: 'test/unsafe-request-id' }, async (request, context) => {
+        assert.equal(getBoundRequestId(request), context.requestId);
+        return context.json({ success: true });
+    });
+    const response = await handler(new NextRequest('http://localhost/api/test', {
+        headers: { 'x-request-id': 'customer@example.test' },
+    }), staticRouteContext);
+
+    assert.match(response.headers.get('x-request-id') || '', /^[a-f0-9-]{36}$/i);
 });
 
 test('adds trace metadata without changing a streamed or binary response contract', async () => {

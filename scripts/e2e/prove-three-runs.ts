@@ -1,5 +1,4 @@
 import { spawn } from 'node:child_process';
-import { getE2EEnvironment } from './config';
 
 function runOnce(index: number): Promise<void> {
   const runId = `proof-${index}-${process.pid}`;
@@ -8,7 +7,7 @@ function runOnce(index: number): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(pnpm, ['test:e2e'], {
       cwd: process.cwd(),
-      env: getE2EEnvironment(runId),
+      env: { ...process.env, E2E_RUN_ID: runId },
       stdio: 'inherit',
       shell: useShell,
     });

@@ -63,6 +63,16 @@ Open deploy debt: <code>BUG-DEPLOY-007</code> đang theo dõi warning Firebase C
 - <b>Validation:</b> ESLint không error, typecheck, 60 unit tests, AI guard, staged diff check và smoke local cho Settings/Inventory/POS/Suppliers đều pass. Còn 25 warning lint cũ ngoài phạm vi.
 - <b>Reopen rule:</b> Chỉ mở phase mới khi p95 production hoặc Firestore cost tái tăng, transaction retry xuất hiện, hoặc timing log chỉ ra một phase cụ thể. Chi tiết handoff: <a href="modules/firebase_cost_performance_20260720.md">module closeout</a>.
 
+### 2026-07-28 - AUTHORIZATION, E2E, OBSERVABILITY & MODULARIZATION CLOSEOUT
+- **Color:** success
+- **Status:** CODE COMPLETE -> MONITORING
+- **Authorization:** Signed session and mutation authority use a Firestore authorization version; role changes and logout pre-revoke RTDB chat grants and persist reconciliation work.
+- **E2E proof:** Three isolated Emulator/browser runs use the default rules-backed RTDB namespace. Demoted users receive API 403 and client RTDB read/write `permission_denied`; copied cookies are rejected after logout.
+- **Measurement:** Session validation p95 was 48.16ms, 47.67ms, and 48.03ms after warmup, with one Firestore profile read per successful validation. This is a local baseline, not production p95.
+- **Phase 4 decision:** No speculative config/auth/performance change. The Firebase performance closeout remains CLOSED -> MONITORING until production timing, retry, or Firebase cost evidence identifies a bottleneck.
+- **Modularization:** Pure POS checkout rules and repair-create input policy now live in `src/lib/posCheckoutRules.ts` and `src/lib/repairCreateInput.ts`; stock, FIFO, debt, cashier, revenue, sequential-ID, and idempotency transactions are unchanged in their routes.
+- **Handoff:** Read <a href="modules/authorization_e2e_observability_closeout_20260728.md">the closeout module</a> before changing these contracts.
+
 ### Customer UX Optimization
 - **Status:** DONE
 - **Color:** success

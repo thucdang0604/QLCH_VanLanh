@@ -9,6 +9,10 @@ type SeedUser = { uid: string; email: string; role: 'admin' | 'staff' | 'custome
 function seedUsers(runId: string): SeedUser[] {
   return [
     { uid: getScopedId('admin', runId), email: `e2e-${runId}-admin@example.test`, role: 'admin', permissions: [], displayName: 'E2E Admin' },
+    { uid: getScopedId('admin-two', runId), email: `e2e-${runId}-admin-two@example.test`, role: 'admin', permissions: [], displayName: 'E2E Second Admin' },
+    { uid: getScopedId('admin-lifecycle-one', runId), email: `e2e-${runId}-admin-lifecycle-one@example.test`, role: 'admin', permissions: [], displayName: 'E2E Lifecycle Admin One' },
+    { uid: getScopedId('admin-lifecycle-two', runId), email: `e2e-${runId}-admin-lifecycle-two@example.test`, role: 'admin', permissions: [], displayName: 'E2E Lifecycle Admin Two' },
+    { uid: getScopedId('admin-lifecycle-logout', runId), email: `e2e-${runId}-admin-lifecycle-logout@example.test`, role: 'admin', permissions: [], displayName: 'E2E Lifecycle Logout Admin' },
     { uid: getScopedId('staff', runId), email: `e2e-${runId}-staff@example.test`, role: 'staff', permissions: ['manage_repairs'], displayName: 'E2E Repair Staff' },
     { uid: getScopedId('customer', runId), email: `e2e-${runId}-customer@example.test`, role: 'customer', permissions: [], displayName: 'E2E Customer' },
   ];
