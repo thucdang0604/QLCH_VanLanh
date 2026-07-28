@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { getAdminAuth, getAdminDb } from '@/lib/firebaseAdmin';
 import type { PermissionId } from '@/lib/adminModules';
+import { getCurrentAuthorization, isFirebaseTokenCurrent } from '@/lib/authorizationLifecycle';
 
 export type VerifiedUser = {
   uid: string;
@@ -36,24 +37,23 @@ export async function verifyUser(req: NextRequest, onTiming?: (timing: VerifyUse
   const readUserProfileStartedAt = Date.now();
   const snap = await getAdminDb().collection('users').doc(uid).get();
   const readUserProfileMs = Date.now() - readUserProfileStartedAt;
-  const data = snap.exists ? (snap.data() as Partial<{ role: string; permissions: string[] }>) : {};
+  const data = snap.exists ? (snap.data() ?? {}) : {};
+  const authorization = getCurrentAuthorization(data);
 
-  const roleRaw = typeof data.role === 'string' ? data.role : 'customer';
-  const role: VerifiedUser['role'] =
-    roleRaw === 'admin' || roleRaw === 'staff' || roleRaw === 'customer' ? roleRaw : 'customer';
-
-  const permissions = Array.isArray(data.permissions) ? data.permissions.filter((p) => typeof p === 'string') : [];
+  if (!isFirebaseTokenCurrent(decoded.auth_time, authorization)) {
+    throw new Error('Forbidden: session token invalidated by logout');
+  }
 
   onTiming?.({ verifyIdTokenMs, readUserProfileMs });
   return {
     uid,
-    role,
-    permissions,
-    displayName: typeof (data as { displayName?: unknown }).displayName === 'string'
-      ? (data as { displayName: string }).displayName
+    role: authorization.role,
+    permissions: authorization.permissions,
+    displayName: typeof data.displayName === 'string'
+      ? data.displayName
       : undefined,
-    name: typeof (data as { name?: unknown }).name === 'string'
-      ? (data as { name: string }).name
+    name: typeof data.name === 'string'
+      ? data.name
       : undefined,
   };
 }

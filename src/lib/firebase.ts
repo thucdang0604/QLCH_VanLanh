@@ -1,9 +1,12 @@
 import { initializeApp, getApps } from 'firebase/app';
-import { getFirestore } from 'firebase/firestore';
+import { connectFirestoreEmulator, getFirestore } from 'firebase/firestore';
 import type { Auth } from 'firebase/auth';
 import type { Database } from 'firebase/database';
 import type { FirebasePerformance } from 'firebase/performance';
 import type { FirebaseStorage } from 'firebase/storage';
+import { getE2EFirebaseEmulatorConfig } from '@/lib/e2eTestMode';
+
+const e2eEmulator = getE2EFirebaseEmulatorConfig();
 
 const firebaseConfig = {
     apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -13,7 +16,9 @@ const firebaseConfig = {
     messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
     appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
     measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
-    databaseURL: `https://${process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID}-default-rtdb.asia-southeast1.firebasedatabase.app`,
+    databaseURL: e2eEmulator
+        ? `http://${e2eEmulator.host}:${e2eEmulator.databasePort}?ns=${e2eEmulator.projectId}`
+        : `https://${process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID}-default-rtdb.asia-southeast1.firebasedatabase.app`,
 };
 
 // Initialize Firebase
@@ -21,6 +26,9 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0
 
 // Firestore - Main Database (eagerly loaded — used everywhere)
 export const db = getFirestore(app);
+if (e2eEmulator) {
+    connectFirestoreEmulator(db, e2eEmulator.host, e2eEmulator.firestorePort);
+}
 
 // ── Lazy Singletons ──
 // Auth, RTDB, Storage are loaded on-demand to keep initial bundle small.
@@ -29,8 +37,11 @@ export const db = getFirestore(app);
 let _auth: Auth | null = null;
 export async function getAuthInstance(): Promise<Auth> {
     if (!_auth) {
-        const { getAuth } = await import('firebase/auth');
+        const { connectAuthEmulator, getAuth } = await import('firebase/auth');
         _auth = getAuth(app);
+        if (e2eEmulator) {
+            connectAuthEmulator(_auth, `http://${e2eEmulator.host}:${e2eEmulator.authPort}`, { disableWarnings: true });
+        }
     }
     return _auth;
 }
@@ -38,8 +49,11 @@ export async function getAuthInstance(): Promise<Auth> {
 let _rtdb: Database | null = null;
 export async function getRtdbInstance(): Promise<Database> {
     if (!_rtdb) {
-        const { getDatabase } = await import('firebase/database');
+        const { connectDatabaseEmulator, getDatabase } = await import('firebase/database');
         _rtdb = getDatabase(app);
+        if (e2eEmulator) {
+            connectDatabaseEmulator(_rtdb, e2eEmulator.host, e2eEmulator.databasePort);
+        }
     }
     return _rtdb;
 }
@@ -47,8 +61,11 @@ export async function getRtdbInstance(): Promise<Database> {
 let _storage: FirebaseStorage | null = null;
 export async function getStorageInstance(): Promise<FirebaseStorage> {
     if (!_storage) {
-        const { getStorage } = await import('firebase/storage');
+        const { connectStorageEmulator, getStorage } = await import('firebase/storage');
         _storage = getStorage(app);
+        if (e2eEmulator) {
+            connectStorageEmulator(_storage, e2eEmulator.host, e2eEmulator.storagePort);
+        }
     }
     return _storage;
 }

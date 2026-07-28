@@ -12,6 +12,7 @@ import { fetchFifoLogsForDeduction, executeFifoDeductionsWrites, type FifoDeduct
 import { incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 import { stampRepairWarrantyOnParts } from '@/lib/repairWarrantyRules';
 import { reserveSequentialDocumentIds } from '@/lib/serverDocumentIds';
+import { getE2ERunMetadata } from '@/lib/e2eRunMetadata';
 
 const LEGACY_TERMINAL_STATUSES = [REPAIR_STATUS.DONE, REPAIR_STATUS.OUT, REPAIR_STATUS.REFUND, 'bh_hoan_tat', 'bh_tu_choi', 'bh_refund'];
 type HandoverRequestBody = {
@@ -58,6 +59,7 @@ export const POST = withApi({
     },
 }, async (request: NextRequest, context) => {
         const caller = await requirePermission(request, 'manage_repairs');
+        const e2eMetadata = getE2ERunMetadata(request);
 
         const body = await context.readJson<HandoverRequestBody>(request);
         const { ticketId, targetStatus, ticketVersion, laborCost, additionalFees } = body;
@@ -333,6 +335,7 @@ export const POST = withApi({
                         // Log
                         const logRef = inventoryLogAllocations[inventoryLogAllocationIndex++].ref;
                         tx.set(logRef, {
+                            ...e2eMetadata,
                             productId: p.productId,
                             productName: p.productName,
                             quantity: -p.quantity, // deduction
@@ -370,6 +373,7 @@ export const POST = withApi({
                     // Ledger
                     const ledgerRef = customerLedgerAllocations[0].ref;
                     tx.set(ledgerRef, {
+                        ...e2eMetadata,
                         customerId: getTicketCustomerId(ticket),
                         customerPhone: ticket.customer?.phone || '',
                         customerName: ticket.customer?.name || '',
@@ -405,6 +409,7 @@ export const POST = withApi({
 
             if (idempotencyKey) {
                 tx.set(db.collection('operation_requests').doc(idempotencyKey), {
+                    ...e2eMetadata,
                     status: 'completed',
                     completedAt: FieldValue.serverTimestamp(),
                     type: 'repair_handover',

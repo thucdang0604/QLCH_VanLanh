@@ -18,6 +18,7 @@ import { queueCashierShiftTally } from '@/lib/cashierShiftTallyServer';
 import type { RepairWorkflowSettings } from '@/lib/repairWorkflowConfig';
 import type { RevenueAggregateDelta } from '@/lib/revenueAggregate';
 import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
+import { getE2ERunMetadata } from '@/lib/e2eRunMetadata';
 
 type CheckoutItemInput = Record<string, unknown> & {
     isRepairTicket?: boolean;
@@ -210,6 +211,7 @@ export const POST = withApi({
         const caller = await requirePermission(request, 'manage_orders', (authSteps) => {
             debugTiming.authSteps = authSteps;
         });
+        const e2eMetadata = getE2ERunMetadata(request);
         markTiming('auth');
 
         const body = await context.readJson(request);
@@ -962,6 +964,7 @@ export const POST = withApi({
             const orderItems = normalizedItems.filter((item) => !item.isOrderPayment);
 
             const order: Record<string, unknown> = {
+                ...e2eMetadata,
                 customer_info: {
                     customerId: resolvedCustomerId || '',
                     name: incomingContactInput.name || 'Khách lẻ',
@@ -1106,6 +1109,7 @@ export const POST = withApi({
 
                     if (retailQty > 0) {
                         tx.set(inventoryLogAllocations[inventoryLogAllocationIndex++].ref, {
+                            ...e2eMetadata,
                             productId,
                             productName: d.name,
                             quantity: -retailQty,
@@ -1120,6 +1124,7 @@ export const POST = withApi({
                     }
                     if (repairQty > 0) {
                         tx.set(inventoryLogAllocations[inventoryLogAllocationIndex++].ref, {
+                            ...e2eMetadata,
                             productId,
                             productName: repairAggregatedForStock.get(productId)?.productName || d.name,
                             quantity: -repairQty,
@@ -1272,6 +1277,7 @@ export const POST = withApi({
                 } else {
                     const customerSpendDelta = !isDebtCollectionOnly ? currentOrderTotal : 0;
                     const newCust: Record<string, unknown> = {
+                        ...e2eMetadata,
                         id: resolvedCustomerId,
                         code: resolvedCustomerId,
                         legacyPhoneId: normalizedPhoneResult?.local || '',
@@ -1301,6 +1307,7 @@ export const POST = withApi({
 
                 if (!isDebtCollectionOnly) {
                     tx.set(customerLedgerAllocations[customerLedgerAllocationIndex++].ref, {
+                        ...e2eMetadata,
                         customerId: resolvedCustomerId,
                         type: 'purchase_order',
                         amount: currentOrderTotal,
@@ -1309,6 +1316,7 @@ export const POST = withApi({
                     });
                     if (submittedDepositAmount > 0) {
                         tx.set(customerLedgerAllocations[customerLedgerAllocationIndex++].ref, {
+                            ...e2eMetadata,
                             customerId: resolvedCustomerId,
                             type: 'purchase_payment',
                             amount: paidNow,
@@ -1319,6 +1327,7 @@ export const POST = withApi({
                 }
                 if (orderPaymentTotal > 0) {
                     tx.set(customerLedgerAllocations[customerLedgerAllocationIndex++].ref, {
+                        ...e2eMetadata,
                         customerId: resolvedCustomerId,
                         type: 'debt_payment',
                         amount: orderPaymentTotal,
@@ -1454,6 +1463,7 @@ export const POST = withApi({
                 if (resolvedCustomerId) {
                     if (orderPaymentTotal > 0) {
                         tx.set(customerTransactionAllocations[customerTransactionAllocationIndex++].ref, {
+                            ...e2eMetadata,
                             customerId: resolvedCustomerId,
                             customerName: incomingName || incomingContactInput.name || 'Khách lẻ',
                             type: 'PAYMENT',
@@ -1470,6 +1480,7 @@ export const POST = withApi({
 
             if (idempotencyKey) {
                 tx.set(db.collection('operation_requests').doc(idempotencyKey), {
+                    ...e2eMetadata,
                     status: 'completed',
                     completedAt: FieldValue.serverTimestamp(),
                     type: isDebtCollectionOnly ? 'pos_debt_collection' : 'pos_checkout',

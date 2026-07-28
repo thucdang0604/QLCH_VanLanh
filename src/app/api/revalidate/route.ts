@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { revalidateTag, revalidatePath } from 'next/cache';
-import { COOKIE_NAME, verifyPayload } from '@/lib/sessionCookie';
+import { COOKIE_NAME } from '@/lib/sessionCookie';
+import { getCurrentServerSession } from '@/lib/serverSession';
 import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 
 export const POST = withApi({
@@ -16,8 +17,8 @@ export const POST = withApi({
         if (!isSecretAuthorized) {
             const cookie = request.cookies.get(COOKIE_NAME)?.value;
             if (cookie) {
-                const session = await verifyPayload(cookie);
-                isAdminSessionAuthorized = session?.role === 'admin';
+                const session = await getCurrentServerSession(cookie);
+                isAdminSessionAuthorized = session?.session.role === 'admin';
             }
         }
 

@@ -54,6 +54,10 @@ temp_git_page.tsx
 .firebase/
 .codex/
 .playwright-cli/
+.e2e-passed
+output/
+playwright-report/
+test-results/
 
 # AI Cache & scratch files
 .ai_cache/

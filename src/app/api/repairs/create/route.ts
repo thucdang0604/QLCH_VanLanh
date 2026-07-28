@@ -9,6 +9,7 @@ import { isTechnicianUser } from '@/lib/repairAccess';
 import { incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 import { reserveSequentialDocumentId } from '@/lib/serverDocumentIds';
 import type { PaymentHistoryEntry } from '@/lib/types';
+import { getE2ERunMetadata } from '@/lib/e2eRunMetadata';
 
 type CreateRepairBody = Record<string, unknown> & {
     ticketType?: 'repair' | 'warranty';
@@ -57,6 +58,7 @@ export const POST = withApi({
     onError: (error, context) => context.error(getApiErrorMessage(error), getApiErrorStatus(error, 400)),
 }, async (request: NextRequest, context) => {
         const caller = await requirePermission(request, 'manage_repairs');
+        const e2eMetadata = getE2ERunMetadata(request);
         const body = await context.readJson<CreateRepairBody>(request);
 
         const db = getAdminDb();
@@ -104,6 +106,7 @@ export const POST = withApi({
 
             // Ép trạng thái về entry node
             const finalData = {
+                ...e2eMetadata,
                 ...safeBody,
                 staff: {
                     createdBy: caller.uid,

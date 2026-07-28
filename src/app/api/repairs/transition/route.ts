@@ -12,6 +12,7 @@ import { isInventoryConsumedRepairPart, planRepairPartVerification, type RepairP
 import { executeFifoDeductionsWrites, fetchFifoLogsForDeduction, type FifoDeductionResult, type FifoDeductor } from '@/lib/inventoryFifo';
 import { reserveSequentialDocumentIds } from '@/lib/serverDocumentIds';
 import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
+import { getE2ERunMetadata } from '@/lib/e2eRunMetadata';
 
 interface RepairTransitionRequest {
     ticketId?: string;
@@ -73,6 +74,7 @@ export const POST = withApi({
     },
 }, async (request: NextRequest, context) => {
         const caller = await requirePermission(request, 'manage_repairs');
+        const e2eMetadata = getE2ERunMetadata(request);
 
         const body = await context.readJson<RepairTransitionRequest>(request);
         const { ticketId, targetStatus, technicianNote, ticketVersion, idempotencyKey, source, partVerification } = body;
@@ -395,6 +397,7 @@ export const POST = withApi({
                     const logAllocation = consumptionLogAllocations[index];
                     if (!productDoc || !logAllocation) return;
                     tx.set(logAllocation.ref, {
+                        ...e2eMetadata,
                         productId,
                         productName: entry.part.productName,
                         quantity: -Math.max(0, Math.floor(Number(entry.part.quantity) || 0)),
@@ -426,6 +429,7 @@ export const POST = withApi({
 
             if (idempotencyKey) {
                 tx.set(db.collection('operation_requests').doc(idempotencyKey), {
+                    ...e2eMetadata,
                     status: 'completed',
                     completedAt: FieldValue.serverTimestamp(),
                     type: 'repair_transition',
