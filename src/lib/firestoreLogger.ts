@@ -81,6 +81,12 @@ export async function getDoc<T = DocumentData, R extends DocumentData = Document
     return snapshot;
 }
 
+let activeSnapshotListenersCount = 0;
+
+export function getActiveSnapshotListenersCount(): number {
+    return activeSnapshotListenersCount;
+}
+
 // ── onSnapshot overloads ──
 // Provide typed signatures so callers get proper inference on snapshot & error callbacks.
 
@@ -100,6 +106,7 @@ export function onSnapshot(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ...args: any[]
 ): Unsubscribe {
+    activeSnapshotListenersCount++;
     if (process.env.NODE_ENV === 'development') {
         const coll = extractCollectionName(reference);
 
@@ -113,6 +120,7 @@ export function onSnapshot(
 
                 console.groupCollapsed(`%c🚨 [FIRESTORE REALTIME] onSnapshot: ${coll}`, logStyle);
                 console.log(`Cập nhật dữ liệu - Số document kéo về: %c${size}`, countStyle);
+                console.log(`Active listeners count: ${activeSnapshotListenersCount}`);
                 console.trace('Nguồn gọi listener (Stack trace):');
                 console.groupEnd();
 
@@ -123,7 +131,11 @@ export function onSnapshot(
 
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
     // @ts-ignore
-    return originalOnSnapshot(reference, ...args);
+    const unsubscribe = originalOnSnapshot(reference, ...args);
+    return () => {
+        activeSnapshotListenersCount = Math.max(0, activeSnapshotListenersCount - 1);
+        unsubscribe();
+    };
 }
 
 export async function getCountFromServer<T = DocumentData, R extends DocumentData = DocumentData>(

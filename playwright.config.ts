@@ -24,9 +24,8 @@ export default defineConfig({
     url: 'http://127.0.0.1:3101/admin/login',
     timeout: 120_000,
     reuseExistingServer: false,
-    env: {
-      ...process.env,
-      ...e2eEnv,
-    },
+    env: Object.fromEntries(
+      Object.entries({ ...process.env, ...e2eEnv }).filter((pair): pair is [string, string] => typeof pair[1] === 'string')
+    ),
   },
 });

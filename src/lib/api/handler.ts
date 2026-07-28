@@ -38,16 +38,14 @@ type ApiRouteHandler<TParams extends StaticRouteContext> = (
     routeContext: TParams,
 ) => Response | Promise<Response>;
 
+import { getOrCreateRequestId, logApiMetric } from '@/lib/observability';
+
 function createRequestId(request: NextRequest): string {
-    const supplied = request.headers.get('x-request-id')?.trim();
-    if (supplied && /^[a-zA-Z0-9_-]{8,128}$/.test(supplied)) {
-        return supplied;
-    }
-    return crypto.randomUUID();
+    return getOrCreateRequestId(request.headers);
 }
 
 function applyResponseMetadata(response: Response, context: ApiRouteContext): Response {
-    response.headers.set('X-Request-Id', context.requestId);
+    response.headers.set('x-request-id', context.requestId);
     response.headers.set('Server-Timing', `total;dur=${context.elapsedMs()}`);
     return response;
 }
@@ -103,18 +101,27 @@ export function withApi<TParams extends StaticRouteContext = StaticRouteContext>
         };
 
         try {
-            return applyResponseMetadata(await handler(request, context, routeContext), context);
+            const response = applyResponseMetadata(await handler(request, context, routeContext), context);
+            logApiMetric({
+                requestId: context.requestId,
+                path: options.name,
+                method: request.method,
+                statusCode: response.status,
+                durationMs: context.elapsedMs(),
+            });
+            return response;
         } catch (error: unknown) {
             const message = getApiErrorMessage(error);
             const response = options.onError
                 ? await options.onError(error, context)
                 : context.error(message, getApiErrorStatus(error));
-            console.error(`${options.name} API error`, {
-                requestId,
+            logApiMetric({
+                requestId: context.requestId,
+                path: options.name,
+                method: request.method,
+                statusCode: response.status,
                 durationMs: context.elapsedMs(),
-                status: response.status,
-                code: getApiErrorCode(error),
-                error: message,
+                meta: { error: message, code: getApiErrorCode(error) },
             });
             return applyResponseMetadata(response, context);
         }

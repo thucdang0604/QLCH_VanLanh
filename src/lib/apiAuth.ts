@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server';
 import { getAdminAuth, getAdminDb } from '@/lib/firebaseAdmin';
 import type { PermissionId } from '@/lib/adminModules';
 import { getCurrentAuthorization, isFirebaseTokenCurrent } from '@/lib/authorizationLifecycle';
+import { getOrCreateRequestId, logApiMetric } from '@/lib/observability';
 
 export type VerifiedUser = {
   uid: string;
@@ -45,6 +46,18 @@ export async function verifyUser(req: NextRequest, onTiming?: (timing: VerifyUse
   }
 
   onTiming?.({ verifyIdTokenMs, readUserProfileMs });
+
+  const requestId = getOrCreateRequestId(req.headers);
+  logApiMetric({
+    requestId,
+    path: req.nextUrl?.pathname || 'unknown_api',
+    method: req.method || 'GET',
+    statusCode: 200,
+    durationMs: verifyIdTokenMs + readUserProfileMs,
+    verifyIdTokenMs,
+    readUserProfileMs,
+  });
+
   return {
     uid,
     role: authorization.role,
