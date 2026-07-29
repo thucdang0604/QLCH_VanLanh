@@ -13,12 +13,15 @@ let validationSession: { role: 'admin' | 'staff'; permissions: string[] } | null
   permissions: [],
 };
 let validationCookie = '';
+let validationUrl = '';
 
 beforeEach(() => {
   validationStatus = 200;
   validationSession = { role: 'admin', permissions: [] };
   validationCookie = '';
-  globalThis.fetch = async (_input, init) => {
+  validationUrl = '';
+  globalThis.fetch = async (input, init) => {
+    validationUrl = String(input);
     validationCookie = new Headers(init?.headers).get('cookie') || '';
     if (validationStatus !== 200 || !validationSession) {
       return new Response(null, { status: validationStatus });
@@ -88,6 +91,7 @@ test('middleware: allows admin access to any admin route', async () => {
   assert.equal(res.status, 200);
   assert.equal(res.headers.get('location'), null);
   assert.equal(validationCookie, `${COOKIE_NAME}=${adminCookie}`);
+  assert.equal(validationUrl, 'https://ssrqlchvanlanh-l4pecgvuqa-as.a.run.app/api/auth/session');
 });
 
 test('middleware: allows staff access to route with matching permission', async () => {

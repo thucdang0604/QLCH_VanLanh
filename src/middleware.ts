@@ -8,6 +8,11 @@ type ValidatedAdminSession = {
   permissions: string[];
 };
 
+// Firebase Hosting runs Edge middleware in front of the SSR function. A
+// loopback fetch to the Hosting origin does not reliably re-enter the Node
+// route, so validate against the stable public Function URL instead.
+const SESSION_VALIDATION_ORIGIN = 'https://ssrqlchvanlanh-l4pecgvuqa-as.a.run.app';
+
 function buildLoginRedirect(request: NextRequest): URL {
   const { pathname, search } = request.nextUrl;
   const fullTarget = pathname + search;
@@ -36,7 +41,7 @@ async function getValidatedAdminSession(
   requestId: string,
 ): Promise<ValidatedAdminSession | null> {
   try {
-    const response = await fetch(new URL('/api/auth/session', request.url), {
+    const response = await fetch(new URL('/api/auth/session', SESSION_VALIDATION_ORIGIN), {
       method: 'GET',
       headers: {
         cookie: COOKIE_NAME + '=' + cookie,
