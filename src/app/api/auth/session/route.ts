@@ -65,7 +65,11 @@ export const GET = withApi({ name: 'auth/session/validate' }, async (request, co
     });
   }
 
-  return context.json({ valid: true }, {
+  return context.json({
+    valid: true,
+    role: session.authorization.role,
+    permissions: session.authorization.permissions,
+  }, {
     headers: {
       'Cache-Control': 'no-store, no-cache, must-revalidate',
       ...(process.env.E2E_TEST_MODE === '1' ? { 'x-e2e-firestore-read-count': '1' } : {}),

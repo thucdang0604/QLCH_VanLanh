@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyPayload, COOKIE_NAME } from '@/lib/sessionCookie';
+import { COOKIE_NAME } from '@/lib/sessionCookie';
 import { getMatchedAdminRoute, sanitizeAdminRedirectTarget } from '@/lib/adminModules';
 import { getOrCreateRequestId } from '@/lib/observability';
+
+type ValidatedAdminSession = {
+  role: 'admin' | 'staff';
+  permissions: string[];
+};
 
 function buildLoginRedirect(request: NextRequest): URL {
   const { pathname, search } = request.nextUrl;
@@ -20,7 +25,16 @@ function withRequestId(response: NextResponse, requestId: string): NextResponse 
   return response;
 }
 
-async function isCurrentServerSession(request: NextRequest, cookie: string, requestId: string): Promise<boolean> {
+/**
+ * Firebase Hosting does not expose application secrets to the Next Edge
+ * bundle. HMAC verification and current-authorization reads remain in the
+ * Node route; the Edge layer consumes only its validated projection.
+ */
+async function getValidatedAdminSession(
+  request: NextRequest,
+  cookie: string,
+  requestId: string,
+): Promise<ValidatedAdminSession | null> {
   try {
     const response = await fetch(new URL('/api/auth/session', request.url), {
       method: 'GET',
@@ -31,9 +45,28 @@ async function isCurrentServerSession(request: NextRequest, cookie: string, requ
       },
       cache: 'no-store',
     });
-    return response.ok;
+    if (!response.ok) return null;
+
+    const payload: unknown = await response.json();
+    if (!payload || typeof payload !== 'object') return null;
+
+    const { valid, role, permissions } = payload as {
+      valid?: unknown;
+      role?: unknown;
+      permissions?: unknown;
+    };
+    if (
+      valid !== true ||
+      (role !== 'admin' && role !== 'staff') ||
+      !Array.isArray(permissions) ||
+      !permissions.every((permission) => typeof permission === 'string')
+    ) {
+      return null;
+    }
+
+    return { role, permissions };
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -51,7 +84,7 @@ export async function middleware(request: NextRequest) {
     return withRequestId(NextResponse.next(), requestId);
   }
 
-  // Read and verify signed session cookie
+  // The cookie is validated in the Node runtime below before use.
   const cookie = request.cookies.get(COOKIE_NAME)?.value;
 
   // No cookie → Fail-Closed redirect to /admin/login
@@ -59,27 +92,9 @@ export async function middleware(request: NextRequest) {
     return withRequestId(NextResponse.redirect(buildLoginRedirect(request)), requestId);
   }
 
-  let session: Awaited<ReturnType<typeof verifyPayload>>;
-  try {
-    session = await verifyPayload(cookie);
-  } catch {
-    // SESSION_SECRET error or crypto failure → Fail-Closed
-    const res = NextResponse.redirect(buildLoginRedirect(request));
-    res.cookies.set(COOKIE_NAME, '', { path: '/', maxAge: 0 });
-    return withRequestId(res, requestId);
-  }
-
+  const session = await getValidatedAdminSession(request, cookie, requestId);
   if (!session) {
-    // Tampered or expired cookie → Fail-Closed & clear cookie
-    const res = NextResponse.redirect(buildLoginRedirect(request));
-    res.cookies.set(COOKIE_NAME, '', { path: '/', maxAge: 0 });
-    return withRequestId(res, requestId);
-  }
-
-  // Cookie integrity only proves who issued it. Confirm its role, permissions,
-  // logout marker, and authorization version against the Node runtime before
-  // allowing an admin page to render.
-  if (!await isCurrentServerSession(request, cookie, requestId)) {
+    // Invalid, expired, tampered or revoked session: Fail-Closed and clear it.
     const res = NextResponse.redirect(buildLoginRedirect(request));
     res.cookies.set(COOKIE_NAME, '', { path: '/', maxAge: 0 });
     return withRequestId(res, requestId);
