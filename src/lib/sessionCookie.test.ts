@@ -1,9 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { signPayload, verifyPayload, SessionPayload } from './sessionCookie';
+import { COOKIE_NAME, LEGACY_COOKIE_NAME, signPayload, verifyPayload, SessionPayload } from './sessionCookie';
 import { sanitizeAdminRedirectTarget, resolveAdminTargetRoute } from './adminModules';
 
 process.env.SESSION_SECRET = 'test_secret_key_1234567890_super_secret_for_tests';
+
+test('sessionCookie: keeps the custom RBAC cookie distinct from Firebase Hosting reserved cookies', () => {
+  assert.equal(COOKIE_NAME, 'vl_admin_session');
+  assert.equal(LEGACY_COOKIE_NAME, '__session');
+  assert.notEqual(COOKIE_NAME, LEGACY_COOKIE_NAME);
+});
 
 test('sessionCookie: signs and verifies valid session payload', async () => {
   const now = Date.now();

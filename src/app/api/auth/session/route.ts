@@ -17,7 +17,7 @@ import {
   type AuthorizationProjection,
 } from '@/lib/authorizationProjection';
 import { getCurrentServerSession } from '@/lib/serverSession';
-import { signPayload, verifyPayload, COOKIE_NAME } from '@/lib/sessionCookie';
+import { signPayload, verifyPayload, COOKIE_NAME, LEGACY_COOKIE_NAME } from '@/lib/sessionCookie';
 import { ApiError, getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 
 const SESSION_TTL_MS = 20 * 60 * 1000;
@@ -155,6 +155,16 @@ export const POST = withApi({
     path: '/',
     maxAge: SESSION_TTL_MS / 1000,
   });
+  // Firebase Hosting Frameworks reserves __session for Firebase Auth JWTs.
+  // Clear the old application HMAC cookie so Hosting no longer attempts to
+  // decode it as a Firebase session after this migration.
+  res.cookies.set(LEGACY_COOKIE_NAME, '', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 0,
+  });
 
   return res;
 });
@@ -268,6 +278,13 @@ export const DELETE = withApi({ name: 'auth/session/delete' }, async (request: N
     rtdbRoleSyncError,
   }, { status: rtdbRoleSynced ? 200 : 202 });
   res.cookies.set(COOKIE_NAME, '', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 0,
+  });
+  res.cookies.set(LEGACY_COOKIE_NAME, '', {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
