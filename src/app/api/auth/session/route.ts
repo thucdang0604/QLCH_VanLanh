@@ -159,9 +159,8 @@ export const POST = withApi({
     path: '/',
     maxAge: SESSION_TTL_MS / 1000,
   });
-  // Firebase Hosting Frameworks reserves __session for Firebase Auth JWTs.
-  // Clear the old application HMAC cookie so Hosting no longer attempts to
-  // decode it as a Firebase session after this migration.
+  // Firebase Hosting forwards only __session to framework backends. Clear the
+  // preceding custom name because it never reaches the SSR function.
   res.cookies.set(LEGACY_COOKIE_NAME, '', {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',

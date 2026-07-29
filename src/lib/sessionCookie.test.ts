@@ -5,9 +5,9 @@ import { sanitizeAdminRedirectTarget, resolveAdminTargetRoute } from './adminMod
 
 process.env.SESSION_SECRET = 'test_secret_key_1234567890_super_secret_for_tests';
 
-test('sessionCookie: keeps the custom RBAC cookie distinct from Firebase Hosting reserved cookies', () => {
-  assert.equal(COOKIE_NAME, 'vl_admin_session');
-  assert.equal(LEGACY_COOKIE_NAME, '__session');
+test('sessionCookie: uses the Firebase Hosting forwarded cookie and retires the previous custom name', () => {
+  assert.equal(COOKIE_NAME, '__session');
+  assert.equal(LEGACY_COOKIE_NAME, 'vl_admin_session');
   assert.notEqual(COOKIE_NAME, LEGACY_COOKIE_NAME);
 });
 

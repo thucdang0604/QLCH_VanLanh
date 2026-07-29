@@ -10,11 +10,11 @@ export interface SessionPayload {
   exp: number; // epoch ms
 }
 
-// Firebase Hosting Frameworks reserves `__session` for a Firebase Auth JWT.
-// This application uses its own HMAC payload, so it must never occupy that
-// reserved cookie name in production.
-const COOKIE_NAME = 'vl_admin_session';
-const LEGACY_COOKIE_NAME = '__session';
+// Firebase Hosting strips cookies before requests reach a framework backend,
+// except for the specially named `__session` cookie. The application HMAC
+// session must therefore use that name for SSR and middleware authorization.
+const COOKIE_NAME = '__session';
+const LEGACY_COOKIE_NAME = 'vl_admin_session';
 const encoder = new TextEncoder();
 
 async function getKey(): Promise<CryptoKey> {
