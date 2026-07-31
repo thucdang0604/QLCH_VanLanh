@@ -70,7 +70,7 @@ function generateSearchKeywords(values) {
 
 function buildPatch(id, data, collectionName) {
   const sourceValues = collectionName === 'products'
-    ? [data.name, data.productCode, data.sku, data.barcode]
+    ? [data.name, data.productCode, data.sku, data.barcode, data.partType, data.model, ...toStringArray(data.compatibleModels)]
     : [data.name, data.device_model, ...toStringArray(data.tags)];
   const searchKeywords = Array.from(new Set([
     ...toStringArray(data.searchKeywords),
@@ -89,7 +89,7 @@ function buildPatch(id, data, collectionName) {
     patch.categoryIds = categoryIds;
   }
   if (collectionName === 'products'
-      && JSON.stringify(toStringArray(data.searchCategoryKeywords)) !== JSON.stringify(searchCategoryKeywords)) {
+    && JSON.stringify(toStringArray(data.searchCategoryKeywords)) !== JSON.stringify(searchCategoryKeywords)) {
     patch.searchCategoryKeywords = searchCategoryKeywords;
   }
   return patch;

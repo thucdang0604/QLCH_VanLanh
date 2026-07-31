@@ -1,7 +1,7 @@
 /* eslint-disable no-console */
-import { 
-    getDocs as originalGetDocs, 
-    getDoc as originalGetDoc, 
+import {
+    getDocs as originalGetDocs,
+    getDoc as originalGetDoc,
     onSnapshot as originalOnSnapshot,
     getCountFromServer as originalGetCountFromServer,
     Query,
@@ -14,6 +14,7 @@ import {
     AggregateQuerySnapshot,
     AggregateField
 } from 'firebase/firestore';
+import { getListenerReadMetrics, getOneShotReadMetrics } from './firestoreReadMetrics';
 
 /**
  * Hàm phân tích Query để lấy tên Collection một cách tương đối
@@ -50,16 +51,20 @@ export async function getDocs<T = DocumentData, R extends DocumentData = Documen
     const snapshot = await originalGetDocs(query);
     const end = performance.now();
     const time = (end - start).toFixed(0);
-    
+
     if (process.env.NODE_ENV === 'development') {
         const coll = extractCollectionName(query);
-        console.groupCollapsed(`%c🚨 [FIRESTORE READ] getDocs: ${coll}`, logStyle);
-        console.log(`Số document đọc (Reads): %c${snapshot.size}`, countStyle);
+        const metrics = getOneShotReadMetrics(snapshot.size, snapshot.metadata.fromCache);
+        console.groupCollapsed(`%c🚨 [FIRESTORE QUERY] getDocs: ${coll}`, logStyle);
+        console.log(`Document trả về: %c${metrics.returnedDocuments}`, countStyle);
+        console.log(`Nguồn snapshot: ${metrics.source}`);
+        console.log(`Document reads ước lượng: %c${metrics.documentReadLowerBound}`, countStyle);
+        console.info(metrics.note);
         console.log(`Thời gian query: ${time}ms`);
         console.trace('Nguồn gọi query (Stack trace):');
         console.groupEnd();
     }
-    
+
     return snapshot;
 }
 
@@ -71,8 +76,12 @@ export async function getDoc<T = DocumentData, R extends DocumentData = Document
 
     if (process.env.NODE_ENV === 'development') {
         const coll = extractCollectionName(ref);
-        console.groupCollapsed(`%c🚨 [FIRESTORE READ] getDoc: ${coll}`, logStyle);
-        console.log(`Số document đọc (Reads): %c1`, countStyle);
+        const metrics = getOneShotReadMetrics(snapshot.exists() ? 1 : 0, snapshot.metadata.fromCache);
+        console.groupCollapsed(`%c🚨 [FIRESTORE QUERY] getDoc: ${coll}`, logStyle);
+        console.log(`Document tồn tại: ${snapshot.exists() ? 'có' : 'không'}`);
+        console.log(`Nguồn snapshot: ${metrics.source}`);
+        console.log(`Document reads ước lượng: %c${metrics.documentReadLowerBound}`, countStyle);
+        console.info(metrics.note);
         console.log(`Thời gian query: ${time}ms`);
         console.trace('Nguồn gọi query (Stack trace):');
         console.groupEnd();
@@ -82,6 +91,7 @@ export async function getDoc<T = DocumentData, R extends DocumentData = Document
 }
 
 let activeSnapshotListenersCount = 0;
+let nextSnapshotListenerId = 1;
 
 export function getActiveSnapshotListenersCount(): number {
     return activeSnapshotListenersCount;
@@ -107,6 +117,8 @@ export function onSnapshot(
     ...args: any[]
 ): Unsubscribe {
     activeSnapshotListenersCount++;
+    const listenerId = nextSnapshotListenerId++;
+    let receivedServerSnapshot = false;
     if (process.env.NODE_ENV === 'development') {
         const coll = extractCollectionName(reference);
 
@@ -117,9 +129,30 @@ export function onSnapshot(
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             args[callbackIndex] = (snapshot: any) => {
                 const size = snapshot.size ?? (snapshot.exists && snapshot.exists() ? 1 : 0);
+                const fromCache = Boolean(snapshot.metadata?.fromCache);
+                const changes = typeof snapshot.docChanges === 'function'
+                    ? snapshot.docChanges().reduce((counts: { added: number; modified: number; removed: number }, change: { type: 'added' | 'modified' | 'removed' }) => {
+                        counts[change.type] += 1;
+                        return counts;
+                    }, { added: 0, modified: 0, removed: 0 })
+                    : { added: 0, modified: 0, removed: 0 };
+                const metrics = getListenerReadMetrics({
+                    returnedDocuments: size,
+                    fromCache,
+                    isInitialSnapshot: !receivedServerSnapshot,
+                    changes,
+                });
+                if (!fromCache) receivedServerSnapshot = true;
 
-                console.groupCollapsed(`%c🚨 [FIRESTORE REALTIME] onSnapshot: ${coll}`, logStyle);
-                console.log(`Cập nhật dữ liệu - Số document kéo về: %c${size}`, countStyle);
+                console.groupCollapsed(`%c🚨 [FIRESTORE LISTENER #${listenerId}] onSnapshot: ${coll}`, logStyle);
+                console.log(`Document trong snapshot: %c${metrics.returnedDocuments}`, countStyle);
+                console.log(`Thay đổi callback: added ${changes.added}, modified ${changes.modified}, removed ${changes.removed}`);
+                console.log(`Nguồn snapshot: ${metrics.source}`);
+                const readRange = metrics.documentReadLowerBound === metrics.documentReadUpperBound
+                    ? String(metrics.documentReadLowerBound)
+                    : `${metrics.documentReadLowerBound}–${metrics.documentReadUpperBound}`;
+                console.log(`Document reads ước lượng cho callback: %c${readRange}`, countStyle);
+                console.info(metrics.note);
                 console.log(`Active listeners count: ${activeSnapshotListenersCount}`);
                 console.trace('Nguồn gọi listener (Stack trace):');
                 console.groupEnd();
@@ -129,9 +162,16 @@ export function onSnapshot(
         }
     }
 
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore
-    const unsubscribe = originalOnSnapshot(reference, ...args);
+    let unsubscribe: Unsubscribe;
+    try {
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-ignore
+        unsubscribe = originalOnSnapshot(reference, ...args);
+    } catch (error) {
+        activeSnapshotListenersCount = Math.max(0, activeSnapshotListenersCount - 1);
+        throw error;
+    }
+
     return () => {
         activeSnapshotListenersCount = Math.max(0, activeSnapshotListenersCount - 1);
         unsubscribe();
@@ -148,8 +188,9 @@ export async function getCountFromServer<T = DocumentData, R extends DocumentDat
 
     if (process.env.NODE_ENV === 'development') {
         const coll = extractCollectionName(query);
-        console.groupCollapsed(`%c🚨 [FIRESTORE READ] getCountFromServer: ${coll}`, logStyle);
-        console.log(`Số lượng đếm (Count): %c${snapshot.data().count}`, countStyle);
+        console.groupCollapsed(`%c🚨 [FIRESTORE AGGREGATE] getCountFromServer: ${coll}`, logStyle);
+        console.log(`Kết quả count: %c${snapshot.data().count}`, countStyle);
+        console.info('Count là kết quả aggregation, không phải số document reads. SDK không cho biết số index entries đã quét; xem Query Explain hoặc Firebase Usage để kiểm tra billing.');
         console.log(`Thời gian query: ${time}ms`);
         console.trace('Nguồn gọi query (Stack trace):');
         console.groupEnd();

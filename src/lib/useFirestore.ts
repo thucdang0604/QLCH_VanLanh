@@ -19,18 +19,32 @@ import {
 import { onSnapshot, getDocs } from './firestoreLogger';
 import { db } from './firebase';
 
+interface FirestoreCollectionOptions {
+    /** Keep the hook mounted but do not create a Firestore listener. */
+    enabled?: boolean;
+}
+
 /**
  * Custom hook for real-time Firestore collection subscription
  */
 export function useFirestoreCollection<T extends DocumentData>(
     collectionName: string,
-    constraints: QueryConstraint[] = []
+    constraints: QueryConstraint[] = [],
+    options: FirestoreCollectionOptions = {},
 ) {
     const [data, setData] = useState<(T & { id: string })[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const enabled = options.enabled ?? true;
+    const constraintsKey = JSON.stringify(constraints.map(constraint => constraint.toString()));
 
     useEffect(() => {
+        if (!enabled) {
+            setLoading(false);
+            setError(null);
+            return;
+        }
+
         // This hook re-subscribes when its query changes; show loading state immediately.
         setLoading(true);
         setError(null);
@@ -56,7 +70,7 @@ export function useFirestoreCollection<T extends DocumentData>(
 
         return () => unsubscribe();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [collectionName, JSON.stringify(constraints.map(c => c.toString()))]);
+    }, [collectionName, constraintsKey, enabled]);
 
     return { data, loading, error };
 }
