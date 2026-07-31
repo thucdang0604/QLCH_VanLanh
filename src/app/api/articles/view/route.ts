@@ -4,6 +4,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { isRateLimited } from '@/lib/rateLimit';
 import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
+import { isKnownSearchCrawlerUserAgent } from '@/lib/searchCrawler';
 
 const VIEW_TTL_SECONDS = 60 * 60 * 24;
 const ARTICLE_VIEW_RATE_LIMIT = 120;
@@ -27,35 +28,42 @@ export const POST = withApi({
         return context.error(status < 500 ? getApiErrorMessage(error) : 'Lỗi hệ thống. Vui lòng thử lại sau.', status);
     },
 }, async (request: NextRequest, context) => {
-        const body = await context.readJson<{ slug?: unknown }>(request);
-        const slug = typeof body.slug === 'string' ? body.slug.trim() : '';
+    // Search and preview bots may execute client-side JavaScript. Do not
+    // treat that crawl as a human view or spend a rate-limit transaction.
+    // This is analytics-only; user-agent is never used for authorization.
+    if (isKnownSearchCrawlerUserAgent(request.headers.get('user-agent'))) {
+        return context.json({ success: true, counted: false, reason: 'crawler' });
+    }
 
-        if (!slug || slug.length > 180 || slug.includes('/')) {
-            return context.json({ error: 'Invalid article slug' }, { status: 400 });
-        }
+    const body = await context.readJson<{ slug?: unknown }>(request);
+    const slug = typeof body.slug === 'string' ? body.slug.trim() : '';
 
-        const cookieName = getViewCookieName(slug);
-        if (request.cookies.get(cookieName)?.value === '1') {
-            return context.json({ success: true, counted: false, reason: 'already-counted' });
-        }
+    if (!slug || slug.length > 180 || slug.includes('/')) {
+        return context.json({ error: 'Invalid article slug' }, { status: 400 });
+    }
 
-        const ip = getClientIp(request);
-        if (await isRateLimited(ip, 'article_view', ARTICLE_VIEW_RATE_LIMIT, ARTICLE_VIEW_RATE_WINDOW_MS)) {
-            return context.json({ error: 'Too many requests' }, { status: 429 });
-        }
+    const cookieName = getViewCookieName(slug);
+    if (request.cookies.get(cookieName)?.value === '1') {
+        return context.json({ success: true, counted: false, reason: 'already-counted' });
+    }
 
-        await getAdminDb().collection('articles').doc(slug).update({
-            views: FieldValue.increment(1),
-            viewsUpdatedAt: FieldValue.serverTimestamp(),
-        });
+    const ip = getClientIp(request);
+    if (await isRateLimited(ip, 'article_view', ARTICLE_VIEW_RATE_LIMIT, ARTICLE_VIEW_RATE_WINDOW_MS)) {
+        return context.json({ error: 'Too many requests' }, { status: 429 });
+    }
 
-        const response = context.json({ success: true, counted: true });
-        response.cookies.set(cookieName, '1', {
-            maxAge: VIEW_TTL_SECONDS,
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'lax',
-            path: '/',
-        });
-        return response;
+    await getAdminDb().collection('articles').doc(slug).update({
+        views: FieldValue.increment(1),
+        viewsUpdatedAt: FieldValue.serverTimestamp(),
+    });
+
+    const response = context.json({ success: true, counted: true });
+    response.cookies.set(cookieName, '1', {
+        maxAge: VIEW_TTL_SECONDS,
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        path: '/',
+    });
+    return response;
 });

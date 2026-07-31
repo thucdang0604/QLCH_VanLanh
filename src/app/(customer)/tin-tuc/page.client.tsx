@@ -1,14 +1,12 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
+import { useMemo, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { ChevronRight, Eye, Clock, Tag, FileText, Loader2 } from 'lucide-react';
 import { Timestamp } from 'firebase/firestore';
 import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
-import { SITE_URL } from "@/lib/constants";
 
 const typeConfig: Record<string, { label: string; color: string }> = {
     Promo: { label: 'Khuyến mãi', color: 'bg-red-100 text-red-700' },
@@ -49,33 +47,14 @@ type ArticleDoc = {
     tags?: string[];
 };
 
-export default function TinTucPage({ initialArticles = [] }: { initialArticles?: ArticleDoc[] }) {
-    const searchParams = useSearchParams();
-    const router = useRouter();
-    const tabFromUrl = searchParams.get('tab');
-    const validTabKeys = tabs.map(t => t.key);
-    const initialTab = tabFromUrl && validTabKeys.includes(tabFromUrl) ? tabFromUrl : 'all';
-    const [activeTab, setActiveTab] = useState(initialTab);
-
-    // Sync tab state when URL changes externally
-    useEffect(() => {
-        const t = searchParams.get('tab');
-        const resolved = t && validTabKeys.includes(t) ? t : 'all';
-        setActiveTab(resolved);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [searchParams]);
-
-    const handleTabChange = (key: string) => {
-        setActiveTab(key);
-        const params = new URLSearchParams(searchParams.toString());
-        if (key === 'all') {
-            params.delete('tab');
-        } else {
-            params.set('tab', key);
-        }
-        const qs = params.toString();
-        router.replace(`/tin-tuc${qs ? `?${qs}` : ''}`, { scroll: false });
-    };
+export default function TinTucPage({
+    initialArticles = [],
+    initialTab = 'all',
+}: {
+    initialArticles?: ArticleDoc[];
+    initialTab?: string;
+}) {
+    const activeTab = tabs.some(tab => tab.key === initialTab) ? initialTab : 'all';
 
     const loading = false;
     const articles = initialArticles;
@@ -90,62 +69,8 @@ export default function TinTucPage({ initialArticles = [] }: { initialArticles?:
     // eslint-disable-next-line react-hooks/exhaustive-deps
     useEffect(() => { resetPage(); }, [activeTab]);
 
-    const seoTitle = 'Bài Viết Nổi Bật | Văn Lành Service';
-    const seoDescription =
-        'Cập nhật tin tức mới nhất, chương trình khuyến mãi, mẹo sử dụng thiết bị từ Trung tâm sửa chữa Văn Lành Service. Hotline: 0932.242.026';
-    const canonicalUrl = `${SITE_URL}/tin-tuc`;
-    const collectionSchema = {
-        '@context': 'https://schema.org',
-        '@type': 'CollectionPage',
-        name: 'Bài Viết Nổi Bật',
-        description: seoDescription,
-        url: canonicalUrl,
-        isPartOf: {
-            '@type': 'WebSite',
-            name: 'Văn Lành Service',
-            url: SITE_URL,
-        },
-    };
-    const breadcrumbSchema = {
-        '@context': 'https://schema.org',
-        '@type': 'BreadcrumbList',
-        itemListElement: [
-            {
-                '@type': 'ListItem',
-                position: 1,
-                name: 'Trang chủ',
-                item: `${SITE_URL}/`,
-            },
-            {
-                '@type': 'ListItem',
-                position: 2,
-                name: 'Bài Viết Nổi Bật',
-                item: canonicalUrl,
-            },
-        ],
-    };
-
     return (
         <div className="max-w-[1200px] mx-auto px-2 md:px-4 py-8">
-            {/* SEO */}
-            <title>{seoTitle}</title>
-            <meta name="description" content={seoDescription} />
-            <link rel="canonical" href={canonicalUrl} />
-            <meta property="og:type" content="website" />
-            <meta property="og:title" content={seoTitle} />
-            <meta property="og:description" content={seoDescription} />
-            <meta property="og:url" content={canonicalUrl} />
-            <meta property="twitter:card" content="summary_large_image" />
-            <meta property="twitter:title" content={seoTitle} />
-            <meta property="twitter:description" content={seoDescription} />
-            <script
-                type="application/ld+json"
-                dangerouslySetInnerHTML={{ __html: JSON.stringify(collectionSchema) }}
-            />
-            <script
-                type="application/ld+json"
-                dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbSchema) }}
-            />
             {/* Breadcrumb */}
             <nav className="flex items-center gap-2 text-sm text-gray-500 mb-6">
                 <Link href="/" className="hover:text-orange-600 transition-colors">Trang chủ</Link>
@@ -162,16 +87,16 @@ export default function TinTucPage({ initialArticles = [] }: { initialArticles?:
             {/* Tabs */}
             <div className="flex gap-2 mb-8 overflow-x-auto pb-2">
                 {tabs.map(tab => (
-                    <button
+                    <Link
                         key={tab.key}
-                        onClick={() => handleTabChange(tab.key)}
+                        href={tab.key === 'all' ? '/tin-tuc' : `/tin-tuc?tab=${tab.key}`}
                         className={`px-5 py-2.5 rounded-full text-sm font-medium whitespace-nowrap transition-all duration-200 ${activeTab === tab.key
                             ? 'bg-orange-500 text-white shadow-md shadow-orange-500/20'
                             : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                             }`}
                     >
                         {tab.label}
-                    </button>
+                    </Link>
                 ))}
             </div>
 
