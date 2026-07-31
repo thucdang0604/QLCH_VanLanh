@@ -235,11 +235,11 @@ function normalizePastedArticleHtml(html: string): string {
 
 async function processBase64Images(htmlContent: string): Promise<string> {
     if (!htmlContent) return '';
-    
+
     const parser = new DOMParser();
     const docNode = parser.parseFromString(htmlContent, 'text/html');
     const images = docNode.querySelectorAll('img');
-    
+
     const base64Images: HTMLImageElement[] = [];
     images.forEach(img => {
         if (img.src && img.src.startsWith('data:image/')) {
@@ -279,7 +279,7 @@ async function processBase64Images(htmlContent: string): Promise<string> {
         try {
             const blob = base64ToBlob(img.src);
             const hash = await calculateHash(blob);
-            
+
             // Document ID using hash for O(1) deduplication lookup
             const mediaDocId = `MED-articles-${hash}`;
             const mediaDocRef = doc(db, 'media_library', mediaDocId);
@@ -295,7 +295,7 @@ async function processBase64Images(htmlContent: string): Promise<string> {
             const extension = blob.type.split('/')[1] || 'png';
             const tempName = `article_embedded_${hash}.${extension}`;
             const file = new File([blob], tempName, { type: blob.type });
-            
+
             // Optimize the image using optimization parameters matching the signature
             const { file: optimized, width, height } = await optimizeImage(file, 1200, 1600, 0.8);
 
@@ -827,6 +827,9 @@ export function ArticleModal({
             };
 
             if (article) {
+                if (formData.status === 'published' && article.status !== 'published') {
+                    payload.publishedAt = serverTimestamp();
+                }
                 // Update existing
                 await updateDoc(doc(db, 'articles', article.id), payload);
                 await triggerRevalidate(['/', `/tin-tuc/${article.id}`, '/tin-tuc', '/sitemap.xml'], ['articles']);
@@ -834,6 +837,9 @@ export function ArticleModal({
                 // Create new
                 payload.views = 0;
                 payload.createdAt = serverTimestamp();
+                if (formData.status === 'published') {
+                    payload.publishedAt = serverTimestamp();
+                }
 
                 const baseSlug = generateSlug(payload.title as string);
                 const checkRef = await getDoc(doc(db, 'articles', baseSlug));
@@ -857,309 +863,312 @@ export function ArticleModal({
     };
 
 
-    
+
 
     return (
         <Modal
             isOpen={true}
             onClose={onClose}
             size="full"
-            className="!max-w-3xl"
+            className="!max-w-full lg:!max-w-6xl xl:!max-w-[1350px] lg:!h-[90vh]"
+            contentClassName="flex-1 min-h-0 flex flex-col overflow-hidden"
             priority="high"
         >
-                <div className="flex items-center justify-between p-4 md:p-6 border-b shrink-0 bg-white sticky top-0 md:rounded-t-2xl z-10">
-                    <h2 className="text-xl font-bold">{article ? 'Sửa bài viết' : 'Thêm bài viết mới'}</h2>
-                    <div className="flex items-center gap-2">
-                        <button
-                            type="button"
-                            onClick={() => handleSeoMagic('check')}
-                            disabled={isCheckingSeo || isRefining}
-                            className="text-sm bg-blue-50 text-blue-600 font-medium px-3 py-1.5 md:px-4 md:py-2 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors flex items-center gap-1.5 disabled:opacity-50"
-                        >
-                            {isCheckingSeo ? <Loader2 size={16} className="animate-spin" /> : <Star size={16} />}
-                            <span className="hidden md:inline">Chấm bài SEO</span>
-                            <span className="md:hidden">Chấm SEO</span>
-                        </button>
-                        <button
-                            type="button"
-                            onClick={handleAutoRefine}
-                            disabled={isRefining || isCheckingSeo}
-                            className="text-sm bg-emerald-50 text-emerald-700 font-medium px-3 py-1.5 md:px-4 md:py-2 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors flex items-center gap-1.5 disabled:opacity-50"
-                        >
-                            {isRefining ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-                            <span className="hidden md:inline">Tự sửa SEO</span>
-                            <span className="md:hidden">Sửa SEO</span>
-                        </button>
+            <div className="flex items-center justify-between px-4 py-3 md:px-5 md:py-3.5 border-b shrink-0 bg-white sticky top-0 md:rounded-t-2xl z-10">
+                <h2 className="text-lg md:text-xl font-bold">{article ? 'Sửa bài viết' : 'Thêm bài viết mới'}</h2>
+                <div className="flex items-center gap-2">
+                    <button
+                        type="button"
+                        onClick={() => handleSeoMagic('check')}
+                        disabled={isCheckingSeo || isRefining}
+                        className="text-xs md:text-sm bg-blue-50 text-blue-600 font-medium px-3 py-1.5 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                        {isCheckingSeo ? <Loader2 size={15} className="animate-spin" /> : <Star size={15} />}
+                        <span className="hidden md:inline">Chấm bài SEO</span>
+                        <span className="md:hidden">Chấm SEO</span>
+                    </button>
+                    <button
+                        type="button"
+                        onClick={handleAutoRefine}
+                        disabled={isRefining || isCheckingSeo}
+                        className="text-xs md:text-sm bg-emerald-50 text-emerald-700 font-medium px-3 py-1.5 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                        {isRefining ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
+                        <span className="hidden md:inline">Tự sửa SEO</span>
+                        <span className="md:hidden">Sửa SEO</span>
+                    </button>
 
-                        <button title="Đóng" onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg">
-                            <X size={20} />
-                        </button>
-                    </div>
+                    <button title="Đóng" onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500">
+                        <X size={20} />
+                    </button>
                 </div>
+            </div>
 
-                <div className="p-4 md:p-6 space-y-5 overflow-y-auto flex-1 pb-20 md:pb-6">
-                    {/* --- AUTO PILOT BANNER --- */}
-                    <div className="bg-gradient-to-r from-indigo-50 text-indigo-900 border border-indigo-200 rounded-xl p-5 shadow-sm transform transition-all hover:shadow-md mb-4 animate-in fade-in zoom-in-95">
-                        <h3 className="font-bold mb-2 flex items-center gap-2 text-lg">
-                            <span className="bg-indigo-600 text-white p-1 rounded-md"><Wand2 size={18} /></span>
-                            Auto-Pilot 1-Touch: Đăng Bài Tự Động
-                        </h3>
-                        <p className="text-sm text-indigo-700 mb-4 opacity-90 leading-relaxed max-w-xl">
-                            Hệ thống sẽ tự động sinh Meta chuẩn SEO, Content chuyên sâu EEAT và ghép Hình Ảnh / Video vào bài viết. Tất cả chỉ trong 1 quy trình.
-                        </p>
+            <div className="p-3 md:p-5 flex-1 min-h-0 overflow-hidden flex flex-col justify-between">
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 flex-1 min-h-0 overflow-hidden">
+                    {/* LEFT COLUMN: Metadata & Settings (Desktop 5/12 width - Compact) */}
+                    <div className="lg:col-span-5 overflow-y-auto pr-1 space-y-3.5 h-full max-h-[calc(90vh-140px)] lg:max-h-none">
+                        {/* --- AUTO PILOT BANNER --- */}
+                        <div className="bg-gradient-to-r from-indigo-50 text-indigo-900 border border-indigo-200 rounded-xl p-4 shadow-sm animate-in fade-in zoom-in-95">
+                            <h3 className="font-bold mb-1.5 flex items-center gap-2 text-base">
+                                <span className="bg-indigo-600 text-white p-1 rounded-md"><Wand2 size={16} /></span>
+                                Auto-Pilot 1-Touch: Đăng Bài Tự Động
+                            </h3>
+                            <p className="text-xs text-indigo-700 mb-3 leading-relaxed">
+                                Tự động sinh Meta chuẩn SEO, Content chuyên sâu EEAT và ghép Hình Ảnh / Video vào bài viết trong 1 click.
+                            </p>
 
-                        <div className="flex flex-col sm:flex-row gap-3">
-                            <div className="flex-1 flex flex-col gap-2">
-                                <input
-                                    type="text"
-                                    placeholder="Nhập từ khóa chính hoặc ý tưởng bài viết (vd: Tủ lạnh giá rẻ)..."
-                                    value={autoPilotTopic}
-                                    onChange={(e) => setAutoPilotTopic(e.target.value)}
+                            <div className="flex flex-col sm:flex-row gap-2">
+                                <div className="flex-1 flex flex-col gap-1.5">
+                                    <input
+                                        type="text"
+                                        placeholder="Từ khóa chính / ý tưởng (vd: Tủ lạnh giá rẻ)..."
+                                        value={autoPilotTopic}
+                                        onChange={(e) => setAutoPilotTopic(e.target.value)}
+                                        disabled={autoPilotState !== 'idle' && autoPilotState !== 'done'}
+                                        className="w-full h-9 px-3 border border-indigo-200 rounded-lg focus:outline-none focus:border-indigo-400 text-xs"
+                                    />
+                                    <input
+                                        type="password"
+                                        placeholder="[Tùy chọn] Gemini API Key..."
+                                        value={googleApiKey}
+                                        onChange={(e) => setGoogleApiKey(e.target.value)}
+                                        disabled={autoPilotState !== 'idle' && autoPilotState !== 'done'}
+                                        className="w-full h-9 px-3 border border-indigo-200 rounded-lg focus:outline-none focus:border-indigo-400 text-xs"
+                                    />
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={runAutoPilot}
                                     disabled={autoPilotState !== 'idle' && autoPilotState !== 'done'}
-                                    className="w-full h-11 px-4 border border-indigo-200 rounded-lg focus:outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 placeholder-indigo-300"
-                                />
-                                <input
-                                    type="password"
-                                    placeholder="[Tùy chọn] Nhập Google Gemini API Key để vẽ ảnh NanoBanana..."
-                                    value={googleApiKey}
-                                    onChange={(e) => setGoogleApiKey(e.target.value)}
-                                    disabled={autoPilotState !== 'idle' && autoPilotState !== 'done'}
-                                    className="w-full h-11 px-4 border border-indigo-200 rounded-lg focus:outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 placeholder-indigo-300 text-sm"
-                                />
-                            </div>
-                            <button
-                                type="button"
-                                onClick={runAutoPilot}
-                                disabled={autoPilotState !== 'idle' && autoPilotState !== 'done'}
-                                className="h-11 px-6 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg transition-transform hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center gap-2 shadow-sm disabled:opacity-50 disabled:hover:translate-y-0"
-                            >
-                                {autoPilotState !== 'idle' && autoPilotState !== 'done' ? (
-                                    <><Loader2 size={18} className="animate-spin" /> Hệ thống đang chạy...</>
-                                ) : (
-                                    <><Wand2 size={18} /> Khởi động Auto-Pilot</>
-                                )}
-                            </button>
-                        </div>
-
-                        {autoPilotLogs.length > 0 && (
-                            <div className="mt-4 bg-indigo-950/90 rounded-lg p-3 max-h-40 overflow-y-auto font-mono text-xs text-indigo-200 space-y-1.5 shadow-inner">
-                                {autoPilotLogs.map((log, idx) => (
-                                    <div key={idx} className="animate-in fade-in slide-in-from-left-2 flex items-start gap-2">
-                                        <span className="text-indigo-500">{'>'}</span> {log}
-                                    </div>
-                                ))}
-                                {autoPilotState !== 'idle' && autoPilotState !== 'done' && (
-                                    <div className="flex items-center gap-2 text-indigo-400 ml-1 mt-2">
-                                        <Loader2 size={10} className="animate-spin" /> ...
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                    </div>
-                    {/* SEO Checker Panel */}
-                    {(seoResult.content || isCheckingSeo) && seoResult.type === 'check' && (
-                        <div className="border rounded-xl p-4 md:p-5 relative shrink-0 bg-blue-50/70 border-blue-200 animate-in fade-in zoom-in-95">
-                            <div className="flex justify-between items-center mb-3 border-b pb-2 border-blue-100/50">
-                                <h3 className="font-bold flex items-center gap-2 text-blue-900">
-                                    <Star size={18} className="text-blue-500" /> Báo cáo chuẩn SEO (Ollama AI)
-                                    {isCheckingSeo && <Loader2 size={14} className="animate-spin text-blue-500" />}
-                                </h3>
-                                <button title="Đóng" type="button" onClick={() => setSeoResult({ type: '', content: '' })} className="p-1 rounded-lg transition-colors text-blue-400 hover:bg-blue-100">
-                                    <X size={16} />
+                                    className="h-9 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg transition-transform flex items-center justify-center gap-1.5 text-xs shrink-0 disabled:opacity-50"
+                                >
+                                    {autoPilotState !== 'idle' && autoPilotState !== 'done' ? (
+                                        <><Loader2 size={14} className="animate-spin" /> Đang chạy...</>
+                                    ) : (
+                                        <><Wand2 size={14} /> Auto-Pilot</>
+                                    )}
                                 </button>
                             </div>
-                            <div className="text-sm leading-relaxed font-medium text-blue-950">
-                                {seoResult.content.split('\n').map((line, i) => (
-                                    <p key={i} className="mb-1">
-                                        {line.split(/(\*\*.*?\*\*)/g).map((part, j) => {
-                                            if (part.startsWith('**') && part.endsWith('**')) {
-                                                return <strong key={j} className="text-blue-900">{part.slice(2, -2)}</strong>;
-                                            }
-                                            return part;
-                                        })}
-                                    </p>
-                                ))}
-                                {isCheckingSeo && <span className="inline-block w-2 h-4 animate-pulse ml-1 align-middle bg-blue-500"></span>}
-                            </div>
-                        </div>
-                    )}
 
-                    {/* Auto-Refine Progress Panel */}
-                    {(isRefining || refineProgress.length > 0) && seoResult.type === 'refine' && (
-                        <div className="border rounded-xl p-4 md:p-5 relative shrink-0 bg-emerald-50/70 border-emerald-200 animate-in fade-in zoom-in-95">
-                            <div className="flex justify-between items-center mb-3 border-b pb-2 border-emerald-100/50">
-                                <h3 className="font-bold flex items-center gap-2 text-emerald-900">
-                                    <RefreshCw size={18} className={isRefining ? 'animate-spin text-emerald-500' : 'text-emerald-500'} />
-                                    Tự động sửa SEO (Vòng lặp thông minh)
-                                    {isRefining && <Loader2 size={14} className="animate-spin text-emerald-500" />}
-                                </h3>
-                                {!isRefining && (
-                                    <button title="Đóng" type="button" onClick={() => { setSeoResult({ type: '', content: '' }); setRefineProgress([]); }} className="p-1 rounded-lg transition-colors text-emerald-400 hover:bg-emerald-100">
-                                        <X size={16} />
-                                    </button>
-                                )}
-                            </div>
-                            <div className="bg-emerald-950/90 rounded-lg p-3 max-h-48 overflow-y-auto font-mono text-xs text-emerald-200 space-y-1.5 shadow-inner">
-                                {refineProgress.map((log, idx) => (
-                                    <div key={idx} className="animate-in fade-in slide-in-from-left-2 flex items-start gap-2">
-                                        <span className="text-emerald-500 shrink-0">{'>'}</span>
-                                        <span>{log}</span>
-                                    </div>
-                                ))}
-                                {isRefining && (
-                                    <div className="flex items-center gap-2 text-emerald-400 ml-1 mt-2">
-                                        <Loader2 size={10} className="animate-spin" /> Đang xử lý...
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Title */}
-                    <div>
-                        <label className="block text-sm font-medium mb-1">Tiêu đề <span className="text-red-500">*</span></label>
-                        <input
-                            type="text"
-                            value={formData.title}
-                            onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                            className="w-full h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
-                            placeholder="Nhập tiêu đề bài viết..."
-                        />
-
-                    </div>
-
-                    {/* Excerpt */}
-                    <div>
-                        <label className="block text-sm font-medium mb-1">Mô tả ngắn (SEO Meta Description)</label>
-                        <textarea
-                            value={formData.excerpt}
-                            onChange={(e) => setFormData({ ...formData, excerpt: e.target.value })}
-                            className="w-full h-20 p-3 border rounded-lg focus:border-orange-500 focus:outline-none resize-none"
-                            placeholder="Mô tả ngắn gọn nội dung bài viết (dưới 155 ký tự)..."
-                        />
-
-                    </div>
-
-                    {/* Thumbnail */}
-                    <div>
-                        <label className="block text-sm font-medium mb-1">Ảnh thumbnail</label>
-                        <div className="flex items-center gap-4">
-                            {formData.thumbnail ? (
-                                <div className="relative w-24 h-16 rounded-lg overflow-hidden border">
-                                    <Image src={formData.thumbnail} alt="" fill className="object-cover" />
-                                    <button
-                                        title="Xóa ảnh thumbnail"
-                                        onClick={() => setFormData({ ...formData, thumbnail: '' })}
-                                        className="absolute top-0.5 right-0.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center"
-                                    >
-                                        <X size={12} />
-                                    </button>
-                                </div>
-                            ) : (
-                                <div className="w-24 h-16 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400">
-                                    <ImageIcon size={20} />
+                            {autoPilotLogs.length > 0 && (
+                                <div className="mt-3 bg-indigo-950/90 rounded-lg p-2.5 max-h-32 overflow-y-auto font-mono text-[11px] text-indigo-200 space-y-1 shadow-inner">
+                                    {autoPilotLogs.map((log, idx) => (
+                                        <div key={idx} className="flex items-start gap-1.5">
+                                            <span className="text-indigo-500">{'>'}</span> {log}
+                                        </div>
+                                    ))}
+                                    {autoPilotState !== 'idle' && autoPilotState !== 'done' && (
+                                        <div className="flex items-center gap-1.5 text-indigo-400 ml-1 mt-1">
+                                            <Loader2 size={10} className="animate-spin" /> ...
+                                        </div>
+                                    )}
                                 </div>
                             )}
-                            <button
-                                type="button"
+                        </div>
+
+                        {/* SEO Checker Panel */}
+                        {(seoResult.content || isCheckingSeo) && seoResult.type === 'check' && (
+                            <div className="border rounded-xl p-3.5 relative shrink-0 bg-blue-50/70 border-blue-200 animate-in fade-in zoom-in-95">
+                                <div className="flex justify-between items-center mb-2 border-b pb-1.5 border-blue-100/50">
+                                    <h3 className="font-bold flex items-center gap-1.5 text-xs text-blue-900">
+                                        <Star size={15} className="text-blue-500" /> Báo cáo chuẩn SEO (Ollama AI)
+                                        {isCheckingSeo && <Loader2 size={13} className="animate-spin text-blue-500" />}
+                                    </h3>
+                                    <button title="Đóng" type="button" onClick={() => setSeoResult({ type: '', content: '' })} className="p-1 rounded text-blue-400 hover:bg-blue-100">
+                                        <X size={14} />
+                                    </button>
+                                </div>
+                                <div className="text-xs leading-relaxed font-medium text-blue-950 max-h-48 overflow-y-auto pr-1">
+                                    {seoResult.content.split('\n').map((line, i) => (
+                                        <p key={i} className="mb-1">
+                                            {line.split(/(\*\*.*?\*\*)/g).map((part, j) => {
+                                                if (part.startsWith('**') && part.endsWith('**')) {
+                                                    return <strong key={j} className="text-blue-900">{part.slice(2, -2)}</strong>;
+                                                }
+                                                return part;
+                                            })}
+                                        </p>
+                                    ))}
+                                    {isCheckingSeo && <span className="inline-block w-2 h-3 animate-pulse ml-1 align-middle bg-blue-500"></span>}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Auto-Refine Progress Panel */}
+                        {(isRefining || refineProgress.length > 0) && seoResult.type === 'refine' && (
+                            <div className="border rounded-xl p-3.5 relative shrink-0 bg-emerald-50/70 border-emerald-200 animate-in fade-in zoom-in-95">
+                                <div className="flex justify-between items-center mb-2 border-b pb-1.5 border-emerald-100/50">
+                                    <h3 className="font-bold flex items-center gap-1.5 text-xs text-emerald-900">
+                                        <RefreshCw size={15} className={isRefining ? 'animate-spin text-emerald-500' : 'text-emerald-500'} />
+                                        Tự động sửa SEO (Vòng lặp thông minh)
+                                        {isRefining && <Loader2 size={13} className="animate-spin text-emerald-500" />}
+                                    </h3>
+                                    {!isRefining && (
+                                        <button title="Đóng" type="button" onClick={() => { setSeoResult({ type: '', content: '' }); setRefineProgress([]); }} className="p-1 rounded text-emerald-400 hover:bg-emerald-100">
+                                            <X size={14} />
+                                        </button>
+                                    )}
+                                </div>
+                                <div className="bg-emerald-950/90 rounded-lg p-2.5 max-h-40 overflow-y-auto font-mono text-[11px] text-emerald-200 space-y-1 shadow-inner">
+                                    {refineProgress.map((log, idx) => (
+                                        <div key={idx} className="flex items-start gap-1.5">
+                                            <span className="text-emerald-500 shrink-0">{'>'}</span>
+                                            <span>{log}</span>
+                                        </div>
+                                    ))}
+                                    {isRefining && (
+                                        <div className="flex items-center gap-1.5 text-emerald-400 ml-1 mt-1">
+                                            <Loader2 size={10} className="animate-spin" /> Đang xử lý...
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Title */}
+                        <div>
+                            <label className="block text-xs font-semibold text-gray-700 mb-1">Tiêu đề <span className="text-red-500">*</span></label>
+                            <input
+                                type="text"
+                                value={formData.title}
+                                onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                                className="w-full h-10 px-3 text-sm border rounded-lg focus:border-orange-500 focus:outline-none"
+                                placeholder="Nhập tiêu đề bài viết..."
+                            />
+                        </div>
+
+                        {/* Excerpt */}
+                        <div>
+                            <label className="block text-xs font-semibold text-gray-700 mb-1">Mô tả ngắn (SEO Meta Description)</label>
+                            <textarea
+                                value={formData.excerpt}
+                                onChange={(e) => setFormData({ ...formData, excerpt: e.target.value })}
+                                className="w-full h-16 p-2.5 text-xs border rounded-lg focus:border-orange-500 focus:outline-none resize-none"
+                                placeholder="Mô tả ngắn gọn nội dung bài viết (dưới 155 ký tự)..."
+                            />
+                        </div>
+
+                        {/* Thumbnail */}
+                        <div>
+                            <label className="block text-xs font-semibold text-gray-700 mb-1">Ảnh thumbnail</label>
+                            <div className="flex items-center gap-3">
+                                {formData.thumbnail ? (
+                                    <div className="relative w-20 h-14 rounded-lg overflow-hidden border shrink-0">
+                                        <Image src={formData.thumbnail} alt="" fill className="object-cover" />
+                                        <button
+                                            title="Xóa ảnh thumbnail"
+                                            onClick={() => setFormData({ ...formData, thumbnail: '' })}
+                                            className="absolute top-0.5 right-0.5 w-4 h-4 bg-red-500 text-white rounded-full flex items-center justify-center"
+                                        >
+                                            <X size={10} />
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div className="w-20 h-14 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 shrink-0">
+                                        <ImageIcon size={18} />
+                                    </div>
+                                )}
+                                <div className="flex flex-wrap gap-2">
+                                    <button
+                                        type="button"
+                                        title="Chọn ảnh thumbnail"
+                                        onClick={() => fileRef.current?.click()}
+                                        disabled={uploading}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-xs hover:bg-gray-50 disabled:opacity-50"
+                                    >
+                                        {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                                        {uploading ? 'Đang tải...' : 'Tải ảnh'}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        title="Chọn ảnh từ thư viện"
+                                        onClick={() => setMediaPickerOpen(true)}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-xs bg-orange-50 text-orange-600 border-orange-200 hover:bg-orange-100 transition-colors"
+                                    >
+                                        <ImageIcon size={14} />
+                                        Thư viện
+                                    </button>
+                                </div>
+                                <input ref={fileRef} type="file" accept="image/*" onChange={handleThumbnailUpload} className="hidden" title="Chọn ảnh thumbnail" />
+                            </div>
+                            <MediaManager
+                                isOpen={mediaPickerOpen}
+                                onClose={() => setMediaPickerOpen(false)}
+                                onSelect={(url) => setFormData({ ...formData, thumbnail: url })}
                                 title="Chọn ảnh thumbnail"
-                                onClick={() => fileRef.current?.click()}
-                                disabled={uploading}
-                                className="flex items-center gap-2 px-4 py-2 border rounded-lg text-sm hover:bg-gray-50 disabled:opacity-50"
-                            >
-                                {uploading ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
-                                {uploading ? 'Đang tải...' : 'Chọn ảnh'}
-                            </button>
-                            <button
-                                type="button"
-                                title="Chọn ảnh từ thư viện"
-                                onClick={() => setMediaPickerOpen(true)}
-                                className="flex items-center gap-2 px-4 py-2 border rounded-lg text-sm bg-orange-50 text-orange-600 border-orange-200 hover:bg-orange-100 transition-colors"
-                            >
-                                <ImageIcon size={16} />
-                                Thư viện
-                            </button>
-                            <input ref={fileRef} type="file" accept="image/*" onChange={handleThumbnailUpload} className="hidden" title="Chọn ảnh thumbnail" />
+                                defaultFolder="articles"
+                            />
                         </div>
-                        <MediaManager
-                            isOpen={mediaPickerOpen}
-                            onClose={() => setMediaPickerOpen(false)}
-                            onSelect={(url) => setFormData({ ...formData, thumbnail: url })}
-                            title="Chọn ảnh thumbnail"
-                            defaultFolder="articles"
-                        />
-                    </div>
 
-                    {/* Type + Status */}
-                    <div className="grid grid-cols-2 gap-4">
+                        {/* Type + Status */}
+                        <div className="grid grid-cols-2 gap-3">
+                            <div>
+                                <label className="block text-xs font-semibold text-gray-700 mb-1">Loại bài</label>
+                                <select
+                                    title="Chọn loại bài"
+                                    value={formData.type}
+                                    onChange={(e) => setFormData({ ...formData, type: e.target.value })}
+                                    className="w-full h-9 px-3 text-xs border rounded-lg focus:border-orange-500 focus:outline-none"
+                                >
+                                    <option value="News">Tin tức</option>
+                                    <option value="Promo">Khuyến mãi</option>
+                                    <option value="Tips">Mẹo hay</option>
+                                    <option value="Training">Đào Tạo</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-semibold text-gray-700 mb-1">Trạng thái</label>
+                                <select
+                                    title="Chọn trạng thái"
+                                    value={formData.status}
+                                    onChange={(e) => setFormData({ ...formData, status: e.target.value })}
+                                    className="w-full h-9 px-3 text-xs border rounded-lg focus:border-orange-500 focus:outline-none"
+                                >
+                                    <option value="draft">Bản nháp</option>
+                                    <option value="published">Đăng ngay</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        {/* Video Embed URL */}
                         <div>
-                            <label className="block text-sm font-medium mb-1">Loại bài</label>
-                            <select
-                                title="Chọn loại bài"
-                                value={formData.type}
-                                onChange={(e) => setFormData({ ...formData, type: e.target.value })}
-                                className="w-full h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
-                            >
-                                <option value="News">Tin tức</option>
-                                <option value="Promo">Khuyến mãi</option>
-                                <option value="Tips">Mẹo hay</option>
-                                <option value="Training">Đào Tạo</option>
-                            </select>
+                            <label className="block text-xs font-semibold text-gray-700 mb-1">
+                                <Video size={13} className="inline mr-1 text-purple-500" />
+                                Video nổi bật (YouTube / Facebook URL)
+                            </label>
+                            <input
+                                type="url"
+                                title="Nhập URL video"
+                                value={formData.videoEmbedUrl}
+                                onChange={(e) => setFormData({ ...formData, videoEmbedUrl: e.target.value })}
+                                className="w-full h-9 px-3 text-xs border rounded-lg focus:border-orange-500 focus:outline-none"
+                                placeholder="VD: https://www.youtube.com/watch?v=..."
+                            />
                         </div>
+
+                        {/* Tags */}
                         <div>
-                            <label className="block text-sm font-medium mb-1">Trạng thái</label>
-                            <select
-                                title="Chọn trạng thái"
-                                value={formData.status}
-                                onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                                className="w-full h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
-                            >
-                                <option value="draft">Bản nháp</option>
-                                <option value="published">Đăng ngay</option>
-                            </select>
+                            <label className="block text-xs font-semibold text-gray-700 mb-1">Tags (cách nhau bằng dấu phẩy)</label>
+                            <input
+                                type="text"
+                                title="Nhập tags"
+                                value={formData.tags}
+                                onChange={(e) => setFormData({ ...formData, tags: e.target.value })}
+                                className="w-full h-9 px-3 text-xs border rounded-lg focus:border-orange-500 focus:outline-none"
+                                placeholder="VD: iPhone, khuyến mãi, mẹo hay"
+                            />
                         </div>
                     </div>
 
-                    {/* Video Embed URL */}
-                    <div>
-                        <label className="block text-sm font-medium mb-1">
-                            <Video size={14} className="inline mr-1 text-purple-500" />
-                            Video nổi bật (YouTube / Facebook URL)
-                        </label>
-                        <input
-                            type="url"
-                            title="Nhập URL video"
-                            value={formData.videoEmbedUrl}
-                            onChange={(e) => setFormData({ ...formData, videoEmbedUrl: e.target.value })}
-                            className="w-full h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
-                            placeholder="VD: https://www.youtube.com/watch?v=..."
-                        />
-                        <p className="text-xs text-gray-400 mt-1">Video sẽ hiển thị to đầu bài viết. Để chèn video giữa bài, dùng nút 🎬 trong trình soạn thảo.</p>
-                    </div>
-
-                    {/* Tags */}
-                    <div>
-                        <label className="block text-sm font-medium mb-1">Tags (cách nhau bằng dấu phẩy)</label>
-                        <input
-                            type="text"
-                            title="Nhập tags"
-                            value={formData.tags}
-                            onChange={(e) => setFormData({ ...formData, tags: e.target.value })}
-                            className="w-full h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
-                            placeholder="VD: iPhone, khuyến mãi, mẹo hay"
-                        />
-
-                    </div>
-
-                    {/* Content - ReactQuill */}
-                    <div>
-                        <div className="flex justify-between items-end mb-2">
-                            <label className="block text-sm font-medium">Nội dung bài viết</label>
-
+                    {/* RIGHT COLUMN: Rich Text Content Editor (Desktop 7/12 width - Single Editor Scrollbar) */}
+                    <div className="lg:col-span-7 flex flex-col flex-1 min-h-0 h-full overflow-hidden space-y-1.5">
+                        <div className="flex justify-between items-end shrink-0">
+                            <label className="block text-xs font-semibold text-gray-700">Nội dung bài viết <span className="text-red-500">*</span></label>
                         </div>
 
                         <div
-                            className="border rounded-lg overflow-hidden [&_.ql-container]:min-h-[250px] [&_.ql-editor]:min-h-[250px] [&_.ql-toolbar]:border-b [&_.ql-toolbar]:border-t-0 [&_.ql-toolbar]:border-x-0 [&_.ql-container]:border-0"
+                            className="border rounded-lg bg-white shadow-sm flex flex-col flex-1 min-h-0 overflow-hidden [&_.quill]:flex-1 [&_.quill]:min-h-0 [&_.quill]:flex [&_.quill]:flex-col [&_.quill]:overflow-hidden [&_.ql-toolbar]:shrink-0 [&_.ql-toolbar]:bg-white [&_.ql-toolbar]:border-b [&_.ql-toolbar]:border-t-0 [&_.ql-toolbar]:border-x-0 [&_.ql-toolbar]:rounded-t-lg [&_.ql-container]:flex-1 [&_.ql-container]:min-h-0 [&_.ql-container]:flex [&_.ql-container]:flex-col [&_.ql-container]:overflow-y-auto [&_.ql-container]:border-0 [&_.ql-editor]:flex-1 [&_.ql-editor]:min-h-full [&_.ql-editor]:p-4 [&_.ql-editor_img]:max-w-full [&_.ql-editor_img]:h-auto [&_.ql-editor_img]:rounded-lg"
                             onPasteCapture={handlePasteCapture}
                         >
                             <ReactQuill
@@ -1169,34 +1178,33 @@ export function ArticleModal({
                                 onChange={(val: string) => setFormData(prev => ({ ...prev, content: val }))}
                                 modules={quillModules}
                                 formats={quillFormats}
-                                placeholder="Viết nội dung bài viết ở đây... Dùng nút 🎬 trên toolbar để chèn video YouTube"
+                                placeholder="Viết nội dung bài viết ở đây..."
                             />
                         </div>
-
-
-                    </div>
-
-                    {/* Actions */}
-                    <div className="flex gap-3 p-4 border-t sticky bottom-0 bg-white mt-auto shrink-0 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] md:shadow-none">
-                        <button
-                            type="button"
-                            title="Đóng"
-                            onClick={onClose}
-                            className="flex-1 py-3 border rounded-lg font-medium hover:bg-gray-50 transition-colors"
-                        >
-                            Hủy
-                        </button>
-                        <button
-                            title="Lưu bài viết"
-                            onClick={handleSave}
-                            disabled={saving}
-                            className="flex-1 py-3 bg-orange-500 text-white rounded-lg font-medium hover:bg-orange-600 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-                        >
-                            {saving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
-                            {article ? 'Cập nhật' : 'Đăng bài'}
-                        </button>
                     </div>
                 </div>
+
+                {/* Actions Bar */}
+                <div className="flex gap-3 pt-3 border-t shrink-0 bg-white mt-3">
+                    <button
+                        type="button"
+                        title="Đóng"
+                        onClick={onClose}
+                        className="flex-1 py-2.5 border rounded-lg font-medium hover:bg-gray-50 transition-colors text-sm"
+                    >
+                        Hủy
+                    </button>
+                    <button
+                        title="Lưu bài viết"
+                        onClick={handleSave}
+                        disabled={saving}
+                        className="flex-1 py-3 bg-orange-500 text-white rounded-lg font-medium hover:bg-orange-600 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                        {saving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
+                        {article ? 'Cập nhật' : 'Đăng bài'}
+                    </button>
+                </div>
+            </div>
         </Modal>
     );
 }

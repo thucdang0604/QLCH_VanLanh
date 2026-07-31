@@ -3,6 +3,13 @@ import { unstable_cache } from 'next/cache';
 import { PRODUCT_STATUS } from '@/lib/productLifecycle';
 import { filterFlashSaleProducts } from '@/lib/flashSale';
 import { toPublicProduct, toPublicService } from '@/lib/publicCatalog';
+import {
+    getProductConditionQueryValues,
+    matchesProductCondition,
+    type ProductConditionFilter,
+} from '@/lib/productConditionCollections';
+
+import { normalizeSidebarMenuItems } from '@/lib/sidebarMenu';
 
 /** Serialized Firestore document with guaranteed `id` field */
 export type SerializedDoc = { id: string } & Record<string, unknown>;
@@ -62,7 +69,7 @@ export const fetchNavConfig = unstable_cache(
         const data = JSON.parse(JSON.stringify(snap.data()));
         return {
             headerNav: data.headerNav || [],
-            sidebarMenu: data.sidebarMenu || [],
+            sidebarMenu: normalizeSidebarMenuItems(data.sidebarMenu || []),
             footerServices: data.footerServices || [],
         };
     },
@@ -71,7 +78,7 @@ export const fetchNavConfig = unstable_cache(
 );
 
 export const fetchCategoryItems = unstable_cache(
-    async (isRepair: boolean, categoryId?: string, condition?: string) => {
+    async (isRepair: boolean, categoryId?: string, condition?: ProductConditionFilter) => {
         if (!isAdminAvailable()) return [];
 
         const db = getAdminDb();
@@ -85,11 +92,18 @@ export const fetchCategoryItems = unstable_cache(
             queryRef = queryRef.where('isActive', '==', true);
         } else {
             queryRef = queryRef.where('status', '==', 'active');
-            
+
         }
 
         if (categoryId && categoryId !== 'all') {
             queryRef = queryRef.where('categoryIds', 'array-contains', categoryId);
+        }
+
+        if (!isRepair && condition) {
+            const conditionValues = getProductConditionQueryValues(condition);
+            queryRef = conditionValues.length === 1
+                ? queryRef.where('condition', '==', conditionValues[0])
+                : queryRef.where('condition', 'in', [...conditionValues]);
         }
 
         const snapshot = await queryRef.limit(200).get();
@@ -99,17 +113,13 @@ export const fetchCategoryItems = unstable_cache(
             return isRepair ? toPublicService(doc.id, data) : toPublicProduct(doc.id, data);
         });
 
-        // In-memory filter for condition if specified
+        // Keep the legacy used collection broad while allowing the public 99%
+        // collection to select only products whose condition is `like-new`.
         if (!isRepair && condition) {
-            items = items.filter(p => {
-                const cond = (p as { condition?: string }).condition;
-                if (condition === 'new') {
-                    return cond === 'new';
-                } else if (condition === 'used') {
-                    return cond === 'used' || cond === 'like-new';
-                }
-                return true;
-            });
+            items = items.filter(p => matchesProductCondition(
+                (p as { condition?: string }).condition,
+                condition,
+            ));
         }
 
         return items;
@@ -197,6 +207,9 @@ export const fetchArticleDetail = unstable_cache(
         }
 
         const data = doc.data() as Record<string, unknown>;
+        if (data.status !== 'published') {
+            return null;
+        }
         const serialized: SerializedDoc = { ...data, id: doc.id };
         if (serialized.createdAt && typeof (serialized.createdAt as { toDate?: unknown }).toDate === 'function') {
             serialized.createdAt = (serialized.createdAt as { toDate: () => Date }).toDate().getTime();
@@ -370,7 +383,7 @@ export const fetchRelatedItems = unstable_cache(
         if (!isAdminAvailable()) return { services: [], accessories: [] };
 
         const db = getAdminDb();
-        
+
         // Fetch some services
         const servicesSnap = await db.collection('services')
             .orderBy('createdAt', 'desc')

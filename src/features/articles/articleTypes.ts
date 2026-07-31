@@ -12,6 +12,7 @@ export interface Article {
     views: number;
     tags?: string[];
     createdAt: unknown;
+    publishedAt?: unknown;
     updatedAt?: unknown;
 }
 
