@@ -6,25 +6,6 @@ import { appConfirm } from '@/lib/appDialog';
 
 /**
  * Modal — Component dùng chung cho toàn bộ popup trong Admin.
- * 
- * Features:
- * - Esc key đóng modal
- * - Click backdrop đóng modal (tuỳ chọn)
- * - Responsive: mobile bottom-sheet, desktop center
- * - z-index configurable (tránh conflict khi modal lồng nhau)
- * - Body scroll lock khi modal mở
- * - CSS animation fade-in
- * - print:hidden mặc định
- * 
- * @example
- * <Modal isOpen={showModal} onClose={() => setShowModal(false)} title="Thêm sản phẩm">
- *   <form>...</form>
- * </Modal>
- * 
- * @example — modal lồng nhau (z-index cao hơn)
- * <Modal isOpen={showSub} onClose={...} priority="high">
- *   <MediaManager ... />
- * </Modal>
  */
 
 type ModalSize = 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl' | '4xl' | 'full';
@@ -48,6 +29,8 @@ interface ModalProps {
     blur?: boolean;
     /** Custom className cho content wrapper */
     className?: string;
+    /** Custom className thay thế cho div content wrapper (ví dụ: flex-1 min-h-0 overflow-hidden) */
+    contentClassName?: string;
     /** Responsive bottom-sheet trên mobile (default: true) */
     mobileSheet?: boolean;
     /** Form có thay đổi chưa lưu, hiện confirm khi đóng */
@@ -76,6 +59,7 @@ export default function Modal({
     printHidden = true,
     blur = false,
     className = '',
+    contentClassName,
     mobileSheet = true,
     isDirty = false,
 }: ModalProps) {
@@ -93,7 +77,6 @@ export default function Modal({
         }
     }, [isDirty, onClose]);
 
-    // Esc key handler
     const handleKeyDown = useCallback((e: KeyboardEvent) => {
         if (e.key === 'Escape') void handleClose();
     }, [handleClose]);
@@ -103,7 +86,6 @@ export default function Modal({
     useEffect(() => {
         if (!isOpen) return;
         document.addEventListener('keydown', handleKeyDown);
-        // Lock body scroll
         const prev = document.body.style.overflow;
         document.body.style.overflow = 'hidden';
         return () => {
@@ -158,7 +140,7 @@ export default function Modal({
                 )}
 
                 {/* Content */}
-                <div className="flex-1 overflow-y-auto">
+                <div className={`flex-1 min-h-0 ${contentClassName ?? 'overflow-y-auto'}`}>
                     {children}
                 </div>
             </div>

@@ -431,7 +431,7 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
                 // --------------------------------------------------------
                 const allImages = jsonRows.flatMap((row) => parseImages(row, IMAGE_MAIN_HEADERS, IMAGE_OTHER_HEADERS));
                 const localImageSources = Array.from(new Set(allImages.filter(isLocalImageReference)));
-                
+
                 const autoMappedUrls = new Map<string, string>();
                 const conflictedLocalKeys = new Set<string>();
 
@@ -484,7 +484,7 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
 
                 const parsed = jsonRows.map((row, index) => {
                     const rowNum = index + 2;
-                    
+
                     // Tạo bản sao processedRow để thay thế URL đã được map tự động
                     const processedRow = { ...row };
                     [...IMAGE_MAIN_HEADERS, ...IMAGE_OTHER_HEADERS].forEach((header) => {
@@ -1034,7 +1034,7 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
                         if (mediaDocSnap.exists()) {
                             return { url: mediaDocSnap.data().url as string, reused: true };
                         }
-                        
+
                         const newUrl = await uploadInitialImportImage(item.file, folder, hash);
                         return { url: newUrl, reused: false };
                     })());
@@ -1095,7 +1095,12 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
         const pricePromo = mode === 'part'
             ? getNumber(row.data, ['Giá bán', 'Giá KM'])
             : getNumber(row.data, ['Giá KM', 'Giá bán']);
-        const searchKeywords = Array.from(new Set([...generateSearchKeywords(name), productCode.toLowerCase()])).slice(0, 60);
+        const partType = mode === 'part' ? getValue(row.data, ['Loại linh kiện', 'Part Type']) : '';
+        const searchKeywords = Array.from(new Set([
+            ...generateSearchKeywords(name),
+            ...generateSearchKeywords(partType),
+            ...generateSearchKeywords(productCode),
+        ])).slice(0, 60);
 
         const data: Record<string, unknown> = {
             sku: productCode,
@@ -1127,7 +1132,7 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
 
         if (mode === 'part') {
             data.quality = getValue(row.data, ['Chất lượng', 'Phân loại']) || 'Zin';
-            data.partType = getValue(row.data, ['Loại linh kiện', 'Part Type']);
+            data.partType = partType;
         } else {
             data.condition = getValue(row.data, ['Tình trạng', 'Condition']) || 'new';
             data.isFlashSale = getBoolean(row.data, ['Flash Sale']);
@@ -1851,11 +1856,10 @@ export default function ExcelImportModal({ mode, onClose }: { mode: ExcelImportM
                                         key={option.value}
                                         type="button"
                                         onClick={() => setPreviewFilter(option.value)}
-                                        className={`px-3 py-1.5 rounded-lg border text-sm font-medium transition-colors ${
-                                            previewFilter === option.value
-                                                ? 'border-orange-300 bg-orange-50 text-orange-700'
-                                                : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
-                                        }`}
+                                        className={`px-3 py-1.5 rounded-lg border text-sm font-medium transition-colors ${previewFilter === option.value
+                                            ? 'border-orange-300 bg-orange-50 text-orange-700'
+                                            : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                                            }`}
                                     >
                                         {option.label} ({option.count})
                                     </button>

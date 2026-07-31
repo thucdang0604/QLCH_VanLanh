@@ -140,11 +140,14 @@ export default function UniversalProductModal({
     const [images, setImages] = useState<string[]>(initialData?.images || []);
     const [isSubmitting, setIsSubmitting] = useState(false);
 
-    // €€ Dynamic Data (Brands) €€
-    
-    const { data: brandsData } = useFirestoreCollection<{ name: string }>('brands', [orderBy('name', 'asc')]);
-    
-    
+    // Brands are only rendered by the retail form. Do not keep a listener open
+    // while the component modal is mounted or closed on the Parts page.
+    const { data: brandsData } = useFirestoreCollection<{ name: string }>(
+        'brands',
+        [orderBy('name', 'asc')],
+        { enabled: isOpen && mode === 'retail' },
+    );
+
     const brands = brandsData.map(b => b.name);
 
     useEffect(() => {
@@ -299,7 +302,11 @@ export default function UniversalProductModal({
         const imageUrl = images[0] || '';
         const productId = isEditing && initialData ? initialData.id : await normalizeDocId(form.name, 'component');
         const productCode = initialData ? getPrimaryProductCode(initialData) : buildProductCodeFromId(productId, 'component');
-        const searchKeywords = Array.from(new Set([...generateSearchKeywords(form.name), productCode.toLowerCase()])).slice(0, 60);
+        const searchKeywords = Array.from(new Set([
+            ...generateSearchKeywords(form.name),
+            ...generateSearchKeywords(form.partType),
+            ...generateSearchKeywords(productCode),
+        ])).slice(0, 60);
 
         const data: Record<string, unknown> = {
             sku: productCode,
@@ -516,7 +523,7 @@ function RetailFields({
                             className={`flex items-center gap-2 p-3 rounded-lg border cursor-pointer transition-all ${form.condition === c.value
                                 ? 'border-orange-400 bg-orange-50'
                                 : 'border-gray-200 hover:border-gray-300'
-                            }`}
+                                }`}
                         >
                             <input
                                 type="radio"
@@ -704,9 +711,9 @@ function ComponentFields({
                 <input
                     type="number"
                     value={form.stock}
-                        onChange={(e) => setForm(p => ({ ...p, stock: e.target.value ? Number(e.target.value) : '' }))}
-                        min={0}
-                        disabled
+                    onChange={(e) => setForm(p => ({ ...p, stock: e.target.value ? Number(e.target.value) : '' }))}
+                    min={0}
+                    disabled
                     className="w-full h-11 px-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-shadow"
                     placeholder="0"
                 />
