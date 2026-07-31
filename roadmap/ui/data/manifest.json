@@ -1,6 +1,6 @@
 {
   "projectName": "QLCH_VanLanh",
-  "lastSync": "2026-07-28T00:00:00.000+07:00",
+  "lastSync": "2026-07-29T00:00:00.000+07:00",
   "stats": {
     "completionPercent": 97,
     "openP0": 0,
@@ -10,6 +10,57 @@
   },
   "constraints": [],
   "aiPlans": [
+    {
+      "id": "plan-parts-taxonomy-search-20260729",
+      "title": "Parts taxonomy search: bounded Firestore cursor pages and historical index backfill",
+      "date": "29.07.2026",
+      "status": "in_progress",
+      "planFile": "data/ai_plans/plan_parts_taxonomy_search_20260729.md",
+      "taskFile": "data/ai_plans/task_parts_taxonomy_search_20260729.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_parts_taxonomy_search_20260729.md",
+      "scope": [
+        "src/app/admin/parts/page.tsx",
+        "src/lib/partCatalogQuery.ts",
+        "src/lib/firestoreQueryHelper.ts",
+        "src/components/admin/UniversalProductModal.tsx",
+        "src/components/admin/ExcelImportModal.tsx",
+        "scripts/backfill-catalog-search-index.mjs",
+        "firestore.indexes.json"
+      ],
+      "decisions": [
+        "Component taxonomy is the mandatory query scope; missing or unsafe config must not broaden to all products.",
+        "Use one Firestore array-membership filter per catalog query; category plus text search uses precomputed searchCategoryKeywords.",
+        "Release indexes and apply historical backfill only with normal production authority.",
+        "Keep global archive recovery and availability/popularity filters as separate, queryable maintenance work."
+      ],
+      "updatedAt": "2026-07-29T00:00:00.000+07:00"
+    },
+    {
+      "id": "plan-article-seo-indexing-20260729",
+      "title": "Article SEO indexing: crawl-cost guardrails, server-rendered hub, and canonical sitemap evidence",
+      "date": "29.07.2026",
+      "status": "in_progress",
+      "planFile": "data/ai_plans/plan_article_seo_indexing_20260729.md",
+      "taskFile": "data/ai_plans/task_article_seo_indexing_20260729.md",
+      "walkthroughFile": "data/ai_plans/walkthrough_article_seo_indexing_20260729.md",
+      "scope": [
+        "src/lib/searchCrawler.ts",
+        "src/app/api/articles/view/route.ts",
+        "src/app/(customer)/tin-tuc/page.tsx",
+        "src/app/(customer)/tin-tuc/page.client.tsx",
+        "src/app/(customer)/tin-tuc/[slug]/page.tsx",
+        "src/app/(customer)/tin-tuc/[slug]/ArticleClientParts.tsx",
+        "src/app/sitemap.ts",
+        "src/features/articles/ArticleEditorModal.tsx"
+      ],
+      "decisions": [
+        "Search-crawler detection is analytics-only: it must not grant access or change authorization.",
+        "Public article detail accepts only published documents and uses the document ID as canonical URL.",
+        "Do not rewrite Firestore article content or deploy without editorial and release approval.",
+        "Search Console indexing requests are an operational follow-up after the production release."
+      ],
+      "updatedAt": "2026-07-29T00:00:00.000+07:00"
+    },
     {
       "id": "plan-authorization-e2e-observability-closeout-20260728",
       "title": "Authorization, Emulator E2E, observability, and POS/Repair modularization closeout",

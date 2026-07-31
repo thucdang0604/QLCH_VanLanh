@@ -1,9 +1,11 @@
 {
   "_meta": {
     "description": "Bản đồ trí tuệ mã nguồn — tự động tích lũy khi AI đọc/sửa code. Giúp AI sau chỉ cần đọc file này là hiểu ngay cấu trúc, liên kết, và cách sửa.",
-    "lastUpdated": "2026-07-28T00:00:00.000+07:00",
-    "version": 74,
+    "lastUpdated": "2026-07-29T00:00:00.000+07:00",
+    "version": 76,
     "changelog": [
+      "v76: /admin/parts now scopes its catalog list to configured component taxonomy and reads cursor pages without an aggregate count across the full match on page open, instead of loading a newest-50 product slice. buildPartCatalogQueryPlan chooses exactly one categoryIds or searchCategoryKeywords array membership filter, blocks unsafe/missing taxonomy configuration, and supports taxonomy-plus-normalized text search. Component writers/imports and the catalog search-index backfill include part type/code terms. UniversalProductModal disables its retail-only brands listener unless an open retail modal needs it, so Parts no longer reads brands. firestoreLogger reports cache/server source plus listener change-based document-read estimates instead of treating full snapshot size as each update's reads. The required Firestore indexes were deployed on 2026-07-29 and must finish building; historical backfill remains an explicit operational follow-up. Global archived recovery and availability/popularity filters are not client-page filters.",
+      "v75: Article SEO indexing slice is coded and validated locally. The /tin-tuc hub server-renders crawlable links, metadata, breadcrumb and collection schema; detail uses published-only data, one document-ID canonical owner, 404 for unavailable content, and BlogPosting dateModified. Known crawlers are analytics-only no-ops for article views, comment reads are on visitor intent, sitemap dates use real timestamps, and publishing writes publishedAt in the existing article document write. Production deploy, Search Console, and editorial changes remain external follow-up.",
       "v74: Added roadmap/ai/START_HERE.md as the required task router. It defines evidence precedence, minimal task-specific bootstrap files, verified correction facts, and the handoff contract. Source intelligence is an architecture index, not standalone proof of current runtime behavior.",
       "v73: Authorization/E2E/observability closeout. Session cookies and privileged mutations use a Firestore authorization version; role change/logout pre-revoke RTDB grants and persist reconciliation work. E2E now proves the default rules-backed RTDB namespace with stale-cookie, logout, and client permission_denied flows. Safe observability measured local session-validation p95 near 48ms with one profile read; this is an Emulator baseline, not production performance evidence. Phase 4 remains monitoring only. Pure POS checkout and repair-create validation moved to posCheckoutRules.ts and repairCreateInput.ts without changing Firestore transaction invariants.",
       "v72: Firebase cost/performance closeout. The current 62 changed API routes use src/lib/api/handler.ts for request IDs, Server-Timing metadata, normalized parse/auth errors, structured server logs, and generic unexpected 500 responses. Added /api/pos/payment-config, which requires manage_orders and returns only payment QR data. Admin settings, inventory, POS, and suppliers defer non-critical code/data. This is CLOSED -> MONITORING: preserve POS/inventory transaction invariants and only reopen with real timing or Firebase cost evidence.",
@@ -640,7 +642,14 @@
       ]
     },
     "src/app/admin/parts/page.tsx": {
-      "lines": "~354",
+      "lines": "~406",
+      "catalogList": {
+        "dataAccess": "useFirestorePaginated(products) issues bounded getDocs cursor pages with includeTotalCount=false; it is disabled until ConfigContext has the component taxonomy. The only remaining onSnapshot in this page reads system_config/repairs for part-type options.",
+        "scope": "buildPartCatalogQueryPlan maps all-parts, selected taxonomy, and taxonomy-plus-search states to one categoryIds or searchCategoryKeywords membership query. Missing, invalid, or too-many root IDs block the list instead of falling back to all products.",
+        "pagination": "Default 20 records; existing 20/50/100 page-size control and cursor navigation never preload the full catalog.",
+        "searchWritePath": "UniversalProductModal component submit and ExcelImportModal part import generate name/type/code searchKeywords and category-specific searchCategoryKeywords; scripts/backfill-catalog-search-index.mjs rebuilds historical fields after approved dry run/apply.",
+        "readObservability": "UniversalProductModal only enables brands when isOpen && mode === retail. firestoreLogger uses firestoreReadMetrics to separate cache snapshots, initial listener results, added/modified documents, and ambiguous removed events; it does not claim aggregate count results are document reads."
+      },
       "purpose": "Quản lý linh kiện. Đã tách ImportPreviewModal và CreateReceiptModal ra src/features/parts/ImportReceiptModals.tsx; logic hỗ trợ vào importReceiptUtils.ts và importReceiptTypes.ts.",
       "keyFunctions": {
         "executeFinalImport(paymentMethod)": {
@@ -774,7 +783,8 @@
       "functions": {
         "fetchDetailItem": "Fetch single product/service by ID or slug",
         "fetchCategoryItems": "Fetch products by category slug",
-        "fetchArticles": "Fetch blog articles",
+        "fetchArticles": "Fetch published blog articles for the server-rendered public hub",
+        "fetchArticleDetail": "Fetch published article by document ID, with legacy slug fallback; unpublished/missing returns null",
         "fetchFlashSaleProducts": "Fetch flash sale items",
         "fetchServices": "Fetch active services",
         "fetchProductVariants": "Fetch products with same deepest categoryIds (excluding current). Uses cache().",

@@ -1315,3 +1315,156 @@ Reviewed the external AI's correction report against the current worktree. This 
 ### 3. Handoff decision
 
 - `APPROVED — facts above are durable roadmap input.` Future AI work must begin from `roadmap/ai/START_HERE.md`, then verify current source before reporting a finding.
+
+---
+
+## Codex implementation and review — Parts taxonomy search and cursor pagination
+
+**Time:** `2026-07-29T18:13:22+07:00`
+
+**Decision:** `APPROVED — code is ready for normal index release and separately approved historical backfill.`
+
+### 1. Goal and inspected scope
+
+Make every taxonomy-assigned part discoverable from `/admin/parts` without reading the complete `products` collection into the browser. Inspected the existing newest-50 page query, taxonomy selector/config shape, product/Excel writers, catalog-index helpers, pagination helper, and existing backfill script.
+
+### 2. Files changed and Git state
+
+- Code/config: `src/app/admin/parts/page.tsx`, `src/lib/partCatalogQuery.ts`, `src/lib/partCatalogQuery.test.ts`, `src/lib/firestoreQueryHelper.ts`, `src/components/admin/UniversalProductModal.tsx`, `src/components/admin/ExcelImportModal.tsx`, `scripts/backfill-catalog-search-index.mjs`, and `firestore.indexes.json`.
+- Handoff: parts module, dashboard, registered plan/task/walkthrough, manifest, and source intelligence.
+- The worktree already contains unrelated article SEO changes and the user-owned `import_linh_kien_vanlanh.xlsx`; they were preserved and not staged, reverted, or used as this slice's evidence.
+
+### 3. Business-logic and authorization impact
+
+- Catalog listing now uses one taxonomy/search membership filter, cursor `getDocs` pages, and an aggregate count; it is not a broad realtime product listener.
+- Missing/unsafe component taxonomy blocks the list rather than falling back to all products. Query changes, including page-size changes, invalidate stale in-flight responses.
+- Component create/edit and part import add name/type/code search tokens; no stock, held, FIFO, repair, payment, authorization, or Firestore Rules behavior changes.
+- The slice-only restore-hidden action was removed. Global recovery and availability/popularity filters remain deliberately out of scope until their server-side query semantics exist.
+
+### 4. Commands run and exact results
+
+- `pnpm exec eslint src/lib/firestoreQueryHelper.ts src/app/admin/parts/page.tsx src/lib/partCatalogQuery.ts src/lib/partCatalogQuery.test.ts` — PASSED.
+- `pnpm typecheck` — PASSED.
+- `node --import tsx --test src/lib/partCatalogQuery.test.ts` — PASSED: 4/4.
+- `pnpm build` — PASSED: optimized production build, 116 routes.
+- JSON parse for `firestore.indexes.json`, `roadmap/ui/data/manifest.json`, and `roadmap/ui/data/source_intelligence.json` — PASSED.
+- `git diff --check` — PASSED.
+
+### 5. Browser/emulator/manual evidence
+
+- No production admin browser smoke was attempted because the new Firestore indexes have not been deployed and historical search-index backfill has not been approved/applied.
+- Static/production-build verification covers the route bundle; post-release smoke must prove an old part, a nested taxonomy part, and a normalized text search in an authenticated admin session.
+
+### 6. Open assumptions, rollback, and handoff decision
+
+- Assumption: every active part has the configured component taxonomy IDs, as specified for this workstream. Documents that predate the search index will require the planned backfill for search, not for taxonomy listing.
+- Rollback: revert only the files listed in section 2; no live Firebase document was changed by this implementation.
+- Required operations: deploy the two composite indexes, wait for readiness, run backfill dry run, review counts, then approve/apply the historical index update and smoke production.
+- `APPROVED — do not treat index deployment/backfill as completed until live evidence is recorded.`
+
+---
+
+## Codex correction — Parts read cost and index deployment
+
+**Time:** `2026-07-29T18:30:00+07:00`
+
+### Finding and correction
+
+- The development log's `Count: 2131` was the aggregate result, not a literal 2,131-document page payload. It was nevertheless an avoidable full-match aggregation on every parts-page open.
+- `/admin/parts` now passes `includeTotalCount: false` to the pagination helper. The page does not call `getCountFromServer`; it loads only the selected 20/50/100-document cursor page and exposes previous/next navigation from the bounded result.
+- The earlier client-side `isPartCategory` heuristic also hid valid component-taxonomy roots such as `dien-thoai`. The Firestore taxonomy query is now authoritative; only archived/proposed records are excluded locally.
+
+### Production operation and evidence
+
+- Ran `pnpm exec firebase deploy --only firestore:indexes --project qlch-vanlanh` — PASSED for the `(default)` database in `qlch-vanlanh`.
+- The production client subsequently reported that the required category index is **building**, confirming the correct index definition is deployed but not yet queryable.
+- Focused ESLint, TypeScript, 4/4 query-plan tests, production build (116 routes), roadmap/index JSON parse, and `git diff --check` pass after the cursor-only correction.
+
+### Boundary
+
+- Wait until Firestore reports the index Enabled, then reload the authenticated parts page. Historical `searchCategoryKeywords` backfill remains a separately approved write operation.
+
+---
+
+## Codex correction — Parts brands listener and Firestore read observability
+
+**Time:** `2026-07-29T19:22:39+07:00`
+
+**Decision:** `APPROVED — local implementation is verified; authenticated runtime smoke remains pending.`
+
+### 1. Findings and implementation
+
+- `UniversalProductModal` was mounted by `/admin/parts` even while closed and unconditionally subscribed to `brands`. This fetched the full brand result on each Parts page mount although component mode never renders or needs retail-brand data.
+- The `brands` subscription is now enabled only while the modal is open in `retail` mode. Component mode therefore creates no `brands` listener.
+- The development logger previously labelled the full size of every listener snapshot as pulled/read documents. A one-document update to a 20-document visible query consequently appeared as 20 reads.
+- The logger now distinguishes one-shot query results, listener initial snapshots, listener `added`/`modified`/`removed` changes, and cache snapshots. It reports an estimate or range with an explicit billing limitation rather than asserting an unknowable exact total. Aggregate `count()` output is separately labelled as a result count, not document reads.
+
+### 2. Files and business impact
+
+- Changed: `src/components/admin/UniversalProductModal.tsx`, `src/lib/useFirestore.ts`, `src/lib/firestoreLogger.ts`, `src/lib/firestoreReadMetrics.ts`, and `src/lib/firestoreReadMetrics.test.ts`.
+- No product, stock, payment, repair, Rules, or authorization behavior changed. The collection hook's optional `enabled` flag defaults to enabled for all existing callers.
+
+### 3. Verification
+
+- Focused ESLint for the changed modules and Parts page — PASSED.
+- `pnpm typecheck` — PASSED.
+- `node --import tsx --test src/lib/firestoreReadMetrics.test.ts src/lib/partCatalogQuery.test.ts` — PASSED: 8/8.
+- `pnpm build` — PASSED: optimized production build, 116 routes.
+- JSON parse of index/roadmap data and `git diff --check` — PASSED.
+
+### 4. Runtime boundary and rollback
+
+- An isolated browser tab reached the admin login screen, so this run could not validate the existing authenticated session or capture live listener output. Also, the deployed product index is still building.
+- After index readiness, an authenticated smoke must open `/admin/parts`, confirm no `brands` listener appears in component mode, then make one known listener update and confirm the logger records document changes rather than the full snapshot size.
+- Rollback is limited to the five files in section 2; no hosting deployment or Firebase data write was made by this correction.
+
+---
+
+## Codex correction — applied catalog search and cross-admin visibility
+
+**Time:** `2026-07-29T20:01:09+07:00`
+
+**Decision:** `APPROVED — source and production index deployment complete; index readiness and authenticated smoke remain operational follow-up.`
+
+### Findings and changes
+
+- Parts, Products, POS, and Stock previously put every keystroke (or a 250/350 ms debounce) directly into the Firestore search path. Each now separates the editable input from the applied search term; only the **Tìm** action or Enter changes the query.
+- Products fetched the newest active `products` page and then removed components locally. After a large parts import, a page containing only components rendered as an empty retail list. Its unfiltered query now excludes the canonical/legacy component category values on Firestore, while text search is scoped to configured retail taxonomy roots.
+- POS incorrectly checked retail root IDs from `DEFAULT_CONFIG`, not the current stored taxonomy. It now uses the active configuration and fetches bounded retail and component defaults separately, so a recent parts-heavy batch cannot crowd every retail product out of the initial grid.
+- Stock now uses the shared component classifier, so current taxonomy/category values are classified consistently, and its server search only starts when applied.
+- Parts adds the canonical component scalar-category constraint in addition to the configured component taxonomy, preventing retail documents with overlapping taxonomy IDs from appearing in the parts catalog.
+
+### Index deployment and verification
+
+- Deployed `pnpm exec firebase deploy --only firestore:indexes --project qlch-vanlanh` successfully. New indexes cover scoped parts taxonomy, retail category filtering, and active-condition retail filtering. No Firestore document, Rules, or Hosting deployment was changed.
+- Focused ESLint and `pnpm typecheck` — PASSED.
+- `node --import tsx --test src/lib/firestoreReadMetrics.test.ts src/lib/partCatalogQuery.test.ts` — PASSED: 8/8.
+- `pnpm build` — PASSED: optimized production build, 116 routes.
+- Runtime index-state API verification could not run because the local environment has no `gcloud` credential tool. An authenticated browser smoke remains required after index state becomes Enabled.
+
+### Required smoke and rollback
+
+- Open `/admin/parts`, `/admin/products`, `/admin/pos`, and `/admin/inventory/stock` as an admin after indexes are Enabled. Confirm typing alone emits no `getDocs`; clicking **Tìm** or Enter emits one bounded query. Confirm Products starts with retail products, POS shows both intended retail/component defaults, and Stock's component tab matches parts.
+- Rollback is limited to `constants.ts`, the four admin pages, and `firestore.indexes.json`; no product data migration was performed.
+
+---
+
+## Codex correction - Stock taxonomy-scoped tabs
+
+**Time:** `2026-07-29T20:20:00+07:00`
+
+### Finding and correction
+
+- The Stock page still loaded one generic alphabetic 100-document page and then applied the **Bán lẻ & Phụ kiện** / **Linh kiện** tab filter in the browser. A part-heavy first page therefore rendered the retail tab empty even though retail products existed later in the collection.
+- Stock now derives top-level retail/component taxonomy IDs from the live configuration and scopes the Firestore cursor query with `categoryIds array-contains-any` before local rendering. Because stored paths include their root ID, this handles legacy scalar `category` labels consistently.
+- A submitted Stock search uses root-plus-search values from `searchCategoryKeywords`; plain typing changes no Firestore query. The code falls back to the canonical/legacy scalar category query only if taxonomy configuration is empty or has more roots than Firestore's 30-root query limit.
+
+### Production operation and verification
+
+- `pnpm exec eslint src/app/admin/inventory/stock/page.tsx src/lib/constants.ts`, `pnpm typecheck`, Firestore index JSON duplicate validation, and `git diff --check` - PASSED.
+- `pnpm build` - PASSED: optimized production build, 116 routes.
+- `pnpm exec firebase deploy --only firestore:indexes --project qlch-vanlanh` - PASSED. Firebase reported one unrelated existing project index absent from the file; no index was deleted because `--force` was not used.
+
+### Runtime boundary
+
+- Wait for the newly requested index to become Enabled, then open authenticated `/admin/inventory/stock`; verify both tabs, submitted search, and **Tải thêm**. No Hosting deployment or Firestore document write was performed.

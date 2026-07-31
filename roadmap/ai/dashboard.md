@@ -34,6 +34,25 @@ Open deploy debt: <code>BUG-DEPLOY-007</code> đang theo dõi warning Firebase C
 
 ## Scaling Roadmap
 
+### 2026-07-29 - ARTICLE SEO INDEXING IMPLEMENTATION
+- **Color:** warning
+- **Status:** CODE COMPLETE -> EDITORIAL / RELEASE / SEARCH CONSOLE
+- **Technical SEO:** `/tin-tuc` now emits server-rendered title, description, canonical, collection/breadcrumb schema, article anchors, and category anchors. Detail canonical URLs use the article document ID, missing/unpublished detail returns 404, and `BlogPosting.dateModified` comes from stored article timestamps.
+- **Firebase protection:** Known search crawlers are no-op article-view analytics requests before rate limiting and Firestore. Public comments load only after `Xem bình luận`; human view analytics is unchanged. Publishing stores `publishedAt` in the existing article write.
+- **Sitemap:** Static/category routes no longer pretend to have just changed. Article/product/service `lastmod` is emitted only from valid persisted timestamps.
+- **Evidence:** crawler unit tests, typecheck, lint with no errors, AI guard, diff check, production build, and local server/browser smoke passed. The local Firebase 403 from `127.0.0.1` is API-key referer restriction for anonymous chat/installations, unrelated to article SEO.
+- **Next:** Editorially approve priority content, deploy normally, verify production HTML/sitemap/canonical/schema, then submit sitemap and selected priority URLs in Google Search Console. Detail: <a href="modules/article-seo-indexing-20260729.md">article SEO module</a>.
+
+### 2026-07-29 - PARTS TAXONOMY SEARCH & CURSOR PAGINATION
+- **Color:** warning
+- **Status:** CODE COMPLETE -> INDEX RELEASE / BACKFILL / PRODUCTION SMOKE
+- **Problem corrected:** `/admin/parts` no longer reads only the newest 50 products and then filters locally. The catalog is scoped to configured `component` taxonomy roots and loaded one cursor page at a time; it does not aggregate-count the full match on every page open.
+- **Search/filter:** Component taxonomy is now a dedicated filter. A selected node matches descendants through stored `categoryIds`; two-or-more-character search uses precomputed `searchCategoryKeywords` so taxonomy plus text remains one server-side membership query.
+- **Firebase guardrails:** The page has no broad product listener and fails closed when component taxonomy is missing, invalid, or exceeds supported query fan-out. Writer/import paths add part type and code search terms; the historical backfill script also considers legacy model fields.
+- **Read observability:** Component-mode Parts no longer opens the retail `brands` listener. Development logs now distinguish cached/server snapshots, result documents, callback changes, and bounded document-read estimates; aggregate count results are not labeled as reads.
+- **Boundary:** The two composite indexes were deployed to `qlch-vanlanh` and must finish building before use; historical data still requires a dry-run then approved backfill. The old restore-hidden action was retired because it inspected only the visible slice. Global `Hết hàng`/`Dùng nhiều` filters remain separate work until availability/sales data is materialized for correct server-side queries.
+- **Evidence:** focused query-plan tests, lint, TypeScript, production build (116 routes), roadmap/index JSON parsing, and diff check pass. Detail: <a href="modules/parts-taxonomy-search-20260729.md">parts taxonomy module</a>.
+
 ### 2026-07-11 - CONFIG SEED OVERWRITE HARDENING
 - **Color:** success
 - **Status:** CODED, VALIDATED
