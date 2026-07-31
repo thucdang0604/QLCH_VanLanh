@@ -4,17 +4,23 @@
 import { useState, useCallback, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import { useConfig, DEFAULT_CONFIG } from '@/lib/ConfigContext';
-import type { NavItem, SidebarMenuItem, FooterServiceLink, HomeServiceCategory } from '@/lib/config-defaults';
+import type { NavItem, SidebarMenuItem, SidebarMenuSubGroupItem, FooterServiceLink, HomeServiceCategory } from '@/lib/config-defaults';
 import type { TaxonomyNode } from '@/lib/types';
 import { ICON_NAMES, getIcon } from '@/lib/icon-map';
 import { getCategoryPath } from '@/lib/utils';
+import { normalizeSidebarMenuItems, toSidebarMenuSubGroupItem } from '@/lib/sidebarMenu';
 import {
     Save, Loader2, Plus, Trash2, ChevronUp, ChevronDown,
     Eye, EyeOff, GripVertical, CheckCircle2, AlertCircle,
-    PanelTop, PanelLeft, PanelBottom, ChevronRight, X, FolderTree, ImageIcon,
+    PanelTop, PanelLeft, PanelBottom, ChevronRight, X, FolderTree, ImageIcon, Link,
 } from 'lucide-react';
 
 const MediaManager = dynamic(() => import('@/components/admin/MediaManager'), { ssr: false });
+
+function getSidebarMenuState(items: SidebarMenuItem[] | undefined): SidebarMenuItem[] {
+    return normalizeSidebarMenuItems(items?.length ? items : DEFAULT_CONFIG.sidebarMenu)
+        .map((item, index) => ({ ...item, order: index }));
+}
 
 // ── Unique ID generator ──
 let _idCounter = 0;
@@ -188,7 +194,7 @@ export default function NavigationTab() {
 
     // ── Sidebar Menu state ──
     const [sidebarMenu, setSidebarMenu] = useState<SidebarMenuItem[]>(
-        () => (config.sidebarMenu?.length ? config.sidebarMenu : DEFAULT_CONFIG.sidebarMenu).map((item, i) => ({ ...item, order: i }))
+        () => getSidebarMenuState(config.sidebarMenu)
     );
 
     // ── Footer Services state ──
@@ -205,7 +211,7 @@ export default function NavigationTab() {
         if (loading) return;
 
         setHeaderNav((config.headerNav?.length ? config.headerNav : DEFAULT_CONFIG.headerNav).map((item, i) => ({ ...item, order: i })));
-        setSidebarMenu((config.sidebarMenu?.length ? config.sidebarMenu : DEFAULT_CONFIG.sidebarMenu).map((item, i) => ({ ...item, order: i })));
+        setSidebarMenu(getSidebarMenuState(config.sidebarMenu));
         setFooterServices((config.footerServices?.length ? config.footerServices : DEFAULT_CONFIG.footerServices).map((item, i) => ({ ...item, order: i })));
         setHomeServiceCategories((config.homeServiceCategories?.length ? config.homeServiceCategories : DEFAULT_CONFIG.homeServiceCategories).map((item, i) => ({ ...item, order: i })));
     }, [loading, config.headerNav, config.sidebarMenu, config.footerServices, config.homeServiceCategories]);
@@ -218,7 +224,12 @@ export default function NavigationTab() {
     const [mediaPickerFor, setMediaPickerFor] = useState<number | null>(null);
 
     // ── Taxonomy suggest popup ──
-    const [showTaxonomySuggest, setShowTaxonomySuggest] = useState<'header' | 'footer' | 'sidebar' | 'home' | null>(null);
+    const [showTaxonomySuggest, setShowTaxonomySuggest] = useState<'header' | 'footer' | 'sidebar' | 'sidebarSubGroup' | 'home' | null>(null);
+    const [subGroupTaxonomyTarget, setSubGroupTaxonomyTarget] = useState<{
+        sidebarIndex: number;
+        groupIndex: number;
+        itemIndex?: number;
+    } | null>(null);
     const allTaxonomyTrees: TaxonomyNode[][] = [
         config.taxonomy?.retail || [],
         config.taxonomy?.service || [],
@@ -250,6 +261,34 @@ export default function NavigationTab() {
                 iconName: parentIcon || node.icon || 'LayoutGrid',
                 order: prev.length, visible: true, subGroups: [], taxonomyRef: node.id,
             }]);
+        } else if (showTaxonomySuggest === 'sidebarSubGroup' && subGroupTaxonomyTarget) {
+            const { sidebarIndex, groupIndex, itemIndex } = subGroupTaxonomyTarget;
+            setSidebarMenu(prev => prev.map((sidebarItem, currentSidebarIndex) => {
+                if (currentSidebarIndex !== sidebarIndex) return sidebarItem;
+
+                const subGroups = sidebarItem.subGroups.map((subGroup, currentGroupIndex) => {
+                    if (currentGroupIndex !== groupIndex) return subGroup;
+
+                    const nextItem = {
+                        id: itemIndex === undefined
+                            ? genId('sbi')
+                            : toSidebarMenuSubGroupItem(
+                                subGroup.items[itemIndex],
+                                `${sidebarItem.id}_group_${groupIndex}_item_${itemIndex}`,
+                            ).id,
+                        label: node.name,
+                        slug: node.id,
+                        taxonomyRef: node.id,
+                    };
+                    const items = [...subGroup.items];
+                    if (itemIndex === undefined) items.push(nextItem);
+                    else items[itemIndex] = nextItem;
+
+                    return { ...subGroup, items };
+                });
+
+                return { ...sidebarItem, subGroups };
+            }));
         } else if (showTaxonomySuggest === 'home') {
             setHomeServiceCategories(prev => [...prev, {
                 id: genId('hc'), name: node.name, slug: node.id,
@@ -258,6 +297,7 @@ export default function NavigationTab() {
             }]);
         }
         setShowTaxonomySuggest(null);
+        setSubGroupTaxonomyTarget(null);
     };
 
     // ── Save all ──
@@ -266,7 +306,7 @@ export default function NavigationTab() {
         setMessage(null);
         try {
             const normalizedHeader = headerNav.map((item, i) => ({ ...item, order: i }));
-            const normalizedSidebar = sidebarMenu.map((item, i) => ({ ...item, order: i }));
+            const normalizedSidebar = normalizeSidebarMenuItems(sidebarMenu).map((item, i) => ({ ...item, order: i }));
             const normalizedFooter = footerServices.map((item, i) => ({ ...item, order: i }));
             const normalizedHomeServiceCategories = homeServiceCategories.map((item, i) => ({ ...item, order: i }));
 
@@ -328,7 +368,7 @@ export default function NavigationTab() {
         }));
     };
 
-    const updateSubGroup = (sidebarIdx: number, groupIdx: number, patch: { group?: string; items?: string[] }) => {
+    const updateSubGroup = (sidebarIdx: number, groupIdx: number, patch: { group?: string }) => {
         setSidebarMenu(prev => prev.map((item, i) => {
             if (i !== sidebarIdx) return item;
             const newGroups = [...item.subGroups];
@@ -342,6 +382,61 @@ export default function NavigationTab() {
             if (i !== sidebarIdx) return item;
             return { ...item, subGroups: item.subGroups.filter((_, gi) => gi !== groupIdx) };
         }));
+    };
+
+    const updateSubGroupItem = (
+        sidebarIdx: number,
+        groupIdx: number,
+        itemIdx: number,
+        patch: Partial<SidebarMenuSubGroupItem>,
+    ) => {
+        setSidebarMenu(prev => prev.map((item, currentSidebarIndex) => {
+            if (currentSidebarIndex !== sidebarIdx) return item;
+            const subGroups = item.subGroups.map((subGroup, currentGroupIndex) => {
+                if (currentGroupIndex !== groupIdx) return subGroup;
+                const items = subGroup.items.map((subItem, currentItemIndex) => currentItemIndex === itemIdx
+                    ? { ...toSidebarMenuSubGroupItem(subItem, `${item.id}_group_${groupIdx}_item_${itemIdx}`), ...patch }
+                    : subItem,
+                );
+                return { ...subGroup, items };
+            });
+            return { ...item, subGroups };
+        }));
+    };
+
+    const removeSubGroupItem = (sidebarIdx: number, groupIdx: number, itemIdx: number) => {
+        setSidebarMenu(prev => prev.map((item, currentSidebarIndex) => {
+            if (currentSidebarIndex !== sidebarIdx) return item;
+            const subGroups = item.subGroups.map((subGroup, currentGroupIndex) => currentGroupIndex === groupIdx
+                ? { ...subGroup, items: subGroup.items.filter((_, currentItemIndex) => currentItemIndex !== itemIdx) }
+                : subGroup,
+            );
+            return { ...item, subGroups };
+        }));
+    };
+
+    const addSubGroupLink = (sidebarIdx: number, groupIdx: number) => {
+        setSidebarMenu(prev => prev.map((item, currentSidebarIndex) => {
+            if (currentSidebarIndex !== sidebarIdx) return item;
+            const subGroups = item.subGroups.map((subGroup, currentGroupIndex) => currentGroupIndex === groupIdx
+                ? {
+                    ...subGroup,
+                    items: [...subGroup.items, {
+                        id: genId('sidebar_link'),
+                        label: 'Hàng 99%',
+                        slug: '/category/may-cu-99',
+                        isCustomLink: true,
+                    }],
+                }
+                : subGroup,
+            );
+            return { ...item, subGroups };
+        }));
+    };
+
+    const openSubGroupTaxonomyPicker = (sidebarIndex: number, groupIndex: number, itemIndex?: number) => {
+        setSubGroupTaxonomyTarget({ sidebarIndex, groupIndex, itemIndex });
+        setShowTaxonomySuggest('sidebarSubGroup');
     };
 
     // ═══════════════════════════
@@ -594,15 +689,80 @@ export default function NavigationTab() {
                                                         <X size={14} />
                                                     </button>
                                                 </div>
-                                                <textarea
-                                                    value={sg.items.join(', ')}
-                                                    onChange={e => {
-                                                        const items = e.target.value.split(',').map(s => s.trim()).filter(Boolean);
-                                                        updateSubGroup(idx, gi, { items });
-                                                    }}
-                                                    className="w-full text-xs border rounded px-2 py-1.5 focus:ring-1 focus:ring-blue-300 min-h-[40px]"
-                                                    placeholder="Các mục cách nhau bằng dấu phẩy (vd: iPhone 16 Pro Max, iPhone 15 Pro)"
-                                                />
+                                                <div className="space-y-2">
+                                                    {sg.items.map((subItem, itemIndex) => {
+                                                        const normalizedItem = toSidebarMenuSubGroupItem(
+                                                            subItem,
+                                                            `${item.id}_group_${gi}_item_${itemIndex}`,
+                                                        );
+                                                        return (
+                                                            <div key={normalizedItem.id} className="flex flex-wrap items-center gap-2 rounded-md border border-gray-100 bg-gray-50 p-2">
+                                                                <input
+                                                                    value={normalizedItem.label}
+                                                                    onChange={event => updateSubGroupItem(idx, gi, itemIndex, { label: event.target.value })}
+                                                                    className="min-w-[160px] flex-1 bg-white text-xs border rounded px-2 py-1.5 focus:ring-1 focus:ring-blue-300"
+                                                                    placeholder="Tên hiển thị"
+                                                                />
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => updateSubGroupItem(idx, gi, itemIndex, {
+                                                                        isCustomLink: !normalizedItem.isCustomLink,
+                                                                        slug: '',
+                                                                        taxonomyRef: undefined,
+                                                                    })}
+                                                                    className={`rounded border px-2 py-1 text-xs font-medium ${normalizedItem.isCustomLink
+                                                                        ? 'border-orange-200 bg-orange-50 text-orange-600'
+                                                                        : 'border-gray-200 bg-white text-gray-500'}`}
+                                                                    title="Đổi loại liên kết"
+                                                                >
+                                                                    {normalizedItem.isCustomLink ? 'Link' : 'DMục'}
+                                                                </button>
+                                                                {normalizedItem.isCustomLink ? (
+                                                                    <input
+                                                                        value={normalizedItem.slug || ''}
+                                                                        onChange={event => updateSubGroupItem(idx, gi, itemIndex, { slug: event.target.value })}
+                                                                        className="min-w-[190px] flex-1 bg-white text-xs border rounded px-2 py-1.5 focus:ring-1 focus:ring-orange-300"
+                                                                        placeholder="/category/may-cu-99"
+                                                                        aria-label="Liên kết trực tiếp"
+                                                                    />
+                                                                ) : (
+                                                                    <>
+                                                                        <TaxonomyBadge slug={normalizedItem.slug || ''} taxonomyRef={normalizedItem.taxonomyRef} allTrees={allTaxonomyTrees} />
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => openSubGroupTaxonomyPicker(idx, gi, itemIndex)}
+                                                                            className="rounded border border-blue-200 bg-white px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50"
+                                                                        >
+                                                                            Gán danh mục
+                                                                        </button>
+                                                                    </>
+                                                                )}
+                                                                <button
+                                                                    type="button"
+                                                                    title="Xóa mục"
+                                                                    onClick={() => removeSubGroupItem(idx, gi, itemIndex)}
+                                                                    className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500"
+                                                                >
+                                                                    <X size={14} />
+                                                                </button>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => openSubGroupTaxonomyPicker(idx, gi)}
+                                                        className="flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700"
+                                                    >
+                                                        <FolderTree size={13} /> Thêm từ taxonomy
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => addSubGroupLink(idx, gi)}
+                                                        className="ml-3 inline-flex items-center gap-1 text-xs font-medium text-orange-600 hover:text-orange-700"
+                                                    >
+                                                        <Link size={13} /> Thêm liên kết
+                                                    </button>
+                                                </div>
                                             </div>
                                         ))}
                                         {item.subGroups.length === 0 && (
@@ -778,7 +938,10 @@ export default function NavigationTab() {
                 <TaxonomySuggestPopup
                     trees={taxonomyTreesForPopup}
                     onSelect={handleTaxonomySuggest}
-                    onClose={() => setShowTaxonomySuggest(null)}
+                    onClose={() => {
+                        setShowTaxonomySuggest(null);
+                        setSubGroupTaxonomyTarget(null);
+                    }}
                 />
             )}
 

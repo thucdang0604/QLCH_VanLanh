@@ -9,20 +9,18 @@ import type { Product } from '@/lib/types';
 import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
 import { isProductArchived } from '@/lib/productLifecycle';
-import { generateSearchKeywords } from '@/lib/utils';
+import { getSearchKeywordQuery } from '@/lib/utils';
+import { isPartCategory, PART_CATEGORY_VALUES } from '@/lib/constants';
+import { productCodeSearchText } from '@/lib/productCodes';
 import { useAuth } from '@/lib/AuthContext';
+import { useConfig } from '@/lib/ConfigContext';
 import { appConfirm } from '@/lib/appDialog';
 import { toastError, toastSuccess } from '@/lib/toast';
 
 const formatPrice = (n: number) => n.toLocaleString('vi-VN') + 'đ';
 
 const STOCK_BATCH_SIZE = 100;
-
-const isComponent = (p: Product) => {
-    const cat = p.category?.toLowerCase() || '';
-    const firstCatId = p.categoryIds?.[0] || '';
-    return cat === 'linh kiện' || cat === 'component' || firstCatId.startsWith('linh-kien') || firstCatId === 'component';
-};
+const EMPTY_TAXONOMY_ROOT_IDS: string[] = [];
 
 const getStockGroupKey = (p: Product & { id: string }) => {
     const code = [p.sku, p.productCode, p.barcode]
@@ -51,34 +49,75 @@ const mergeStockProduct = (
 
 export default function StockPage() {
     const { user } = useAuth();
+    const { config, loading: configLoading } = useConfig();
     const [products, setProducts] = useState<(Product & { id: string })[]>([]);
     const [loading, setLoading] = useState(true);
     const [loadingMore, setLoadingMore] = useState(false);
     const [lastDoc, setLastDoc] = useState<DocumentSnapshot | null>(null);
     const [hasMore, setHasMore] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
-    const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+    const [appliedSearchQuery, setAppliedSearchQuery] = useState('');
     const [sortBy, setSortBy] = useState<'name' | 'stock' | 'costPrice'>('name');
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
     const [stockTab, setStockTab] = useState<'all' | 'retail' | 'component'>('all');
     const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'archived'>('all');
     const [isReconcilingHeld, setIsReconcilingHeld] = useState(false);
+    const retailRootIds = useMemo(
+        () => (config?.taxonomy?.retail || []).map(node => node.id).filter(Boolean),
+        [config?.taxonomy?.retail],
+    );
+    const componentRootIds = useMemo(
+        () => (config?.taxonomy?.component || []).map(node => node.id).filter(Boolean),
+        [config?.taxonomy?.component],
+    );
+    const taxonomyRootIds = useMemo(() => {
+        if (stockTab === 'retail') return retailRootIds;
+        if (stockTab === 'component') return componentRootIds;
+        return EMPTY_TAXONOMY_ROOT_IDS;
+    }, [componentRootIds, retailRootIds, stockTab]);
+    const isTabQueryReady = stockTab === 'all' || !configLoading;
 
     const buildStockQueryConstraints = useCallback((cursor?: DocumentSnapshot | null): QueryConstraint[] => {
-        const trimmedSearch = debouncedSearchQuery.trim();
+        const trimmedSearch = appliedSearchQuery.trim();
+        const searchToken = getSearchKeywordQuery(trimmedSearch);
         const constraints: QueryConstraint[] = [];
+        const canScopeByTaxonomy = stockTab !== 'all' && taxonomyRootIds.length > 0 && taxonomyRootIds.length <= 30;
 
-        if (trimmedSearch) {
-            const keyword = generateSearchKeywords(trimmedSearch)[0] || trimmedSearch.toLowerCase();
-            constraints.push(where('searchKeywords', 'array-contains', keyword));
+        // Apply the tab's taxonomy roots in Firestore before the 100-item page.
+        // Filtering a generic first page locally can make retail look empty when
+        // that page happens to contain only parts. categoryIds includes the root
+        // taxonomy ID, unlike legacy category labels which are not consistent.
+        if (canScopeByTaxonomy) {
+            if (searchToken) {
+                constraints.push(where(
+                    'searchCategoryKeywords',
+                    'array-contains-any',
+                    taxonomyRootIds.map(rootId => `${rootId}::${searchToken}`),
+                ));
+            } else {
+                constraints.push(where('categoryIds', 'array-contains-any', taxonomyRootIds));
+            }
         } else {
+            // Keep legacy records usable while the configured taxonomy is empty
+            // or has more roots than Firestore permits in an array-contains-any query.
+            if (stockTab === 'retail') {
+                constraints.push(where('category', 'not-in', PART_CATEGORY_VALUES));
+            } else if (stockTab === 'component') {
+                constraints.push(where('category', 'in', PART_CATEGORY_VALUES));
+            }
+            if (searchToken) {
+                constraints.push(where('searchKeywords', 'array-contains', searchToken));
+            }
+        }
+
+        if (!trimmedSearch) {
             constraints.push(orderBy('name', 'asc'));
         }
 
         if (cursor) constraints.push(startAfter(cursor));
         constraints.push(limit(STOCK_BATCH_SIZE));
         return constraints;
-    }, [debouncedSearchQuery]);
+    }, [appliedSearchQuery, stockTab, taxonomyRootIds]);
 
     const loadProducts = useCallback(async (mode: 'reset' | 'more', cursor?: DocumentSnapshot | null) => {
         const isReset = mode === 'reset';
@@ -111,15 +150,9 @@ export default function StockPage() {
     }, [buildStockQueryConstraints]);
 
     useEffect(() => {
-        const timer = window.setTimeout(() => {
-            setDebouncedSearchQuery(searchQuery.trim());
-        }, 250);
-        return () => window.clearTimeout(timer);
-    }, [searchQuery]);
-
-    useEffect(() => {
+        if (!isTabQueryReady) return;
         loadProducts('reset');
-    }, [loadProducts]);
+    }, [isTabQueryReady, loadProducts]);
 
     const stockProducts = useMemo(() => {
         const grouped = new Map<string, Product & { id: string }>();
@@ -133,8 +166,8 @@ export default function StockPage() {
 
     const tabFiltered = stockProducts.filter(p => {
         if (p.isProposed) return false;
-        if (stockTab === 'component') return isComponent(p);
-        if (stockTab === 'retail') return !isComponent(p);
+        if (stockTab === 'component') return isPartCategory(p.category, p.categoryIds);
+        if (stockTab === 'retail') return !isPartCategory(p.category, p.categoryIds);
         return true;
     });
     const statusFiltered = tabFiltered.filter(p => {
@@ -145,10 +178,11 @@ export default function StockPage() {
 
     const filtered = statusFiltered
         .filter(p => {
-            if (!searchQuery) return true;
-            const q = searchQuery.toLowerCase();
+            if (!appliedSearchQuery) return true;
+            const q = appliedSearchQuery.toLowerCase();
             return p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q) ||
-                p.brand?.toLowerCase().includes(q) || p.category?.toLowerCase().includes(q);
+                p.brand?.toLowerCase().includes(q) || p.category?.toLowerCase().includes(q) ||
+                productCodeSearchText(p).includes(q);
         })
         .sort((a, b) => {
             let cmp = 0;
@@ -179,7 +213,7 @@ export default function StockPage() {
 
     const { paginatedData: paginatedFiltered, currentPage, totalPages, pageSize, totalFiltered: totalFilteredCount, setPage, setPageSize, resetPage } = useClientPagination(filtered, 20);
 
-    useEffect(() => { resetPage(); }, [searchQuery, stockTab, statusFilter, resetPage]);
+    useEffect(() => { resetPage(); }, [appliedSearchQuery, stockTab, statusFilter, resetPage]);
 
     const reconcileHeldInventory = async () => {
         if (!await appConfirm(
@@ -221,10 +255,10 @@ export default function StockPage() {
         <div className="p-4 md:p-6 space-y-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-                    <Package className="text-orange-500" /> Tổng Tồn Kho
-                </h1>
-                <p className="text-sm text-gray-500 mt-0.5">{statusFiltered.length} mặt hàng đã tải{stockTab !== 'all' ? ` (${stockTab === 'retail' ? 'bán lẻ' : 'linh kiện'})` : ''}</p>
+                    <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                        <Package className="text-orange-500" /> Tổng Tồn Kho
+                    </h1>
+                    <p className="text-sm text-gray-500 mt-0.5">{statusFiltered.length} mặt hàng đã tải{stockTab !== 'all' ? ` (${stockTab === 'retail' ? 'bán lẻ' : 'linh kiện'})` : ''}</p>
                 </div>
                 {user?.role === 'admin' && (
                     <button
@@ -244,10 +278,10 @@ export default function StockPage() {
                 {([['all', '📋 Tất cả'], ['retail', '📦 Bán lẻ & Phụ kiện'], ['component', '🔧 Linh kiện']] as const).map(([key, label]) => (
                     <button key={key} onClick={() => setStockTab(key)}
                         className={`px-3 py-1.5 text-xs rounded-xl text-sm font-medium transition-all border ${stockTab === key
-                                ? key === 'component' ? 'bg-orange-50 border-orange-300 text-orange-700 shadow-sm'
-                                    : key === 'retail' ? 'bg-blue-50 border-blue-300 text-blue-700 shadow-sm'
-                                        : 'bg-gray-800 border-gray-800 text-white shadow-sm'
-                                : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                            ? key === 'component' ? 'bg-orange-50 border-orange-300 text-orange-700 shadow-sm'
+                                : key === 'retail' ? 'bg-blue-50 border-blue-300 text-blue-700 shadow-sm'
+                                    : 'bg-gray-800 border-gray-800 text-white shadow-sm'
+                            : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
                             }`}>
                         {label}
                     </button>
@@ -261,8 +295,8 @@ export default function StockPage() {
                 ] as const).map(([key, label]) => (
                     <button key={key} onClick={() => setStatusFilter(key)}
                         className={`px-3 py-1.5 text-xs rounded-xl text-sm font-medium transition-all border ${statusFilter === key
-                                ? 'bg-orange-50 border-orange-300 text-orange-700 shadow-sm'
-                                : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                            ? 'bg-orange-50 border-orange-300 text-orange-700 shadow-sm'
+                            : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
                             }`}>
                         {label}
                     </button>
@@ -298,12 +332,23 @@ export default function StockPage() {
             </div>
 
             {/* Search */}
-            <div className="relative max-w-md">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                <input type="text" placeholder="Tìm sản phẩm, linh kiện..."
-                    value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-                    className="w-full pl-8 pr-3 py-2.5 border rounded-xl focus:ring-2 focus:ring-orange-500/30 bg-white shadow-sm" />
-            </div>
+            <form
+                className="flex max-w-md gap-2"
+                onSubmit={(event) => {
+                    event.preventDefault();
+                    setAppliedSearchQuery(searchQuery.trim());
+                }}
+            >
+                <div className="relative flex-1">
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input type="text" placeholder="Tìm sản phẩm, linh kiện..."
+                        value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+                        className="w-full pl-8 pr-3 py-2.5 border rounded-xl focus:ring-2 focus:ring-orange-500/30 bg-white shadow-sm" />
+                </div>
+                <button type="submit" className="rounded-xl bg-orange-500 px-4 text-sm font-semibold text-white hover:bg-orange-600">
+                    Tìm
+                </button>
+            </form>
 
             {/* Table */}
             <div className="bg-white rounded-xl shadow-sm overflow-hidden">

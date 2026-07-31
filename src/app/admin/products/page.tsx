@@ -23,7 +23,7 @@ import { CreateReceiptModal } from '@/features/parts/ImportReceiptModals';
 import type { SupplierOption } from '@/features/parts/importReceiptTypes';
 import type { Product } from '@/lib/types';
 import { useConfig } from '@/lib/ConfigContext';
-import { isPartCategory } from '@/lib/constants';
+import { isPartCategory, PART_CATEGORY_VALUES } from '@/lib/constants';
 import { productCodeSearchText } from '@/lib/productCodes';
 import { buildArchiveUpdate, getArchiveBlockReason } from '@/lib/productLifecycle';
 import { useAuth } from '@/lib/AuthContext';
@@ -45,7 +45,8 @@ export default function ProductsPage() {
     const isAdmin = user?.role === 'admin';
     const router = useRouter();
     const { config, loading: configLoading } = useConfig();
-    const [searchQuery, setSearchQuery] = useState('');
+    const [searchInput, setSearchInput] = useState('');
+    const [appliedSearch, setAppliedSearch] = useState('');
     const [filterCategoryIds, setFilterCategoryIds] = useState<string[]>([]);
     const [filterCondition, setFilterCondition] = useState('');
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -64,13 +65,26 @@ export default function ProductsPage() {
     const [isCreateReceiptOpen, setIsCreateReceiptOpen] = useState(false);
     const [supplierList, setSupplierList] = useState<SupplierOption[]>([]);
     const [retailProducts, setRetailProducts] = useState<(Product & { id: string })[]>([]);
+    const retailRootIds = useMemo(
+        () => (config?.taxonomy?.retail || []).map(node => node.id).filter(Boolean),
+        [config?.taxonomy?.retail],
+    );
 
     const whereConstraints = useMemo(() => {
         const constraints: QueryConstraint[] = [];
         constraints.push(where('status', '==', 'active'));
         const categoryId = filterCategoryIds.at(-1) || '';
-        const trimmedSearch = searchQuery.trim();
+        const trimmedSearch = appliedSearch.trim();
         const searchToken = trimmedSearch.length >= 2 ? getSearchKeywordQuery(trimmedSearch) : '';
+        const scopedRetailSearchTokens = !categoryId && searchToken && retailRootIds.length > 0 && retailRootIds.length <= 30
+            ? retailRootIds.map(rootId => `${rootId}::${searchToken}`)
+            : [];
+
+        // The default page must already be retail-only. Filtering components after
+        // a 20-document page is what made the page appear empty after part imports.
+        if (!categoryId && !searchToken) {
+            constraints.push(where('category', 'not-in', PART_CATEGORY_VALUES));
+        }
 
         if (filterCondition) {
             constraints.push(where('condition', '==', filterCondition));
@@ -80,19 +94,21 @@ export default function ProductsPage() {
             constraints.push(where('searchCategoryKeywords', 'array-contains', `${categoryId}::${searchToken}`));
         } else if (categoryId) {
             constraints.push(where('categoryIds', 'array-contains', categoryId));
+        } else if (scopedRetailSearchTokens.length > 0) {
+            constraints.push(where('searchCategoryKeywords', 'array-contains-any', scopedRetailSearchTokens));
         } else if (searchToken) {
             constraints.push(where('searchKeywords', 'array-contains', searchToken));
         }
 
         return constraints;
-    }, [filterCategoryIds, filterCondition, searchQuery]);
+    }, [appliedSearch, filterCategoryIds, filterCondition, retailRootIds]);
 
     const orderByConstraints = useMemo(() => {
-        const hasSearch = getSearchKeywordQuery(searchQuery).length >= 2;
+        const hasSearch = getSearchKeywordQuery(appliedSearch).length >= 2;
         const hasCategory = filterCategoryIds.length > 0;
         if (hasSearch || hasCategory || filterCondition) return [];
         return [orderBy('createdAt', 'desc')];
-    }, [searchQuery, filterCategoryIds, filterCondition]);
+    }, [appliedSearch, filterCategoryIds, filterCondition]);
 
     const {
         data: products,
@@ -108,12 +124,13 @@ export default function ProductsPage() {
         queryKey: JSON.stringify({
             categoryId: filterCategoryIds.at(-1) || '',
             condition: filterCondition,
-            search: searchQuery.trim().length >= 2 ? getSearchKeywordQuery(searchQuery) : '',
+            search: appliedSearch.trim().length >= 2 ? getSearchKeywordQuery(appliedSearch) : '',
             sort: orderByConstraints.length ? 'createdAt-desc' : 'none',
         }),
         whereConstraints,
         orderByConstraints,
-        pageSize: 20
+        pageSize: 20,
+        enabled: !configLoading,
     });
 
     const setPage = goToPage;
@@ -178,13 +195,13 @@ export default function ProductsPage() {
     const filteredProducts = useMemo(() => {
         return products.filter((p) => {
             if (isPartCategory(p.category, p.categoryIds)) return false;
-            const normalizedQuery = searchQuery.toLowerCase().trim();
+            const normalizedQuery = appliedSearch.toLowerCase().trim();
             if (normalizedQuery.length > 0 && normalizedQuery.length < 2) {
                 return p.name.toLowerCase().includes(normalizedQuery) || productCodeSearchText(p as Product & { id: string }).includes(normalizedQuery);
             }
             return true;
         });
-    }, [products, searchQuery]);
+    }, [appliedSearch, products]);
 
     const retailTaxonomy = config?.taxonomy?.retail || [];
     const paginatedProducts = filteredProducts;
@@ -352,13 +369,24 @@ export default function ProductsPage() {
                 <div className="flex flex-col md:flex-row gap-2">
                     <div className="relative flex-1">
                         <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" />
-                        <input
-                            type="text"
-                            placeholder="Tìm sản phẩm..."
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            className="w-full h-8 text-sm pl-6 pr-2 text-sm border rounded-lg focus:border-orange-500 focus:outline-none"
-                        />
+                        <form
+                            className="flex gap-2"
+                            onSubmit={(event) => {
+                                event.preventDefault();
+                                setAppliedSearch(searchInput.trim());
+                            }}
+                        >
+                            <input
+                                type="text"
+                                placeholder="Tìm sản phẩm..."
+                                value={searchInput}
+                                onChange={(event) => setSearchInput(event.target.value)}
+                                className="w-full h-8 text-sm pl-6 pr-2 text-sm border rounded-lg focus:border-orange-500 focus:outline-none"
+                            />
+                            <button type="submit" className="h-8 rounded-lg bg-orange-500 px-3 text-xs font-semibold text-white hover:bg-orange-600">
+                                Tìm
+                            </button>
+                        </form>
                     </div>
 
                     <select

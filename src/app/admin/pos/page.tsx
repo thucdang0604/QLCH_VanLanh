@@ -21,8 +21,7 @@ import type { Product, TaxonomyNode } from '@/lib/types';
 import type { ContactMethod, ContactMethodType } from '@/lib/types/contact';
 
 import { toastError, toastSuccess, toastWarning } from '@/lib/toast';
-import { DEFAULT_CONFIG } from '@/lib/config-defaults';
-import { PART_CATEGORY, isPartCategory } from '@/lib/constants';
+import { PART_CATEGORY, PART_CATEGORY_VALUES, isPartCategory } from '@/lib/constants';
 import { fetchActiveDiscountRules, calculateAccessoryDiscounts } from '@/lib/discountRuleUtils';
 import { consumeChatWorkflowHandoff } from '@/lib/chatWorkflowHandoff';
 import { extractProductCodeFromScan, getPrimaryProductCode, getProductScanCandidates, productCodeSearchText } from '@/lib/productCodes';
@@ -43,9 +42,9 @@ type BrowserBarcodeDetectorConstructor = {
     new(options?: { formats?: string[] }): BrowserBarcodeDetector;
     getSupportedFormats?: () => Promise<string[]>;
 };
-const RETAIL_CATEGORY_IDS = DEFAULT_CONFIG.taxonomy.retail.map((node) => node.id);
 const CAMERA_BARCODE_FORMATS = ['qr_code', 'code_128'];
-const POS_DEFAULT_PRODUCT_LIMIT = 120;
+const POS_DEFAULT_RETAIL_LIMIT = 80;
+const POS_DEFAULT_COMPONENT_LIMIT = 40;
 const POS_SEARCH_PRODUCT_LIMIT = 60;
 const POS_LEGACY_SCAN_FALLBACK_LIMIT = 500;
 type PosProduct = Product & { id: string };
@@ -246,6 +245,10 @@ const UniversalProductModal = dynamic(() => import('@/components/admin/Universal
 export default function POSPage() {
     const { config } = useConfig();
     const searchParams = useSearchParams();
+    const retailCategoryRootIds = useMemo(
+        () => (config?.taxonomy?.retail || []).map(node => node.id).filter(Boolean),
+        [config?.taxonomy?.retail],
+    );
 
     const resolveWarranty = useCallback((product: Product) => {
         if (product.warrantyType && product.warrantyType !== 'none') {
@@ -260,6 +263,7 @@ export default function POSPage() {
     const [products, setProducts] = useState<PosProduct[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
+    const [appliedSearchQuery, setAppliedSearchQuery] = useState('');
     const [activeCategory, setActiveCategory] = useState('all');
 
     // Cart
@@ -708,11 +712,11 @@ export default function POSPage() {
             if (!options?.includeOutOfStock && !isProductSellable(p)) return false;
             if (isPartCategory(p.category, p.categoryIds)) return true;
             if (p.categoryIds && p.categoryIds.length > 0) {
-                return RETAIL_CATEGORY_IDS.includes(p.categoryIds[0]);
+                return retailCategoryRootIds.includes(p.categoryIds[0]);
             }
             return p.category !== 'Dịch vụ sửa chữa' && p.category !== 'service';
         });
-    }, []);
+    }, [retailCategoryRootIds]);
 
     const mergeProducts = useCallback((nextProducts: PosProduct[], options?: { includeOutOfStock?: boolean }) => {
         const sellableProducts = filterPosProducts(nextProducts, options);
@@ -724,13 +728,30 @@ export default function POSPage() {
     }, [filterPosProducts]);
 
     const loadDefaultProducts = useCallback(async () => {
-        const snap = await getDocs(query(
-            collection(db, 'products'),
-            fbOrderBy('createdAt', 'desc'),
-            limit(POS_DEFAULT_PRODUCT_LIMIT),
-        ));
-        const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as PosProduct));
-        setProducts(filterPosProducts(data));
+        const productsRef = collection(db, 'products');
+        const [retailSnapshot, componentSnapshot] = await Promise.all([
+            getDocs(query(
+                productsRef,
+                where('status', '==', PRODUCT_STATUS.ACTIVE),
+                where('category', 'not-in', PART_CATEGORY_VALUES),
+                fbOrderBy('category', 'asc'),
+                fbOrderBy('createdAt', 'desc'),
+                limit(POS_DEFAULT_RETAIL_LIMIT),
+            )),
+            getDocs(query(
+                productsRef,
+                where('status', '==', PRODUCT_STATUS.ACTIVE),
+                where('category', 'in', PART_CATEGORY_VALUES),
+                fbOrderBy('category', 'asc'),
+                fbOrderBy('createdAt', 'desc'),
+                limit(POS_DEFAULT_COMPONENT_LIMIT),
+            )),
+        ]);
+        const productsById = new Map<string, PosProduct>();
+        [...retailSnapshot.docs, ...componentSnapshot.docs].forEach((snapshot) => {
+            productsById.set(snapshot.id, { id: snapshot.id, ...snapshot.data() } as PosProduct);
+        });
+        setProducts(filterPosProducts(Array.from(productsById.values())));
     }, [filterPosProducts]);
 
     // Load a bounded POS product cache instead of the full products collection.
@@ -748,50 +769,27 @@ export default function POSPage() {
     }, [loadDefaultProducts]);
 
     useEffect(() => {
-        const normalizedSearch = searchQuery.trim();
+        const normalizedSearch = appliedSearchQuery.trim();
         if (normalizedSearch.length === 0) return;
         if (normalizedSearch.length < 2) return;
 
-        const timeoutId = window.setTimeout(async () => {
+        void (async () => {
             try {
-                const normalizedQuery = normalizedSearch.toLowerCase();
                 const keyword = generateSearchKeywords(normalizedSearch)[0] || normalizedSearch.toLowerCase();
                 const keywordSnap = await getDocs(query(
                     collection(db, 'products'),
                     where('searchKeywords', 'array-contains', keyword),
                     limit(POS_SEARCH_PRODUCT_LIMIT),
                 ));
-
-                const fallbackSnap = await getDocs(query(
-                    collection(db, 'products'),
-                    fbOrderBy('createdAt', 'desc'),
-                    limit(POS_SEARCH_PRODUCT_LIMIT),
-                ));
-
-                const candidates = new Map<string, PosProduct>();
-                keywordSnap.docs.forEach(d => candidates.set(d.id, { id: d.id, ...d.data() } as PosProduct));
-                fallbackSnap.docs.forEach(d => {
-                    const product = { id: d.id, ...d.data() } as PosProduct;
-                    const searchKeywords = (product as { searchKeywords?: unknown }).searchKeywords;
-                    const haystack = [
-                        product.name,
-                        product.id,
-                        productCodeSearchText(product),
-                        ...(Array.isArray(searchKeywords) ? searchKeywords : []),
-                    ].join(' ').toLowerCase();
-                    if (haystack.includes(normalizedQuery)) {
-                        candidates.set(product.id, product);
-                    }
-                });
-
-                mergeProducts(Array.from(candidates.values()), { includeOutOfStock: true });
+                mergeProducts(
+                    keywordSnap.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as PosProduct)),
+                    { includeOutOfStock: true },
+                );
             } catch (err) {
                 console.error('Failed to search POS products:', err);
             }
-        }, 250);
-
-        return () => window.clearTimeout(timeoutId);
-    }, [loadDefaultProducts, mergeProducts, searchQuery]);
+        })();
+    }, [appliedSearchQuery, mergeProducts]);
 
     // Keyboard shortcut: F1 to focus search
     useEffect(() => {
@@ -821,7 +819,7 @@ export default function POSPage() {
     // ── Filtered products ──
     const filtered = products.filter(p => {
         const matchCat = activeCategory === 'all' || p.category === activeCategory;
-        const q = searchQuery.toLowerCase();
+        const q = appliedSearchQuery.toLowerCase();
         const matchSearch = !q || p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q) || productCodeSearchText(p).includes(q);
         return matchCat && matchSearch;
     });
@@ -833,9 +831,9 @@ export default function POSPage() {
             toastError('Sản phẩm đã hết hàng!');
             return;
         }
-        
+
         const targetCartItemId = preferredLotCode ? `${product.id}_${preferredLotCode}` : product.id;
-        
+
         setCart(prev => {
             const existing = prev.find(c => c.cartItemId === targetCartItemId);
             if (existing) {
@@ -897,7 +895,7 @@ export default function POSPage() {
             const docSnap = snapshot.docs[0];
             if (!docSnap) continue;
             const product = { id: docSnap.id, ...docSnap.data() } as PosProduct;
-                const [sellable] = filterPosProducts([product], { includeOutOfStock: true });
+            const [sellable] = filterPosProducts([product], { includeOutOfStock: true });
             if (sellable) {
                 mergeProducts([sellable]);
                 return sellable;
@@ -962,6 +960,7 @@ export default function POSPage() {
                     if (isSearchFocused) {
                         e.preventDefault();
                         setSearchQuery('');
+                        setAppliedSearchQuery('');
                     }
                     void handleProductScan(code, 'keyboard');
                 }
@@ -1804,97 +1803,111 @@ export default function POSPage() {
                 </div>
                 {posTab === 'sales' ? (
                     <>
-                {/* Search + Category Filter + Quick Add */}
-                <div className="flex gap-3 mb-4">
-                    <div className="relative flex-1">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-                        <input
-                            ref={searchRef}
-                            type="text"
-                            placeholder="Tìm sản phẩm... (F1)"
-                            value={searchQuery}
-                            onChange={e => setSearchQuery(e.target.value)}
-                            className="w-full pl-10 pr-4 py-2.5 border rounded-xl focus:ring-2 focus:ring-orange-500/30 focus:border-orange-400 bg-white shadow-sm"
-                        />
-                    </div>
-                    <button
-                        onClick={() => setShowProductModal(true)}
-                        className="flex items-center gap-1.5 px-4 py-2.5 bg-green-600 text-white rounded-xl hover:bg-green-700 shadow-sm font-semibold text-sm whitespace-nowrap transition-all"
-                    >
-                        <Plus size={16} />
-                        Thêm SP Mới
-                    </button>
-                    <button
-                        onClick={() => setShowScanner(true)}
-                        className="flex items-center gap-1.5 px-4 py-2.5 bg-gray-900 text-white rounded-xl hover:bg-black shadow-sm font-semibold text-sm whitespace-nowrap transition-all"
-                    >
-                        <Camera size={16} />
-                        Quét mã
-                    </button>
-                </div>
-
-                {/* Category Tabs */}
-                <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
-                    {categories.map(cat => (
-                        <button
-                            key={cat}
-                            onClick={() => setActiveCategory(cat)}
-                            className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-all ${activeCategory === cat
-                                ? 'bg-orange-500 text-white shadow-md shadow-orange-200'
-                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                }`}
-                        >
-                            {catLabel[cat] || cat}
-                        </button>
-                    ))}
-                </div>
-
-                {/* Product Grid */}
-                <div className="md:flex-1 md:overflow-y-auto">
-                    <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                        {filtered.map(product => {
-                            const available = (product.stock || 0) - (product.held || 0);
-                            const outOfStock = available <= 0;
-                            return (
+                        {/* Search + Category Filter + Quick Add */}
+                        <div className="flex gap-3 mb-4">
+                            <form
+                                className="flex flex-1 gap-2"
+                                onSubmit={(event) => {
+                                    event.preventDefault();
+                                    setAppliedSearchQuery(searchQuery.trim());
+                                }}
+                            >
+                                <div className="relative flex-1">
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                                    <input
+                                        ref={searchRef}
+                                        type="text"
+                                        placeholder="Tìm sản phẩm... (F1)"
+                                        value={searchQuery}
+                                        onChange={e => setSearchQuery(e.target.value)}
+                                        className="w-full pl-10 pr-4 py-2.5 border rounded-xl focus:ring-2 focus:ring-orange-500/30 focus:border-orange-400 bg-white shadow-sm"
+                                    />
+                                </div>
                                 <button
-                                    key={product.id}
-                                    onClick={() => !outOfStock && addToCart(product)}
-                                    disabled={outOfStock}
-                                    className={`bg-white rounded-xl border border-gray-100 p-3 text-left transition-all group relative ${outOfStock
-                                        ? 'opacity-50 cursor-not-allowed'
-                                        : 'hover:shadow-lg hover:border-orange-200 active:scale-[0.97]'
+                                    type="submit"
+                                    className="rounded-xl bg-orange-500 px-4 text-sm font-semibold text-white hover:bg-orange-600"
+                                >
+                                    Tìm
+                                </button>
+                            </form>
+                            <button
+                                onClick={() => setShowProductModal(true)}
+                                className="flex items-center gap-1.5 px-4 py-2.5 bg-green-600 text-white rounded-xl hover:bg-green-700 shadow-sm font-semibold text-sm whitespace-nowrap transition-all"
+                            >
+                                <Plus size={16} />
+                                Thêm SP Mới
+                            </button>
+                            <button
+                                onClick={() => setShowScanner(true)}
+                                className="flex items-center gap-1.5 px-4 py-2.5 bg-gray-900 text-white rounded-xl hover:bg-black shadow-sm font-semibold text-sm whitespace-nowrap transition-all"
+                            >
+                                <Camera size={16} />
+                                Quét mã
+                            </button>
+                        </div>
+
+                        {/* Category Tabs */}
+                        <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
+                            {categories.map(cat => (
+                                <button
+                                    key={cat}
+                                    onClick={() => setActiveCategory(cat)}
+                                    className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-all ${activeCategory === cat
+                                        ? 'bg-orange-500 text-white shadow-md shadow-orange-200'
+                                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                                         }`}
                                 >
-                                    {/* Out-of-stock badge */}
-                                    {outOfStock && (
-                                        <div className="absolute top-2 right-2 z-10 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm flex items-center gap-1">
-                                            <AlertTriangle size={10} /> Hết hàng
-                                        </div>
-                                    )}
-                                    <div className="aspect-square rounded-lg bg-gray-50 mb-2 overflow-hidden flex items-center justify-center">
-                                        {((product as unknown as { imageUrl?: string }).imageUrl || product.images?.[0]) ? (
-                                            <Image src={((product as unknown as { imageUrl?: string }).imageUrl || product.images?.[0]) as string} alt={product.name} width={200} height={200} className={`w-full h-full object-cover ${!outOfStock ? 'group-hover:scale-105' : ''} transition-transform`} />
-                                        ) : (
-                                            <Package className="text-gray-300" size={32} />
-                                        )}
-                                    </div>
-                                    <p className="text-xs font-semibold text-gray-800 line-clamp-2 mb-1">{product.name}</p>
-                                    <p className="text-[10px] font-mono text-gray-400 mb-1">{getPrimaryProductCode(product)}</p>
-                                    <p className="text-sm font-bold text-orange-600">{formatPrice(product.price_promo || product.price_original)}</p>
-                                    <p className={`text-[10px] mt-0.5 font-medium ${outOfStock ? 'text-red-500' : available <= 3 ? 'text-amber-500' : 'text-gray-400'}`}>
-                                        Tồn kho: {product.stock || 0}{(product.held || 0) > 0 ? ` (Đang giữ: ${product.held})` : ''}
-                                    </p>
+                                    {catLabel[cat] || cat}
                                 </button>
-                            );
-                        })}
-                        {filtered.length === 0 && (
-                            <div className="col-span-full text-center py-16 text-gray-400">
-                                <Package size={48} className="mx-auto mb-3 opacity-50" />
-                                <p>Không tìm thấy sản phẩm</p>
+                            ))}
+                        </div>
+
+                        {/* Product Grid */}
+                        <div className="md:flex-1 md:overflow-y-auto">
+                            <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                                {filtered.map(product => {
+                                    const available = (product.stock || 0) - (product.held || 0);
+                                    const outOfStock = available <= 0;
+                                    return (
+                                        <button
+                                            key={product.id}
+                                            onClick={() => !outOfStock && addToCart(product)}
+                                            disabled={outOfStock}
+                                            className={`bg-white rounded-xl border border-gray-100 p-3 text-left transition-all group relative ${outOfStock
+                                                ? 'opacity-50 cursor-not-allowed'
+                                                : 'hover:shadow-lg hover:border-orange-200 active:scale-[0.97]'
+                                                }`}
+                                        >
+                                            {/* Out-of-stock badge */}
+                                            {outOfStock && (
+                                                <div className="absolute top-2 right-2 z-10 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm flex items-center gap-1">
+                                                    <AlertTriangle size={10} /> Hết hàng
+                                                </div>
+                                            )}
+                                            <div className="aspect-square rounded-lg bg-gray-50 mb-2 overflow-hidden flex items-center justify-center">
+                                                {((product as unknown as { imageUrl?: string }).imageUrl || product.images?.[0]) ? (
+                                                    <Image src={((product as unknown as { imageUrl?: string }).imageUrl || product.images?.[0]) as string} alt={product.name} width={200} height={200} className={`w-full h-full object-cover ${!outOfStock ? 'group-hover:scale-105' : ''} transition-transform`} />
+                                                ) : (
+                                                    <Package className="text-gray-300" size={32} />
+                                                )}
+                                            </div>
+                                            <p className="text-xs font-semibold text-gray-800 line-clamp-2 mb-1">{product.name}</p>
+                                            <p className="text-[10px] font-mono text-gray-400 mb-1">{getPrimaryProductCode(product)}</p>
+                                            <p className="text-sm font-bold text-orange-600">{formatPrice(product.price_promo || product.price_original)}</p>
+                                            <p className={`text-[10px] mt-0.5 font-medium ${outOfStock ? 'text-red-500' : available <= 3 ? 'text-amber-500' : 'text-gray-400'}`}>
+                                                Tồn kho: {product.stock || 0}{(product.held || 0) > 0 ? ` (Đang giữ: ${product.held})` : ''}
+                                            </p>
+                                        </button>
+                                    );
+                                })}
+                                {filtered.length === 0 && (
+                                    <div className="col-span-full text-center py-16 text-gray-400">
+                                        <Package size={48} className="mx-auto mb-3 opacity-50" />
+                                        <p>Không tìm thấy sản phẩm</p>
+                                    </div>
+                                )}
                             </div>
-                        )}
-                    </div>
-                </div>
+                        </div>
                     </>
                 ) : cashierSection}
             </div>
