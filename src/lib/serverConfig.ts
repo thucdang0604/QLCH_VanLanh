@@ -14,6 +14,7 @@ import {
     isFieldStoredInDocument,
 } from '@/lib/systemConfig';
 import { normalizePublicGeofence } from '@/lib/geofence';
+import { normalizeSidebarMenuItems } from '@/lib/sidebarMenu';
 
 function mergeHomeSections(value: unknown): HomeSectionItem[] {
     if (!Array.isArray(value) || value.length === 0) {
@@ -118,7 +119,7 @@ export async function fetchStorefrontConfigData(): Promise<SiteConfig> {
             forbiddenWords: (data.forbiddenWords as string[]) || DEFAULT_CONFIG.forbiddenWords,
             geofence: normalizePublicGeofence(data.geofence),
             headerNav: (data.headerNav as SiteConfig['headerNav']) || DEFAULT_CONFIG.headerNav,
-            sidebarMenu: (data.sidebarMenu as SiteConfig['sidebarMenu']) || DEFAULT_CONFIG.sidebarMenu,
+            sidebarMenu: normalizeSidebarMenuItems((data.sidebarMenu as SiteConfig['sidebarMenu']) || DEFAULT_CONFIG.sidebarMenu),
             footerServices: (data.footerServices as SiteConfig['footerServices']) || DEFAULT_CONFIG.footerServices,
             homeServiceCategories: (data.homeServiceCategories as SiteConfig['homeServiceCategories']) || DEFAULT_CONFIG.homeServiceCategories,
             taxonomy: (data.taxonomy as SiteConfig['taxonomy']) || DEFAULT_CONFIG.taxonomy,
