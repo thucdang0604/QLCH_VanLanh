@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { Archive, Package, Search, Loader2, ArrowUpDown, TrendingDown, TrendingUp, RefreshCw } from 'lucide-react';
-import { collection, limit, orderBy, query, startAfter, where, type DocumentSnapshot, type QueryConstraint } from 'firebase/firestore';
+import { collection, limit, orderBy, query, startAfter, where, getCountFromServer, type DocumentSnapshot, type QueryConstraint } from 'firebase/firestore';
 import { getDocs } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import type { Product } from '@/lib/types';
@@ -55,7 +55,9 @@ export default function StockPage() {
     const [loadingMore, setLoadingMore] = useState(false);
     const [lastDoc, setLastDoc] = useState<DocumentSnapshot | null>(null);
     const [hasMore, setHasMore] = useState(true);
+    const [totalCount, setTotalCount] = useState<number | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
+
     const [appliedSearchQuery, setAppliedSearchQuery] = useState('');
     const [sortBy, setSortBy] = useState<'name' | 'stock' | 'costPrice'>('name');
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
@@ -81,43 +83,25 @@ export default function StockPage() {
         const trimmedSearch = appliedSearchQuery.trim();
         const searchToken = getSearchKeywordQuery(trimmedSearch);
         const constraints: QueryConstraint[] = [];
-        const canScopeByTaxonomy = stockTab !== 'all' && taxonomyRootIds.length > 0 && taxonomyRootIds.length <= 30;
 
-        // Apply the tab's taxonomy roots in Firestore before the 100-item page.
-        // Filtering a generic first page locally can make retail look empty when
-        // that page happens to contain only parts. categoryIds includes the root
-        // taxonomy ID, unlike legacy category labels which are not consistent.
-        if (canScopeByTaxonomy) {
-            if (searchToken) {
-                constraints.push(where(
-                    'searchCategoryKeywords',
-                    'array-contains-any',
-                    taxonomyRootIds.map(rootId => `${rootId}::${searchToken}`),
-                ));
-            } else {
-                constraints.push(where('categoryIds', 'array-contains-any', taxonomyRootIds));
-            }
-        } else {
-            // Keep legacy records usable while the configured taxonomy is empty
-            // or has more roots than Firestore permits in an array-contains-any query.
-            if (stockTab === 'retail') {
-                constraints.push(where('category', 'not-in', PART_CATEGORY_VALUES));
-            } else if (stockTab === 'component') {
-                constraints.push(where('category', 'in', PART_CATEGORY_VALUES));
-            }
-            if (searchToken) {
-                constraints.push(where('searchKeywords', 'array-contains', searchToken));
-            }
+        if (stockTab === 'retail') {
+            constraints.push(where('category', 'not-in', PART_CATEGORY_VALUES));
+        } else if (stockTab === 'component') {
+            constraints.push(where('category', 'in', PART_CATEGORY_VALUES));
         }
 
-        if (!trimmedSearch) {
+        if (searchToken) {
+            constraints.push(where('searchKeywords', 'array-contains', searchToken));
+        }
+
+        if (!trimmedSearch && stockTab === 'all') {
             constraints.push(orderBy('name', 'asc'));
         }
 
         if (cursor) constraints.push(startAfter(cursor));
         constraints.push(limit(STOCK_BATCH_SIZE));
         return constraints;
-    }, [appliedSearchQuery, stockTab, taxonomyRootIds]);
+    }, [appliedSearchQuery, stockTab]);
 
     const loadProducts = useCallback(async (mode: 'reset' | 'more', cursor?: DocumentSnapshot | null) => {
         const isReset = mode === 'reset';
@@ -128,12 +112,16 @@ export default function StockPage() {
         }
 
         try {
-            const snap = await getDocs(query(
-                collection(db, 'products'),
-                ...buildStockQueryConstraints(isReset ? null : cursor),
-            ));
+            const constraints = buildStockQueryConstraints(isReset ? null : cursor);
+            const [snap, countSnap] = await Promise.all([
+                getDocs(query(collection(db, 'products'), ...constraints)),
+                isReset ? getCountFromServer(collection(db, 'products')).catch(() => null) : Promise.resolve(null),
+            ]);
             const nextProducts = snap.docs.map(d => ({ id: d.id, ...d.data() } as Product & { id: string }));
             setProducts(current => isReset ? nextProducts : [...current, ...nextProducts]);
+            if (isReset && countSnap) {
+                setTotalCount(countSnap.data().count);
+            }
             setLastDoc(snap.docs[snap.docs.length - 1] || null);
             setHasMore(snap.docs.length === STOCK_BATCH_SIZE);
         } catch (err) {
@@ -178,11 +166,21 @@ export default function StockPage() {
 
     const filtered = statusFiltered
         .filter(p => {
-            if (!appliedSearchQuery) return true;
-            const q = appliedSearchQuery.toLowerCase();
-            return p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q) ||
-                p.brand?.toLowerCase().includes(q) || p.category?.toLowerCase().includes(q) ||
-                productCodeSearchText(p).includes(q);
+            if (!appliedSearchQuery.trim()) return true;
+            const tokens = appliedSearchQuery.toLowerCase().trim().split(/\s+/).filter(Boolean);
+            if (tokens.length === 0) return true;
+            const searchTxt = (
+                (p.name || '') + ' ' +
+                (p.id || '') + ' ' +
+                (p.productCode || '') + ' ' +
+                (p.sku || '') + ' ' +
+                (p.barcode || '') + ' ' +
+                (p.brand || '') + ' ' +
+                (p.category || '') + ' ' +
+                ((p as Product & { model?: string }).model || '') + ' ' +
+                productCodeSearchText(p)
+            ).toLowerCase();
+            return tokens.every(t => searchTxt.includes(t));
         })
         .sort((a, b) => {
             let cmp = 0;
@@ -306,8 +304,10 @@ export default function StockPage() {
             {/* Stats */}
             <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
                 <div className="bg-white rounded-xl border p-3">
-                    <p className="text-xs text-gray-500">Tổng tồn kho</p>
-                    <p className="text-lg font-bold text-gray-800">{totalItems}</p>
+                    <p className="text-xs text-gray-500">Mẫu SP trong DB</p>
+                    <p className="text-lg font-bold text-gray-800">
+                        {totalCount !== null ? `${totalCount.toLocaleString('vi-VN')} mẫu` : totalItems}
+                    </p>
                 </div>
                 <div className="bg-white rounded-xl border p-3">
                     <p className="text-xs text-gray-500">Tạm giữ</p>

@@ -22,7 +22,8 @@ import Modal from '@/components/admin/Modal';
 import ProductQrLabelModal from '@/components/admin/ProductQrLabelModal';
 import UniversalProductModal from '@/components/admin/UniversalProductModal';
 import ExportImportReportButton from '@/components/admin/ExportImportReportButton';
-import { PART_CATEGORY_LABEL } from '@/lib/constants';
+import { PART_CATEGORY_LABEL, PART_CATEGORY_VALUES } from '@/lib/constants';
+import { generateSlug, getSearchKeywordQuery } from '@/lib/utils';
 import { db } from '@/lib/firebase';
 import type { Product } from '@/lib/types';
 import { updateDocument } from '@/lib/useFirestore';
@@ -74,20 +75,27 @@ export default function PartsPage() {
     );
 
     const whereConstraints = useMemo<QueryConstraint[]>(() => {
-        if (queryPlan.state !== 'ready') return [];
-        const value = queryPlan.operator === 'array-contains'
-            ? queryPlan.values[0]
-            : queryPlan.values;
-        return [
-            where('category', '==', PART_CATEGORY_LABEL),
-            where(queryPlan.field, queryPlan.operator, value),
-        ];
-    }, [queryPlan]);
+        const constraints: QueryConstraint[] = [];
+        constraints.push(where('category', 'in', PART_CATEGORY_VALUES));
+
+        const categoryId = filterCategoryIds.at(-1) || '';
+        const trimmedSearch = appliedSearch.trim();
+        const searchToken = trimmedSearch.length >= 2 ? getSearchKeywordQuery(trimmedSearch) : '';
+
+        if (searchToken) {
+            constraints.push(where('searchKeywords', 'array-contains', searchToken));
+        } else if (categoryId) {
+            constraints.push(where('categoryIds', 'array-contains', categoryId));
+        }
+
+        return constraints;
+    }, [appliedSearch, filterCategoryIds]);
 
     const orderByConstraints = useMemo(() => [orderBy('createdAt', 'desc')], []);
-    const queryKey = queryPlan.state === 'ready'
-        ? `parts:${queryPlan.queryKey}:createdAt-desc`
-        : queryPlan.queryKey;
+    const queryKey = JSON.stringify({
+        categoryId: filterCategoryIds.at(-1) || '',
+        searchToken: appliedSearch.trim().length >= 2 ? getSearchKeywordQuery(appliedSearch) : '',
+    });
 
     const {
         data: parts,
@@ -101,7 +109,7 @@ export default function PartsPage() {
         setPageSize,
         refresh,
     } = useFirestorePaginated<Product>('products', {
-        enabled: !configLoading && queryPlan.state === 'ready',
+        enabled: !configLoading,
         queryKey,
         whereConstraints,
         orderByConstraints,
@@ -121,11 +129,25 @@ export default function PartsPage() {
 
     const getPartModel = (part: Product & { id: string }) => (part as Product & { model?: string }).model || '';
     const visibleParts = useMemo(
-        // The Firestore query is already scoped by the configured component taxonomy.
-        // Do not reapply the legacy category-name heuristic here: valid taxonomy IDs
-        // such as `dien-thoai` do not necessarily start with `linh-kien`.
-        () => parts.filter(part => !isProductArchived(part) && !part.isProposed),
-        [parts],
+        () => parts.filter(part => {
+            if (isProductArchived(part) || part.isProposed) return false;
+            const categoryId = filterCategoryIds.at(-1) || '';
+            if (categoryId && (!part.categoryIds || !part.categoryIds.includes(categoryId))) {
+                return false;
+            }
+            const trimmedSearch = appliedSearch.trim();
+            if (trimmedSearch.length > 0) {
+                const tokens = generateSlug(trimmedSearch).split('-').filter(Boolean);
+                if (tokens.length > 0) {
+                    const searchTxt = generateSlug(
+                        `${part.name || ''} ${part.id || ''} ${part.productCode || ''} ${part.sku || ''} ${part.barcode || ''} ${(part as Product & { partType?: string; model?: string }).partType || ''} ${(part as Product & { partType?: string; model?: string }).model || ''} ${Array.isArray((part as Product & { compatibleModels?: string[] }).compatibleModels) ? (part as Product & { compatibleModels?: string[] }).compatibleModels?.join(' ') : ''}`
+                    );
+                    if (!tokens.every(t => searchTxt.includes(t))) return false;
+                }
+            }
+            return true;
+        }),
+        [appliedSearch, filterCategoryIds, parts],
     );
 
     const queryPlanMessage = queryPlan.state === 'blocked'

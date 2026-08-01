@@ -73,42 +73,18 @@ export default function ProductsPage() {
     const whereConstraints = useMemo(() => {
         const constraints: QueryConstraint[] = [];
         constraints.push(where('status', '==', 'active'));
-        const categoryId = filterCategoryIds.at(-1) || '';
-        const trimmedSearch = appliedSearch.trim();
-        const searchToken = trimmedSearch.length >= 2 ? getSearchKeywordQuery(trimmedSearch) : '';
-        const scopedRetailSearchTokens = !categoryId && searchToken && retailRootIds.length > 0 && retailRootIds.length <= 30
-            ? retailRootIds.map(rootId => `${rootId}::${searchToken}`)
-            : [];
-
-        // The default page must already be retail-only. Filtering components after
-        // a 20-document page is what made the page appear empty after part imports.
-        if (!categoryId && !searchToken) {
-            constraints.push(where('category', 'not-in', PART_CATEGORY_VALUES));
-        }
+        constraints.push(where('category', 'not-in', PART_CATEGORY_VALUES));
 
         if (filterCondition) {
             constraints.push(where('condition', '==', filterCondition));
         }
 
-        if (categoryId && searchToken) {
-            constraints.push(where('searchCategoryKeywords', 'array-contains', `${categoryId}::${searchToken}`));
-        } else if (categoryId) {
-            constraints.push(where('categoryIds', 'array-contains', categoryId));
-        } else if (scopedRetailSearchTokens.length > 0) {
-            constraints.push(where('searchCategoryKeywords', 'array-contains-any', scopedRetailSearchTokens));
-        } else if (searchToken) {
-            constraints.push(where('searchKeywords', 'array-contains', searchToken));
-        }
-
         return constraints;
-    }, [appliedSearch, filterCategoryIds, filterCondition, retailRootIds]);
+    }, [filterCondition]);
 
     const orderByConstraints = useMemo(() => {
-        const hasSearch = getSearchKeywordQuery(appliedSearch).length >= 2;
-        const hasCategory = filterCategoryIds.length > 0;
-        if (hasSearch || hasCategory || filterCondition) return [];
         return [orderBy('createdAt', 'desc')];
-    }, [appliedSearch, filterCategoryIds, filterCondition]);
+    }, []);
 
     const {
         data: products,
@@ -125,7 +101,7 @@ export default function ProductsPage() {
             categoryId: filterCategoryIds.at(-1) || '',
             condition: filterCondition,
             search: appliedSearch.trim().length >= 2 ? getSearchKeywordQuery(appliedSearch) : '',
-            sort: orderByConstraints.length ? 'createdAt-desc' : 'none',
+            sort: 'createdAt-desc',
         }),
         whereConstraints,
         orderByConstraints,
@@ -193,19 +169,24 @@ export default function ProductsPage() {
     };
 
     const filteredProducts = useMemo(() => {
+        const categoryId = filterCategoryIds.at(-1) || '';
+        const normalizedQuery = appliedSearch.toLowerCase().trim();
         return products.filter((p) => {
             if (isPartCategory(p.category, p.categoryIds)) return false;
-            const normalizedQuery = appliedSearch.toLowerCase().trim();
-            if (normalizedQuery.length > 0 && normalizedQuery.length < 2) {
-                return p.name.toLowerCase().includes(normalizedQuery) || productCodeSearchText(p as Product & { id: string }).includes(normalizedQuery);
+            if (categoryId && (!p.categoryIds || !p.categoryIds.includes(categoryId))) return false;
+            if (normalizedQuery.length > 0) {
+                const searchTxt = (p.name + ' ' + (p.productCode || '') + ' ' + (p.sku || '') + ' ' + (p.barcode || '')).toLowerCase();
+                return searchTxt.includes(normalizedQuery);
             }
             return true;
         });
-    }, [appliedSearch, products]);
+    }, [appliedSearch, filterCategoryIds, products]);
 
     const retailTaxonomy = config?.taxonomy?.retail || [];
     const paginatedProducts = filteredProducts;
-    const totalFiltered = totalCount;
+    const totalFiltered = (filterCategoryIds.length > 0 || appliedSearch.trim().length > 0)
+        ? filteredProducts.length
+        : totalCount;
 
     const validNodeIds = collectAllNodeIds(retailTaxonomy);
 

@@ -2,9 +2,10 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { collection, query, orderBy, doc, updateDoc, serverTimestamp, where, limit, startAfter, DocumentSnapshot, QuerySnapshot, DocumentData } from 'firebase/firestore';
-import { onSnapshot, getDocs } from '@/lib/firestoreLogger';
+import { collection, query, orderBy, doc, updateDoc, serverTimestamp, where, limit, startAfter, getCountFromServer, DocumentSnapshot, QuerySnapshot, DocumentData } from 'firebase/firestore';
+import { onSnapshot, getDocs, getDoc } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
+import { getSearchKeywordQuery } from '@/lib/utils';
 import { appAlert } from '@/lib/appDialog';
 import {
     Clock,
@@ -71,8 +72,16 @@ export default function AppointmentsPage() {
 
     const [lastDoc, setLastDoc] = useState<DocumentSnapshot | null>(null);
     const [hasMore, setHasMore] = useState(true);
+    const [totalCount, setTotalCount] = useState<number | null>(null);
     const [isSearchingDB, setIsSearchingDB] = useState(false);
     const [activeTab, setActiveTab] = useState<'active' | 'completed'>('active');
+
+    // Fetch total appointment count
+    useEffect(() => {
+        getCountFromServer(collection(db, 'appointments'))
+            .then(snap => setTotalCount(snap.data().count))
+            .catch(() => null);
+    }, []);
 
     // Reset status filter when changing tabs
     useEffect(() => {
@@ -138,25 +147,49 @@ export default function AppointmentsPage() {
         }
         setIsSearchingDB(true);
         try {
-            // Find by phone
-            const qPhone = query(collection(db, 'appointments'), where('phone', '==', searchQuery.trim()), limit(APPOINTMENT_SEARCH_LIMIT));
-            const snap = await getDocs(qPhone);
-            
-            if (!snap.empty) {
-                const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Appointment[];
+            const keyword = searchQuery.trim();
+            const phone = keyword.replace(/[^0-9]/g, '').trim();
+            const searchToken = getSearchKeywordQuery(keyword);
+
+            const queries = [
+                getDocs(query(collection(db, 'appointments'), where('searchKeywords', 'array-contains', searchToken), limit(APPOINTMENT_SEARCH_LIMIT))),
+            ];
+            if (phone.length >= 8) {
+                queries.push(getDocs(query(collection(db, 'appointments'), where('phone', '==', phone), limit(10))));
+            }
+
+            const snaps = await Promise.all(queries);
+            const foundMap = new Map<string, Appointment>();
+            snaps.forEach(snap => {
+                snap.docs.forEach(d => {
+                    foundMap.set(d.id, { id: d.id, ...d.data() } as Appointment);
+                });
+            });
+
+            try {
+                const docSnap = await getDoc(doc(db, 'appointments', keyword));
+                if (docSnap.exists()) {
+                    foundMap.set(docSnap.id, { id: docSnap.id, ...docSnap.data() } as Appointment);
+                }
+            } catch {}
+
+            if (foundMap.size > 0) {
+                const data = Array.from(foundMap.values());
                 setAppointments(prev => {
                     const existingIds = new Set(prev.map(p => p.id));
                     const newItems = data.filter(d => !existingIds.has(d.id));
                     return [...prev, ...newItems];
                 });
+                toastSuccess(`Đã tìm thấy ${data.length} lịch hẹn từ Server`);
             } else {
                 await appAlert('Không tìm thấy dữ liệu trên máy chủ!', { title: 'Không tìm thấy dữ liệu' });
             }
         } catch (e) {
             console.error('Lỗi tìm kiếm DB', e);
             await appAlert('Lỗi tìm kiếm!', { title: 'Tìm kiếm thất bại' });
+        } finally {
+            setIsSearchingDB(false);
         }
-        setIsSearchingDB(false);
     };
 
     const handleUpdateStatus = async (id: string, newStatus: string) => {
@@ -314,7 +347,9 @@ export default function AppointmentsPage() {
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
                     <h1 className="text-lg font-bold text-gray-900">Quản lý đặt lịch</h1>
-                    <p className="text-gray-500">Danh sách khách hàng đăng ký sửa chữa</p>
+                    <p className="text-gray-500">
+                        {totalCount !== null ? `Tổng số ${totalCount.toLocaleString('vi-VN')} lịch hẹn trong DB (Đã tải ${appointments.length})` : 'Danh sách khách hàng đăng ký sửa chữa'}
+                    </p>
                 </div>
             </div>
 

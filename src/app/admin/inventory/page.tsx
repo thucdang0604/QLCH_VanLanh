@@ -25,6 +25,7 @@ import {
 import { buildImportPreviewState } from '@/features/parts/importReceiptUtils';
 import type { ImportPreviewState, ImportReceiptItem, SupplierOption } from '@/features/parts/importReceiptTypes';
 import { buildInlineSupplierContactInput, buildSupplierContactDocumentFields, reserveSupplierDocumentId } from '@/lib/supplierDocumentIds';
+import { getSearchKeywordQuery } from '@/lib/utils';
 
 const LotTrackingModal = dynamic(() => import('@/components/admin/LotTrackingModal'), { ssr: false });
 const ProductQrLabelModal = dynamic(() => import('@/components/admin/ProductQrLabelModal'), { ssr: false });
@@ -91,6 +92,8 @@ export default function InventoryPage() {
     const [loadingMoreReceipts, setLoadingMoreReceipts] = useState(false);
     const [lastReceiptDoc, setLastReceiptDoc] = useState<DocumentSnapshot | null>(null);
     const [hasMoreReceipts, setHasMoreReceipts] = useState(true);
+    const [totalReceiptCount, setTotalReceiptCount] = useState<number | null>(null);
+    const [isSearchingDB, setIsSearchingDB] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [isProcessing, setIsProcessing] = useState(false);
     const [timeFilter, setTimeFilter] = useState<'all' | 'today' | 'week' | 'month'>('all');
@@ -130,18 +133,64 @@ export default function InventoryPage() {
         const isReset = mode === 'reset';
         if (!isReset) setLoadingMoreReceipts(true);
         try {
-            const snap = await getDocs(query(
-                collection(db, 'import_receipts'),
-                ...buildReceiptQueryConstraints(isReset ? null : cursor),
- ));
+            const constraints = buildReceiptQueryConstraints(isReset ? null : cursor);
+            const [snap, countSnap] = await Promise.all([
+                getDocs(query(collection(db, 'import_receipts'), ...constraints)),
+                isReset ? getCountFromServer(collection(db, 'import_receipts')).catch(() => null) : Promise.resolve(null),
+            ]);
             const nextReceipts = snap.docs.map(d => ({ id: d.id, ...d.data() } as ImportReceipt & { id: string }));
             setReceipts(current => isReset ? nextReceipts : [...current, ...nextReceipts]);
+            if (isReset && countSnap) {
+                setTotalReceiptCount(countSnap.data().count);
+            }
             setLastReceiptDoc(snap.docs[snap.docs.length - 1] || null);
             setHasMoreReceipts(snap.docs.length === RECEIPT_BATCH_SIZE);
+        } catch (err) {
+            console.error('Receipts fetch error:', err);
         } finally {
             if (!isReset) setLoadingMoreReceipts(false);
         }
     }, [buildReceiptQueryConstraints]);
+
+    const searchInDatabase = async () => {
+        if (!searchQuery.trim()) {
+            toastError('Vui lòng nhập mã phiếu hoặc tên NCC để tìm trên Server');
+            return;
+        }
+        setIsSearchingDB(true);
+        try {
+            const keyword = searchQuery.trim();
+            const searchToken = getSearchKeywordQuery(keyword);
+            const snaps = await Promise.all([
+                getDocs(query(collection(db, 'import_receipts'), where('code', '==', keyword), limit(10))),
+                getDocs(query(collection(db, 'import_receipts'), where('searchKeywords', 'array-contains', searchToken), limit(20))),
+            ]);
+            const foundMap = new Map<string, ImportReceipt & { id: string }>();
+            snaps.forEach(snap => {
+                snap.docs.forEach(d => {
+                    foundMap.set(d.id, { id: d.id, ...d.data() } as ImportReceipt & { id: string });
+                });
+            });
+
+            if (foundMap.size === 0) {
+                toastError('Không tìm thấy phiếu nhập trên máy chủ.');
+                return;
+            }
+
+            const foundReceipts = Array.from(foundMap.values());
+            setReceipts(current => {
+                const merged = new Map(current.map(r => [r.id, r]));
+                foundReceipts.forEach(r => merged.set(r.id, r));
+                return [...merged.values()];
+            });
+            toastSuccess(`Đã tìm thấy ${foundReceipts.length} phiếu nhập từ Server`);
+        } catch (error) {
+            console.error('Search receipts error:', error);
+            toastError('Có lỗi khi tìm phiếu nhập');
+        } finally {
+            setIsSearchingDB(false);
+        }
+    };
 
     const refreshProducts = useCallback(async () => {
         if (products.length > 0) return; // Lazy load: already loaded
@@ -583,8 +632,10 @@ export default function InventoryPage() {
             {/* Stats row */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <div className="bg-white rounded-xl border p-4">
-                    <p className="text-xs text-gray-500">Tổng phiếu nhập</p>
-                    <p className="text-2xl font-bold text-gray-900">{receipts.length}</p>
+                    <p className="text-xs text-gray-500">Tổng phiếu nhập trong DB</p>
+                    <p className="text-2xl font-bold text-gray-900">
+                        {totalReceiptCount !== null ? totalReceiptCount.toLocaleString('vi-VN') : receipts.length}
+                    </p>
                 </div>
                 <div className="bg-white rounded-xl border p-4">
                     <p className="text-xs text-gray-500">Đã hoàn thành</p>
@@ -626,11 +677,25 @@ export default function InventoryPage() {
 
             {/* Search + Time Filter */}
             <div className="flex flex-col md:flex-row gap-3">
-                <div className="relative flex-1 max-w-md">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-                    <input type="text" placeholder="Tìm NCC hoặc sản phẩm..."
-                        value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-                        className="w-full pl-10 pr-4 py-2.5 border rounded-xl focus:ring-2 focus:ring-orange-500/30 bg-white shadow-sm" />
+                <div className="flex gap-2 flex-1 max-w-md">
+                    <div className="relative flex-1">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                        <input type="text" placeholder="Tìm mã phiếu, NCC, SP... (hoặc bấm Tìm Server)"
+                            value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+                            className="w-full pl-10 pr-4 py-2.5 border rounded-xl focus:ring-2 focus:ring-orange-500/30 bg-white shadow-sm text-sm" />
+                    </div>
+                    {searchQuery.trim().length > 0 && (
+                        <button
+                            type="button"
+                            onClick={searchInDatabase}
+                            disabled={isSearchingDB}
+                            className="px-3 bg-orange-100 text-orange-600 rounded-xl hover:bg-orange-200 transition-colors flex items-center justify-center gap-1.5 text-xs font-semibold whitespace-nowrap shadow-sm"
+                            title="Tìm trực tiếp trên Server máy chủ"
+                        >
+                            {isSearchingDB ? <Loader2 className="animate-spin" size={14} /> : <Search size={14} />}
+                            <span>Tìm Server</span>
+                        </button>
+                    )}
                 </div>
                 <div className="flex gap-1.5">
                     {([['all', 'Tất cả'], ['today', 'Hôm nay'], ['week', 'Tuần này'], ['month', 'Tháng này']] as const).map(([key, label]) => (

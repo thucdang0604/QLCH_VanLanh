@@ -62,7 +62,12 @@ function generateSearchKeywords(values) {
     }
     if (words.length > 1) {
       keywords.add(words.join(' '));
-      keywords.add(words.slice(0, 2).join(' '));
+      for (let index = 0; index < words.length - 1; index += 1) {
+        keywords.add(`${words[index]} ${words[index + 1]}`);
+      }
+      for (let index = 0; index < words.length - 2; index += 1) {
+        keywords.add(`${words[index]} ${words[index + 1]} ${words[index + 2]}`);
+      }
     }
   }
   return Array.from(keywords);

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Image from 'next/image';
 import {
     Plus,
@@ -73,12 +73,7 @@ export default function ServicesPage() {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingService, setEditingService] = useState<Service | null>(null);
 
-    useEffect(() => {
-        const timer = setTimeout(() => {
-            setAppliedSearch(searchQuery);
-        }, 300);
-        return () => clearTimeout(timer);
-    }, [searchQuery]);
+
 
     const whereConstraints = useCallback(() => {
         const constraints: QueryConstraint[] = [];
@@ -86,12 +81,10 @@ export default function ServicesPage() {
         const trimmedSearch = appliedSearch.trim();
         const searchToken = trimmedSearch.length >= 2 ? getSearchKeywordQuery(trimmedSearch) : '';
 
-        if (categoryId && searchToken) {
-            constraints.push(where('searchCategoryKeywords', 'array-contains', `${categoryId}::${searchToken}`));
+        if (searchToken) {
+            constraints.push(where('searchKeywords', 'array-contains', searchToken));
         } else if (categoryId) {
             constraints.push(where('categoryIds', 'array-contains', categoryId));
-        } else if (searchToken) {
-            constraints.push(where('searchKeywords', 'array-contains', searchToken));
         }
 
         return constraints;
@@ -137,6 +130,17 @@ export default function ServicesPage() {
     const [catalogServices, setCatalogServices] = useState<Service[]>([]);
     const [categoryAuditLoading, setCategoryAuditLoading] = useState(false);
     const [categoryAuditLoaded, setCategoryAuditLoaded] = useState(false);
+
+    const filteredServices = useMemo(() => {
+        const categoryId = filterCategoryIds.at(-1) || '';
+        const searchToken = appliedSearch.trim().length >= 2 ? getSearchKeywordQuery(appliedSearch) : '';
+        return services.filter(service => {
+            if (categoryId && searchToken) {
+                if (!service.categoryIds || !service.categoryIds.includes(categoryId)) return false;
+            }
+            return true;
+        });
+    }, [appliedSearch, filterCategoryIds, services]);
 
     const refreshCategoryAudit = useCallback(async () => {
         setCategoryAuditLoading(true);
@@ -333,6 +337,13 @@ export default function ServicesPage() {
             {/* Search + Category filter */}
             <div className="flex flex-col gap-3">
                 <div className="flex flex-col sm:flex-row gap-3">
+                <form
+                    className="flex flex-1 gap-2"
+                    onSubmit={(e) => {
+                        e.preventDefault();
+                        setAppliedSearch(searchQuery.trim());
+                    }}
+                >
                     <div className="relative flex-1">
                         <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                         <input
@@ -343,6 +354,13 @@ export default function ServicesPage() {
                             className="w-full h-8 text-sm pl-10 pr-4 border rounded-lg focus:border-orange-500 focus:outline-none"
                         />
                     </div>
+                    <button
+                        type="submit"
+                        className="h-8 rounded-lg bg-orange-500 px-3 text-xs font-semibold text-white hover:bg-orange-600 active:scale-95 transition-all"
+                    >
+                        Tìm kiếm
+                    </button>
+                </form>
                 </div>
                 {/* Modern Taxonomy Filter */}
                 <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
@@ -360,7 +378,7 @@ export default function ServicesPage() {
                 <div className="flex items-center justify-center py-20">
                     <Loader2 size={32} className="animate-spin text-orange-500" />
                 </div>
-            ) : services.length === 0 ? (
+            ) : filteredServices.length === 0 ? (
                 <div className="text-center py-20 bg-white rounded-xl">
                     <Wrench size={48} className="mx-auto text-gray-300 mb-4" />
                     <p className="text-gray-500">Chưa có dịch vụ nào</p>
@@ -368,7 +386,7 @@ export default function ServicesPage() {
             ) : (
                 <>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {services.map((service) => {
+                        {filteredServices.map((service) => {
                             const promo = getPromoPrice(service);
                             return (
                                 <div key={service.id} className={`bg-white rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow`}>
