@@ -2,11 +2,9 @@
 
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { Archive, Package, Search, Loader2, ArrowUpDown, TrendingDown, TrendingUp, RefreshCw } from 'lucide-react';
-import { collection, limit, orderBy, query, startAfter, where, getCountFromServer, type DocumentSnapshot, type QueryConstraint } from 'firebase/firestore';
-import { getDocs } from '@/lib/firestoreLogger';
-import { db } from '@/lib/firebase';
+import { orderBy, where, type QueryConstraint } from 'firebase/firestore';
 import type { Product } from '@/lib/types';
-import { useClientPagination } from '@/lib/useClientPagination';
+import { useFirestorePaginated } from '@/lib/firestoreQueryHelper';
 import PaginationBar from '@/components/admin/PaginationBar';
 import { isProductArchived } from '@/lib/productLifecycle';
 import { getSearchKeywordQuery } from '@/lib/utils';
@@ -19,8 +17,17 @@ import { toastError, toastSuccess } from '@/lib/toast';
 
 const formatPrice = (n: number) => n.toLocaleString('vi-VN') + 'đ';
 
-const STOCK_BATCH_SIZE = 100;
-const EMPTY_TAXONOMY_ROOT_IDS: string[] = [];
+interface InventoryStats {
+    totalProducts: number;
+    retailCount: number;
+    componentCount: number;
+    totalItems: number;
+    totalHeld: number;
+    totalAvailable: number;
+    totalValue: number;
+    lowStockCount: number;
+    outOfStockCount: number;
+}
 
 const getStockGroupKey = (p: Product & { id: string }) => {
     const code = [p.sku, p.productCode, p.barcode]
@@ -49,98 +56,85 @@ const mergeStockProduct = (
 
 export default function StockPage() {
     const { user } = useAuth();
-    const { config, loading: configLoading } = useConfig();
-    const [products, setProducts] = useState<(Product & { id: string })[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [loadingMore, setLoadingMore] = useState(false);
-    const [lastDoc, setLastDoc] = useState<DocumentSnapshot | null>(null);
-    const [hasMore, setHasMore] = useState(true);
-    const [totalCount, setTotalCount] = useState<number | null>(null);
+    const { loading: configLoading } = useConfig();
     const [searchQuery, setSearchQuery] = useState('');
-
     const [appliedSearchQuery, setAppliedSearchQuery] = useState('');
     const [sortBy, setSortBy] = useState<'name' | 'stock' | 'costPrice'>('name');
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
     const [stockTab, setStockTab] = useState<'all' | 'retail' | 'component'>('all');
     const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'archived'>('all');
     const [isReconcilingHeld, setIsReconcilingHeld] = useState(false);
-    const retailRootIds = useMemo(
-        () => (config?.taxonomy?.retail || []).map(node => node.id).filter(Boolean),
-        [config?.taxonomy?.retail],
-    );
-    const componentRootIds = useMemo(
-        () => (config?.taxonomy?.component || []).map(node => node.id).filter(Boolean),
-        [config?.taxonomy?.component],
-    );
-    const taxonomyRootIds = useMemo(() => {
-        if (stockTab === 'retail') return retailRootIds;
-        if (stockTab === 'component') return componentRootIds;
-        return EMPTY_TAXONOMY_ROOT_IDS;
-    }, [componentRootIds, retailRootIds, stockTab]);
+    const [stats, setStats] = useState<InventoryStats | null>(null);
+
     const isTabQueryReady = stockTab === 'all' || !configLoading;
 
-    const buildStockQueryConstraints = useCallback((cursor?: DocumentSnapshot | null): QueryConstraint[] => {
-        const trimmedSearch = appliedSearchQuery.trim();
-        const searchToken = getSearchKeywordQuery(trimmedSearch);
-        const constraints: QueryConstraint[] = [];
+    const fetchStats = useCallback(async () => {
+        try {
+            const auth = await (await import('@/lib/firebase')).getAuthInstance();
+            const idToken = await auth.currentUser?.getIdToken();
+            const res = await fetch('/api/inventory/stats', {
+                headers: idToken ? { Authorization: `Bearer ${idToken}` } : {},
+            });
+            if (res.ok) {
+                const data = await res.json();
+                setStats(data);
+            }
+        } catch (err) {
+            console.error('Failed to fetch stock stats:', err);
+        }
+    }, []);
 
+    useEffect(() => {
+        fetchStats();
+    }, [fetchStats]);
+
+    const whereConstraints = useMemo<QueryConstraint[]>(() => {
+        const constraints: QueryConstraint[] = [];
         if (stockTab === 'retail') {
             constraints.push(where('category', 'not-in', PART_CATEGORY_VALUES));
         } else if (stockTab === 'component') {
             constraints.push(where('category', 'in', PART_CATEGORY_VALUES));
         }
-
+        const searchToken = appliedSearchQuery.trim().length >= 2 ? getSearchKeywordQuery(appliedSearchQuery) : '';
         if (searchToken) {
             constraints.push(where('searchKeywords', 'array-contains', searchToken));
         }
-
-        if (!trimmedSearch && stockTab === 'all') {
-            constraints.push(orderBy('name', 'asc'));
-        }
-
-        if (cursor) constraints.push(startAfter(cursor));
-        constraints.push(limit(STOCK_BATCH_SIZE));
         return constraints;
     }, [appliedSearchQuery, stockTab]);
 
-    const loadProducts = useCallback(async (mode: 'reset' | 'more', cursor?: DocumentSnapshot | null) => {
-        const isReset = mode === 'reset';
-        if (isReset) {
-            setLoading(true);
-        } else {
-            setLoadingMore(true);
+    const orderByConstraints = useMemo<QueryConstraint[]>(() => {
+        const searchToken = appliedSearchQuery.trim().length >= 2 ? getSearchKeywordQuery(appliedSearchQuery) : '';
+        if (stockTab === 'all' && !searchToken) {
+            return [orderBy('name', 'asc')];
         }
+        return [];
+    }, [appliedSearchQuery, stockTab]);
 
-        try {
-            const constraints = buildStockQueryConstraints(isReset ? null : cursor);
-            const [snap, countSnap] = await Promise.all([
-                getDocs(query(collection(db, 'products'), ...constraints)),
-                isReset ? getCountFromServer(collection(db, 'products')).catch(() => null) : Promise.resolve(null),
-            ]);
-            const nextProducts = snap.docs.map(d => ({ id: d.id, ...d.data() } as Product & { id: string }));
-            setProducts(current => isReset ? nextProducts : [...current, ...nextProducts]);
-            if (isReset && countSnap) {
-                setTotalCount(countSnap.data().count);
-            }
-            setLastDoc(snap.docs[snap.docs.length - 1] || null);
-            setHasMore(snap.docs.length === STOCK_BATCH_SIZE);
-        } catch (err) {
-            console.error(err);
-            if (isReset) {
-                setProducts([]);
-                setLastDoc(null);
-                setHasMore(false);
-            }
-        } finally {
-            setLoading(false);
-            setLoadingMore(false);
-        }
-    }, [buildStockQueryConstraints]);
+    const queryKey = JSON.stringify({
+        stockTab,
+        searchToken: appliedSearchQuery.trim().length >= 2 ? getSearchKeywordQuery(appliedSearchQuery) : '',
+    });
 
-    useEffect(() => {
-        if (!isTabQueryReady) return;
-        loadProducts('reset');
-    }, [isTabQueryReady, loadProducts]);
+    const {
+        data: products,
+        loading,
+        totalCount,
+        currentPage,
+        totalPages,
+        pageSize,
+        nextPage,
+        prevPage,
+        goToPage,
+        setPageSize,
+        refresh,
+    } = useFirestorePaginated<Product>('products', {
+        enabled: isTabQueryReady,
+        queryKey,
+        whereConstraints,
+        orderByConstraints,
+        pageSize: 20,
+        includeTotalCount: true,
+    });
 
     const stockProducts = useMemo(() => {
         const grouped = new Map<string, Product & { id: string }>();
@@ -158,60 +152,55 @@ export default function StockPage() {
         if (stockTab === 'retail') return !isPartCategory(p.category, p.categoryIds);
         return true;
     });
+
     const statusFiltered = tabFiltered.filter(p => {
         if (statusFilter === 'archived') return isProductArchived(p);
         if (statusFilter === 'active') return !isProductArchived(p);
         return true;
     });
 
-    const filtered = statusFiltered
-        .filter(p => {
-            if (!appliedSearchQuery.trim()) return true;
-            const tokens = appliedSearchQuery.toLowerCase().trim().split(/\s+/).filter(Boolean);
-            if (tokens.length === 0) return true;
-            const searchTxt = (
-                (p.name || '') + ' ' +
-                (p.id || '') + ' ' +
-                (p.productCode || '') + ' ' +
-                (p.sku || '') + ' ' +
-                (p.barcode || '') + ' ' +
-                (p.brand || '') + ' ' +
-                (p.category || '') + ' ' +
-                ((p as Product & { model?: string }).model || '') + ' ' +
-                productCodeSearchText(p)
-            ).toLowerCase();
-            return tokens.every(t => searchTxt.includes(t));
-        })
-        .sort((a, b) => {
-            let cmp = 0;
-            if (sortBy === 'name') cmp = a.name.localeCompare(b.name);
-            else if (sortBy === 'stock') cmp = (a.stock || 0) - (b.stock || 0);
-            else if (sortBy === 'costPrice') cmp = (a.costPrice || 0) - (b.costPrice || 0);
-            return sortDir === 'asc' ? cmp : -cmp;
-        });
+    const filtered = useMemo(() => {
+        return statusFiltered
+            .filter(p => {
+                if (!appliedSearchQuery.trim()) return true;
+                const tokens = appliedSearchQuery.toLowerCase().trim().split(/\s+/).filter(Boolean);
+                if (tokens.length === 0) return true;
+                const searchTxt = (
+                    (p.name || '') + ' ' +
+                    (p.id || '') + ' ' +
+                    (p.productCode || '') + ' ' +
+                    (p.sku || '') + ' ' +
+                    (p.barcode || '') + ' ' +
+                    (p.brand || '') + ' ' +
+                    (p.category || '') + ' ' +
+                    ((p as Product & { model?: string }).model || '') + ' ' +
+                    productCodeSearchText(p)
+                ).toLowerCase();
+                return tokens.every(t => searchTxt.includes(t));
+            })
+            .sort((a, b) => {
+                let cmp = 0;
+                if (sortBy === 'name') cmp = a.name.localeCompare(b.name);
+                else if (sortBy === 'stock') cmp = (a.stock || 0) - (b.stock || 0);
+                else if (sortBy === 'costPrice') cmp = (a.costPrice || 0) - (b.costPrice || 0);
+                return sortDir === 'asc' ? cmp : -cmp;
+            });
+    }, [appliedSearchQuery, sortBy, sortDir, statusFiltered]);
 
-    const totalItems = statusFiltered.reduce((s, p) => s + (Number(p.stock) || 0), 0);
-    const totalHeld = statusFiltered.reduce((s, p) => s + Math.max(0, Number(p.held) || 0), 0);
-    const totalAvailable = statusFiltered.reduce(
-        (s, p) => s + Math.max(0, (Number(p.stock) || 0) - (Number(p.held) || 0)),
-        0,
-    );
-    const totalValue = statusFiltered.reduce((s, p) => s + (Number(p.stock) || 0) * (Number(p.costPrice) || 0), 0);
-    const lowStock = statusFiltered.filter(p => {
+    const totalItems = stats ? stats.totalItems : statusFiltered.reduce((s, p) => s + (Number(p.stock) || 0), 0);
+    const totalHeld = stats ? stats.totalHeld : statusFiltered.reduce((s, p) => s + Math.max(0, Number(p.held) || 0), 0);
+    const totalAvailable = stats ? stats.totalAvailable : statusFiltered.reduce((s, p) => s + Math.max(0, (Number(p.stock) || 0) - (Number(p.held) || 0)), 0);
+    const totalValue = stats ? stats.totalValue : statusFiltered.reduce((s, p) => s + (Number(p.stock) || 0) * (Number(p.costPrice) || 0), 0);
+    const lowStock = stats ? stats.lowStockCount : statusFiltered.filter(p => {
         const available = (Number(p.stock) || 0) - (Number(p.held) || 0);
         return available > 0 && available <= 3;
     }).length;
-    const outOfStock = statusFiltered.filter(p => (Number(p.stock) || 0) - (Number(p.held) || 0) <= 0).length;
-    const archivedCount = tabFiltered.filter(isProductArchived).length;
+    const outOfStock = stats ? stats.outOfStockCount : statusFiltered.filter(p => (Number(p.stock) || 0) - (Number(p.held) || 0) <= 0).length;
 
     const toggleSort = (col: typeof sortBy) => {
         if (sortBy === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
         else { setSortBy(col); setSortDir('asc'); }
     };
-
-    const { paginatedData: paginatedFiltered, currentPage, totalPages, pageSize, totalFiltered: totalFilteredCount, setPage, setPageSize, resetPage } = useClientPagination(filtered, 20);
-
-    useEffect(() => { resetPage(); }, [appliedSearchQuery, stockTab, statusFilter, resetPage]);
 
     const reconcileHeldInventory = async () => {
         if (!await appConfirm(
@@ -234,7 +223,8 @@ export default function StockPage() {
             if (!response.ok) throw new Error(data.error || 'Không thể đồng bộ tồn tạm giữ.');
 
             toastSuccess(`Đã đồng bộ ${data.productsUpdated || 0} mặt hàng; tổng tạm giữ: ${data.totalHeld || 0}.`);
-            await loadProducts('reset');
+            refresh();
+            fetchStats();
         } catch (error) {
             console.error('Held inventory reconciliation failed:', error);
             toastError(error instanceof Error ? error.message : 'Không thể đồng bộ tồn tạm giữ.');
@@ -256,7 +246,7 @@ export default function StockPage() {
                     <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
                         <Package className="text-orange-500" /> Tổng Tồn Kho
                     </h1>
-                    <p className="text-sm text-gray-500 mt-0.5">{statusFiltered.length} mặt hàng đã tải{stockTab !== 'all' ? ` (${stockTab === 'retail' ? 'bán lẻ' : 'linh kiện'})` : ''}</p>
+                    <p className="text-sm text-gray-500 mt-0.5">{totalCount} mặt hàng trong kho{stockTab !== 'all' ? ` (${stockTab === 'retail' ? 'bán lẻ' : 'linh kiện'})` : ''}</p>
                 </div>
                 {user?.role === 'admin' && (
                     <button
@@ -278,36 +268,20 @@ export default function StockPage() {
                         className={`px-3 py-1.5 text-xs rounded-xl text-sm font-medium transition-all border ${stockTab === key
                             ? key === 'component' ? 'bg-orange-50 border-orange-300 text-orange-700 shadow-sm'
                                 : key === 'retail' ? 'bg-blue-50 border-blue-300 text-blue-700 shadow-sm'
-                                    : 'bg-gray-800 border-gray-800 text-white shadow-sm'
-                            : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-                            }`}>
-                        {label}
-                    </button>
-                ))}
-            </div>
-            <div className="flex gap-2">
-                {([
-                    ['all', 'Tất cả trạng thái'],
-                    ['active', 'Đang hoạt động'],
-                    ['archived', `Đã lưu trữ (${archivedCount})`],
-                ] as const).map(([key, label]) => (
-                    <button key={key} onClick={() => setStatusFilter(key)}
-                        className={`px-3 py-1.5 text-xs rounded-xl text-sm font-medium transition-all border ${statusFilter === key
-                            ? 'bg-orange-50 border-orange-300 text-orange-700 shadow-sm'
-                            : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-                            }`}>
+                                    : 'bg-gray-900 border-gray-900 text-white shadow-sm'
+                            : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                    >
                         {label}
                     </button>
                 ))}
             </div>
 
-            {/* Stats */}
-            <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+            {/* Stats Cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
                 <div className="bg-white rounded-xl border p-3">
                     <p className="text-xs text-gray-500">Mẫu SP trong DB</p>
-                    <p className="text-lg font-bold text-gray-800">
-                        {totalCount !== null ? `${totalCount.toLocaleString('vi-VN')} mẫu` : totalItems}
-                    </p>
+                    <p className="text-lg font-bold text-gray-900">{stats?.totalProducts ?? totalCount}</p>
+                    <p className="text-[10px] text-gray-400 font-medium">Tổng SP: {totalItems}</p>
                 </div>
                 <div className="bg-white rounded-xl border p-3">
                     <p className="text-xs text-gray-500">Tạm giữ</p>
@@ -381,7 +355,7 @@ export default function StockPage() {
                         <tbody className="divide-y divide-gray-100">
                             {filtered.length === 0 ? (
                                 <tr><td colSpan={10} className="text-center py-12 text-gray-400">Không có sản phẩm nào</td></tr>
-                            ) : paginatedFiltered.map(p => {
+                            ) : filtered.map(p => {
                                 const stock = Number(p.stock) || 0;
                                 const held = Math.max(0, Number(p.held) || 0);
                                 const available = Math.max(0, stock - held);
@@ -427,7 +401,6 @@ export default function StockPage() {
 
                 {/* Mobile Card List */}
                 <div className="lg:hidden">
-                    {/* Mobile sort controls */}
                     <div className="flex items-center gap-2 p-3 bg-gray-50 border-b overflow-x-auto">
                         <span className="text-xs text-gray-500 shrink-0">Sắp xếp:</span>
                         {[
@@ -448,7 +421,7 @@ export default function StockPage() {
                     <div className="divide-y divide-gray-100">
                         {filtered.length === 0 ? (
                             <div className="text-center py-12 text-gray-400">Không có sản phẩm nào</div>
-                        ) : paginatedFiltered.map(p => {
+                        ) : filtered.map(p => {
                             const stock = Number(p.stock) || 0;
                             const held = Math.max(0, Number(p.held) || 0);
                             const available = Math.max(0, stock - held);
@@ -495,26 +468,16 @@ export default function StockPage() {
                 <PaginationBar
                     currentPage={currentPage}
                     totalPages={totalPages}
-                    pageSize={pageSize}
-                    totalFiltered={totalFilteredCount}
-                    totalAll={products.length}
-                    onPageChange={setPage}
-                    onPageSizeChange={setPageSize}
+                    pageSize={pageSize as 20 | 50 | 100}
+                    totalFiltered={totalCount}
+                    totalAll={totalCount}
+                    onPageChange={(p) => {
+                        if (p > currentPage) nextPage();
+                        else if (p < currentPage) prevPage();
+                    }}
+                    onPageSizeChange={(s) => setPageSize(s)}
                     entityLabel="sản phẩm"
                 />
-                {hasMore && (
-                    <div className="flex justify-center border-t bg-gray-50 px-4 py-3">
-                        <button
-                            type="button"
-                            onClick={() => loadProducts('more', lastDoc)}
-                            disabled={loadingMore}
-                            className="inline-flex items-center gap-2 rounded-lg border border-orange-200 bg-white px-3 py-1.5 text-xs text-sm font-medium text-orange-700 hover:bg-orange-50 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                            {loadingMore && <Loader2 size={16} className="animate-spin" />}
-                            Tải thêm {STOCK_BATCH_SIZE} mặt hàng
-                        </button>
-                    </div>
-                )}
             </div>
         </div>
     );
