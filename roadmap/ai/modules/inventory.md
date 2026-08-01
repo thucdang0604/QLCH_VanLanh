@@ -1,5 +1,16 @@
-# 🧩 Workflows
-## inventory
+## FEATURE-INV-021: N-gram Multi-Word Search & Stock Page Bounded Cursor Pagination Upgrade
+- **Status:** completed
+- **Severity:** high
+- **Date:** 2026-08-01
+- **Module:** Inventory & Catalog
+- **Files:** `src/app/admin/products/page.tsx`, `src/app/admin/parts/page.tsx`, `src/app/admin/services/page.tsx`, `src/app/admin/inventory/stock/page.tsx`, `src/app/api/inventory/stats/route.ts`, `src/lib/utils.ts`, `scripts/backfill-catalog-search-index.mjs`
+### Summary
+- Upgraded search inputs across admin catalog pages to require explicit submit buttons (Form submit / Enter key) instead of auto-triggering on keyup.
+- Fixed `admin/products` category count by excluding parts (`category not-in PART_CATEGORY_VALUES`), maintaining accurate product count (21 items).
+- Expanded `generateSearchKeywords` in `src/lib/utils.ts` to build complete N-gram Bigrams & Trigrams across all terms, and backfilled search index across 2,141+ products/parts and 530 services in Firestore.
+- Fixed Firestore query errors on `admin/inventory/stock` (`not-in` + `array-contains-any` conflict and composite index requirement).
+- Upgraded `admin/inventory/stock` to bounded cursor pagination (`useFirestorePaginated` with 20 items/page) and added server aggregate stats API `GET /api/inventory/stats` for real-time 100% accurate financial & stock KPI metrics.
+- Verification: `pnpm typecheck` (0 errors), `pnpm verify` (0 errors), Browser Subagent E2E tested on Chrome headless.
 
 ## BUG-INV-006: Fix-held maintenance route co the bulk update toan bo products
 - **Status:** fixed

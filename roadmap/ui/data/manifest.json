@@ -11,6 +11,32 @@
   "constraints": [],
   "aiPlans": [
     {
+      "id": "plan-ngram-search-stock-pagination-20260801",
+      "title": "Search N-grams expansion, explicit submit buttons, and stock page cursor pagination upgrade",
+      "date": "01.08.2026",
+      "status": "completed",
+      "completedAt": "01.08.2026",
+      "planFile": "data/ai_plans/plan_ngram_search_stock_pagination_20260801.md",
+      "taskFile": "",
+      "walkthroughFile": "data/ai_plans/walkthrough_ngram_search_stock_pagination_20260801.md",
+      "scope": [
+        "src/app/admin/products/page.tsx",
+        "src/app/admin/parts/page.tsx",
+        "src/app/admin/services/page.tsx",
+        "src/app/admin/inventory/stock/page.tsx",
+        "src/app/api/inventory/stats/route.ts",
+        "src/lib/utils.ts",
+        "scripts/backfill-catalog-search-index.mjs"
+      ],
+      "decisions": [
+        "All catalog search inputs across admin pages must use explicit submit buttons instead of auto-triggering on keyup",
+        "Product catalog queries must strictly exclude parts (category not-in PART_CATEGORY_VALUES) to maintain accurate total counts",
+        "N-gram search keywords array-contains must use full Bigrams and Trigrams for multi-word token matching",
+        "Stock page uses bounded cursor pagination (20 items/page) with server aggregate stats API GET /api/inventory/stats"
+      ],
+      "updatedAt": "2026-08-01T12:30:00.000+07:00"
+    },
+    {
       "id": "plan-parts-taxonomy-search-20260729",
       "title": "Parts taxonomy search: bounded Firestore cursor pages and historical index backfill",
       "date": "29.07.2026",
