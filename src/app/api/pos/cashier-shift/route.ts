@@ -12,6 +12,9 @@ type CashierShiftData = FirebaseFirestore.DocumentData & {
     cashSalesAmount?: number;
     bankSalesAmount?: number;
     otherSalesAmount?: number;
+    cashExpenseAmount?: number;
+    bankExpenseAmount?: number;
+    otherExpenseAmount?: number;
     openedByName?: string;
     closingCashAmount?: number;
     closingBankAmount?: number;
@@ -54,8 +57,11 @@ function serializeShift(id: string, data: CashierShiftData, liveTotals?: Cashier
     const cashSalesAmount = liveTotals ? asAmount(liveTotals.cashSalesAmount) : asAmount(data.cashSalesAmount);
     const bankSalesAmount = liveTotals ? asAmount(liveTotals.bankSalesAmount) : asAmount(data.bankSalesAmount);
     const otherSalesAmount = liveTotals ? asAmount(liveTotals.otherSalesAmount) : asAmount(data.otherSalesAmount);
-    const expectedCashAmount = openingCashAmount + cashSalesAmount;
-    const expectedBankAmount = openingBankAmount + bankSalesAmount;
+    const cashExpenseAmount = liveTotals ? asAmount(liveTotals.cashExpenseAmount) : asAmount(data.cashExpenseAmount);
+    const bankExpenseAmount = liveTotals ? asAmount(liveTotals.bankExpenseAmount) : asAmount(data.bankExpenseAmount);
+    const otherExpenseAmount = liveTotals ? asAmount(liveTotals.otherExpenseAmount) : asAmount(data.otherExpenseAmount);
+    const expectedCashAmount = openingCashAmount + cashSalesAmount - cashExpenseAmount;
+    const expectedBankAmount = openingBankAmount + bankSalesAmount - bankExpenseAmount;
 
     return {
         id,
@@ -65,6 +71,9 @@ function serializeShift(id: string, data: CashierShiftData, liveTotals?: Cashier
         cashSalesAmount,
         bankSalesAmount,
         otherSalesAmount,
+        cashExpenseAmount,
+        bankExpenseAmount,
+        otherExpenseAmount,
         expectedCashAmount,
         expectedBankAmount,
         closingCashAmount: asAmount(data.closingCashAmount ?? expectedCashAmount),
@@ -159,6 +168,9 @@ export const POST = withApi({
                 cashSalesAmount: 0,
                 bankSalesAmount: 0,
                 otherSalesAmount: 0,
+                cashExpenseAmount: 0,
+                bankExpenseAmount: 0,
+                otherExpenseAmount: 0,
                 tallyVersion: 1,
                 openedBy: caller.uid,
                 openedByName,
@@ -179,6 +191,9 @@ export const POST = withApi({
                 cashSalesAmount: 0,
                 bankSalesAmount: 0,
                 otherSalesAmount: 0,
+                cashExpenseAmount: 0,
+                bankExpenseAmount: 0,
+                otherExpenseAmount: 0,
                 tallyVersion: 1,
                 expectedCashAmount: openingCashAmount,
                 expectedBankAmount: openingBankAmount,
@@ -242,14 +257,20 @@ export const PATCH = withApi({
             const cashSalesAmount = liveTotals ? liveTotals.cashSalesAmount : asAmount(shiftData.cashSalesAmount);
             const bankSalesAmount = liveTotals ? liveTotals.bankSalesAmount : asAmount(shiftData.bankSalesAmount);
             const otherSalesAmount = liveTotals ? liveTotals.otherSalesAmount : asAmount(shiftData.otherSalesAmount);
-            const expectedCashAmount = asAmount(shiftData.openingCashAmount) + cashSalesAmount;
-            const expectedBankAmount = asAmount(shiftData.openingBankAmount) + bankSalesAmount;
+            const cashExpenseAmount = liveTotals ? liveTotals.cashExpenseAmount : asAmount(shiftData.cashExpenseAmount);
+            const bankExpenseAmount = liveTotals ? liveTotals.bankExpenseAmount : asAmount(shiftData.bankExpenseAmount);
+            const otherExpenseAmount = liveTotals ? liveTotals.otherExpenseAmount : asAmount(shiftData.otherExpenseAmount);
+            const expectedCashAmount = asAmount(shiftData.openingCashAmount) + cashSalesAmount - cashExpenseAmount;
+            const expectedBankAmount = asAmount(shiftData.openingBankAmount) + bankSalesAmount - bankExpenseAmount;
 
             tx.update(activeDoc.ref, {
                 status: 'closed',
                 cashSalesAmount,
                 bankSalesAmount,
                 otherSalesAmount,
+                cashExpenseAmount,
+                bankExpenseAmount,
+                otherExpenseAmount,
                 expectedCashAmount,
                 expectedBankAmount,
                 closingCashAmount: expectedCashAmount,
@@ -273,6 +294,9 @@ export const PATCH = withApi({
                     cashSalesAmount,
                     bankSalesAmount,
                     otherSalesAmount,
+                    cashExpenseAmount,
+                    bankExpenseAmount,
+                    otherExpenseAmount,
                     closedBy: caller.uid,
                     closedByName,
                 }),

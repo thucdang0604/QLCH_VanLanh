@@ -13,6 +13,7 @@ import { getAuthInstance } from '@/lib/firebase';
 import { toast } from 'sonner';
 import type { CustomerTransaction } from '@/lib/types';
 import type { ContactMethod, ContactMethodType } from '@/lib/types/contact';
+import ZaloProfileQr from './ZaloProfileQr';
 
 export interface CustomerDetailRecord {
     id: string;
@@ -216,6 +217,8 @@ export default function CustomerDetailDrawer({ customer, isOpen, onClose }: Prop
                             <p className="mt-1 text-lg font-semibold text-gray-900">{customer.totalRepairs || 0}</p>
                         </div>
                     </div>
+
+                    <ZaloProfileQr contactMethods={customer.contactMethods} />
 
                     <div className="flex border-b" role="tablist">
                         <button

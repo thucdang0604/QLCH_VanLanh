@@ -1,5 +1,6 @@
 import type { FirestoreDateValue, PaymentHistoryEntry } from './common';
 import type { ContactMethod, ContactMethodType } from './contact';
+import type { PosPaymentBreakdownEntry } from '@/lib/posPaymentBreakdown';
 
 export interface OrderItem {
     productId: string;
@@ -19,6 +20,8 @@ export interface CustomerInfo {
     customerId?: string;
     name: string;
     phone: string;
+    identityMode?: 'guest' | 'existing' | 'verified_phone';
+    phoneVerifiedAt?: FirestoreDateValue;
     contactType?: ContactMethodType;
     contactLabel?: string;
     contactValue?: string;
@@ -38,6 +41,12 @@ export interface Customer {
     primaryContactType?: ContactMethodType;
     primaryContactValue?: string;
     contactMethods?: ContactMethod[];
+    contactVerification?: {
+        method: 'phone_otp';
+        phone: string;
+        verifiedAt?: FirestoreDateValue;
+        verifiedBy?: string;
+    };
     searchKeywords?: string[];
     totalSpent?: number;
     totalOrders?: number;
@@ -77,10 +86,28 @@ export interface Order {
     total_amount: number;
     status: 'Pending' | 'Confirmed' | 'Shipping' | 'Completed' | 'Cancelled';
     is_vat_exported: boolean;
-    payment_method?: 'COD' | 'Bank' | 'Momo' | 'Card' | 'Installment' | 'Debt' | 'QR';
+    payment_method?: 'COD' | 'Bank' | 'Momo' | 'Card' | 'Installment' | 'Debt' | 'QR' | 'CASH' | 'BANK' | 'MOMO' | 'CARD' | 'INSTALLMENT' | 'DEBT' | 'MIXED';
     deposit_payment_method?: 'CASH' | 'BANK' | 'MOMO' | 'QR' | 'CARD';
+    paymentBreakdown?: PosPaymentBreakdownEntry[];
     paymentStatus?: 'paid' | 'unpaid' | 'debt' | 'refunded';
     shippingFee?: number;
+    shipping_fee?: number;
+    repairShipping?: {
+        repairTicketId: string;
+        mode: 'customer_paid_now' | 'shop_absorbs' | 'shop_advance_on_credit';
+        fee: number;
+        customerCharge: number;
+        recipientName: string;
+        recipientPhone: string;
+        recipientAddress: string;
+        billingCustomerId?: string;
+        shopPaymentMethod?: 'CASH' | 'BANK';
+        shippingAdvanceOrderId?: string;
+        note?: string;
+    };
+    isShippingAdvance?: boolean;
+    shippingAdvanceRepairTicketId?: string;
+    parentOrderId?: string;
     linkedRepairIds?: string[];
     deposit_amount?: number;
     paymentHistory?: PaymentHistoryEntry[];

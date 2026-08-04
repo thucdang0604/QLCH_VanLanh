@@ -31,6 +31,8 @@ export type PaymentStatus = 'unpaid' | 'deposit' | 'paid' | 'pay_later' | 'refun
 export interface PaymentHistoryEntry {
     amount: number;
     method?: string;
+    paymentRecordId?: string;
+    bankTransferReference?: string;
     date?: FirestoreDateValue;
     timestamp?: number;
     type: 'deposit' | 'payment' | 'full' | 'additional' | 'refund' | 'debt_payment';

@@ -5,7 +5,7 @@ import { getAdminDb } from '@/lib/firebaseAdmin';
 import { buildPaymentBankConfig } from '@/lib/paymentBankConfig';
 
 /**
- * Read-only QR payment details for a completed POS receipt.
+ * Read-only QR payment details for the POS checkout and its completed receipt.
  * This deliberately excludes admin-only TOTP and contact configuration.
  */
 export const GET = withApi({ name: 'pos/payment-config' }, async (request: NextRequest, context) => {

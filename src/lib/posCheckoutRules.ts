@@ -1,4 +1,5 @@
 import type { RepairTicket } from '@/lib/types';
+import { getProductCodeKind } from '@/lib/productCodes';
 
 export type CheckoutItemInput = Record<string, unknown> & {
     isRepairTicket?: boolean;
@@ -116,4 +117,21 @@ export function resolveProductWarranty(
         currentNodes = node.children;
     }
     return lastFoundWarranty;
+}
+
+export function requiresImeiForPosRetailProduct(productData: { category?: unknown; categoryIds?: unknown }) {
+    const categoryIds = Array.isArray(productData.categoryIds)
+        ? productData.categoryIds.filter((value): value is string => typeof value === 'string')
+        : [];
+
+    return getProductCodeKind({
+        category: typeof productData.category === 'string' ? productData.category : '',
+        categoryIds,
+    }) === 'product';
+}
+
+export function getFixedPosRetailPrice(productData: { price_promo?: unknown; price_original?: unknown }, fieldName: string) {
+    const promotionalPrice = Number(productData.price_promo);
+    if (Number.isFinite(promotionalPrice) && promotionalPrice > 0) return promotionalPrice;
+    return readNonNegativeCheckoutAmount(productData.price_original, fieldName);
 }

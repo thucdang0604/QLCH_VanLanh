@@ -3,6 +3,7 @@ import test from 'node:test';
 import type { RepairTicket } from '@/lib/types';
 import {
     getCashierShiftChannel,
+    getFixedPosRetailPrice,
     getRepairPaidAmount,
     getRepairPaymentAmount,
     normalizeOrderPaymentId,
@@ -10,6 +11,7 @@ import {
     readNonNegativeCheckoutAmount,
     readOptionalNonNegativeCheckoutAmount,
     readPositiveCheckoutQuantity,
+    requiresImeiForPosRetailProduct,
     resolveProductWarranty,
 } from './posCheckoutRules';
 
@@ -71,4 +73,16 @@ test('classifies cashier channels without treating debt as received cash or bank
     assert.equal(getCashierShiftChannel('CASH'), 'cash');
     assert.equal(getCashierShiftChannel('QR'), 'bank');
     assert.equal(getCashierShiftChannel('DEBT'), 'none');
+});
+
+test('requires IMEI or Serial for every retail device, but never for accessories or components', () => {
+    assert.equal(requiresImeiForPosRetailProduct({ category: 'Máy tính bảng', categoryIds: ['may-tinh-bang', 'may-tinh-bang/ipad'] }), true);
+    assert.equal(requiresImeiForPosRetailProduct({ category: 'Laptop', categoryIds: ['laptop', 'laptop/macbook'] }), true);
+    assert.equal(requiresImeiForPosRetailProduct({ category: 'Phụ kiện', categoryIds: ['phu-kien', 'phu-kien/cap-sac'] }), false);
+    assert.equal(requiresImeiForPosRetailProduct({ category: 'Linh kiện', categoryIds: ['linh-kien', 'linh-kien/man-hinh'] }), false);
+});
+
+test('uses the catalog price for retail POS lines', () => {
+    assert.equal(getFixedPosRetailPrice({ price_promo: 8_490_000, price_original: 9_490_000 }, 'price'), 8_490_000);
+    assert.equal(getFixedPosRetailPrice({ price_promo: 0, price_original: 9_490_000 }, 'price'), 9_490_000);
 });

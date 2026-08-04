@@ -34,6 +34,21 @@ Open deploy debt: <code>BUG-DEPLOY-007</code> đang theo dõi warning Firebase C
 
 ## Scaling Roadmap
 
+### 2026-08-02 - POS MULTI-CHANNEL PAYMENT & BANK RECONCILIATION FOUNDATION
+- **Color:** success
+- **Status:** CODE COMPLETE, LOCALLY VALIDATED -> NORMAL DEPLOYMENT
+- **Cashier UX:** Cash and Bank transfer are the two primary choices. The cashier enters the amount tendered for cash; selecting Bank produces an exact VietQR amount and stable `POS-*` transfer content. A partially paid balance can become one additional channel or debt without exposing a separate, redundant “received channel” control. MoMo, instalment, and full debt are collapsed under Other methods.
+- **Financial contract:** `payment_breakdown` stores ordered collected-money lines and allocates them once inside the checkout transaction across the new sale, repair settlement, selected old debt, revenue channels, and cashier shift tally. Debt remains a balance status, not a money channel. Existing legacy `deposit_amount` behavior is retained only for deliberate cash-surplus debt offsets.
+- **Future reconciliation:** Each bank payment is recorded with stable payment-record ID, expected amount, `POS-*` reference and linked order IDs in `bank_payment_reconciliations`. The current explicit cashier confirmation marks payment received; a future bank statement/webhook worker may safely mark reconciliation status without replaying financial writes. Detail: <a href="modules/pos-orders.md">POS &amp; Orders module</a>.
+
+### 2026-08-01 - REPAIR DELIVERY SHIPPING SETTLEMENT
+- **Color:** success
+- **Status:** CODE COMPLETE, LOCALLY VALIDATED -> NORMAL DEPLOYMENT
+- **Business flow:** A repair checkout may carry one delivery instruction only. Customer-paid shipping is an invoice charge and collected shipping revenue. Shop-absorbed shipping is paid from the active cashier shift and records a shipping expense. A partner/customer advance is paid by the shop immediately, creates receivable debt for that party, and is intentionally neither revenue nor expense.
+- **Financial guardrails:** Ship never affects commission base. Shop-paid modes require `manage_cashier_expenses`; every shop outflow is an idempotent cashier expense movement and lowers expected close balance. The advance creates a linked debt order, allowing the existing POS debt-collection flow to settle it without double-counting revenue.
+- **POS workspace UX:** Customer lookup and status now live at the top of the sales screen. The compact catalog uses 48px thumbnails; the checkout panel separates selected goods, repair services, and debt collection. Delivery remains a repair-only action, so routine product sales are not burdened by shipping/debt controls. A new debtor must provide name plus either OTP-verified phone or a stable Zalo contact-card link; the checkout panel shows the advance and the exact new receivable before submission.
+- **Security and evidence:** Client Firestore Rules block direct changes to ship/delivery financial fields. Repair-shipping unit tests, TypeScript, lint, and its E2E case pass. The full suite has one unrelated RBAC failure (`manage_repairs` staff session redirects to login); do not attribute that failure to this slice. Detail: <a href="modules/pos-orders.md">POS &amp; Orders module</a>.
+
 ### 2026-07-29 - ARTICLE SEO INDEXING IMPLEMENTATION
 - **Color:** warning
 - **Status:** CODE COMPLETE -> EDITORIAL / RELEASE / SEARCH CONSOLE

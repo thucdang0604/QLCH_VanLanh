@@ -204,6 +204,21 @@ export interface RepairTicket {
         outstandingAmount?: number;
     };
     paymentHistory?: PaymentHistoryEntry[];
+    delivery?: {
+        status: 'pending_dispatch' | 'dispatched' | 'delivered' | 'cancelled';
+        mode: 'customer_paid_now' | 'shop_absorbs' | 'shop_advance_on_credit';
+        fee: number;
+        recipientName: string;
+        recipientPhone: string;
+        recipientAddress: string;
+        billingCustomerId?: string;
+        shopPaymentMethod?: 'CASH' | 'BANK';
+        checkoutOrderId?: string;
+        shippingAdvanceOrderId?: string;
+        note?: string;
+        createdAt?: FirestoreDateValue;
+        updatedAt?: FirestoreDateValue;
+    };
     staff: {
         createdBy: string;
         createdByName: string;

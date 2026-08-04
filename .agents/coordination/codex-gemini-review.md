@@ -1468,3 +1468,43 @@ Make every taxonomy-assigned part discoverable from `/admin/parts` without readi
 ### Runtime boundary
 
 - Wait for the newly requested index to become Enabled, then open authenticated `/admin/inventory/stock`; verify both tabs, submitted search, and **Tải thêm**. No Hosting deployment or Firestore document write was performed.
+
+---
+
+## Codex local implementation review — POS Zalo contact-card debtor
+
+**Time:** `2026-08-02T10:16:00+07:00`
+
+**Decision:** `APPROVED — local validation passes; deploy and authenticated POS smoke remain.`
+
+### 1. Goal and inspected scope
+
+- Added the approved alternate new-customer identity for POS: name plus a Zalo contact-card link, alongside the existing name plus OTP-verified phone path.
+- Inspected the POS customer workspace, checkout transaction, contact identity model, Zalo QR parser, focused POS tests, and Emulator test harness.
+
+### 2. Files and business/authorization impact
+
+- Changed POS identity helper/UI/API, local Zalo QR parser, POS debt warning, focused tests, and the POS roadmap/source map.
+- The API accepts a new debt only for an explicitly selected customer, OTP-verified phone, or a canonical Zalo contact-card external ID. Plain names and free-form Zalo labels remain unable to create debt.
+- Zalo contact-card IDs use deterministic `customers/KH-ZALO-{externalId}`. A pre-existing record with that ID must prove the same stored Zalo card; otherwise checkout returns 409 instead of overwriting it.
+- No Firebase rule, permission, or production data change was made.
+
+### 3. Commands and results
+
+- `corepack pnpm exec tsx --test src/lib/posCustomerIdentity.test.ts src/lib/zaloContactCardImport.test.ts` — PASSED, 5/5.
+- `node --import tsx --test src/lib/posCustomerIdentity.test.ts src/lib/zaloContactCardImport.test.ts src/lib/contactIdentity.test.ts src/lib/posCheckoutRules.test.ts src/features/pos/posCartRules.test.ts src/features/pos/posRepairPaymentEligibility.test.ts src/lib/repairShipping.test.ts` — PASSED, 24/24.
+- Focused ESLint for the POS, Zalo, API, and E2E files — PASSED.
+- `corepack pnpm typecheck` — PASSED.
+- `corepack pnpm verify` — PASSED; 32 pre-existing warnings and 0 errors; production build generated 117 routes.
+- `corepack pnpm test:e2e` — the new Zalo E2E assertions passed and registered the owned `customers/KH-ZALO-*` document; suite exit remains blocked by the existing RBAC smoke failure for a `manage_repairs`-only staff session redirecting to `/admin/login`.
+
+### 4. Browser/emulator evidence
+
+- Emulator test rejects a plain Zalo label and accepts a Zalo card with a 1đ advance, then checks the `119,999đ` customer debt, contact proof, and debt order fields.
+- The local in-app browser reached `/admin/login?from=/admin/pos`, so no authenticated visual screenshot was possible. No user/customer data was entered.
+
+### 5. Assumptions, rollback, and follow-up
+
+- A Zalo contact-card represents a stable contact reference, not proof that the cashier controls that Zalo account; it is stored as `contactProof`, not OTP-style verification.
+- Rollback is limited to the new identity mode and UI/API/test/docs hunks. No migration is required because customer IDs are created only for new POS Zalo records.
+- After deployment, an authenticated cashier should smoke: enter a name and a scanned/entered Zalo card, choose debt with an advance, confirm the pre-submit warning, and verify the created customer has a scannable QR in the Customer drawer.

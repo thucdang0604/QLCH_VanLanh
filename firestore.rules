@@ -326,7 +326,7 @@ service cloud.firestore {
       allow read: if hasPermission('manage_orders') || canViewRevenueSources();
       allow create: if false;
       allow update: if hasPermission('manage_orders')
-        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'assignedSellerId', 'assignedSellerName', 'assignedSellerAt', 'assignedBy', 'items', 'total_amount', 'subtotal_amount', 'discount_amount', 'shipping_fee', 'voucherCode', 'voucherDiscount']);
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'assignedSellerId', 'assignedSellerName', 'assignedSellerAt', 'assignedBy', 'items', 'total_amount', 'subtotal_amount', 'discount_amount', 'shipping_fee', 'repairShipping', 'isShippingAdvance', 'shippingAdvanceRepairTicketId', 'parentOrderId', 'voucherCode', 'voucherDiscount']);
       allow delete: if false;
     }
     
@@ -351,7 +351,7 @@ service cloud.firestore {
       allow create: if false; // Tắt hoàn toàn tạo từ client, bắt buộc qua Server API
       allow update: if hasPermission('manage_repairs')
         && canModifyRepairTicket()
-        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['parts', 'payment', 'status', 'statusTimeline', 'partsLockedAt', 'pendingTechnicianTransfer', 'staff']);
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['parts', 'payment', 'status', 'statusTimeline', 'partsLockedAt', 'pendingTechnicianTransfer', 'staff', 'delivery']);
       allow delete: if isAdmin();
     }
 

@@ -101,13 +101,20 @@ test('POS debt and collect-debt paths use customer id before legacy phone fallba
     assert.match(collectDebt, /\.where\('customer_info\.phone', '==', phone\)/);
 });
 
-test('POS customer entry stays compact and missing cashier shift is actionable', () => {
+test('POS customer entry requires deliberate identity selection and keeps cashier shift actionable', () => {
     const posPage = fs.readFileSync(repoFile('src', 'app', 'admin', 'pos', 'page.tsx'), 'utf8');
     const posCartPanel = fs.readFileSync(repoFile('src', 'features', 'pos', 'PosCartPanel.tsx'), 'utf8');
+    const customerWorkspace = fs.readFileSync(repoFile('src', 'features', 'pos', 'PosCustomerWorkspace.tsx'), 'utf8');
     const posCheckout = fs.readFileSync(repoFile('src', 'app', 'api', 'pos', 'checkout', 'route.ts'), 'utf8');
 
-    assert.match(posCartPanel, /const customerContactOptions/);
-    assert.match(posCartPanel, /Liên hệ phụ/);
+    assert.match(customerWorkspace, /const customerContactOptions/);
+    assert.match(customerWorkspace, /onSelectCustomer/);
+    assert.match(customerWorkspace, /onClearCustomerSelection/);
+    assert.doesNotMatch(customerWorkspace, /runCustomerLookup\(customerName\)/);
+    assert.match(posPage, /customerIdentityMode === 'guest'/);
+    assert.match(posPage, /requiresSpecificMatch/);
+    assert.match(posCheckout, /canCreatePosDebt\(customerIdentityMode\)/);
+    assert.match(posCheckout, /verifyPosPhoneOwnership/);
     assert.match(posCartPanel, /missingCashierShift/);
     assert.match(posCartPanel, /Mở ca thu ngân trước/);
     assert.match(posPage, /setPosTab\('cashier'\)/);
