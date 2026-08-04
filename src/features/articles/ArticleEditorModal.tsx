@@ -1,18 +1,20 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type React from 'react';
 import dynamic from 'next/dynamic';
 import Image from 'next/image';
 import { doc, getDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
-import { Image as ImageIcon, Loader2, RefreshCw, Save, Star, Upload, Video, Wand2, X } from 'lucide-react';
+import { Image as ImageIcon, Loader2, RefreshCw, Save, Settings, Star, Upload, Video, Wand2, X, Link as LinkIcon } from 'lucide-react';
 import Modal from '@/components/admin/Modal';
 import MediaManager from '@/components/admin/MediaManager';
 import { db, getAuthInstance, getStorageInstance } from '@/lib/firebase';
 import { generateSlug } from '@/lib/utils';
 import { optimizeImage } from '@/lib/imageOptimizer';
 import { triggerRevalidate } from '@/lib/revalidate';
-import { toastError } from '@/lib/toast';
+import { toastError, toastSuccess, toastInfo } from '@/lib/toast';
+import { resolveInternalLinkPlaceholdersInHtml } from '@/lib/internalLinkResolver';
+import { AiProviderMode, AiTaskModels, DEFAULT_AI_CONFIG, DEFAULT_9ROUTER_MODELS } from '@/lib/aiAdapter';
 import type { Article } from './articleTypes';
 import 'react-quill-new/dist/quill.snow.css';
 
@@ -251,93 +253,67 @@ async function processBase64Images(htmlContent: string): Promise<string> {
         return htmlContent;
     }
 
-    const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
-    const storage = await getStorageInstance();
-
-    const base64ToBlob = (dataURI: string) => {
-        const parts = dataURI.split(',');
-        const mime = parts[0].split(':')[1].split(';')[0];
-        const byteString = atob(parts[1]);
-        const ab = new ArrayBuffer(byteString.length);
-        const ia = new Uint8Array(ab);
-        for (let i = 0; i < byteString.length; i++) {
-            ia[i] = byteString.charCodeAt(i);
-        }
-        return new Blob([ab], { type: mime });
-    };
-
-    // Helper to calculate SHA-256 hash of a Blob on client-side using Web Crypto API
-    const calculateHash = async (blob: Blob): Promise<string> => {
-        const arrayBuffer = await blob.arrayBuffer();
-        const hashBuffer = await window.crypto.subtle.digest('SHA-256', arrayBuffer);
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-    };
-
     for (let i = 0; i < base64Images.length; i++) {
         const img = base64Images[i];
-        try {
-            const blob = base64ToBlob(img.src);
-            const hash = await calculateHash(blob);
+        const base64Src = img.src;
 
-            // Document ID using hash for O(1) deduplication lookup
-            const mediaDocId = `MED-articles-${hash}`;
-            const mediaDocRef = doc(db, 'media_library', mediaDocId);
+        try {
+            const res = await fetch(base64Src);
+            const blob = await res.blob();
+            const originalFile = new File([blob], `pasted_image_${Date.now()}_${i}.png`, { type: blob.type });
+
+            const optimizeResponse = await optimizeImage(originalFile, 1200, 800, 0.8);
+            const optimizedFile = optimizeResponse.file;
+
+            const arrayBuffer = await optimizedFile.arrayBuffer();
+            const hashBuffer = await window.crypto.subtle.digest('SHA-256', arrayBuffer);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            const hash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+            const docId = `MED-articles-${hash}`;
+            const mediaDocRef = doc(db, 'media_library', docId);
             const mediaDocSnap = await getDoc(mediaDocRef);
 
             if (mediaDocSnap.exists()) {
-                // Image already exists! Use the existing URL and bypass upload/optimization
-                const existingUrl = mediaDocSnap.data().url;
-                img.src = existingUrl;
+                img.src = mediaDocSnap.data().url;
                 continue;
             }
 
-            const extension = blob.type.split('/')[1] || 'png';
-            const tempName = `article_embedded_${hash}.${extension}`;
-            const file = new File([blob], tempName, { type: blob.type });
-
-            // Optimize the image using optimization parameters matching the signature
-            const { file: optimized, width, height } = await optimizeImage(file, 1200, 1600, 0.8);
-
-            // Use the hash in the Storage path to guarantee physical deduplication
             const storagePath = `media/articles/${hash}.webp`;
+            const storage = await getStorageInstance();
+            const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
             const storageRef = ref(storage, storagePath);
-            const buffer = await optimized.arrayBuffer();
-            const bytes = new Uint8Array(buffer);
 
-            await uploadBytes(storageRef, bytes, { contentType: 'image/webp' });
+            await uploadBytes(storageRef, new Uint8Array(arrayBuffer), { contentType: 'image/webp' });
             const url = await getDownloadURL(storageRef);
 
-            // Register in Media Library using the hash-based ID
             await setDoc(mediaDocRef, {
                 url,
                 path: storagePath,
-                name: optimized.name,
+                name: optimizedFile.name,
                 type: 'image/webp',
-                size: optimized.size,
-                width,
-                height,
+                size: optimizedFile.size,
+                width: optimizeResponse.width,
+                height: optimizeResponse.height,
                 folder: 'articles',
                 createdAt: serverTimestamp(),
             });
 
-            // Replace the src
             img.src = url;
         } catch (err) {
-            console.error('Failed to process embedded image:', err);
+            console.error('Failed to process base64 image:', err);
         }
     }
 
     return docNode.body.innerHTML;
 }
 
-export function ArticleModal({
-    article,
-    onClose,
-}: {
-    article: Article | null;
+interface ArticleEditorModalProps {
+    article?: Article | null;
     onClose: () => void;
-}) {
+}
+
+export default function ArticleEditorModal({ article, onClose }: ArticleEditorModalProps) {
     const [formData, setFormData] = useState({
         title: article?.title || '',
         type: article?.type || 'News',
@@ -373,25 +349,92 @@ export function ArticleModal({
         editor.clipboard.dangerouslyPasteHTML(index, normalizePastedArticleHtml(html));
     };
 
-
-    // --- AUTO-PILOT STATES ---
+    // --- AUTO-PILOT STATES & DYNAMIC AI ENGINE CONFIG ---
     const [autoPilotTopic, setAutoPilotTopic] = useState('');
-    const [googleApiKey, setGoogleApiKey] = useState('');
     const [autoPilotState, setAutoPilotState] = useState<'idle' | 'meta' | 'content' | 'refine' | 'images' | 'done'>('idle');
     const [autoPilotLogs, setAutoPilotLogs] = useState<string[]>([]);
 
+    const [providerMode, setProviderMode] = useState<AiProviderMode>('ollama');
+    const [cloudApiKey, setCloudApiKey] = useState('');
+    const [cloudBaseUrl, setCloudBaseUrl] = useState('https://api.9router.com/v1');
+    const [taskModels, setTaskModels] = useState<AiTaskModels>(DEFAULT_AI_CONFIG.taskModels);
+    const [localModels, setLocalModels] = useState<string[]>([]);
+    const [isLoadingLocalModels, setIsLoadingLocalModels] = useState(false);
+    const [showAiConfigPanel, setShowAiConfigPanel] = useState(false);
 
+    // Load saved AI config from LocalStorage on mount
+    useEffect(() => {
+        try {
+            const saved = localStorage.getItem('qlch_ai_config');
+            if (saved) {
+                const parsed = JSON.parse(saved);
+                if (parsed.providerMode) setProviderMode(parsed.providerMode);
+                if (parsed.cloudApiKey !== undefined) setCloudApiKey(parsed.cloudApiKey);
+                if (parsed.cloudBaseUrl !== undefined) setCloudBaseUrl(parsed.cloudBaseUrl);
+                if (parsed.taskModels) setTaskModels(prev => ({ ...prev, ...parsed.taskModels }));
+            }
+        } catch { /* skip */ }
+    }, []);
+
+    // Save AI config to LocalStorage helper
+    const updateAndSaveAiConfig = (
+        mode: AiProviderMode,
+        key: string,
+        url: string,
+        models: AiTaskModels
+    ) => {
+        setProviderMode(mode);
+        setCloudApiKey(key);
+        setCloudBaseUrl(url);
+        setTaskModels(models);
+        try {
+            localStorage.setItem('qlch_ai_config', JSON.stringify({
+                providerMode: mode,
+                cloudApiKey: key,
+                cloudBaseUrl: url,
+                taskModels: models
+            }));
+        } catch { /* skip */ }
+    };
+
+    // Helper to fetch local models from Ollama
+    const fetchLocalModels = async () => {
+        setIsLoadingLocalModels(true);
+        try {
+            const res = await callAiApi({ action: 'get-local-models', payload: {} });
+            if (res.ok) {
+                const data = await res.json();
+                if (Array.isArray(data.models) && data.models.length > 0) {
+                    setLocalModels(data.models);
+                }
+            }
+        } catch { /* skip */ } finally {
+            setIsLoadingLocalModels(false);
+        }
+    };
 
     const callAiApi = async (body: Record<string, unknown>) => {
         const auth = await getAuthInstance();
         const token = await auth.currentUser?.getIdToken();
+
+        const payload = (body.payload as Record<string, unknown>) || {};
+        const payloadWithConfig = {
+            providerMode,
+            apiKey: cloudApiKey,
+            baseUrl: cloudBaseUrl,
+            ...payload
+        };
+
         return fetch('/api/admin/ai', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 ...(token ? { 'Authorization': `Bearer ${token}` } : {})
             },
-            body: JSON.stringify(body)
+            body: JSON.stringify({
+                ...body,
+                payload: payloadWithConfig
+            })
         });
     };
 
@@ -401,28 +444,32 @@ export function ArticleModal({
             return;
         }
 
+        // Save active config before running
+        updateAndSaveAiConfig(providerMode, cloudApiKey, cloudBaseUrl, taskModels);
+
         setAutoPilotLogs(["Khởi động Auto-Pilot..."]);
         setAutoPilotState('meta');
 
         try {
             // STEP 0: CONNECTION CHECK
-            setAutoPilotLogs(prev => [...prev, "Bước 0: Kiểm tra kết nối AI API..."]);
+            setAutoPilotLogs(prev => [...prev, `Bước 0: Kiểm tra kết nối AI API (${providerMode === 'cloud9router' ? '9router Cloud' : 'Ollama Local'})...`]);
             const connRes = await callAiApi({
                 action: 'check-connection',
-                payload: { apiKey: googleApiKey }
+                payload: {}
             });
             const connData = await connRes.json();
             if (!connRes.ok || !connData.ok) {
                 throw new Error(connData.error || "Kết nối API thất bại.");
             }
-            setAutoPilotLogs(prev => [...prev, "✓ Kết nối API ổn định!"]);
+            setAutoPilotLogs(prev => [...prev, "✓ Kết nối AI Engine ổn định!"]);
 
             // STEP 1: META GENERATION
-            setAutoPilotLogs(prev => [...prev, "Bước 1: Phân tích SEO & Viết Tiêu đề, Tags, Mô tả ngắn..."]);
+            setAutoPilotLogs(prev => [...prev, `Bước 1: Phân tích SEO & Viết Tiêu đề, Tags, Mô tả (Model: ${taskModels.meta})...`]);
             const metaRes = await callAiApi({
                 action: 'seo-suggest',
                 payload: {
-                    content: autoPilotTopic
+                    content: autoPilotTopic,
+                    model: taskModels.meta
                 }
             });
             if (!metaRes.ok) throw new Error("Lỗi API seo-suggest");
@@ -450,11 +497,11 @@ export function ArticleModal({
                 tags: newTags
             }));
 
-            setAutoPilotLogs(prev => [...prev, "✓ Đã tìm ra Tiêu đề, Tags và Mô tả cực cháy!"]);
+            setAutoPilotLogs(prev => [...prev, "✓ Đã tạo xong Tiêu đề, Tags và Mô tả ngắn!"]);
 
             // STEP 2: CONTENT GENERATION
             setAutoPilotState('content');
-            setAutoPilotLogs(prev => [...prev, "Bước 2: Viết nội dung chuẩn SEO EEAT..."]);
+            setAutoPilotLogs(prev => [...prev, `Bước 2: Viết nội dung chuẩn SEO EEAT (Model: ${taskModels.writer})...`]);
 
             const contentRes = await callAiApi({
                 action: 'content-suggest',
@@ -462,7 +509,8 @@ export function ArticleModal({
                     title: newTitle,
                     excerpt: newDesc,
                     tags: newTags,
-                    content: autoPilotTopic
+                    content: autoPilotTopic,
+                    model: taskModels.writer
                 }
             });
             if (!contentRes.ok) throw new Error("Lỗi API content-suggest");
@@ -483,7 +531,7 @@ export function ArticleModal({
 
             // STEP 3: AUTO-REFINE LOOP (Check → Fix → Re-check)
             setAutoPilotState('refine');
-            setAutoPilotLogs(prev => [...prev, "Bước 3: 🔄 Tự động kiểm tra & sửa SEO (Vòng lặp thông minh)..."]);
+            setAutoPilotLogs(prev => [...prev, `Bước 3: 🔄 Tự động kiểm tra & sửa SEO (Model Chấm/Sửa: ${taskModels.refiner})...`]);
 
             const refineRes = await callAiApi({
                 action: 'auto-refine',
@@ -493,7 +541,8 @@ export function ArticleModal({
                     tags: newTags,
                     content: contentStr,
                     targetScore: 85,
-                    maxRounds: 3
+                    maxRounds: 3,
+                    model: taskModels.refiner
                 }
             });
             if (!refineRes.ok) throw new Error("Lỗi API auto-refine");
@@ -509,9 +558,8 @@ export function ArticleModal({
                 if (done) break;
                 refineBuffer += refineDecoder.decode(value, { stream: true });
 
-                // Parse complete JSON lines
                 const lines = refineBuffer.split('\n');
-                refineBuffer = lines.pop() || ''; // keep incomplete line in buffer
+                refineBuffer = lines.pop() || '';
 
                 for (const line of lines) {
                     if (!line.trim()) continue;
@@ -523,12 +571,9 @@ export function ArticleModal({
                             refinedContent = data.content;
                             setAutoPilotLogs(prev => [...prev, `🏆 Kết quả: Điểm SEO cuối cùng = ${data.finalScore}/100 (sau ${data.rounds} vòng)`]);
                         }
-                    } catch {
-                        // not valid JSON, skip
-                    }
+                    } catch { /* skip */ }
                 }
             }
-            // Parse any remaining buffer
             if (refineBuffer.trim()) {
                 try {
                     const data = JSON.parse(refineBuffer);
@@ -550,7 +595,7 @@ export function ArticleModal({
 
             // STEP 4: IMAGE GENERATION
             setAutoPilotState('images');
-            setAutoPilotLogs(prev => [...prev, "Bước 4: Quét vị trí ảnh cần tạo..."]);
+            setAutoPilotLogs(prev => [...prev, `Bước 4: Quét vị trí ảnh & dịch prompt (Model Prompt: ${taskModels.imagePrompt})...`]);
 
             const imgRegex = /\[CHÈN HÌNH ẢNH: (.*?)\]/g;
             let match;
@@ -559,25 +604,43 @@ export function ArticleModal({
                 placeholders.push(match[1]);
             }
 
+            let tempContent = contentStr;
+
             if (placeholders.length === 0) {
                 setAutoPilotLogs(prev => [...prev, "Khoan, AI không chèn cái ảnh nào cả."]);
             } else {
                 setAutoPilotLogs(prev => [...prev, `Tìm thấy ${placeholders.length} vị trí ảnh. Đang nhờ hoạ sĩ AI vẽ...`]);
-                let tempContent = contentStr;
                 for (let i = 0; i < placeholders.length; i++) {
+                    if (i > 0) {
+                        setAutoPilotLogs(prev => [...prev, `⏱️ Nghỉ 2.5s giãn cách rate limit (QPS) Gemini...`]);
+                        await new Promise(r => setTimeout(r, 2500));
+                    }
+
                     const ph = placeholders[i];
                     setAutoPilotLogs(prev => [...prev, `⏳ Đang vẽ ảnh ${i + 1}/${placeholders.length}: ${ph.substring(0, 30)}...`]);
+
 
                     try {
                         const imgRes = await callAiApi({
                             action: 'generate-image',
-                            payload: { prompt: ph, model: 'gptimage', apiKey: googleApiKey }
+                            payload: {
+                                prompt: ph,
+                                model: 'gptimage',
+                                modelName: taskModels.imagePrompt,
+                                textModel: taskModels.writer || taskModels.meta || 'ag/gemini-3.6-flash-high'
+                            }
                         });
 
-                        if (!imgRes.ok) throw new Error('Cannot fetch image');
+                        if (!imgRes.ok) {
+                            let errText = `Lỗi (${imgRes.status})`;
+                            try {
+                                const errJson = await imgRes.json();
+                                errText = errJson.error || errText;
+                            } catch { /* skip */ }
+                            throw new Error(errText);
+                        }
                         const blob = await imgRes.blob();
 
-                        // optimize & upload
                         const optimizeResponse = await optimizeImage(new File([blob], `ai_${Date.now()}.webp`, { type: 'image/webp' }), 1200, 800, 0.8);
                         const optimized = optimizeResponse.file;
                         const storagePath = `media/${Date.now()}_ai_img_${i}.webp`;
@@ -588,7 +651,6 @@ export function ArticleModal({
                         await uploadBytes(storageRef, await optimized.arrayBuffer(), { contentType: 'image/webp' });
                         const finalUrl = await getDownloadURL(storageRef);
 
-                        // Register in Media Library
                         await setDoc(doc(db, 'media_library', buildArticleMediaDocumentId(`ai-img-${i + 1}-${ph}`)), {
                             url: finalUrl,
                             path: storagePath,
@@ -603,16 +665,33 @@ export function ArticleModal({
                         const imgHtml = `<figure><img src="${finalUrl}" alt="${ph}" /> <figcaption class="text-center italic text-sm text-gray-500 mt-2">${ph}</figcaption></figure><br/>`;
                         tempContent = tempContent.replace(`[CHÈN HÌNH ẢNH: ${ph}]`, imgHtml);
                         setFormData(prev => ({ ...prev, content: tempContent }));
-                        setAutoPilotLogs(prev => [...prev, `✓ Đã giải quyết xong ảnh số ${i + 1}!`]);
+                        setAutoPilotLogs(prev => [...prev, `✓ Đã tạo thành công ảnh số ${i + 1}!`]);
 
                     } catch (e) {
                         console.error(e);
-                        setAutoPilotLogs(prev => [...prev, `❌ mạng lag không tải được ảnh "${ph}". Thử lại sau.`]);
+                        const errMsg = e instanceof Error ? e.message : String(e);
+                        setAutoPilotLogs(prev => [...prev, `⚠️ Lỗi ảnh ${i + 1} (${ph.substring(0, 20)}...): ${errMsg}`]);
                     }
                 }
             }
 
-            setAutoPilotLogs(prev => [...prev, "🎉 XONG! Bài viết đã được viết, tối ưu SEO tự động, và ghép ảnh!"]);
+            // STEP 5: AUTOMATIC INTERNAL LINK RESOLVER
+            setAutoPilotLogs(prev => [...prev, "Bước 5: Quét & tự động ghép Link Nội Bộ từ dữ liệu web..."]);
+            try {
+                const { updatedHtml, resolvedCount, logs: linkLogs } = await resolveInternalLinkPlaceholdersInHtml(tempContent);
+                if (resolvedCount > 0) {
+                    tempContent = updatedHtml;
+                    setFormData(prev => ({ ...prev, content: updatedHtml }));
+                    setAutoPilotLogs(prev => [...prev, ...linkLogs]);
+                    setAutoPilotLogs(prev => [...prev, `✓ Đã tự động chèn ${resolvedCount} link nội bộ chuẩn SEO!`]);
+                } else {
+                    setAutoPilotLogs(prev => [...prev, "ℹ️ Bài viết chưa có placeholder link nội bộ."]);
+                }
+            } catch (linkErr) {
+                console.warn('Internal link resolution error:', linkErr);
+            }
+
+            setAutoPilotLogs(prev => [...prev, "🎉 XONG! Bài viết đã hoàn thiện, tối ưu SEO, vẽ ảnh & ghép link nội bộ!"]);
             setAutoPilotState('done');
 
         } catch (error) {
@@ -643,7 +722,8 @@ export function ArticleModal({
                     title: formData.title,
                     excerpt: formData.excerpt,
                     tags: formData.tags,
-                    content: plainTextContent
+                    content: plainTextContent,
+                    model: type === 'check' ? taskModels.inspector : type === 'suggest' ? taskModels.meta : taskModels.writer
                 }
             });
 
@@ -661,13 +741,12 @@ export function ArticleModal({
             }
         } catch (error) {
             console.error('SEO Magic Error:', error);
-            toastError('Lỗi khi phân tích bằng AI. Hãy chắc chắn Ollama đang chạy.');
+            toastError('Lỗi khi phân tích bằng AI.');
         } finally {
             setIsCheckingSeo(false);
         }
     };
 
-    // Standalone auto-refine for manual editing flow
     const handleAutoRefine = async () => {
         if (!formData.content.trim()) {
             toastError('Chưa có nội dung để tối ưu!');
@@ -691,7 +770,8 @@ export function ArticleModal({
                     tags: formData.tags,
                     content: formData.content,
                     targetScore: 85,
-                    maxRounds: 3
+                    maxRounds: 3,
+                    model: taskModels.refiner
                 }
             });
             if (!res.ok) throw new Error('Lỗi API auto-refine');
@@ -721,7 +801,6 @@ export function ArticleModal({
                     } catch { /* skip */ }
                 }
             }
-            // Parse remaining buffer
             if (buffer.trim()) {
                 try {
                     const data = JSON.parse(buffer);
@@ -736,6 +815,30 @@ export function ArticleModal({
             setRefineProgress(prev => [...prev, `❌ Lỗi: ${(error as Error).message}`]);
         } finally {
             setIsRefining(false);
+        }
+    };
+
+    const [isLinkingInternal, setIsLinkingInternal] = useState(false);
+
+    const handleAutoLinkInternal = async () => {
+        if (!formData.content) {
+            toastError('Vui lòng viết hoặc dán nội dung bài viết trước khi ghép link!');
+            return;
+        }
+        setIsLinkingInternal(true);
+        try {
+            const { updatedHtml, resolvedCount, logs } = await resolveInternalLinkPlaceholdersInHtml(formData.content);
+            if (resolvedCount > 0) {
+                setFormData(prev => ({ ...prev, content: updatedHtml }));
+                toastSuccess(`Đã tự động ghép ${resolvedCount} link nội bộ chuẩn SEO!`);
+                setAutoPilotLogs(prev => [...prev, ...logs]);
+            } else {
+                toastInfo('Không tìm thấy placeholder [GỢI Ý LIÊN KẾT: ...] trong bài viết.');
+            }
+        } catch (e) {
+            toastError('Lỗi khi ghép link nội bộ: ' + (e as Error).message);
+        } finally {
+            setIsLinkingInternal(false);
         }
     };
 
@@ -767,9 +870,7 @@ export function ArticleModal({
                 return;
             }
 
-            // Optimize: resize & convert to WebP
             const { file: optimized, width, height } = await optimizeImage(file, 1200, 800, 0.8);
-
             const storagePath = `media/articles/${hash}.webp`;
             const storage = await getStorageInstance();
             const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
@@ -781,7 +882,6 @@ export function ArticleModal({
             await uploadBytes(storageRef, bytes, { contentType: 'image/webp' });
             const url = await getDownloadURL(storageRef);
 
-            // Register in Media Library
             await setDoc(mediaDocRef, {
                 url,
                 path: storagePath,
@@ -803,7 +903,6 @@ export function ArticleModal({
         }
     };
 
-
     const handleSave = async () => {
         if (!formData.title.trim()) {
             toastError('Vui lòng nhập tiêu đề!');
@@ -811,7 +910,6 @@ export function ArticleModal({
         }
         setSaving(true);
         try {
-            // Pre-process content to optimize and upload base64 images to Storage
             const processedContent = await processBase64Images(formData.content);
 
             const payload: Record<string, unknown> = {
@@ -830,11 +928,9 @@ export function ArticleModal({
                 if (formData.status === 'published' && article.status !== 'published') {
                     payload.publishedAt = serverTimestamp();
                 }
-                // Update existing
                 await updateDoc(doc(db, 'articles', article.id), payload);
                 await triggerRevalidate(['/', `/tin-tuc/${article.id}`, '/tin-tuc', '/sitemap.xml'], ['articles']);
             } else {
-                // Create new
                 payload.views = 0;
                 payload.createdAt = serverTimestamp();
                 if (formData.status === 'published') {
@@ -861,9 +957,6 @@ export function ArticleModal({
             setSaving(false);
         }
     };
-
-
-
 
     return (
         <Modal
@@ -906,17 +999,252 @@ export function ArticleModal({
 
             <div className="p-3 md:p-5 flex-1 min-h-0 overflow-hidden flex flex-col justify-between">
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 flex-1 min-h-0 overflow-hidden">
-                    {/* LEFT COLUMN: Metadata & Settings (Desktop 5/12 width - Compact) */}
+                    {/* LEFT COLUMN: Metadata & Settings */}
                     <div className="lg:col-span-5 overflow-y-auto pr-1 space-y-3.5 h-full max-h-[calc(90vh-140px)] lg:max-h-none">
                         {/* --- AUTO PILOT BANNER --- */}
                         <div className="bg-gradient-to-r from-indigo-50 text-indigo-900 border border-indigo-200 rounded-xl p-4 shadow-sm animate-in fade-in zoom-in-95">
-                            <h3 className="font-bold mb-1.5 flex items-center gap-2 text-base">
-                                <span className="bg-indigo-600 text-white p-1 rounded-md"><Wand2 size={16} /></span>
-                                Auto-Pilot 1-Touch: Đăng Bài Tự Động
-                            </h3>
+                            <div className="flex items-center justify-between mb-1.5">
+                                <h3 className="font-bold flex items-center gap-2 text-base">
+                                    <span className="bg-indigo-600 text-white p-1 rounded-md"><Wand2 size={16} /></span>
+                                    Auto-Pilot 1-Touch
+                                </h3>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setShowAiConfigPanel(!showAiConfigPanel);
+                                        if (!showAiConfigPanel && providerMode === 'ollama' && localModels.length === 0) {
+                                            fetchLocalModels();
+                                        }
+                                    }}
+                                    className={`text-xs px-2.5 py-1 rounded-lg border font-medium flex items-center gap-1 transition-colors ${showAiConfigPanel ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-indigo-700 border-indigo-200 hover:bg-indigo-50'}`}
+                                >
+                                    <Settings size={13} />
+                                    <span>⚙️ Ma trận AI</span>
+                                </button>
+                            </div>
+
                             <p className="text-xs text-indigo-700 mb-3 leading-relaxed">
-                                Tự động sinh Meta chuẩn SEO, Content chuyên sâu EEAT và ghép Hình Ảnh / Video vào bài viết trong 1 click.
+                                Tự động sinh Meta chuẩn SEO, Content chuyên sâu EEAT và ghép Ảnh minh hoạ.
                             </p>
+
+                            {/* --- AI CONFIG MATRIX PANEL --- */}
+                            {showAiConfigPanel && (
+                                <div className="mb-3.5 bg-white/90 border border-indigo-200 rounded-xl p-3 space-y-3 text-xs shadow-inner animate-in fade-in slide-in-from-top-2">
+                                    <div className="flex items-center justify-between border-b pb-2">
+                                        <span className="font-bold text-indigo-950">Nguồn AI Engine:</span>
+                                        <div className="flex items-center gap-3">
+                                            <label className="flex items-center gap-1.5 cursor-pointer font-medium">
+                                                <input
+                                                    type="radio"
+                                                    name="providerMode"
+                                                    value="ollama"
+                                                    checked={providerMode === 'ollama'}
+                                                    onChange={() => {
+                                                        setProviderMode('ollama');
+                                                        if (localModels.length === 0) fetchLocalModels();
+                                                    }}
+                                                    className="accent-indigo-600"
+                                                />
+                                                <span>🖥️ Ollama Local</span>
+                                            </label>
+                                            <label className="flex items-center gap-1.5 cursor-pointer font-medium">
+                                                <input
+                                                    type="radio"
+                                                    name="providerMode"
+                                                    value="cloud9router"
+                                                    checked={providerMode === 'cloud9router'}
+                                                    onChange={() => {
+                                                        setProviderMode('cloud9router');
+                                                        if (taskModels.writer === DEFAULT_AI_CONFIG.taskModels.writer) {
+                                                            setTaskModels(DEFAULT_9ROUTER_MODELS);
+                                                        }
+                                                    }}
+                                                    className="accent-indigo-600"
+                                                />
+                                                <span>☁️ 9router / Cloud API</span>
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    {providerMode === 'cloud9router' && (
+                                        <div className="space-y-2 bg-indigo-50/50 p-2 rounded-lg border border-indigo-100">
+                                            <div>
+                                                <label className="block text-[11px] font-semibold text-indigo-900 mb-1">9router API Key <span className="text-red-500">*</span></label>
+                                                <input
+                                                    type="password"
+                                                    placeholder="Nhập API Key 9router..."
+                                                    value={cloudApiKey}
+                                                    onChange={(e) => setCloudApiKey(e.target.value)}
+                                                    className="w-full h-8 px-2.5 border rounded border-indigo-200 bg-white text-xs focus:outline-none focus:border-indigo-500"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-[11px] font-semibold text-indigo-900 mb-1">Base URL Gateway</label>
+                                                <input
+                                                    type="text"
+                                                    placeholder="https://api.9router.com/v1"
+                                                    value={cloudBaseUrl}
+                                                    onChange={(e) => setCloudBaseUrl(e.target.value)}
+                                                    className="w-full h-8 px-2.5 border rounded border-indigo-200 bg-white text-xs focus:outline-none focus:border-indigo-500"
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {providerMode === 'ollama' && (
+                                        <div className="flex items-center justify-between bg-indigo-50/50 p-2 rounded-lg border border-indigo-100">
+                                            <span className="text-[11px] text-indigo-800">Cục bộ: http://localhost:11434</span>
+                                            <button
+                                                type="button"
+                                                onClick={fetchLocalModels}
+                                                disabled={isLoadingLocalModels}
+                                                className="text-[11px] bg-white border border-indigo-200 px-2 py-0.5 rounded text-indigo-700 hover:bg-indigo-50 flex items-center gap-1 disabled:opacity-50"
+                                            >
+                                                {isLoadingLocalModels ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+                                                Quét Model Local
+                                            </button>
+                                        </div>
+                                    )}
+
+                                    {/* --- DYNAMIC TASK MODEL MATRIX --- */}
+                                    <div className="space-y-2 pt-1 border-t">
+                                        <div className="flex items-center justify-between">
+                                            <span className="font-bold text-[11px] text-indigo-950">Ma trận gán Model theo Tác vụ:</span>
+                                            {providerMode === 'cloud9router' && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setTaskModels(DEFAULT_9ROUTER_MODELS)}
+                                                    className="text-[10px] text-indigo-600 hover:underline"
+                                                >
+                                                    Tải mẫu 9router
+                                                </button>
+                                            )}
+                                        </div>
+
+                                        <div className="grid grid-cols-1 gap-2">
+                                            {/* Meta Task */}
+                                            <div className="flex items-center gap-2">
+                                                <span className="w-24 shrink-0 font-medium text-[11px] text-indigo-900">📌 1. Sinh Meta:</span>
+                                                {providerMode === 'ollama' && localModels.length > 0 ? (
+                                                    <select
+                                                        value={taskModels.meta}
+                                                        onChange={(e) => setTaskModels({ ...taskModels, meta: e.target.value })}
+                                                        className="flex-1 h-7 px-2 border rounded border-indigo-200 text-xs bg-white"
+                                                    >
+                                                        {localModels.map((m) => (
+                                                            <option key={m} value={m}>{m}</option>
+                                                        ))}
+                                                    </select>
+                                                ) : (
+                                                    <input
+                                                        type="text"
+                                                        value={taskModels.meta}
+                                                        onChange={(e) => setTaskModels({ ...taskModels, meta: e.target.value })}
+                                                        placeholder="Model tên (vd: gpt-4o-mini)"
+                                                        className="flex-1 h-7 px-2 border rounded border-indigo-200 text-xs bg-white"
+                                                    />
+                                                )}
+                                            </div>
+
+                                            {/* Writer Task */}
+                                            <div className="flex items-center gap-2">
+                                                <span className="w-24 shrink-0 font-medium text-[11px] text-indigo-900">✍️ 2. Viết Content:</span>
+                                                {providerMode === 'ollama' && localModels.length > 0 ? (
+                                                    <select
+                                                        value={taskModels.writer}
+                                                        onChange={(e) => setTaskModels({ ...taskModels, writer: e.target.value })}
+                                                        className="flex-1 h-7 px-2 border rounded border-indigo-200 text-xs bg-white"
+                                                    >
+                                                        {localModels.map((m) => (
+                                                            <option key={m} value={m}>{m}</option>
+                                                        ))}
+                                                    </select>
+                                                ) : (
+                                                    <input
+                                                        type="text"
+                                                        value={taskModels.writer}
+                                                        onChange={(e) => setTaskModels({ ...taskModels, writer: e.target.value })}
+                                                        placeholder="Model tên (vd: gpt-4o-mini / claude-3-5-sonnet)"
+                                                        className="flex-1 h-7 px-2 border rounded border-indigo-200 text-xs bg-white"
+                                                    />
+                                                )}
+                                            </div>
+
+                                            {/* Inspector Task */}
+                                            <div className="flex items-center gap-2">
+                                                <span className="w-24 shrink-0 font-medium text-[11px] text-indigo-900">🔍 3. Chấm SEO:</span>
+                                                {providerMode === 'ollama' && localModels.length > 0 ? (
+                                                    <select
+                                                        value={taskModels.inspector}
+                                                        onChange={(e) => setTaskModels({ ...taskModels, inspector: e.target.value })}
+                                                        className="flex-1 h-7 px-2 border rounded border-indigo-200 text-xs bg-white"
+                                                    >
+                                                        {localModels.map((m) => (
+                                                            <option key={m} value={m}>{m}</option>
+                                                        ))}
+                                                    </select>
+                                                ) : (
+                                                    <input
+                                                        type="text"
+                                                        value={taskModels.inspector}
+                                                        onChange={(e) => setTaskModels({ ...taskModels, inspector: e.target.value })}
+                                                        placeholder="Model tên (vd: deepseek-chat / gpt-4o)"
+                                                        className="flex-1 h-7 px-2 border rounded border-indigo-200 text-xs bg-white"
+                                                    />
+                                                )}
+                                            </div>
+
+                                            {/* Refine Task */}
+                                            <div className="flex items-center gap-2">
+                                                <span className="w-24 shrink-0 font-medium text-[11px] text-indigo-900">🔄 4. Tự Sửa SEO:</span>
+                                                {providerMode === 'ollama' && localModels.length > 0 ? (
+                                                    <select
+                                                        value={taskModels.refiner}
+                                                        onChange={(e) => setTaskModels({ ...taskModels, refiner: e.target.value })}
+                                                        className="flex-1 h-7 px-2 border rounded border-indigo-200 text-xs bg-white"
+                                                    >
+                                                        {localModels.map((m) => (
+                                                            <option key={m} value={m}>{m}</option>
+                                                        ))}
+                                                    </select>
+                                                ) : (
+                                                    <input
+                                                        type="text"
+                                                        value={taskModels.refiner}
+                                                        onChange={(e) => setTaskModels({ ...taskModels, refiner: e.target.value })}
+                                                        placeholder="Model tên (vd: deepseek-chat)"
+                                                        className="flex-1 h-7 px-2 border rounded border-indigo-200 text-xs bg-white"
+                                                    />
+                                                )}
+                                            </div>
+
+                                            {/* Image Prompt Task */}
+                                            <div className="flex items-center gap-2">
+                                                <span className="w-24 shrink-0 font-medium text-[11px] text-indigo-900">🎨 5. Prompt Ảnh:</span>
+                                                {providerMode === 'ollama' && localModels.length > 0 ? (
+                                                    <select
+                                                        value={taskModels.imagePrompt}
+                                                        onChange={(e) => setTaskModels({ ...taskModels, imagePrompt: e.target.value })}
+                                                        className="flex-1 h-7 px-2 border rounded border-indigo-200 text-xs bg-white"
+                                                    >
+                                                        {localModels.map((m) => (
+                                                            <option key={m} value={m}>{m}</option>
+                                                        ))}
+                                                    </select>
+                                                ) : (
+                                                    <input
+                                                        type="text"
+                                                        value={taskModels.imagePrompt}
+                                                        onChange={(e) => setTaskModels({ ...taskModels, imagePrompt: e.target.value })}
+                                                        placeholder="Model tên (vd: gpt-4o-mini)"
+                                                        className="flex-1 h-7 px-2 border rounded border-indigo-200 text-xs bg-white"
+                                                    />
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
 
                             <div className="flex flex-col sm:flex-row gap-2">
                                 <div className="flex-1 flex flex-col gap-1.5">
@@ -925,14 +1253,6 @@ export function ArticleModal({
                                         placeholder="Từ khóa chính / ý tưởng (vd: Tủ lạnh giá rẻ)..."
                                         value={autoPilotTopic}
                                         onChange={(e) => setAutoPilotTopic(e.target.value)}
-                                        disabled={autoPilotState !== 'idle' && autoPilotState !== 'done'}
-                                        className="w-full h-9 px-3 border border-indigo-200 rounded-lg focus:outline-none focus:border-indigo-400 text-xs"
-                                    />
-                                    <input
-                                        type="password"
-                                        placeholder="[Tùy chọn] Gemini API Key..."
-                                        value={googleApiKey}
-                                        onChange={(e) => setGoogleApiKey(e.target.value)}
                                         disabled={autoPilotState !== 'idle' && autoPilotState !== 'done'}
                                         className="w-full h-9 px-3 border border-indigo-200 rounded-lg focus:outline-none focus:border-indigo-400 text-xs"
                                     />
@@ -947,6 +1267,19 @@ export function ArticleModal({
                                         <><Loader2 size={14} className="animate-spin" /> Đang chạy...</>
                                     ) : (
                                         <><Wand2 size={14} /> Auto-Pilot</>
+                                    )}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleAutoLinkInternal}
+                                    disabled={isLinkingInternal || (autoPilotState !== 'idle' && autoPilotState !== 'done')}
+                                    title="Quét dữ liệu website & tự động khớp link nội bộ"
+                                    className="h-9 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg transition-transform flex items-center justify-center gap-1.5 text-xs shrink-0 disabled:opacity-50"
+                                >
+                                    {isLinkingInternal ? (
+                                        <><Loader2 size={14} className="animate-spin" /> Đang quét...</>
+                                    ) : (
+                                        <><LinkIcon size={14} /> Ghép Link Nội Bộ</>
                                     )}
                                 </button>
                             </div>
@@ -972,7 +1305,7 @@ export function ArticleModal({
                             <div className="border rounded-xl p-3.5 relative shrink-0 bg-blue-50/70 border-blue-200 animate-in fade-in zoom-in-95">
                                 <div className="flex justify-between items-center mb-2 border-b pb-1.5 border-blue-100/50">
                                     <h3 className="font-bold flex items-center gap-1.5 text-xs text-blue-900">
-                                        <Star size={15} className="text-blue-500" /> Báo cáo chuẩn SEO (Ollama AI)
+                                        <Star size={15} className="text-blue-500" /> Báo cáo chuẩn SEO ({providerMode === 'cloud9router' ? '9router Cloud' : 'Ollama Local'})
                                         {isCheckingSeo && <Loader2 size={13} className="animate-spin text-blue-500" />}
                                     </h3>
                                     <button title="Đóng" type="button" onClick={() => setSeoResult({ type: '', content: '' })} className="p-1 rounded text-blue-400 hover:bg-blue-100">
@@ -1161,7 +1494,7 @@ export function ArticleModal({
                         </div>
                     </div>
 
-                    {/* RIGHT COLUMN: Rich Text Content Editor (Desktop 7/12 width - Single Editor Scrollbar) */}
+                    {/* RIGHT COLUMN: Rich Text Content Editor */}
                     <div className="lg:col-span-7 flex flex-col flex-1 min-h-0 h-full overflow-hidden space-y-1.5">
                         <div className="flex justify-between items-end shrink-0">
                             <label className="block text-xs font-semibold text-gray-700">Nội dung bài viết <span className="text-red-500">*</span></label>
@@ -1209,4 +1542,4 @@ export function ArticleModal({
     );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
+export { ArticleEditorModal as ArticleModal };
