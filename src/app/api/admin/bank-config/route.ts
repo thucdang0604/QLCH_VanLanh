@@ -22,7 +22,6 @@ export const GET = withApi({
         return context.json({
             success: true, 
             config: {
-                adminPhone: data?.adminPhone || '',
                 bankId: data?.bankId || '',
                 accountNo: data?.accountNo || '',
                 accountName: data?.accountName || '',

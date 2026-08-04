@@ -16,7 +16,6 @@ type BankAccount = {
 };
 
 type BankConfig = {
-    adminPhone: string;
     accounts: BankAccount[];
     bankId?: string;
     accountNo?: string;
@@ -41,7 +40,6 @@ function errorMessage(error: unknown, fallback: string): string {
 export default function BankIntegrationConfig() {
     const [loading, setLoading] = useState(true);
     const [config, setConfig] = useState<BankConfig>({
-        adminPhone: '',
         accounts: [],
         bankId: '',
         accountNo: '',
@@ -50,7 +48,6 @@ export default function BankIntegrationConfig() {
 
     const [isEditing, setIsEditing] = useState(false);
     const [editForm, setEditForm] = useState<BankConfig>({
-        adminPhone: '',
         accounts: [],
         bankId: '',
         accountNo: '',
@@ -66,7 +63,6 @@ export default function BankIntegrationConfig() {
     
     const [showTotpVerify, setShowTotpVerify] = useState(false);
     const [verifyToken, setVerifyToken] = useState('');
-    const [verifiedToken, setVerifiedToken] = useState('');
 
     useEffect(() => {
         loadConfig();
@@ -163,45 +159,26 @@ export default function BankIntegrationConfig() {
 
     function handleEditClick() {
         if (config.totpEnabled) {
-            setShowTotpVerify(true);
+            setEditForm(structuredClone(config));
+            setIsEditing(true);
         } else {
             toast.error('Vui lòng thiết lập Authenticator trước khi chỉnh sửa cấu hình ngân hàng.');
             startTotpSetup();
         }
     }
 
-    async function verifyTotpForEdit() {
-        if (!verifyToken || verifyToken.length !== 6) return toast.error('Vui lòng nhập mã 6 số');
-        setIsProcessing(true);
-        try {
-            const adminToken = await getAuth(app).currentUser?.getIdToken();
-            const res = await fetch('/api/admin/bank-config/totp/verify', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
-                body: JSON.stringify({ token: verifyToken })
-            });
-            const data = await res.json();
-            if (data.success) {
-                setVerifiedToken(verifyToken);
-                setShowTotpVerify(false);
-                setVerifyToken('');
-                setIsEditing(true);
-            } else {
-                toast.error(data.error);
-            }
-        } catch {
-            toast.error('Lỗi xác thực TOTP');
-        } finally {
-            setIsProcessing(false);
+    function requestSaveConfig() {
+        if (!config.totpEnabled) {
+            toast.error('Vui lòng thiết lập Authenticator trước khi lưu cấu hình ngân hàng.');
+            return;
         }
+
+        setVerifyToken('');
+        setShowTotpVerify(true);
     }
 
     async function saveConfig() {
-        if (!verifiedToken) {
-            toast.error('Vui lòng xác thực TOTP trước khi lưu cấu hình ngân hàng.');
-            setShowTotpVerify(true);
-            return;
-        }
+        if (!verifyToken || verifyToken.length !== 6) return toast.error('Vui lòng nhập mã 6 số');
 
         setIsProcessing(true);
         try {
@@ -215,8 +192,7 @@ export default function BankIntegrationConfig() {
                     Authorization: `Bearer ${adminToken}`,
                 },
                 body: JSON.stringify({
-                    phone: editForm.adminPhone,
-                    otpToken: verifiedToken,
+                    otpToken: verifyToken,
                     config: {
                         accounts: editForm.accounts || []
                     }
@@ -227,8 +203,9 @@ export default function BankIntegrationConfig() {
                 throw new Error(data.error || 'Lỗi lưu cấu hình');
             }
             toast.success('Đã lưu cấu hình ngân hàng');
+            setShowTotpVerify(false);
+            setVerifyToken('');
             setIsEditing(false);
-            setVerifiedToken('');
             loadConfig();
         } catch (error: unknown) {
             console.error(error);
@@ -273,15 +250,6 @@ export default function BankIntegrationConfig() {
             <div className="p-6">
                 {!isEditing ? (
                     <div className="flex flex-col gap-6">
-                        <div className="flex flex-col md:flex-row gap-8">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 flex-1">
-                                <div>
-                                    <p className="text-sm text-gray-500">SĐT Admin liên hệ</p>
-                                    <p className="font-medium mt-1">{config.adminPhone || 'Chưa thiết lập'}</p>
-                                </div>
-                            </div>
-                        </div>
-
                         <div>
                             <h3 className="text-sm font-medium text-gray-700 border-b pb-2 mb-4">Danh sách tài khoản ngân hàng</h3>
                             {config.accounts && config.accounts.length > 0 ? (
@@ -328,21 +296,11 @@ export default function BankIntegrationConfig() {
                     <div className="space-y-4 max-w-xl">
                         <div className="bg-amber-50 p-3 rounded-lg border border-amber-200 text-sm text-amber-800 flex gap-2">
                             <ShieldCheck className="shrink-0" size={18} />
-                            <span>Cập nhật số điện thoại Admin và cấu hình danh sách tài khoản ngân hàng để hiển thị VietQR. Bạn có thể chọn nhiều tài khoản làm mặc định.</span>
+                            <span>Cập nhật danh sách tài khoản ngân hàng để hiển thị VietQR. Bạn có thể chọn nhiều tài khoản làm mặc định.</span>
                         </div>
 
                         <div className="grid gap-4">
                             <div>
-                                <label className="text-sm font-medium text-gray-700">SĐT Admin liên hệ</label>
-                                <input
-                                    value={editForm.adminPhone}
-                                    onChange={e => setEditForm({ ...editForm, adminPhone: e.target.value })}
-                                    placeholder="0987654321"
-                                    className="w-full mt-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20 disabled:bg-gray-100"
-                                />
-                            </div>
-
-                            <div className="border-t pt-4 mt-2">
                                 <div className="flex items-center justify-between mb-3">
                                     <h3 className="text-sm font-medium text-gray-700">Tài khoản Ngân hàng</h3>
                                     <button 
@@ -452,7 +410,6 @@ export default function BankIntegrationConfig() {
                                     onClick={() => {
                                         setIsEditing(false);
                                         setEditForm(config);
-                                        setVerifiedToken('');
                                     }}
                                     className="px-4 py-2 border rounded-lg hover:bg-gray-50"
                                 >
@@ -460,7 +417,7 @@ export default function BankIntegrationConfig() {
                                 </button>
                                 
                                 <button
-                                    onClick={saveConfig}
+                                    onClick={requestSaveConfig}
                                     disabled={isProcessing}
                                     className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2"
                                 >
@@ -521,7 +478,7 @@ export default function BankIntegrationConfig() {
             </div>
         )}
 
-        {/* Modal Xác thực TOTP */}
+        {/* Modal Xác thực TOTP trước khi lưu */}
         {showTotpVerify && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
                 <div className="bg-white rounded-xl shadow-lg w-full max-w-sm overflow-hidden flex flex-col">
@@ -529,13 +486,13 @@ export default function BankIntegrationConfig() {
                         <h3 className="font-medium text-gray-800 flex items-center gap-2">
                             <ShieldCheck size={18} className="text-orange-600" /> Xác thực bảo mật
                         </h3>
-                        <button title="Đóng" onClick={() => setShowTotpVerify(false)} className="text-gray-400 hover:text-gray-600">
+                        <button title="Đóng" onClick={() => { setShowTotpVerify(false); setVerifyToken(''); }} className="text-gray-400 hover:text-gray-600">
                             <X size={20} />
                         </button>
                     </div>
                     <div className="p-6 flex flex-col items-center">
                         <p className="text-sm text-center text-gray-600 mb-4">
-                            Vui lòng nhập mã 6 số từ ứng dụng Authenticator để tiếp tục.
+                            Nhập mã 6 số mới nhất từ ứng dụng Authenticator để lưu cấu hình ngân hàng.
                         </p>
                         <input
                             type="text"
@@ -545,23 +502,23 @@ export default function BankIntegrationConfig() {
                             value={verifyToken}
                             onChange={(e) => setVerifyToken(e.target.value.replace(/\D/g, ''))}
                             onKeyDown={(e) => {
-                                if (e.key === 'Enter') verifyTotpForEdit();
+                                if (e.key === 'Enter') saveConfig();
                             }}
                         />
                     </div>
                     <div className="p-4 border-t flex justify-end gap-3 bg-gray-50">
                         <button
-                            onClick={() => setShowTotpVerify(false)}
+                            onClick={() => { setShowTotpVerify(false); setVerifyToken(''); }}
                             className="px-4 py-2 border rounded-lg text-sm hover:bg-white"
                         >
                             Hủy
                         </button>
                         <button
-                            onClick={verifyTotpForEdit}
+                            onClick={saveConfig}
                             disabled={isProcessing || verifyToken.length !== 6}
                             className="px-4 py-2 bg-orange-600 text-white rounded-lg text-sm hover:bg-orange-700 disabled:opacity-50 flex items-center gap-2"
                         >
-                            {isProcessing ? <Loader2 size={16} className="animate-spin" /> : 'Xác thực'}
+                            {isProcessing ? <Loader2 size={16} className="animate-spin" /> : 'Xác nhận & Lưu'}
                         </button>
                     </div>
                 </div>
