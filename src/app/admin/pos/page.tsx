@@ -2076,8 +2076,8 @@ export default function POSPage() {
                                 ))}
                             </div>
 
-                            {/* Product Grid — fills available height */}
-                            <div className="flex-1 min-h-0 overflow-y-auto">
+                            {/* Product Grid — limited height on desktop */}
+                            <div className="md:max-h-[45vh] overflow-y-auto">
                                 <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
                                     {filtered.map(product => {
                                         const available = (product.stock || 0) - (product.held || 0);
@@ -2127,17 +2127,27 @@ export default function POSPage() {
                             </div>
 
                             {/* ═══ Payment Controls (below product grid, left column) ═══ */}
-                            <div className="hidden md:block shrink-0 mt-2.5 rounded-2xl border bg-white shadow-sm">
+                            <div className="hidden md:block mt-3 rounded-2xl border bg-white shadow-sm">
                                 {paymentSection}
                             </div>
                         </div>
 
-                        {/* ═══ RIGHT COLUMN: Customer Workspace + Cart & Checkout (Single consolidated column) ═══ */}
-                        <div className="hidden min-h-0 md:flex md:w-[340px] lg:w-[380px] xl:w-[420px] shrink-0 flex-col gap-2.5 overflow-y-auto">
-                            <div className="shrink-0 rounded-2xl border bg-white shadow-sm overflow-hidden">
+                        {/* ═══ RIGHT (Tablet/Laptop md & lg): Single Right Column Stacking Customer + Cart ═══ */}
+                        <div className="hidden min-h-0 md:flex xl:hidden md:w-[350px] lg:w-[380px] flex-shrink-0 flex-col gap-2.5 overflow-y-auto">
+                            <div className="rounded-2xl border bg-white p-2 shadow-sm">
                                 {customerWorkspace}
                             </div>
                             <div className="flex min-h-0 flex-1 flex-col rounded-2xl border bg-white shadow-sm overflow-hidden">
+                                {cartItemsSection}
+                            </div>
+                        </div>
+
+                        {/* ═══ RIGHT (Large Desktop xl & 2xl): Separate Customer & Cart Columns ═══ */}
+                        <div className="hidden min-h-0 xl:flex xl:w-[300px] 2xl:w-[340px] flex-shrink-0 flex-col overflow-y-auto rounded-2xl border bg-white p-2 shadow-sm">
+                            {customerWorkspace}
+                        </div>
+                        <div className="hidden min-h-0 xl:flex xl:w-[340px] 2xl:w-[380px] flex-shrink-0 flex-col overflow-y-auto rounded-2xl border bg-white shadow-sm">
+                            <div className="flex min-h-0 flex-1 flex-col">
                                 {cartItemsSection}
                             </div>
                         </div>
