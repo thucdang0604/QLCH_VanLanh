@@ -802,37 +802,37 @@ export default function TechnicianPage() {
 
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-2 flex-wrap">
-                                            <p title="Máy" className="font-bold text-gray-900 text-lg sm:text-xl">{ticket.deviceInfo?.model || 'Thiết bị'}</p>
-                                            <span className={`text-sm font-medium px-2.5 py-1 rounded-full border ${st.color}`}>
+                                            <p title="Máy" className="font-bold text-gray-900 text-sm sm:text-base">{ticket.deviceInfo?.model || 'Thiết bị'}</p>
+                                            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${st.color}`}>
                                                 {st.label}
                                             </span>
                                         </div>
-                                        <div className="text-sm text-gray-500 mt-1.5 flex items-center gap-1">
+                                        <div className="text-xs text-gray-500 mt-1 flex items-center gap-1">
                                             <span title="Mã phiếu">#{ticket.id.slice(-6).toUpperCase()}</span>
                                             {ticket.ticketType === 'warranty' && (
-                                                <span className="px-1.5 py-0.5 bg-purple-100 text-purple-700 text-xs rounded-full font-bold">BH</span>
+                                                <span className="px-1.5 py-0.5 bg-purple-100 text-purple-700 text-[10px] rounded-full font-bold">BH</span>
                                             )}
                                             <span title="Khách hàng">• {ticket.customer?.name}</span>
                                         </div>
                                         {ticket.issues && ticket.issues.length > 0 ? (
-                                            <p title="Vấn đề" className="text-base sm:text-lg text-gray-700 mt-2 line-clamp-2">{ticket.issues.map(i => i.label).join(', ')}</p>
+                                            <p title="Vấn đề" className="text-xs sm:text-sm text-gray-700 mt-1.5 line-clamp-2">{ticket.issues.map(i => i.label).join(', ')}</p>
                                         ) : ticket.issue?.description && (
-                                            <p className="text-base sm:text-lg text-gray-700 mt-2 line-clamp-2">{ticket.issue.description}</p>
+                                            <p className="text-xs sm:text-sm text-gray-700 mt-1.5 line-clamp-2">{ticket.issue.description}</p>
                                         )}
 
                                         {(pendingTransfer || actionWarnings.length > 0) && (
-                                            <div className="mt-3 space-y-2">
+                                            <div className="mt-2 space-y-1.5">
                                                 {pendingTransfer && (
-                                                    <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
-                                                        <p className="font-semibold flex items-center gap-2"><ArrowRightLeft size={16} /> Chờ {pendingTransfer.toTechnicianName} tiếp nhận</p>
-                                                        <p className="mt-1 text-xs">Lý do: {pendingTransfer.reason || 'Không có lý do'}</p>
-                                                        <p className="mt-1 text-xs text-blue-700">Người đề nghị: {pendingTransfer.requestedByName || pendingTransfer.requestedBy}</p>
+                                                    <div className="rounded-lg border border-blue-200 bg-blue-50 p-2 text-xs text-blue-900">
+                                                        <p className="font-semibold flex items-center gap-1.5"><ArrowRightLeft size={14} /> Chờ {pendingTransfer.toTechnicianName} tiếp nhận</p>
+                                                        <p className="mt-0.5 text-[11px]">Lý do: {pendingTransfer.reason || 'Không có lý do'}</p>
+                                                        <p className="mt-0.5 text-[11px] text-blue-700">Người đề nghị: {pendingTransfer.requestedByName || pendingTransfer.requestedBy}</p>
                                                     </div>
                                                 )}
                                                 {actionWarnings.length > 0 && (
-                                                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
-                                                        <p className="text-xs font-bold uppercase text-amber-800 flex items-center gap-1"><ShieldAlert size={14} /> Cần xử lý ở bước này</p>
-                                                        <ul className="mt-1 space-y-1 text-sm text-amber-900">
+                                                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-2">
+                                                        <p className="text-[11px] font-bold uppercase text-amber-800 flex items-center gap-1"><ShieldAlert size={13} /> Cần xử lý ở bước này</p>
+                                                        <ul className="mt-0.5 space-y-0.5 text-xs text-amber-900">
                                                             {actionWarnings.map(item => <li key={item}>• {item}</li>)}
                                                         </ul>
                                                     </div>
@@ -881,14 +881,14 @@ export default function TechnicianPage() {
                                         )}
 
                                         {st?.allowedFeatures?.includes('requireChecklist') && (
-                                            <div className="mt-3 border-t pt-3">
-                                                <p className="text-xs font-bold text-gray-400 uppercase mb-2 flex items-center gap-1"><CheckCircle2 size={14} /> Checklist kiểm tra</p>
-                                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                            <div className="mt-2.5 border-t pt-2">
+                                                <p className="text-[11px] font-bold text-gray-400 uppercase mb-1.5 flex items-center gap-1"><CheckCircle2 size={13} /> Checklist kiểm tra</p>
+                                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                                                     {Object.keys(checklistLabels).map(key => {
                                                         const val = (ticket.deviceInfo?.checklist as Record<string, string> | undefined)?.[key] || '';
                                                         return (
                                                             <div key={key} className="flex flex-col">
-                                                                <label className="text-base text-gray-600 mb-1 truncate">{checklistLabels[key]}</label>
+                                                                <label className="text-xs text-gray-500 mb-0.5 truncate">{checklistLabels[key]}</label>
                                                                 <select
                                                                     value={val}
                                                                     onClick={e => e.stopPropagation()}
@@ -896,7 +896,7 @@ export default function TechnicianPage() {
                                                                     disabled={isReadOnly}
                                                                     aria-label={`Checklist: ${checklistLabels[key]}`}
                                                                     title={`Checklist: ${checklistLabels[key]}`}
-                                                                    className={`min-h-[56px] text-xl sm:text-2xl px-3 py-3 rounded-xl border cursor-pointer transition-all appearance-none text-center font-bold ${val === 'OK' ? 'bg-green-50 border-green-300 text-green-700' :
+                                                                    className={`min-h-[34px] text-xs px-2 py-1 rounded-lg border cursor-pointer transition-all appearance-none text-center font-bold ${val === 'OK' ? 'bg-green-50 border-green-300 text-green-700' :
                                                                             val === 'Lỗi' ? 'bg-red-50 border-red-300 text-red-600' :
                                                                                 val ? 'bg-orange-50 border-orange-200 text-orange-700' :
                                                                                     'bg-gray-50 border-gray-200 text-gray-400'
@@ -910,14 +910,14 @@ export default function TechnicianPage() {
                                                         );
                                                     })}
                                                 </div>
-                                                <div className="flex flex-wrap gap-2 mt-2">
+                                                <div className="flex flex-wrap gap-1.5 mt-2">
                                                     {(['hasPriorRepair', 'hasWaterDamage', 'hasNonGenuineParts'] as const).map(key => {
                                                         const labels: Record<string, string> = { hasPriorRepair: 'Đã từng sửa', hasWaterDamage: 'Vào nước', hasNonGenuineParts: 'Kém/Lô' };
                                                         const val = !!(ticket.deviceInfo?.checklist as Record<string, boolean> | undefined)?.[key];
                                                         return (
                                                             <button key={key} onClick={(e) => { e.stopPropagation(); if (!isReadOnly) handleHistoryToggle(ticket, key, val); }}
                                                                 disabled={isReadOnly}
-                                                                className={`text-sm px-3 py-1.5 rounded-lg border transition-all ${isReadOnly ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'} ${val ? 'bg-orange-50 border-orange-200 text-orange-700 font-bold' : 'bg-gray-50 border-gray-200 text-gray-500'
+                                                                className={`text-xs px-2.5 py-1 rounded-md border transition-all ${isReadOnly ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'} ${val ? 'bg-orange-50 border-orange-200 text-orange-700 font-bold' : 'bg-gray-50 border-gray-200 text-gray-500'
                                                                     }`}
                                                                 title={`${labels[key]}: ${val ? 'Có' : 'Không'} (Bấm để đổi)`}>
                                                                 {val ? '☑' : '☐'} {labels[key]}
@@ -929,29 +929,29 @@ export default function TechnicianPage() {
                                         )}
                                     </div>
 
-                                    <div className="grid grid-cols-2 gap-2 w-full sm:w-56 sm:flex sm:flex-col flex-shrink-0 mt-3 sm:mt-0">
+                                    <div className="grid grid-cols-2 gap-1.5 w-full sm:w-44 sm:flex sm:flex-col flex-shrink-0 mt-2 sm:mt-0">
                                         <button
                                             onClick={(e) => { e.stopPropagation(); setSelectedTicket(ticket); }}
-                                            className="min-h-12 px-3 py-2 border border-gray-200 bg-white rounded-xl transition-colors flex items-center justify-center gap-2 text-base font-bold hover:bg-gray-50" title="Xem chi tiết"
+                                            className="px-2.5 py-1.5 border border-gray-200 bg-white text-gray-700 rounded-lg transition-colors flex items-center justify-center gap-1.5 text-xs font-bold hover:bg-gray-50" title="Xem chi tiết"
                                         >
-                                            <Eye size={20} className="text-gray-500" /> Chi tiết
+                                            <Eye size={15} className="text-gray-500" /> Chi tiết
                                         </button>
 
                                         {canRequestTransfer && (
                                             <button
                                                 onClick={(event) => { event.stopPropagation(); setTransferModal({ ticket }); setTransferTechnicianId(''); setTransferReason(''); }}
-                                                className="min-h-12 px-3 py-2 border border-blue-200 bg-blue-50 text-blue-700 rounded-xl flex items-center justify-center gap-2 text-base font-bold hover:bg-blue-100"
+                                                className="px-2.5 py-1.5 border border-blue-200 bg-blue-50 text-blue-700 rounded-lg flex items-center justify-center gap-1.5 text-xs font-bold hover:bg-blue-100"
                                             >
-                                                <ArrowRightLeft size={20} /> Chuyển KTV
+                                                <ArrowRightLeft size={15} /> Chuyển KTV
                                             </button>
                                         )}
 
                                         {pendingTransfer && (pendingTransfer.requestedBy === user?.uid || isRepairManager(user)) && (
                                             <button
                                                 onClick={(event) => { event.stopPropagation(); handleTransferCancel(ticket); }}
-                                                className="min-h-12 px-3 py-2 border border-red-200 bg-red-50 text-red-700 rounded-xl flex items-center justify-center gap-2 text-base font-bold hover:bg-red-100"
+                                                className="px-2.5 py-1.5 border border-red-200 bg-red-50 text-red-700 rounded-lg flex items-center justify-center gap-1.5 text-xs font-bold hover:bg-red-100"
                                             >
-                                                <X size={20} /> Hủy chuyển
+                                                <X size={15} /> Hủy chuyển
                                             </button>
                                         )}
 
@@ -961,12 +961,12 @@ export default function TechnicianPage() {
                                                 return (
                                                     <>
                                                         <button onClick={(e) => { e.stopPropagation(); handleTransferResponse(ticket, 'accepted'); }}
-                                                            className="min-h-11 text-sm px-3 py-2 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg font-semibold transition-all flex items-center justify-center gap-2 w-full hover:bg-emerald-100">
-                                                            <CheckCircle2 size={12} /> Nhận phiếu
+                                                            className="text-xs px-2.5 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg font-semibold transition-all flex items-center justify-center gap-1.5 w-full hover:bg-emerald-100">
+                                                            <CheckCircle2 size={13} /> Nhận phiếu
                                                         </button>
                                                         <button onClick={(e) => { e.stopPropagation(); handleTransferResponse(ticket, 'rejected'); }}
-                                                            className="min-h-11 text-sm px-3 py-2 bg-red-50 border border-red-200 text-red-600 rounded-lg font-semibold transition-all flex items-center justify-center gap-2 w-full hover:bg-red-100">
-                                                            <X size={12} /> Từ chối
+                                                            className="text-xs px-2.5 py-1.5 bg-red-50 border border-red-200 text-red-600 rounded-lg font-semibold transition-all flex items-center justify-center gap-1.5 w-full hover:bg-red-100">
+                                                            <X size={13} /> Từ chối
                                                         </button>
                                                     </>
                                                 );
@@ -987,7 +987,7 @@ export default function TechnicianPage() {
                                                         if (useDynamic) {
                                                             return (
                                                                 <button onClick={(e) => { e.stopPropagation(); handleStatusChange(ticket.id, targetStatus.id); }}
-                                                                    className={`col-span-2 min-h-12 w-full py-3 bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-xl font-bold text-base shadow-md hover:shadow-orange-500/25 active:scale-[0.98] transition-all flex items-center gap-2 justify-center`}>
+                                                                    className={`col-span-2 py-1.5 px-2.5 bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-lg font-bold text-xs shadow-sm hover:from-orange-600 hover:to-orange-700 active:scale-[0.98] transition-all flex items-center gap-1.5 justify-center`}>
                                                                     Chuyển → {hasRequestedParts ? 'Tìm linh kiện' : targetStatus.label}
                                                                 </button>
                                                             );
@@ -997,7 +997,7 @@ export default function TechnicianPage() {
                                                             return allowedNextStatuses.map((nextCfg) => {
                                                                 return (
                                                                     <button key={nextCfg.id} onClick={(e) => { e.stopPropagation(); handleStatusChange(ticket.id, nextCfg.id); }}
-                                                                        className={`col-span-2 min-h-12 w-full py-3 text-white rounded-xl font-bold text-base shadow-md active:scale-[0.98] transition-all flex items-center gap-2 justify-center ${nextCfg.id === 'refund' ? 'bg-red-500 hover:bg-red-600' : nextCfg.id === 'out' ? 'bg-gray-700 hover:bg-gray-800' : 'bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700'}`}>
+                                                                        className={`col-span-2 py-1.5 px-2.5 text-white rounded-lg font-bold text-xs shadow-sm active:scale-[0.98] transition-all flex items-center gap-1.5 justify-center ${nextCfg.id === 'refund' ? 'bg-red-500 hover:bg-red-600' : nextCfg.id === 'out' ? 'bg-gray-700 hover:bg-gray-800' : 'bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700'}`}>
                                                                         Chuyển → {nextCfg.label}
                                                                     </button>
                                                                 );
