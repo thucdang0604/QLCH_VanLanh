@@ -4,8 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 import type React from 'react';
 import dynamic from 'next/dynamic';
 import Image from 'next/image';
-import { doc, getDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
-import { Image as ImageIcon, Loader2, RefreshCw, Save, Settings, Star, Upload, Video, Wand2, X, Link as LinkIcon } from 'lucide-react';
+import { deleteField, doc, getDoc, serverTimestamp, setDoc, Timestamp, updateDoc } from 'firebase/firestore';
+import { Clock, Image as ImageIcon, Loader2, RefreshCw, Save, Settings, Star, Upload, Video, Wand2, X } from 'lucide-react';
 import Modal from '@/components/admin/Modal';
 import MediaManager from '@/components/admin/MediaManager';
 import { db, getAuthInstance, getStorageInstance } from '@/lib/firebase';
@@ -58,6 +58,26 @@ const quillFormats = [
     'color', 'background', 'list', 'align',
     'blockquote', 'code-block', 'link', 'image', 'video',
 ];
+
+function formatDateTimeLocal(d: unknown): string {
+    if (!d) return '';
+    let date: Date | null = null;
+    if (typeof d === 'object' && d !== null && 'seconds' in d) {
+        date = new Date((d as { seconds: number }).seconds * 1000);
+    } else if (d instanceof Date) {
+        date = d;
+    } else if (typeof d === 'string' || typeof d === 'number') {
+        date = new Date(d);
+    }
+    if (!date || isNaN(date.getTime())) return '';
+
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
 
 function buildArticleMediaDocumentId(name: string) {
     const slug = generateSlug(name).slice(0, 70) || 'media';
@@ -323,6 +343,7 @@ export default function ArticleEditorModal({ article, onClose }: ArticleEditorMo
         thumbnail: article?.thumbnail || '',
         videoEmbedUrl: article?.videoEmbedUrl || '',
         tags: article?.tags?.join(', ') || '',
+        scheduledAt: formatDateTimeLocal(article?.scheduledAt),
     });
     const [saving, setSaving] = useState(false);
     const [uploading, setUploading] = useState(false);
@@ -351,7 +372,7 @@ export default function ArticleEditorModal({ article, onClose }: ArticleEditorMo
 
     // --- AUTO-PILOT STATES & DYNAMIC AI ENGINE CONFIG ---
     const [autoPilotTopic, setAutoPilotTopic] = useState('');
-    const [autoPilotState, setAutoPilotState] = useState<'idle' | 'meta' | 'content' | 'refine' | 'images' | 'done'>('idle');
+    const [autoPilotState, setAutoPilotState] = useState<'idle' | 'meta' | 'content' | 'refine' | 'images' | 'links' | 'done'>('idle');
     const [autoPilotLogs, setAutoPilotLogs] = useState<string[]>([]);
 
     const [providerMode, setProviderMode] = useState<AiProviderMode>('ollama');
@@ -438,244 +459,349 @@ export default function ArticleEditorModal({ article, onClose }: ArticleEditorMo
         });
     };
 
-    const runAutoPilot = async () => {
-        if (!autoPilotTopic.trim()) {
-            toastError("Vui lòng nhập chủ đề Auto-Pilot!");
-            return;
+    const runImageGenerationStep = async (inputHtml?: string) => {
+        const contentStr = inputHtml || formData.content;
+        if (!contentStr) {
+            toastError("Chưa có nội dung bài viết để tạo ảnh!");
+            return contentStr;
         }
 
+        setAutoPilotState('images');
+        setAutoPilotLogs(prev => [...prev, `Bước 4: Quét vị trí ảnh & dịch prompt (Model Prompt: ${taskModels.imagePrompt})...`]);
+
+        // Fetch Store Config for Watermark Logo & Site Name
+        let storeLogoUrl: string | undefined;
+        let storeName = 'Văn Lành Service';
+        try {
+            const cfgSnap = await getDoc(doc(db, 'system_config', 'settings'));
+            if (cfgSnap.exists()) {
+                const d = cfgSnap.data();
+                if (d.logoUrl) storeLogoUrl = String(d.logoUrl).trim();
+                if (d.siteName) storeName = String(d.siteName).trim();
+            }
+        } catch (cfgErr) {
+            console.warn('Could not fetch store config for watermark:', cfgErr);
+        }
+
+        const imgRegex = /\[(?:IMAGE_PROMPT|CHÈN\s+(?:HÌNH\s*)?[ẢÁA]NH):\s*(.*?)\]/gi;
+        let match;
+        const placeholders: { fullMatch: string; promptText: string }[] = [];
+        while ((match = imgRegex.exec(contentStr)) !== null) {
+            if (match[1]?.trim()) {
+                placeholders.push({
+                    fullMatch: match[0],
+                    promptText: match[1].trim(),
+                });
+            }
+        }
+
+        let tempContent = contentStr;
+
+        if (placeholders.length === 0) {
+            setAutoPilotLogs(prev => [...prev, "Khoan, AI không chèn cái ảnh nào cả."]);
+        } else {
+            setAutoPilotLogs(prev => [...prev, `Tìm thấy ${placeholders.length} vị trí ảnh. Đang nhờ hoạ sĩ AI vẽ & gắn Watermark logo cửa hàng...`]);
+            for (let i = 0; i < placeholders.length; i++) {
+                if (i > 0) {
+                    setAutoPilotLogs(prev => [...prev, `⏱️ Nghỉ 2.5s giãn cách rate limit (QPS) Gemini...`]);
+                    await new Promise(r => setTimeout(r, 2500));
+                }
+
+                const { fullMatch, promptText: ph } = placeholders[i];
+                setAutoPilotLogs(prev => [...prev, `⏳ Đang vẽ & đóng dấu logo ảnh ${i + 1}/${placeholders.length}: ${ph.substring(0, 30)}...`]);
+
+                try {
+                    const imgRes = await callAiApi({
+                        action: 'generate-image',
+                        payload: {
+                            prompt: ph,
+                            model: 'gptimage',
+                            modelName: taskModels.imagePrompt,
+                            textModel: taskModels.writer || taskModels.meta || 'ag/gemini-3.6-flash-high'
+                        }
+                    });
+
+                    if (!imgRes.ok) {
+                        let errText = `Lỗi (${imgRes.status})`;
+                        try {
+                            const errJson = await imgRes.json();
+                            errText = errJson.error || errText;
+                        } catch { /* skip */ }
+                        throw new Error(errText);
+                    }
+                    const blob = await imgRes.blob();
+
+                    // Apply Store Watermark (Logo image or store name badge fallback)
+                    const optimizeResponse = await optimizeImage(
+                        new File([blob], `ai_${Date.now()}.webp`, { type: 'image/webp' }),
+                        1200,
+                        800,
+                        0.8,
+                        { logoUrl: storeLogoUrl, storeName }
+                    );
+                    const optimized = optimizeResponse.file;
+                    const storagePath = `media/${Date.now()}_ai_img_${i}.webp`;
+                    const storage = await getStorageInstance();
+                    const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
+                    const storageRef = ref(storage, storagePath);
+
+                    await uploadBytes(storageRef, await optimized.arrayBuffer(), { contentType: 'image/webp' });
+                    const finalUrl = await getDownloadURL(storageRef);
+
+                    await setDoc(doc(db, 'media_library', buildArticleMediaDocumentId(`ai-img-${i + 1}-${ph}`)), {
+                        url: finalUrl,
+                        path: storagePath,
+                        name: `AI Generated Article Image ${i + 1}`,
+                        type: 'image/webp',
+                        size: optimized.size,
+                        width: optimizeResponse.width,
+                        height: optimizeResponse.height,
+                        createdAt: serverTimestamp(),
+                    });
+
+                    const imgHtml = `<figure><img src="${finalUrl}" alt="${ph}" /> <figcaption class="text-center italic text-sm text-gray-500 mt-2">${ph}</figcaption></figure><br/>`;
+                    tempContent = tempContent.replace(fullMatch, imgHtml);
+
+                    // Auto-set Article Thumbnail from the first AI image generated
+                    setFormData(prev => {
+                        const updated = { ...prev, content: tempContent };
+                        if (!updated.thumbnail) {
+                            updated.thumbnail = finalUrl;
+                        }
+                        return updated;
+                    });
+
+                    setAutoPilotLogs(prev => [...prev, `✓ Đã tạo thành công & gắn Watermark logo cho ảnh số ${i + 1}!`]);
+                    if (i === 0) {
+                        setAutoPilotLogs(prev => [...prev, `🖼️ Tự động gán ảnh AI này làm Ảnh Thumbnail cho bài viết!`]);
+                    }
+
+                } catch (e) {
+                    console.error(e);
+                    const errMsg = e instanceof Error ? e.message : String(e);
+                    setAutoPilotLogs(prev => [...prev, `⚠️ Lỗi ảnh ${i + 1} (${ph.substring(0, 20)}...): ${errMsg}`]);
+                }
+            }
+        }
+        setAutoPilotState('idle');
+        return tempContent;
+    };
+
+    const runAutoPilot = async (resumeFromStep?: 'refine' | 'images' | 'links') => {
         // Save active config before running
         updateAndSaveAiConfig(providerMode, cloudApiKey, cloudBaseUrl, taskModels);
 
-        setAutoPilotLogs(["Khởi động Auto-Pilot..."]);
-        setAutoPilotState('meta');
+        let effectiveStep = resumeFromStep;
+        // Intelligent State Detection: If draft content already exists in form state, detect where we left off!
+        if (!effectiveStep && formData.content && formData.content.trim().length > 100 && !autoPilotTopic.trim()) {
+            const hasPlaceholders = /\[(?:IMAGE_PROMPT|CHÈN\s+(?:HÌNH\s*)?[ẢÁA]NH):\s*(.*?)\]/i.test(formData.content);
+            if (hasPlaceholders) {
+                effectiveStep = 'images';
+                setAutoPilotLogs(["🔍 Tự động phát hiện bài viết nháp hiện tại còn thẻ ảnh. Tự động nối tiếp Bước 4 (Vẽ ảnh) & Bước 5 (Ghép link)..."]);
+            } else {
+                effectiveStep = 'refine';
+                setAutoPilotLogs(["🔍 Tự động phát hiện bài viết nháp hiện tại. Tự động nối tiếp Bước 3 (Sửa SEO), Bước 4 & Bước 5..."]);
+            }
+        } else if (!effectiveStep && !autoPilotTopic.trim()) {
+            toastError("Vui lòng nhập chủ đề Auto-Pilot!");
+            return;
+        } else if (!effectiveStep) {
+            setAutoPilotLogs(["Khởi động Auto-Pilot..."]);
+        } else {
+            setAutoPilotLogs(prev => [...prev, `▶️ Tự động nối tiếp Auto-Pilot từ Bước ${effectiveStep === 'refine' ? '3 (Sửa SEO ➔ Vẽ ảnh ➔ Ghép link)' : effectiveStep === 'images' ? '4 (Vẽ ảnh ➔ Ghép link)' : '5 (Ghép link nội bộ)'}...`]);
+        }
+
+        setAutoPilotState(effectiveStep || 'meta');
 
         try {
-            // STEP 0: CONNECTION CHECK
-            setAutoPilotLogs(prev => [...prev, `Bước 0: Kiểm tra kết nối AI API (${providerMode === 'cloud9router' ? '9router Cloud' : 'Ollama Local'})...`]);
-            const connRes = await callAiApi({
-                action: 'check-connection',
-                payload: {}
-            });
-            const connData = await connRes.json();
-            if (!connRes.ok || !connData.ok) {
-                throw new Error(connData.error || "Kết nối API thất bại.");
-            }
-            setAutoPilotLogs(prev => [...prev, "✓ Kết nối AI Engine ổn định!"]);
+            let newTitle = formData.title || autoPilotTopic;
+            let newDesc = formData.excerpt || '';
+            let newTags = formData.tags || '';
+            let contentStr = formData.content || '';
 
-            // STEP 1: META GENERATION
-            setAutoPilotLogs(prev => [...prev, `Bước 1: Phân tích SEO & Viết Tiêu đề, Tags, Mô tả (Model: ${taskModels.meta})...`]);
-            const metaRes = await callAiApi({
-                action: 'seo-suggest',
-                payload: {
-                    content: autoPilotTopic,
-                    model: taskModels.meta
-                }
-            });
-            if (!metaRes.ok) throw new Error("Lỗi API seo-suggest");
-            const metaReader = metaRes.body?.getReader();
-            const metaDecoder = new TextDecoder();
-            let metaAccumulated = '';
-            while (true) {
-                const { done, value } = (await metaReader?.read()) || { done: true, value: undefined };
-                if (done) break;
-                metaAccumulated += metaDecoder.decode(value, { stream: true });
-            }
-            // Parse Meta
-            const titleMatch = metaAccumulated.match(/\[TITLE\]([\s\S]*?)(?:\[\/TITLE\]|$)/);
-            const descMatch = metaAccumulated.match(/\[DESC\]([\s\S]*?)(?:\[\/DESC\]|$)/);
-            const tagsMatch = metaAccumulated.match(/\[TAGS\]([\s\S]*?)(?:\[\/TAGS\]|$)/);
-
-            const newTitle = titleMatch ? titleMatch[1].trim() : autoPilotTopic;
-            const newDesc = descMatch ? descMatch[1].trim() : '';
-            const newTags = tagsMatch ? tagsMatch[1].trim() : '';
-
-            setFormData(prev => ({
-                ...prev,
-                title: newTitle,
-                excerpt: newDesc,
-                tags: newTags
-            }));
-
-            setAutoPilotLogs(prev => [...prev, "✓ Đã tạo xong Tiêu đề, Tags và Mô tả ngắn!"]);
-
-            // STEP 2: CONTENT GENERATION
-            setAutoPilotState('content');
-            setAutoPilotLogs(prev => [...prev, `Bước 2: Viết nội dung chuẩn SEO EEAT (Model: ${taskModels.writer})...`]);
-
-            const contentRes = await callAiApi({
-                action: 'content-suggest',
-                payload: {
-                    title: newTitle,
-                    excerpt: newDesc,
-                    tags: newTags,
-                    content: autoPilotTopic,
-                    model: taskModels.writer
-                }
-            });
-            if (!contentRes.ok) throw new Error("Lỗi API content-suggest");
-            const contentReader = contentRes.body?.getReader();
-            const contentDecoder = new TextDecoder();
-            let contentStr = '';
-            while (true) {
-                const { done, value } = (await contentReader?.read()) || { done: true, value: undefined };
-                if (done) break;
-                contentStr += contentDecoder.decode(value, { stream: true });
-            }
-
-            setFormData(prev => ({
-                ...prev,
-                content: contentStr
-            }));
-            setAutoPilotLogs(prev => [...prev, "✓ Đã viết xong bản nháp đầu tiên!"]);
-
-            // STEP 3: AUTO-REFINE LOOP (Check → Fix → Re-check)
-            setAutoPilotState('refine');
-            setAutoPilotLogs(prev => [...prev, `Bước 3: 🔄 Tự động kiểm tra & sửa SEO (Model Chấm/Sửa: ${taskModels.refiner})...`]);
-
-            const refineRes = await callAiApi({
-                action: 'auto-refine',
-                payload: {
-                    title: newTitle,
-                    excerpt: newDesc,
-                    tags: newTags,
-                    content: contentStr,
-                    targetScore: 85,
-                    maxRounds: 3,
-                    model: taskModels.refiner
-                }
-            });
-            if (!refineRes.ok) throw new Error("Lỗi API auto-refine");
-
-            // Parse JSON-line stream from auto-refine
-            const refineReader = refineRes.body?.getReader();
-            const refineDecoder = new TextDecoder();
-            let refineBuffer = '';
-            let refinedContent = contentStr; // fallback to original if refine fails
-
-            while (true) {
-                const { done, value } = (await refineReader?.read()) || { done: true, value: undefined };
-                if (done) break;
-                refineBuffer += refineDecoder.decode(value, { stream: true });
-
-                const lines = refineBuffer.split('\n');
-                refineBuffer = lines.pop() || '';
-
-                for (const line of lines) {
-                    if (!line.trim()) continue;
-                    try {
-                        const data = JSON.parse(line);
-                        if (data.type === 'log') {
-                            setAutoPilotLogs(prev => [...prev, data.message]);
-                        } else if (data.type === 'result') {
-                            refinedContent = data.content;
-                            setAutoPilotLogs(prev => [...prev, `🏆 Kết quả: Điểm SEO cuối cùng = ${data.finalScore}/100 (sau ${data.rounds} vòng)`]);
-                        }
-                    } catch { /* skip */ }
-                }
-            }
-            if (refineBuffer.trim()) {
+            // STEP 0 - 2: Only run if NOT resuming from Step 3/4/5
+            if (!effectiveStep) {
+                // STEP 0: CONNECTION CHECK
+                setAutoPilotLogs(prev => [...prev, `Bước 0: Kiểm tra kết nối AI API (${providerMode === 'cloud9router' ? '9router Cloud' : 'Ollama Local'})...`]);
                 try {
-                    const data = JSON.parse(refineBuffer);
-                    if (data.type === 'log') {
-                        setAutoPilotLogs(prev => [...prev, data.message]);
-                    } else if (data.type === 'result') {
-                        refinedContent = data.content;
-                        setAutoPilotLogs(prev => [...prev, `🏆 Kết quả: Điểm SEO cuối cùng = ${data.finalScore}/100 (sau ${data.rounds} vòng)`]);
+                    const connRes = await callAiApi({
+                        action: 'check-connection',
+                        payload: {}
+                    });
+                    const connData = await connRes.json();
+                    if (!connRes.ok || !connData.ok) {
+                        throw new Error(connData.error || "Kết nối API thất bại.");
                     }
-                } catch { /* skip */ }
-            }
+                    setAutoPilotLogs(prev => [...prev, "✓ Kết nối AI Engine ổn định!"]);
+                } catch (connErr) {
+                    setAutoPilotLogs(prev => [...prev, `⚠️ Cảnh báo kết nối: ${(connErr as Error).message}. Đang thử tiếp tục...`]);
+                }
 
-            contentStr = refinedContent;
-            setFormData(prev => ({
-                ...prev,
-                content: refinedContent
-            }));
-            setAutoPilotLogs(prev => [...prev, "✓ Bài viết đã được tối ưu SEO tự động!"]);
-
-            // STEP 4: IMAGE GENERATION
-            setAutoPilotState('images');
-            setAutoPilotLogs(prev => [...prev, `Bước 4: Quét vị trí ảnh & dịch prompt (Model Prompt: ${taskModels.imagePrompt})...`]);
-
-            const imgRegex = /\[CHÈN HÌNH ẢNH: (.*?)\]/g;
-            let match;
-            const placeholders = [];
-            while ((match = imgRegex.exec(contentStr)) !== null) {
-                placeholders.push(match[1]);
-            }
-
-            let tempContent = contentStr;
-
-            if (placeholders.length === 0) {
-                setAutoPilotLogs(prev => [...prev, "Khoan, AI không chèn cái ảnh nào cả."]);
-            } else {
-                setAutoPilotLogs(prev => [...prev, `Tìm thấy ${placeholders.length} vị trí ảnh. Đang nhờ hoạ sĩ AI vẽ...`]);
-                for (let i = 0; i < placeholders.length; i++) {
-                    if (i > 0) {
-                        setAutoPilotLogs(prev => [...prev, `⏱️ Nghỉ 2.5s giãn cách rate limit (QPS) Gemini...`]);
-                        await new Promise(r => setTimeout(r, 2500));
-                    }
-
-                    const ph = placeholders[i];
-                    setAutoPilotLogs(prev => [...prev, `⏳ Đang vẽ ảnh ${i + 1}/${placeholders.length}: ${ph.substring(0, 30)}...`]);
-
-
-                    try {
-                        const imgRes = await callAiApi({
-                            action: 'generate-image',
-                            payload: {
-                                prompt: ph,
-                                model: 'gptimage',
-                                modelName: taskModels.imagePrompt,
-                                textModel: taskModels.writer || taskModels.meta || 'ag/gemini-3.6-flash-high'
-                            }
-                        });
-
-                        if (!imgRes.ok) {
-                            let errText = `Lỗi (${imgRes.status})`;
-                            try {
-                                const errJson = await imgRes.json();
-                                errText = errJson.error || errText;
-                            } catch { /* skip */ }
-                            throw new Error(errText);
+                // STEP 1: META GENERATION
+                setAutoPilotLogs(prev => [...prev, `Bước 1: Phân tích SEO & Viết Tiêu đề, Tags, Mô tả (Model: ${taskModels.meta})...`]);
+                try {
+                    const metaRes = await callAiApi({
+                        action: 'seo-suggest',
+                        payload: {
+                            content: autoPilotTopic,
+                            model: taskModels.meta
                         }
-                        const blob = await imgRes.blob();
+                    });
+                    if (metaRes.ok) {
+                        const metaReader = metaRes.body?.getReader();
+                        const metaDecoder = new TextDecoder();
+                        let metaAccumulated = '';
+                        while (true) {
+                            const { done, value } = (await metaReader?.read()) || { done: true, value: undefined };
+                            if (done) break;
+                            metaAccumulated += metaDecoder.decode(value, { stream: true });
+                        }
+                        // Parse Meta
+                        const titleMatch = metaAccumulated.match(/\[TITLE\]([\s\S]*?)(?:\[\/TITLE\]|$)/);
+                        const descMatch = metaAccumulated.match(/\[DESC\]([\s\S]*?)(?:\[\/DESC\]|$)/);
+                        const tagsMatch = metaAccumulated.match(/\[TAGS\]([\s\S]*?)(?:\[\/TAGS\]|$)/);
 
-                        const optimizeResponse = await optimizeImage(new File([blob], `ai_${Date.now()}.webp`, { type: 'image/webp' }), 1200, 800, 0.8);
-                        const optimized = optimizeResponse.file;
-                        const storagePath = `media/${Date.now()}_ai_img_${i}.webp`;
-                        const storage = await getStorageInstance();
-                        const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
-                        const storageRef = ref(storage, storagePath);
+                        newTitle = titleMatch ? titleMatch[1].trim() : autoPilotTopic;
+                        newDesc = descMatch ? descMatch[1].trim() : '';
+                        newTags = tagsMatch ? tagsMatch[1].trim() : '';
 
-                        await uploadBytes(storageRef, await optimized.arrayBuffer(), { contentType: 'image/webp' });
-                        const finalUrl = await getDownloadURL(storageRef);
+                        setFormData(prev => ({
+                            ...prev,
+                            title: newTitle,
+                            excerpt: newDesc,
+                            tags: newTags
+                        }));
 
-                        await setDoc(doc(db, 'media_library', buildArticleMediaDocumentId(`ai-img-${i + 1}-${ph}`)), {
-                            url: finalUrl,
-                            path: storagePath,
-                            name: `AI Generated Article Image ${i + 1}`,
-                            type: 'image/webp',
-                            size: optimized.size,
-                            width: optimizeResponse.width,
-                            height: optimizeResponse.height,
-                            createdAt: serverTimestamp(),
-                        });
-
-                        const imgHtml = `<figure><img src="${finalUrl}" alt="${ph}" /> <figcaption class="text-center italic text-sm text-gray-500 mt-2">${ph}</figcaption></figure><br/>`;
-                        tempContent = tempContent.replace(`[CHÈN HÌNH ẢNH: ${ph}]`, imgHtml);
-                        setFormData(prev => ({ ...prev, content: tempContent }));
-                        setAutoPilotLogs(prev => [...prev, `✓ Đã tạo thành công ảnh số ${i + 1}!`]);
-
-                    } catch (e) {
-                        console.error(e);
-                        const errMsg = e instanceof Error ? e.message : String(e);
-                        setAutoPilotLogs(prev => [...prev, `⚠️ Lỗi ảnh ${i + 1} (${ph.substring(0, 20)}...): ${errMsg}`]);
+                        setAutoPilotLogs(prev => [...prev, "✓ Đã tạo xong Tiêu đề, Tags và Mô tả ngắn!"]);
+                    } else {
+                        setAutoPilotLogs(prev => [...prev, "⚠️ Không tạo được Meta tự động, dùng tên chủ đề làm tiêu đề."]);
                     }
+                } catch (metaErr) {
+                    console.warn('Meta generation step skipped:', metaErr);
+                    setAutoPilotLogs(prev => [...prev, "⚠️ Bước 1 gặp sự cố, tự động bỏ qua để chuyển sang Bước 2 viết bài."]);
+                }
+
+                // STEP 2: CONTENT GENERATION
+                setAutoPilotState('content');
+                setAutoPilotLogs(prev => [...prev, `Bước 2: Viết nội dung chuẩn SEO EEAT (Model: ${taskModels.writer})...`]);
+
+                const contentRes = await callAiApi({
+                    action: 'content-suggest',
+                    payload: {
+                        title: newTitle,
+                        excerpt: newDesc,
+                        tags: newTags,
+                        content: autoPilotTopic,
+                        model: taskModels.writer
+                    }
+                });
+                if (!contentRes.ok) throw new Error("Lỗi kết nối AI khi viết bài ở Bước 2.");
+                const contentReader = contentRes.body?.getReader();
+                const contentDecoder = new TextDecoder();
+                contentStr = '';
+                while (true) {
+                    const { done, value } = (await contentReader?.read()) || { done: true, value: undefined };
+                    if (done) break;
+                    contentStr += contentDecoder.decode(value, { stream: true });
+                }
+
+                setFormData(prev => ({
+                    ...prev,
+                    content: contentStr
+                }));
+                setAutoPilotLogs(prev => [...prev, "✓ Đã viết xong bản nháp đầu tiên!"]);
+            }
+
+            // STEP 3: AUTO-REFINE LOOP (Only if full run or effectiveStep === 'refine')
+            if (!effectiveStep || effectiveStep === 'refine') {
+                setAutoPilotState('refine');
+                setAutoPilotLogs(prev => [...prev, `Bước 3: 🔄 Tự động kiểm tra & sửa SEO (Model Chấm/Sửa: ${taskModels.refiner})...`]);
+
+                try {
+                    const refineRes = await callAiApi({
+                        action: 'auto-refine',
+                        payload: {
+                            title: newTitle,
+                            excerpt: newDesc,
+                            tags: newTags,
+                            content: contentStr,
+                            targetScore: 85,
+                            maxRounds: 2,
+                            model: taskModels.refiner
+                        }
+                    });
+
+                    if (!refineRes.ok) {
+                        let errDetail = '';
+                        try {
+                            const errJson = await refineRes.json();
+                            errDetail = errJson.error || '';
+                        } catch { /* skip */ }
+                        setAutoPilotLogs(prev => [...prev, `⚠️ Bước 3 gián đoạn kết nối (${refineRes.status}${errDetail ? `: ${errDetail}` : ''}). Tự động giữ bài viết ở Bước 2 và TỰ ĐỘNG CHUYỂN SANG BƯỚC 4 (VẼ ẢNH)...`]);
+                    } else {
+                        const refineReader = refineRes.body?.getReader();
+                        const refineDecoder = new TextDecoder();
+                        let refineBuffer = '';
+                        let refinedContent = contentStr;
+
+                        while (true) {
+                            const { done, value } = (await refineReader?.read()) || { done: true, value: undefined };
+                            if (done) break;
+                            refineBuffer += refineDecoder.decode(value, { stream: true });
+
+                            const lines = refineBuffer.split('\n');
+                            refineBuffer = lines.pop() || '';
+
+                            for (const line of lines) {
+                                if (!line.trim()) continue;
+                                try {
+                                    const data = JSON.parse(line);
+                                    if (data.type === 'log') {
+                                        setAutoPilotLogs(prev => [...prev, data.message]);
+                                    } else if (data.type === 'result') {
+                                        refinedContent = data.content;
+                                        setAutoPilotLogs(prev => [...prev, `🏆 Kết quả: Điểm SEO cuối cùng = ${data.finalScore}/100 (sau ${data.rounds} vòng)`]);
+                                    }
+                                } catch { /* skip */ }
+                            }
+                        }
+                        if (refineBuffer.trim()) {
+                            try {
+                                const data = JSON.parse(refineBuffer);
+                                if (data.type === 'log') {
+                                    setAutoPilotLogs(prev => [...prev, data.message]);
+                                } else if (data.type === 'result') {
+                                    refinedContent = data.content;
+                                    setAutoPilotLogs(prev => [...prev, `🏆 Kết quả: Điểm SEO cuối cùng = ${data.finalScore}/100 (sau ${data.rounds} vòng)`]);
+                                }
+                            } catch { /* skip */ }
+                        }
+
+                        contentStr = refinedContent;
+                        setFormData(prev => ({
+                            ...prev,
+                            content: refinedContent
+                        }));
+                        setAutoPilotLogs(prev => [...prev, "✓ Bài viết đã được tối ưu SEO tự động!"]);
+                    }
+                } catch (refineErr) {
+                    console.warn('Auto refine step skipped:', refineErr);
+                    setAutoPilotLogs(prev => [...prev, "⚠️ Bước 3 bị quá thời gian Tunnel (Timeout). Tự động giữ bài viết ở Bước 2 và TỰ ĐỘNG CHUYỂN SANG BƯỚC 4 (VẼ ẢNH)..."]);
                 }
             }
 
-            // STEP 5: AUTOMATIC INTERNAL LINK RESOLVER
+            // STEP 4: IMAGE GENERATION (Only if full run, 'refine', or 'images')
+            let tempContent = contentStr;
+            if (!effectiveStep || effectiveStep === 'refine' || effectiveStep === 'images') {
+                try {
+                    tempContent = await runImageGenerationStep(contentStr);
+                } catch (imgErr) {
+                    console.warn('Image step error:', imgErr);
+                    setAutoPilotLogs(prev => [...prev, `⚠️ Bước 4 gặp sự cố ảnh. Tự động chuyển tiếp sang Bước 5 (Ghép link)...`]);
+                }
+            }
+
+            // STEP 5: AUTOMATIC INTERNAL LINK RESOLVER (Always runs to finish)
             setAutoPilotLogs(prev => [...prev, "Bước 5: Quét & tự động ghép Link Nội Bộ từ dữ liệu web..."]);
             try {
                 const { updatedHtml, resolvedCount, logs: linkLogs } = await resolveInternalLinkPlaceholdersInHtml(tempContent);
@@ -691,14 +817,26 @@ export default function ArticleEditorModal({ article, onClose }: ArticleEditorMo
                 console.warn('Internal link resolution error:', linkErr);
             }
 
-            setAutoPilotLogs(prev => [...prev, "🎉 XONG! Bài viết đã hoàn thiện, tối ưu SEO, vẽ ảnh & ghép link nội bộ!"]);
+            // Fallback: If thumbnail is still empty, scan HTML content and select first image as thumbnail
+            setFormData(prev => {
+                if (!prev.thumbnail && tempContent) {
+                    const imgMatch = tempContent.match(/<img[^>]+src=["']([^"']+)["']/i);
+                    if (imgMatch && imgMatch[1]) {
+                        setAutoPilotLogs(l => [...l, `🖼️ Tự động gán ảnh từ bài viết làm Thumbnail!`]);
+                        return { ...prev, thumbnail: imgMatch[1] };
+                    }
+                }
+                return prev;
+            });
+
+            setAutoPilotLogs(prev => [...prev, "🎉 XONG! Bài viết đã hoàn thiện 100% tự động!"]);
             setAutoPilotState('done');
 
         } catch (error) {
             console.error(error);
             const errorMessage = error instanceof Error ? error.message : String(error);
             setAutoPilotLogs(prev => [...prev, `❌ Lỗi: ${errorMessage}`]);
-            setAutoPilotState('idle');
+            setAutoPilotState('done');
         }
     };
 
@@ -908,6 +1046,19 @@ export default function ArticleEditorModal({ article, onClose }: ArticleEditorMo
             toastError('Vui lòng nhập tiêu đề!');
             return;
         }
+
+        if (formData.status === 'scheduled') {
+            if (!formData.scheduledAt) {
+                toastError('Vui lòng chọn ngày giờ đăng bài!');
+                return;
+            }
+            const scheduledDate = new Date(formData.scheduledAt);
+            if (isNaN(scheduledDate.getTime())) {
+                toastError('Ngày giờ đăng bài không hợp lệ!');
+                return;
+            }
+        }
+
         setSaving(true);
         try {
             const processedContent = await processBase64Images(formData.content);
@@ -924,18 +1075,40 @@ export default function ArticleEditorModal({ article, onClose }: ArticleEditorMo
                 updatedAt: serverTimestamp(),
             };
 
-            if (article) {
-                if (formData.status === 'published' && article.status !== 'published') {
+            if (formData.status === 'scheduled') {
+                const scheduledDate = new Date(formData.scheduledAt);
+                if (scheduledDate.getTime() <= Date.now()) {
+                    payload.status = 'published';
+                    if (!article || article.status !== 'published') {
+                        payload.publishedAt = serverTimestamp();
+                    }
+                    payload.scheduledAt = deleteField();
+                    toastInfo('Thời gian hẹn đã qua, bài viết đã được đăng ngay!');
+                } else {
+                    payload.scheduledAt = Timestamp.fromDate(scheduledDate);
+                }
+            } else if (formData.status === 'published') {
+                if (!article || article.status !== 'published') {
                     payload.publishedAt = serverTimestamp();
                 }
+                payload.scheduledAt = deleteField();
+            } else {
+                payload.scheduledAt = deleteField();
+            }
+
+            if (article) {
                 await updateDoc(doc(db, 'articles', article.id), payload);
                 await triggerRevalidate(['/', `/tin-tuc/${article.id}`, '/tin-tuc', '/sitemap.xml'], ['articles']);
             } else {
                 payload.views = 0;
                 payload.createdAt = serverTimestamp();
-                if (formData.status === 'published') {
-                    payload.publishedAt = serverTimestamp();
-                }
+
+                // Clean up deleteField() sentinels when creating a new document with setDoc()
+                Object.keys(payload).forEach(key => {
+                    if (payload[key] === deleteField()) {
+                        delete payload[key];
+                    }
+                });
 
                 const baseSlug = generateSlug(payload.title as string);
                 const checkRef = await getDoc(doc(db, 'articles', baseSlug));
@@ -1259,27 +1432,14 @@ export default function ArticleEditorModal({ article, onClose }: ArticleEditorMo
                                 </div>
                                 <button
                                     type="button"
-                                    onClick={runAutoPilot}
+                                    onClick={() => runAutoPilot()}
                                     disabled={autoPilotState !== 'idle' && autoPilotState !== 'done'}
-                                    className="h-9 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg transition-transform flex items-center justify-center gap-1.5 text-xs shrink-0 disabled:opacity-50"
+                                    className="h-9 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg transition-transform flex items-center justify-center gap-1.5 text-xs shrink-0 disabled:opacity-50 shadow-sm"
                                 >
                                     {autoPilotState !== 'idle' && autoPilotState !== 'done' ? (
-                                        <><Loader2 size={14} className="animate-spin" /> Đang chạy...</>
+                                        <><Loader2 size={14} className="animate-spin" /> Đang chạy Auto-Pilot...</>
                                     ) : (
-                                        <><Wand2 size={14} /> Auto-Pilot</>
-                                    )}
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={handleAutoLinkInternal}
-                                    disabled={isLinkingInternal || (autoPilotState !== 'idle' && autoPilotState !== 'done')}
-                                    title="Quét dữ liệu website & tự động khớp link nội bộ"
-                                    className="h-9 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg transition-transform flex items-center justify-center gap-1.5 text-xs shrink-0 disabled:opacity-50"
-                                >
-                                    {isLinkingInternal ? (
-                                        <><Loader2 size={14} className="animate-spin" /> Đang quét...</>
-                                    ) : (
-                                        <><LinkIcon size={14} /> Ghép Link Nội Bộ</>
+                                        <><Wand2 size={14} /> Auto-Pilot 1-Touch</>
                                     )}
                                 </button>
                             </div>
@@ -1460,9 +1620,28 @@ export default function ArticleEditorModal({ article, onClose }: ArticleEditorMo
                                 >
                                     <option value="draft">Bản nháp</option>
                                     <option value="published">Đăng ngay</option>
+                                    <option value="scheduled">Hẹn giờ đăng bài</option>
                                 </select>
                             </div>
                         </div>
+
+                        {formData.status === 'scheduled' && (
+                            <div className="bg-amber-50/60 border border-amber-200 p-3 rounded-lg space-y-1">
+                                <label className="block text-xs font-semibold text-amber-800 flex items-center gap-1">
+                                    <Clock size={13} className="text-amber-600" />
+                                    Ngày giờ đăng bài tự động
+                                </label>
+                                <input
+                                    type="datetime-local"
+                                    title="Chọn ngày giờ hẹn đăng"
+                                    value={formData.scheduledAt}
+                                    onChange={(e) => setFormData({ ...formData, scheduledAt: e.target.value })}
+                                    className="w-full h-9 px-3 text-xs border border-amber-300 bg-white rounded-lg focus:border-amber-500 focus:outline-none text-gray-800"
+                                    min={formatDateTimeLocal(new Date())}
+                                />
+                                <p className="text-[11px] text-amber-700">Bài viết sẽ tự động hiển thị công khai khi đến thời điểm này.</p>
+                            </div>
+                        )}
 
                         {/* Video Embed URL */}
                         <div>
@@ -1534,7 +1713,7 @@ export default function ArticleEditorModal({ article, onClose }: ArticleEditorMo
                         className="flex-1 py-3 bg-orange-500 text-white rounded-lg font-medium hover:bg-orange-600 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                     >
                         {saving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
-                        {article ? 'Cập nhật' : 'Đăng bài'}
+                        {article ? 'Cập nhật' : formData.status === 'scheduled' ? 'Lên lịch đăng' : 'Đăng bài'}
                     </button>
                 </div>
             </div>

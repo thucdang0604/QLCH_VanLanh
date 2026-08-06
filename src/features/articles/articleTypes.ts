@@ -13,6 +13,7 @@ export interface Article {
     tags?: string[];
     createdAt: unknown;
     publishedAt?: unknown;
+    scheduledAt?: unknown;
     updatedAt?: unknown;
 }
 
