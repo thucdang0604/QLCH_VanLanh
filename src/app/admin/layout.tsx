@@ -282,15 +282,15 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                 )}
 
                 <aside
-                    className="hidden lg:block lg:sticky top-0 left-0 z-40 h-screen w-64 bg-white border-r border-gray-200"
+                    className="hidden lg:block lg:sticky top-0 left-0 z-40 h-screen w-[154px] bg-white border-r border-gray-200"
                 >
                     <div className="h-full flex flex-col">
-                        <div className="p-6 border-b border-gray-100 flex items-center justify-between">
-                            <Link href="/" className="flex items-center gap-2">
-                                <div className="bg-orange-500 p-1.5 rounded-lg">
-                                    <LayoutDashboard className="text-white" size={20} />
+                        <div className="p-3 border-b border-gray-100 flex items-center justify-between">
+                            <Link href="/" className="flex items-center gap-1.5 min-w-0">
+                                <div className="bg-orange-500 p-1 rounded-md shrink-0">
+                                    <LayoutDashboard className="text-white" size={16} />
                                 </div>
-                                <span className="font-bold text-xl text-gray-900">Admin</span>
+                                <span className="font-bold text-base text-gray-900 truncate">Admin</span>
                             </Link>
                             <button
                                 onClick={() => setIsSidebarOpen(false)}
@@ -298,14 +298,14 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                                 aria-label="Đóng menu"
                                 title="Đóng menu"
                             >
-                                <X size={20} />
+                                <X size={16} />
                             </button>
                         </div>
 
-                        <div className="flex-1 overflow-y-auto py-5 px-3 space-y-4">
+                        <div className="flex-1 overflow-y-auto py-3 px-1.5 space-y-3">
                             {filteredMenuGroups.map((group) => (
-                                <div key={group.id} className="space-y-1">
-                                    <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider px-3 mb-1.5">
+                                <div key={group.id} className="space-y-0.5">
+                                    <p className="text-[9px] text-gray-400 font-bold uppercase tracking-wider px-2 mb-1">
                                         {group.label}
                                     </p>
                                     {group.items.map((item) => {
@@ -317,19 +317,19 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                                                 key={item.href}
                                                 href={item.href}
                                                 onClick={() => setIsSidebarOpen(false)}
-                                                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group ${isActive
-                                                    ? 'bg-orange-50 text-orange-600 font-medium shadow-sm'
+                                                className={`flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all duration-200 group ${isActive
+                                                    ? 'bg-orange-50 text-orange-600 font-semibold shadow-sm'
                                                     : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                                                     }`}
                                             >
                                                 <Icon
-                                                    size={18}
-                                                    className={`transition-colors ${isActive ? 'text-orange-500' : 'text-gray-400 group-hover:text-gray-600'
+                                                    size={15}
+                                                    className={`shrink-0 transition-colors ${isActive ? 'text-orange-500' : 'text-gray-400 group-hover:text-gray-600'
                                                         }`}
                                                 />
-                                                <span className="text-sm">{item.label}</span>
+                                                <span className="text-xs truncate min-w-0 flex-1">{item.label}</span>
                                                 {(badgeMap[item.href] ?? 0) > 0 && (
-                                                    <span className="ml-auto min-w-[20px] h-5 px-1.5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center animate-pulse">
+                                                    <span className="ml-auto shrink-0 min-w-[16px] h-4 px-1 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center animate-pulse">
                                                         {badgeMap[item.href] > 99 ? '99+' : badgeMap[item.href]}
                                                     </span>
                                                 )}
@@ -340,25 +340,25 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                             ))}
                         </div>
 
-                        <div className="p-4 border-t border-gray-100">
-                            <div className="bg-gray-50 rounded-xl p-3 flex items-center gap-3">
-                                <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center text-orange-600 shadow-sm font-bold border border-gray-100">
+                        <div className="p-2 border-t border-gray-100">
+                            <div className="bg-gray-50 rounded-lg p-2 flex items-center gap-2">
+                                <div className="w-7 h-7 bg-white rounded-md flex shrink-0 items-center justify-center text-orange-600 shadow-sm text-xs font-bold border border-gray-100">
                                     {user.displayName?.[0] || 'A'}
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                    <p className="text-sm font-medium text-gray-900 truncate">
+                                    <p className="text-xs font-medium text-gray-900 truncate">
                                         {user.displayName}
                                     </p>
-                                    <p className="text-xs text-gray-500 truncate capitalize">
+                                    <p className="text-[10px] text-gray-500 truncate capitalize">
                                         {user.role}
                                     </p>
                                 </div>
                                 <button
                                     onClick={handleLogout}
-                                    className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                                    className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors shrink-0"
                                     title="Đăng xuất"
                                 >
-                                    <LogOut size={18} />
+                                    <LogOut size={15} />
                                 </button>
                             </div>
                         </div>
@@ -370,7 +370,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                         role="dialog"
                         aria-modal="true"
                         aria-label="Menu quản trị"
-                        className="fixed inset-x-0 bottom-0 z-40 lg:hidden bg-white rounded-t-2xl shadow-2xl border-t border-gray-200 max-h-[88dvh] pb-[env(safe-area-inset-bottom)] flex flex-col animate-[slideUp_0.3s_ease-out]"
+                        className="fixed inset-x-0 bottom-0 z-40 lg:hidden bg-white rounded-t-2xl shadow-2xl border-t border-gray-200 max-h-[53dvh] pb-[env(safe-area-inset-bottom)] flex flex-col animate-[slideUp_0.3s_ease-out]"
                     >
                         <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between gap-3">
                             <div className="flex items-center gap-3 min-w-0">
