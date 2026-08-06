@@ -221,7 +221,7 @@ export const POST = withApi({
         markTiming('auth');
 
         const body = await context.readJson(request);
-        const { idempotencyKey, repairTicketId, repairTicketIds, customer_info, phone_verification_token, items, discount_amount, total_amount, deposit_amount, deposit_payment_method, payment_breakdown, payment_method, voucherCode, use_surplus_to_pay_debt, cashierShiftId, repair_shipping } = body;
+        const { idempotencyKey, repairTicketId, repairTicketIds, customer_info, phone_verification_token, items, discount_amount, total_amount, deposit_amount, deposit_payment_method, payment_breakdown, payment_method, voucherCode, use_surplus_to_pay_debt, cashierShiftId, repair_shipping, pos_shipping } = body;
         markTiming('parseBody');
 
         if (!Array.isArray(items) || items.length === 0) {
@@ -287,7 +287,8 @@ export const POST = withApi({
             const normalized = normalizeRepairTicketId(item.repairTicketId || item.productId);
             if (normalized) repairIdSet.add(normalized);
         }
-        const repairShipping = readRepairShippingInput(repair_shipping, repairIdSet);
+        const hasRetailProducts = checkoutItems.some(item => !item.isRepairTicket && !item.isOrderPayment);
+        const repairShipping = readRepairShippingInput(pos_shipping || repair_shipping, repairIdSet, hasRetailProducts);
         if (repairShipping && repairShipping.mode !== 'customer_paid_now') {
             await requirePermission(request, 'manage_cashier_expenses');
         }
@@ -534,20 +535,23 @@ export const POST = withApi({
                 ? serverTotal
                 : submittedDepositAmount;
             const paidNow = !isDebtCollectionOnly ? Math.min(paymentReceived, currentOrderTotal) : 0;
-            const depositPaymentMethodCode = String(deposit_payment_method || '').trim().toUpperCase();
+            const primarySubmittedMethod = submittedPaymentBreakdown && submittedPaymentBreakdown.length > 0
+                ? submittedPaymentBreakdown[0].method
+                : undefined;
+            const depositPaymentMethodCode = String(deposit_payment_method || primarySubmittedMethod || '').trim().toUpperCase();
             const receivedPaymentMethodCode = paymentMethodCode === 'DEBT' && paidNow > 0
-                ? depositPaymentMethodCode
+                ? (depositPaymentMethodCode || 'CASH')
                 : paymentMethodCode;
 
             if (paymentMethodCode === 'DEBT' && paidNow > 0 && !['CASH', 'BANK', 'MOMO', 'QR', 'CARD'].includes(receivedPaymentMethodCode)) {
-                throw new Error('Vui lòng chọn kênh tiền mặt hoặc chuyển khoản/QR cho khoản khách đã đưa.');
+                throw new ApiError('Vui lòng chọn kênh tiền mặt hoặc chuyển khoản/QR cho khoản khách đã đưa.', 400, 'debt_deposit_channel_required');
             }
 
             if (paymentMethodCode === 'DEBT' && orderPaymentSubtotal > 0 && discountableSubtotal > 0) {
-                throw new Error('Vui lòng tách thu nợ đơn cũ và bán hàng mới thành 2 lần thanh toán riêng.');
+                throw new ApiError('Vui lòng tách thu nợ đơn cũ và bán hàng mới thành 2 lần thanh toán riêng.', 400, 'separate_debt_collection_required');
             }
             if (isDebtCollectionOnly && voucherCode) {
-                throw new Error('Không áp dụng voucher cho khoản thu nợ đơn cũ.');
+                throw new ApiError('Không áp dụng voucher cho khoản thu nợ đơn cũ.', 400, 'voucher_not_allowed_for_debt_collection');
             }
 
             markTransaction('normalizeTotals');
@@ -637,12 +641,12 @@ export const POST = withApi({
                 }
                 repairPaymentTotals.set(id, expectedAmount);
             }
-            if (repairShipping && !repairPaymentTotals.has(repairShipping.repairTicketId)) {
+            if (repairShipping && repairShipping.repairTicketId && !repairPaymentTotals.has(repairShipping.repairTicketId)) {
                 throw new Error('Phí ship chỉ được tạo cùng phiếu sửa chữa chưa thanh toán trong giỏ POS.');
             }
             if (repairShipping?.mode === 'shop_advance_on_credit') {
                 if (!shippingPayerRef || !shippingPayerSnap?.exists || shippingPayerSnap.data()?.isActive === false) {
-                    throw new Error('Không tìm thấy khách/đối tác đang hoạt động để ghi nợ phí ship shop ứng hộ.');
+                    throw new ApiError('Khách lẻ không thể ghi nợ phí ship. Vui lòng chọn hồ sơ khách hàng hoặc chọn Khách trả/Shop chịu.', 400, 'shipping_advance_debtor_required');
                 }
             }
 
@@ -1052,7 +1056,7 @@ export const POST = withApi({
                 : (idempotencyKey || orderId || `DEBT-${updatedOrderIds.map(id => id.slice(-6)).join('-')}`);
             const orderItems = normalizedItems.filter((item) => !item.isOrderPayment);
             const repairShippingRecord = repairShipping ? {
-                repairTicketId: repairShipping.repairTicketId,
+                ...(repairShipping.repairTicketId ? { repairTicketId: repairShipping.repairTicketId } : {}),
                 mode: repairShipping.mode,
                 fee: repairShipping.fee,
                 customerCharge: customerShippingCharge,
@@ -1320,7 +1324,7 @@ export const POST = withApi({
                     status: 'Completed',
                     source: 'pos',
                     isShippingAdvance: true,
-                    shippingAdvanceRepairTicketId: repairShipping.repairTicketId,
+                    shippingAdvanceRepairTicketId: repairShipping.repairTicketId || null,
                     parentOrderId: orderId,
                     payment_method: 'DEBT',
                     paymentStatus: 'debt',
@@ -1342,10 +1346,12 @@ export const POST = withApi({
                 tx.set(expenseAllocation.ref, {
                     ...e2eMetadata,
                     category: 'shipping',
-                    description: `Phí ship phiếu sửa #${repairShipping.repairTicketId.slice(-6)} (shop chịu)`,
+                    description: repairShipping.repairTicketId
+                        ? `Phí ship phiếu sửa #${repairShipping.repairTicketId.slice(-6)} (shop chịu)`
+                        : `Phí ship đơn hàng #${orderId.slice(-6)} (shop chịu)`,
                     amount: repairShipping.fee,
                     paymentMethod: repairShipping.shopPaymentMethod,
-                    repairTicketId: repairShipping.repairTicketId,
+                    ...(repairShipping.repairTicketId ? { repairTicketId: repairShipping.repairTicketId } : {}),
                     orderId,
                     createdBy: caller.uid,
                     createdByName,
@@ -1526,7 +1532,8 @@ export const POST = withApi({
                         updateData.contactMethods = contactMethods;
                         updateData.searchKeywords = buildContactSearchKeywords(incomingContactInput, contactMethods);
                         if (incomingContactInput.email) updateData.email = incomingContactInput.email;
-                        if (incomingContactInput.address) updateData.address = incomingContactInput.address;
+                        const effectiveAddress = incomingContactInput.address || repairShipping?.recipientAddress || '';
+                        if (effectiveAddress) updateData.address = effectiveAddress;
                         if (incomingContactInput.note) updateData.note = incomingContactInput.note;
                     }
 
@@ -1581,7 +1588,7 @@ export const POST = withApi({
                         } : {}),
                         searchKeywords: buildContactSearchKeywords(incomingContactInput, incomingContactMethods),
                         email: incomingContactInput.email || '',
-                        address: incomingContactInput.address || '',
+                        address: incomingContactInput.address || repairShipping?.recipientAddress || '',
                         note: incomingContactInput.note || '',
                         totalSpent: customerSpendDelta,
                         totalOrders: customerSpendDelta > 0 ? 1 : 0,

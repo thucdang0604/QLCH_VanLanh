@@ -76,7 +76,7 @@ export interface RepairTicketInfo {
 }
 
 export interface RepairShippingDraft {
-    repairTicketId: string;
+    repairTicketId?: string;
     mode: 'customer_paid_now' | 'shop_absorbs' | 'shop_advance_on_credit';
     fee: number;
     recipientName: string;

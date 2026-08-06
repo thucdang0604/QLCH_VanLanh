@@ -8,7 +8,7 @@ export type RepairShippingMode = typeof REPAIR_SHIPPING_MODES[number];
 export type RepairShippingPaymentMethod = 'CASH' | 'BANK';
 
 export interface RepairShippingInput {
-    repairTicketId: string;
+    repairTicketId?: string;
     mode: RepairShippingMode;
     fee: number;
     recipientName: string;
@@ -38,8 +38,12 @@ function readShopPaymentMethod(value: unknown): RepairShippingPaymentMethod | un
     throw new Error('Shop chỉ có thể thanh toán ship bằng tiền mặt hoặc chuyển khoản.');
 }
 
-/** Normalizes the repair-only shipping contract before checkout writes. */
-export function readRepairShippingInput(value: unknown, repairTicketIds: Set<string>): RepairShippingInput | null {
+/** Normalizes the POS shipping contract before checkout writes (supports repairs & retail product orders). */
+export function readRepairShippingInput(
+    value: unknown,
+    repairTicketIds: Set<string>,
+    hasRetailProducts = false,
+): RepairShippingInput | null {
     if (value === undefined || value === null) return null;
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
         throw new Error('Thông tin phí ship không hợp lệ.');
@@ -48,19 +52,32 @@ export function readRepairShippingInput(value: unknown, repairTicketIds: Set<str
     const raw = value as Record<string, unknown>;
     const repairTicketId = readText(raw.repairTicketId, 160);
     const mode = readText(raw.mode, 64) as RepairShippingMode;
-    if (!repairTicketId || !repairTicketIds.has(repairTicketId)) {
-        throw new Error('Phí ship phải gắn với đúng một phiếu sửa chữa trong giỏ POS.');
-    }
-    if (repairTicketIds.size !== 1 || !REPAIR_SHIPPING_MODES.includes(mode)) {
-        throw new Error('Mỗi lần thanh toán ship chỉ áp dụng cho đúng một phiếu sửa chữa.');
+
+    if (!REPAIR_SHIPPING_MODES.includes(mode)) {
+        throw new Error('Chế độ giao hàng không hợp lệ.');
     }
 
-    const fee = readPositiveAmount(raw.fee);
+    if (repairTicketIds.size > 0) {
+        if (repairTicketIds.size > 1) {
+            throw new Error('Mỗi lần thanh toán ship chỉ áp dụng cho đúng một phiếu sửa chữa.');
+        }
+        if (!repairTicketId || !repairTicketIds.has(repairTicketId)) {
+            throw new Error('Phí ship phải gắn với đúng phiếu sửa chữa trong giỏ POS.');
+        }
+    } else {
+        if (!hasRetailProducts) {
+            throw new Error('Không tìm thấy sản phẩm hoặc phiếu sửa chữa để áp dụng giao hàng.');
+        }
+    }
+
+    const fee = mode === 'customer_paid_now'
+        ? Math.max(0, Math.round(Number(raw.fee) || 0))
+        : readPositiveAmount(raw.fee);
     const recipientName = readText(raw.recipientName, 120);
     const recipientPhone = readText(raw.recipientPhone, 40);
     const recipientAddress = readText(raw.recipientAddress, 500);
     if (!recipientName || !recipientPhone || !recipientAddress) {
-        throw new Error('Vui lòng nhập đủ người nhận, số điện thoại và địa chỉ giao máy.');
+        throw new Error('Vui lòng nhập đủ người nhận, số điện thoại và địa chỉ giao hàng.');
     }
 
     const shopPaymentMethod = readShopPaymentMethod(raw.shopPaymentMethod);
@@ -73,7 +90,7 @@ export function readRepairShippingInput(value: unknown, repairTicketIds: Set<str
     }
 
     return {
-        repairTicketId,
+        ...(repairTicketId ? { repairTicketId } : {}),
         mode,
         fee,
         recipientName,

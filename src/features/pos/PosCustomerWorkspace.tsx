@@ -25,6 +25,8 @@ interface PosCustomerWorkspaceProps {
     setCustomerName: (value: string) => void;
     customerPhone: string;
     setCustomerPhone: (value: string) => void;
+    customerAddress?: string;
+    setCustomerAddress?: (value: string) => void;
     customerZalo: string;
     setCustomerZalo: (value: string) => void;
     customerFacebook: string;
@@ -61,6 +63,8 @@ export function PosCustomerWorkspace({
     setCustomerName,
     customerPhone,
     setCustomerPhone,
+    customerAddress = '',
+    setCustomerAddress,
     customerZalo,
     setCustomerZalo,
     customerFacebook,
@@ -90,7 +94,7 @@ export function PosCustomerWorkspace({
 }: PosCustomerWorkspaceProps) {
     const [customerLookupQuery, setCustomerLookupQuery] = useState('');
     const [showExtraContacts, setShowExtraContacts] = useState(false);
-    const [showRepairActions, setShowRepairActions] = useState(false);
+    const [showRepairActions, setShowRepairActions] = useState(true);
     const [showDebtActions, setShowDebtActions] = useState(false);
     const [customerQrScanning, setCustomerQrScanning] = useState(false);
     const [phoneVerificationStep, setPhoneVerificationStep] = useState<'idle' | 'otp'>('idle');
@@ -254,121 +258,135 @@ export function PosCustomerWorkspace({
         clearPhoneRecaptcha();
     }, []);
 
-    const shouldShowRepairActions = linkedRepairs.length > 0 || Boolean(shippingRepair);
+    const hasRetailProducts = cart.some(item => !item.isRepairTicket && !item.isOrderPayment);
+    const shouldShowRepairActions = linkedRepairs.length > 0 || Boolean(shippingRepair) || hasRetailProducts;
     const shouldShowActions = shouldShowRepairActions || payableOrders.length > 0;
 
     return (
-        <section className="shrink-0 overflow-hidden rounded-xl border bg-white shadow-sm">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-gray-100 px-3 py-2">
-                <div className="flex items-center gap-1.5 text-sm font-bold text-gray-900">
-                    <User className="text-orange-500" size={16} /> Khách hàng
+        <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border bg-white shadow-sm">
+            {/* ═══ Customer Info & Search (Top - natural height) ═══ */}
+            <div className="shrink-0">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 border-b border-gray-100 px-2.5 py-1.5 shrink-0 text-xs">
+                    <div className="flex items-center gap-1 text-xs font-bold text-gray-900">
+                        <User className="text-orange-500" size={14} /> Khách hàng
+                    </div>
+                    <span className={`max-w-[200px] truncate rounded-full px-2 py-0.5 text-[11px] font-semibold ${hasCustomer ? 'bg-orange-50 text-orange-700' : 'bg-gray-100 text-gray-500'}`}>
+                        {hasCustomer ? identityLabel : 'Chưa chọn khách'}
+                    </span>
+                    {isExistingCustomer && <button type="button" onClick={onClearCustomerSelection} className="text-[11px] font-semibold text-orange-700 underline underline-offset-2 hover:text-orange-900">Bỏ chọn</button>}
+                    {customerDebt > 0 && <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700"><AlertTriangle size={11} /> Nợ {formatPrice(customerDebt)}</span>}
+                    {repairLoading && <span className="animate-pulse text-[11px] text-gray-400">Đang tra cứu…</span>}
                 </div>
-                <span className={`max-w-[220px] truncate rounded-full px-2 py-0.5 text-xs font-semibold ${hasCustomer ? 'bg-orange-50 text-orange-700' : 'bg-gray-100 text-gray-500'}`}>
-                    {hasCustomer ? identityLabel : 'Chưa chọn khách'}
-                </span>
-                {isExistingCustomer && <button type="button" onClick={onClearCustomerSelection} className="text-xs font-semibold text-orange-700 underline underline-offset-2 hover:text-orange-900">Bỏ chọn</button>}
-                {customerDebt > 0 && <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700"><AlertTriangle size={12} /> Nợ {formatPrice(customerDebt)}</span>}
-                {repairLoading && <span className="animate-pulse text-xs text-gray-400">Đang tra cứu…</span>}
-            </div>
 
-            <div className="grid gap-2 p-2 lg:grid-cols-[minmax(0,1.35fr)_minmax(160px,0.72fr)_minmax(135px,0.55fr)_auto]">
-                <div className="relative">
-                    <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                    <input
-                        type="text"
-                        placeholder="Tra cứu khách cũ: SĐT, tên, mã KH, Zalo"
-                        value={customerLookupQuery}
-                        onChange={event => setCustomerLookupQuery(event.target.value)}
-                        onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); runCustomerLookup(); } }}
-                        className="w-full rounded-lg border py-1.5 pl-8 pr-16 text-sm focus:ring-2 focus:ring-orange-500/20"
-                    />
-                    <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => runCustomerLookup()} className="absolute right-8 top-1/2 -translate-y-1/2 rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-orange-600" aria-label="Tìm khách" title="Tìm khách"><Search size={15} /></button>
-                    <button type="button" onMouseDown={event => event.preventDefault()} onClick={customerQrScanning ? stopCustomerQrScanner : startCustomerQrScanner} className="absolute right-1 top-1/2 -translate-y-1/2 rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-sky-600" aria-label={customerQrScanning ? 'Dừng quét QR khách' : 'Quét QR khách'} title={customerQrScanning ? 'Dừng quét QR khách' : 'Quét QR khách'}>{customerQrScanning ? <Square size={15} /> : <Camera size={15} />}</button>
-                </div>
-                <div className="relative">
-                    <User size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                    <input type="text" placeholder="Tên người mua (khách lẻ)" value={customerName} readOnly={isExistingCustomer} onChange={event => setCustomerName(event.target.value)} className="w-full rounded-lg border py-1.5 pl-8 pr-2 text-sm focus:ring-2 focus:ring-orange-500/20 read-only:bg-gray-50" />
-                </div>
-                <div className="relative">
-                    <Phone size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                    <input type="text" placeholder="SĐT" value={customerPhone} readOnly={isExistingCustomer} onChange={event => { const value = event.target.value.replace(/[^0-9]/g, ''); setCustomerPhone(value); onPhoneChanged(value); phoneConfirmationRef.current = null; clearPhoneRecaptcha(); setPhoneVerificationStep('idle'); setPhoneVerificationCode(''); setPhoneVerificationError(''); setCustomerPrimaryContactType('phone'); }} className="w-full rounded-lg border py-1.5 pl-8 pr-2 text-sm focus:ring-2 focus:ring-orange-500/20 read-only:bg-gray-50" />
-                </div>
-                <button type="button" onClick={() => setShowExtraContacts(previous => !previous)} className="inline-flex items-center justify-center gap-1 rounded-lg bg-gray-50 px-2 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-100 hover:text-orange-600">
-                    Khác <ChevronDown size={14} className={`transition-transform ${showExtraContacts ? 'rotate-180' : ''}`} />
-                </button>
-            </div>
+                <div className="flex flex-col gap-1.5 p-1.5 text-xs">
+                    <div className="relative w-full">
+                        <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <input
+                            type="text"
+                            placeholder="Tra cứu khách cũ: SĐT, tên, mã KH, Zalo"
+                            value={customerLookupQuery}
+                            onChange={event => setCustomerLookupQuery(event.target.value)}
+                            onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); runCustomerLookup(); } }}
+                            className="w-full rounded-lg border py-1 pl-7 pr-14 text-xs focus:ring-2 focus:ring-orange-500/20"
+                        />
+                        <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => runCustomerLookup()} className="absolute right-7 top-1/2 -translate-y-1/2 rounded p-0.5 text-gray-500 hover:bg-gray-100 hover:text-orange-600" aria-label="Tìm khách" title="Tìm khách"><Search size={13} /></button>
+                        <button type="button" onMouseDown={event => event.preventDefault()} onClick={customerQrScanning ? stopCustomerQrScanner : startCustomerQrScanner} className="absolute right-1 top-1/2 -translate-y-1/2 rounded p-0.5 text-gray-500 hover:bg-gray-100 hover:text-sky-600" aria-label={customerQrScanning ? 'Dừng quét QR khách' : 'Quét QR khách'} title={customerQrScanning ? 'Dừng quét QR khách' : 'Quét QR khách'}>{customerQrScanning ? <Square size={13} /> : <Camera size={13} />}</button>
+                    </div>
 
-            {customerMatches.length > 0 && <div className="border-t border-gray-100 bg-slate-50 px-2 py-2">
-                <p className="mb-1.5 text-xs font-semibold text-slate-600">Kết quả chỉ để đối chiếu — bấm chọn đúng khách, hệ thống không tự gắn hồ sơ.</p>
-                <div className="grid gap-1 sm:grid-cols-2">
-                    {customerMatches.map(match => <button key={match.id} type="button" onClick={() => onSelectCustomer(match.id)} className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-left text-xs hover:border-orange-300 hover:bg-orange-50">
-                        <span className="min-w-0"><strong className="block truncate text-slate-900">{match.name || 'Chưa có tên'}</strong><span className="block truncate text-slate-500">{match.primaryContactLabel || match.phone || `Mã ${match.id}`}</span></span>
-                        {match.totalDebt > 0 && <span className="shrink-0 font-semibold text-red-600">Nợ {formatPrice(match.totalDebt)}</span>}
-                    </button>)}
-                </div>
-            </div>}
-
-            {!isExistingCustomer && <div className={`border-t px-2 py-2 text-xs ${isPhoneVerified ? 'border-emerald-100 bg-emerald-50/60' : isZaloContact ? 'border-sky-100 bg-sky-50/60' : 'border-amber-100 bg-amber-50/60'}`}>
-                {isPhoneVerified ? <p className="font-semibold text-emerald-700">SĐT đã xác minh bằng OTP. Có thể tạo hồ sơ mới; nếu ghi nợ, POS sẽ hiển thị rõ tiền trả trước và còn nợ.</p> : isZaloContact ? <p className="font-semibold text-sky-700">Đã nhận diện danh thiếp Zalo. Nhập tên để tạo hồ sơ mới; có thể ghi nợ và POS sẽ cảnh báo tiền trả trước/còn nợ trước khi thanh toán.</p> : <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-amber-800">Khách lẻ chỉ thanh toán đủ. Muốn ghi nợ cho khách mới, xác minh SĐT bằng OTP hoặc dùng danh thiếp Zalo.</p><button type="button" onClick={sendPhoneVerification} disabled={phoneVerificationLoading || !customerPhone.trim()} className="rounded-md border border-amber-300 bg-white px-2 py-1 font-semibold text-amber-800 disabled:cursor-not-allowed disabled:opacity-50">{phoneVerificationLoading ? 'Đang gửi…' : 'Xác minh SĐT'}</button></div>}
-                {!isPhoneVerified && !isZaloContact && phoneVerificationStep === 'otp' && <div className="mt-2 flex flex-wrap items-start gap-2">
-                    <input type="text" inputMode="numeric" maxLength={6} value={phoneVerificationCode} onChange={event => setPhoneVerificationCode(event.target.value.replace(/\D/g, ''))} placeholder="Mã OTP 6 số" className="w-32 rounded-md border bg-white px-2 py-1.5" />
-                    <button type="button" onClick={confirmPhoneVerification} disabled={phoneVerificationLoading} className="rounded-md bg-emerald-600 px-2 py-1.5 font-semibold text-white disabled:opacity-50">Xác nhận OTP</button>
-                    <button type="button" onClick={sendPhoneVerification} disabled={phoneVerificationLoading} className="rounded-md border border-gray-300 bg-white px-2 py-1.5 font-semibold text-gray-700 disabled:opacity-50">Gửi lại</button>
-                </div>}
-                {!isPhoneVerified && !isZaloContact && <div id="pos-phone-verification-recaptcha" className={phoneVerificationStep === 'otp' ? 'mt-2' : ''} />}
-                {phoneVerificationError && <p className="mt-1.5 font-medium text-red-600">{phoneVerificationError}</p>}
-            </div>}
-
-            <video ref={customerQrVideoRef} muted playsInline className={`mx-2 mb-2 w-[min(440px,calc(100%-1rem))] rounded-lg border border-sky-200 bg-black ${customerQrScanning ? 'block' : 'hidden'}`} />
-            {showExtraContacts && (
-                <div className="grid gap-2 border-t border-gray-100 bg-gray-50/70 p-2 sm:grid-cols-2 lg:grid-cols-4">
-                    <div className="relative"><MessageCircle size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" /><input type="text" placeholder="Danh thiếp Zalo (zaloapp.com/qr/p/…)" value={customerZalo} readOnly={isExistingCustomer} onChange={event => applyZaloContactValue(event.target.value)} className="w-full rounded-lg border bg-white py-1.5 pl-8 pr-2 text-sm read-only:bg-gray-100" /></div>
-                    <div className="relative"><MessageCircle size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" /><input type="text" placeholder="Facebook" value={customerFacebook} readOnly={isExistingCustomer} onChange={event => { setCustomerFacebook(event.target.value); if (!customerPhone.trim() && !customerZalo.trim()) setCustomerPrimaryContactType('facebook'); }} className="w-full rounded-lg border bg-white py-1.5 pl-8 pr-2 text-sm read-only:bg-gray-100" /></div>
-                    <input type="text" placeholder="Mã khách hàng" value={customerId} readOnly={isExistingCustomer} onChange={event => setCustomerId(event.target.value)} onBlur={() => { if (!isExistingCustomer && customerId.trim()) runCustomerLookup(customerId); }} className="w-full rounded-lg border bg-white px-2 py-1.5 text-sm read-only:bg-gray-100" />
-                    <input type="text" placeholder="Liên hệ khác" value={customerOtherContact} readOnly={isExistingCustomer} onChange={event => { setCustomerOtherContact(event.target.value); if (!customerPhone.trim() && !customerZalo.trim() && !customerFacebook.trim()) setCustomerPrimaryContactType('other'); }} className="w-full rounded-lg border bg-white px-2 py-1.5 text-sm read-only:bg-gray-100" />
-                </div>
-            )}
-
-            {shouldShowActions && (
-                <div className={`grid gap-2 border-t border-gray-100 bg-gray-50/70 p-2 ${shouldShowRepairActions && payableOrders.length > 0 ? 'lg:grid-cols-2' : ''}`}>
-                    {shouldShowRepairActions && (
-                        <div className="rounded-lg border border-blue-100 bg-white p-2">
-                            <button type="button" onClick={() => setShowRepairActions(previous => !previous)} className="flex w-full items-center justify-between gap-2 text-left text-sm font-bold text-blue-800">
-                                <span className="flex items-center gap-1.5"><Wrench size={15} /> Bàn giao & thanh toán {linkedRepairs.length > 0 ? `(${linkedRepairs.length})` : ''}</span>
-                                <ChevronDown size={15} className={`transition-transform ${showRepairActions ? 'rotate-180' : ''}`} />
-                            </button>
-                            {showRepairActions && (
-                                <div className="mt-2 space-y-1.5">
-                                    {linkedRepairs.length > 0 && <div className="max-h-36 space-y-1.5 overflow-y-auto pr-1">
-                                        {linkedRepairs.map(repair => {
-                                            const isInCart = cart.some(item => item.repairTicketId === repair.id);
-                                            return <div key={repair.id} className="flex items-center gap-2 rounded-md border border-blue-100 bg-blue-50/40 px-2 py-1.5 text-xs"><div className="min-w-0 flex-1"><p className="truncate font-bold text-blue-800">Phiếu #{repair.id.slice(-6)} · {repair.deviceModel || 'Thiết bị sửa chữa'}</p><p className="text-blue-600">Cần thu {formatPrice(repair.paymentAmount)}</p></div><button type="button" onClick={() => { onAddRepairToCart(repair); setShowRepairActions(true); }} disabled={isInCart} className="shrink-0 rounded-md bg-blue-600 px-2.5 py-1 font-bold text-white disabled:bg-blue-200">{isInCart ? 'Đã chọn' : 'Thanh toán'}</button></div>;
-                                        })}
-                                    </div>}
-                                    <RepairShippingPanel repair={shippingRepair} value={repairShipping} onChange={onRepairShippingChange} formatPrice={formatPrice} />
-                                </div>
-                            )}
+                    <div className="grid grid-cols-[1fr_1fr_auto] gap-1 items-center">
+                        <div className="relative min-w-0">
+                            <User size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" />
+                            <input type="text" placeholder="Tên người mua (khách lẻ)" value={customerName} readOnly={isExistingCustomer} onChange={event => setCustomerName(event.target.value)} className="w-full rounded-lg border py-1 pl-6 pr-1 text-xs focus:ring-2 focus:ring-orange-500/20 read-only:bg-gray-50" />
                         </div>
-                    )}
+                        <div className="relative min-w-0">
+                            <Phone size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" />
+                            <input type="text" placeholder="SĐT" value={customerPhone} readOnly={isExistingCustomer} onChange={event => { const value = event.target.value.replace(/[^0-9]/g, ''); setCustomerPhone(value); onPhoneChanged(value); phoneConfirmationRef.current = null; clearPhoneRecaptcha(); setPhoneVerificationStep('idle'); setPhoneVerificationCode(''); setPhoneVerificationError(''); setCustomerPrimaryContactType('phone'); }} className="w-full rounded-lg border py-1 pl-6 pr-1 text-xs focus:ring-2 focus:ring-orange-500/20 read-only:bg-gray-50" />
+                        </div>
+                        <button type="button" onClick={() => setShowExtraContacts(previous => !previous)} className="inline-flex items-center justify-center gap-0.5 rounded-lg bg-gray-50 px-1.5 py-1 text-xs font-semibold text-gray-600 hover:bg-gray-100 hover:text-orange-600">
+                            Khác <ChevronDown size={12} className={`transition-transform ${showExtraContacts ? 'rotate-180' : ''}`} />
+                        </button>
+                    </div>
+                </div>
 
-                    {payableOrders.length > 0 && (
-                        <div className="rounded-lg border border-amber-100 bg-white p-2">
-                            <button type="button" onClick={() => setShowDebtActions(previous => !previous)} className="flex w-full items-center justify-between gap-2 text-left text-sm font-bold text-amber-800">
-                                <span className="flex items-center gap-1.5"><Receipt size={15} /> Công nợ cần thu ({payableOrders.length})</span>
-                                <ChevronDown size={15} className={`transition-transform ${showDebtActions ? 'rotate-180' : ''}`} />
-                            </button>
-                            {showDebtActions && <div className="mt-2 max-h-36 space-y-1.5 overflow-y-auto pr-1">
-                                {payableOrders.map(order => {
-                                    const isInCart = cart.some(item => item.orderPaymentId === order.id);
-                                    const title = order.isShippingAdvance ? 'Ship ứng hộ' : `Đơn #${order.id.slice(-6)}`;
-                                    const detail = order.isShippingAdvance ? `Thu hồi ship phiếu #${order.shippingAdvanceRepairTicketId?.slice(-6) || '—'}` : `${order.status} · ${order.createdAtLabel}`;
-                                    return <div key={order.id} className="flex items-center gap-2 rounded-md border border-amber-100 bg-amber-50/40 px-2 py-1.5 text-xs"><div className="min-w-0 flex-1"><p className="truncate font-bold text-amber-900">{title}</p><p className="truncate text-amber-700">{detail} · {formatPrice(order.remainingAmount)}</p></div><button type="button" onClick={() => onAddPayableOrderToCart(order)} disabled={isInCart} className="shrink-0 rounded-md bg-amber-600 px-2.5 py-1 font-bold text-white disabled:bg-amber-200">{isInCart ? 'Đã chọn' : 'Thu nợ'}</button></div>;
+                {customerMatches.length > 0 && <div className="border-t border-gray-100 bg-slate-50 px-2 py-1.5">
+                    <p className="mb-1 text-[11px] font-semibold text-slate-600">Kết quả chỉ để đối chiếu — bấm chọn đúng khách.</p>
+                    <div className="grid gap-1 sm:grid-cols-2">
+                        {customerMatches.map(match => <button key={match.id} type="button" onClick={() => onSelectCustomer(match.id)} className="flex min-w-0 items-center justify-between gap-1.5 rounded-lg border border-slate-200 bg-white px-2 py-1 text-left text-xs hover:border-orange-300 hover:bg-orange-50">
+                            <span className="min-w-0"><strong className="block truncate text-slate-900">{match.name || 'Chưa có tên'}</strong><span className="block truncate text-slate-500">{match.primaryContactLabel || match.phone || `Mã ${match.id}`}</span></span>
+                            {match.totalDebt > 0 && <span className="shrink-0 font-semibold text-red-600">Nợ {formatPrice(match.totalDebt)}</span>}
+                        </button>)}
+                    </div>
+                </div>}
+
+                {!isExistingCustomer && <div className={`border-t px-2 py-1 text-xs ${isPhoneVerified ? 'border-emerald-100 bg-emerald-50/60' : isZaloContact ? 'border-sky-100 bg-sky-50/60' : 'border-amber-100 bg-amber-50/60'}`}>
+                    {isPhoneVerified ? <p className="font-semibold text-emerald-700 text-[11px]">SĐT đã xác minh bằng OTP.</p> : isZaloContact ? <p className="font-semibold text-sky-700 text-[11px]">Đã nhận diện danh thiếp Zalo.</p> : <div className="flex flex-wrap items-center justify-between gap-1 text-[11px]"><p className="text-amber-800">xác minh SĐT bằng OTP.</p><button type="button" onClick={sendPhoneVerification} disabled={phoneVerificationLoading || !customerPhone.trim()} className="rounded-md border border-amber-300 bg-white px-1.5 py-0.5 font-semibold text-amber-800 disabled:cursor-not-allowed disabled:opacity-50">{phoneVerificationLoading ? 'Đang gửi…' : 'Xác minh SĐT'}</button></div>}
+                    {!isPhoneVerified && !isZaloContact && phoneVerificationStep === 'otp' && <div className="mt-1 flex flex-wrap items-start gap-1">
+                        <input type="text" inputMode="numeric" maxLength={6} value={phoneVerificationCode} onChange={event => setPhoneVerificationCode(event.target.value.replace(/\D/g, ''))} placeholder="Mã OTP 6 số" className="w-28 rounded-md border bg-white px-1.5 py-1 text-xs" />
+                        <button type="button" onClick={confirmPhoneVerification} disabled={phoneVerificationLoading} className="rounded-md bg-emerald-600 px-2 py-1 text-xs font-semibold text-white disabled:opacity-50">Xác nhận</button>
+                        <button type="button" onClick={sendPhoneVerification} disabled={phoneVerificationLoading} className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs font-semibold text-gray-700 disabled:opacity-50">Gửi lại</button>
+                    </div>}
+                    {!isPhoneVerified && !isZaloContact && <div id="pos-phone-verification-recaptcha" className={phoneVerificationStep === 'otp' ? 'mt-1' : ''} />}
+                    {phoneVerificationError && <p className="mt-1 font-medium text-red-600 text-[11px]">{phoneVerificationError}</p>}
+                </div>}
+
+                <video ref={customerQrVideoRef} muted playsInline className={`mx-2 mb-2 w-[min(440px,calc(100%-1rem))] rounded-lg border border-sky-200 bg-black ${customerQrScanning ? 'block' : 'hidden'}`} />
+                {showExtraContacts && (
+                    <div className="grid gap-1.5 border-t border-gray-100 bg-gray-50/70 p-1.5 sm:grid-cols-2 lg:grid-cols-4 text-xs">
+                        <div className="relative"><MessageCircle size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" /><input type="text" placeholder="Danh thiếp Zalo" value={customerZalo} readOnly={isExistingCustomer} onChange={event => applyZaloContactValue(event.target.value)} className="w-full rounded-lg border bg-white py-1 pl-7 pr-1.5 text-xs read-only:bg-gray-100" /></div>
+                        <div className="relative"><MessageCircle size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" /><input type="text" placeholder="Facebook" value={customerFacebook} readOnly={isExistingCustomer} onChange={event => { setCustomerFacebook(event.target.value); if (!customerPhone.trim() && !customerZalo.trim()) setCustomerPrimaryContactType('facebook'); }} className="w-full rounded-lg border bg-white py-1 pl-7 pr-1.5 text-xs read-only:bg-gray-100" /></div>
+                        <input type="text" placeholder="Mã KH" value={customerId} readOnly={isExistingCustomer} onChange={event => setCustomerId(event.target.value)} onBlur={() => { if (!isExistingCustomer && customerId.trim()) runCustomerLookup(customerId); }} className="w-full rounded-lg border bg-white px-2 py-1 text-xs read-only:bg-gray-100" />
+                        <input type="text" placeholder="Liên hệ khác" value={customerOtherContact} readOnly={isExistingCustomer} onChange={event => { setCustomerOtherContact(event.target.value); if (!customerPhone.trim() && !customerZalo.trim() && !customerFacebook.trim()) setCustomerPrimaryContactType('other'); }} className="w-full rounded-lg border bg-white px-2 py-1 text-xs read-only:bg-gray-100" />
+                    </div>
+                )}
+            </div>
+
+            {/* ═══ Sửa chữa & Giao hàng (Immediately below Customer Info) ═══ */}
+            <div className="flex-1 min-h-0 overflow-y-auto border-t border-gray-100 bg-gray-50/70 p-1.5 space-y-1.5">
+                <div className="rounded-lg border border-blue-100 bg-white p-1.5">
+                    <button type="button" onClick={() => setShowRepairActions(previous => !previous)} className="flex w-full items-center justify-between gap-2 text-left text-xs font-bold text-blue-800">
+                        <span className="flex items-center gap-1.5"><Wrench size={14} /> Sửa chữa & Giao hàng {linkedRepairs.length > 0 ? `(${linkedRepairs.length})` : ''}</span>
+                        <ChevronDown size={14} className={`transition-transform ${showRepairActions ? 'rotate-180' : ''}`} />
+                    </button>
+                    {showRepairActions && (
+                        <div className="mt-1.5 space-y-1.5">
+                            {linkedRepairs.length > 0 && <div className="max-h-36 space-y-1 overflow-y-auto pr-1">
+                                {linkedRepairs.map(repair => {
+                                    const isInCart = cart.some(item => item.repairTicketId === repair.id);
+                                    return <div key={repair.id} className="flex items-center gap-2 rounded-md border border-blue-100 bg-blue-50/40 px-2 py-1 text-xs"><div className="min-w-0 flex-1"><p className="truncate font-bold text-blue-800">Phiếu #{repair.id.slice(-6)} · {repair.deviceModel || 'Thiết bị sửa chữa'}</p><p className="text-blue-600 text-[11px]">Cần thu {formatPrice(repair.paymentAmount)}</p></div><button type="button" onClick={() => { onAddRepairToCart(repair); setShowRepairActions(true); }} disabled={isInCart} className="shrink-0 rounded-md bg-blue-600 px-2 py-0.5 font-bold text-white text-xs disabled:bg-blue-200">{isInCart ? 'Đã chọn' : 'Thanh toán'}</button></div>;
                                 })}
                             </div>}
+                            <RepairShippingPanel
+                                repair={shippingRepair}
+                                value={repairShipping}
+                                onChange={onRepairShippingChange}
+                                formatPrice={formatPrice}
+                                hasRetailProducts={hasRetailProducts}
+                                customerName={customerName}
+                                customerPhone={customerPhone}
+                                customerAddress={customerAddress}
+                                customerId={customerId}
+                            />
                         </div>
                     )}
                 </div>
-            )}
+
+                {payableOrders.length > 0 && (
+                    <div className="rounded-lg border border-amber-100 bg-white p-1.5">
+                        <button type="button" onClick={() => setShowDebtActions(previous => !previous)} className="flex w-full items-center justify-between gap-2 text-left text-xs font-bold text-amber-800">
+                            <span className="flex items-center gap-1.5"><Receipt size={14} /> Công nợ cần thu ({payableOrders.length})</span>
+                            <ChevronDown size={14} className={`transition-transform ${showDebtActions ? 'rotate-180' : ''}`} />
+                        </button>
+                        {showDebtActions && <div className="mt-1.5 max-h-36 space-y-1 overflow-y-auto pr-1">
+                            {payableOrders.map(order => {
+                                const isInCart = cart.some(item => item.orderPaymentId === order.id);
+                                const title = order.isShippingAdvance ? 'Ship ứng hộ' : `Đơn #${order.id.slice(-6)}`;
+                                const detail = order.isShippingAdvance ? `Thu hồi ship phiếu #${order.shippingAdvanceRepairTicketId?.slice(-6) || '—'}` : `${order.status} · ${order.createdAtLabel}`;
+                                return <div key={order.id} className="flex items-center gap-2 rounded-md border border-amber-100 bg-amber-50/40 px-2 py-1 text-xs"><div className="min-w-0 flex-1"><p className="truncate font-bold text-amber-900">{title}</p><p className="truncate text-amber-700 text-[11px]">{detail} · {formatPrice(order.remainingAmount)}</p></div><button type="button" onClick={() => onAddPayableOrderToCart(order)} disabled={isInCart} className="shrink-0 rounded-md bg-amber-600 px-2 py-0.5 font-bold text-white text-xs disabled:bg-amber-200">{isInCart ? 'Đã chọn' : 'Thu nợ'}</button></div>;
+                            })}
+                        </div>}
+                    </div>
+                )}
+            </div>
         </section>
     );
 }
