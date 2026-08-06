@@ -2078,7 +2078,7 @@ export default function POSPage() {
 
                             {/* Product Grid — limited height on desktop */}
                             <div className="md:max-h-[45vh] overflow-y-auto">
-                                <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                                <div className="grid grid-cols-2 gap-1.5 min-[1500px]:grid-cols-3 min-[1700px]:grid-cols-4">
                                     {filtered.map(product => {
                                         const available = (product.stock || 0) - (product.held || 0);
                                         const outOfStock = available <= 0;
