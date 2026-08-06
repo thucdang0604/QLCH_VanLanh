@@ -11,6 +11,41 @@
   "constraints": [],
   "aiPlans": [
     {
+      "id": "plan-project-system-summary-20260805",
+      "title": "Báo cáo tổng hợp dự án: Chức năng hoàn thành, Tái sử dụng & Vấn đề tồn đọng",
+      "date": "05.08.2026",
+      "status": "completed",
+      "completedAt": "05.08.2026",
+      "planFile": "data/ai_plans/plan_project_system_summary_20260805.md",
+      "taskFile": "",
+      "walkthroughFile": "data/ai_plans/walkthrough_project_system_summary_20260805.md",
+      "scope": [
+        "src/app/admin/pos/page.tsx",
+        "src/app/admin/repairs/page.tsx",
+        "src/app/admin/products/page.tsx",
+        "src/app/admin/parts/page.tsx",
+        "src/app/admin/inventory/page.tsx",
+        "src/app/admin/customers/page.tsx",
+        "src/app/admin/suppliers/page.tsx",
+        "src/app/admin/revenue/page.tsx",
+        "src/app/admin/vouchers/page.tsx",
+        "src/app/admin/initial-data/page.tsx",
+        "src/app/admin/articles/page.tsx",
+        "src/components/admin/MediaManager.tsx",
+        "src/components/admin/customers/CustomerDetailDrawer.tsx",
+        "src/components/admin/UniversalProductModal.tsx",
+        "src/components/admin/ProductQrLabelModal.tsx",
+        "src/components/admin/PrintableWarranty.tsx",
+        "src/components/admin/ExcelImportModal.tsx"
+      ],
+      "decisions": [
+        "Tổng hợp toàn bộ các trang đã hoàn thành trong phân hệ Admin và Storefront Khách hàng",
+        "Ghi nhận và phân loại chi tiết các vấn đề kỹ thuật/vận hành còn tồn đọng (Deploy CLI, Index backfill, SEO Search Console, Omnichannel Auth)",
+        "Thống kê đầy đủ danh sách các chức năng nghiệp vụ, thành phần UI và tiện ích server/client được tái sử dụng trên nhiều trang"
+      ],
+      "updatedAt": "2026-08-05T16:00:00.000+07:00"
+    },
+    {
       "id": "plan-ngram-search-stock-pagination-20260801",
       "title": "Search N-grams expansion, explicit submit buttons, and stock page cursor pagination upgrade",
       "date": "01.08.2026",
