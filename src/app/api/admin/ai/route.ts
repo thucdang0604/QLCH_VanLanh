@@ -302,7 +302,7 @@ export const POST = withApi({
         } else if (contentType === 'promo') {
             systemPrompt += ` Tạo nội dung khuyến mãi chuyên nghiệp:\n- Tiêu đề: Nêu rõ % giảm giá / giá trị ưu đãi bằng CON SỐ CỤ THỂ.\n- Mức giá gốc → giá sale → tiết kiệm được bao nhiêu.\n- Kèm CTA rõ ràng.${baseRules}`;
         } else if (contentType === 'article') {
-            systemPrompt += ` Viết bài review/phân tích chuẩn SEO flagship năm ${currentYear}:\n- Mở bài: Hook mạnh + focus keyword trong 100 từ đầu.\n- Thân bài: Chia thành các mục <h2> rõ ràng có số liệu benchmark/so sánh.\n- Dùng thuật ngữ LSI chuyên sâu.\n- Chèn ít nhất 3 [CHÈN HÌNH ẢNH: ...], 1 [CHÈN VIDEO: ...], 4 [GỢI Ý LIÊN KẾT: ...].\n- Nêu cả NHƯỢC ĐIỂM.\n- Độ dài tối thiểu 1200 từ.${baseRules}`;
+            systemPrompt += ` Viết bài review/phân tích chuẩn SEO flagship năm ${currentYear}:\n- Mở bài: Hook mạnh + focus keyword trong 100 từ đầu.\n- Thân bài: Chia thành các mục <h2> rõ ràng có số liệu benchmark/so sánh.\n- Dùng thuật ngữ LSI chuyên sâu.\n- Chèn ít nhất 3 [IMAGE_PROMPT: mô tả vị trí và ngữ cảnh ảnh thực tế], 1 [CHÈN VIDEO: ...], 4 [GỢI Ý LIÊN KẾT: ...].\n- Nêu cả NHƯỢC ĐIỂM.\n- Độ dài tối thiểu 1200 từ.${baseRules}`;
         } else if (contentType === 'seo') {
             systemPrompt += ` Cung cấp bộ Meta Tags tối ưu chuẩn SEO năm ${currentYear}:\n[TITLE]: ...\n[DESC]: ...\n[TAGS]: ...`;
         }
@@ -379,7 +379,7 @@ LUẬT BẮT BUỘC:
 3. Nêu cả NHƯỢC ĐIỂM.
 4. Keyword "${focusKeyword}" phải xuất hiện trong 100 từ đầu tiên và ở đoạn kết luận. Mật độ 0.8-1.5%.
 5. Dùng thuật ngữ LSI chuyên sâu. Tags: ${allKeywords}
-6. Chèn ít nhất 3 [CHÈN HÌNH ẢNH: ...], 1 [CHÈN VIDEO: ...], 4 [GỢI Ý LIÊN KẾT: ...].
+6. Chèn ít nhất 3 [IMAGE_PROMPT: mô tả bối cảnh ngắn gọn về hình ảnh], 1 [CHÈN VIDEO: ...], 4 [GỢI Ý LIÊN KẾT: ...].
 7. Viết bằng HTML sạch (<h2>, <h3>, <p>, <strong>, <ul>, <li>). KHÔNG DÙNG MARKDOWN. Độ dài > 1200 từ.`;
         
         const prompt = `Từ khóa chính: ${focusKeyword || title}\nBộ từ khóa: ${allKeywords}\nTiêu đề: ${title}\nMô tả: ${excerpt}\nNội dung/Dàn ý:\n${content || '(Tự viết bài hoàn chỉnh)'}`;
@@ -390,6 +390,7 @@ LUẬT BẮT BUỘC:
         const allKeywords = tags || '';
 
         const checkSystemPrompt = `Bạn là Chuyên gia Kiểm Duyệt SEO Google năm ${currentYear}.${yearRule} Chấm điểm bài viết theo 10 tiêu chí (mỗi tiêu chí 10đ, tổng 100đ).
+5. Đa phương tiện ([IMAGE_PROMPT], [CHÈN VIDEO])
 FOCUS KEYWORD: "${focusKeyword || title}"
 
 Trả về ĐÚNG format:
@@ -404,7 +405,7 @@ ${allKeywords ? `LSI Keywords / Tags: ${allKeywords}` : ''}
 
 LUẬT BẮT BUỘC:
 - THỜI GIAN LÀ NĂM ${currentYear}. CẤM ghi năm cũ 2024/2025 làm năm hiện tại.
-- GIỮ NGUYÊN cấu trúc HTML và các placeholder ([CHÈN HÌNH ẢNH: ...], [CHÈN VIDEO: ...], [GỢI Ý LIÊN KẾT: ...]).
+- GIỮ NGUYÊN cấu trúc HTML và các placeholder ([IMAGE_PROMPT: ...], [CHÈN VIDEO: ...], [GỢI Ý LIÊN KẾT: ...]).
 - KHÔNG dùng tính từ sáo rỗng. Phải kèm số liệu cụ thể và nêu NHƯỢC ĐIỂM.
 - Keyword "${focusKeyword}" trong 100 từ đầu VÀ kết luận.
 - Output CHỈ LÀ bài viết HTML đã sửa.`;

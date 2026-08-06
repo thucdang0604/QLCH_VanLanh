@@ -218,6 +218,7 @@ export async function generateContent(
                 messages,
                 stream: false,
             }),
+            signal: AbortSignal.timeout(90000),
         });
 
         if (!response.ok) {
