@@ -1,3 +1,5 @@
+import type { PosPaymentBreakdownEntry } from '@/lib/posPaymentBreakdown';
+
 export interface OrderLineItem {
     productId: string;
     productName: string;
@@ -29,6 +31,7 @@ export interface LastOrderData {
     shipping_fee: number;
     deposit_amount: number;
     payment_method: string;
+    paymentBreakdown?: PosPaymentBreakdownEntry[];
     createdByName?: string;
     createdAt: Date;
 }
@@ -47,6 +50,7 @@ export interface CartItem {
     isRepairTicket?: boolean;
     isOrderPayment?: boolean;
     warrantyType?: string;
+    requiresImei?: boolean;
     imeis?: string[];
     lotCode?: string;
 }
@@ -56,6 +60,7 @@ export interface RepairTicketInfo {
     customerId?: string;
     customerName: string;
     customerPhone: string;
+    customerAddress?: string;
     primaryContactValue?: string;
     deviceModel: string;
     status: string;
@@ -67,7 +72,19 @@ export interface RepairTicketInfo {
     paymentStatus: string;
     paymentOutstandingOrderId?: string;
     gifts?: string[];
-    issues?: { label?: string; estimatedPrice?: number; categoryPath?: string[]; serviceName?: string }[];
+    issues?: { label?: string; estimatedPrice?: number; categoryPath?: string[]; serviceName?: string; serviceId?: string }[];
+}
+
+export interface RepairShippingDraft {
+    repairTicketId?: string;
+    mode: 'customer_paid_now' | 'shop_absorbs' | 'shop_advance_on_credit';
+    fee: number;
+    recipientName: string;
+    recipientPhone: string;
+    recipientAddress: string;
+    billingCustomerId: string;
+    shopPaymentMethod: 'CASH' | 'BANK';
+    note: string;
 }
 
 export interface PayableOrderInfo {
@@ -82,6 +99,8 @@ export interface PayableOrderInfo {
     remainingAmount: number;
     createdAtLabel: string;
     itemNames: string[];
+    isShippingAdvance?: boolean;
+    shippingAdvanceRepairTicketId?: string;
 }
 
 export interface DiscountDetail {

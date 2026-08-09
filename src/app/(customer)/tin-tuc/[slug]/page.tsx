@@ -1,12 +1,13 @@
 import { Metadata } from 'next';
 import Link from 'next/link';
 import Image from 'next/image';
-import { ChevronRight, Clock, User, Tag, ArrowLeft, Eye, FileText } from 'lucide-react';
+import { ChevronRight, Clock, User, Tag, ArrowLeft, Eye } from 'lucide-react';
 import VideoEmbed from '@/components/VideoEmbed';
 import { SITE_URL } from "@/lib/constants";
 import { sanitizeHtml } from '@/lib/sanitizeHtml';
 import ArticleClientParts from './ArticleClientParts';
 import { fetchArticleDetail } from '@/app/(customer)/_lib/server-queries';
+import { notFound } from 'next/navigation';
 
 export const revalidate = 30;
 
@@ -24,6 +25,13 @@ function stripHtml(html: string): string {
 function formatDate(timestampMs?: number): string {
     if (!timestampMs) return '';
     return new Date(timestampMs).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+function toIsoDate(timestamp: unknown): string | undefined {
+    const milliseconds = Number(timestamp);
+    return Number.isFinite(milliseconds) && milliseconds > 0
+        ? new Date(milliseconds).toISOString()
+        : undefined;
 }
 
 const typeConfig: Record<string, { label: string; color: string }> = {
@@ -48,6 +56,8 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
     const description = descriptionSource.slice(0, 155);
     const ogImage = String(article.thumbnail || `${SITE_URL}/logo.png`);
     const canonicalUrl = `${SITE_URL}/tin-tuc/${article.id}`;
+    const publishedIso = toIsoDate(article.publishedAt || article.createdAt);
+    const modifiedIso = toIsoDate(article.updatedAt || article.publishedAt || article.createdAt);
 
     return {
         title,
@@ -59,8 +69,15 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
             url: canonicalUrl,
             images: [{ url: ogImage }],
             type: 'article',
-            publishedTime: (article.publishedAt || article.createdAt) ? new Date(Number(article.publishedAt || article.createdAt)).toISOString() : undefined,
+            publishedTime: publishedIso,
+            modifiedTime: modifiedIso,
             authors: article.author ? [String(article.author)] : undefined,
+        },
+        twitter: {
+            card: 'summary_large_image',
+            title,
+            description,
+            images: [ogImage],
         },
     };
 }
@@ -69,20 +86,7 @@ export default async function ArticleDetailPage({ params }: { params: Promise<{ 
     const { slug } = await params;
     const article = await fetchArticleDetail(slug);
 
-    if (!article) {
-        return (
-            <div className="max-w-[900px] mx-auto px-2 md:px-4 py-8">
-                <div className="bg-white rounded-xl shadow-sm py-20 text-center">
-                    <FileText size={64} className="mx-auto text-gray-300 mb-4" />
-                    <h1 className="text-2xl font-bold text-gray-800">Không tìm thấy bài viết</h1>
-                    <p className="text-gray-500 mt-2">Bài viết này không tồn tại hoặc đã bị xóa.</p>
-                    <Link href="/tin-tuc" className="mt-6 inline-block px-8 py-3 bg-orange-600 text-white rounded-xl font-bold hover:bg-orange-700 transition-colors">
-                        ← Tất cả bài viết
-                    </Link>
-                </div>
-            </div>
-        );
-    }
+    if (!article) notFound();
 
     const typeInfo = typeConfig[String(article.type || '')] || { label: String(article.type || ''), color: 'bg-gray-100 text-gray-600' };
 
@@ -90,8 +94,8 @@ export default async function ArticleDetailPage({ params }: { params: Promise<{ 
     const descriptionSource = String(article.excerpt || stripHtml(String(article.content || '')) || article.title || 'Bài viết');
     const seoDescription = descriptionSource.slice(0, 155);
 
-    const publishedMs = Number(article.publishedAt || article.createdAt || 0);
-    const publishedIso = publishedMs ? new Date(publishedMs).toISOString() : undefined;
+    const publishedIso = toIsoDate(article.publishedAt || article.createdAt);
+    const modifiedIso = toIsoDate(article.updatedAt || article.publishedAt || article.createdAt);
 
     const blogPostingSchema = {
         '@context': 'https://schema.org',
@@ -100,11 +104,14 @@ export default async function ArticleDetailPage({ params }: { params: Promise<{ 
         description: seoDescription,
         image: article.thumbnail ? [article.thumbnail] : undefined,
         datePublished: publishedIso,
-        dateModified: publishedIso,
-        author: article.author ? { '@type': 'Person', name: String(article.author) } : { '@type': 'Organization', name: 'Văn Lành Service' },
+        dateModified: modifiedIso,
+        author: article.author
+            ? { '@type': 'Person', name: String(article.author) }
+            : { '@type': 'Organization', name: 'Văn Lành Service', url: SITE_URL },
         publisher: {
             '@type': 'Organization',
             name: 'Văn Lành Service',
+            url: SITE_URL,
             logo: {
                 '@type': 'ImageObject',
                 url: `${SITE_URL}/logo.png`,
@@ -241,7 +248,7 @@ export default async function ArticleDetailPage({ params }: { params: Promise<{ 
             </article>
 
             {/* Ratings + Comments (Client Side) */}
-            <ArticleClientParts slug={slug} />
+            <ArticleClientParts slug={String(article.id)} />
 
             {/* Back link */}
             <div className="mt-6 text-center">

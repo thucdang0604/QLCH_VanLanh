@@ -17,23 +17,34 @@ import { useConfig } from '@/lib/ConfigContext';
 import Modal from '@/components/admin/Modal';
 import Image from 'next/image';
 import { db, getAuthInstance } from '@/lib/firebase';
-import type { Product, TaxonomyNode } from '@/lib/types';
+import type { Product } from '@/lib/types';
 import type { ContactMethod, ContactMethodType } from '@/lib/types/contact';
 
 import { toastError, toastSuccess, toastWarning } from '@/lib/toast';
-import { DEFAULT_CONFIG } from '@/lib/config-defaults';
-import { PART_CATEGORY, isPartCategory } from '@/lib/constants';
+import { PART_CATEGORY, PART_CATEGORY_VALUES, isPartCategory } from '@/lib/constants';
 import { fetchActiveDiscountRules, calculateAccessoryDiscounts } from '@/lib/discountRuleUtils';
 import { consumeChatWorkflowHandoff } from '@/lib/chatWorkflowHandoff';
 import { extractProductCodeFromScan, getPrimaryProductCode, getProductScanCandidates, productCodeSearchText } from '@/lib/productCodes';
+import { requiresImeiForPosRetailProduct, resolveProductWarranty } from '@/lib/posCheckoutRules';
+import { normalizeVietnamPhone } from '@/lib/phone';
+import { resolvePosZaloContactIdentity, type PosCustomerIdentityMode, type PosCustomerSearchMatch } from '@/lib/posCustomerIdentity';
 import { PRODUCT_STATUS, isProductSellable } from '@/lib/productLifecycle';
 import { generateSearchKeywords } from '@/lib/utils';
-import { extractZaloQrIdentity } from '@/lib/zaloContactCardImport';
-import { PosCartPanel } from '@/features/pos/PosCartPanel';
+import { PosCartPanel, PosCartItemsSection, PosPaymentSection } from '@/features/pos/PosCartPanel';
+import { PosCustomerWorkspace } from '@/features/pos/PosCustomerWorkspace';
 import { calculatePosDiscountBreakdown } from '@/features/pos/posDiscountTotals';
 import { getRepairTicketIdsInCart, removeCartItem, removeRepairTicketFromCart } from '@/features/pos/posCartRules';
-import type { AppliedVoucher, CartItem, DiscountDetail, LastOrderData, OrderLineItem, PayableOrderInfo, RepairTicketInfo, VoucherStatus } from '@/features/pos/posTypes';
+import { isRepairReadyForPosPayment } from '@/features/pos/posRepairPaymentEligibility';
+import type { PosPaymentMode } from '@/features/pos/PosPaymentComposer';
+import type { AppliedVoucher, CartItem, DiscountDetail, LastOrderData, OrderLineItem, PayableOrderInfo, RepairShippingDraft, RepairTicketInfo, VoucherStatus } from '@/features/pos/posTypes';
 import CurrencyInput from '@/components/admin/CurrencyInput';
+import { buildPosPaymentBreakdown, createPosPaymentReference } from '@/lib/posPaymentBreakdown';
+import {
+    filterAvailableCategoryRecommendations,
+    getLinkedProductCategoryIds,
+    getRepairServiceIds,
+    type ServiceBusinessLink,
+} from '@/lib/serviceRecommendations';
 
 type BarcodeDetectionResult = { rawValue?: string };
 type BrowserBarcodeDetector = {
@@ -43,49 +54,13 @@ type BrowserBarcodeDetectorConstructor = {
     new(options?: { formats?: string[] }): BrowserBarcodeDetector;
     getSupportedFormats?: () => Promise<string[]>;
 };
-const RETAIL_CATEGORY_IDS = DEFAULT_CONFIG.taxonomy.retail.map((node) => node.id);
 const CAMERA_BARCODE_FORMATS = ['qr_code', 'code_128'];
-const POS_DEFAULT_PRODUCT_LIMIT = 120;
+const POS_DEFAULT_RETAIL_LIMIT = 80;
+const POS_DEFAULT_COMPONENT_LIMIT = 40;
 const POS_SEARCH_PRODUCT_LIMIT = 60;
 const POS_LEGACY_SCAN_FALLBACK_LIMIT = 500;
 type PosProduct = Product & { id: string };
 type PosTab = 'sales' | 'cashier';
-
-function getProductCategoryPathIds(product: Product) {
-    if (Array.isArray(product.categoryIds) && product.categoryIds.length > 0) {
-        return product.categoryIds.filter(Boolean);
-    }
-
-    const category = typeof product.category === 'string' ? product.category : '';
-    const segments = category.split('/').filter(Boolean);
-    return segments.map((_, index) => segments.slice(0, index + 1).join('/'));
-}
-
-function findTaxonomyNodeById(nodes: TaxonomyNode[], id: string): TaxonomyNode | null {
-    for (const node of nodes) {
-        if (node.id === id || node.slug === id) return node;
-        const child = findTaxonomyNodeById(node.children || [], id);
-        if (child) return child;
-    }
-    return null;
-}
-
-function resolveTaxonomyWarranty(nodes: TaxonomyNode[], categoryPathIds: string[]): Product['warrantyType'] | null {
-    let currentNodes = nodes;
-    let lastFound: Product['warrantyType'] | null = null;
-
-    for (const categoryPathId of categoryPathIds) {
-        const slug = categoryPathId.split('/').pop();
-        const node = currentNodes.find((candidate) => candidate.id === categoryPathId || candidate.slug === slug)
-            || findTaxonomyNodeById(nodes, categoryPathId);
-        if (!node) break;
-        if (node.warrantyType && node.warrantyType !== 'none') lastFound = node.warrantyType;
-        else if (node.warrantyType === 'none') lastFound = null;
-        currentNodes = node.children || [];
-    }
-
-    return lastFound;
-}
 
 function toStringArray(value: unknown): string[] {
     return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
@@ -101,6 +76,7 @@ function mapRepairTicketInfo(id: string, data: Record<string, unknown>, fallback
         customerId: String(customer.id || customer.customerId || ''),
         customerName: String(customer.name || data.customerName || ''),
         customerPhone: String(customer.phone || data.customerPhone || fallbackPhone),
+        customerAddress: String(customer.address || ''),
         primaryContactValue: String(customer.primaryContactValue || ''),
         deviceModel: String(deviceInfo.model || data.deviceModel || ''),
         status: String(data.status || ''),
@@ -128,6 +104,7 @@ function mapRepairTicketInfo(id: string, data: Record<string, unknown>, fallback
                 estimatedPrice: Number(item.estimatedPrice || 0),
                 categoryPath: toStringArray(item.categoryPath),
                 serviceName: typeof item.serviceName === 'string' ? item.serviceName : '',
+                serviceId: typeof item.serviceId === 'string' ? item.serviceId : '',
             };
         }) : [],
     };
@@ -135,6 +112,50 @@ function mapRepairTicketInfo(id: string, data: Record<string, unknown>, fallback
 
 function firstContactValue(methods: ContactMethod[] | undefined, type: ContactMethodType) {
     return methods?.find(method => method.type === type)?.value || '';
+}
+
+function formatPaymentMethodLabel(paymentMethod: string, paymentBreakdown?: { method: string }[]) {
+    const methods = Array.from(new Set((paymentBreakdown || []).map(entry => entry.method)));
+    if (methods.length > 0) {
+        const labels = methods.map(method => method === 'CASH'
+            ? 'Tiền mặt'
+            : method === 'BANK' || method === 'QR' || method === 'CARD'
+                ? 'Chuyển khoản'
+                : method === 'MOMO'
+                    ? 'MoMo'
+                    : method === 'INSTALLMENT'
+                        ? 'Trả góp'
+                        : method);
+        return labels.join(' + ');
+    }
+    if (paymentMethod === 'CASH') return 'Tiền mặt';
+    if (paymentMethod === 'INSTALLMENT') return 'Trả góp';
+    if (paymentMethod === 'DEBT') return 'Ghi nợ';
+    if (paymentMethod === 'MIXED') return 'Thanh toán nhiều kênh';
+    return 'Chuyển khoản/MoMo';
+}
+
+function normalizeCustomerLookup(value: string) {
+    return value
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/đ/gi, 'd')
+        .toLowerCase()
+        .trim()
+        .replace(/\s+/g, ' ');
+}
+
+function mapCustomerSearchMatch(id: string, data: Record<string, unknown>): PosCustomerSearchMatch {
+    const contactMethods = Array.isArray(data.contactMethods) ? data.contactMethods as ContactMethod[] : [];
+    const primaryContact = contactMethods.find(method => method.isPrimary) || contactMethods[0];
+    const phone = String(data.phone || data.primaryPhone || '');
+    return {
+        id,
+        name: String(data.name || ''),
+        phone,
+        primaryContactLabel: primaryContact?.value || String(data.primaryContactValue || phone || ''),
+        totalDebt: Number(data.totalDebt || 0),
+    };
 }
 
 function isContactMethodType(value: string | null | undefined): value is ContactMethodType {
@@ -198,6 +219,8 @@ function mapPayableOrderInfo(id: string, data: Record<string, unknown>): Payable
         remainingAmount: remainingAmount || totalAmount,
         createdAtLabel: formatLookupDate(data.createdAt),
         itemNames: items.slice(0, 4).map(item => getOrderLineDisplayName((item || {}) as Partial<OrderLineItem> & { name?: string })).filter(Boolean),
+        isShippingAdvance: data.isShippingAdvance === true,
+        shippingAdvanceRepairTicketId: String(data.shippingAdvanceRepairTicketId || ''),
     };
 }
 
@@ -231,6 +254,9 @@ interface CashierShiftView {
     cashSalesAmount: number;
     bankSalesAmount: number;
     otherSalesAmount?: number;
+    cashExpenseAmount?: number;
+    bankExpenseAmount?: number;
+    otherExpenseAmount?: number;
     expectedCashAmount: number;
     expectedBankAmount: number;
     closingCashAmount?: number;
@@ -246,20 +272,20 @@ const UniversalProductModal = dynamic(() => import('@/components/admin/Universal
 export default function POSPage() {
     const { config } = useConfig();
     const searchParams = useSearchParams();
+    const retailCategoryRootIds = useMemo(
+        () => (config?.taxonomy?.retail || []).map(node => node.id).filter(Boolean),
+        [config?.taxonomy?.retail],
+    );
 
     const resolveWarranty = useCallback((product: Product) => {
-        if (product.warrantyType && product.warrantyType !== 'none') {
-            return product.warrantyType;
-        }
-        if (product.warrantyType === 'none') return 'none';
-
-        return resolveTaxonomyWarranty(config?.taxonomy?.retail || [], getProductCategoryPathIds(product)) || 'none';
+        return resolveProductWarranty(product, config?.taxonomy?.retail || [])?.warrantyType || 'none';
     }, [config?.taxonomy?.retail]);
 
     // Products
     const [products, setProducts] = useState<PosProduct[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
+    const [appliedSearchQuery, setAppliedSearchQuery] = useState('');
     const [activeCategory, setActiveCategory] = useState('all');
 
     // Cart
@@ -267,16 +293,24 @@ export default function POSPage() {
     const [customerId, setCustomerId] = useState('');
     const [customerName, setCustomerName] = useState('');
     const [customerPhone, setCustomerPhone] = useState('');
+    const [customerAddress, setCustomerAddress] = useState('');
     const [customerZalo, setCustomerZalo] = useState('');
     const [customerFacebook, setCustomerFacebook] = useState('');
     const [customerOtherContact, setCustomerOtherContact] = useState('');
     const [customerPrimaryContactType, setCustomerPrimaryContactType] = useState<ContactMethodType>('phone');
+    const [customerIdentityMode, setCustomerIdentityMode] = useState<PosCustomerIdentityMode>('guest');
+    const [customerMatches, setCustomerMatches] = useState<PosCustomerSearchMatch[]>([]);
+    const [phoneVerificationToken, setPhoneVerificationToken] = useState('');
+    const [verifiedPhone, setVerifiedPhone] = useState('');
     const [customerDebt, setCustomerDebt] = useState<number>(0);
-    const [paymentMethod, setPaymentMethod] = useState('cash');
-    const [depositPaymentMethod, setDepositPaymentMethod] = useState('cash');
+    const [paymentMethod, setPaymentMethod] = useState<PosPaymentMode>('cash');
     const [discount, setDiscount] = useState(0);
-    const [deposit, setDeposit] = useState(0);
-    const [shippingFee, setShippingFee] = useState(0);
+    const [cashTendered, setCashTendered] = useState(0);
+    const [bankTransferAmount, setBankTransferAmount] = useState(0);
+    const [bankTransferConfirmed, setBankTransferConfirmed] = useState(false);
+    const [debtRequested, setDebtRequested] = useState(false);
+    const [bankTransferReference, setBankTransferReference] = useState(() => createPosPaymentReference(crypto.randomUUID()));
+    const [repairShipping, setRepairShipping] = useState<RepairShippingDraft | null>(null);
     const [useSurplusToPayDebt, setUseSurplusToPayDebt] = useState(false);
     const [voucherCode, setVoucherCode] = useState('');
     const [voucherStatus, setVoucherStatus] = useState<VoucherStatus | null>(null);
@@ -330,9 +364,10 @@ export default function POSPage() {
 
     useEffect(() => {
         const needsBankConfig = paymentMethod === 'bank'
+            || bankTransferAmount > 0
             || (showReceipt && lastOrder?.payment_method === 'BANK');
         if (needsBankConfig) void loadBankConfig();
-    }, [lastOrder?.payment_method, loadBankConfig, paymentMethod, showReceipt]);
+    }, [bankTransferAmount, lastOrder?.payment_method, loadBankConfig, paymentMethod, showReceipt]);
 
     const loadCashierShift = useCallback(async (includeHistory = false) => {
         setCashierLoading(true);
@@ -435,6 +470,8 @@ export default function POSPage() {
     const [autoDiscountAmount, setAutoDiscountAmount] = useState(0);
     const [discountDetails, setDiscountDetails] = useState<DiscountDetail[]>([]);
     const [autoDiscountApplied, setAutoDiscountApplied] = useState(false);
+    const [serviceAccessorySuggestions, setServiceAccessorySuggestions] = useState<PosProduct[]>([]);
+    const [isLoadingServiceAccessories, setIsLoadingServiceAccessories] = useState(false);
     const repairDiscountContextKey = useMemo(
         () => linkedRepairs.map(repair => repair.id).sort().join('|'),
         [linkedRepairs],
@@ -444,11 +481,69 @@ export default function POSPage() {
         setAutoDiscountApplied(false);
     }, [repairDiscountContextKey]);
 
+    const linkedRepairServiceKey = useMemo(() => {
+        const repairIdsInCart = getRepairTicketIdsInCart(cart);
+        return linkedRepairs
+            .filter(repair => repairIdsInCart.has(repair.id))
+            .flatMap(repair => getRepairServiceIds(repair))
+            .sort()
+            .join('|');
+    }, [cart, linkedRepairs]);
+
+    useEffect(() => {
+        let disposed = false;
+        const repairIdsInCart = getRepairTicketIdsInCart(cart);
+        const serviceIds = Array.from(new Set(linkedRepairs
+            .filter(repair => repairIdsInCart.has(repair.id))
+            .flatMap(repair => getRepairServiceIds(repair))));
+        if (serviceIds.length === 0) {
+            setServiceAccessorySuggestions([]);
+            setIsLoadingServiceAccessories(false);
+            return;
+        }
+
+        const loadSuggestions = async () => {
+            setIsLoadingServiceAccessories(true);
+            try {
+                const serviceSnaps = await Promise.all(serviceIds.map(serviceId => getDoc(doc(db, 'services', serviceId))));
+                const categories = getLinkedProductCategoryIds(serviceSnaps
+                    .filter(snapshot => snapshot.exists())
+                    .map(snapshot => ({ id: snapshot.id, ...snapshot.data() } as ServiceBusinessLink)));
+                if (categories.length === 0) {
+                    if (!disposed) setServiceAccessorySuggestions([]);
+                    return;
+                }
+                const productSnaps = await Promise.all(categories.slice(0, 10).map(categoryId => getDocs(query(
+                    collection(db, 'products'),
+                    where('categoryIds', 'array-contains', categoryId),
+                    limit(20),
+                ))));
+                const productMap = new Map<string, PosProduct>();
+                productSnaps.forEach(snapshot => snapshot.docs.forEach(productDoc => {
+                    const product = { id: productDoc.id, ...productDoc.data() } as PosProduct;
+                    if (product.status === PRODUCT_STATUS.ACTIVE && !isPartCategory(product.category, product.categoryIds)) {
+                        productMap.set(product.id, product);
+                    }
+                }));
+                const suggestions = filterAvailableCategoryRecommendations(Array.from(productMap.values()), categories).slice(0, 10);
+                if (!disposed) setServiceAccessorySuggestions(suggestions);
+            } catch (error) {
+                console.error('Failed to load service-linked accessory suggestions', error);
+                if (!disposed) setServiceAccessorySuggestions([]);
+            } finally {
+                if (!disposed) setIsLoadingServiceAccessories(false);
+            }
+        };
+        void loadSuggestions();
+        return () => { disposed = true; };
+    }, [cart, linkedRepairServiceKey, linkedRepairs]);
+
     useEffect(() => {
         if (chatPrefillApplied.current || searchParams.get('source') !== 'chat') return;
         const handoff = consumeChatWorkflowHandoff(searchParams);
         if (!handoff) return;
         setCustomerId(handoff.customerId || '');
+        setCustomerIdentityMode(handoff.customerId ? 'existing' : 'guest');
         setCustomerName(handoff.customerName);
         setCustomerPhone(handoff.customerPhone);
         const handoffContactType = isContactMethodType(handoff.primaryContactType) ? handoff.primaryContactType : handoff.customerPhone ? 'phone' : 'other';
@@ -477,6 +572,7 @@ export default function POSPage() {
 
                 setLinkedRepairs(previous => [...previous, repair]);
                 setCustomerId(previous => previous || repair.customerId || '');
+                if (repair.customerId) setCustomerIdentityMode('existing');
                 setCustomerName(previous => previous || repair.customerName);
                 setCustomerPhone(previous => previous || repair.customerPhone);
                 setCustomerOtherContact(previous => previous || repair.primaryContactValue || '');
@@ -499,6 +595,7 @@ export default function POSPage() {
         setCustomerId(id);
         setCustomerName(String(data.name || ''));
         setCustomerPhone(String(data.phone || data.primaryPhone || ''));
+        setCustomerAddress(String(data.address || ''));
         setCustomerZalo(firstContactValue(contactMethods, 'zalo'));
         setCustomerFacebook(firstContactValue(contactMethods, 'facebook'));
         setCustomerOtherContact(firstContactValue(contactMethods, 'other') || String(data.primaryContactValue || ''));
@@ -507,125 +604,175 @@ export default function POSPage() {
     };
 
     // Lookup repair/order debt by customer id first, then legacy phone fallback.
-    const lookupRepairByPhone = async (lookupValue: string) => {
-        const rawKeyword = lookupValue.trim();
-        const zaloQr = extractZaloQrIdentity(rawKeyword);
-        const keyword = zaloQr?.profileUrl || rawKeyword;
-        if (!keyword || keyword.length < 3) {
-            setLinkedRepairs([]);
-            setPayableOrders([]);
-            setAutoDiscountAmount(0);
-            setDiscountDetails([]);
-            setCustomerDebt(0);
-            return;
-        }
+    const loadCustomerActivity = async (resolvedCustomerId: string, phone: string) => {
         setRepairLoading(true);
         try {
-            const normalizedPhone = zaloQr ? '' : keyword.replace(/[^0-9]/g, '');
-            const currentCustomerId = customerId.trim();
-            const lookupMatchesCurrentCustomerId = Boolean(currentCustomerId)
-                && currentCustomerId.toLowerCase() === keyword.toLowerCase();
-            let resolvedCustomerId = '';
-            const { doc, getDoc } = await import('firebase/firestore');
-            const isSafeDocumentId = (value: string) => Boolean(value)
-                && !/[\/\\#?\[\]]/.test(value)
-                && value.length <= 120;
-
-            const docCandidates = Array.from(new Set([
-                lookupMatchesCurrentCustomerId ? currentCustomerId : '',
-                normalizedPhone,
-                keyword,
-                zaloQr?.externalId,
-            ].filter((value): value is string => Boolean(value))))
-                .filter(isSafeDocumentId);
-            for (const candidate of docCandidates) {
-                const custSnap = await getDoc(doc(db, 'customers', candidate));
-                if (!custSnap.exists()) continue;
-                resolvedCustomerId = custSnap.id;
-                applyCustomerSnapshot(custSnap.id, custSnap.data());
-                break;
-            }
-
-            if (!resolvedCustomerId && keyword.length >= 3) {
-                const searchKeywords = Array.from(new Set([
-                    keyword.toLowerCase(),
-                    zaloQr?.externalId?.toLowerCase(),
-                    generateSearchKeywords(keyword)[0] || keyword.toLowerCase(),
-                ].filter(Boolean)));
-                for (const searchKeyword of searchKeywords) {
-                    const customerSnap = await getDocs(query(collection(db, 'customers'), where('searchKeywords', 'array-contains', searchKeyword), limit(1)));
-                    const found = customerSnap.docs[0];
-                    if (!found) continue;
-                    resolvedCustomerId = found.id;
-                    applyCustomerSnapshot(found.id, found.data());
-                    break;
-                }
-            }
-
-            if (!resolvedCustomerId) {
-                setCustomerId('');
-                setCustomerDebt(0);
-            }
-
+            const normalizedPhone = normalizeVietnamPhone(phone)?.local || phone.replace(/[^0-9]/g, '');
             const repairDocs = new Map<string, Record<string, unknown> & { id: string }>();
             const orderDocs = new Map<string, Record<string, unknown> & { id: string }>();
-            const queryPairs: Promise<void>[] = [];
             const addRepairsFromSnap = async (repairQuery: ReturnType<typeof query>) => {
                 const snap = await getDocs(repairQuery);
-                snap.docs.forEach(d => {
-                    const data = d.data() as Record<string, unknown>;
-                    repairDocs.set(d.id, { id: d.id, ...data });
-                });
+                snap.docs.forEach(d => repairDocs.set(d.id, { id: d.id, ...(d.data() as Record<string, unknown>) }));
             };
             const addOrdersFromSnap = async (ordersQuery: ReturnType<typeof query>) => {
-                const ordersSnap = await getDocs(ordersQuery);
-                ordersSnap.docs.forEach(d => {
-                    const data = d.data() as Record<string, unknown>;
-                    orderDocs.set(d.id, { id: d.id, ...data });
-                });
+                const snap = await getDocs(ordersQuery);
+                snap.docs.forEach(d => orderDocs.set(d.id, { id: d.id, ...(d.data() as Record<string, unknown>) }));
             };
-
-            if (resolvedCustomerId) {
-                queryPairs.push(addRepairsFromSnap(query(collection(db, 'repairs'), where('customer.id', '==', resolvedCustomerId), fbOrderBy('createdAt', 'desc'), limit(20))));
-                queryPairs.push(addOrdersFromSnap(query(collection(db, 'orders'), where('customer_info.customerId', '==', resolvedCustomerId), limit(20))));
-            }
+            const queryPairs: Promise<void>[] = [
+                addRepairsFromSnap(query(collection(db, 'repairs'), where('customer.id', '==', resolvedCustomerId), fbOrderBy('createdAt', 'desc'), limit(20))),
+                addOrdersFromSnap(query(collection(db, 'orders'), where('customer_info.customerId', '==', resolvedCustomerId), limit(20))),
+            ];
             if (normalizedPhone) {
-                queryPairs.push(addRepairsFromSnap(query(collection(db, 'repairs'), where('customer.phone', '==', keyword), fbOrderBy('createdAt', 'desc'), limit(20))));
-                queryPairs.push(addOrdersFromSnap(query(collection(db, 'orders'), where('customer_info.phone', '==', keyword), limit(20))));
+                queryPairs.push(addRepairsFromSnap(query(collection(db, 'repairs'), where('customer.phone', '==', normalizedPhone), fbOrderBy('createdAt', 'desc'), limit(20))));
+                queryPairs.push(addOrdersFromSnap(query(collection(db, 'orders'), where('customer_info.phone', '==', normalizedPhone), limit(20))));
             }
             await Promise.all(queryPairs);
 
-            const repairs = Array.from(repairDocs.values())
-                .filter(d => {
-                    const payment = (d.payment || {}) as Record<string, unknown>;
-                    const ps = payment.status;
-                    return !ps || ps === 'unpaid' || ps === 'partial';
-                })
-                .sort((a, b) => {
-                    const ta = (a.createdAt as { toMillis?: () => number })?.toMillis?.() || 0;
-                    const tb = (b.createdAt as { toMillis?: () => number })?.toMillis?.() || 0;
-                    return tb - ta;
-                })
-                .map(d => mapRepairTicketInfo(d.id, d, normalizedPhone || keyword));
-            setLinkedRepairs(repairs);
-            const firstRepair = repairs[0];
-            if (!resolvedCustomerId && firstRepair) {
-                if (firstRepair.customerName) setCustomerName(firstRepair.customerName);
-                if (firstRepair.customerPhone) setCustomerPhone(firstRepair.customerPhone);
-            }
-            const orders = Array.from(orderDocs.values())
-                .sort((a, b) => {
-                    const ta = (a.createdAt as { toMillis?: () => number })?.toMillis?.() || 0;
-                    const tb = (b.createdAt as { toMillis?: () => number })?.toMillis?.() || 0;
-                    return tb - ta;
-                })
+            setLinkedRepairs(Array.from(repairDocs.values())
+                .filter(isRepairReadyForPosPayment)
+                .sort((a, b) => ((b.createdAt as { toMillis?: () => number })?.toMillis?.() || 0) - ((a.createdAt as { toMillis?: () => number })?.toMillis?.() || 0))
+                .map(d => mapRepairTicketInfo(d.id, d, normalizedPhone)));
+            setPayableOrders(Array.from(orderDocs.values())
+                .sort((a, b) => ((b.createdAt as { toMillis?: () => number })?.toMillis?.() || 0) - ((a.createdAt as { toMillis?: () => number })?.toMillis?.() || 0))
                 .map(orderDoc => mapPayableOrderInfo(orderDoc.id, orderDoc))
-                .filter((order): order is PayableOrderInfo => Boolean(order));
-            setPayableOrders(orders);
-        } catch (err) {
-            console.error('Repair/Customer lookup failed:', err);
+                .filter((order): order is PayableOrderInfo => Boolean(order)));
+        } catch (error) {
+            console.error('Customer activity lookup failed:', error);
+        } finally {
+            setRepairLoading(false);
         }
-        setRepairLoading(false);
+    };
+
+    const lookupCustomer = async (lookupValue: string) => {
+        const rawValue = lookupValue.trim();
+        const normalizedLookup = normalizeCustomerLookup(rawValue);
+        if (normalizedLookup.length < 2) {
+            setCustomerMatches([]);
+            return;
+        }
+
+        setRepairLoading(true);
+        try {
+            const normalizedPhone = normalizeVietnamPhone(rawValue)?.local || '';
+            const zaloIdentity = resolvePosZaloContactIdentity(rawValue);
+            const directIds = Array.from(new Set([rawValue, normalizedPhone, zaloIdentity?.customerId || '']))
+                .filter(value => value && !/[\/\\#?\[\]]/.test(value) && value.length <= 120);
+            const fallbackKeyword = generateSearchKeywords(normalizedLookup)[0] || normalizedLookup;
+            const searchKeywords = Array.from(new Set([normalizedLookup, fallbackKeyword].filter(keyword => keyword.length >= 2)));
+            const [directSnapshots, searchSnapshots] = await Promise.all([
+                Promise.all(directIds.map(id => getDoc(doc(db, 'customers', id)))),
+                Promise.all(searchKeywords.map(keyword => getDocs(query(collection(db, 'customers'), where('searchKeywords', 'array-contains', keyword), limit(8))))),
+            ]);
+            const matchesById = new Map<string, PosCustomerSearchMatch>();
+            directSnapshots.forEach(snapshot => {
+                if (snapshot.exists()) matchesById.set(snapshot.id, mapCustomerSearchMatch(snapshot.id, snapshot.data() as Record<string, unknown>));
+            });
+            searchSnapshots.forEach(snapshot => snapshot.docs.forEach(customerDoc => {
+                matchesById.set(customerDoc.id, mapCustomerSearchMatch(customerDoc.id, customerDoc.data() as Record<string, unknown>));
+            }));
+            const scoreMatch = (match: PosCustomerSearchMatch) => {
+                if (match.id.toLowerCase() === rawValue.toLowerCase() || match.id === zaloIdentity?.customerId || (normalizedPhone && match.phone === normalizedPhone)) return 3;
+                if (normalizeCustomerLookup(match.name) === normalizedLookup) return 2;
+                return 1;
+            };
+            const requiresSpecificMatch = Boolean(normalizedPhone)
+                || normalizedLookup.includes(' ')
+                || rawValue.includes('/')
+                || rawValue.includes('@');
+            setCustomerMatches(Array.from(matchesById.values())
+                .filter(match => {
+                    if (!requiresSpecificMatch) return true;
+                    if (match.id.toLowerCase() === rawValue.toLowerCase() || match.id === zaloIdentity?.customerId || (normalizedPhone && match.phone === normalizedPhone)) return true;
+                    const searchable = normalizeCustomerLookup(`${match.name} ${match.primaryContactLabel}`);
+                    return searchable.includes(normalizedLookup);
+                })
+                .sort((left, right) => scoreMatch(right) - scoreMatch(left) || left.name.localeCompare(right.name, 'vi'))
+                .slice(0, 8));
+        } catch (error) {
+            console.error('Customer search failed:', error);
+            toastError('Không thể tra cứu khách hàng. Vui lòng thử lại.');
+        } finally {
+            setRepairLoading(false);
+        }
+    };
+
+    const selectCustomer = async (customerIdToSelect: string) => {
+        setRepairLoading(true);
+        try {
+            const snapshot = await getDoc(doc(db, 'customers', customerIdToSelect));
+            if (!snapshot.exists()) {
+                toastError('Hồ sơ khách hàng không còn tồn tại. Vui lòng tra cứu lại.');
+                return;
+            }
+            const data = snapshot.data() as Record<string, unknown>;
+            applyCustomerSnapshot(snapshot.id, data);
+            setCustomerIdentityMode('existing');
+            setCustomerMatches([]);
+            setPhoneVerificationToken('');
+            setVerifiedPhone('');
+            await loadCustomerActivity(snapshot.id, String(data.phone || data.primaryPhone || ''));
+        } catch (error) {
+            console.error('Customer selection failed:', error);
+            toastError('Không thể chọn khách hàng. Vui lòng thử lại.');
+        } finally {
+            setRepairLoading(false);
+        }
+    };
+
+    const clearCustomerSelection = () => {
+        setCustomerId('');
+        setCustomerName('');
+        setCustomerPhone('');
+        setCustomerAddress('');
+        setCustomerZalo('');
+        setCustomerFacebook('');
+        setCustomerOtherContact('');
+        setCustomerPrimaryContactType('phone');
+        setCustomerIdentityMode('guest');
+        setCustomerMatches([]);
+        setPhoneVerificationToken('');
+        setVerifiedPhone('');
+        setCustomerDebt(0);
+        setLinkedRepairs([]);
+        setPayableOrders([]);
+    };
+
+    const handleCustomerPhoneChanged = (value: string) => {
+        if (customerIdentityMode === 'zalo_contact') return;
+        if (value === verifiedPhone) return;
+        setCustomerIdentityMode('guest');
+        setPhoneVerificationToken('');
+        setVerifiedPhone('');
+    };
+
+    const handleCustomerZaloChanged = (value: string) => {
+        if (customerIdentityMode === 'existing' || customerIdentityMode === 'verified_phone') return;
+
+        const zaloIdentity = resolvePosZaloContactIdentity(value);
+        if (zaloIdentity) {
+            setCustomerId('');
+            setCustomerDebt(0);
+            setCustomerMatches([]);
+            setCustomerIdentityMode('zalo_contact');
+            return;
+        }
+
+        if (customerIdentityMode === 'zalo_contact') {
+            setCustomerIdentityMode('guest');
+        }
+    };
+
+    const handlePhoneVerified = (phone: string, token: string) => {
+        if (normalizeVietnamPhone(customerPhone)?.local !== phone) {
+            toastError('SĐT đã thay đổi, vui lòng xác minh lại.');
+            return;
+        }
+        setCustomerId('');
+        setCustomerDebt(0);
+        setCustomerMatches([]);
+        setCustomerIdentityMode('verified_phone');
+        setVerifiedPhone(phone);
+        setPhoneVerificationToken(token);
     };
 
     // Auto-calculate discount when cart or linked repair changes
@@ -708,11 +855,11 @@ export default function POSPage() {
             if (!options?.includeOutOfStock && !isProductSellable(p)) return false;
             if (isPartCategory(p.category, p.categoryIds)) return true;
             if (p.categoryIds && p.categoryIds.length > 0) {
-                return RETAIL_CATEGORY_IDS.includes(p.categoryIds[0]);
+                return retailCategoryRootIds.includes(p.categoryIds[0]);
             }
             return p.category !== 'Dịch vụ sửa chữa' && p.category !== 'service';
         });
-    }, []);
+    }, [retailCategoryRootIds]);
 
     const mergeProducts = useCallback((nextProducts: PosProduct[], options?: { includeOutOfStock?: boolean }) => {
         const sellableProducts = filterPosProducts(nextProducts, options);
@@ -724,13 +871,30 @@ export default function POSPage() {
     }, [filterPosProducts]);
 
     const loadDefaultProducts = useCallback(async () => {
-        const snap = await getDocs(query(
-            collection(db, 'products'),
-            fbOrderBy('createdAt', 'desc'),
-            limit(POS_DEFAULT_PRODUCT_LIMIT),
-        ));
-        const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as PosProduct));
-        setProducts(filterPosProducts(data));
+        const productsRef = collection(db, 'products');
+        const [retailSnapshot, componentSnapshot] = await Promise.all([
+            getDocs(query(
+                productsRef,
+                where('status', '==', PRODUCT_STATUS.ACTIVE),
+                where('category', 'not-in', PART_CATEGORY_VALUES),
+                fbOrderBy('category', 'asc'),
+                fbOrderBy('createdAt', 'desc'),
+                limit(POS_DEFAULT_RETAIL_LIMIT),
+            )),
+            getDocs(query(
+                productsRef,
+                where('status', '==', PRODUCT_STATUS.ACTIVE),
+                where('category', 'in', PART_CATEGORY_VALUES),
+                fbOrderBy('category', 'asc'),
+                fbOrderBy('createdAt', 'desc'),
+                limit(POS_DEFAULT_COMPONENT_LIMIT),
+            )),
+        ]);
+        const productsById = new Map<string, PosProduct>();
+        [...retailSnapshot.docs, ...componentSnapshot.docs].forEach((snapshot) => {
+            productsById.set(snapshot.id, { id: snapshot.id, ...snapshot.data() } as PosProduct);
+        });
+        setProducts(filterPosProducts(Array.from(productsById.values())));
     }, [filterPosProducts]);
 
     // Load a bounded POS product cache instead of the full products collection.
@@ -748,50 +912,27 @@ export default function POSPage() {
     }, [loadDefaultProducts]);
 
     useEffect(() => {
-        const normalizedSearch = searchQuery.trim();
+        const normalizedSearch = appliedSearchQuery.trim();
         if (normalizedSearch.length === 0) return;
         if (normalizedSearch.length < 2) return;
 
-        const timeoutId = window.setTimeout(async () => {
+        void (async () => {
             try {
-                const normalizedQuery = normalizedSearch.toLowerCase();
                 const keyword = generateSearchKeywords(normalizedSearch)[0] || normalizedSearch.toLowerCase();
                 const keywordSnap = await getDocs(query(
                     collection(db, 'products'),
                     where('searchKeywords', 'array-contains', keyword),
                     limit(POS_SEARCH_PRODUCT_LIMIT),
                 ));
-
-                const fallbackSnap = await getDocs(query(
-                    collection(db, 'products'),
-                    fbOrderBy('createdAt', 'desc'),
-                    limit(POS_SEARCH_PRODUCT_LIMIT),
-                ));
-
-                const candidates = new Map<string, PosProduct>();
-                keywordSnap.docs.forEach(d => candidates.set(d.id, { id: d.id, ...d.data() } as PosProduct));
-                fallbackSnap.docs.forEach(d => {
-                    const product = { id: d.id, ...d.data() } as PosProduct;
-                    const searchKeywords = (product as { searchKeywords?: unknown }).searchKeywords;
-                    const haystack = [
-                        product.name,
-                        product.id,
-                        productCodeSearchText(product),
-                        ...(Array.isArray(searchKeywords) ? searchKeywords : []),
-                    ].join(' ').toLowerCase();
-                    if (haystack.includes(normalizedQuery)) {
-                        candidates.set(product.id, product);
-                    }
-                });
-
-                mergeProducts(Array.from(candidates.values()), { includeOutOfStock: true });
+                mergeProducts(
+                    keywordSnap.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as PosProduct)),
+                    { includeOutOfStock: true },
+                );
             } catch (err) {
                 console.error('Failed to search POS products:', err);
             }
-        }, 250);
-
-        return () => window.clearTimeout(timeoutId);
-    }, [loadDefaultProducts, mergeProducts, searchQuery]);
+        })();
+    }, [appliedSearchQuery, mergeProducts]);
 
     // Keyboard shortcut: F1 to focus search
     useEffect(() => {
@@ -821,7 +962,7 @@ export default function POSPage() {
     // ── Filtered products ──
     const filtered = products.filter(p => {
         const matchCat = activeCategory === 'all' || p.category === activeCategory;
-        const q = searchQuery.toLowerCase();
+        const q = appliedSearchQuery.toLowerCase();
         const matchSearch = !q || p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q) || productCodeSearchText(p).includes(q);
         return matchCat && matchSearch;
     });
@@ -833,9 +974,9 @@ export default function POSPage() {
             toastError('Sản phẩm đã hết hàng!');
             return;
         }
-        
+
         const targetCartItemId = preferredLotCode ? `${product.id}_${preferredLotCode}` : product.id;
-        
+
         setCart(prev => {
             const existing = prev.find(c => c.cartItemId === targetCartItemId);
             if (existing) {
@@ -859,6 +1000,7 @@ export default function POSPage() {
                 costPrice: product.costPrice || 0,
                 quantity: 1,
                 warrantyType: wType,
+                requiresImei: requiresImeiForPosRetailProduct(product),
                 imeis: [],
                 lotCode: preferredLotCode,
             }];
@@ -897,7 +1039,7 @@ export default function POSPage() {
             const docSnap = snapshot.docs[0];
             if (!docSnap) continue;
             const product = { id: docSnap.id, ...docSnap.data() } as PosProduct;
-                const [sellable] = filterPosProducts([product], { includeOutOfStock: true });
+            const [sellable] = filterPosProducts([product], { includeOutOfStock: true });
             if (sellable) {
                 mergeProducts([sellable]);
                 return sellable;
@@ -962,6 +1104,7 @@ export default function POSPage() {
                     if (isSearchFocused) {
                         e.preventDefault();
                         setSearchQuery('');
+                        setAppliedSearchQuery('');
                     }
                     void handleProductScan(code, 'keyboard');
                 }
@@ -1192,19 +1335,6 @@ export default function POSPage() {
         );
     };
 
-    const updatePrice = async (cartItemId: string, newPrice: number) => {
-        const item = cart.find(c => c.cartItemId === cartItemId);
-        if (item?.isRepairTicket || item?.isOrderPayment) return;
-        if (item && (item.costPrice || 0) > 0 && newPrice < (item.costPrice || 0) && newPrice > 0) {
-            if (!await appConfirm(`Giá bán (${newPrice.toLocaleString('vi-VN')}đ) thấp hơn giá vốn (${(item.costPrice || 0).toLocaleString('vi-VN')}đ). Bạn sẽ lỗ ${((item.costPrice || 0) - newPrice).toLocaleString('vi-VN')}đ/sp. Tiếp tục?`, { title: 'Xác nhận bán dưới giá vốn', confirmText: 'Tiếp tục', destructive: true })) {
-                return;
-            }
-        }
-        setCart(prev =>
-            prev.map(c => c.cartItemId === cartItemId ? { ...c, sellingPrice: newPrice } : c)
-        );
-    };
-
     const removeFromCart = (cartItemId: string) => {
         setCart(prev => removeCartItem(prev, cartItemId));
         setAutoDiscountAmount(0);
@@ -1244,15 +1374,45 @@ export default function POSPage() {
             : Math.min(Math.round(discountableSubtotal * appliedVoucher.value / 100), appliedVoucher.maxDiscount || Infinity, Math.max(0, discountableSubtotal - effectiveDiscount))
     ) : 0;
 
-    const total = Math.max(0, subtotal - effectiveDiscount - voucherDiscountAmount + (shippingFee || 0));
+    const repairTicketIdsInCart = Array.from(getRepairTicketIdsInCart(cart));
+    const shippingRepair = repairTicketIdsInCart.length === 1
+        ? linkedRepairs.find(repair => repair.id === repairTicketIdsInCart[0]) || null
+        : null;
+    const shippingCustomerCharge = repairShipping?.mode === 'customer_paid_now' ? Math.max(0, repairShipping.fee) : 0;
+    const shopShippingPayment = Boolean(repairShipping && repairShipping.mode !== 'customer_paid_now' && repairShipping.fee > 0);
+    const total = Math.max(0, subtotal - effectiveDiscount - voucherDiscountAmount + shippingCustomerCharge);
+    const selectedDebtTotal = cart
+        .filter(item => item.isOrderPayment)
+        .reduce((sum, item) => sum + item.sellingPrice * item.quantity, 0);
+    const surplusCashForDebt = useSurplusToPayDebt
+        ? Math.min(Math.max(0, cashTendered - total), Math.max(0, customerDebt - selectedDebtTotal))
+        : 0;
+    const paymentSummary = useMemo(() => buildPosPaymentBreakdown({
+        total,
+        cashTendered,
+        bankTransferAmount,
+        bankReference: bankTransferReference,
+        extraCashAllocation: surplusCashForDebt,
+    }), [bankTransferAmount, bankTransferReference, cashTendered, surplusCashForDebt, total]);
+    const usesLegacySurplusPayment = surplusCashForDebt > 0;
+    const deposit = usesLegacySurplusPayment ? cashTendered : paymentSummary.paidAmount;
+    const checkoutPaymentBreakdown = usesLegacySurplusPayment ? undefined : paymentSummary.entries;
+    const paymentBankAccounts = useMemo(() => {
+        const configuredAccounts = bankConfig?.accounts || [];
+        if (configuredAccounts.length > 0) return configuredAccounts;
+        if (bankConfig?.bankId && bankConfig.accountNo) {
+            return [{ bankId: bankConfig.bankId, accountNo: bankConfig.accountNo, accountName: bankConfig.accountName || '', isDefault: true }];
+        }
+        return [];
+    }, [bankConfig]);
 
     const formatPrice = (n: number) => n.toLocaleString('vi-VN') + 'đ';
     const activeCashierShift = cashierShift?.status === 'open' ? cashierShift : null;
     const currentCashAmount = activeCashierShift
-        ? activeCashierShift.openingCashAmount + activeCashierShift.cashSalesAmount
+        ? activeCashierShift.openingCashAmount + activeCashierShift.cashSalesAmount - (activeCashierShift.cashExpenseAmount || 0)
         : openingCashAmount;
     const currentBankAmount = activeCashierShift
-        ? activeCashierShift.openingBankAmount + activeCashierShift.bankSalesAmount
+        ? activeCashierShift.openingBankAmount + activeCashierShift.bankSalesAmount - (activeCashierShift.bankExpenseAmount || 0)
         : openingBankAmount;
     const openingShiftTotal = openingCashAmount + openingBankAmount;
     const formatDateTime = (value?: string | null) => {
@@ -1288,29 +1448,61 @@ export default function POSPage() {
         }
     };
 
-    // Auto-switch between debt and immediate payment based on the amount entered.
     useEffect(() => {
-        if (deposit > 0 && deposit < total && paymentMethod !== 'debt') {
-            if (['cash', 'bank', 'momo'].includes(paymentMethod)) {
-                setDepositPaymentMethod(paymentMethod);
-            }
-            setPaymentMethod('debt');
-            toastWarning('Số tiền khách trả nhỏ hơn tổng tiền. Hệ thống tự động chuyển sang hình thức Ghi nợ.');
+        if (debtRequested && paymentSummary.remainingAmount <= 0) {
+            setDebtRequested(false);
         }
-        if (deposit >= total && paymentMethod === 'debt') {
-            setPaymentMethod(depositPaymentMethod);
+    }, [debtRequested, paymentSummary.remainingAmount]);
+
+    useEffect(() => {
+        if (!shippingRepair) {
+            setRepairShipping(null);
+            return;
         }
-    }, [deposit, total, paymentMethod, depositPaymentMethod]);
+        setRepairShipping(current => current?.repairTicketId === shippingRepair.id ? current : null);
+    }, [shippingRepair]);
 
     // ── Checkout ──
     const handleCheckout = async () => {
         if (cart.length === 0) return;
 
-        const receivedPaymentMethod = paymentMethod === 'debt' && deposit > 0
-            ? depositPaymentMethod
-            : paymentMethod;
-        const requiresCashierShift = ['cash', 'bank', 'momo'].includes(receivedPaymentMethod)
-            && total > 0;
+        if (customerIdentityMode === 'zalo_contact') {
+            if (!customerName.trim()) {
+                toastError('Khách mới qua Zalo cần nhập tên trước khi tạo hồ sơ hoặc ghi nợ.');
+                return;
+            }
+            if (!resolvePosZaloContactIdentity(customerZalo)) {
+                toastError('Liên kết Zalo chưa phải danh thiếp hợp lệ. Hãy quét QR Zalo hoặc nhập link zaloapp.com/qr/p/…');
+                return;
+            }
+        }
+        if (customerIdentityMode === 'verified_phone' && !customerName.trim()) {
+            toastError('Khách mới xác minh SĐT cần nhập tên trước khi tạo hồ sơ hoặc ghi nợ.');
+            return;
+        }
+
+        const isExternalImmediatePayment = paymentMethod === 'momo' || paymentMethod === 'installment';
+        const immediateMethods = Array.from(new Set(paymentSummary.entries.map(entry => entry.method)));
+        const checkoutPaymentMethod = debtRequested && paymentSummary.remainingAmount > 0
+            ? 'DEBT'
+            : immediateMethods.length > 1
+                ? 'MIXED'
+                : immediateMethods[0] || (paymentMethod === 'installment' ? 'INSTALLMENT' : paymentMethod === 'momo' ? 'MOMO' : 'CASH');
+        if (paymentSummary.bankApplied > 0 && !bankTransferConfirmed) {
+            toastError('Vui lòng xác nhận tiền chuyển khoản đã vào tài khoản trước khi thanh toán.');
+            return;
+        }
+        if (!isExternalImmediatePayment && paymentSummary.remainingAmount > 0 && !debtRequested) {
+            toastWarning('Chọn Chuyển khoản hoặc Ghi nợ phần còn lại trước khi thanh toán.');
+            return;
+        }
+        if (debtRequested && selectedDebtTotal > 0) {
+            toastError('Khoản thu nợ cũ phải được thanh toán đủ trong một lần, không thể ghi nợ tiếp.');
+            return;
+        }
+        const requiresCashierShift = (
+            (paymentSummary.entries.length > 0 || isExternalImmediatePayment) && total > 0
+        ) || shopShippingPayment;
         if (requiresCashierShift && !activeCashierShift) {
             setPosTab('cashier');
             toastError('Chưa mở ca thu ngân. Vui lòng mở ca ở tab Thu ngân trước khi thanh toán tiền mặt, chuyển khoản hoặc ví.');
@@ -1318,17 +1510,31 @@ export default function POSPage() {
         }
 
         // Validation for debt/partial payments
-        const isDebtPayment = paymentMethod === 'debt' || (deposit > 0 && deposit < total);
+        const isDebtPayment = debtRequested && paymentSummary.remainingAmount > 0;
         if (isDebtPayment) {
+            if (customerIdentityMode === 'guest') {
+                toastError('Khách lẻ không thể ghi nợ. Hãy chọn hồ sơ khách cũ hoặc xác minh SĐT khách mới bằng OTP.');
+                return;
+            }
+            if (customerIdentityMode === 'existing' && !customerId.trim()) {
+                toastError('Vui lòng chọn hồ sơ khách hàng trước khi ghi nợ.');
+                return;
+            }
+            if (customerIdentityMode === 'verified_phone') {
+                const normalizedVerifiedPhone = normalizeVietnamPhone(customerPhone)?.local || '';
+                if (!phoneVerificationToken || !verifiedPhone || normalizedVerifiedPhone !== verifiedPhone) {
+                    toastError('SĐT khách mới chưa được xác minh hoặc đã thay đổi. Vui lòng xác minh OTP lại.');
+                    return;
+                }
+            }
             const phoneClean = customerPhone.trim();
             const hasDebtContact = Boolean(customerId.trim() || phoneClean || customerZalo.trim() || customerFacebook.trim() || customerOtherContact.trim());
             if (!hasDebtContact) {
                 toastError('Đơn hàng ghi nợ hoặc thanh toán thiếu bắt buộc phải có Mã KH, SĐT, Zalo, Facebook hoặc liên hệ khác.');
                 return;
             }
-            const digits = phoneClean.replace(/[^0-9]/g, '');
-            if (phoneClean && (digits.length < 9 || digits.length > 11)) {
-                toastError('Số điện thoại khách hàng không hợp lệ (yêu cầu từ 9 đến 11 chữ số).');
+            if (phoneClean && !normalizeVietnamPhone(phoneClean)) {
+                toastError('Số điện thoại khách hàng không hợp lệ (bắt đầu bằng 0, gồm 10–11 chữ số).');
                 return;
             }
         }
@@ -1354,9 +1560,9 @@ export default function POSPage() {
 
             // Validate IMEIs
             for (const item of cart) {
-                if (item.warrantyType === 'warrantyDevice') {
+                if (item.requiresImei) {
                     const validImeis = (item.imeis || []).map(i => i.trim()).filter(Boolean);
-                    if (validImeis.length < item.quantity && deposit === 0) { // Nếu có deposit thì có thể là pending order, nhưng POS ta require luôn nếu không có cọc
+                    if (validImeis.length < item.quantity) {
                         toastError(`Vui lòng nhập đủ ${item.quantity} IMEI/Serial cho sản phẩm ${item.name}`);
                         setIsProcessing(false);
                         return;
@@ -1380,11 +1586,13 @@ export default function POSPage() {
                     customerId: customerId.trim(),
                     name: customerName.trim() || 'Khách lẻ',
                     phone: customerPhone.trim(),
+                    identityMode: customerIdentityMode,
                     zalo: customerZalo.trim(),
                     facebook: customerFacebook.trim(),
                     otherContact: customerOtherContact.trim(),
                     primaryContactType: customerPrimaryContactType,
                 },
+                ...(customerIdentityMode === 'verified_phone' ? { phone_verification_token: phoneVerificationToken } : {}),
                 items: cart.map(c => ({
                     productId: c.productId,
                     productName: c.name,
@@ -1400,13 +1608,13 @@ export default function POSPage() {
                 total_amount: total,
                 discount_amount: effectiveDiscount + voucherDiscountAmount,
                 subtotal_amount: subtotal,
-                shipping_fee: shippingFee,
+                shipping_fee: shippingCustomerCharge,
+                ...(repairShipping ? { repair_shipping: repairShipping } : {}),
                 deposit_amount: deposit,
-                deposit_payment_method: paymentMethod === 'debt' && deposit > 0
-                    ? (depositPaymentMethod === 'cash' ? 'CASH' : depositPaymentMethod === 'bank' ? 'BANK' : 'MOMO')
-                    : undefined,
+                deposit_payment_method: paymentSummary.entries[0]?.method || (cashTendered > 0 ? 'CASH' : bankTransferAmount > 0 ? 'BANK' : undefined),
+                ...(checkoutPaymentBreakdown !== undefined ? { payment_breakdown: checkoutPaymentBreakdown } : {}),
                 use_surplus_to_pay_debt: useSurplusToPayDebt,
-                payment_method: paymentMethod === 'cash' ? 'CASH' : paymentMethod === 'bank' ? 'BANK' : paymentMethod === 'installment' ? 'INSTALLMENT' : paymentMethod === 'debt' ? 'DEBT' : 'MOMO',
+                payment_method: checkoutPaymentMethod,
                 ...(requiresCashierShift && activeCashierShift ? { cashierShiftId: activeCashierShift.id } : {}),
                 ...(appliedVoucher ? { voucherCode: appliedVoucher.code } : {}),
             };
@@ -1452,7 +1660,7 @@ export default function POSPage() {
                 setShowReceipt(false);
                 toastSuccess('Thu nợ thành công, đã cập nhật lịch sử thanh toán trên đơn cũ!');
             } else {
-                setLastOrder({ id: data.orderId, ...orderData, createdAt: new Date() });
+                setLastOrder({ id: data.orderId, ...orderData, paymentBreakdown: data.paymentBreakdown || checkoutPaymentBreakdown, createdAt: new Date() });
                 toastSuccess('Thanh toán thành công!');
                 setShowReceipt(true);
             }
@@ -1466,13 +1674,21 @@ export default function POSPage() {
             setCustomerFacebook('');
             setCustomerOtherContact('');
             setCustomerPrimaryContactType('phone');
+            setCustomerIdentityMode('guest');
+            setCustomerMatches([]);
+            setPhoneVerificationToken('');
+            setVerifiedPhone('');
             setCustomerDebt(0);
             setLinkedRepairs([]);
             setDiscount(0);
-            setDeposit(0);
-            setDepositPaymentMethod('cash');
+            setCashTendered(0);
+            setBankTransferAmount(0);
+            setBankTransferConfirmed(false);
+            setDebtRequested(false);
+            setBankTransferReference(createPosPaymentReference(crypto.randomUUID()));
+            setPaymentMethod('cash');
             setUseSurplusToPayDebt(false);
-            setShippingFee(0);
+            setRepairShipping(null);
             setVoucherCode('');
             setAppliedVoucher(null);
             setVoucherStatus(null);
@@ -1508,17 +1724,17 @@ export default function POSPage() {
         </div>
     );
 
-    const cartSection = (
-        <PosCartPanel
+    const customerWorkspace = (
+        <PosCustomerWorkspace
             cart={cart}
-            setCart={setCart}
-            products={products}
             customerId={customerId}
             setCustomerId={setCustomerId}
             customerName={customerName}
             setCustomerName={setCustomerName}
             customerPhone={customerPhone}
             setCustomerPhone={setCustomerPhone}
+            customerAddress={customerAddress}
+            setCustomerAddress={setCustomerAddress}
             customerZalo={customerZalo}
             setCustomerZalo={setCustomerZalo}
             customerFacebook={customerFacebook}
@@ -1527,48 +1743,57 @@ export default function POSPage() {
             setCustomerOtherContact={setCustomerOtherContact}
             customerPrimaryContactType={customerPrimaryContactType}
             setCustomerPrimaryContactType={setCustomerPrimaryContactType}
+            customerIdentityMode={customerIdentityMode}
+            customerMatches={customerMatches}
+            onSelectCustomer={selectCustomer}
+            onClearCustomerSelection={clearCustomerSelection}
+            onPhoneChanged={handleCustomerPhoneChanged}
+            onPhoneVerified={handlePhoneVerified}
+            onZaloContactChanged={handleCustomerZaloChanged}
             customerDebt={customerDebt}
             repairLoading={repairLoading}
             linkedRepairs={linkedRepairs}
+            shippingRepair={shippingRepair}
+            repairShipping={repairShipping}
+            onRepairShippingChange={setRepairShipping}
             payableOrders={payableOrders}
-            discountDetails={discountDetails}
-            autoDiscountAmount={autoDiscountAmount}
-            autoDiscountApplied={autoDiscountApplied}
-            onApplyAutoDiscount={() => setAutoDiscountApplied(true)}
-            setDiscount={setDiscount}
-            paymentMethod={paymentMethod}
-            setPaymentMethod={setPaymentMethod}
-            depositPaymentMethod={depositPaymentMethod}
-            setDepositPaymentMethod={setDepositPaymentMethod}
-            discount={discount}
-            voucherCode={voucherCode}
-            setVoucherCode={setVoucherCode}
-            voucherStatus={voucherStatus}
-            appliedVoucher={appliedVoucher}
-            setAppliedVoucher={setAppliedVoucher}
-            setVoucherStatus={setVoucherStatus}
-            voucherDiscountAmount={voucherDiscountAmount}
-            deposit={deposit}
-            setDeposit={setDeposit}
-            useSurplusToPayDebt={useSurplusToPayDebt}
-            setUseSurplusToPayDebt={setUseSurplusToPayDebt}
-            subtotal={subtotal}
-            total={total}
-            isProcessing={isProcessing}
-            cashierShiftOpen={Boolean(activeCashierShift)}
-            onCloseMobileCart={() => setShowMobileCart(false)}
-            onLookupRepairByPhone={lookupRepairByPhone}
+            onLookupCustomer={lookupCustomer}
             onAddRepairToCart={addRepairToCart}
             onAddPayableOrderToCart={addPayableOrderToCart}
-            onApplyVoucher={handleApplyVoucher}
-            onUpdateQuantity={updateQuantity}
-            onUpdatePrice={updatePrice}
-            onRemoveFromCart={removeFromCart}
-            onRemoveRepairFromCart={removeRepairFromCart}
-            onCheckout={handleCheckout}
             formatPrice={formatPrice}
         />
     );
+
+    const cartPanelProps = {
+        cart, setCart, customerName, customerPhone, customerDebt, repairShipping,
+        discountDetails, autoDiscountAmount, autoDiscountApplied,
+        onApplyAutoDiscount: () => setAutoDiscountApplied(true),
+        setDiscount, paymentMethod, setPaymentMethod, discount,
+        voucherCode, setVoucherCode, voucherStatus, appliedVoucher,
+        setAppliedVoucher, setVoucherStatus, voucherDiscountAmount,
+        deposit, paymentBreakdown: paymentSummary.entries,
+        cashTendered, setCashTendered, bankTransferAmount, setBankTransferAmount,
+        bankTransferConfirmed, setBankTransferConfirmed,
+        debtRequested, setDebtRequested, bankTransferReference,
+        bankAccounts: paymentBankAccounts,
+        useSurplusToPayDebt, setUseSurplusToPayDebt,
+        subtotal, total, isProcessing,
+        cashierShiftOpen: Boolean(activeCashierShift),
+        onCloseMobileCart: () => setShowMobileCart(false),
+        onApplyVoucher: handleApplyVoucher,
+        onUpdateQuantity: updateQuantity,
+        onRemoveFromCart: removeFromCart,
+        onRemoveRepairFromCart: removeRepairFromCart,
+        onCheckout: handleCheckout,
+        formatPrice,
+    };
+
+    /* Mobile: combined cart + payment (full-screen sheet) */
+    const cartSection = <PosCartPanel {...cartPanelProps} />;
+    /* Desktop right column: cart items only */
+    const cartItemsSection = <PosCartItemsSection {...cartPanelProps} />;
+    /* Desktop bottom full-width: payment controls + totals + checkout */
+    const paymentSection = <PosPaymentSection {...cartPanelProps} />;
 
     const cashierSection = (
         <div className="md:flex-1 md:overflow-y-auto">
@@ -1609,14 +1834,14 @@ export default function POSPage() {
                                     <div className="text-xs font-bold uppercase tracking-wide text-gray-500">Tiền mặt hiện có</div>
                                     <div className="mt-1 text-2xl font-black text-gray-950">{formatPrice(currentCashAmount)}</div>
                                     <div className="mt-2 text-xs font-medium text-gray-500">
-                                        Đầu ca {formatPrice(activeCashierShift.openingCashAmount)} + POS {formatPrice(activeCashierShift.cashSalesAmount)}
+                                        Đầu ca {formatPrice(activeCashierShift.openingCashAmount)} + thu POS {formatPrice(activeCashierShift.cashSalesAmount)} − chi ship {formatPrice(activeCashierShift.cashExpenseAmount || 0)}
                                     </div>
                                 </div>
                                 <div className="rounded-2xl border border-blue-100 bg-blue-50 p-3">
                                     <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Chuyển khoản trong ca</div>
                                     <div className="mt-1 text-2xl font-black text-blue-900">{formatPrice(currentBankAmount)}</div>
                                     <div className="mt-2 text-xs font-medium text-blue-600">
-                                        Đầu ca {formatPrice(activeCashierShift.openingBankAmount)} + POS {formatPrice(activeCashierShift.bankSalesAmount)}
+                                        Đầu ca {formatPrice(activeCashierShift.openingBankAmount)} + thu POS {formatPrice(activeCashierShift.bankSalesAmount)} − chi ship {formatPrice(activeCashierShift.bankExpenseAmount || 0)}
                                     </div>
                                 </div>
                             </div>
@@ -1631,6 +1856,14 @@ export default function POSPage() {
                                     <div className="rounded-xl bg-gray-50 p-3">
                                         <div className="text-xs text-gray-500">Chuyển khoản</div>
                                         <div className="font-black text-gray-900">{formatPrice(activeCashierShift.bankSalesAmount)}</div>
+                                    </div>
+                                    <div className="rounded-xl bg-red-50 p-3">
+                                        <div className="text-xs text-red-600">Chi ship tiền mặt</div>
+                                        <div className="font-black text-red-800">-{formatPrice(activeCashierShift.cashExpenseAmount || 0)}</div>
+                                    </div>
+                                    <div className="rounded-xl bg-red-50 p-3">
+                                        <div className="text-xs text-red-600">Chi ship chuyển khoản</div>
+                                        <div className="font-black text-red-800">-{formatPrice(activeCashierShift.bankExpenseAmount || 0)}</div>
                                     </div>
                                 </div>
                             </div>
@@ -1775,143 +2008,215 @@ export default function POSPage() {
     );
 
     return (
-        <div className="min-h-[calc(100vh-220px)] md:h-[calc(100vh-80px)] flex gap-4 p-4">
-            {/* ═══ LEFT: Product Grid ═══ */}
-            <div className="flex-1 flex flex-col min-w-0">
-                <div className="mb-4 flex w-full gap-2 rounded-2xl border bg-white p-1 shadow-sm sm:w-fit">
-                    <button
-                        type="button"
-                        onClick={() => setPosTab('sales')}
-                        className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-bold transition-all sm:flex-none ${posTab === 'sales'
-                            ? 'bg-orange-500 text-white shadow-sm'
-                            : 'text-gray-600 hover:bg-gray-50'
-                            }`}
-                    >
-                        <ShoppingCart size={16} />
-                        Bán hàng
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => setPosTab('cashier')}
-                        className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-bold transition-all sm:flex-none ${posTab === 'cashier'
-                            ? 'bg-emerald-600 text-white shadow-sm'
-                            : 'text-gray-600 hover:bg-gray-50'
-                            }`}
-                    >
-                        <Banknote size={16} />
-                        Thu ngân
-                    </button>
-                </div>
-                {posTab === 'sales' ? (
-                    <>
-                {/* Search + Category Filter + Quick Add */}
-                <div className="flex gap-3 mb-4">
-                    <div className="relative flex-1">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-                        <input
-                            ref={searchRef}
-                            type="text"
-                            placeholder="Tìm sản phẩm... (F1)"
-                            value={searchQuery}
-                            onChange={e => setSearchQuery(e.target.value)}
-                            className="w-full pl-10 pr-4 py-2.5 border rounded-xl focus:ring-2 focus:ring-orange-500/30 focus:border-orange-400 bg-white shadow-sm"
-                        />
+        <div className="min-h-[calc(100vh-220px)] p-4 md:h-[calc(100vh-80px)]">
+            <div className="flex h-full flex-col gap-4">
+                <div className="flex items-center gap-3">
+                    <div className="flex w-full gap-2 rounded-2xl border bg-white p-1 shadow-sm sm:w-fit">
+                        <button
+                            type="button"
+                            onClick={() => setPosTab('sales')}
+                            className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-bold transition-all sm:flex-none ${posTab === 'sales'
+                                ? 'bg-orange-500 text-white shadow-sm'
+                                : 'text-gray-600 hover:bg-gray-50'
+                                }`}
+                        >
+                            <ShoppingCart size={16} />
+                            Bán hàng
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setPosTab('cashier')}
+                            className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-bold transition-all sm:flex-none ${posTab === 'cashier'
+                                ? 'bg-emerald-600 text-white shadow-sm'
+                                : 'text-gray-600 hover:bg-gray-50'
+                                }`}
+                        >
+                            <Banknote size={16} />
+                            Thu ngân
+                        </button>
                     </div>
                     <button
                         onClick={() => setShowProductModal(true)}
-                        className="flex items-center gap-1.5 px-4 py-2.5 bg-green-600 text-white rounded-xl hover:bg-green-700 shadow-sm font-semibold text-sm whitespace-nowrap transition-all"
+                        className="flex items-center gap-1.5 rounded-xl bg-green-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all hover:bg-green-700 whitespace-nowrap"
                     >
-                        <Plus size={16} />
+                        <Plus size={15} />
                         Thêm SP Mới
                     </button>
-                    <button
-                        onClick={() => setShowScanner(true)}
-                        className="flex items-center gap-1.5 px-4 py-2.5 bg-gray-900 text-white rounded-xl hover:bg-black shadow-sm font-semibold text-sm whitespace-nowrap transition-all"
-                    >
-                        <Camera size={16} />
-                        Quét mã
-                    </button>
                 </div>
-
-                {/* Category Tabs */}
-                <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
-                    {categories.map(cat => (
-                        <button
-                            key={cat}
-                            onClick={() => setActiveCategory(cat)}
-                            className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-all ${activeCategory === cat
-                                ? 'bg-orange-500 text-white shadow-md shadow-orange-200'
-                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                }`}
-                        >
-                            {catLabel[cat] || cat}
-                        </button>
-                    ))}
-                </div>
-
-                {/* Product Grid */}
-                <div className="md:flex-1 md:overflow-y-auto">
-                    <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                        {filtered.map(product => {
-                            const available = (product.stock || 0) - (product.held || 0);
-                            const outOfStock = available <= 0;
-                            return (
-                                <button
-                                    key={product.id}
-                                    onClick={() => !outOfStock && addToCart(product)}
-                                    disabled={outOfStock}
-                                    className={`bg-white rounded-xl border border-gray-100 p-3 text-left transition-all group relative ${outOfStock
-                                        ? 'opacity-50 cursor-not-allowed'
-                                        : 'hover:shadow-lg hover:border-orange-200 active:scale-[0.97]'
-                                        }`}
+                {posTab === 'sales' ? (
+                    <div className="flex min-h-0 flex-1 gap-4">
+                        {/* ═══ LEFT: Product Grid + Payment Controls ═══ */}
+                        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
+                            {/* Search + Category Filter + Quick Add */}
+                            <div className="flex flex-wrap sm:flex-nowrap gap-2 sm:gap-3 mb-3">
+                                <form
+                                    className="flex flex-1 max-w-[50%] min-w-[180px] gap-1.5 sm:gap-2"
+                                    onSubmit={(event) => {
+                                        event.preventDefault();
+                                        setAppliedSearchQuery(searchQuery.trim());
+                                    }}
                                 >
-                                    {/* Out-of-stock badge */}
-                                    {outOfStock && (
-                                        <div className="absolute top-2 right-2 z-10 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm flex items-center gap-1">
-                                            <AlertTriangle size={10} /> Hết hàng
+                                    <div className="relative flex-1">
+                                        <Search className="absolute left-2 sm:left-2.5 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
+                                        <input
+                                            ref={searchRef}
+                                            type="text"
+                                            placeholder="Tìm sản phẩm... (F1)"
+                                            value={searchQuery}
+                                            onChange={e => setSearchQuery(e.target.value)}
+                                            className="w-full pl-7 sm:pl-8 pr-2.5 py-1 sm:py-1.5 text-xs border rounded-lg focus:ring-2 focus:ring-orange-500/30 focus:border-orange-400 bg-white shadow-sm"
+                                        />
+                                    </div>
+                                    <button
+                                        type="submit"
+                                        className="rounded-lg bg-orange-500 px-2.5 sm:px-3 py-1 sm:py-1.5 text-xs font-semibold text-white hover:bg-orange-600 shrink-0"
+                                    >
+                                        Tìm
+                                    </button>
+                                </form>
+                                <div className="flex gap-1.5 sm:gap-2 shrink-0">
+                                    <button
+                                        onClick={() => setShowScanner(true)}
+                                        className="flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-4 py-2 sm:py-2.5 bg-gray-900 text-white rounded-xl hover:bg-black shadow-sm font-semibold text-xs sm:text-sm whitespace-nowrap transition-all"
+                                    >
+                                        <Camera size={15} />
+                                        <span>Quét mã</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Category Tabs */}
+                            <div className="flex gap-2 mb-3 overflow-x-auto pb-1">
+                                {categories.map(cat => (
+                                    <button
+                                        key={cat}
+                                        onClick={() => setActiveCategory(cat)}
+                                        className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-all ${activeCategory === cat
+                                            ? 'bg-orange-500 text-white shadow-md shadow-orange-200'
+                                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                            }`}
+                                    >
+                                        {catLabel[cat] || cat}
+                                    </button>
+                                ))}
+                            </div>
+
+                            {(isLoadingServiceAccessories || serviceAccessorySuggestions.length > 0) && (
+                                <div className="mb-3 rounded-xl border border-emerald-100 bg-emerald-50/70 p-2.5">
+                                    <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-emerald-800">
+                                        <Package size={14} /> Phụ kiện gợi ý theo dịch vụ sửa chữa
+                                        {isLoadingServiceAccessories && <Loader2 size={13} className="animate-spin" />}
+                                    </div>
+                                    <div className="flex gap-2 overflow-x-auto pb-0.5">
+                                        {serviceAccessorySuggestions.map(product => {
+                                            const available = Math.max(0, (product.stock || 0) - (product.held || 0));
+                                            return (
+                                                <button
+                                                    key={product.id}
+                                                    type="button"
+                                                    onClick={() => addToCart(product)}
+                                                    disabled={available <= 0}
+                                                    className="min-w-36 rounded-lg border border-emerald-100 bg-white px-2.5 py-2 text-left text-xs hover:border-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
+                                                >
+                                                    <p className="line-clamp-1 font-semibold text-gray-800">{product.name}</p>
+                                                    <p className="mt-0.5 text-emerald-700">{formatPrice(product.price_promo || product.price_original)} · Tồn {available}</p>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Product Grid — limited height on desktop */}
+                            <div className="md:max-h-[45vh] overflow-y-auto">
+                                <div className="grid grid-cols-2 gap-1.5 min-[1500px]:grid-cols-3 min-[1700px]:grid-cols-4">
+                                    {filtered.map(product => {
+                                        const available = (product.stock || 0) - (product.held || 0);
+                                        const outOfStock = available <= 0;
+                                        return (
+                                            <button
+                                                key={product.id}
+                                                onClick={() => !outOfStock && addToCart(product)}
+                                                disabled={outOfStock}
+                                                className={`group relative flex min-h-[56px] items-center gap-1.5 sm:gap-2 rounded-lg border border-gray-100 bg-white p-1.5 sm:p-2 text-left transition-all ${outOfStock
+                                                    ? 'opacity-50 cursor-not-allowed'
+                                                    : 'hover:shadow-md hover:border-orange-200 active:scale-[0.97]'
+                                                    }`}
+                                            >
+                                                {outOfStock && (
+                                                    <div className="absolute right-1 top-1 z-10 flex items-center gap-0.5 rounded-full bg-red-500 px-1 py-0.5 text-[8px] font-bold text-white shadow-sm">
+                                                        <AlertTriangle size={9} /> Hết
+                                                    </div>
+                                                )}
+                                                <div className="flex h-9 w-9 sm:h-10 sm:w-10 shrink-0 items-center justify-center overflow-hidden rounded-md bg-gray-50">
+                                                    {((product as unknown as { imageUrl?: string }).imageUrl || product.images?.[0]) ? (
+                                                        <Image src={((product as unknown as { imageUrl?: string }).imageUrl || product.images?.[0]) as string} alt={product.name} width={40} height={40} className={`h-full w-full object-cover ${!outOfStock ? 'group-hover:scale-105' : ''} transition-transform`} />
+                                                    ) : (
+                                                        <Package className="text-gray-300" size={15} />
+                                                    )}
+                                                </div>
+                                                <div className="min-w-0 flex-1">
+                                                    <p className="line-clamp-2 text-xs font-semibold leading-3.5 text-gray-800">{product.name}</p>
+                                                    <p className="mt-0.5 truncate font-mono text-[9px] sm:text-[10px] text-gray-400">{getPrimaryProductCode(product)}</p>
+                                                    <div className="mt-0.5 flex flex-wrap items-end justify-between gap-x-1">
+                                                        <p className="text-xs font-bold text-orange-600">{formatPrice(product.price_promo || product.price_original)}</p>
+                                                        <p className={`text-right text-[9px] sm:text-[10px] font-medium ${outOfStock ? 'text-red-500' : available <= 3 ? 'text-amber-500' : 'text-gray-400'}`}>
+                                                            Tồn: {available}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            </button>
+                                        );
+                                    })}
+                                    {filtered.length === 0 && (
+                                        <div className="col-span-full text-center py-16 text-gray-400">
+                                            <Package size={48} className="mx-auto mb-3 opacity-50" />
+                                            <p>Không tìm thấy sản phẩm</p>
                                         </div>
                                     )}
-                                    <div className="aspect-square rounded-lg bg-gray-50 mb-2 overflow-hidden flex items-center justify-center">
-                                        {((product as unknown as { imageUrl?: string }).imageUrl || product.images?.[0]) ? (
-                                            <Image src={((product as unknown as { imageUrl?: string }).imageUrl || product.images?.[0]) as string} alt={product.name} width={200} height={200} className={`w-full h-full object-cover ${!outOfStock ? 'group-hover:scale-105' : ''} transition-transform`} />
-                                        ) : (
-                                            <Package className="text-gray-300" size={32} />
-                                        )}
-                                    </div>
-                                    <p className="text-xs font-semibold text-gray-800 line-clamp-2 mb-1">{product.name}</p>
-                                    <p className="text-[10px] font-mono text-gray-400 mb-1">{getPrimaryProductCode(product)}</p>
-                                    <p className="text-sm font-bold text-orange-600">{formatPrice(product.price_promo || product.price_original)}</p>
-                                    <p className={`text-[10px] mt-0.5 font-medium ${outOfStock ? 'text-red-500' : available <= 3 ? 'text-amber-500' : 'text-gray-400'}`}>
-                                        Tồn kho: {product.stock || 0}{(product.held || 0) > 0 ? ` (Đang giữ: ${product.held})` : ''}
-                                    </p>
-                                </button>
-                            );
-                        })}
-                        {filtered.length === 0 && (
-                            <div className="col-span-full text-center py-16 text-gray-400">
-                                <Package size={48} className="mx-auto mb-3 opacity-50" />
-                                <p>Không tìm thấy sản phẩm</p>
+                                </div>
                             </div>
-                        )}
-                    </div>
-                </div>
-                    </>
-                ) : cashierSection}
-            </div>
 
-            {/* ═══ RIGHT: Cart & Checkout (Desktop) ═══ */}
-            {posTab === 'sales' && (
-                <div className="hidden md:flex w-[380px] flex-shrink-0 bg-white rounded-2xl border shadow-sm flex-col">
-                    {cartSection}
-                </div>
-            )}
+                            {/* ═══ Payment Controls (below product grid, left column) ═══ */}
+                            <div className="hidden md:block mt-3 rounded-2xl border bg-white shadow-sm">
+                                {paymentSection}
+                            </div>
+                        </div>
+
+                        {/* ═══ RIGHT (Tablet/Laptop md & lg): Single Right Column Stacking Customer + Cart ═══ */}
+                        <div className="hidden min-h-0 md:flex xl:hidden md:w-[350px] lg:w-[380px] flex-shrink-0 flex-col gap-2.5 overflow-y-auto">
+                            <div className="rounded-2xl border bg-white p-2 shadow-sm">
+                                {customerWorkspace}
+                            </div>
+                            <div className="flex min-h-0 flex-1 flex-col rounded-2xl border bg-white shadow-sm overflow-hidden">
+                                {cartItemsSection}
+                            </div>
+                        </div>
+
+                        {/* ═══ RIGHT (Large Desktop xl & 2xl): Separate Customer & Cart Columns ═══ */}
+                        <div className="hidden min-h-0 xl:flex xl:w-[300px] 2xl:w-[340px] flex-shrink-0 flex-col overflow-y-auto rounded-2xl border bg-white p-2 shadow-sm">
+                            {customerWorkspace}
+                        </div>
+                        <div className="hidden min-h-0 xl:flex xl:w-[340px] 2xl:w-[380px] flex-shrink-0 flex-col overflow-y-auto rounded-2xl border bg-white shadow-sm">
+                            <div className="flex min-h-0 flex-1 flex-col">
+                                {cartItemsSection}
+                            </div>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="flex min-h-0 flex-1 gap-4">
+                        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                            {cashierSection}
+                        </div>
+                    </div>
+                )}
 
             {/* ═══ Mobile: Sticky Bottom Bar ═══ */}
             {posTab === 'sales' && !showMobileCart && (
-                <div className="md:hidden fixed left-0 right-0 bottom-[calc(env(safe-area-inset-bottom)+76px)] bg-white border-t shadow-lg px-4 py-3 z-40">
+                <div className="md:hidden fixed left-0 right-0 bottom-[calc(env(safe-area-inset-bottom)+62px)] bg-white/95 backdrop-blur-sm border-t shadow-lg px-3 py-2 z-40">
                     <button onClick={() => setShowMobileCart(true)}
-                        className="w-full py-3 rounded-xl font-bold text-white bg-gradient-to-r from-orange-500 to-orange-600 flex items-center justify-center gap-2 shadow-lg shadow-orange-200/50 active:scale-[0.98]">
-                        <ShoppingCart size={18} />
+                        className="w-full py-2.5 rounded-xl font-bold text-sm text-white bg-gradient-to-r from-orange-500 to-orange-600 flex items-center justify-center gap-2 shadow-md shadow-orange-200/50 active:scale-[0.98]">
+                        <ShoppingCart size={16} />
                         Giỏ hàng ({cart.reduce((s, c) => s + c.quantity, 0)}) — {formatPrice(total)}
                     </button>
                 </div>
@@ -1919,8 +2224,11 @@ export default function POSPage() {
 
             {/* ═══ Mobile: Full-screen Cart Sheet ═══ */}
             {posTab === 'sales' && showMobileCart && (
-                <div className="md:hidden fixed inset-0 bg-white z-50 flex flex-col pb-[env(safe-area-inset-bottom)]">
-                    {cartSection}
+                <div className="fixed inset-0 z-50 flex flex-col overflow-y-auto bg-white pb-[env(safe-area-inset-bottom)] md:hidden">
+                    <div className="p-3">{customerWorkspace}</div>
+                    <div className="flex min-h-0 flex-1 flex-col border-t">
+                        {cartSection}
+                    </div>
                 </div>
             )}
 
@@ -2050,6 +2358,9 @@ export default function POSPage() {
                                         {lastOrder.discount_amount > 0 && (
                                             <div className="flex justify-between"><span>Giảm giá</span><span>-{formatPrice(lastOrder.discount_amount)}</span></div>
                                         )}
+                                        {lastOrder.shipping_fee > 0 && (
+                                            <div className="flex justify-between text-sky-700"><span>Phí ship</span><span>+{formatPrice(lastOrder.shipping_fee)}</span></div>
+                                        )}
                                         <div className="flex justify-between font-bold text-sm border-t pt-1">
                                             <span>TỔNG CỘNG</span>
                                             <span>{formatPrice(lastOrder.total_amount)}</span>
@@ -2057,47 +2368,17 @@ export default function POSPage() {
                                         {lastOrder.deposit_amount > 0 && (
                                             <>
                                                 <div className="flex justify-between text-blue-600 mt-1"><span>Khách đã cọc</span><span>{formatPrice(lastOrder.deposit_amount)}</span></div>
+                                                {lastOrder.paymentBreakdown?.map((entry, index) => (
+                                                    <div key={`${entry.method}-${index}`} className="flex justify-between text-xs text-blue-500"><span>{entry.method === 'CASH' ? 'Tiền mặt' : entry.method === 'BANK' ? 'Chuyển khoản' : entry.method}</span><span>{formatPrice(entry.amount)}</span></div>
+                                                ))}
                                                 <div className="flex justify-between font-bold text-red-600"><span>CÒN LẠI</span><span>{formatPrice(Math.max(0, lastOrder.total_amount - lastOrder.deposit_amount))}</span></div>
                                             </>
                                         )}
                                         <div className="flex justify-between text-gray-500 pt-1">
                                             <span>HTTT</span>
-                                            <span>{lastOrder.payment_method === 'CASH' ? 'Tiền mặt' : lastOrder.payment_method === 'INSTALLMENT' ? 'Trả góp' : lastOrder.payment_method === 'DEBT' ? 'Ghi nợ' : 'Chuyển khoản/MoMo'}</span>
+                                            <span>{formatPaymentMethodLabel(lastOrder.payment_method, lastOrder.paymentBreakdown)}</span>
                                         </div>
                                     </div>
-                                    {lastOrder.payment_method === 'BANK' && bankConfig && (
-                                        (() => {
-                                            const defaultAccs: BankAccountConfig[] = bankConfig.accounts?.filter((account) => account.isDefault) || [];
-                                            if (defaultAccs.length === 0 && bankConfig.bankId && bankConfig.accountNo) {
-                                                defaultAccs.push({
-                                                    bankId: bankConfig.bankId,
-                                                    accountNo: bankConfig.accountNo,
-                                                    accountName: bankConfig.accountName || '',
-                                                });
-                                            }
-                                            if (defaultAccs.length === 0) return null;
-                                            return (
-                                                <div className="flex flex-col items-center mt-2 pb-2 border-t border-dashed pt-2">
-                                                    <p className="font-bold text-center mb-1">QUÉT MÃ CHUYỂN KHOẢN</p>
-                                                    <div className="flex flex-wrap justify-center gap-2">
-                                                        {defaultAccs.map((acc, idx) => (
-                                                            <div key={idx} className="flex flex-col items-center">
-                                                                <Image
-                                                                    src={`https://img.vietqr.io/image/${acc.bankId}-${acc.accountNo}-compact2.png?amount=${Math.max(0, lastOrder.total_amount - lastOrder.deposit_amount)}&addInfo=${lastOrder.id.slice(-6)}&accountName=${encodeURIComponent(acc.accountName || '')}`}
-                                                                    alt="VietQR"
-                                                                    width={128}
-                                                                    height={128}
-                                                                    unoptimized
-                                                                    className="w-32 h-32 object-contain mx-auto"
-                                                                />
-                                                                <span className="text-[9px] mt-1 text-gray-600">{acc.bankId}</span>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            );
-                                        })()
-                                    )}
                                     <p className="text-center text-gray-400 text-[10px]">Cảm ơn quý khách! Hẹn gặp lại.</p>
                                 </div>
                             ) : (
@@ -2214,6 +2495,7 @@ export default function POSPage() {
                                             <div class="summary">
                                                 <div class="summary-row"><span>Tổng tiền hàng:</span><span>${lastOrder.subtotal_amount.toLocaleString('vi-VN')} đ</span></div>
                                                 ${lastOrder.discount_amount > 0 ? `<div class="summary-row"><span>Chiết khấu:</span><span>- ${lastOrder.discount_amount.toLocaleString('vi-VN')} đ</span></div>` : ''}
+                                                ${lastOrder.shipping_fee > 0 ? `<div class="summary-row"><span>Phí ship:</span><span>+ ${lastOrder.shipping_fee.toLocaleString('vi-VN')} đ</span></div>` : ''}
                                                 <div class="summary-row bold" style="font-size: 16px; margin-top: 5px; border-top: 1px dotted #ccc; padding-top: 5px;">
                                                     <span>Tổng thanh toán:</span><span>${lastOrder.total_amount.toLocaleString('vi-VN')} đ</span>
                                                 </div>
@@ -2221,33 +2503,9 @@ export default function POSPage() {
                                                 <div class="summary-row bold" style="color: red; font-size: 16px;"><span>CÒN LẠI:</span><span>${Math.max(0, lastOrder.total_amount - lastOrder.deposit_amount).toLocaleString('vi-VN')} đ</span></div>` : ''}
                                             </div>
 
-                                            <p style="text-align: right; font-style: italic; margin-top: 10px;">Hình thức TT: ${lastOrder.payment_method === 'CASH' ? 'Tiền mặt' : lastOrder.payment_method === 'INSTALLMENT' ? 'Trả góp' : lastOrder.payment_method === 'DEBT' ? 'Ghi nợ' : 'Chuyển khoản / Momo'}</p>
+                                            <p style="text-align: right; font-style: italic; margin-top: 10px;">Hình thức TT: ${formatPaymentMethodLabel(lastOrder.payment_method, lastOrder.paymentBreakdown)}</p>
 
                                             <div class="signatures" style="display: flex; justify-content: space-between; margin-top: 30px;">
-                                                <div style="flex: 1; text-align: center;">
-                                                    ${lastOrder.payment_method === 'BANK' && bankConfig ? (() => {
-                                            const defaultAccs: BankAccountConfig[] = bankConfig.accounts?.filter((account) => account.isDefault) || [];
-                                            if (defaultAccs.length === 0 && bankConfig.bankId && bankConfig.accountNo) {
-                                                defaultAccs.push({
-                                                    bankId: bankConfig.bankId,
-                                                    accountNo: bankConfig.accountNo,
-                                                    accountName: bankConfig.accountName || '',
-                                                });
-                                            }
-                                            if (defaultAccs.length === 0) return '';
-                                            return `
-                                                            <p style="font-weight: bold; margin-bottom: 5px;">QUÉT MÃ CHUYỂN KHOẢN</p>
-                                                            <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
-                                                                ${defaultAccs.map((acc) => `
-                                                                    <div style="text-align: center;">
-                                                                        <img src="https://img.vietqr.io/image/${acc.bankId}-${acc.accountNo}-compact2.png?amount=${Math.max(0, lastOrder.total_amount - lastOrder.deposit_amount)}&addInfo=${lastOrder.id.slice(-6)}&accountName=${encodeURIComponent(acc.accountName || '')}" style="width: 140px; height: 140px; object-fit: contain; border: 1px solid #ccc; border-radius: 8px; padding: 5px;" />
-                                                                        <div style="font-size: 11px; color: #555; margin-top: 2px;">${acc.bankId}</div>
-                                                                    </div>
-                                                                `).join('')}
-                                                            </div>
-                                                        `;
-                                        })() : ''}
-                                                </div>
                                                 <div style="flex: 1; text-align: center;">
                                                     <p class="title" style="margin: 0 0 70px 0; font-weight: bold;">Khách hàng</p>
                                                     <p style="color: #666; font-style: italic;">(Ký, ghi rõ họ tên)</p>
@@ -2299,6 +2557,7 @@ export default function POSPage() {
                         </tbody>
                     </table>
                     <hr className="border-t border-dashed border-black" />
+                    {lastOrder.shipping_fee > 0 && <p className="text-right">Phí ship: {formatPrice(lastOrder.shipping_fee)}</p>}
                     <p className="text-right font-bold">TỔNG: {formatPrice(lastOrder.total_amount)}</p>
                     <hr className="border-t border-dashed border-black" />
                     <p className="text-center mt-2">Cảm ơn quý khách!</p>
@@ -2315,6 +2574,7 @@ export default function POSPage() {
                     submitLabel="Tạo & Đưa vào POS"
                 />
             )}
+            </div>
         </div>
     );
 }

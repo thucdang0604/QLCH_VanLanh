@@ -3,7 +3,7 @@ import { isSelectedRepairPart, isWarrantyEligibleRepairPart } from '@/lib/repair
 
 export type RepairWarrantyPart = NonNullable<RepairTicket['parts']>[number];
 export type RepairWarrantyProductData = Record<string, unknown> | null | undefined;
-export type RepairWarrantyRuleEntry = { label: string; months: number };
+export type RepairWarrantyRuleEntry = { id: string; label: string; months: number };
 
 export function normalizeWarrantyRuleKey(value: unknown) {
     return String(value || '')
@@ -28,6 +28,7 @@ export function buildRepairWarrantyRuleMap(warrantyRules: Array<Partial<Warranty
         const ruleKey = normalizeWarrantyRuleKey(partType);
         if (!ruleKey) continue;
         ruleMap.set(ruleKey, {
+            id: ruleKey,
             label: partType,
             months: Number(rule.warrantyMonths) || 0,
         });
@@ -59,6 +60,13 @@ export function resolveRepairPartWarrantyRule(
     productData: RepairWarrantyProductData,
     ruleMap: Map<string, RepairWarrantyRuleEntry>,
 ) {
+    const assignedPolicyId = normalizeWarrantyRuleKey(
+        (part as RepairWarrantyPart & { warrantyPolicyId?: unknown }).warrantyPolicyId || productData?.warrantyPolicyId,
+    );
+    if (assignedPolicyId) {
+        const assignedRule = ruleMap.get(assignedPolicyId);
+        if (assignedRule) return assignedRule;
+    }
     const candidates = getWarrantyMatchCandidates(part, productData);
     for (const candidate of candidates) {
         const exact = ruleMap.get(candidate);
@@ -107,6 +115,7 @@ export function stampRepairWarrantyOnParts(
             ...part,
             warrantyMonths: months,
             warrantyExpiresAt: expiresAt.getTime(),
+            warrantyPolicyId: warrantyRule?.id,
             partType: warrantyRule?.label || rawPartType,
         };
     });

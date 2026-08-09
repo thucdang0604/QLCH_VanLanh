@@ -3,13 +3,16 @@ import test from 'node:test';
 import type { RepairTicket } from '@/lib/types';
 import {
     getCashierShiftChannel,
+    getFixedPosRetailPrice,
     getRepairPaidAmount,
     getRepairPaymentAmount,
+    getWarrantyExpiresAt,
     normalizeOrderPaymentId,
     normalizeRepairTicketId,
     readNonNegativeCheckoutAmount,
     readOptionalNonNegativeCheckoutAmount,
     readPositiveCheckoutQuantity,
+    requiresImeiForPosRetailProduct,
     resolveProductWarranty,
 } from './posCheckoutRules';
 
@@ -64,11 +67,41 @@ test('resolves product warranty from the product first, then the deepest taxonom
     assert.deepEqual(resolveProductWarranty({ category: 'phones/android' }, taxonomy), {
         warrantyType: 'warrantyDevice', warrantyMonths: 18,
     });
+    assert.deepEqual(resolveProductWarranty({ category: 'Phones', categoryIds: ['phones', 'phones/android'] }, taxonomy), {
+        warrantyType: 'warrantyDevice', warrantyMonths: 18,
+    });
+    assert.deepEqual(resolveProductWarranty({ warrantyType: 'warrantyDevice', warrantyMonths: 0, category: 'phones/android' }, taxonomy), {
+        warrantyType: 'warrantyDevice', warrantyMonths: 18,
+    });
+    const inheritedTaxonomy = [{
+        id: 'accessories', slug: 'accessories', warrantyType: 'warrantyAccessory', warrantyMonths: 3,
+        children: [{ id: 'accessories/cables', slug: 'cables', warrantyType: 'none' }],
+    }];
+    assert.deepEqual(resolveProductWarranty({ category: 'accessories/cables' }, inheritedTaxonomy), {
+        warrantyType: 'warrantyAccessory', warrantyMonths: 3,
+    });
     assert.equal(resolveProductWarranty({ warrantyType: 'none', category: 'phones/android' }, taxonomy), null);
+});
+
+test('calculates a stable warranty expiry from the checkout timestamp', () => {
+    assert.equal(getWarrantyExpiresAt(new Date('2026-01-31T00:00:00.000Z').getTime(), 1), new Date('2026-03-03T00:00:00.000Z').getTime());
+    assert.equal(getWarrantyExpiresAt(Date.now(), 0), undefined);
 });
 
 test('classifies cashier channels without treating debt as received cash or bank money', () => {
     assert.equal(getCashierShiftChannel('CASH'), 'cash');
     assert.equal(getCashierShiftChannel('QR'), 'bank');
     assert.equal(getCashierShiftChannel('DEBT'), 'none');
+});
+
+test('requires IMEI or Serial for every retail device, but never for accessories or components', () => {
+    assert.equal(requiresImeiForPosRetailProduct({ category: 'Máy tính bảng', categoryIds: ['may-tinh-bang', 'may-tinh-bang/ipad'] }), true);
+    assert.equal(requiresImeiForPosRetailProduct({ category: 'Laptop', categoryIds: ['laptop', 'laptop/macbook'] }), true);
+    assert.equal(requiresImeiForPosRetailProduct({ category: 'Phụ kiện', categoryIds: ['phu-kien', 'phu-kien/cap-sac'] }), false);
+    assert.equal(requiresImeiForPosRetailProduct({ category: 'Linh kiện', categoryIds: ['linh-kien', 'linh-kien/man-hinh'] }), false);
+});
+
+test('uses the catalog price for retail POS lines', () => {
+    assert.equal(getFixedPosRetailPrice({ price_promo: 8_490_000, price_original: 9_490_000 }, 'price'), 8_490_000);
+    assert.equal(getFixedPosRetailPrice({ price_promo: 0, price_original: 9_490_000 }, 'price'), 9_490_000);
 });

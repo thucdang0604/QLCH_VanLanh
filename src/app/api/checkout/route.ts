@@ -197,7 +197,10 @@ export const POST = withApi({
                 if (productData.warrantyType === 'none') return null;
 
                 // Fallback xuống danh mục
-                const categoryPath = productData.category || '';
+                const categoryIds = Array.isArray(productData.categoryIds)
+                    ? productData.categoryIds.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+                    : [];
+                const categoryPath = categoryIds.at(-1) || productData.category || '';
                 if (!categoryPath) return null;
 
                 const segments = categoryPath.split('/');

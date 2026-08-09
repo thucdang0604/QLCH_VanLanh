@@ -7,7 +7,7 @@ import {
     User as UserIcon, ArrowRightLeft, ShieldAlert
 } from 'lucide-react';
 import { collection, query, doc, where, orderBy, limit } from 'firebase/firestore';
-import { onSnapshot, getDocs } from '@/lib/firestoreLogger';
+import { onSnapshot, getDoc, getDocs } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
 import { appConfirm } from '@/lib/appDialog';
@@ -29,6 +29,12 @@ import {
 } from '@/features/technician/TechnicianWorkflowModals';
 import { TechnicianPageHeader } from '@/features/technician/TechnicianPageHeader';
 import { TechnicianTicketDetailModal } from '@/features/technician/TechnicianTicketDetailModal';
+import {
+    filterAvailableCategoryRecommendations,
+    getRecommendedPartCategoryIds,
+    getRepairServiceIds,
+    type ServiceBusinessLink,
+} from '@/lib/serviceRecommendations';
 
 
 const checklistLabels: Record<string, string> = {
@@ -149,8 +155,58 @@ export default function TechnicianPage() {
     const [partSearchQuery, setPartSearchQuery] = useState('');
     const [partSearchResults, setPartSearchResults] = useState<Product[]>([]);
     const [isSearchingParts, setIsSearchingParts] = useState(false);
+    const [serviceSuggestedParts, setServiceSuggestedParts] = useState<Product[]>([]);
+    const [isLoadingServiceSuggestions, setIsLoadingServiceSuggestions] = useState(false);
     const [selectedPartQuality, setSelectedPartQuality] = useState('Zin');
     const [customPartName, setCustomPartName] = useState('');
+
+    const selectedTicketServiceKey = getRepairServiceIds(selectedTicket || {}).join('|');
+
+    useEffect(() => {
+        let disposed = false;
+        const serviceIds = getRepairServiceIds(selectedTicket || {});
+        if (serviceIds.length === 0) {
+            setServiceSuggestedParts([]);
+            setIsLoadingServiceSuggestions(false);
+            return;
+        }
+
+        const loadSuggestions = async () => {
+            setIsLoadingServiceSuggestions(true);
+            try {
+                const serviceSnaps = await Promise.all(serviceIds.map(serviceId => getDoc(doc(db, 'services', serviceId))));
+                const services = serviceSnaps
+                    .filter(snapshot => snapshot.exists())
+                    .map(snapshot => ({ id: snapshot.id, ...snapshot.data() } as ServiceBusinessLink));
+                const categoryIds = getRecommendedPartCategoryIds(services);
+                if (categoryIds.length === 0) {
+                    if (!disposed) setServiceSuggestedParts([]);
+                    return;
+                }
+                const productSnaps = await Promise.all(categoryIds.slice(0, 10).map(categoryId => getDocs(query(
+                    collection(db, 'products'),
+                    where('categoryIds', 'array-contains', categoryId),
+                    limit(20),
+                ))));
+                const productMap = new Map<string, Product>();
+                productSnaps.forEach(snapshot => snapshot.docs.forEach(productDoc => {
+                    const product = { id: productDoc.id, ...productDoc.data() } as Product;
+                    if (product.status === 'active' && isPartCategory(product.category, product.categoryIds)) {
+                        productMap.set(productDoc.id, product);
+                    }
+                }));
+                const suggestions = filterAvailableCategoryRecommendations(Array.from(productMap.values()), categoryIds).slice(0, 10);
+                if (!disposed) setServiceSuggestedParts(suggestions);
+            } catch (error) {
+                console.error('Failed to load service-linked part suggestions', error);
+                if (!disposed) setServiceSuggestedParts([]);
+            } finally {
+                if (!disposed) setIsLoadingServiceSuggestions(false);
+            }
+        };
+        void loadSuggestions();
+        return () => { disposed = true; };
+    }, [selectedTicket, selectedTicketServiceKey]);
 
     const [dynamicStatuses, setDynamicStatuses] = useState<WorkflowNode[]>([]);
     const [warrantyStatuses, setWarrantyStatuses] = useState<WorkflowNode[]>([]);
@@ -787,229 +843,238 @@ export default function TechnicianPage() {
                         return (
                             <div
                                 key={ticket.id}
-                                className="bg-white rounded-lg border p-3 sm:p-4 hover:shadow-md transition-shadow relative"
+                                className="bg-white rounded-lg border p-3 sm:p-4 hover:shadow-md transition-shadow"
                                 title="Xem chi tiết"
                                 onClick={() => setSelectedTicket(ticket)}
                             >
-                                <div className="absolute top-2 right-2 flex items-center gap-1 bg-orange-50 text-orange-600 border border-orange-200 rounded-full px-2 py-0.5 text-[10px] font-medium max-w-[140px]">
-                                    <UserIcon size={10} className="flex-shrink-0" />
-                                    <span className="truncate">{ticket.staff?.assignedTechnicianName || 'Chưa phân công'}</span>
-                                </div>
-                                <div className="flex flex-col sm:flex-row items-stretch sm:items-start gap-3 mt-4">
-                                    <div className="w-10 h-10 rounded-lg bg-white border flex items-center justify-center flex-shrink-0">
-                                        <Smartphone size={20} className="text-gray-600" />
-                                    </div>
-
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-2 flex-wrap">
-                                            <p title="Máy" className="font-bold text-gray-900 text-lg sm:text-xl">{ticket.deviceInfo?.model || 'Thiết bị'}</p>
-                                            <span className={`text-sm font-medium px-2.5 py-1 rounded-full border ${st.color}`}>
+                                {/* Header Row */}
+                                <div className="flex items-center justify-between gap-2 border-b pb-2.5 mb-3">
+                                    <div className="flex items-center gap-2.5 min-w-0">
+                                        <div className="w-8 h-8 rounded-lg bg-orange-50 border border-orange-100 flex items-center justify-center flex-shrink-0 text-orange-600">
+                                            <Smartphone size={16} />
+                                        </div>
+                                        <div className="flex items-center gap-2 flex-wrap min-w-0">
+                                            <p title="Máy" className="font-bold text-gray-900 text-sm sm:text-base truncate">{ticket.deviceInfo?.model || 'Thiết bị'}</p>
+                                            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${st.color}`}>
                                                 {st.label}
                                             </span>
+                                            <div className="text-xs text-gray-500 flex items-center gap-1">
+                                                <span title="Mã phiếu" className="font-mono font-medium">#{ticket.id.slice(-6).toUpperCase()}</span>
+                                                {ticket.ticketType === 'warranty' && (
+                                                    <span className="px-1.5 py-0.5 bg-purple-100 text-purple-700 text-[10px] rounded-full font-bold">BH</span>
+                                                )}
+                                                {ticket.customer?.name && (
+                                                    <span title="Khách hàng" className="truncate">• {ticket.customer.name}</span>
+                                                )}
+                                            </div>
                                         </div>
-                                        <div className="text-sm text-gray-500 mt-1.5 flex items-center gap-1">
-                                            <span title="Mã phiếu">#{ticket.id.slice(-6).toUpperCase()}</span>
-                                            {ticket.ticketType === 'warranty' && (
-                                                <span className="px-1.5 py-0.5 bg-purple-100 text-purple-700 text-xs rounded-full font-bold">BH</span>
-                                            )}
-                                            <span title="Khách hàng">• {ticket.customer?.name}</span>
-                                        </div>
-                                        {ticket.issues && ticket.issues.length > 0 ? (
-                                            <p title="Vấn đề" className="text-base sm:text-lg text-gray-700 mt-2 line-clamp-2">{ticket.issues.map(i => i.label).join(', ')}</p>
-                                        ) : ticket.issue?.description && (
-                                            <p className="text-base sm:text-lg text-gray-700 mt-2 line-clamp-2">{ticket.issue.description}</p>
-                                        )}
-
-                                        {(pendingTransfer || actionWarnings.length > 0) && (
-                                            <div className="mt-3 space-y-2">
-                                                {pendingTransfer && (
-                                                    <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
-                                                        <p className="font-semibold flex items-center gap-2"><ArrowRightLeft size={16} /> Chờ {pendingTransfer.toTechnicianName} tiếp nhận</p>
-                                                        <p className="mt-1 text-xs">Lý do: {pendingTransfer.reason || 'Không có lý do'}</p>
-                                                        <p className="mt-1 text-xs text-blue-700">Người đề nghị: {pendingTransfer.requestedByName || pendingTransfer.requestedBy}</p>
-                                                    </div>
-                                                )}
-                                                {actionWarnings.length > 0 && (
-                                                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
-                                                        <p className="text-xs font-bold uppercase text-amber-800 flex items-center gap-1"><ShieldAlert size={14} /> Cần xử lý ở bước này</p>
-                                                        <ul className="mt-1 space-y-1 text-sm text-amber-900">
-                                                            {actionWarnings.map(item => <li key={item}>• {item}</li>)}
-                                                        </ul>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        )}
-
-                                        {st?.allowedFeatures?.includes('allowPartsSelection') && (
-                                            <div className="mt-2 flex flex-wrap gap-1.5 items-center">
-                                                <span className="text-[10px] font-semibold text-gray-500 uppercase">Linh kiện:</span>
-                                                {(!ticket.parts || ticket.parts.length === 0) && (
-                                                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-red-50 text-red-600 border border-red-200">
-                                                        Chưa chọn linh kiện
-                                                    </span>
-                                                )}
-                                                {ticket.parts && ticket.parts.length > 0 && (() => {
-                                                    const maxShow = 3;
-                                                    const partsToShow = ticket.parts.slice(0, maxShow);
-                                                    const remaining = ticket.parts.length - partsToShow.length;
-                                                    return (
-                                                        <>
-                                                            {partsToShow.map((p, idx) => (
-                                                                <span
-                                                                    key={idx}
-                                                                    className={`text-[10px] px-2 py-0.5 rounded-full border ${isRepairPartStatus(p.status, REPAIR_PART_STATUS.SELECTED)
-                                                                            ? 'bg-green-50 text-green-700 border-green-200'
-                                                                            : isRepairPartStatus(p.status, REPAIR_PART_STATUS.IN_STOCK)
-                                                                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                                                                : p.status === 'unavailable'
-                                                                                    ? 'bg-red-50 text-red-600 border-red-200'
-                                                                                    : 'bg-yellow-50 text-yellow-700 border-yellow-200'
-                                                                        }`}
-                                                                >
-                                                                    {(p.productName || p.partName || PART_CATEGORY_LABEL)}{p.quantity ? ` ×${p.quantity}` : ''}
-                                                                </span>
-                                                            ))}
-                                                            {remaining > 0 && (
-                                                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200">
-                                                                    +{remaining} linh kiện khác
-                                                                </span>
-                                                            )}
-                                                        </>
-                                                    );
-                                                })()}
-                                            </div>
-                                        )}
-
-                                        {st?.allowedFeatures?.includes('requireChecklist') && (
-                                            <div className="mt-3 border-t pt-3">
-                                                <p className="text-xs font-bold text-gray-400 uppercase mb-2 flex items-center gap-1"><CheckCircle2 size={14} /> Checklist kiểm tra</p>
-                                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                                                    {Object.keys(checklistLabels).map(key => {
-                                                        const val = (ticket.deviceInfo?.checklist as Record<string, string> | undefined)?.[key] || '';
-                                                        return (
-                                                            <div key={key} className="flex flex-col">
-                                                                <label className="text-base text-gray-600 mb-1 truncate">{checklistLabels[key]}</label>
-                                                                <select
-                                                                    value={val}
-                                                                    onClick={e => e.stopPropagation()}
-                                                                    onChange={e => handleChecklistUpdate(ticket, key, e.target.value)}
-                                                                    disabled={isReadOnly}
-                                                                    aria-label={`Checklist: ${checklistLabels[key]}`}
-                                                                    title={`Checklist: ${checklistLabels[key]}`}
-                                                                    className={`min-h-[56px] text-xl sm:text-2xl px-3 py-3 rounded-xl border cursor-pointer transition-all appearance-none text-center font-bold ${val === 'OK' ? 'bg-green-50 border-green-300 text-green-700' :
-                                                                            val === 'Lỗi' ? 'bg-red-50 border-red-300 text-red-600' :
-                                                                                val ? 'bg-orange-50 border-orange-200 text-orange-700' :
-                                                                                    'bg-gray-50 border-gray-200 text-gray-400'
-                                                                        }`}>
-                                                                    <option value="">--</option>
-                                                                    {CHECKLIST_VALUES.map(v => (
-                                                                        <option key={v} value={v}>{v}</option>
-                                                                    ))}
-                                                                </select>
-                                                            </div>
-                                                        );
-                                                    })}
-                                                </div>
-                                                <div className="flex flex-wrap gap-2 mt-2">
-                                                    {(['hasPriorRepair', 'hasWaterDamage', 'hasNonGenuineParts'] as const).map(key => {
-                                                        const labels: Record<string, string> = { hasPriorRepair: 'Đã từng sửa', hasWaterDamage: 'Vào nước', hasNonGenuineParts: 'Kém/Lô' };
-                                                        const val = !!(ticket.deviceInfo?.checklist as Record<string, boolean> | undefined)?.[key];
-                                                        return (
-                                                            <button key={key} onClick={(e) => { e.stopPropagation(); if (!isReadOnly) handleHistoryToggle(ticket, key, val); }}
-                                                                disabled={isReadOnly}
-                                                                className={`text-sm px-3 py-1.5 rounded-lg border transition-all ${isReadOnly ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'} ${val ? 'bg-orange-50 border-orange-200 text-orange-700 font-bold' : 'bg-gray-50 border-gray-200 text-gray-500'
-                                                                    }`}
-                                                                title={`${labels[key]}: ${val ? 'Có' : 'Không'} (Bấm để đổi)`}>
-                                                                {val ? '☑' : '☐'} {labels[key]}
-                                                            </button>
-                                                        );
-                                                    })}
-                                                </div>
-                                            </div>
-                                        )}
                                     </div>
 
-                                    <div className="grid grid-cols-2 gap-2 w-full sm:w-56 sm:flex sm:flex-col flex-shrink-0 mt-3 sm:mt-0">
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); setSelectedTicket(ticket); }}
-                                            className="min-h-12 px-3 py-2 border border-gray-200 bg-white rounded-xl transition-colors flex items-center justify-center gap-2 text-base font-bold hover:bg-gray-50" title="Xem chi tiết"
-                                        >
-                                            <Eye size={20} className="text-gray-500" /> Chi tiết
-                                        </button>
+                                    {/* KTV Badge */}
+                                    <div className="flex-shrink-0 flex items-center gap-1 bg-orange-50 text-orange-600 border border-orange-200 rounded-full px-2.5 py-0.5 text-xs font-medium">
+                                        <UserIcon size={12} className="flex-shrink-0" />
+                                        <span className="truncate max-w-[120px]">{ticket.staff?.assignedTechnicianName || 'Chưa phân công'}</span>
+                                    </div>
+                                </div>
 
-                                        {canRequestTransfer && (
-                                            <button
-                                                onClick={(event) => { event.stopPropagation(); setTransferModal({ ticket }); setTransferTechnicianId(''); setTransferReason(''); }}
-                                                className="min-h-12 px-3 py-2 border border-blue-200 bg-blue-50 text-blue-700 rounded-xl flex items-center justify-center gap-2 text-base font-bold hover:bg-blue-100"
-                                            >
-                                                <ArrowRightLeft size={20} /> Chuyển KTV
-                                            </button>
-                                        )}
+                                {/* Body Section */}
+                                <div className="space-y-2.5">
+                                    {ticket.issues && ticket.issues.length > 0 ? (
+                                        <p title="Vấn đề" className="text-xs sm:text-sm text-gray-700 line-clamp-2 bg-gray-50/80 p-2 rounded-lg border border-gray-100">{ticket.issues.map(i => i.label).join(', ')}</p>
+                                    ) : ticket.issue?.description ? (
+                                        <p className="text-xs sm:text-sm text-gray-700 line-clamp-2 bg-gray-50/80 p-2 rounded-lg border border-gray-100">{ticket.issue.description}</p>
+                                    ) : null}
 
-                                        {pendingTransfer && (pendingTransfer.requestedBy === user?.uid || isRepairManager(user)) && (
-                                            <button
-                                                onClick={(event) => { event.stopPropagation(); handleTransferCancel(ticket); }}
-                                                className="min-h-12 px-3 py-2 border border-red-200 bg-red-50 text-red-700 rounded-xl flex items-center justify-center gap-2 text-base font-bold hover:bg-red-100"
-                                            >
-                                                <X size={20} /> Hủy chuyển
-                                            </button>
-                                        )}
+                                    {(pendingTransfer || actionWarnings.length > 0) && (
+                                        <div className="space-y-1.5">
+                                            {pendingTransfer && (
+                                                <div className="rounded-lg border border-blue-200 bg-blue-50 p-2 text-xs text-blue-900">
+                                                    <p className="font-semibold flex items-center gap-1.5"><ArrowRightLeft size={14} /> Chờ {pendingTransfer.toTechnicianName} tiếp nhận</p>
+                                                    <p className="mt-0.5 text-[11px]">Lý do: {pendingTransfer.reason || 'Không có lý do'}</p>
+                                                    <p className="mt-0.5 text-[11px] text-blue-700">Người đề nghị: {pendingTransfer.requestedByName || pendingTransfer.requestedBy}</p>
+                                                </div>
+                                            )}
+                                            {actionWarnings.length > 0 && (
+                                                <div className="rounded-lg border border-amber-200 bg-amber-50 p-2">
+                                                    <p className="text-[11px] font-bold uppercase text-amber-800 flex items-center gap-1"><ShieldAlert size={13} /> Cần xử lý ở bước này</p>
+                                                    <ul className="mt-0.5 space-y-0.5 text-xs text-amber-900">
+                                                        {actionWarnings.map(item => <li key={item}>• {item}</li>)}
+                                                    </ul>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
 
-                                        {(() => {
-                                            const isIncomingTransfer = ticket.pendingTechnicianTransfer?.toTechnicianId === user?.uid && ticket.pendingTechnicianTransfer?.status === 'pending';
-                                            if (isIncomingTransfer) {
+                                    {st?.allowedFeatures?.includes('allowPartsSelection') && (
+                                        <div className="flex flex-wrap gap-1.5 items-center pt-1">
+                                            <span className="text-[10px] font-semibold text-gray-500 uppercase">Linh kiện:</span>
+                                            {(!ticket.parts || ticket.parts.length === 0) && (
+                                                <span className="text-[11px] px-2 py-0.5 rounded-full bg-red-50 text-red-600 border border-red-200">
+                                                    Chưa chọn linh kiện
+                                                </span>
+                                            )}
+                                            {ticket.parts && ticket.parts.length > 0 && (() => {
+                                                const maxShow = 4;
+                                                const partsToShow = ticket.parts.slice(0, maxShow);
+                                                const remaining = ticket.parts.length - partsToShow.length;
                                                 return (
                                                     <>
-                                                        <button onClick={(e) => { e.stopPropagation(); handleTransferResponse(ticket, 'accepted'); }}
-                                                            className="min-h-11 text-sm px-3 py-2 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg font-semibold transition-all flex items-center justify-center gap-2 w-full hover:bg-emerald-100">
-                                                            <CheckCircle2 size={12} /> Nhận phiếu
-                                                        </button>
-                                                        <button onClick={(e) => { e.stopPropagation(); handleTransferResponse(ticket, 'rejected'); }}
-                                                            className="min-h-11 text-sm px-3 py-2 bg-red-50 border border-red-200 text-red-600 rounded-lg font-semibold transition-all flex items-center justify-center gap-2 w-full hover:bg-red-100">
-                                                            <X size={12} /> Từ chối
-                                                        </button>
+                                                        {partsToShow.map((p, idx) => (
+                                                            <span
+                                                                key={idx}
+                                                                className={`text-[10px] px-2 py-0.5 rounded-full border ${isRepairPartStatus(p.status, REPAIR_PART_STATUS.SELECTED)
+                                                                        ? 'bg-green-50 text-green-700 border-green-200'
+                                                                        : isRepairPartStatus(p.status, REPAIR_PART_STATUS.IN_STOCK)
+                                                                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                                                            : p.status === 'unavailable'
+                                                                                ? 'bg-red-50 text-red-600 border-red-200'
+                                                                                : 'bg-yellow-50 text-yellow-700 border-yellow-200'
+                                                                    }`}
+                                                            >
+                                                                {(p.productName || p.partName || PART_CATEGORY_LABEL)}{p.quantity ? ` ×${p.quantity}` : ''}
+                                                            </span>
+                                                        ))}
+                                                        {remaining > 0 && (
+                                                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200">
+                                                                +{remaining} linh kiện khác
+                                                            </span>
+                                                        )}
                                                     </>
                                                 );
-                                            }
+                                            })()}
+                                        </div>
+                                    )}
 
+                                    {st?.allowedFeatures?.includes('requireChecklist') && (
+                                        <div className="border-t pt-2 mt-2">
+                                            <p className="text-[11px] font-bold text-gray-400 uppercase mb-1.5 flex items-center gap-1"><CheckCircle2 size={13} /> Checklist kiểm tra</p>
+                                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                                                {Object.keys(checklistLabels).map(key => {
+                                                    const val = (ticket.deviceInfo?.checklist as Record<string, string> | undefined)?.[key] || '';
+                                                    return (
+                                                        <div key={key} className="flex flex-col">
+                                                            <label className="text-xs text-gray-500 mb-0.5 truncate">{checklistLabels[key]}</label>
+                                                            <select
+                                                                value={val}
+                                                                onClick={e => e.stopPropagation()}
+                                                                onChange={e => handleChecklistUpdate(ticket, key, e.target.value)}
+                                                                disabled={isReadOnly}
+                                                                aria-label={`Checklist: ${checklistLabels[key]}`}
+                                                                title={`Checklist: ${checklistLabels[key]}`}
+                                                                className={`min-h-[34px] text-xs px-2 py-1 rounded-lg border cursor-pointer transition-all appearance-none text-center font-bold ${val === 'OK' ? 'bg-green-50 border-green-300 text-green-700' :
+                                                                        val === 'Lỗi' ? 'bg-red-50 border-red-300 text-red-600' :
+                                                                            val ? 'bg-orange-50 border-orange-200 text-orange-700' :
+                                                                                'bg-gray-50 border-gray-200 text-gray-400'
+                                                                    }`}>
+                                                                <option value="">--</option>
+                                                                {CHECKLIST_VALUES.map(v => (
+                                                                    <option key={v} value={v}>{v}</option>
+                                                                ))}
+                                                            </select>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                            <div className="flex flex-wrap gap-1.5 mt-2">
+                                                {(['hasPriorRepair', 'hasWaterDamage', 'hasNonGenuineParts'] as const).map(key => {
+                                                    const labels: Record<string, string> = { hasPriorRepair: 'Đã từng sửa', hasWaterDamage: 'Vào nước', hasNonGenuineParts: 'Kém/Lô' };
+                                                    const val = !!(ticket.deviceInfo?.checklist as Record<string, boolean> | undefined)?.[key];
+                                                    return (
+                                                        <button key={key} onClick={(e) => { e.stopPropagation(); if (!isReadOnly) handleHistoryToggle(ticket, key, val); }}
+                                                            disabled={isReadOnly}
+                                                            className={`text-xs px-2.5 py-1 rounded-md border transition-all ${isReadOnly ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'} ${val ? 'bg-orange-50 border-orange-200 text-orange-700 font-bold' : 'bg-gray-50 border-gray-200 text-gray-500'
+                                                                }`}
+                                                            title={`${labels[key]}: ${val ? 'Có' : 'Không'} (Bấm để đổi)`}>
+                                                            {val ? '☑' : '☐'} {labels[key]}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Footer Action Toolbar */}
+                                <div className="border-t pt-2.5 mt-3 flex flex-wrap items-center justify-end gap-2">
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); setSelectedTicket(ticket); }}
+                                        className="px-3 py-1.5 border border-gray-200 bg-white text-gray-700 rounded-lg transition-colors flex items-center justify-center gap-1.5 text-xs font-bold hover:bg-gray-50" title="Xem chi tiết"
+                                    >
+                                        <Eye size={15} className="text-gray-500" /> Chi tiết
+                                    </button>
+
+                                    {canRequestTransfer && (
+                                        <button
+                                            onClick={(event) => { event.stopPropagation(); setTransferModal({ ticket }); setTransferTechnicianId(''); setTransferReason(''); }}
+                                            className="px-3 py-1.5 border border-blue-200 bg-blue-50 text-blue-700 rounded-lg flex items-center justify-center gap-1.5 text-xs font-bold hover:bg-blue-100"
+                                        >
+                                            <ArrowRightLeft size={15} /> Chuyển KTV
+                                        </button>
+                                    )}
+
+                                    {pendingTransfer && (pendingTransfer.requestedBy === user?.uid || isRepairManager(user)) && (
+                                        <button
+                                            onClick={(event) => { event.stopPropagation(); handleTransferCancel(ticket); }}
+                                            className="px-3 py-1.5 border border-red-200 bg-red-50 text-red-700 rounded-lg flex items-center justify-center gap-1.5 text-xs font-bold hover:bg-red-100"
+                                        >
+                                            <X size={15} /> Hủy chuyển
+                                        </button>
+                                    )}
+
+                                    {(() => {
+                                        const isIncomingTransfer = ticket.pendingTechnicianTransfer?.toTechnicianId === user?.uid && ticket.pendingTechnicianTransfer?.status === 'pending';
+                                        if (isIncomingTransfer) {
                                             return (
-                                                <>
-                                                    {(() => {
-                                                        if (isReadOnly) return null;
+                                                <div className="flex items-center gap-1.5">
+                                                    <button onClick={(e) => { e.stopPropagation(); handleTransferResponse(ticket, 'accepted'); }}
+                                                        className="text-xs px-3 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg font-semibold transition-all flex items-center justify-center gap-1.5 hover:bg-emerald-100">
+                                                        <CheckCircle2 size={13} /> Nhận phiếu
+                                                    </button>
+                                                    <button onClick={(e) => { e.stopPropagation(); handleTransferResponse(ticket, 'rejected'); }}
+                                                        className="text-xs px-3 py-1.5 bg-red-50 border border-red-200 text-red-600 rounded-lg font-semibold transition-all flex items-center justify-center gap-1.5 hover:bg-red-100">
+                                                        <X size={13} /> Từ chối
+                                                    </button>
+                                                </div>
+                                            );
+                                        }
 
-                                                        const hasRequestedParts = ticket.parts?.some(p => isRepairPartStatus(p.status, REPAIR_PART_STATUS.REQUESTED) || isRepairPartStatus(p.status, REPAIR_PART_STATUS.ORDERED));
-                                                        const targetStatusId = hasRequestedParts ? 'dang_tim_linh_kien' : 'dang_sua_chua';
+                                        return (
+                                            <>
+                                                {(() => {
+                                                    if (isReadOnly) return null;
 
-                                                        const allowedNextStatuses = getAllowedNextWorkflowNodes(workflow, ticket.status);
-                                                        const targetStatus = allowedNextStatuses.find((status) => status.id === targetStatusId);
-                                                        const useDynamic = st?.allowedFeatures?.includes('allowPartsSelection') && !!targetStatus;
+                                                    const hasRequestedParts = ticket.parts?.some(p => isRepairPartStatus(p.status, REPAIR_PART_STATUS.REQUESTED) || isRepairPartStatus(p.status, REPAIR_PART_STATUS.ORDERED));
+                                                    const targetStatusId = hasRequestedParts ? 'dang_tim_linh_kien' : 'dang_sua_chua';
 
-                                                        if (useDynamic) {
+                                                    const allowedNextStatuses = getAllowedNextWorkflowNodes(workflow, ticket.status);
+                                                    const targetStatus = allowedNextStatuses.find((status) => status.id === targetStatusId);
+                                                    const useDynamic = st?.allowedFeatures?.includes('allowPartsSelection') && !!targetStatus;
+
+                                                    if (useDynamic) {
+                                                        return (
+                                                            <button onClick={(e) => { e.stopPropagation(); handleStatusChange(ticket.id, targetStatus.id); }}
+                                                                className={`py-1.5 px-3 bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-lg font-bold text-xs shadow-sm hover:from-orange-600 hover:to-orange-700 active:scale-[0.98] transition-all flex items-center gap-1.5 justify-center`}>
+                                                                Chuyển → {hasRequestedParts ? 'Tìm linh kiện' : targetStatus.label}
+                                                            </button>
+                                                        );
+                                                    }
+
+                                                    if (allowedNextStatuses.length > 0) {
+                                                        return allowedNextStatuses.map((nextCfg) => {
                                                             return (
-                                                                <button onClick={(e) => { e.stopPropagation(); handleStatusChange(ticket.id, targetStatus.id); }}
-                                                                    className={`col-span-2 min-h-12 w-full py-3 bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-xl font-bold text-base shadow-md hover:shadow-orange-500/25 active:scale-[0.98] transition-all flex items-center gap-2 justify-center`}>
-                                                                    Chuyển → {hasRequestedParts ? 'Tìm linh kiện' : targetStatus.label}
+                                                                <button key={nextCfg.id} onClick={(e) => { e.stopPropagation(); handleStatusChange(ticket.id, nextCfg.id); }}
+                                                                    className={`py-1.5 px-3 text-white rounded-lg font-bold text-xs shadow-sm active:scale-[0.98] transition-all flex items-center gap-1.5 justify-center ${nextCfg.id === 'refund' ? 'bg-red-500 hover:bg-red-600' : nextCfg.id === 'out' ? 'bg-gray-700 hover:bg-gray-800' : 'bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700'}`}>
+                                                                    Chuyển → {nextCfg.label}
                                                                 </button>
                                                             );
-                                                        }
+                                                        });
+                                                    }
 
-                                                        if (allowedNextStatuses.length > 0) {
-                                                            return allowedNextStatuses.map((nextCfg) => {
-                                                                return (
-                                                                    <button key={nextCfg.id} onClick={(e) => { e.stopPropagation(); handleStatusChange(ticket.id, nextCfg.id); }}
-                                                                        className={`col-span-2 min-h-12 w-full py-3 text-white rounded-xl font-bold text-base shadow-md active:scale-[0.98] transition-all flex items-center gap-2 justify-center ${nextCfg.id === 'refund' ? 'bg-red-500 hover:bg-red-600' : nextCfg.id === 'out' ? 'bg-gray-700 hover:bg-gray-800' : 'bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700'}`}>
-                                                                        Chuyển → {nextCfg.label}
-                                                                    </button>
-                                                                );
-                                                            });
-                                                        }
-
-                                                        return null;
-                                                    })()}
-                                                </>
-                                            );
-                                        })()}
-                                    </div>
+                                                    return null;
+                                                })()}
+                                            </>
+                                        );
+                                    })()}
                                 </div>
                             </div>
                         );
@@ -1187,6 +1252,8 @@ export default function TechnicianPage() {
                 setPartSearchQuery={setPartSearchQuery}
                 partSearchResults={partSearchResults}
                 isSearchingParts={isSearchingParts}
+                serviceSuggestedParts={serviceSuggestedParts}
+                isLoadingServiceSuggestions={isLoadingServiceSuggestions}
                 selectedPartQuality={selectedPartQuality}
                 setSelectedPartQuality={setSelectedPartQuality}
                 customPartName={customPartName}

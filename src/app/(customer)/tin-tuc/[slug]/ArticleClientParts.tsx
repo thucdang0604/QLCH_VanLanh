@@ -36,7 +36,8 @@ function formatDate(d: unknown): string {
 
 export default function ArticleClientParts({ slug }: { slug: string }) {
     const [comments, setComments] = useState<ArticleComment[]>([]);
-    const [commentsLoading, setCommentsLoading] = useState(true);
+    const [commentsRequested, setCommentsRequested] = useState(false);
+    const [commentsLoading, setCommentsLoading] = useState(false);
     const [submitLoading, setSubmitLoading] = useState(false);
     const [submitDone, setSubmitDone] = useState(false);
 
@@ -77,8 +78,11 @@ export default function ArticleClientParts({ slug }: { slug: string }) {
     }, [slug]);
 
     useEffect(() => {
+        if (!commentsRequested) return;
+
         let isMounted = true;
         const fetchComments = async () => {
+            setCommentsLoading(true);
             try {
                 const q = query(
                     collection(db, 'article_comments'),
@@ -99,7 +103,7 @@ export default function ArticleClientParts({ slug }: { slug: string }) {
         };
         fetchComments();
         return () => { isMounted = false; };
-    }, [slug]);
+    }, [commentsRequested, slug]);
 
     const averageRating = comments.length === 0
         ? 0
@@ -260,10 +264,24 @@ export default function ArticleClientParts({ slug }: { slug: string }) {
                 <div className="mt-6">
                     <div className="flex items-center justify-between">
                         <h3 className="font-bold text-gray-900">Bình luận đã duyệt</h3>
-                        <span className="text-xs text-gray-500">{comments.length} bình luận</span>
+                        {commentsRequested ? (
+                            <span className="text-xs text-gray-500">{comments.length} bình luận</span>
+                        ) : (
+                            <button
+                                type="button"
+                                onClick={() => setCommentsRequested(true)}
+                                className="text-sm font-semibold text-orange-600 hover:text-orange-700 hover:underline"
+                            >
+                                Xem bình luận
+                            </button>
+                        )}
                     </div>
 
-                    {commentsLoading ? (
+                    {!commentsRequested ? (
+                        <div className="py-10 text-center text-gray-500 text-sm">
+                            Bình luận sẽ được tải khi bạn chọn xem.
+                        </div>
+                    ) : commentsLoading ? (
                         <div className="py-10 text-center text-gray-400 text-sm">Đang tải bình luận...</div>
                     ) : comments.length === 0 ? (
                         <div className="py-10 text-center text-gray-500 text-sm">

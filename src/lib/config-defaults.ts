@@ -132,8 +132,25 @@ export interface SidebarMenuItem {
     iconName: string;
     order: number;
     visible: boolean;
-    subGroups: Array<{ group: string; items: string[] }>;
+    subGroups: SidebarMenuSubGroup[];
     taxonomyRef?: string; // ID of linked taxonomy node
+}
+
+/**
+ * A sidebar flyout item can point at a precise taxonomy node. `string` is
+ * retained below only to read menus saved before submenu destinations existed.
+ */
+export interface SidebarMenuSubGroupItem {
+    id: string;
+    label: string;
+    slug?: string;
+    isCustomLink?: boolean;
+    taxonomyRef?: string;
+}
+
+export interface SidebarMenuSubGroup {
+    group: string;
+    items: Array<SidebarMenuSubGroupItem | string>;
 }
 
 export interface FooterServiceLink {
@@ -330,37 +347,53 @@ export const DEFAULT_CONFIG: SiteConfig = {
         { id: 'hn5', label: 'Phụ kiện', slug: 'phu-kien', iconName: 'Headphones', order: 4, visible: true, filterType: 'accessory' as const },
     ],
     sidebarMenu: [
-        { id: 'sb1', name: 'Sửa iPhone', slug: 'sua-iphone', iconName: 'Smartphone', order: 0, visible: true, subGroups: [
-            { group: 'Dòng máy', items: ['iPhone 16 Pro Max', 'iPhone 16 Pro', 'iPhone 16', 'iPhone 15 Pro Max', 'iPhone 15 Pro', 'iPhone 15', 'iPhone 14 Pro Max', 'iPhone 14', 'iPhone 13', 'iPhone 12', 'iPhone 11'] },
-            { group: 'Dịch vụ phổ biến', items: ['Thay màn hình iPhone', 'Thay pin iPhone', 'Ép kính iPhone', 'Sửa loa iPhone', 'Thay camera iPhone'] },
-        ]},
-        { id: 'sb2', name: 'Sửa Samsung', slug: 'sua-samsung', iconName: 'Smartphone', order: 1, visible: true, subGroups: [
-            { group: 'Dòng máy', items: ['Galaxy S25 Ultra', 'Galaxy S24 Ultra', 'Galaxy S24', 'Galaxy S23 Ultra', 'Galaxy Z Fold6', 'Galaxy Z Flip6', 'Galaxy A55', 'Galaxy A35', 'Galaxy A15'] },
-            { group: 'Dịch vụ phổ biến', items: ['Thay màn hình Samsung', 'Thay pin Samsung', 'Ép kính Samsung', 'Sửa sọc màn hình'] },
-        ]},
-        { id: 'sb3', name: 'Thay Pin', slug: 'thay-pin', iconName: 'Battery', order: 2, visible: true, subGroups: [
-            { group: 'Thay pin theo hãng', items: ['Pin iPhone chính hãng', 'Pin Samsung chính hãng', 'Pin OPPO', 'Pin Xiaomi', 'Pin Vivo', 'Pin Realme'] },
-            { group: 'Cam kết', items: ['Bảo hành trọn đời', 'Pin dung lượng chuẩn', 'Thay trong 30 phút'] },
-        ]},
-        { id: 'sb4', name: 'Ép Kính', slug: 'ep-kinh', iconName: 'Monitor', order: 3, visible: true, subGroups: [
-            { group: 'Ép kính theo hãng', items: ['Ép kính iPhone', 'Ép kính Samsung', 'Ép kính OPPO', 'Ép kính Xiaomi'] },
-            { group: 'Cam kết', items: ['Kính cường lực cao cấp', 'Bảo hành 12 tháng', 'Xong trong 45 phút'] },
-        ]},
-        { id: 'sb5', name: 'Sửa Laptop', slug: 'sua-laptop', iconName: 'Laptop', order: 4, visible: true, subGroups: [
-            { group: 'Hãng máy', items: ['MacBook Pro', 'MacBook Air', 'Dell XPS / Inspiron', 'HP Pavilion / EliteBook', 'Lenovo ThinkPad / IdeaPad', 'Asus VivoBook / ZenBook', 'MSI Gaming'] },
-            { group: 'Dịch vụ', items: ['Thay màn hình laptop', 'Thay bàn phím laptop', 'Vệ sinh laptop', 'Nâng cấp SSD/RAM'] },
-        ]},
-        { id: 'sb6', name: 'Sửa Apple Watch', slug: 'sua-apple-watch', iconName: 'Watch', order: 5, visible: true, subGroups: [
-            { group: 'Dòng máy', items: ['Apple Watch Ultra 2', 'Apple Watch Series 10', 'Apple Watch Series 9', 'Apple Watch SE'] },
-            { group: 'Dịch vụ', items: ['Thay màn hình Apple Watch', 'Thay pin Apple Watch', 'Sửa nút Digital Crown'] },
-        ]},
-        { id: 'sb7', name: 'Sửa iPad', slug: 'sua-ipad', iconName: 'Tablet', order: 6, visible: true, subGroups: [
-            { group: 'Dòng máy', items: ['iPad Pro', 'iPad Air', 'iPad Mini', 'iPad'] },
-            { group: 'Dịch vụ', items: ['Thay màn hình iPad', 'Thay pin iPad', 'Sửa nút Digital Crown'] },
-        ]},
-        { id: 'sb8', name: 'Sửa Máy tính', slug: 'sua-may-tinh', iconName: 'Cpu', order: 7, visible: true, subGroups: [
-            { group: 'Dịch vụ', items: ['Cài đặt Windows/macOS', 'Diệt virus - Phần mềm', 'Cứu dữ liệu', 'Lắp ráp PC theo yêu cầu'] },
-        ]},
+        {
+            id: 'sb1', name: 'Sửa iPhone', slug: 'sua-iphone', iconName: 'Smartphone', order: 0, visible: true, subGroups: [
+                { group: 'Dòng máy', items: ['iPhone 16 Pro Max', 'iPhone 16 Pro', 'iPhone 16', 'iPhone 15 Pro Max', 'iPhone 15 Pro', 'iPhone 15', 'iPhone 14 Pro Max', 'iPhone 14', 'iPhone 13', 'iPhone 12', 'iPhone 11'] },
+                { group: 'Dịch vụ phổ biến', items: ['Thay màn hình iPhone', 'Thay pin iPhone', 'Ép kính iPhone', 'Sửa loa iPhone', 'Thay camera iPhone'] },
+            ]
+        },
+        {
+            id: 'sb2', name: 'Sửa Samsung', slug: 'sua-samsung', iconName: 'Smartphone', order: 1, visible: true, subGroups: [
+                { group: 'Dòng máy', items: ['Galaxy S25 Ultra', 'Galaxy S24 Ultra', 'Galaxy S24', 'Galaxy S23 Ultra', 'Galaxy Z Fold6', 'Galaxy Z Flip6', 'Galaxy A55', 'Galaxy A35', 'Galaxy A15'] },
+                { group: 'Dịch vụ phổ biến', items: ['Thay màn hình Samsung', 'Thay pin Samsung', 'Ép kính Samsung', 'Sửa sọc màn hình'] },
+            ]
+        },
+        {
+            id: 'sb3', name: 'Thay Pin', slug: 'thay-pin', iconName: 'Battery', order: 2, visible: true, subGroups: [
+                { group: 'Thay pin theo hãng', items: ['Pin iPhone chính hãng', 'Pin Samsung chính hãng', 'Pin OPPO', 'Pin Xiaomi', 'Pin Vivo', 'Pin Realme'] },
+                { group: 'Cam kết', items: ['Bảo hành trọn đời', 'Pin dung lượng chuẩn', 'Thay trong 30 phút'] },
+            ]
+        },
+        {
+            id: 'sb4', name: 'Ép Kính', slug: 'ep-kinh', iconName: 'Monitor', order: 3, visible: true, subGroups: [
+                { group: 'Ép kính theo hãng', items: ['Ép kính iPhone', 'Ép kính Samsung', 'Ép kính OPPO', 'Ép kính Xiaomi'] },
+                { group: 'Cam kết', items: ['Kính cường lực cao cấp', 'Bảo hành 12 tháng', 'Xong trong 45 phút'] },
+            ]
+        },
+        {
+            id: 'sb5', name: 'Sửa Laptop', slug: 'sua-laptop', iconName: 'Laptop', order: 4, visible: true, subGroups: [
+                { group: 'Hãng máy', items: ['MacBook Pro', 'MacBook Air', 'Dell XPS / Inspiron', 'HP Pavilion / EliteBook', 'Lenovo ThinkPad / IdeaPad', 'Asus VivoBook / ZenBook', 'MSI Gaming'] },
+                { group: 'Dịch vụ', items: ['Thay màn hình laptop', 'Thay bàn phím laptop', 'Vệ sinh laptop', 'Nâng cấp SSD/RAM'] },
+            ]
+        },
+        {
+            id: 'sb6', name: 'Sửa Apple Watch', slug: 'sua-apple-watch', iconName: 'Watch', order: 5, visible: true, subGroups: [
+                { group: 'Dòng máy', items: ['Apple Watch Ultra 2', 'Apple Watch Series 10', 'Apple Watch Series 9', 'Apple Watch SE'] },
+                { group: 'Dịch vụ', items: ['Thay màn hình Apple Watch', 'Thay pin Apple Watch', 'Sửa nút Digital Crown'] },
+            ]
+        },
+        {
+            id: 'sb7', name: 'Sửa iPad', slug: 'sua-ipad', iconName: 'Tablet', order: 6, visible: true, subGroups: [
+                { group: 'Dòng máy', items: ['iPad Pro', 'iPad Air', 'iPad Mini', 'iPad'] },
+                { group: 'Dịch vụ', items: ['Thay màn hình iPad', 'Thay pin iPad', 'Sửa nút Digital Crown'] },
+            ]
+        },
+        {
+            id: 'sb8', name: 'Sửa Máy tính', slug: 'sua-may-tinh', iconName: 'Cpu', order: 7, visible: true, subGroups: [
+                { group: 'Dịch vụ', items: ['Cài đặt Windows/macOS', 'Diệt virus - Phần mềm', 'Cứu dữ liệu', 'Lắp ráp PC theo yêu cầu'] },
+            ]
+        },
     ],
     footerServices: [
         { id: 'fs1', name: 'Sửa chữa Điện thoại', slug: 'sua-iphone', order: 0, visible: true },

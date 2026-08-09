@@ -13,6 +13,7 @@ import {
     type SystemConfigDocument,
 } from './systemConfig';
 import { normalizePublicGeofence } from './geofence';
+import { normalizeSidebarMenuItems } from './sidebarMenu';
 
 import {
     type HeroBanner,
@@ -167,7 +168,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
                         }
                         setConfig(prev => {
                             const next = { ...prev };
-                            
+
                             // Merge data, but only for keys that belong to this docName
                             for (const key of Object.keys(data)) {
                                 if (CONFIG_METADATA_FIELDS.has(key)) continue;
@@ -175,6 +176,10 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
                                 if (isFieldStoredInDocument(key, docName)) {
                                     (next as Record<string, unknown>)[key] = data[key];
                                 }
+                            }
+
+                            if (docName === 'navigation_settings') {
+                                next.sidebarMenu = normalizeSidebarMenuItems(next.sidebarMenu || []);
                             }
 
                             if (docName === 'layout_settings') {

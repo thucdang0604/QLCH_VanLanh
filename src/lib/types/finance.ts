@@ -38,7 +38,7 @@ export interface Commission {
 
 export interface Expense {
     id: string;
-    category: 'rent' | 'utilities' | 'supplies' | 'salary' | 'supplier_payment' | 'other';
+    category: 'rent' | 'utilities' | 'supplies' | 'salary' | 'supplier_payment' | 'shipping' | 'other';
     description: string;
     amount: number;
     date: FirestoreDateValue;

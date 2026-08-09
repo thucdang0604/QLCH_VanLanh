@@ -2,9 +2,10 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
-import { collection, query, where, updateDoc, doc, serverTimestamp, orderBy, Timestamp, limit, startAfter, DocumentSnapshot, arrayUnion, type QueryConstraint } from 'firebase/firestore';
+import { collection, query, where, updateDoc, doc, serverTimestamp, orderBy, Timestamp, limit, startAfter, getCountFromServer, DocumentSnapshot, arrayUnion, type QueryConstraint } from 'firebase/firestore';
 import { getDocs, onSnapshot, getDoc } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
+import { getSearchKeywordQuery } from '@/lib/utils';
 import { useAuth } from '@/lib/AuthContext';
 import { useConfig } from '@/lib/ConfigContext';
 import type { RepairTicket, RepairStatus, PaymentStatus, DeviceChecklist, WorkflowNode, RepairIssue } from '@/lib/types';
@@ -264,6 +265,14 @@ export default function RepairPage() {
         }
     }, [formData.customerPhone, editingTicket, showModal]);
 
+    const [totalCount, setTotalCount] = useState<number | null>(null);
+
+    useEffect(() => {
+        getCountFromServer(collection(db, 'repairs'))
+            .then(snap => setTotalCount(snap.data().count))
+            .catch(() => null);
+    }, []);
+
     const [dynamicStatuses, setDynamicStatuses] = useState<WorkflowNode[]>([]);
     const [warrantyStatuses, setWarrantyStatuses] = useState<WorkflowNode[]>([]);
     const [statusConfigLoaded, setStatusConfigLoaded] = useState(false);
@@ -370,34 +379,42 @@ export default function RepairPage() {
     };
     const searchInDatabase = async () => {
         if (!searchTerm.trim()) {
-            toastWarning('Vui lòng nhập số điện thoại, IMEI hoặc mã phiếu để tìm trên máy chủ.');
+            toastWarning('Vui lòng nhập số điện thoại, tên máy, IMEI hoặc mã phiếu để tìm trên máy chủ.');
             return;
         }
         setIsSearchingDB(true);
         try {
             const s = searchTerm.trim();
+            const searchToken = getSearchKeywordQuery(s);
+            const phone = s.replace(/[^0-9]/g, '').trim();
+
             const queries = [
+                getDocs(query(collection(db, 'repairs'), where('searchKeywords', 'array-contains', searchToken), limit(REPAIR_SEARCH_LIMIT))),
                 getDocs(query(collection(db, 'repairs'), where('customer.id', '==', s), limit(REPAIR_SEARCH_LIMIT))),
-                getDocs(query(collection(db, 'repairs'), where('customer.phone', '==', s), limit(REPAIR_SEARCH_LIMIT))),
-                getDocs(query(collection(db, 'repairs'), where('deviceInfo.imei', '==', s), limit(REPAIR_SEARCH_LIMIT)))
+                getDocs(query(collection(db, 'repairs'), where('deviceInfo.imei', '==', s), limit(REPAIR_SEARCH_LIMIT))),
             ];
+            if (phone.length >= 8) {
+                queries.push(getDocs(query(collection(db, 'repairs'), where('customer.phone', '==', phone), limit(10))));
+            }
+
             const snaps = await Promise.all(queries);
-            let combined: RepairTicket[] = [];
+            const foundMap = new Map<string, RepairTicket>();
 
             snaps.forEach(snap => {
-                const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as RepairTicket));
-                combined = [...combined, ...data];
+                snap.docs.forEach(d => {
+                    foundMap.set(d.id, { id: d.id, ...d.data() } as RepairTicket);
+                });
             });
 
             try {
                 const docSnap = await getDoc(doc(db, 'repairs', s));
                 if (docSnap.exists()) {
-                    combined.push({ id: docSnap.id, ...docSnap.data() } as RepairTicket);
+                    foundMap.set(docSnap.id, { id: docSnap.id, ...docSnap.data() } as RepairTicket);
                 }
-            } catch {
-            }
+            } catch {}
 
-            if (combined.length > 0) {
+            if (foundMap.size > 0) {
+                const combined = Array.from(foundMap.values());
                 setTickets(prev => {
                     const map = new Map(prev.map(p => [p.id, p]));
                     combined.forEach(c => map.set(c.id, c));
@@ -407,15 +424,16 @@ export default function RepairPage() {
                         return tB - tA;
                     });
                 });
-                toastSuccess('Đã tìm thấy dữ liệu trên máy chủ!');
+                toastSuccess(`Đã tìm thấy ${combined.length} phiếu sửa chữa từ Server!`);
             } else {
                 toastWarning('Không tìm thấy dữ liệu trên máy chủ!');
             }
         } catch (e) {
             console.error('Lỗi tìm kiếm DB', e);
             toastError('Lỗi tìm kiếm!');
+        } finally {
+            setIsSearchingDB(false);
         }
-        setIsSearchingDB(false);
     };
     useEffect(() => {
         if (!showModal && !assignModal && !managerOverrideModal) return;
@@ -1273,7 +1291,7 @@ export default function RepairPage() {
     }
     return (
         <div className="space-y-6">
-            <RepairPageHeader onCreate={() => handleOpenModal()} />
+            <RepairPageHeader onCreate={() => handleOpenModal()} totalCount={totalCount} />
             <RepairStatsGrid stats={stats} />
             <div className="flex flex-wrap items-center gap-2 print:hidden">
                 {[

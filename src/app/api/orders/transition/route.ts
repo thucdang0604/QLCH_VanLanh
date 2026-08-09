@@ -7,6 +7,7 @@ import { calculateAndSaveCommissionsServer, reverseCommissionServer } from '@/li
 import { buildCompletedOrderRevenueDelta, incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 import { reserveSequentialDocumentIds } from '@/lib/serverDocumentIds';
 import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
+import { getWarrantyExpiresAt } from '@/lib/posCheckoutRules';
 
 type FirestoreData = Record<string, unknown>;
 type ProductDoc = { ref: DocumentReference; data: FirestoreData };
@@ -18,6 +19,7 @@ type OrderUpdate = {
     refundedAt?: FieldValue;
     refundAmount?: number;
     paymentHistory?: FieldValue;
+    items?: Order['items'];
 };
 const ORDER_STATUSES = ['Pending', 'Confirmed', 'Shipping', 'Completed', 'Cancelled'] as const;
 const ORDER_TRANSITIONS: Record<string, string[]> = {
@@ -61,6 +63,23 @@ function getOrderRetailTotal(order: Order) {
 
     const retailDiscount = Math.min(Number(order.discount_amount) || 0, retailSubtotal);
     return Math.max(0, retailSubtotal - retailDiscount);
+}
+
+function stampOrderWarrantyItems(items: Order['items'], startedAt: number) {
+    let changed = false;
+    const stampedItems = items.map(item => {
+        if (item.warrantyStartedAt || item.warrantyType === 'none') return item;
+        const warrantyMonths = Number(item.warrantyMonths || 0);
+        if (!item.warrantyType || warrantyMonths <= 0) return item;
+        changed = true;
+        const warrantyExpiresAt = getWarrantyExpiresAt(startedAt, warrantyMonths);
+        return {
+            ...item,
+            warrantyStartedAt: startedAt,
+            ...(warrantyExpiresAt ? { warrantyExpiresAt } : {}),
+        };
+    });
+    return { changed, items: stampedItems };
 }
 
 export const POST = withApi({
@@ -258,6 +277,8 @@ export const POST = withApi({
 
             if (targetStatus === 'Completed') {
                 updateData.completedAt = FieldValue.serverTimestamp();
+                const stampedWarranty = stampOrderWarrantyItems(freshOrder.items || [], Date.now());
+                if (stampedWarranty.changed) updateData.items = stampedWarranty.items;
             }
             if (oldStatus === 'Completed' && targetStatus === 'Cancelled') {
                 const historyRefundAmount = Math.max(0, getOrderPaymentTotal(freshOrder));

@@ -1,6 +1,7 @@
 export type PermissionId =
     | 'manage_products'
     | 'manage_orders'
+    | 'manage_cashier_expenses'
     | 'manage_repairs'
     | 'manage_services'
     | 'manage_articles'
@@ -78,6 +79,7 @@ export const PERMISSIONS_REGISTRY: PermissionDefinition[] = [
     { id: 'view_dashboard', label: 'Xem Dashboard', group: 'Tổng quan' },
     { id: 'view_revenue', label: 'Xem Doanh thu', group: 'Tổng quan' },
     { id: 'manage_orders', label: 'Quản lý Đơn hàng & POS', group: 'Bán hàng' },
+    { id: 'manage_cashier_expenses', label: 'Chi tiền từ ca POS', group: 'Bán hàng' },
     { id: 'manage_repairs', label: 'Quản lý Sửa chữa', group: 'Sửa chữa' },
     { id: 'manage_services', label: 'Quản lý Dịch vụ', group: 'Sửa chữa' },
     { id: 'manage_products', label: 'Quản lý Sản phẩm', group: 'Kho hàng' },

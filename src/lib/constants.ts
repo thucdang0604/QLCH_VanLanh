@@ -1,5 +1,7 @@
 export const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://fixphone.vn';
 export const PART_CATEGORY = 'component'; // System ID for parts
+/** Canonical and legacy scalar values used to distinguish parts from retail products. */
+export const PART_CATEGORY_VALUES = [PART_CATEGORY, 'Linh kiện', 'linh kiện', 'linh-kien'] as const;
 export const PART_CATEGORY_LABEL = 'Linh kiện'; // Display label for parts
 export const RETAIL_CATEGORIES = ['Phone', 'Laptop', 'Tablet', 'Audio', 'Watch', 'Accessory', PART_CATEGORY] as const;
 export type RetailCategory = typeof RETAIL_CATEGORIES[number];
@@ -8,6 +10,7 @@ export type RetailCategory = typeof RETAIL_CATEGORIES[number];
 export const isPartCategory = (category?: string, categoryIds?: string[]): boolean => {
     if (!category && (!categoryIds || categoryIds.length === 0)) return false;
     const catLower = (category || '').toLowerCase();
+    if (PART_CATEGORY_VALUES.some(value => catLower === value.toLowerCase())) return true;
     if (catLower === PART_CATEGORY || catLower === 'linh kiện' || catLower === 'linh-kien') return true;
     if (categoryIds && categoryIds.length > 0) {
         const firstCatId = categoryIds[0].toLowerCase();

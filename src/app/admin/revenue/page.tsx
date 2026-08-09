@@ -28,6 +28,7 @@ const expenseCategories = [
     { key: 'supplies', label: 'Vật tư', icon: '📦' },
     { key: 'salary', label: 'Lương NV (thêm)', icon: '👤' },
     { key: 'supplier_payment', label: 'Trả nợ NCC', icon: '💸' },
+    { key: 'shipping', label: 'Phí ship shop chịu', icon: '🚚' },
     { key: 'other', label: 'Khác', icon: '📝' },
 ];
 
@@ -284,6 +285,7 @@ export default function RevenuePage() {
             return {
                 orderRevenue: totals.orderRevenue,
                 repairRevenue: totals.repairRevenue,
+                shippingRevenue: totals.shippingRevenue,
                 cashRevenue: totals.cashRevenue,
                 bankRevenue: totals.bankRevenue,
                 otherRevenue: totals.otherRevenue,
@@ -294,6 +296,7 @@ export default function RevenuePage() {
                 importDebt: totals.importDebt,
                 commissionCost: totals.commissionCost,
                 manualExpenses: totals.manualExpenses,
+                shippingExpense: totals.shippingExpense,
                 supplierPaymentCost: totals.supplierPaymentCost ?? 0,
                 cashExpenses: totals.cashExpenses,
                 bankExpenses: totals.bankExpenses,
@@ -395,7 +398,10 @@ export default function RevenuePage() {
             .filter(r => r.ticketType !== 'warranty' && r.status === 'done' && inRange(r.timing?.completedAt || r.createdAt))
             .reduce((sum, r) => sum + (r.payment?.giftDiscount || 0), 0);
 
-        const totalRevenue = orderRevenue + repairRevenue;
+        const shippingRevenue = orders
+            .filter(o => (o as Order & { repairShipping?: { mode?: string; fee?: number } }).repairShipping?.mode === 'customer_paid_now' && inRange(o.completedAt || o.updatedAt || o.createdAt))
+            .reduce((sum, order) => sum + Math.max(0, Number((order as Order & { repairShipping?: { fee?: number } }).repairShipping?.fee) || 0), 0);
+        const totalRevenue = orderRevenue + repairRevenue + shippingRevenue;
 
         // EXPENSES (CHI)
         const importCost = importReceipts
@@ -414,17 +420,26 @@ export default function RevenuePage() {
             .filter(e => (e as { category?: string }).category === 'supplier_payment')
             .reduce((s, e) => s + (e.amount || 0), 0);
         const manualExpenses = filteredExpenses
-            .filter(e => (e as { category?: string }).category !== 'supplier_payment')
+            .filter(e => !['supplier_payment', 'shipping'].includes(String((e as { category?: string }).category || '')))
+            .reduce((s, e) => s + (e.amount || 0), 0);
+        const shippingExpense = filteredExpenses
+            .filter(e => (e as { category?: string }).category === 'shipping')
+            .reduce((s, e) => s + (e.amount || 0), 0);
+        const shippingCashExpense = filteredExpenses
+            .filter(e => (e as { category?: string; paymentMethod?: string }).category === 'shipping' && String((e as { paymentMethod?: string }).paymentMethod || '').toUpperCase() === 'CASH')
+            .reduce((s, e) => s + (e.amount || 0), 0);
+        const shippingBankExpense = filteredExpenses
+            .filter(e => (e as { category?: string; paymentMethod?: string }).category === 'shipping' && String((e as { paymentMethod?: string }).paymentMethod || '').toUpperCase() === 'BANK')
             .reduce((s, e) => s + (e.amount || 0), 0);
         const cashExpenses = importReceipts
             .filter(i => i.status === 'completed' && !isImportDebt(i) && getPaymentChannel(i.paymentMethod) === 'cash' && inRange(i.completedAt || i.createdAt))
-            .reduce((s, i) => s + (i.totalAmount || 0), 0) + manualExpenses;
+            .reduce((s, i) => s + (i.totalAmount || 0), 0) + manualExpenses + shippingCashExpense;
         const bankExpenses = importReceipts
             .filter(i => i.status === 'completed' && !isImportDebt(i) && getPaymentChannel(i.paymentMethod) === 'bank' && inRange(i.completedAt || i.createdAt))
-            .reduce((s, i) => s + (i.totalAmount || 0), 0);
+            .reduce((s, i) => s + (i.totalAmount || 0), 0) + shippingBankExpense;
         const debtExpenses = importDebt;
 
-        const totalExpenses = importCost + commissionCost + manualExpenses + supplierPaymentCost;
+        const totalExpenses = importCost + commissionCost + manualExpenses + shippingExpense + supplierPaymentCost;
 
         // NET PROFIT (trừ quà tặng)
         const netProfit = totalRevenue - totalExpenses - totalGiftDiscount;
@@ -443,8 +458,8 @@ export default function RevenuePage() {
         };
 
         return {
-            orderRevenue, repairRevenue, cashRevenue, bankRevenue, otherRevenue, debtRevenue, totalRevenue, totalGiftDiscount,
-            importCost, importDebt, commissionCost, manualExpenses, supplierPaymentCost, cashExpenses, bankExpenses, debtExpenses, totalExpenses,
+            orderRevenue, repairRevenue, shippingRevenue, cashRevenue, bankRevenue, otherRevenue, debtRevenue, totalRevenue, totalGiftDiscount,
+            importCost, importDebt, commissionCost, manualExpenses, shippingExpense, supplierPaymentCost, cashExpenses, bankExpenses, debtExpenses, totalExpenses,
             netProfit,
             webOrderCount: webOrders.length,
             posOrderCount: posOrders.length,
@@ -458,9 +473,9 @@ export default function RevenuePage() {
     const revenueDisplay = useMemo(() => {
         const channelTotal = calculations.cashRevenue + calculations.bankRevenue + calculations.otherRevenue;
         const unclassifiedRevenue = Math.max(0, calculations.totalRevenue - channelTotal);
-        const [webOrderRevenue, posOrderRevenue, repairRevenue] = capBreakdownToTotal(
+        const [webOrderRevenue, posOrderRevenue, repairRevenue, shippingRevenue] = capBreakdownToTotal(
             calculations.totalRevenue,
-            [calculations.webOrderRevenue, calculations.posOrderRevenue, calculations.repairRevenue],
+            [calculations.webOrderRevenue, calculations.posOrderRevenue, calculations.repairRevenue, calculations.shippingRevenue],
         );
 
         return {
@@ -468,6 +483,7 @@ export default function RevenuePage() {
             webOrderRevenue,
             posOrderRevenue,
             repairRevenue,
+            shippingRevenue,
         };
     }, [calculations]);
 
@@ -595,7 +611,7 @@ export default function RevenuePage() {
 
             setExpenses(prev => [expenseForState, ...prev]);
             if (useAggregateData) {
-                setAggregateDays(prev => applyRevenueAggregateDelta(prev, new Date(String(expense.createdAt)), { manualExpenses: expAmount }));
+                setAggregateDays(prev => applyRevenueAggregateDelta(prev, new Date(String(expense.createdAt)), expCategory === 'shipping' ? { shippingExpense: expAmount } : { manualExpenses: expAmount }));
             }
             setShowExpenseModal(false);
             setExpDescription('');
@@ -685,6 +701,7 @@ export default function RevenuePage() {
                         <div className="flex justify-between"><span>🌐 Web ({calculations.webOrderCount})</span><span>{formatPrice(revenueDisplay.webOrderRevenue)}</span></div>
                         <div className="flex justify-between"><span>🏪 POS ({calculations.posOrderCount})</span><span>{formatPrice(revenueDisplay.posOrderRevenue)}</span></div>
                         <div className="flex justify-between"><span>🔧 Sửa chữa ({calculations.repairCount})</span><span>{formatPrice(revenueDisplay.repairRevenue)}</span></div>
+                        {revenueDisplay.shippingRevenue > 0 && <div className="flex justify-between"><span>🚚 Ship khách trả</span><span>{formatPrice(revenueDisplay.shippingRevenue)}</span></div>}
                     </div>
                 </div>
 
@@ -708,6 +725,7 @@ export default function RevenuePage() {
                         {calculations.supplierPaymentCost > 0 && (
                             <div className="flex justify-between"><span>💸 Trả nợ NCC</span><span>{formatPrice(calculations.supplierPaymentCost)}</span></div>
                         )}
+                        {calculations.shippingExpense > 0 && <div className="flex justify-between"><span>🚚 Ship shop chịu</span><span>{formatPrice(calculations.shippingExpense)}</span></div>}
                         <div className="flex justify-between"><span>📝 Chi phí khác</span><span>{formatPrice(calculations.manualExpenses)}</span></div>
                         {calculations.totalGiftDiscount > 0 && (
                             <div className="flex justify-between"><span>🎁 Quà tặng</span><span>{formatPrice(calculations.totalGiftDiscount)}</span></div>

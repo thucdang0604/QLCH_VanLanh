@@ -4,6 +4,7 @@ export const REVENUE_AGGREGATE_ROLLOUT_DATE = '2026-06-17';
 export const REVENUE_AGGREGATE_NUMERIC_FIELDS = [
     'orderRevenue',
     'repairRevenue',
+    'shippingRevenue',
     'cashRevenue',
     'bankRevenue',
     'otherRevenue',
@@ -14,6 +15,7 @@ export const REVENUE_AGGREGATE_NUMERIC_FIELDS = [
     'importDebt',
     'commissionCost',
     'manualExpenses',
+    'shippingExpense',
     'supplierPaymentCost',
     'cashExpenses',
     'bankExpenses',
@@ -82,8 +84,8 @@ export function normalizeRevenueAggregateDelta(delta: RevenueAggregateDelta): Re
         }
     }
 
-    const revenueDelta = toFiniteNumber(normalized.orderRevenue) + toFiniteNumber(normalized.repairRevenue);
-    const expenseDelta = toFiniteNumber(normalized.importCost) + toFiniteNumber(normalized.commissionCost) + toFiniteNumber(normalized.manualExpenses) + toFiniteNumber(normalized.supplierPaymentCost);
+    const revenueDelta = toFiniteNumber(normalized.orderRevenue) + toFiniteNumber(normalized.repairRevenue) + toFiniteNumber(normalized.shippingRevenue);
+    const expenseDelta = toFiniteNumber(normalized.importCost) + toFiniteNumber(normalized.commissionCost) + toFiniteNumber(normalized.manualExpenses) + toFiniteNumber(normalized.shippingExpense) + toFiniteNumber(normalized.supplierPaymentCost);
     const giftDelta = toFiniteNumber(normalized.totalGiftDiscount);
 
     if (revenueDelta !== 0) {

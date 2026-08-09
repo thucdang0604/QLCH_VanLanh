@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
 import { Search, Users, Loader2, Star, TrendingUp, Plus, Download, Filter, RefreshCw } from 'lucide-react';
-import { collection, query, orderBy, limit, startAfter, DocumentSnapshot, doc, setDoc, serverTimestamp, updateDoc, where } from 'firebase/firestore';
+import { collection, query, orderBy, limit, startAfter, DocumentSnapshot, doc, setDoc, serverTimestamp, updateDoc, where, getCountFromServer } from 'firebase/firestore';
 import { onSnapshot, getDocs, getDoc } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import CustomerDetailDrawer from '@/components/admin/customers/CustomerDetailDrawer';
@@ -16,7 +16,7 @@ import type { Customer } from '@/lib/types';
 import { buildContactMethods, buildContactSearchKeywords, getPrimaryContact, mergeContactMethods, normalizeContactValue } from '@/lib/contactIdentity';
 import { reserveCustomerDocumentId } from '@/lib/customerDocumentIds';
 import { normalizeVietnamPhone } from '@/lib/phone';
-import { generateSearchKeywords } from '@/lib/utils';
+import { getSearchKeywordQuery } from '@/lib/utils';
 import type { ContactMethod } from '@/lib/types/contact';
 
 const formatPrice = (price: number) => new Intl.NumberFormat('vi-VN').format(price) + 'đ';
@@ -97,6 +97,7 @@ export default function CustomersPage() {
 
     const [lastDoc, setLastDoc] = useState<DocumentSnapshot | null>(null);
     const [hasMore, setHasMore] = useState(true);
+    const [totalCount, setTotalCount] = useState<number | null>(null);
     const [tiers, setTiers] = useState<TierConfig[]>([]);
 
     // Load dynamic tiers
@@ -119,9 +120,15 @@ export default function CustomersPage() {
         setLoading(true);
         try {
             const q = query(collection(db, 'customers'), orderBy('updatedAt', 'desc'), limit(50));
-            const snap = await getDocs(q);
+            const [snap, countSnap] = await Promise.all([
+                getDocs(q),
+                getCountFromServer(collection(db, 'customers')).catch(() => null),
+            ]);
             const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Customer[];
             setCustomers(data);
+            if (countSnap) {
+                setTotalCount(countSnap.data().count);
+            }
             setLastDoc(snap.docs[snap.docs.length - 1] || null);
             setHasMore(snap.docs.length === 50);
         } catch (err) {
@@ -186,14 +193,28 @@ export default function CustomersPage() {
                 });
                 toast.success('Đã tìm thấy KH từ Server!');
             } else {
-                const searchKeyword = generateSearchKeywords(keyword)[0] || keyword.toLowerCase();
-                const q = query(collection(db, 'customers'), where('searchKeywords', 'array-contains', searchKeyword), limit(10));
-                const snap = await getDocs(q);
-                if (snap.empty) {
+                const searchToken = getSearchKeywordQuery(keyword);
+                const queries = [
+                    getDocs(query(collection(db, 'customers'), where('searchKeywords', 'array-contains', searchToken), limit(20))),
+                ];
+                if (phone.length >= 8) {
+                    queries.push(getDocs(query(collection(db, 'customers'), where('phone', '==', phone), limit(10))));
+                }
+
+                const snaps = await Promise.all(queries);
+                const foundMap = new Map<string, Customer>();
+                snaps.forEach(snap => {
+                    snap.docs.forEach(d => {
+                        foundMap.set(d.id, { id: d.id, ...d.data() } as Customer);
+                    });
+                });
+
+                if (foundMap.size === 0) {
                     toast.error('Không tìm thấy dữ liệu trên máy chủ cho từ khóa này.');
                     return;
                 }
-                const foundCustomers = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Customer[];
+
+                const foundCustomers = Array.from(foundMap.values());
                 setCustomers(prev => {
                     const existingIds = new Set(prev.map(p => p.id));
                     return [...foundCustomers.filter(customer => !existingIds.has(customer.id)), ...prev];
@@ -427,8 +448,10 @@ export default function CustomersPage() {
                         <Users size={20} />
                     </div>
                     <div>
-                        <p className="text-xs text-gray-500">Hiển thị</p>
-                        <p className="text-lg font-bold text-gray-800">{stats.totalLoaded}</p>
+                        <p className="text-xs text-gray-500">Tổng KH trong DB</p>
+                        <p className="text-lg font-bold text-gray-800">
+                            {totalCount !== null ? totalCount.toLocaleString('vi-VN') : stats.totalLoaded}
+                        </p>
                     </div>
                 </div>
                 <div className="bg-white rounded-xl border p-3 flex items-center gap-4">

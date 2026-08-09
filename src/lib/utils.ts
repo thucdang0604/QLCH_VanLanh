@@ -79,14 +79,24 @@ export function generateSearchKeywords(name: string): string[] {
         }
     }
 
-    // Also add multi-word prefixes for compound search
+    // Add contiguous N-grams (Bigrams & Trigrams) across all words
     if (words.length > 1) {
+        // Full phrase
         keywords.add(words.join(' '));
-        keywords.add(words.slice(0, 2).join(' '));
+
+        // Bigrams (2 contiguous words: e.g. "iphone 16", "16 pro", "pro max")
+        for (let i = 0; i < words.length - 1; i++) {
+            keywords.add(`${words[i]} ${words[i + 1]}`);
+        }
+
+        // Trigrams (3 contiguous words: e.g. "iphone 16 pro", "16 pro max")
+        for (let i = 0; i < words.length - 2; i++) {
+            keywords.add(`${words[i]} ${words[i + 1]} ${words[i + 2]}`);
+        }
     }
 
-    // Cap at 60 to avoid Firestore limits
-    return Array.from(keywords).slice(0, 60);
+    // Cap at 80 to fit comfortably within Firestore limits while enabling N-gram search
+    return Array.from(keywords).slice(0, 80);
 }
 
 /**

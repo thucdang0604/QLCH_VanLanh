@@ -3,9 +3,9 @@
 import { useState, useEffect } from 'react';
 import {
     Plus, Search, Edit, Trash2, FileText,
-    Loader2, Video, MessageCircle
+    Loader2, Video, MessageCircle, Clock
 } from 'lucide-react';
-import { collection, query, orderBy, limit, deleteDoc, doc } from 'firebase/firestore';
+import { collection, query, orderBy, limit, deleteDoc, doc, updateDoc, deleteField, serverTimestamp } from 'firebase/firestore';
 import { onSnapshot } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import Image from 'next/image';
@@ -27,13 +27,43 @@ export default function ArticlesPage() {
     const [managingCommentsFor, setManagingCommentsFor] = useState<Article | null>(null);
     const [activeTab, setActiveTab] = useState<'articles' | 'comments'>('articles');
 
-    // ── Realtime subscription to Firestore ──
+    // ── Realtime subscription to Firestore & Auto-publish due scheduled articles ──
     useEffect(() => {
         const q = query(collection(db, 'articles'), orderBy('createdAt', 'desc'), limit(50));
         const unsub = onSnapshot(q, (snap) => {
             const items = snap.docs.map(d => ({ id: d.id, ...d.data() } as Article));
             setArticles(items);
             setLoading(false);
+
+            // Auto-publish any scheduled articles that are now due
+            const now = Date.now();
+            items.forEach(async (article) => {
+                if (article.status === 'scheduled' && article.scheduledAt) {
+                    let scheduledTime = 0;
+                    const sat = article.scheduledAt as { seconds?: number };
+                    if (typeof sat === 'object' && sat !== null && 'seconds' in sat && typeof sat.seconds === 'number') {
+                        scheduledTime = sat.seconds * 1000;
+                    } else if (typeof article.scheduledAt === 'number') {
+                        scheduledTime = article.scheduledAt;
+                    } else if (typeof article.scheduledAt === 'string') {
+                        scheduledTime = new Date(article.scheduledAt).getTime();
+                    }
+
+                    if (scheduledTime > 0 && scheduledTime <= now) {
+                        try {
+                            await updateDoc(doc(db, 'articles', article.id), {
+                                status: 'published',
+                                publishedAt: serverTimestamp(),
+                                scheduledAt: deleteField(),
+                                updatedAt: serverTimestamp(),
+                            });
+                            await triggerRevalidate(['/', `/tin-tuc/${article.id}`, '/tin-tuc', '/sitemap.xml'], ['articles']);
+                        } catch (err) {
+                            console.error('Auto publish scheduled article error:', article.id, err);
+                        }
+                    }
+                }
+            });
         }, (err) => {
             console.error('Articles fetch error:', err);
             setLoading(false);
@@ -65,6 +95,22 @@ export default function ArticlesPage() {
         if (!d) return '—';
         if (typeof d === 'object' && d !== null && 'seconds' in d) return new Date((d as { seconds: number }).seconds * 1000).toLocaleDateString('vi-VN');
         return new Date(d as string | number | Date).toLocaleDateString('vi-VN');
+    };
+
+    const formatScheduledTime = (d: unknown) => {
+        if (!d) return 'Đã lên lịch';
+        let date: Date | null = null;
+        if (typeof d === 'object' && d !== null && 'seconds' in d) {
+            date = new Date((d as { seconds: number }).seconds * 1000);
+        } else if (d instanceof Date) {
+            date = d;
+        } else if (typeof d === 'string' || typeof d === 'number') {
+            date = new Date(d);
+        }
+        if (!date || isNaN(date.getTime())) return 'Đã lên lịch';
+        const dateStr = date.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
+        const timeStr = date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', hour12: false });
+        return `${timeStr} ${dateStr}`;
     };
 
     return (
@@ -146,8 +192,17 @@ export default function ArticlesPage() {
                                             <span className={`px-2 py-0.5 text-[10px] font-medium rounded-full ${articleTypeColors[article.type] || 'bg-gray-100'}`}>
                                                 {articleTypeLabels[article.type] || article.type}
                                             </span>
-                                            <span className={`px-2 py-0.5 text-[10px] font-medium rounded-full ${article.status === 'published' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
-                                                {article.status === 'published' ? 'Đã đăng' : 'Bản nháp'}
+                                            <span className={`px-2 py-0.5 text-[10px] font-medium rounded-full ${
+                                                article.status === 'published' ? 'bg-green-100 text-green-700' :
+                                                article.status === 'scheduled' ? 'bg-amber-100 text-amber-800 flex items-center gap-0.5' :
+                                                'bg-gray-100 text-gray-600'
+                                            }`}>
+                                                {article.status === 'published' ? 'Đã đăng' : article.status === 'scheduled' ? (
+                                                    <>
+                                                        <Clock size={10} />
+                                                        {formatScheduledTime(article.scheduledAt)}
+                                                    </>
+                                                ) : 'Bản nháp'}
                                             </span>
                                             {article.videoEmbedUrl && (
                                                 <span className="text-[10px] text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded font-medium flex items-center gap-0.5">
@@ -221,9 +276,17 @@ export default function ArticlesPage() {
                                                 </span>
                                             </td>
                                             <td className="px-6 py-4">
-                                                <span className={`px-3 py-1 text-xs font-medium rounded-full ${article.status === 'published' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'
-                                                    }`}>
-                                                    {article.status === 'published' ? 'Đã đăng' : 'Bản nháp'}
+                                                <span className={`px-3 py-1 text-xs font-medium rounded-full ${
+                                                    article.status === 'published' ? 'bg-green-100 text-green-700' :
+                                                    article.status === 'scheduled' ? 'bg-amber-100 text-amber-800 inline-flex items-center gap-1' :
+                                                    'bg-gray-100 text-gray-600'
+                                                }`}>
+                                                    {article.status === 'published' ? 'Đã đăng' : article.status === 'scheduled' ? (
+                                                        <>
+                                                            <Clock size={12} />
+                                                            {formatScheduledTime(article.scheduledAt)}
+                                                        </>
+                                                    ) : 'Bản nháp'}
                                                 </span>
                                             </td>
                                             <td className="px-6 py-4 text-sm text-gray-600">{(article.views || 0).toLocaleString()}</td>

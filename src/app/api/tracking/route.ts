@@ -3,11 +3,14 @@ import { getAdminDb } from '@/lib/firebaseAdmin';
 import { isRateLimited } from '@/lib/rateLimit';
 import { normalizeVietnamPhone } from '@/lib/phone';
 import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
+import { normalizeWarrantySerial } from '@/lib/orderWarrantyLookup';
+import { Timestamp, type Query } from 'firebase-admin/firestore';
 
 const RATE_LIMIT_MAX = 5;
 const RATE_LIMIT_WINDOW_MS = 60_000;
-const TRACKING_RESULT_LIMIT = 10;
-
+const TRACKING_PAGE_SIZE = 10;
+type TrackingResource = 'appointments' | 'repairs' | 'orders';
+type CursorPayload = { createdAtMs: number; id: string };
 function formatTimestamp(val: unknown): { seconds: number; nanoseconds: number } | null {
     if (!val) return null;
     const obj = val as Record<string, unknown>;
@@ -53,6 +56,78 @@ function clientIp(request: NextRequest): string {
         || 'unknown';
 }
 
+function decodeCursor(value: unknown): CursorPayload | null {
+    if (typeof value !== 'string' || !value) return null;
+    try {
+        const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as CursorPayload;
+        return Number.isFinite(parsed.createdAtMs) && typeof parsed.id === 'string' && parsed.id ? parsed : null;
+    } catch {
+        return null;
+    }
+}
+
+function encodeCursor(doc: { id: string; data: () => Record<string, unknown> }): string | null {
+    const createdAt = formatTimestamp(doc.data().createdAt);
+    if (!createdAt) return null;
+    return Buffer.from(JSON.stringify({ createdAtMs: createdAt.seconds * 1000, id: doc.id })).toString('base64url');
+}
+
+async function fetchPage(query: Query, cursor: CursorPayload | null) {
+    const pagedQuery = cursor
+        ? query.startAfter(Timestamp.fromMillis(cursor.createdAtMs))
+        : query;
+    const docs = (await pagedQuery.limit(TRACKING_PAGE_SIZE + 1).get()).docs;
+    const pageDocs = docs.slice(0, TRACKING_PAGE_SIZE);
+    return {
+        docs: pageDocs,
+        nextCursor: docs.length > TRACKING_PAGE_SIZE && pageDocs.length > 0
+            ? encodeCursor(pageDocs[pageDocs.length - 1]!)
+            : null,
+    };
+}
+
+function serializeOrder(doc: { id: string; data: () => Record<string, unknown> }) {
+    const data = doc.data();
+    const repairShipping = data.repairShipping as Record<string, unknown> | undefined;
+    return {
+        id: doc.id,
+        status: data.status,
+        createdAt: formatTimestamp(data.createdAt),
+        completedAt: formatTimestamp(data.completedAt),
+        customer_info: {
+            name: maskName(String((data.customer_info as Record<string, unknown> | undefined)?.name || '')),
+            phone: maskPhone(String((data.customer_info as Record<string, unknown> | undefined)?.phone || '')),
+            note: (data.customer_info as Record<string, unknown> | undefined)?.note,
+        },
+        items: Array.isArray(data.items) ? data.items.map((item: Record<string, unknown>) => ({
+            name: item.name,
+            productName: item.productName,
+            image: item.image,
+            quantity: item.quantity,
+            price: item.price,
+            color: item.color,
+            storage: item.storage,
+            warrantyType: item.warrantyType,
+            warrantyMonths: Number(item.warrantyMonths || 0),
+            warrantyStartedAt: formatTimestamp(item.warrantyStartedAt),
+            warrantyExpiresAt: formatTimestamp(item.warrantyExpiresAt),
+        })) : [],
+        shipping_fee: Number(data.shipping_fee ?? data.shippingFee ?? repairShipping?.customerCharge ?? 0),
+        total_amount: Number(data.total_amount || 0),
+    };
+}
+
+function serializeOrderSummary(doc: { id: string; data: () => Record<string, unknown> }) {
+    const data = doc.data();
+    return {
+        id: doc.id,
+        status: data.status,
+        createdAt: formatTimestamp(data.createdAt),
+        completedAt: formatTimestamp(data.completedAt),
+        total_amount: Number(data.total_amount || 0),
+    };
+}
+
 export const POST = withApi({
     name: 'tracking',
     onError: (error, context) => {
@@ -69,25 +144,75 @@ export const POST = withApi({
         }
 
         const body = await context.readJson(request);
-        const { phone } = body;
+        const { phone, serial, resource, cursor, orderId } = body;
 
-        if (!phone || typeof phone !== 'string') {
-            return context.json({ error: 'So dien thoai khong hop le.' }, { status: 400 });
+        if ((!phone || typeof phone !== 'string') && (!serial || typeof serial !== 'string')) {
+            return context.json({ error: 'Nhap so dien thoai hoac IMEI/Serial de tra cuu.' }, { status: 400 });
         }
 
-        const normalizedPhone = normalizeVietnamPhone(phone);
-        if (!normalizedPhone) {
+        const normalizedPhone = typeof phone === 'string' ? normalizeVietnamPhone(phone) : null;
+        if (phone && !normalizedPhone) {
             return context.json({ error: 'So dien thoai khong hop le.' }, { status: 400 });
         }
+        const requestedSerial = normalizeWarrantySerial(serial);
+        if (serial && requestedSerial.length < 4) {
+            return context.json({ error: 'IMEI/Serial khong hop le.' }, { status: 400 });
+        }
 
-        const cleanPhone = normalizedPhone.local;
+        const cleanPhone = normalizedPhone?.local || '';
         const db = getAdminDb();
 
-        const appointmentsSnap = await db.collection('appointments')
-            .where('phone', '==', cleanPhone)
-            .limit(TRACKING_RESULT_LIMIT)
-            .get();
-        const appointments = appointmentsSnap.docs.map(doc => {
+        if (requestedSerial) {
+            const serialDocs = (await db.collection('orders')
+                .where('warrantySerials', 'array-contains', requestedSerial)
+                .limit(1)
+                .get()).docs;
+            const orderData = serialDocs[0]?.data();
+            const warrantyItem = Array.isArray(orderData?.items)
+                ? orderData.items.find((item: Record<string, unknown>) => Array.isArray(item.imeis)
+                    && item.imeis.some((imei: unknown) => normalizeWarrantySerial(imei) === requestedSerial)) as Record<string, unknown> | undefined
+                : undefined;
+            const warrantyExpiresAt = formatTimestamp(warrantyItem?.warrantyExpiresAt);
+            const expiresAtMs = warrantyExpiresAt ? warrantyExpiresAt.seconds * 1000 : 0;
+
+            return context.json({
+                success: true,
+                lookupMode: 'serial',
+                warranty: warrantyItem && warrantyExpiresAt ? {
+                    productName: String(warrantyItem.productName || warrantyItem.name || 'Sản phẩm'),
+                    image: warrantyItem.image || '',
+                    warrantyType: warrantyItem.warrantyType || 'none',
+                    warrantyMonths: Number(warrantyItem.warrantyMonths || 0),
+                    warrantyStartedAt: formatTimestamp(warrantyItem.warrantyStartedAt),
+                    warrantyExpiresAt,
+                    status: expiresAtMs >= Date.now() ? 'active' : 'expired',
+                    remainingDays: Math.max(0, Math.ceil((expiresAtMs - Date.now()) / 86_400_000)),
+                } : null,
+            });
+        }
+
+        if (typeof orderId === 'string' && orderId) {
+            const orderDoc = await db.collection('orders').doc(orderId).get();
+            const orderPhone = String((orderDoc.data()?.customer_info as Record<string, unknown> | undefined)?.phone || '');
+            if (!orderDoc.exists || orderPhone !== cleanPhone) {
+                return context.json({ error: 'Không tìm thấy đơn hàng.' }, { status: 404 });
+            }
+            return context.json({
+                success: true,
+                lookupMode: 'phone',
+                order: serializeOrder({ id: orderDoc.id, data: () => orderDoc.data() as Record<string, unknown> }),
+            });
+        }
+
+        const requestedResource: TrackingResource | null = ['appointments', 'repairs', 'orders'].includes(resource)
+            ? resource as TrackingResource
+            : null;
+        const pageCursor = decodeCursor(cursor);
+
+        const appointmentPage = !requestedResource || requestedResource === 'appointments'
+            ? await fetchPage(db.collection('appointments').where('phone', '==', cleanPhone).orderBy('createdAt', 'desc'), pageCursor)
+            : { docs: [], nextCursor: null };
+        const appointments = appointmentPage.docs.map(doc => {
             const data = doc.data();
             return {
                 id: doc.id,
@@ -101,12 +226,12 @@ export const POST = withApi({
             };
         });
 
-        const repairsSnap = await db.collection('repairs')
-            .where('customer.phone', '==', cleanPhone)
-            .orderBy('createdAt', 'desc')
-            .limit(TRACKING_RESULT_LIMIT)
-            .get();
-        const repairs = repairsSnap.docs.map(doc => {
+        const repairPage = !requestedResource || requestedResource === 'repairs'
+            ? await fetchPage(db.collection('repairs')
+                .where('customer.phone', '==', cleanPhone)
+                .orderBy('createdAt', 'desc'), pageCursor)
+            : { docs: [], nextCursor: null };
+        const repairs = repairPage.docs.map(doc => {
             const data = doc.data();
             const cleanDeviceInfo = data.deviceInfo ? { ...data.deviceInfo } : {};
             delete cleanDeviceInfo.passcode;
@@ -151,37 +276,27 @@ export const POST = withApi({
             };
         });
 
-        const ordersSnap = await db.collection('orders')
-            .where('customer_info.phone', '==', cleanPhone)
-            .orderBy('createdAt', 'desc')
-            .limit(TRACKING_RESULT_LIMIT)
-            .get();
-        const orders = ordersSnap.docs.map(doc => {
-            const data = doc.data();
-            return {
-                id: doc.id,
-                status: data.status,
-                createdAt: formatTimestamp(data.createdAt),
-                customer_info: {
-                    name: maskName(data.customer_info?.name),
-                    phone: maskPhone(data.customer_info?.phone),
-                    note: data.customer_info?.note,
-                },
-                items: Array.isArray(data.items) ? data.items.map((item: Record<string, unknown>) => ({
-                    name: item.name,
-                    productName: item.productName,
-                    quantity: item.quantity,
-                    price: item.price,
-                })) : [],
-                shipping_fee: Number(data.shipping_fee || 0),
-                total_amount: Number(data.total_amount || 0),
-            };
-        });
+        // Serial lookup deliberately has no orderBy: it avoids a composite Firestore index.
+        // The small result set is sorted after serialization instead.
+        const orderPage = !requestedResource || requestedResource === 'orders'
+            ? await fetchPage(db.collection('orders')
+                .where('customer_info.phone', '==', cleanPhone)
+                .orderBy('createdAt', 'desc'), pageCursor)
+            : { docs: [], nextCursor: null };
+        const orders = orderPage.docs
+            .map(serializeOrderSummary)
+            .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
 
         return context.json({
             success: true,
             appointments,
             repairs,
             orders,
+            lookupMode: 'phone',
+            pageInfo: {
+                appointments: { nextCursor: appointmentPage.nextCursor },
+                repairs: { nextCursor: repairPage.nextCursor },
+                orders: { nextCursor: orderPage.nextCursor },
+            },
         });
 });

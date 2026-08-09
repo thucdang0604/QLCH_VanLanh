@@ -15,6 +15,7 @@ type RepairFormValue = string | number | boolean | RepairIssue[] | string[] | Pa
 
 type ServiceSuggestion = {
     id: string;
+    serviceId?: string;
     name: string;
     path: string[];
     searchText: string;
@@ -227,6 +228,7 @@ export function RepairEditorModal({
                                                             ...i,
                                                             categoryPath: suggestion.path,
                                                             serviceName: suggestion.name,
+                                                            serviceId: suggestion.serviceId || '',
                                                             estimatedPrice: Number(i.estimatedPrice) > 0 ? i.estimatedPrice : suggestion.estimatedPrice || i.estimatedPrice,
                                                         } : i),
                                                         laborCost: (() => {
@@ -602,6 +604,7 @@ function mergeServiceSuggestions(taxonomySuggestions: ServiceSuggestion[], servi
         const estimatedPrice = getServiceSuggestionPrice(service);
         const suggestion: ServiceSuggestion = {
             id: `service:${service.id}`,
+            serviceId: service.id,
             name,
             path,
             estimatedPrice: estimatedPrice > 0 ? estimatedPrice : undefined,

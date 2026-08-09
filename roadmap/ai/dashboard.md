@@ -34,6 +34,40 @@ Open deploy debt: <code>BUG-DEPLOY-007</code> đang theo dõi warning Firebase C
 
 ## Scaling Roadmap
 
+### 2026-08-02 - POS MULTI-CHANNEL PAYMENT & BANK RECONCILIATION FOUNDATION
+- **Color:** success
+- **Status:** CODE COMPLETE, LOCALLY VALIDATED -> NORMAL DEPLOYMENT
+- **Cashier UX:** Cash and Bank transfer are the two primary choices. The cashier enters the amount tendered for cash; selecting Bank produces an exact VietQR amount and stable `POS-*` transfer content. A partially paid balance can become one additional channel or debt without exposing a separate, redundant “received channel” control. MoMo, instalment, and full debt are collapsed under Other methods.
+- **Financial contract:** `payment_breakdown` stores ordered collected-money lines and allocates them once inside the checkout transaction across the new sale, repair settlement, selected old debt, revenue channels, and cashier shift tally. Debt remains a balance status, not a money channel. Existing legacy `deposit_amount` behavior is retained only for deliberate cash-surplus debt offsets.
+- **Future reconciliation:** Each bank payment is recorded with stable payment-record ID, expected amount, `POS-*` reference and linked order IDs in `bank_payment_reconciliations`. The current explicit cashier confirmation marks payment received; a future bank statement/webhook worker may safely mark reconciliation status without replaying financial writes. Detail: <a href="modules/pos-orders.md">POS &amp; Orders module</a>.
+
+### 2026-08-01 - REPAIR DELIVERY SHIPPING SETTLEMENT
+- **Color:** success
+- **Status:** CODE COMPLETE, LOCALLY VALIDATED -> NORMAL DEPLOYMENT
+- **Business flow:** A repair checkout may carry one delivery instruction only. Customer-paid shipping is an invoice charge and collected shipping revenue. Shop-absorbed shipping is paid from the active cashier shift and records a shipping expense. A partner/customer advance is paid by the shop immediately, creates receivable debt for that party, and is intentionally neither revenue nor expense.
+- **Financial guardrails:** Ship never affects commission base. Shop-paid modes require `manage_cashier_expenses`; every shop outflow is an idempotent cashier expense movement and lowers expected close balance. The advance creates a linked debt order, allowing the existing POS debt-collection flow to settle it without double-counting revenue.
+- **POS workspace UX:** Customer lookup and status now live at the top of the sales screen. The compact catalog uses 48px thumbnails; the checkout panel separates selected goods, repair services, and debt collection. Delivery remains a repair-only action, so routine product sales are not burdened by shipping/debt controls. A new debtor must provide name plus either OTP-verified phone or a stable Zalo contact-card link; the checkout panel shows the advance and the exact new receivable before submission.
+- **Security and evidence:** Client Firestore Rules block direct changes to ship/delivery financial fields. Repair-shipping unit tests, TypeScript, lint, and its E2E case pass. The full suite has one unrelated RBAC failure (`manage_repairs` staff session redirects to login); do not attribute that failure to this slice. Detail: <a href="modules/pos-orders.md">POS &amp; Orders module</a>.
+
+### 2026-07-29 - ARTICLE SEO INDEXING IMPLEMENTATION
+- **Color:** warning
+- **Status:** CODE COMPLETE -> EDITORIAL / RELEASE / SEARCH CONSOLE
+- **Technical SEO:** `/tin-tuc` now emits server-rendered title, description, canonical, collection/breadcrumb schema, article anchors, and category anchors. Detail canonical URLs use the article document ID, missing/unpublished detail returns 404, and `BlogPosting.dateModified` comes from stored article timestamps.
+- **Firebase protection:** Known search crawlers are no-op article-view analytics requests before rate limiting and Firestore. Public comments load only after `Xem bình luận`; human view analytics is unchanged. Publishing stores `publishedAt` in the existing article write.
+- **Sitemap:** Static/category routes no longer pretend to have just changed. Article/product/service `lastmod` is emitted only from valid persisted timestamps.
+- **Evidence:** crawler unit tests, typecheck, lint with no errors, AI guard, diff check, production build, and local server/browser smoke passed. The local Firebase 403 from `127.0.0.1` is API-key referer restriction for anonymous chat/installations, unrelated to article SEO.
+- **Next:** Editorially approve priority content, deploy normally, verify production HTML/sitemap/canonical/schema, then submit sitemap and selected priority URLs in Google Search Console. Detail: <a href="modules/article-seo-indexing-20260729.md">article SEO module</a>.
+
+### 2026-07-29 - PARTS TAXONOMY SEARCH & CURSOR PAGINATION
+- **Color:** warning
+- **Status:** CODE COMPLETE -> INDEX RELEASE / BACKFILL / PRODUCTION SMOKE
+- **Problem corrected:** `/admin/parts` no longer reads only the newest 50 products and then filters locally. The catalog is scoped to configured `component` taxonomy roots and loaded one cursor page at a time; it does not aggregate-count the full match on every page open.
+- **Search/filter:** Component taxonomy is now a dedicated filter. A selected node matches descendants through stored `categoryIds`; two-or-more-character search uses precomputed `searchCategoryKeywords` so taxonomy plus text remains one server-side membership query.
+- **Firebase guardrails:** The page has no broad product listener and fails closed when component taxonomy is missing, invalid, or exceeds supported query fan-out. Writer/import paths add part type and code search terms; the historical backfill script also considers legacy model fields.
+- **Read observability:** Component-mode Parts no longer opens the retail `brands` listener. Development logs now distinguish cached/server snapshots, result documents, callback changes, and bounded document-read estimates; aggregate count results are not labeled as reads.
+- **Boundary:** The two composite indexes were deployed to `qlch-vanlanh` and must finish building before use; historical data still requires a dry-run then approved backfill. The old restore-hidden action was retired because it inspected only the visible slice. Global `Hết hàng`/`Dùng nhiều` filters remain separate work until availability/sales data is materialized for correct server-side queries.
+- **Evidence:** focused query-plan tests, lint, TypeScript, production build (116 routes), roadmap/index JSON parsing, and diff check pass. Detail: <a href="modules/parts-taxonomy-search-20260729.md">parts taxonomy module</a>.
+
 ### 2026-07-11 - CONFIG SEED OVERWRITE HARDENING
 - **Color:** success
 - **Status:** CODED, VALIDATED

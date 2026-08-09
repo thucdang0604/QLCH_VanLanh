@@ -7,6 +7,8 @@ import { useConfig } from '@/lib/ConfigContext';
 import type { HeroBanner, StoreBranch } from '@/lib/ConfigContext';
 import { getIcon } from '@/lib/icon-map';
 import Link from 'next/link';
+import type { SidebarMenuItem } from '@/lib/config-defaults';
+import { getSidebarMenuSubGroupItemHref, toSidebarMenuSubGroupItem } from '@/lib/sidebarMenu';
 
 const trustBadges = [
     { icon: <Shield size={24} />, title: 'Bảo hành trọn đời', desc: 'Cho mọi dịch vụ' },
@@ -37,7 +39,7 @@ function BannerSkeleton() {
 }
 
 // ===== Sidebar Flyout Menu Item =====
-function SidebarItem({ item }: { item: { name: string; slug: string; iconName: string; isCustomLink?: boolean; subGroups: Array<{ group: string; items: string[] }> } }) {
+function SidebarItem({ item }: { item: SidebarMenuItem }) {
     const [showFlyout, setShowFlyout] = useState(false);
     const timeoutRef = useRef<NodeJS.Timeout | null>(null);
     const Icon = getIcon(item.iconName);
@@ -78,16 +80,19 @@ function SidebarItem({ item }: { item: { name: string; slug: string; iconName: s
                             <div key={gi}>
                                 <h4 className="text-xs font-bold text-copper uppercase tracking-wider mb-2.5">{group.group}</h4>
                                 <ul className="space-y-1.5">
-                                    {group.items.map((sub, si) => (
-                                        <li key={si}>
-                                            <Link
-                                                href={`/category/${item.slug}`}
-                                                className="text-sm text-gray-600 hover:text-copper hover:pl-1 transition-all block py-0.5"
-                                            >
-                                                {sub}
-                                            </Link>
-                                        </li>
-                                    ))}
+                                    {group.items.map((sub, si) => {
+                                        const subItem = toSidebarMenuSubGroupItem(sub, `${item.id}_group_${gi}_item_${si}`);
+                                        return (
+                                            <li key={subItem.id}>
+                                                <Link
+                                                    href={getSidebarMenuSubGroupItemHref(subItem, item)}
+                                                    className="text-sm text-gray-600 hover:text-copper hover:pl-1 transition-all block py-0.5"
+                                                >
+                                                    {subItem.label}
+                                                </Link>
+                                            </li>
+                                        );
+                                    })}
                                 </ul>
                             </div>
                         ))}
@@ -175,8 +180,8 @@ export default function HeroSection({ initialBanners }: HeroSectionProps) {
                                         .filter(i => i.visible)
                                         .sort((a, b) => a.order - b.order)
                                         .map((cat, index) => (
-                                        <SidebarItem key={`${cat.slug}-${cat.order}-${index}`} item={cat} />
-                                    ))}
+                                            <SidebarItem key={`${cat.slug}-${cat.order}-${index}`} item={cat} />
+                                        ))}
                                 </nav>
                             </div>
                         </div>
@@ -185,16 +190,16 @@ export default function HeroSection({ initialBanners }: HeroSectionProps) {
                         <div className="relative min-w-0 flex-1 overflow-hidden bg-white">
                             <div className="px-0">
                                 <div className="relative aspect-[16/9] w-full overflow-hidden bg-dark">
-                                        {heroBanners.map((banner, i) => {
-                                            const isFirst = i === 0;
-                                            // SSR: render first slide only.
-                                            // Client: render current + next slide (for smooth transition preload).
-                                            // All other slides stay as placeholder → reduces bandwidth contention.
-                                            const isCurrentOrNext = i === current || i === (current + 1) % heroBanners.length;
-                                            const shouldRenderImage = isFirst || (mounted && isCurrentOrNext);
-                                            const finalSrc = banner.imageUrl;
+                                    {heroBanners.map((banner, i) => {
+                                        const isFirst = i === 0;
+                                        // SSR: render first slide only.
+                                        // Client: render current + next slide (for smooth transition preload).
+                                        // All other slides stay as placeholder → reduces bandwidth contention.
+                                        const isCurrentOrNext = i === current || i === (current + 1) % heroBanners.length;
+                                        const shouldRenderImage = isFirst || (mounted && isCurrentOrNext);
+                                        const finalSrc = banner.imageUrl;
 
-                                            return (
+                                        return (
                                             <div key={banner.id} className={`absolute inset-0 ${isFirst ? '' : 'transition-opacity duration-700'} ${i === current ? 'opacity-100 z-10' : 'opacity-0 z-0'}`}>
                                                 {!shouldRenderImage ? (
                                                     <div className="w-full h-full bg-dark" />
@@ -203,20 +208,20 @@ export default function HeroSection({ initialBanners }: HeroSectionProps) {
                                                         {imgError[banner.id] ? (
                                                             <div className="w-full h-full bg-gray-800 flex items-center justify-center text-gray-500 text-lg">Banner</div>
                                                         ) : banner.width && banner.height ? (
-                                                                <Image
-                                                                    src={finalSrc}
-                                                                    alt={banner.alt || 'Banner Văn Lành Service'}
-                                                                    width={banner.width}
-                                                                    height={banner.height}
-                                                                    priority={isFirst || i === current}
-                                                                    fetchPriority={isFirst || i === current ? "high" : "auto"}
-                                                                    sizes="(max-width: 1024px) 100vw, (max-width: 1120px) calc(100vw - 252px), 860px"
-                                                                    quality={60}
-                                                                    unoptimized={isFirst}
-                                                                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                                                                    {...(isFirst ? { decoding: "sync" } : {})}
-                                                                    onError={() => setImgError(prev => ({ ...prev, [banner.id]: true }))}
-                                                                />
+                                                            <Image
+                                                                src={finalSrc}
+                                                                alt={banner.alt || 'Banner Văn Lành Service'}
+                                                                width={banner.width}
+                                                                height={banner.height}
+                                                                priority={isFirst || i === current}
+                                                                fetchPriority={isFirst || i === current ? "high" : "auto"}
+                                                                sizes="(max-width: 1024px) 100vw, (max-width: 1120px) calc(100vw - 252px), 860px"
+                                                                quality={60}
+                                                                unoptimized={isFirst}
+                                                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                                                {...(isFirst ? { decoding: "sync" } : {})}
+                                                                onError={() => setImgError(prev => ({ ...prev, [banner.id]: true }))}
+                                                            />
                                                         ) : (
                                                             <Image
                                                                 src={finalSrc}
@@ -268,8 +273,8 @@ export default function HeroSection({ initialBanners }: HeroSectionProps) {
                                                     )
                                                 )}
                                             </div>
-                                            );
-                                        })}
+                                        );
+                                    })}
                                 </div>
                                 {heroBanners.length > 1 && (
                                     <div className="border-t border-gray-100 bg-white">

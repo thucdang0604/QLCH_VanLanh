@@ -6,6 +6,9 @@ export type CashierShiftTallyTotals = {
     cashSalesAmount: number;
     bankSalesAmount: number;
     otherSalesAmount: number;
+    cashExpenseAmount: number;
+    bankExpenseAmount: number;
+    otherExpenseAmount: number;
 };
 
 type CashierShiftTallyReader = {
@@ -48,11 +51,17 @@ export async function readCashierShiftTallyTotals(
         totals.cashSalesAmount += asAmount(data.cashSalesAmount);
         totals.bankSalesAmount += asAmount(data.bankSalesAmount);
         totals.otherSalesAmount += asAmount(data.otherSalesAmount);
+        totals.cashExpenseAmount += asAmount(data.cashExpenseAmount);
+        totals.bankExpenseAmount += asAmount(data.bankExpenseAmount);
+        totals.otherExpenseAmount += asAmount(data.otherExpenseAmount);
         return totals;
     }, {
         cashSalesAmount: 0,
         bankSalesAmount: 0,
         otherSalesAmount: 0,
+        cashExpenseAmount: 0,
+        bankExpenseAmount: 0,
+        otherExpenseAmount: 0,
     });
 }
 
@@ -71,6 +80,8 @@ export function queueCashierShiftTally(
         cashAmount?: number;
         bankAmount?: number;
         otherAmount?: number;
+        direction?: 'income' | 'expense';
+        movementType?: 'sale' | 'repair_shipping';
         actorId: string;
     },
 ) {
@@ -78,6 +89,7 @@ export function queueCashierShiftTally(
     const bankAmount = asAmount(input.bankAmount);
     const otherAmount = asAmount(input.otherAmount);
     if (cashAmount + bankAmount + otherAmount <= 0) return;
+    const direction = input.direction || 'income';
 
     const shardId = getCashierShiftTallyShardId(input.operationKey);
     const movementRef = db.collection('cashier_shift_movements').doc(`CSM-${input.shiftId}-${input.operationKey}`);
@@ -91,15 +103,23 @@ export function queueCashierShiftTally(
         cashAmount,
         bankAmount,
         otherAmount,
+        direction,
+        movementType: input.movementType || 'sale',
         actorId: input.actorId,
         createdAt: FieldValue.serverTimestamp(),
     });
     tx.set(tallyRef, {
         shiftId: input.shiftId,
         shardId,
-        ...(cashAmount > 0 ? { cashSalesAmount: FieldValue.increment(cashAmount) } : {}),
-        ...(bankAmount > 0 ? { bankSalesAmount: FieldValue.increment(bankAmount) } : {}),
-        ...(otherAmount > 0 ? { otherSalesAmount: FieldValue.increment(otherAmount) } : {}),
+        ...(cashAmount > 0 ? {
+            [direction === 'expense' ? 'cashExpenseAmount' : 'cashSalesAmount']: FieldValue.increment(cashAmount),
+        } : {}),
+        ...(bankAmount > 0 ? {
+            [direction === 'expense' ? 'bankExpenseAmount' : 'bankSalesAmount']: FieldValue.increment(bankAmount),
+        } : {}),
+        ...(otherAmount > 0 ? {
+            [direction === 'expense' ? 'otherExpenseAmount' : 'otherSalesAmount']: FieldValue.increment(otherAmount),
+        } : {}),
         updatedAt: FieldValue.serverTimestamp(),
     }, { merge: true });
 }

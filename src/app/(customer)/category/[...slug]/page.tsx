@@ -5,13 +5,14 @@ import { SITE_URL } from "@/lib/constants";
 import { notFound, redirect } from 'next/navigation';
 import type { TaxonomyNode } from '@/lib/types';
 import { getBusinessIdentity } from '@/lib/businessIdentity';
+import { getProductConditionCollection, type ProductConditionFilter } from '@/lib/productConditionCollections';
 
 export const revalidate = 300;
 
 /* ── Resolve nav/taxonomy info for a given slug ── */
 type ResolvedInfo = {
     label: string;
-    condition?: string;
+    condition?: ProductConditionFilter;
     isRepair?: boolean;
     isAccessory?: boolean;
     canonicalSegments?: string[];
@@ -61,6 +62,11 @@ function findTaxonomyNode(slugSegments: string[], trees: { type: string; nodes: 
 async function resolveSlug(slugSegments: string[]): Promise<ResolvedInfo | null> {
     if (slugSegments.length === 1 && slugSegments[0] === 'all') {
         return { label: 'Tất cả sản phẩm', canonicalSegments: ['all'] };
+    }
+
+    const conditionCollection = getProductConditionCollection(slugSegments);
+    if (conditionCollection) {
+        return { ...conditionCollection, canonicalSegments: slugSegments };
     }
 
     const resolvedSegments = CATEGORY_ALIASES[slugSegments.join('/')] || slugSegments;
@@ -176,7 +182,7 @@ export default async function CategoryPage({ params }: { params: Promise<{ slug:
     const seoDescription = isRepair
         ? `Dịch vụ ${info.label} chính hãng tại ${identity.siteName}. Linh kiện chính hãng, bảo hành trọn đời, xong trong 30 phút. Hotline: ${identity.formattedPhone}`
         : `Mua ${info.label} chính hãng giá tốt tại ${identity.siteName}. Bảo hành uy tín, giao hàng nhanh.`;
-        
+
     const schemaData = isRepair ? {
         '@context': 'https://schema.org',
         '@type': 'Service',

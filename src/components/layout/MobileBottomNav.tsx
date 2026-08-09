@@ -15,6 +15,7 @@ import { getBusinessIdentity } from '@/lib/businessIdentity';
 import TrackingModal from '@/components/TrackingModal';
 import { getIcon } from '@/lib/icon-map';
 import type { SidebarMenuItem } from '@/lib/config-defaults';
+import { getSidebarMenuSubGroupItemHref, toSidebarMenuSubGroupItem } from '@/lib/sidebarMenu';
 
 const BookingSection = dynamic(() => import('@/components/home/BookingSection'), {
     ssr: false,
@@ -146,9 +147,8 @@ export default function MobileBottomNav() {
             {/* Category Sidebar (Right to Left) */}
             <div
                 ref={categoryMenuRef}
-                className={`fixed top-0 right-0 h-full w-[90vw] md:w-[500px] bg-white z-50 shadow-2xl lg:hidden transform transition-transform duration-300 flex flex-col ${
-                    showCategoryMenu ? 'translate-x-0' : 'translate-x-full'
-                }`}
+                className={`fixed top-0 right-0 h-full w-[90vw] md:w-[500px] bg-white z-50 shadow-2xl lg:hidden transform transition-transform duration-300 flex flex-col ${showCategoryMenu ? 'translate-x-0' : 'translate-x-full'
+                    }`}
             >
                 {/* Header */}
                 <div className="px-4 py-4 border-b flex items-center justify-between bg-white z-10">
@@ -177,9 +177,8 @@ export default function MobileBottomNav() {
                                 <button
                                     key={cat.id}
                                     onClick={() => setActiveCategoryId(cat.id)}
-                                    className={`w-full flex flex-col items-center gap-1.5 p-3 text-center transition-colors border-b border-gray-100 last:border-0 ${
-                                        isActiveCat ? 'bg-white border-l-4 border-l-copper' : 'hover:bg-gray-100 border-l-4 border-l-transparent'
-                                    }`}
+                                    className={`w-full flex flex-col items-center gap-1.5 p-3 text-center transition-colors border-b border-gray-100 last:border-0 ${isActiveCat ? 'bg-white border-l-4 border-l-copper' : 'hover:bg-gray-100 border-l-4 border-l-transparent'
+                                        }`}
                                 >
                                     <span className={`text-lg flex-shrink-0 ${isActiveCat ? 'text-copper' : 'text-gray-500'}`}>
                                         <Icon size={24} />
@@ -203,7 +202,7 @@ export default function MobileBottomNav() {
                                     {/* View All Header */}
                                     <div className="flex items-center justify-between pb-2 border-b border-gray-100">
                                         <h3 className="font-bold text-gray-800 text-sm md:text-base">{activeCat.name}</h3>
-                                        <Link 
+                                        <Link
                                             href={activeCat.isCustomLink ? activeCat.slug : `/category/${activeCat.slug}`}
                                             onClick={() => setShowCategoryMenu(false)}
                                             className="text-xs text-copper font-medium hover:underline flex items-center"
@@ -219,16 +218,19 @@ export default function MobileBottomNav() {
                                                 <div key={gi}>
                                                     <h4 className="text-xs font-bold text-gray-800 uppercase mb-3">{group.group}</h4>
                                                     <div className="grid grid-cols-2 gap-2">
-                                                        {group.items.map((sub: string, si: number) => (
-                                                            <Link
-                                                                key={si}
-                                                                href={activeCat.isCustomLink ? activeCat.slug : `/category/${activeCat.slug}`}
-                                                                onClick={() => setShowCategoryMenu(false)}
-                                                                className="text-[13px] text-gray-600 hover:text-copper border border-gray-200 rounded-lg px-2 py-2 text-center truncate hover:border-copper transition-colors bg-gray-50/50"
-                                                            >
-                                                                {sub}
-                                                            </Link>
-                                                        ))}
+                                                        {group.items.map((sub, si: number) => {
+                                                            const subItem = toSidebarMenuSubGroupItem(sub, `${activeCat.id}_group_${gi}_item_${si}`);
+                                                            return (
+                                                                <Link
+                                                                    key={subItem.id}
+                                                                    href={getSidebarMenuSubGroupItemHref(subItem, activeCat)}
+                                                                    onClick={() => setShowCategoryMenu(false)}
+                                                                    className="text-[13px] text-gray-600 hover:text-copper border border-gray-200 rounded-lg px-2 py-2 text-center truncate hover:border-copper transition-colors bg-gray-50/50"
+                                                                >
+                                                                    {subItem.label}
+                                                                </Link>
+                                                            );
+                                                        })}
                                                     </div>
                                                 </div>
                                             ))}

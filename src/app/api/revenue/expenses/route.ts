@@ -6,7 +6,7 @@ import { getAdminDb } from '@/lib/firebaseAdmin';
 import { incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 import { reserveSequentialDocumentId } from '@/lib/serverDocumentIds';
 
-const EXPENSE_CATEGORIES = new Set(['rent', 'utilities', 'supplies', 'salary', 'other']);
+const EXPENSE_CATEGORIES = new Set(['rent', 'utilities', 'supplies', 'salary', 'shipping', 'other']);
 type ExpenseRequestBody = { category?: string; description?: string; amount?: unknown };
 
 function getErrorMessage(error: unknown): string {
@@ -57,7 +57,7 @@ export const POST = withApi({
 
             expenseAllocation.commitCounter();
             tx.set(expenseRef, expense);
-            incrementRevenueAggregates(tx, db, { manualExpenses: amount }, createdAt);
+            incrementRevenueAggregates(tx, db, category === 'shipping' ? { shippingExpense: amount } : { manualExpenses: amount }, createdAt);
 
             return {
                 id: expenseAllocation.id,

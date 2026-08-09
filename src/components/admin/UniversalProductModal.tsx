@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Loader2, Plus } from 'lucide-react';
 import CurrencyInput from '@/components/admin/CurrencyInput';
-import { orderBy } from 'firebase/firestore';
+import { deleteField, orderBy } from 'firebase/firestore';
 import { buildCategorySearchKeywords, generateSearchKeywords } from '@/lib/utils';
 import { useFirestoreCollection } from '@/lib/useFirestore';
 import { triggerRevalidate } from '@/lib/revalidate';
@@ -18,6 +18,7 @@ import { buildProductCodeFromId, getPrimaryProductCode, getProductCodeKind } fro
 import { createProductWithCodes, updateProductWithCodes } from '@/lib/productCodeRegistry';
 import { useAuth } from '@/lib/AuthContext';
 import { canEditProductField, type ProductEditableField } from '@/lib/catalogEditPolicy';
+import { normalizeWarrantyRuleKey } from '@/lib/repairWarrantyRules';
 
 // €€ Shared Constants €€
 
@@ -27,6 +28,8 @@ const CONDITIONS = [
     { value: 'used', label: 'Hàng cũ | TBH' },
 ];
 const QUALITY_OPTIONS = ['Zin', 'Loại 1', 'Loại 2', 'Bóc máy'];
+
+export type WarrantyPolicyOption = { id: string; label: string; months: number };
 
 // €€ Props €€
 interface UniversalProductModalProps {
@@ -42,6 +45,8 @@ interface UniversalProductModalProps {
     onUpdated?: () => void;
     /** Danh sách loại linh kiện từ warranty config (chỉ dùng cho mode component) */
     partTypeOptions?: string[];
+    /** Chính sách bảo hành ổn định; thay thế việc nhân viên phải nhớ tên loại linh kiện. */
+    warrantyPolicies?: WarrantyPolicyOption[];
     /** Custom label cho nút submit */
     submitLabel?: string;
 }
@@ -60,6 +65,9 @@ interface RetailFormData {
     status: string;
     condition: string;
     isFlashSale: boolean;
+    useProductWarranty: boolean;
+    warrantyType: NonNullable<Product['warrantyType']>;
+    warrantyMonths: number | '';
 }
 
 // €€ Component Form Data €€
@@ -73,6 +81,7 @@ interface ComponentFormData {
     status: string;
     quality: string;
     partType: string;
+    warrantyPolicyId: string;
     supplier: string;
 }
 
@@ -84,6 +93,7 @@ export default function UniversalProductModal({
     onCreated,
     onUpdated,
     partTypeOptions = [],
+    warrantyPolicies = [],
     submitLabel,
 }: UniversalProductModalProps) {
     const isEditing = !!initialData;
@@ -98,13 +108,17 @@ export default function UniversalProductModal({
         if (field === 'images') {
             return initialData.images?.length ? initialData.images : (initialData.imageUrl ? [initialData.imageUrl] : []);
         }
+        if (field === 'warranty') return initialData.warrantyType ?? initialData.warrantyMonths;
         return (initialData as unknown as Record<string, unknown>)[field];
     };
     const canEdit = (field: ProductEditableField) => canEditProductField(editorRole, isEditing, field, storedValue(field), grantedFields);
     const editableFields: ProductEditableField[] = mode === 'retail'
-        ? ['name', 'price_original', 'price_promo', 'category', 'subCategory', 'categoryIds', 'brand', 'description', 'status', 'condition', 'isFlashSale', 'images']
+        ? ['name', 'price_original', 'price_promo', 'category', 'subCategory', 'categoryIds', 'brand', 'description', 'status', 'condition', 'isFlashSale', 'warranty', 'images']
         : ['name', 'price_original', 'price_promo', 'categoryIds', 'description', 'status', 'quality', 'partType', 'supplier', 'images'];
     const canSubmit = editorRole === 'admin' || (!isEditing ? false : editableFields.some(canEdit));
+    const resolvedWarrantyPolicies = warrantyPolicies.length > 0
+        ? warrantyPolicies
+        : partTypeOptions.map(label => ({ id: normalizeWarrantyRuleKey(label), label, months: 0 }));
 
     // €€ Retail Form State €€
     const [retailForm, setRetailForm] = useState<RetailFormData>({
@@ -120,6 +134,9 @@ export default function UniversalProductModal({
         status: initialData?.status || 'active',
         condition: initialData?.condition || 'new',
         isFlashSale: initialData?.isFlashSale || false,
+        useProductWarranty: Boolean(initialData?.warrantyType),
+        warrantyType: initialData?.warrantyType || 'warrantyDevice',
+        warrantyMonths: initialData?.warrantyMonths ?? '',
     });
 
     // €€ Component Form State €€
@@ -133,6 +150,7 @@ export default function UniversalProductModal({
         status: initialData?.status || 'active',
         quality: initialData?.quality || 'Zin',
         partType: initialData?.partType || '',
+        warrantyPolicyId: initialData?.warrantyPolicyId || normalizeWarrantyRuleKey(initialData?.partType),
         supplier: initialData?.supplier || '',
     });
 
@@ -140,11 +158,14 @@ export default function UniversalProductModal({
     const [images, setImages] = useState<string[]>(initialData?.images || []);
     const [isSubmitting, setIsSubmitting] = useState(false);
 
-    // €€ Dynamic Data (Brands) €€
-    
-    const { data: brandsData } = useFirestoreCollection<{ name: string }>('brands', [orderBy('name', 'asc')]);
-    
-    
+    // Brands are only rendered by the retail form. Do not keep a listener open
+    // while the component modal is mounted or closed on the Parts page.
+    const { data: brandsData } = useFirestoreCollection<{ name: string }>(
+        'brands',
+        [orderBy('name', 'asc')],
+        { enabled: isOpen && mode === 'retail' },
+    );
+
     const brands = brandsData.map(b => b.name);
 
     useEffect(() => {
@@ -162,6 +183,9 @@ export default function UniversalProductModal({
                 status: initialData?.status || 'active',
                 condition: initialData?.condition || 'new',
                 isFlashSale: initialData?.isFlashSale || false,
+                useProductWarranty: Boolean(initialData?.warrantyType),
+                warrantyType: initialData?.warrantyType || 'warrantyDevice',
+                warrantyMonths: initialData?.warrantyMonths ?? '',
             });
             setComponentForm({
                 name: initialData?.name || '',
@@ -173,6 +197,7 @@ export default function UniversalProductModal({
                 status: initialData?.status || 'active',
                 quality: initialData?.quality || 'Zin',
                 partType: initialData?.partType || '',
+                warrantyPolicyId: initialData?.warrantyPolicyId || normalizeWarrantyRuleKey(initialData?.partType),
                 supplier: initialData?.supplier || '',
             });
             setImages(initialData?.images?.length ? initialData.images : (initialData?.imageUrl ? [initialData.imageUrl] : []));
@@ -195,8 +220,10 @@ export default function UniversalProductModal({
             ['status', ['status']],
             ['condition', ['condition']],
             ['isFlashSale', ['isFlashSale']],
+            ['warranty', ['warrantyType', 'warrantyMonths']],
             ['quality', ['quality']],
             ['partType', ['partType']],
+            ['partType', ['warrantyPolicyId']],
             ['supplier', ['supplier']],
             ['images', ['images', 'imageUrl']],
         ];
@@ -274,6 +301,19 @@ export default function UniversalProductModal({
             searchKeywords,
             searchCategoryKeywords: buildCategorySearchKeywords(form.categoryIds, searchKeywords),
         };
+        const allowsWarrantyOverride = form.condition !== 'new';
+        if (allowsWarrantyOverride && form.useProductWarranty) {
+            const warrantyMonths = form.warrantyType === 'none' ? 0 : Number(form.warrantyMonths);
+            if (form.warrantyType !== 'none' && (!Number.isInteger(warrantyMonths) || warrantyMonths < 1 || warrantyMonths > 120)) {
+                toastError('Thời hạn bảo hành riêng phải từ 1 đến 120 tháng.');
+                return;
+            }
+            data.warrantyType = form.warrantyType;
+            data.warrantyMonths = warrantyMonths;
+        } else if (initialData?.warrantyType) {
+            data.warrantyType = deleteField();
+            data.warrantyMonths = deleteField();
+        }
         const qrCodes = [productCode];
 
         if (isEditing && initialData) {
@@ -299,7 +339,11 @@ export default function UniversalProductModal({
         const imageUrl = images[0] || '';
         const productId = isEditing && initialData ? initialData.id : await normalizeDocId(form.name, 'component');
         const productCode = initialData ? getPrimaryProductCode(initialData) : buildProductCodeFromId(productId, 'component');
-        const searchKeywords = Array.from(new Set([...generateSearchKeywords(form.name), productCode.toLowerCase()])).slice(0, 60);
+        const searchKeywords = Array.from(new Set([
+            ...generateSearchKeywords(form.name),
+            ...generateSearchKeywords(form.partType),
+            ...generateSearchKeywords(productCode),
+        ])).slice(0, 60);
 
         const data: Record<string, unknown> = {
             sku: productCode,
@@ -316,6 +360,7 @@ export default function UniversalProductModal({
             status: form.status,
             quality: form.quality,
             partType: form.partType,
+            warrantyPolicyId: form.warrantyPolicyId,
             supplier: form.supplier,
             imageUrl,
             images,
@@ -385,7 +430,7 @@ export default function UniversalProductModal({
                         <ComponentFields
                             form={componentForm}
                             setForm={setComponentForm}
-                            partTypeOptions={partTypeOptions}
+                            warrantyPolicies={resolvedWarrantyPolicies}
                             canEdit={canEdit}
                         />
                     )}
@@ -426,6 +471,7 @@ function RetailFields({
     brands: string[];
     canEdit: (field: ProductEditableField) => boolean;
 }) {
+    const allowsWarrantyOverride = form.condition !== 'new';
     return (
         <>
             {/* Name */}
@@ -487,6 +533,55 @@ function RetailFields({
                 />
             </div>
 
+            {allowsWarrantyOverride && (
+            <div className="rounded-xl border border-emerald-100 bg-emerald-50/50 p-4 space-y-3">
+                <label className="flex items-center gap-2 text-sm font-semibold text-emerald-900">
+                    <input
+                        type="checkbox"
+                        checked={form.useProductWarranty}
+                        onChange={(event) => setForm(current => ({ ...current, useProductWarranty: event.target.checked }))}
+                        disabled={!canEdit('warranty')}
+                        className="h-4 w-4 rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500"
+                    />
+                    Bảo hành riêng cho sản phẩm này
+                </label>
+                <p className="text-xs text-emerald-800">
+                    Bỏ chọn để dùng cấu hình bảo hành của taxonomy. Thông tin thực tế sẽ được chốt trên từng đơn bán.
+                </p>
+                {form.useProductWarranty && (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                        <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">Loại bảo hành</label>
+                            <select
+                                value={form.warrantyType}
+                                onChange={(event) => setForm(current => ({ ...current, warrantyType: event.target.value as RetailFormData['warrantyType'] }))}
+                                disabled={!canEdit('warranty')}
+                                className="w-full h-10 px-3 border border-gray-300 rounded-lg bg-white"
+                            >
+                                <option value="warrantyDevice">Thiết bị</option>
+                                <option value="warrantyAccessory">Phụ kiện</option>
+                                <option value="warrantyRepair">Sửa chữa</option>
+                                <option value="none">Không bảo hành</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">Thời hạn (tháng)</label>
+                            <input
+                                type="number"
+                                min={1}
+                                max={120}
+                                value={form.warrantyType === 'none' ? 0 : form.warrantyMonths}
+                                onChange={(event) => setForm(current => ({ ...current, warrantyMonths: event.target.value ? Number(event.target.value) : '' }))}
+                                disabled={!canEdit('warranty') || form.warrantyType === 'none'}
+                                className="w-full h-10 px-3 border border-gray-300 rounded-lg bg-white disabled:bg-gray-100"
+                                aria-label="Thời hạn bảo hành"
+                            />
+                        </div>
+                    </div>
+                )}
+            </div>
+            )}
+
             {/* Brand */}
             <div className="grid grid-cols-1 gap-4 mb-4">
                 <div>
@@ -516,14 +611,18 @@ function RetailFields({
                             className={`flex items-center gap-2 p-3 rounded-lg border cursor-pointer transition-all ${form.condition === c.value
                                 ? 'border-orange-400 bg-orange-50'
                                 : 'border-gray-200 hover:border-gray-300'
-                            }`}
+                                }`}
                         >
                             <input
                                 type="radio"
                                 name="condition"
                                 value={c.value}
                                 checked={form.condition === c.value}
-                                onChange={() => setForm(p => ({ ...p, condition: c.value }))}
+                                onChange={() => setForm(p => ({
+                                    ...p,
+                                    condition: c.value,
+                                    ...(c.value === 'new' ? { useProductWarranty: false } : {}),
+                                }))}
                                 disabled={!canEdit('condition')}
                                 className="accent-orange-500"
                             />
@@ -594,16 +693,25 @@ function RetailFields({
     );
 }
 
+function suggestWarrantyPolicy(categoryIds: string[], policies: WarrantyPolicyOption[]) {
+    const categoryText = normalizeWarrantyRuleKey(categoryIds.join(' '));
+    if (!categoryText) return undefined;
+    return policies.find(policy => {
+        const policyText = normalizeWarrantyRuleKey(policy.label || policy.id);
+        return policyText.length >= 3 && categoryText.includes(policyText);
+    });
+}
+
 // €€ Component Fields Sub-component €€
 function ComponentFields({
     form,
     setForm,
-    partTypeOptions,
+    warrantyPolicies,
     canEdit,
 }: {
     form: ComponentFormData;
     setForm: React.Dispatch<React.SetStateAction<ComponentFormData>>;
-    partTypeOptions: string[];
+    warrantyPolicies: WarrantyPolicyOption[];
     canEdit: (field: ProductEditableField) => boolean;
 }) {
     return (
@@ -631,7 +739,13 @@ function ComponentFields({
                     onChange={(ids) => {
                         setForm(p => ({
                             ...p,
-                            categoryIds: ids
+                            categoryIds: ids,
+                            ...(!p.warrantyPolicyId && suggestWarrantyPolicy(ids, warrantyPolicies)
+                                ? (() => {
+                                    const policy = suggestWarrantyPolicy(ids, warrantyPolicies)!;
+                                    return { warrantyPolicyId: policy.id, partType: policy.label };
+                                })()
+                                : {}),
                         }));
                     }}
                     disabled={!canEdit('categoryIds')}
@@ -680,21 +794,28 @@ function ComponentFields({
                     </select>
                 </div>
 
-                {/* Part Type */}
+                {/* Warranty policy */}
                 <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Loại linh kiện (BH)</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Chính sách bảo hành</label>
                     <select
-                        value={form.partType}
-                        onChange={(e) => setForm(p => ({ ...p, partType: e.target.value }))}
+                        value={form.warrantyPolicyId}
+                        onChange={(e) => {
+                            const policy = warrantyPolicies.find(item => item.id === e.target.value);
+                            setForm(p => ({ ...p, warrantyPolicyId: e.target.value, partType: policy?.label || '' }));
+                        }}
                         disabled={!canEdit('partType')}
                         className="w-full h-11 px-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-shadow"
-                        aria-label="Loại linh kiện"
-                        title="Loại linh kiện"
+                        aria-label="Chính sách bảo hành"
+                        title="Chính sách bảo hành"
                     >
-                        <option value="">-- Chưa chọn --</option>
-                        {partTypeOptions.map(pt => <option key={pt} value={pt}>{pt}</option>)}
+                        <option value="">-- Chưa áp dụng --</option>
+                        {warrantyPolicies.map(policy => (
+                            <option key={policy.id} value={policy.id}>
+                                {policy.label}{policy.months > 0 ? ` · ${policy.months} tháng` : ''}
+                            </option>
+                        ))}
                     </select>
-                    <p className="text-xs text-gray-500 mt-1">Dùng để tính thời gian bảo hành khi hoàn tất phiếu SC</p>
+                    <p className="text-xs text-gray-500 mt-1">Tự gợi ý từ taxonomy; có thể đổi khi linh kiện cần policy khác.</p>
                 </div>
             </div>
 
@@ -704,9 +825,9 @@ function ComponentFields({
                 <input
                     type="number"
                     value={form.stock}
-                        onChange={(e) => setForm(p => ({ ...p, stock: e.target.value ? Number(e.target.value) : '' }))}
-                        min={0}
-                        disabled
+                    onChange={(e) => setForm(p => ({ ...p, stock: e.target.value ? Number(e.target.value) : '' }))}
+                    min={0}
+                    disabled
                     className="w-full h-11 px-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-shadow"
                     placeholder="0"
                 />

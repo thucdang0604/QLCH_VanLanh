@@ -440,23 +440,51 @@ export function parseSpecs(raw: string): ProductSpecs {
 export function resolveCategoryPath(pathStr: string, taxonomy: TaxonomyNode[]): { categoryIds: string[]; category: string } {
     if (!pathStr) return { categoryIds: [], category: '' };
 
-    const parts = pathStr.split('>').map((part) => part.trim()).filter(Boolean);
+    const cleanPathStr = pathStr.trim();
+
+    // 1. Try direct lookup by node.id or node.slug across the taxonomy tree
+    const findById = (nodes: TaxonomyNode[], targetId: string, currentPath: string[] = []): { categoryIds: string[]; category: string } | null => {
+        for (const node of nodes) {
+            const nextPath = [...currentPath, node.id];
+            if (node.id.toLowerCase() === targetId.toLowerCase() || (node.slug && node.slug.toLowerCase() === targetId.toLowerCase())) {
+                return { categoryIds: nextPath, category: node.name };
+            }
+            if (node.children?.length) {
+                const found = findById(node.children, targetId, nextPath);
+                if (found) return found;
+            }
+        }
+        return null;
+    };
+
+    const directMatch = findById(taxonomy, cleanPathStr);
+    if (directMatch) {
+        return directMatch;
+    }
+
+    // 2. Try breadcrumb path matching by part names/ids (separated by '>' or '/')
+    const parts = cleanPathStr.split(/[>/]/).map((part) => part.trim()).filter(Boolean);
     let currentNodes = taxonomy;
     const ids: string[] = [];
     let matchedLeafName = '';
 
     for (const part of parts) {
-        const matchedNode = currentNodes.find((node) => node.name.trim().toLowerCase() === part.toLowerCase());
+        const matchedNode = currentNodes.find((node) =>
+            node.name.trim().toLowerCase() === part.toLowerCase() ||
+            node.id.toLowerCase() === part.toLowerCase() ||
+            (node.slug && node.slug.toLowerCase() === part.toLowerCase())
+        );
         if (!matchedNode) break;
         ids.push(matchedNode.id);
         matchedLeafName = matchedNode.name;
         currentNodes = matchedNode.children || [];
     }
 
-    if (ids.length === parts.length) {
+    if (ids.length > 0 && ids.length === parts.length) {
         return { categoryIds: ids, category: matchedLeafName };
     }
-    return { categoryIds: [], category: pathStr };
+
+    return { categoryIds: [], category: cleanPathStr };
 }
 
 export function productKindForMode(mode: ExcelImportMode, category: string, categoryIds: string[]): ProductCodeKind {
@@ -471,8 +499,8 @@ export function buildImportProductId(mode: 'product' | 'accessory' | 'part', nam
         mode === 'part'
             ? 'LK'
             : mode === 'accessory' || categorySlug === 'accessory' || categorySlug === 'phu-kien'
-              ? 'PK'
-              : 'SP';
+                ? 'PK'
+                : 'SP';
     return `${prefix}-${generateSlug(name)}`;
 }
 
@@ -619,8 +647,8 @@ export async function uploadInitialImportImage(file: File, folder: LocalImageUpl
     const thumb = await optimizeImage(file, 128, 128, 0.60);
     const storage = await getStorageInstance();
     const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
-    const storagePath = hash 
-        ? `media/${folder}/${hash}.webp` 
+    const storagePath = hash
+        ? `media/${folder}/${hash}.webp`
         : `media/${folder}/${Date.now()}_${optimized.file.name}`;
     const storageRef = ref(storage, storagePath);
 
@@ -632,8 +660,8 @@ export async function uploadInitialImportImage(file: File, folder: LocalImageUpl
     await uploadBytes(thumbRef, thumb.file, { contentType: thumb.file.type });
     url = `${url}&hasThumb=true`;
 
-    const docId = hash 
-        ? `MED-import-${folder}-${hash}` 
+    const docId = hash
+        ? `MED-import-${folder}-${hash}`
         : buildImportMediaDocumentId(folder, optimized.file.name);
 
     await setDoc(doc(db, 'media_library', docId), {

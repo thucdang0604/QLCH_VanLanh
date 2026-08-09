@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Image from 'next/image';
 import {
     Plus,
@@ -10,17 +10,16 @@ import {
     Loader2,
     Wrench
 } from 'lucide-react';
-import { collection, limit, orderBy } from 'firebase/firestore';
-import { useFirestoreCollection, addDocumentWithId, updateDocument, deleteDocument } from '@/lib/useFirestore';
+import { collection, where, orderBy, type QueryConstraint } from 'firebase/firestore';
+import { addDocumentWithId, updateDocument, deleteDocument } from '@/lib/useFirestore';
+import { useFirestorePaginated } from '@/lib/firestoreQueryHelper';
 import { getDocs } from '@/lib/firestoreLogger';
 
-import { generateSearchKeywords, generateSlug } from '@/lib/utils';
+import { generateSearchKeywords, generateSlug, getSearchKeywordQuery, buildCategorySearchKeywords, getCategoryPath, collectAllNodeIds } from '@/lib/utils';
 import type { FirestoreDateValue } from '@/lib/types';
-import { getCategoryPath, collectAllNodeIds } from '@/lib/utils';
 import { getCatalogCategoryKey, getCatalogCategoryStatus } from '@/lib/catalogCategory';
 import { appConfirm } from '@/lib/appDialog';
 import { toastError, toastSuccess, toastWarning } from '@/lib/toast';
-import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
 import { triggerRevalidate } from '@/lib/revalidate';
 import Modal from '@/components/admin/Modal';
@@ -31,7 +30,6 @@ import MediaGalleryField from '@/components/admin/MediaGalleryField';
 import { useAuth } from '@/lib/AuthContext';
 import { canEditServiceField, type ServiceEditableField } from '@/lib/catalogEditPolicy';
 import { db } from '@/lib/firebase';
-
 interface Service {
     id: string;
     name: string;
@@ -69,11 +67,58 @@ export default function ServicesPage() {
     const { user } = useAuth();
     const isAdmin = user?.role === 'admin';
     const { config, loading: configLoading } = useConfig();
-    const { data: services, loading } = useFirestoreCollection<Service>('services', [orderBy('createdAt', 'desc'), limit(50)]);
     const [searchQuery, setSearchQuery] = useState('');
+    const [appliedSearch, setAppliedSearch] = useState('');
     const [filterCategoryIds, setFilterCategoryIds] = useState<string[]>([]);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingService, setEditingService] = useState<Service | null>(null);
+
+
+
+    const whereConstraints = useCallback(() => {
+        const constraints: QueryConstraint[] = [];
+        const categoryId = filterCategoryIds.at(-1) || '';
+        const trimmedSearch = appliedSearch.trim();
+        const searchToken = trimmedSearch.length >= 2 ? getSearchKeywordQuery(trimmedSearch) : '';
+
+        if (searchToken) {
+            constraints.push(where('searchKeywords', 'array-contains', searchToken));
+        } else if (categoryId) {
+            constraints.push(where('categoryIds', 'array-contains', categoryId));
+        }
+
+        return constraints;
+    }, [appliedSearch, filterCategoryIds])();
+
+    const orderByConstraints = useCallback(() => {
+        const categoryId = filterCategoryIds.at(-1) || '';
+        const searchToken = appliedSearch.trim().length >= 2 ? getSearchKeywordQuery(appliedSearch) : '';
+        if (categoryId || searchToken) return [];
+        return [orderBy('createdAt', 'desc')];
+    }, [appliedSearch, filterCategoryIds])();
+
+    const queryKey = JSON.stringify({
+        filterCategoryIds,
+        appliedSearch: appliedSearch.trim(),
+    });
+
+    const {
+        data: services,
+        loading,
+        totalCount,
+        currentPage,
+        totalPages,
+        pageSize,
+        goToPage,
+        setPageSize,
+        refresh,
+    } = useFirestorePaginated<Service>('services', {
+        queryKey,
+        whereConstraints,
+        orderByConstraints,
+        pageSize: 20,
+        includeTotalCount: true,
+    });
 
     // Batch reassign state
     const [showReassign, setShowReassign] = useState(false);
@@ -81,10 +126,21 @@ export default function ServicesPage() {
     const [reassignTo, setReassignTo] = useState('');
     const [reassignToIds, setReassignToIds] = useState<string[]>([]);
     const [isReassigning, setIsReassigning] = useState(false);
-    const [reassignProgress, setReassignProgress] = useState<{current: number, total: number} | null>(null);
+    const [reassignProgress, setReassignProgress] = useState<{ current: number, total: number } | null>(null);
     const [catalogServices, setCatalogServices] = useState<Service[]>([]);
     const [categoryAuditLoading, setCategoryAuditLoading] = useState(false);
     const [categoryAuditLoaded, setCategoryAuditLoaded] = useState(false);
+
+    const filteredServices = useMemo(() => {
+        const categoryId = filterCategoryIds.at(-1) || '';
+        const searchToken = appliedSearch.trim().length >= 2 ? getSearchKeywordQuery(appliedSearch) : '';
+        return services.filter(service => {
+            if (categoryId && searchToken) {
+                if (!service.categoryIds || !service.categoryIds.includes(categoryId)) return false;
+            }
+            return true;
+        });
+    }, [appliedSearch, filterCategoryIds, services]);
 
     const refreshCategoryAudit = useCallback(async () => {
         setCategoryAuditLoading(true);
@@ -106,22 +162,11 @@ export default function ServicesPage() {
         try {
             await deleteDocument('services', service.id);
             await triggerRevalidate(['/', `/service/${service.id}`, '/category/sua-chua', '/sitemap.xml'], ['services']);
+            refresh();
         } catch {
             toastError('Lỗi khi xóa dịch vụ!');
         }
     };
-
-    const filteredServices = services.filter((s) => {
-        const matchSearch = s.name.toLowerCase().includes(searchQuery.toLowerCase());
-        let matchCategory = true;
-
-        if (filterCategoryIds.length > 0) {
-            const targetId = filterCategoryIds[filterCategoryIds.length - 1];
-            matchCategory = s.categoryIds?.includes(targetId) || false;
-        }
-
-        return matchSearch && matchCategory;
-    });
 
     // --- ORPHAN CATEGORY DETECTION (ID-based) ---
     const serviceTaxonomy = config?.taxonomy?.service || [];
@@ -213,12 +258,7 @@ export default function ServicesPage() {
         }
     };
 
-    const { paginatedData: paginatedServices, currentPage, totalPages, pageSize, totalFiltered, setPage, setPageSize, resetPage } = useClientPagination(filteredServices, 20);
-
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    useEffect(() => { resetPage(); }, [searchQuery, filterCategoryIds]);
-
-    /** Get display price â€” prefers numeric fields, falls back to legacy string */
+    /** Get display price — prefers numeric fields, falls back to legacy string */
     const getDisplayPrice = (s: Service) => {
         if (s.hidePrice) return 'Liên hệ nhận báo giá';
         if (s.price_original > 0) return formatPrice(s.price_original);
@@ -246,7 +286,7 @@ export default function ServicesPage() {
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
                     <h1 className="text-lg font-bold text-gray-900">Quản lý dịch vụ</h1>
-                    <p className="text-gray-500">{services.length} dịch vụ</p>
+                    <p className="text-gray-500">{loading ? 'Đang tải...' : `${totalCount} dịch vụ`}</p>
                 </div>
                 {isAdmin && (
                     <div className="flex gap-2">
@@ -297,6 +337,13 @@ export default function ServicesPage() {
             {/* Search + Category filter */}
             <div className="flex flex-col gap-3">
                 <div className="flex flex-col sm:flex-row gap-3">
+                <form
+                    className="flex flex-1 gap-2"
+                    onSubmit={(e) => {
+                        e.preventDefault();
+                        setAppliedSearch(searchQuery.trim());
+                    }}
+                >
                     <div className="relative flex-1">
                         <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                         <input
@@ -307,6 +354,13 @@ export default function ServicesPage() {
                             className="w-full h-8 text-sm pl-10 pr-4 border rounded-lg focus:border-orange-500 focus:outline-none"
                         />
                     </div>
+                    <button
+                        type="submit"
+                        className="h-8 rounded-lg bg-orange-500 px-3 text-xs font-semibold text-white hover:bg-orange-600 active:scale-95 transition-all"
+                    >
+                        Tìm kiếm
+                    </button>
+                </form>
                 </div>
                 {/* Modern Taxonomy Filter */}
                 <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
@@ -331,102 +385,103 @@ export default function ServicesPage() {
                 </div>
             ) : (
                 <>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {paginatedServices.map((service) => {
-                        const promo = getPromoPrice(service);
-                        return (
-                        <div key={service.id} className={`bg-white rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow`}>
-                            <div className="flex items-start justify-between mb-4">
-                                <div className="w-14 h-14 bg-orange-100 rounded-xl flex items-center justify-center">
-                                    {service.imageUrl ? (
-                                        <Image
-                                            src={service.imageUrl}
-                                            alt={service.name}
-                                            width={40}
-                                            height={40}
-                                            className="rounded-lg object-cover"
-                                        />
-                                    ) : (
-                                        <Wrench size={24} className="text-orange-600" />
-                                    )}
-                                </div>
-                                <div className="flex gap-1">
-                                    <button
-                                        title="Sửa dịch vụ"
-                                        onClick={() => { setEditingService(service); setIsModalOpen(true); }}
-                                        className="p-2 hover:bg-blue-100 text-blue-600 rounded-lg"
-                                    >
-                                        <Edit size={16} />
-                                    </button>
-                                    {isAdmin && (
-                                        <button
-                                            title="Xóa dịch vụ"
-                                            onClick={() => handleDelete(service)}
-                                            className="p-2 hover:bg-red-100 text-red-600 rounded-lg"
-                                        >
-                                            <Trash2 size={16} />
-                                        </button>
-                                    )}
-                                </div>
-                            </div>
-                            <h3 className="font-semibold text-gray-900 mb-1">{service.name}</h3>
-                            {/* Auto-render category path from taxonomy tree */}
-                            {(() => {
-                                const status = getOrphanStatus(service);
-                                const deepestId = service.categoryIds?.[service.categoryIds.length - 1];
-                                const path = deepestId ? getCategoryPath(deepestId, serviceTaxonomy) : null;
-                                if (status === 'orphan') {
-                                    return <p className="text-xs text-red-600 bg-red-50 px-2 py-0.5 rounded inline-block mb-1">⚠ Lỗi danh mục: {deepestId || service.category}</p>;
-                                }
-                                if (status === 'unassigned') {
-                                    return <p className="text-xs text-yellow-600 bg-yellow-50 px-2 py-0.5 rounded inline-block mb-1">⚠ Chưa gán danh mục</p>;
-                                }
-                                return path ? <p className="text-xs text-gray-400 mb-1">📌 {path}</p> : null;
-                            })()}
-                            <p className="text-sm text-gray-500 line-clamp-2 mb-3">{service.description}</p>
-                            {(service.linkedProductCategoryIds?.length || service.recommendedPartCategoryIds?.length) && (
-                                <div className="mb-3 flex flex-wrap gap-1.5 text-[11px]">
-                                    {service.linkedProductCategoryIds?.length ? (
-                                        <span className="rounded-md border border-blue-100 bg-blue-50 px-2 py-0.5 font-medium text-blue-700">
-                                            Bán kèm: {getLinkedCategoryPath('retail', service.linkedProductCategoryIds)}
-                                        </span>
-                                    ) : null}
-                                    {service.recommendedPartCategoryIds?.length ? (
-                                        <span className="rounded-md border border-emerald-100 bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700">
-                                            Linh kiện: {getLinkedCategoryPath('component', service.recommendedPartCategoryIds)}
-                                        </span>
-                                    ) : null}
-                                </div>
-                            )}
-                            <div className="flex items-center justify-between">
-                                <div>
-                                    {promo ? (
-                                        <div className="flex items-baseline gap-2">
-                                            <span className="text-orange-600 font-bold">{promo}</span>
-                                            <span className="text-gray-400 text-xs line-through">{getDisplayPrice(service)}</span>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {filteredServices.map((service) => {
+                            const promo = getPromoPrice(service);
+                            return (
+                                <div key={service.id} className={`bg-white rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow`}>
+                                    <div className="flex items-start justify-between mb-4">
+                                        <div className="w-14 h-14 bg-orange-100 rounded-xl flex items-center justify-center">
+                                            {service.imageUrl ? (
+                                                <Image
+                                                    src={service.imageUrl}
+                                                    alt={service.name}
+                                                    width={40}
+                                                    height={40}
+                                                    className="rounded-lg object-cover"
+                                                />
+                                            ) : (
+                                                <Wrench size={24} className="text-orange-600" />
+                                            )}
                                         </div>
-                                    ) : (
-                                        <span className="text-orange-600 font-bold">{getDisplayPrice(service)}</span>
+                                        <div className="flex gap-1">
+                                            <button
+                                                title="Sửa dịch vụ"
+                                                onClick={() => { setEditingService(service); setIsModalOpen(true); }}
+                                                className="p-2 hover:bg-blue-100 text-blue-600 rounded-lg"
+                                            >
+                                                <Edit size={16} />
+                                            </button>
+                                            {isAdmin && (
+                                                <button
+                                                    title="Xóa dịch vụ"
+                                                    onClick={() => handleDelete(service)}
+                                                    className="p-2 hover:bg-red-100 text-red-600 rounded-lg"
+                                                >
+                                                    <Trash2 size={16} />
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <h3 className="font-semibold text-gray-900 mb-1">{service.name}</h3>
+                                    {/* Auto-render category path from taxonomy tree */}
+                                    {(() => {
+                                        const status = getOrphanStatus(service);
+                                        const deepestId = service.categoryIds?.[service.categoryIds.length - 1];
+                                        const path = deepestId ? getCategoryPath(deepestId, serviceTaxonomy) : null;
+                                        if (status === 'orphan') {
+                                            return <p className="text-xs text-red-600 bg-red-50 px-2 py-0.5 rounded inline-block mb-1">⚠ Lỗi danh mục: {deepestId || service.category}</p>;
+                                        }
+                                        if (status === 'unassigned') {
+                                            return <p className="text-xs text-yellow-600 bg-yellow-50 px-2 py-0.5 rounded inline-block mb-1">⚠ Chưa gán danh mục</p>;
+                                        }
+                                        return path ? <p className="text-xs text-gray-400 mb-1">📌 {path}</p> : null;
+                                    })()}
+                                    <p className="text-sm text-gray-500 line-clamp-2 mb-3">{service.description}</p>
+                                    {(service.linkedProductCategoryIds?.length || service.recommendedPartCategoryIds?.length) && (
+                                        <div className="mb-3 flex flex-wrap gap-1.5 text-[11px]">
+                                            {service.linkedProductCategoryIds?.length ? (
+                                                <span className="rounded-md border border-blue-100 bg-blue-50 px-2 py-0.5 font-medium text-blue-700">
+                                                    Bán kèm: {getLinkedCategoryPath('retail', service.linkedProductCategoryIds)}
+                                                </span>
+                                            ) : null}
+                                            {service.recommendedPartCategoryIds?.length ? (
+                                                <span className="rounded-md border border-emerald-100 bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700">
+                                                    Linh kiện: {getLinkedCategoryPath('component', service.recommendedPartCategoryIds)}
+                                                </span>
+                                            ) : null}
+                                        </div>
                                     )}
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            {promo ? (
+                                                <div className="flex items-baseline gap-2">
+                                                    <span className="text-orange-600 font-bold">{promo}</span>
+                                                    <span className="text-gray-400 text-xs line-through">{getDisplayPrice(service)}</span>
+                                                </div>
+                                            ) : (
+                                                <span className="text-orange-600 font-bold">{getDisplayPrice(service)}</span>
+                                            )}
+                                        </div>
+                                        <span className={`px-2 py-1 text-xs rounded-full ${service.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
+                                            }`}>
+                                            {service.isActive ? 'Hoạt động' : 'Tạm dừng'}
+                                        </span>
+                                    </div>
                                 </div>
-                                <span className={`px-2 py-1 text-xs rounded-full ${service.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
-                                    }`}>
-                                    {service.isActive ? 'Hoạt động' : 'Tạm dừng'}
-                                </span>
-                            </div>
-                        </div>
-                    );})}
-                </div>
-                <PaginationBar
-                    currentPage={currentPage}
-                    totalPages={totalPages}
-                    pageSize={pageSize}
-                    totalFiltered={totalFiltered}
-                    totalAll={services.length}
-                    onPageChange={setPage}
-                    onPageSizeChange={setPageSize}
-                    entityLabel="dịch vụ"
-                />
+                            );
+                        })}
+                    </div>
+                    <PaginationBar
+                        currentPage={currentPage}
+                        totalPages={totalPages}
+                        pageSize={pageSize as 20 | 50 | 100}
+                        totalFiltered={totalCount}
+                        totalAll={totalCount}
+                        onPageChange={goToPage}
+                        onPageSizeChange={(size) => setPageSize(size)}
+                        entityLabel="dịch vụ"
+                    />
                 </>
             )}
 
@@ -434,7 +489,7 @@ export default function ServicesPage() {
             <ServiceModal
                 isOpen={isModalOpen}
                 service={editingService}
-                onClose={() => setIsModalOpen(false)}
+                onClose={() => { setIsModalOpen(false); refresh(); }}
                 existingIds={services.map(s => s.id)}
             />
 
@@ -457,13 +512,13 @@ export default function ServicesPage() {
                     </div>
                     <div className="flex gap-3 pt-4">
                         <button onClick={() => setShowReassign(false)} className="flex-1 py-2.5 border rounded-lg hover:bg-gray-50 font-medium">Há»§y</button>
-                        <button 
-                            onClick={handleBatchReassign} 
+                        <button
+                            onClick={handleBatchReassign}
                             disabled={!reassignTo || reassignToIds.length === 0 || reassignTargets.length === 0 || isReassigning}
                             className="flex-1 py-2.5 bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-medium disabled:opacity-50 flex justify-center items-center gap-2"
                         >
                             {isReassigning && <Loader2 size={16} className="animate-spin" />}
-                            {isReassigning 
+                            {isReassigning
                                 ? (reassignProgress ? `Đang xử lý ${reassignProgress.current}/${reassignProgress.total}...` : 'Đang xử lý...')
                                 : 'Xác nhận gán lại'}
                         </button>
@@ -579,6 +634,7 @@ function ServiceModal({
         });
         if (!canEdit('name') && !canEdit('device_model') && !canEdit('tags')) {
             delete allowed.searchKeywords;
+            delete allowed.searchCategoryKeywords;
         }
         delete allowed.price;
         return allowed;
@@ -601,6 +657,7 @@ function ServiceModal({
                 formData.device_model,
                 ...tagsArray,
             ].filter(Boolean).join(' '));
+            const searchCategoryKeywords = buildCategorySearchKeywords(formData.categoryIds, searchKeywords);
 
             const data: Record<string, unknown> = {
                 name: formData.name,
@@ -619,6 +676,7 @@ function ServiceModal({
                 seoDescription: formData.seoDescription || '',
                 tags: tagsArray,
                 searchKeywords,
+                searchCategoryKeywords,
                 imageUrl,
                 images,
             };
@@ -654,268 +712,268 @@ function ServiceModal({
     return (
         <Modal isOpen={isOpen} onClose={onClose} title={service ? 'Sửa dịch vụ' : 'Thêm dịch vụ'} size="2xl">
 
-                <form onSubmit={handleSubmit} className="p-6 space-y-4">
-                    <MediaGalleryField
-                        label={'Ảnh dịch vụ'}
-                        mediaTitle={'Chọn Ảnh dịch vụ'}
-                        value={images}
-                        onChange={setImages}
-                        emptyText={'Chọn Ảnh dịch vụ từ thư viện'}
-                        defaultFolder="services"
-                        disabled={!canEdit('images')}
+            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+                <MediaGalleryField
+                    label={'Ảnh dịch vụ'}
+                    mediaTitle={'Chọn Ảnh dịch vụ'}
+                    value={images}
+                    onChange={setImages}
+                    emptyText={'Chọn Ảnh dịch vụ từ thư viện'}
+                    defaultFolder="services"
+                    disabled={!canEdit('images')}
+                />
+
+                {editorRole === 'staff' && isEditing && (
+                    <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                        Nhân viên chỉ có thể sửa trường được admin cấp quyền hoặc bổ sung trường đang trống.
+                    </p>
+                )}
+
+                {/* Name */}
+                <div>
+                    <label className="block text-sm font-medium mb-1">Tên dịch vụ *</label>
+                    <input
+                        type="text"
+                        value={formData.name}
+                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                        required
+                        disabled={!canEdit('name')}
+                        className="w-full h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
+                        placeholder="Thay pin iPhone"
                     />
+                </div>
 
-                    {editorRole === 'staff' && isEditing && (
-                        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                            Nhân viên chỉ có thể sửa trường được admin cấp quyền hoặc bổ sung trường đang trống.
-                        </p>
-                    )}
+                {/* Device Model with suggestions */}
+                <div>
+                    <label className="block text-sm font-medium mb-1">Dòng máy hỗ trợ</label>
+                    <input
+                        type="text"
+                        list="device-model-suggestions"
+                        value={formData.device_model}
+                        onChange={(e) => setFormData({ ...formData, device_model: e.target.value })}
+                        disabled={!canEdit('device_model')}
+                        className="w-full h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
+                        placeholder="iPhone 15 Pro Max, Samsung S24 Ultra..."
+                    />
+                    <datalist id="device-model-suggestions">
+                        {['iPhone 16 Pro Max', 'iPhone 16 Pro', 'iPhone 16', 'iPhone 15 Pro Max', 'iPhone 15 Pro', 'iPhone 15', 'iPhone 14 Pro Max', 'iPhone 14', 'iPhone 13', 'iPhone 12', 'iPhone 11', 'iPhone SE',
+                            'Samsung Galaxy S25 Ultra', 'Samsung Galaxy S25', 'Samsung Galaxy S24 Ultra', 'Samsung Galaxy S24', 'Samsung Galaxy S23', 'Samsung Galaxy Z Fold6', 'Samsung Galaxy Z Flip6', 'Samsung Galaxy A55', 'Samsung Galaxy A35', 'Samsung Galaxy A15',
+                            'Xiaomi 14 Ultra', 'Xiaomi 14', 'Xiaomi 13', 'Redmi Note 13 Pro', 'Redmi Note 13', 'Redmi Note 12', 'POCO F6 Pro', 'POCO X6',
+                            'OPPO Find X7', 'OPPO Reno 12', 'OPPO Reno 11', 'OPPO A98', 'OPPO A78',
+                            'Vivo X100', 'Vivo V30', 'Vivo Y36',
+                            'MacBook Pro', 'MacBook Air', 'Dell XPS', 'HP Pavilion', 'Lenovo ThinkPad', 'Asus ROG', 'Acer Nitro', 'MSI Gaming',
+                            'iPad Pro', 'iPad Air', 'iPad mini', 'Samsung Galaxy Tab',
+                        ].map(m => <option key={m} value={m} />)}
+                    </datalist>
+                    <p className="text-xs text-gray-400 mt-1">Nhấn vào gợi ý bên dưới để thêm nhanh:</p>
+                    <div className="flex flex-wrap gap-1.5 mt-1.5">
+                        {[
+                            { group: 'iPhone', items: ['iPhone 16 Pro Max', 'iPhone 15 Pro Max', 'iPhone 14', 'iPhone 13', 'iPhone 12', 'iPhone 11'] },
+                            { group: 'Samsung', items: ['Galaxy S25 Ultra', 'Galaxy S24 Ultra', 'Galaxy A55', 'Galaxy Z Fold6'] },
+                            { group: 'Xiaomi', items: ['Xiaomi 14', 'Redmi Note 13 Pro', 'OPPO Reno 12', 'OPPO A78', 'Vivo V30'] },
+                            { group: 'MacBook', items: ['MacBook Pro', 'MacBook Air', 'Dell XPS', 'HP Pavilion', 'Lenovo ThinkPad'] },
+                        ].map(g => g.items.map(item => (
+                            <button
+                                key={item}
+                                type="button"
+                                onClick={() => {
+                                    const current = formData.device_model.trim();
+                                    const newVal = current ? `${current}, ${item}` : item;
+                                    setFormData({ ...formData, device_model: newVal });
+                                }}
+                                disabled={!canEdit('device_model')}
+                                className="px-2 py-0.5 text-xs bg-gray-100 hover:bg-orange-100 hover:text-orange-700 rounded-full border border-gray-200 transition-colors cursor-pointer"
+                            >
+                                {g.group} {item}
+                            </button>
+                        )))}
+                    </div>
+                </div>
 
-                    {/* Name */}
+                {/* Price */}
+                <div className="grid grid-cols-2 gap-3">
                     <div>
-                        <label className="block text-sm font-medium mb-1">Tên dịch vụ *</label>
-                        <input
-                            type="text"
-                            value={formData.name}
-                            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                            required
-                            disabled={!canEdit('name')}
+                        <label className="block text-sm font-medium mb-1">Giá dịch vụ (đ) *</label>
+                        <CurrencyInput
+                            value={formData.price_original || ''}
+                            onChange={(v) => setFormData({ ...formData, price_original: v })}
+                            disabled={!canEdit('price_original')}
                             className="w-full h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
-                            placeholder="Thay pin iPhone"
+                            placeholder="350.000"
                         />
                     </div>
-
-                    {/* Device Model with suggestions */}
                     <div>
-                        <label className="block text-sm font-medium mb-1">Dòng máy hỗ trợ</label>
-                        <input
-                            type="text"
-                            list="device-model-suggestions"
-                            value={formData.device_model}
-                            onChange={(e) => setFormData({ ...formData, device_model: e.target.value })}
-                            disabled={!canEdit('device_model')}
+                        <label className="block text-sm font-medium mb-1">Giá khuyến mãi (đ)</label>
+                        <CurrencyInput
+                            value={formData.price_promo || ''}
+                            onChange={(v) => setFormData({ ...formData, price_promo: v })}
+                            disabled={!canEdit('price_promo')}
                             className="w-full h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
-                            placeholder="iPhone 15 Pro Max, Samsung S24 Ultra..."
+                            placeholder="Để trống nếu không giảm"
                         />
-                        <datalist id="device-model-suggestions">
-                            {['iPhone 16 Pro Max', 'iPhone 16 Pro', 'iPhone 16', 'iPhone 15 Pro Max', 'iPhone 15 Pro', 'iPhone 15', 'iPhone 14 Pro Max', 'iPhone 14', 'iPhone 13', 'iPhone 12', 'iPhone 11', 'iPhone SE',
-                                'Samsung Galaxy S25 Ultra', 'Samsung Galaxy S25', 'Samsung Galaxy S24 Ultra', 'Samsung Galaxy S24', 'Samsung Galaxy S23', 'Samsung Galaxy Z Fold6', 'Samsung Galaxy Z Flip6', 'Samsung Galaxy A55', 'Samsung Galaxy A35', 'Samsung Galaxy A15',
-                                'Xiaomi 14 Ultra', 'Xiaomi 14', 'Xiaomi 13', 'Redmi Note 13 Pro', 'Redmi Note 13', 'Redmi Note 12', 'POCO F6 Pro', 'POCO X6',
-                                'OPPO Find X7', 'OPPO Reno 12', 'OPPO Reno 11', 'OPPO A98', 'OPPO A78',
-                                'Vivo X100', 'Vivo V30', 'Vivo Y36',
-                                'MacBook Pro', 'MacBook Air', 'Dell XPS', 'HP Pavilion', 'Lenovo ThinkPad', 'Asus ROG', 'Acer Nitro', 'MSI Gaming',
-                                'iPad Pro', 'iPad Air', 'iPad mini', 'Samsung Galaxy Tab',
-                            ].map(m => <option key={m} value={m} />)}
-                        </datalist>
-                        <p className="text-xs text-gray-400 mt-1">Nhấn vào gợi ý bên dưới để thêm nhanh:</p>
-                        <div className="flex flex-wrap gap-1.5 mt-1.5">
-                            {[
-                                { group: 'iPhone', items: ['iPhone 16 Pro Max', 'iPhone 15 Pro Max', 'iPhone 14', 'iPhone 13', 'iPhone 12', 'iPhone 11'] },
-                                { group: 'Samsung', items: ['Galaxy S25 Ultra', 'Galaxy S24 Ultra', 'Galaxy A55', 'Galaxy Z Fold6'] },
-                                { group: 'Xiaomi', items: ['Xiaomi 14', 'Redmi Note 13 Pro', 'OPPO Reno 12', 'OPPO A78', 'Vivo V30'] },
-                                { group: 'MacBook', items: ['MacBook Pro', 'MacBook Air', 'Dell XPS', 'HP Pavilion', 'Lenovo ThinkPad'] },
-                            ].map(g => g.items.map(item => (
-                                <button
-                                    key={item}
-                                    type="button"
-                                    onClick={() => {
-                                        const current = formData.device_model.trim();
-                                        const newVal = current ? `${current}, ${item}` : item;
-                                        setFormData({ ...formData, device_model: newVal });
-                                    }}
-                                    disabled={!canEdit('device_model')}
-                                    className="px-2 py-0.5 text-xs bg-gray-100 hover:bg-orange-100 hover:text-orange-700 rounded-full border border-gray-200 transition-colors cursor-pointer"
-                                >
-                                    {g.group} {item}
-                                </button>
-                            )))}
+                    </div>
+                </div>
+                <label className="flex items-start gap-3 rounded-lg border border-orange-100 bg-orange-50/60 p-3 cursor-pointer">
+                    <input
+                        type="checkbox"
+                        checked={formData.hidePrice}
+                        onChange={(e) => setFormData({ ...formData, hidePrice: e.target.checked })}
+                        disabled={!canEdit('hidePrice')}
+                        className="mt-0.5 w-5 h-5 accent-orange-500"
+                    />
+                    <span>
+                        <span className="block text-sm font-semibold text-orange-800">Ẩn giá phía khách hàng</span>
+                        <span className="block text-xs text-orange-700">Trang khách sẽ hiển thị “Liên hệ nhận báo giá”. Giá vẫn được lưu nội bộ để admin tham khảo.</span>
+                    </span>
+                </label>
+
+                {/* Category */}
+                <div>
+                    <label className="block text-sm font-medium mb-1">Danh mục *</label>
+                    <CategoryTaxonomySelector
+                        type="service"
+                        value={formData.categoryIds}
+                        onChange={(ids, catName) => setFormData({ ...formData, categoryIds: ids, category: catName || formData.category })}
+                        disabled={!canEdit('categoryIds')}
+                    />
+                </div>
+
+                <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-4">
+                    <p className="text-sm font-semibold text-blue-900">Liên kết nghiệp vụ</p>
+                    <p className="mt-1 text-xs text-blue-700">
+                        Đây là dữ liệu gợi ý dùng lại cho các luồng khác. Không tự trừ tồn kho, không tự đổi workflow và không tự tạo khuyến mãi.
+                    </p>
+                    <div className="mt-3 grid gap-2 text-xs text-blue-900 sm:grid-cols-2">
+                        <div className="rounded-lg border border-blue-100 bg-white/80 p-2">
+                            <span className="font-semibold">POS / giảm giá:</span> nhóm sản phẩm bán kèm giúp rule voucher biết dịch vụ này nên gợi ý phụ kiện nào.
+                        </div>
+                        <div className="rounded-lg border border-blue-100 bg-white/80 p-2">
+                            <span className="font-semibold">Phiếu sửa:</span> nhóm linh kiện giúp nhân viên/KTV có gợi ý linh kiện khi nhập bệnh.
+                        </div>
+                        <div className="rounded-lg border border-blue-100 bg-white/80 p-2">
+                            <span className="font-semibold">Bảo hành:</span> danh mục dịch vụ vẫn là nguồn lấy cấu hình thời hạn và mẫu phiếu bảo hành.
+                        </div>
+                        <div className="rounded-lg border border-blue-100 bg-white/80 p-2">
+                            <span className="font-semibold">Giá dự kiến:</span> giá dịch vụ dùng làm tham khảo khi tạo chi tiết sửa chữa, không khóa giá cuối.
                         </div>
                     </div>
-
-                    {/* Price */}
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="mt-3 space-y-3">
                         <div>
-                            <label className="block text-sm font-medium mb-1">Giá dịch vụ (đ) *</label>
-                            <CurrencyInput
-                                value={formData.price_original || ''}
-                                onChange={(v) => setFormData({ ...formData, price_original: v })}
-                                disabled={!canEdit('price_original')}
-                                className="w-full h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
-                                placeholder="350.000"
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Nhóm sản phẩm/phụ kiện bán kèm</label>
+                            <CategoryTaxonomySelector
+                                type="retail"
+                                value={formData.linkedProductCategoryIds}
+                                onChange={(ids) => setFormData({ ...formData, linkedProductCategoryIds: ids })}
+                                disabled={!canEdit('linkedProductCategoryIds')}
                             />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium mb-1">Giá khuyến mãi (đ)</label>
-                            <CurrencyInput
-                                value={formData.price_promo || ''}
-                                onChange={(v) => setFormData({ ...formData, price_promo: v })}
-                                disabled={!canEdit('price_promo')}
-                                className="w-full h-11 px-4 border rounded-lg focus:border-orange-500 focus:outline-none"
-                                placeholder="Để trống nếu không giảm"
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Nhóm linh kiện liên quan</label>
+                            <CategoryTaxonomySelector
+                                type="component"
+                                value={formData.recommendedPartCategoryIds}
+                                onChange={(ids) => setFormData({ ...formData, recommendedPartCategoryIds: ids })}
+                                disabled={!canEdit('recommendedPartCategoryIds')}
                             />
                         </div>
                     </div>
-                    <label className="flex items-start gap-3 rounded-lg border border-orange-100 bg-orange-50/60 p-3 cursor-pointer">
-                        <input
-                            type="checkbox"
-                            checked={formData.hidePrice}
-                            onChange={(e) => setFormData({ ...formData, hidePrice: e.target.checked })}
-                            disabled={!canEdit('hidePrice')}
-                            className="mt-0.5 w-5 h-5 accent-orange-500"
-                        />
-                        <span>
-                            <span className="block text-sm font-semibold text-orange-800">Ẩn giá phía khách hàng</span>
-                            <span className="block text-xs text-orange-700">Trang khách sẽ hiển thị “Liên hệ nhận báo giá”. Giá vẫn được lưu nội bộ để admin tham khảo.</span>
-                        </span>
-                    </label>
+                </div>
 
-                    {/* Category */}
-                    <div>
-                        <label className="block text-sm font-medium mb-1">Danh mục *</label>
-                        <CategoryTaxonomySelector
-                            type="service"
-                            value={formData.categoryIds}
-                            onChange={(ids, catName) => setFormData({ ...formData, categoryIds: ids, category: catName || formData.category })}
-                            disabled={!canEdit('categoryIds')}
-                        />
-                    </div>
+                {/* Description */}
+                <div>
+                    <label className="block text-sm font-medium mb-1">Mô tả</label>
+                    <textarea
+                        value={formData.description}
+                        onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                        rows={3}
+                        disabled={!canEdit('description')}
+                        className="w-full px-4 py-3 border rounded-lg focus:border-orange-500 focus:outline-none resize-none"
+                        placeholder="Mô tả dịch vụ..."
+                    />
+                </div>
 
-                    <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-4">
-                        <p className="text-sm font-semibold text-blue-900">Liên kết nghiệp vụ</p>
-                        <p className="mt-1 text-xs text-blue-700">
-                            Đây là dữ liệu gợi ý dùng lại cho các luồng khác. Không tự trừ tồn kho, không tự đổi workflow và không tự tạo khuyến mãi.
-                        </p>
-                        <div className="mt-3 grid gap-2 text-xs text-blue-900 sm:grid-cols-2">
-                            <div className="rounded-lg border border-blue-100 bg-white/80 p-2">
-                                <span className="font-semibold">POS / giảm giá:</span> nhóm sản phẩm bán kèm giúp rule voucher biết dịch vụ này nên gợi ý phụ kiện nào.
-                            </div>
-                            <div className="rounded-lg border border-blue-100 bg-white/80 p-2">
-                                <span className="font-semibold">Phiếu sửa:</span> nhóm linh kiện giúp nhân viên/KTV có gợi ý linh kiện khi nhập bệnh.
-                            </div>
-                            <div className="rounded-lg border border-blue-100 bg-white/80 p-2">
-                                <span className="font-semibold">Bảo hành:</span> danh mục dịch vụ vẫn là nguồn lấy cấu hình thời hạn và mẫu phiếu bảo hành.
-                            </div>
-                            <div className="rounded-lg border border-blue-100 bg-white/80 p-2">
-                                <span className="font-semibold">Giá dự kiến:</span> giá dịch vụ dùng làm tham khảo khi tạo chi tiết sửa chữa, không khóa giá cuối.
-                            </div>
-                        </div>
-                        <div className="mt-3 space-y-3">
-                            <div>
-                                <label className="block text-xs font-medium text-gray-600 mb-1">Nhóm sản phẩm/phụ kiện bán kèm</label>
-                                <CategoryTaxonomySelector
-                                    type="retail"
-                                    value={formData.linkedProductCategoryIds}
-                                    onChange={(ids) => setFormData({ ...formData, linkedProductCategoryIds: ids })}
-                                    disabled={!canEdit('linkedProductCategoryIds')}
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-medium text-gray-600 mb-1">Nhóm linh kiện liên quan</label>
-                                <CategoryTaxonomySelector
-                                    type="component"
-                                    value={formData.recommendedPartCategoryIds}
-                                    onChange={(ids) => setFormData({ ...formData, recommendedPartCategoryIds: ids })}
-                                    disabled={!canEdit('recommendedPartCategoryIds')}
-                                />
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Description */}
-                    <div>
-                        <label className="block text-sm font-medium mb-1">Mô tả</label>
-                        <textarea
-                            value={formData.description}
-                            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                            rows={3}
-                            disabled={!canEdit('description')}
-                            className="w-full px-4 py-3 border rounded-lg focus:border-orange-500 focus:outline-none resize-none"
-                            placeholder="Mô tả dịch vụ..."
-                        />
-                    </div>
-
-                    {/* SEO & Service Details */}
-                    <div className="border-t pt-4 mt-2">
-                        <p className="text-sm font-medium text-gray-700 mb-3">Thông tin bổ sung & SEO</p>
-                        <div className="grid grid-cols-2 gap-3 mb-3">
-                            <div>
-                                <label className="block text-xs font-medium text-gray-600 mb-1">Bảo hành</label>
-                                <input
-                                    type="text"
-                                    value={formData.warranty_text}
-                                    onChange={(e) => setFormData({ ...formData, warranty_text: e.target.value })}
-                                    disabled={!canEdit('warranty_text')}
-                                    className="w-full h-10 px-3 text-sm border rounded-lg focus:border-orange-500 focus:outline-none"
-                                    placeholder="BH 12 tháng"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-medium text-gray-600 mb-1">Thời gian sửa</label>
-                                <input
-                                    type="text"
-                                    value={formData.repair_time}
-                                    onChange={(e) => setFormData({ ...formData, repair_time: e.target.value })}
-                                    disabled={!canEdit('repair_time')}
-                                    className="w-full h-10 px-3 text-sm border rounded-lg focus:border-orange-500 focus:outline-none"
-                                    placeholder="30 phút"
-                                />
-                            </div>
-                        </div>
-                        <div className="mb-3">
-                            <label className="block text-xs font-medium text-gray-600 mb-1">Mô tả SEO (hiển thị trên Google)</label>
-                            <textarea
-                                    value={formData.seoDescription}
-                                    onChange={(e) => setFormData({ ...formData, seoDescription: e.target.value })}
-                                    rows={2}
-                                    maxLength={160}
-                                    disabled={!canEdit('seoDescription')}
-                                className="w-full px-3 py-2 text-sm border rounded-lg focus:border-orange-500 focus:outline-none resize-none"
-                                placeholder="Mô tả ngắn gọn cho SEO (tối đa 160 ký tự)"
-                            />
-                            <p className="text-xs text-gray-400 mt-0.5">{formData.seoDescription.length}/160</p>
-                        </div>
+                {/* SEO & Service Details */}
+                <div className="border-t pt-4 mt-2">
+                    <p className="text-sm font-medium text-gray-700 mb-3">Thông tin bổ sung & SEO</p>
+                    <div className="grid grid-cols-2 gap-3 mb-3">
                         <div>
-                            <label className="block text-xs font-medium text-gray-600 mb-1">Tags (phân cách bằng dấu phẩy)</label>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Bảo hành</label>
                             <input
                                 type="text"
-                                    value={formData.tags}
-                                    onChange={(e) => setFormData({ ...formData, tags: e.target.value })}
-                                    disabled={!canEdit('tags')}
+                                value={formData.warranty_text}
+                                onChange={(e) => setFormData({ ...formData, warranty_text: e.target.value })}
+                                disabled={!canEdit('warranty_text')}
                                 className="w-full h-10 px-3 text-sm border rounded-lg focus:border-orange-500 focus:outline-none"
-                                placeholder="thay pin, iphone, bảo hành"
+                                placeholder="BH 12 tháng"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Thời gian sửa</label>
+                            <input
+                                type="text"
+                                value={formData.repair_time}
+                                onChange={(e) => setFormData({ ...formData, repair_time: e.target.value })}
+                                disabled={!canEdit('repair_time')}
+                                className="w-full h-10 px-3 text-sm border rounded-lg focus:border-orange-500 focus:outline-none"
+                                placeholder="30 phút"
                             />
                         </div>
                     </div>
-
-                    {/* Active */}
+                    <div className="mb-3">
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Mô tả SEO (hiển thị trên Google)</label>
+                        <textarea
+                            value={formData.seoDescription}
+                            onChange={(e) => setFormData({ ...formData, seoDescription: e.target.value })}
+                            rows={2}
+                            maxLength={160}
+                            disabled={!canEdit('seoDescription')}
+                            className="w-full px-3 py-2 text-sm border rounded-lg focus:border-orange-500 focus:outline-none resize-none"
+                            placeholder="Mô tả ngắn gọn cho SEO (tối đa 160 ký tự)"
+                        />
+                        <p className="text-xs text-gray-400 mt-0.5">{formData.seoDescription.length}/160</p>
+                    </div>
                     <div>
-                        <label className="flex items-center gap-3 cursor-pointer">
-                            <input
-                                type="checkbox"
-                                checked={formData.isActive}
-                                onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
-                                disabled={!canEdit('isActive')}
-                                className="w-5 h-5 accent-orange-500"
-                            />
-                            <span className="text-sm font-medium">Đang hoạt động</span>
-                        </label>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Tags (phân cách bằng dấu phẩy)</label>
+                        <input
+                            type="text"
+                            value={formData.tags}
+                            onChange={(e) => setFormData({ ...formData, tags: e.target.value })}
+                            disabled={!canEdit('tags')}
+                            className="w-full h-10 px-3 text-sm border rounded-lg focus:border-orange-500 focus:outline-none"
+                            placeholder="thay pin, iphone, bảo hành"
+                        />
                     </div>
+                </div>
 
-                    {/* Actions */}
-                    <div className="flex gap-3 pt-4">
-                        <button type="button" onClick={onClose} className="flex-1 py-3 border rounded-lg font-medium hover:bg-gray-50">
-                            Hủy
-                        </button>
-                        <button
-                            type="submit"
-                            disabled={isSubmitting || !canSubmit}
-                            className="flex-1 py-3 bg-orange-500 text-white rounded-lg font-medium hover:bg-orange-600 disabled:opacity-50 flex items-center justify-center gap-2"
-                        >
-                            {isSubmitting && <Loader2 size={18} className="animate-spin" />}
-                            {service ? 'Cập nhật' : 'Thêm dịch vụ'}
-                        </button>
-                    </div>
-                </form>
+                {/* Active */}
+                <div>
+                    <label className="flex items-center gap-3 cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={formData.isActive}
+                            onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
+                            disabled={!canEdit('isActive')}
+                            className="w-5 h-5 accent-orange-500"
+                        />
+                        <span className="text-sm font-medium">Đang hoạt động</span>
+                    </label>
+                </div>
+
+                {/* Actions */}
+                <div className="flex gap-3 pt-4">
+                    <button type="button" onClick={onClose} className="flex-1 py-3 border rounded-lg font-medium hover:bg-gray-50">
+                        Hủy
+                    </button>
+                    <button
+                        type="submit"
+                        disabled={isSubmitting || !canSubmit}
+                        className="flex-1 py-3 bg-orange-500 text-white rounded-lg font-medium hover:bg-orange-600 disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                        {isSubmitting && <Loader2 size={18} className="animate-spin" />}
+                        {service ? 'Cập nhật' : 'Thêm dịch vụ'}
+                    </button>
+                </div>
+            </form>
         </Modal>
     );
 }

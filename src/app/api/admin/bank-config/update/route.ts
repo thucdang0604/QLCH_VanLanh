@@ -1,6 +1,5 @@
 import { NextRequest } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
-import { normalizeVietnamPhone } from '@/lib/phone';
 import { requirePermission } from '@/lib/apiAuth';
 import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 
@@ -19,7 +18,7 @@ type BankConfigInput = {
     accountName?: string;
 };
 
-type BankConfigUpdateRequestBody = { phone?: string; config?: BankConfigInput; otpToken?: string };
+type BankConfigUpdateRequestBody = { config?: BankConfigInput; otpToken?: string };
 
 export const POST = withApi({
     name: 'admin/bank-config/update',
@@ -27,20 +26,15 @@ export const POST = withApi({
 }, async (request: NextRequest, context) => {
         await requirePermission(request, 'manage_settings');
         const body = await context.readJson<BankConfigUpdateRequestBody>(request);
-        const { phone, config, otpToken } = body;
+        const { config, otpToken } = body;
 
-        if (!phone || !config) {
+        if (!config) {
             return context.json({ success: false, error: 'Thiếu thông tin bắt buộc.' }, { status: 400 });
         }
 
         const db = getAdminDb();
-        
-        const normalizedInputPhone = normalizeVietnamPhone(phone)?.e164;
-        if (!normalizedInputPhone) {
-            return context.json({ success: false, error: 'Số điện thoại không hợp lệ.' }, { status: 400 });
-        }
 
-        // 2. Kiểm tra TOTP nếu hệ thống đã bật
+        // A fresh Google Authenticator token authorizes this save operation.
         const configDoc = await db.collection('settings').doc('bank_config').get();
         const configData = configDoc.data();
         if (!configData?.totpEnabled || !configData?.totpSecret) {
@@ -59,10 +53,8 @@ export const POST = withApi({
             }
         }
 
-        // 3. Cập nhật cấu hình
-        const updateData: Record<string, unknown> = {
-            adminPhone: phone,
-        };
+        // Preserve any legacy adminPhone value without requiring or updating it here.
+        const updateData: Record<string, unknown> = {};
 
         if (config.accounts && Array.isArray(config.accounts) && config.accounts.length > 0) {
             updateData.accounts = config.accounts;

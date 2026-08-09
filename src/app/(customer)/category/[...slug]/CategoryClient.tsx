@@ -8,6 +8,7 @@ import CatalogImage from '@/components/customer/CatalogImage';
 import ServiceCard from '@/components/home/ServiceCard';
 import { useClientPagination } from '@/lib/useClientPagination';
 import PaginationBar from '@/components/admin/PaginationBar';
+import { matchesProductCondition, type ProductConditionFilter } from '@/lib/productConditionCollections';
 
 type DynamicCategory = {
     id: string;
@@ -89,16 +90,21 @@ function matchesSelectedCategory(item: CategoryItem, categoryConfig?: DynamicCat
     return Array.isArray(item.categoryIds) && item.categoryIds.includes(categoryConfig.id);
 }
 
+function filterByNavigationCondition(items: CategoryItem[], condition?: ProductConditionFilter): CategoryItem[] {
+    if (!condition) return items;
+    return items.filter(item => matchesProductCondition(item.condition, condition));
+}
+
 const formatPrice = (p: number) => new Intl.NumberFormat('vi-VN').format(p) + 'đ';
 
-export default function CategoryClient({ 
+export default function CategoryClient({
     initialItems,
     categoryConfig,
-    navInfo 
-}: { 
+    navInfo
+}: {
     initialItems: CategoryItem[];
     categoryConfig?: DynamicCategory;
-    navInfo?: { label: string; condition?: string; isRepair?: boolean; isAccessory?: boolean };
+    navInfo?: { label: string; condition?: ProductConditionFilter; isRepair?: boolean; isAccessory?: boolean };
 }) {
     const isRepair = navInfo ? !!navInfo.isRepair : categoryConfig?.type === 'service';
     const pageLabel = navInfo?.label ?? categoryConfig?.name ?? 'Danh mục';
@@ -153,10 +159,8 @@ export default function CategoryClient({
             list.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'vi'));
         } else {
             // Products
-            if (navInfo?.condition === 'new') {
-                list = list.filter(p => p.condition === 'new');
-            } else if (navInfo?.condition === 'used') {
-                list = list.filter(p => p.condition === 'used' || p.condition === 'like-new');
+            if (navInfo?.condition) {
+                list = filterByNavigationCondition(list, navInfo.condition);
             } else if (navInfo?.isAccessory) {
                 list = list.filter(p => (p.category || '').toLowerCase().includes('phụ kiện') || (p.category || '').toLowerCase().includes('phu kien') || p.category === 'Phụ kiện');
             }
@@ -185,12 +189,10 @@ export default function CategoryClient({
     // Unique Brands for Products
     const productBrands = useMemo(() => {
         if (isRepair) return [];
-        let source = items;
-        if (navInfo?.condition === 'new') source = items.filter(p => p.condition === 'new');
-        else if (navInfo?.condition === 'used') source = items.filter(p => p.condition === 'used' || p.condition === 'like-new');
-        
+        let source = filterByNavigationCondition(items, navInfo?.condition);
+
         source = source.filter(p => matchesSelectedCategory(p, categoryConfig));
-        
+
         const set = new Set(source.map(p => p.brand).filter((v): v is string => typeof v === 'string' && v.length > 0));
         return Array.from(set).sort();
     }, [items, isRepair, navInfo, categoryConfig]);
@@ -198,12 +200,10 @@ export default function CategoryClient({
     // Unique Conditions for Products
     const productConditions = useMemo(() => {
         if (isRepair) return [];
-        let source = items;
-        if (navInfo?.condition === 'new') source = items.filter(p => p.condition === 'new');
-        else if (navInfo?.condition === 'used') source = items.filter(p => p.condition === 'used' || p.condition === 'like-new');
-        
+        let source = filterByNavigationCondition(items, navInfo?.condition);
+
         source = source.filter(p => matchesSelectedCategory(p, categoryConfig));
-        
+
         const set = new Set(source.map(p => p.condition).filter((v): v is string => typeof v === 'string' && v.length > 0));
         return Array.from(set);
     }, [items, isRepair, navInfo, categoryConfig]);
@@ -211,7 +211,7 @@ export default function CategoryClient({
     // Unique Brands for Repairs (derived from text)
     const repairBrands = useMemo(() => {
         if (!isRepair) return [];
-        
+
         let source = items.filter(s => s.isActive !== false);
         source = source.filter(s => matchesSelectedCategory(s, categoryConfig));
 
@@ -230,7 +230,7 @@ export default function CategoryClient({
     // Unique part types found in repair services
     const repairParts = useMemo(() => {
         if (!isRepair) return [];
-        
+
         let source = items.filter(s => s.isActive !== false);
         source = source.filter(s => matchesSelectedCategory(s, categoryConfig));
 
@@ -245,10 +245,8 @@ export default function CategoryClient({
     // Unique Categories (Dòng máy) for Products
     const productCategories = useMemo(() => {
         if (isRepair) return [];
-        let source = items;
-        if (navInfo?.condition === 'new') source = items.filter(p => p.condition === 'new');
-        else if (navInfo?.condition === 'used') source = items.filter(p => p.condition === 'used' || p.condition === 'like-new');
-        
+        let source = filterByNavigationCondition(items, navInfo?.condition);
+
         source = source.filter(p => matchesSelectedCategory(p, categoryConfig));
 
         const set = new Set(source.map(p => p.category).filter((v): v is string => typeof v === 'string' && v.length > 0));
@@ -257,7 +255,7 @@ export default function CategoryClient({
 
     const toggleBrand = (brand: string) => setSidebarBrands(prev => prev.includes(brand) ? prev.filter(b => b !== brand) : [...prev, brand]);
     const togglePart = (part: string) => setSidebarParts(prev => prev.includes(part) ? prev.filter(p => p !== part) : [...prev, part]);
-    
+
     const clearAllFilters = () => {
         setSidebarBrands([]); setSidebarParts([]); setSidebarCategory(''); setFilterCondition(''); setFilterPrice(''); setFilterSubCategory('');
     };
@@ -402,7 +400,7 @@ export default function CategoryClient({
                                     </button>
                                 )}
                             </div>
-                            
+
                             {/* Horizontal scrollable brands */}
                             {displayBrands.length > 0 && (
                                 <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1">
@@ -465,7 +463,7 @@ export default function CategoryClient({
                                         {productConditions.includes('used') && <option value="used">Hàng cũ</option>}
                                     </select>
                                 )}
-                                
+
                                 {!isRepair && productCategories.length > 1 && (
                                     <select
                                         value={sidebarCategory}
@@ -616,7 +614,7 @@ export default function CategoryClient({
                     </div>
                 </div>
             </div>
-            
+
             {/* Styles for custom scrollbar inside sidebar */}
             <style jsx global>{`
                 .custom-scrollbar::-webkit-scrollbar {

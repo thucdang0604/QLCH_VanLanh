@@ -1,64 +1,24 @@
-import { useState, useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
-import Image from 'next/image';
-import { AlertTriangle, Banknote, Camera, ChevronDown, CreditCard, MessageCircle, Minus, Package, Phone, Plus, QrCode, Receipt, Search, ShoppingCart, Square, Tag, Trash2, User, Wrench, X } from 'lucide-react';
+import { useState, type Dispatch, type SetStateAction } from 'react';
+import { AlertTriangle, ChevronDown, Minus, Phone, Plus, Receipt, ShoppingCart, Trash2, User, Wrench, X } from 'lucide-react';
 import CurrencyInput from '@/components/admin/CurrencyInput';
-import type { Product } from '@/lib/types';
-import type { ContactMethodType } from '@/lib/types/contact';
-import { extractZaloQrIdentity } from '@/lib/zaloContactCardImport';
-import type { AppliedVoucher, CartItem, DiscountDetail, PayableOrderInfo, RepairTicketInfo, VoucherStatus } from './posTypes';
-
-const paymentMethods = [
-    { key: 'cash', label: 'Tiền mặt', icon: Banknote },
-    { key: 'bank', label: 'Chuyển khoản', icon: CreditCard },
-    { key: 'momo', label: 'MoMo', icon: QrCode },
-    { key: 'installment', label: 'Trả góp', icon: CreditCard },
-    { key: 'debt', label: 'Ghi nợ', icon: AlertTriangle },
-];
-
-type PosCustomerContactType = Extract<ContactMethodType, 'phone' | 'zalo' | 'facebook' | 'other'>;
-
-const customerContactOptions: Array<{
-    type: PosCustomerContactType;
-    label: string;
-    placeholder: string;
-}> = [
-    { type: 'phone', label: 'SĐT', placeholder: 'Số điện thoại' },
-    { type: 'zalo', label: 'Zalo', placeholder: 'Tên hoặc số Zalo' },
-    { type: 'facebook', label: 'Facebook', placeholder: 'Facebook/Messenger' },
-    { type: 'other', label: 'Khác', placeholder: 'Liên hệ khác' },
-];
+import type { AppliedVoucher, CartItem, DiscountDetail, RepairShippingDraft, VoucherStatus } from './posTypes';
+import { PosPaymentComposer, type PosPaymentMode } from './PosPaymentComposer';
+import type { PosPaymentBreakdownEntry } from '@/lib/posPaymentBreakdown';
 
 interface PosCartPanelProps {
     cart: CartItem[];
     setCart: Dispatch<SetStateAction<CartItem[]>>;
-    products: (Product & { id: string })[];
-    customerId: string;
-    setCustomerId: (value: string) => void;
     customerName: string;
-    setCustomerName: (value: string) => void;
     customerPhone: string;
-    setCustomerPhone: (value: string) => void;
-    customerZalo: string;
-    setCustomerZalo: (value: string) => void;
-    customerFacebook: string;
-    setCustomerFacebook: (value: string) => void;
-    customerOtherContact: string;
-    setCustomerOtherContact: (value: string) => void;
-    customerPrimaryContactType: ContactMethodType;
-    setCustomerPrimaryContactType: (value: ContactMethodType) => void;
     customerDebt: number;
-    repairLoading: boolean;
-    linkedRepairs: RepairTicketInfo[];
-    payableOrders: PayableOrderInfo[];
+    repairShipping: RepairShippingDraft | null;
     discountDetails: DiscountDetail[];
     autoDiscountAmount: number;
     autoDiscountApplied: boolean;
     onApplyAutoDiscount: () => void;
     setDiscount: Dispatch<SetStateAction<number>>;
-    paymentMethod: string;
-    setPaymentMethod: (value: string) => void;
-    depositPaymentMethod: string;
-    setDepositPaymentMethod: (value: string) => void;
+    paymentMethod: PosPaymentMode;
+    setPaymentMethod: (value: PosPaymentMode) => void;
     discount: number;
     voucherCode: string;
     setVoucherCode: (value: string) => void;
@@ -68,7 +28,17 @@ interface PosCartPanelProps {
     setVoucherStatus: (value: VoucherStatus | null) => void;
     voucherDiscountAmount: number;
     deposit: number;
-    setDeposit: Dispatch<SetStateAction<number>>;
+    paymentBreakdown: PosPaymentBreakdownEntry[];
+    cashTendered: number;
+    setCashTendered: (value: number) => void;
+    bankTransferAmount: number;
+    setBankTransferAmount: (value: number) => void;
+    bankTransferConfirmed: boolean;
+    setBankTransferConfirmed: (value: boolean) => void;
+    debtRequested: boolean;
+    setDebtRequested: (value: boolean) => void;
+    bankTransferReference: string;
+    bankAccounts: { bankId: string; accountNo: string; accountName: string; isDefault?: boolean }[];
     useSurplusToPayDebt: boolean;
     setUseSurplusToPayDebt: (value: boolean) => void;
     subtotal: number;
@@ -76,691 +46,248 @@ interface PosCartPanelProps {
     isProcessing: boolean;
     cashierShiftOpen: boolean;
     onCloseMobileCart: () => void;
-    onLookupRepairByPhone: (phone: string) => void;
-    onAddRepairToCart: (repair: RepairTicketInfo) => void;
-    onAddPayableOrderToCart: (order: PayableOrderInfo) => void;
     onApplyVoucher: () => void;
     onUpdateQuantity: (cartItemId: string, delta: number) => void;
-    onUpdatePrice: (cartItemId: string, newPrice: number) => void;
     onRemoveFromCart: (cartItemId: string) => void;
     onRemoveRepairFromCart: (repairTicketId: string) => void;
     onCheckout: () => void;
     formatPrice: (value: number) => string;
 }
 
-export function PosCartPanel({
-    cart,
-    setCart,
-    products,
-    customerId,
-    setCustomerId,
-    customerName,
-    setCustomerName,
-    customerPhone,
-    setCustomerPhone,
-    customerZalo,
-    setCustomerZalo,
-    customerFacebook,
-    setCustomerFacebook,
-    customerOtherContact,
-    setCustomerOtherContact,
-    customerPrimaryContactType,
-    setCustomerPrimaryContactType,
-    customerDebt,
-    repairLoading,
-    linkedRepairs,
-    payableOrders,
-    discountDetails,
-    autoDiscountAmount,
-    autoDiscountApplied,
-    onApplyAutoDiscount,
-    setDiscount,
-    paymentMethod,
-    setPaymentMethod,
-    depositPaymentMethod,
-    setDepositPaymentMethod,
-    discount,
-    voucherCode,
-    setVoucherCode,
-    voucherStatus,
-    appliedVoucher,
-    setAppliedVoucher,
-    setVoucherStatus,
-    voucherDiscountAmount,
-    deposit,
-    setDeposit,
-    useSurplusToPayDebt,
-    setUseSurplusToPayDebt,
-    subtotal,
-    total,
-    isProcessing,
-    cashierShiftOpen,
-    onCloseMobileCart,
-    onLookupRepairByPhone,
-    onAddRepairToCart,
-    onAddPayableOrderToCart,
-    onApplyVoucher,
-    onUpdateQuantity,
-    onUpdatePrice,
-    onRemoveFromCart,
-    onRemoveRepairFromCart,
-    onCheckout,
-    formatPrice,
-}: PosCartPanelProps) {
-    const itemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
-    const selectedDebtTotal = cart
-        .filter(item => item.isOrderPayment)
-        .reduce((sum, item) => sum + item.sellingPrice * item.quantity, 0);
-    const saleTotal = Math.max(0, total - selectedDebtTotal);
-    const selectedDebtCovered = Math.min(selectedDebtTotal, Math.max(0, deposit - saleTotal));
-    const surplusAfterSelectedDebt = Math.max(0, deposit - saleTotal - selectedDebtTotal);
-    const remainingDebtAfterSelected = Math.max(0, customerDebt - selectedDebtTotal);
-    const autoDebtOffset = useSurplusToPayDebt
-        ? Math.min(surplusAfterSelectedDebt, remainingDebtAfterSelected)
-        : 0;
-    const changeDue = Math.max(0, surplusAfterSelectedDebt - autoDebtOffset);
-    const remainingCurrentPayment = deposit > 0 ? Math.max(0, total - deposit) : 0;
-    const [showRepairsList, setShowRepairsList] = useState(true);
-    const [showExtraContacts, setShowExtraContacts] = useState(false);
+function useCartPanelState(props: PosCartPanelProps) {
     const [showVoucherEntry, setShowVoucherEntry] = useState(false);
-    const [customerLookupQuery, setCustomerLookupQuery] = useState('');
-    const [customerQrScanning, setCustomerQrScanning] = useState(false);
-    const customerQrVideoRef = useRef<HTMLVideoElement>(null);
-    const customerQrControlsRef = useRef<{ stop: () => void } | null>(null);
-    const contactValues: Record<PosCustomerContactType, string> = {
-        phone: customerPhone,
-        zalo: customerZalo,
-        facebook: customerFacebook,
-        other: customerOtherContact,
-    };
-    const primaryContactOption = customerContactOptions.find(option => option.type === customerPrimaryContactType)
-        ?? customerContactOptions[0];
-    const primaryContactValue = contactValues[primaryContactOption.type].trim();
-    const hasStoredContactDetails = Boolean(
-        customerId.trim() || primaryContactValue || customerZalo.trim() || customerFacebook.trim() || customerOtherContact.trim()
-    );
-    const receivedPaymentMethod = paymentMethod === 'debt' && deposit > 0
-        ? depositPaymentMethod
-        : paymentMethod;
-    const requiresCashierShift = ['cash', 'bank', 'momo'].includes(receivedPaymentMethod)
-        && cart.length > 0
-        && total > 0;
-    const missingCashierShift = requiresCashierShift && !cashierShiftOpen;
-    const checkoutDisabled = cart.length === 0 || isProcessing || missingCashierShift;
-    const runCustomerLookup = (rawValue = customerLookupQuery) => {
-        const value = rawValue.trim();
-        if (!value) return;
-        onLookupRepairByPhone(value);
-    };
-    const stopCustomerQrScanner = () => {
-        customerQrControlsRef.current?.stop();
-        customerQrControlsRef.current = null;
-        setCustomerQrScanning(false);
-    };
-    const applyCustomerQrText = (rawText: string) => {
-        const zalo = extractZaloQrIdentity(rawText);
-        const lookupValue = zalo?.profileUrl || rawText.trim();
-        if (!lookupValue) return false;
-        setCustomerLookupQuery(lookupValue);
-        if (zalo) {
-            setCustomerZalo(zalo.profileUrl);
-            if (!customerPhone.trim()) setCustomerPrimaryContactType('zalo');
-        }
-        onLookupRepairByPhone(lookupValue);
-        return true;
-    };
-    const startCustomerQrScanner = async () => {
-        if (!customerQrVideoRef.current) return;
-        setCustomerQrScanning(true);
-        try {
-            const { BrowserQRCodeReader } = await import('@zxing/browser');
-            const reader = new BrowserQRCodeReader();
-            const controls = await reader.decodeFromVideoDevice(
-                undefined,
-                customerQrVideoRef.current,
-                (result) => {
-                    if (!result) return;
-                    if (applyCustomerQrText(result.getText())) {
-                        stopCustomerQrScanner();
-                    }
-                },
-            );
-            customerQrControlsRef.current = controls;
-        } catch (error) {
-            console.error('POS customer QR scanner error:', error);
-            stopCustomerQrScanner();
-        }
-    };
+    const [showAdjustments, setShowAdjustments] = useState(false);
+    const productItems = props.cart.filter(item => !item.isRepairTicket && !item.isOrderPayment);
+    const repairItems = props.cart.filter(item => item.isRepairTicket);
+    const debtItems = props.cart.filter(item => item.isOrderPayment);
+    const productQuantity = productItems.reduce((sum, item) => sum + item.quantity, 0);
+    const selectedDebtTotal = debtItems.reduce((sum, item) => sum + item.sellingPrice * item.quantity, 0);
+    const saleTotal = Math.max(0, props.total - selectedDebtTotal);
+    const selectedDebtCovered = Math.min(selectedDebtTotal, Math.max(0, props.deposit - saleTotal));
+    const surplusAfterSelectedDebt = Math.max(0, props.cashTendered - props.total);
+    const remainingDebtAfterSelected = Math.max(0, props.customerDebt - selectedDebtTotal);
+    const autoDebtOffset = props.useSurplusToPayDebt ? Math.min(surplusAfterSelectedDebt, remainingDebtAfterSelected) : 0;
+    const changeDue = Math.max(0, surplusAfterSelectedDebt - autoDebtOffset);
+    const remainingCurrentPayment = Math.max(0, props.total - props.deposit);
+    const receivedPaymentMethod = props.paymentBreakdown.length > 1
+        ? 'mixed'
+        : props.paymentBreakdown[0]?.method === 'CASH'
+            ? 'cash'
+            : props.paymentBreakdown[0]?.method === 'BANK'
+                ? 'bank'
+                : props.paymentMethod;
+    const shippingCustomerCharge = props.repairShipping?.mode === 'customer_paid_now' ? Math.max(0, props.repairShipping.fee) : 0;
+    const shopShippingPayment = Boolean(props.repairShipping && props.repairShipping.mode !== 'customer_paid_now' && props.repairShipping.fee > 0);
+    const requiresCashierShift = (
+        (props.paymentBreakdown.length > 0 || props.paymentMethod === 'momo' || props.paymentMethod === 'installment')
+        && props.cart.length > 0
+        && props.total > 0
+    ) || shopShippingPayment;
+    const missingCashierShift = requiresCashierShift && !props.cashierShiftOpen;
+    const hasUnconfirmedBankPayment = props.paymentBreakdown.some(entry => entry.method === 'BANK') && !props.bankTransferConfirmed;
+    const hasIncompletePayment = remainingCurrentPayment > 0 && !props.debtRequested && !['momo', 'installment'].includes(props.paymentMethod);
+    const checkoutDisabled = props.cart.length === 0 || props.isProcessing || missingCashierShift || hasUnconfirmedBankPayment || hasIncompletePayment;
+    const adjustmentCount = Number(props.discount > 0) + Number(props.voucherCode.length > 0 || Boolean(props.appliedVoucher)) + Number(props.discountDetails.length > 0);
 
-    // Auto-expand repair list when a new set of repairs is loaded
-    useEffect(() => {
-        if (linkedRepairs.length > 0 || payableOrders.length > 0) {
-            setShowRepairsList(true);
-        }
-    }, [linkedRepairs, payableOrders]);
+    return {
+        showVoucherEntry, setShowVoucherEntry,
+        showAdjustments, setShowAdjustments,
+        productItems, repairItems, debtItems,
+        productQuantity, selectedDebtTotal, saleTotal, selectedDebtCovered,
+        surplusAfterSelectedDebt, remainingDebtAfterSelected,
+        autoDebtOffset, changeDue, remainingCurrentPayment,
+        receivedPaymentMethod, shippingCustomerCharge, shopShippingPayment,
+        requiresCashierShift, missingCashierShift,
+        hasUnconfirmedBankPayment, hasIncompletePayment,
+        checkoutDisabled, adjustmentCount,
+    };
+}
 
-    useEffect(() => () => stopCustomerQrScanner(), []);
+/** Cart items list section — intended for the right column on desktop */
+export function PosCartItemsSection(props: PosCartPanelProps) {
+    const state = useCartPanelState(props);
 
     return (
         <>
-            <div className="px-4 py-3 border-b flex items-center gap-2">
-                <ShoppingCart size={20} className="text-orange-500" />
-                <h2 className="font-bold text-gray-800">Giỏ hàng</h2>
-                <span className="ml-auto bg-orange-100 text-orange-600 text-xs font-bold px-2 py-0.5 rounded-full">
-                    {itemCount} SP
-                </span>
-                <button
-                    onClick={onCloseMobileCart}
-                    className="md:hidden p-1 text-gray-400 hover:text-gray-600"
-                    aria-label="Đóng giỏ hàng"
-                    title="Đóng giỏ hàng"
-                >
-                    <X size={20} />
-                </button>
+            <div className="flex items-center gap-2 border-b px-3 py-2">
+                <ShoppingCart size={16} className="text-orange-500" />
+                <h3 className="text-xs font-bold uppercase tracking-wide text-gray-600">Hàng hóa đã chọn</h3>
+                <span className="ml-auto rounded-full bg-orange-100 px-2 py-0.5 text-xs font-bold text-orange-600">{state.productQuantity} SP</span>
+                <button onClick={props.onCloseMobileCart} className="p-1 text-gray-400 hover:text-gray-600 md:hidden" aria-label="Đóng thanh toán" title="Đóng thanh toán"><X size={18} /></button>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-4 py-2 space-y-2">
-                {cart.length === 0 && (
-                    <div className="text-center py-12 text-gray-300">
-                        <ShoppingCart size={36} className="mx-auto mb-2 opacity-40" />
-                        <p className="text-sm">Chưa có sản phẩm</p>
-                    </div>
-                )}
-                {cart.map((item, index) => {
-                    const product = products.find(candidate => candidate.id === item.productId);
-                    const isFixedPaymentItem = item.isRepairTicket || item.isOrderPayment;
-                    const isFirstRepairTicketLine = Boolean(item.isRepairTicket && item.repairTicketId)
-                        && cart.findIndex(candidate => candidate.repairTicketId === item.repairTicketId) === index;
-                    return (
-                        <div key={item.cartItemId} className="bg-gray-50 rounded-xl p-3 space-y-2">
-                            <div className="flex items-start gap-2">
-                                <div className="w-12 h-12 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0 flex items-center justify-center">
-                                    {product?.images?.[0] ? (
-                                        <Image src={product.images[0]} alt="" width={48} height={48} className="w-full h-full object-cover" />
-                                    ) : (
-                                        <Package className="text-gray-300" size={18} />
-                                    )}
+            <div className="flex-1 space-y-2 overflow-y-auto px-3 py-2">
+                {state.productItems.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-gray-200 py-6 text-center text-gray-400"><ShoppingCart size={24} className="mx-auto mb-1.5 opacity-40" /><p className="text-xs">Chưa chọn hàng hóa</p></div>
+                ) : (
+                    <div className="space-y-1.5">
+                        {state.productItems.map(item => (
+                            <div key={item.cartItemId} className="rounded-lg border border-gray-100 bg-white p-2 shadow-sm">
+                                <div className="flex items-center gap-2">
+                                    <div className="min-w-0 flex-1"><p className="line-clamp-1 text-xs font-semibold text-gray-800">{item.name}</p>{item.lotCode && <p className="mt-0.5 text-[10px] font-bold text-orange-700">Lô: {item.lotCode}</p>}</div>
+                                    <div className="flex shrink-0 items-center rounded-lg border bg-gray-50"><button onClick={() => props.onUpdateQuantity(item.cartItemId, -1)} className="rounded-l-lg p-1 hover:bg-gray-100" aria-label="Giảm số lượng" title="Giảm số lượng"><Minus size={13} /></button><span className="min-w-[24px] px-0.5 text-center text-xs font-bold">{item.quantity}</span><button onClick={() => props.onUpdateQuantity(item.cartItemId, 1)} className="rounded-r-lg p-1 hover:bg-gray-100" aria-label="Tăng số lượng" title="Tăng số lượng"><Plus size={13} /></button></div>
+                                    <span className="shrink-0 text-xs font-bold text-orange-600">{props.formatPrice(item.sellingPrice * item.quantity)}</span>
+                                    <button onClick={() => props.onRemoveFromCart(item.cartItemId)} className="rounded p-0.5 text-red-400 hover:bg-red-50 hover:text-red-600" aria-label="Xóa khỏi giỏ" title="Xóa khỏi giỏ"><Trash2 size={13} /></button>
                                 </div>
-                                <div className="flex-1">
-                                    <p className="text-sm font-medium text-gray-800 line-clamp-2">{item.name}</p>
-                                    {item.lotCode && (
-                                        <span className="inline-block mt-1 bg-orange-100 text-orange-700 text-[10px] font-bold px-1.5 py-0.5 rounded">
-                                            Lô: {item.lotCode}
-                                        </span>
-                                    )}
-                                </div>
-                                {item.isRepairTicket ? (
-                                    isFirstRepairTicketLine && item.repairTicketId ? (
-                                        <button
-                                            onClick={() => onRemoveRepairFromCart(item.repairTicketId!)}
-                                            className="text-red-400 hover:text-red-600 p-0.5 text-xs font-medium"
-                                            aria-label="Bỏ toàn bộ phiếu sửa chữa khỏi giỏ"
-                                            title="Bỏ toàn bộ phiếu sửa chữa"
-                                        >
-                                            Bỏ phiếu
-                                        </button>
-                                    ) : (
-                                        <span className="text-[10px] text-gray-400 whitespace-nowrap" title="Dòng thuộc phiếu sửa chữa không thể xóa riêng lẻ">
-                                            Theo phiếu
-                                        </span>
-                                    )
-                                ) : (
-                                    <button onClick={() => onRemoveFromCart(item.cartItemId)} className="text-red-400 hover:text-red-600 p-0.5" aria-label="Xóa khỏi giỏ" title="Xóa khỏi giỏ">
-                                        <Trash2 size={14} />
-                                    </button>
-                                )}
+                                {item.requiresImei && <div className="mt-1.5 space-y-1.5 border-t border-gray-100 pt-1.5"><p className="text-[10px] font-semibold text-gray-600">IMEI / Serial ({item.quantity})</p>{Array.from({ length: item.quantity }).map((_, index) => <div key={index} className="relative"><input type="text" placeholder={`IMEI/Serial #${index + 1}`} value={item.imeis?.[index] || ''} onChange={event => { const value = event.target.value; props.setCart(previous => previous.map(cartItem => { if (cartItem.cartItemId !== item.cartItemId) return cartItem; const imeis = [...(cartItem.imeis || [])]; imeis[index] = value; return { ...cartItem, imeis }; })); }} className="w-full rounded border py-1 pl-2 pr-7 text-[11px] uppercase" />{(item.imeis?.[index]?.length || 0) < 5 && <AlertTriangle size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-orange-400" />}</div>)}</div>}
                             </div>
-                            <div className="flex items-center gap-2">
-                                <div className="flex items-center gap-1 bg-white rounded-lg border">
-                                    <button onClick={() => onUpdateQuantity(item.cartItemId, -1)} className="p-1 hover:bg-gray-100 rounded-l-lg disabled:opacity-50 disabled:cursor-not-allowed" aria-label="Giảm số lượng" title="Giảm số lượng" disabled={isFixedPaymentItem}>
-                                        <Minus size={14} />
-                                    </button>
-                                    <span className="px-2 text-sm font-bold min-w-[24px] text-center">{item.quantity}</span>
-                                    <button onClick={() => onUpdateQuantity(item.cartItemId, 1)} className="p-1 hover:bg-gray-100 rounded-r-lg disabled:opacity-50 disabled:cursor-not-allowed" aria-label="Tăng số lượng" title="Tăng số lượng" disabled={isFixedPaymentItem}>
-                                        <Plus size={14} />
-                                    </button>
-                                </div>
-                                <div className="flex-1 relative">
-                                    <Tag size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" />
-                                    <CurrencyInput
-                                        value={item.sellingPrice}
-                                        onChange={value => onUpdatePrice(item.cartItemId, value)}
-                                        disabled={isFixedPaymentItem}
-                                        className={`w-full pl-7 pr-2 py-1 text-sm border rounded-lg text-right font-semibold ${item.sellingPrice !== item.originalPrice ? 'border-orange-300 text-orange-600 bg-orange-50' : ''} ${isFixedPaymentItem ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`}
-                                    />
-                                </div>
-                                <span className="text-sm font-bold text-gray-700 whitespace-nowrap min-w-[70px] text-right">
-                                    {formatPrice(item.sellingPrice * item.quantity)}
-                                </span>
-                            </div>
-                            {item.warrantyType === 'warrantyDevice' && (
-                                <div className="mt-2 space-y-2 border-t pt-2 border-gray-100">
-                                    <p className="text-xs font-semibold text-gray-600">Bắt buộc nhập IMEI / Serial ({item.quantity})</p>
-                                    {Array.from({ length: item.quantity }).map((_, index) => (
-                                        <div key={index} className="relative">
-                                            <input
-                                                type="text"
-                                                placeholder={`Nhập IMEI/Serial #${index + 1}`}
-                                                value={item.imeis?.[index] || ''}
-                                                onChange={(event) => {
-                                                    const value = event.target.value;
-                                                    setCart(previous => previous.map(cartItem => {
-                                                        if (cartItem.productId !== item.productId) return cartItem;
-                                                        const imeis = [...(cartItem.imeis || [])];
-                                                        imeis[index] = value;
-                                                        return { ...cartItem, imeis };
-                                                    }));
-                                                }}
-                                                className="w-full text-xs py-1.5 pl-2 pr-8 border rounded focus:ring-1 focus:ring-orange-500/20 uppercase"
-                                            />
-                                            {(item.imeis?.[index]?.length || 0) < 5 && (
-                                                <AlertTriangle size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-orange-400" />
-                                            )}
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                    );
-                })}
-            </div>
-
-            <div className="border-t px-4 py-3 space-y-3">
-                <div className="space-y-2">
-                    <div className="relative">
-                        <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                        <input
-                            type="text"
-                            placeholder="Tìm khách: SĐT, tên, mã KH, link Zalo, Facebook"
-                            value={customerLookupQuery}
-                            onChange={event => setCustomerLookupQuery(event.target.value)}
-                            onKeyDown={event => {
-                                if (event.key === 'Enter') {
-                                    event.preventDefault();
-                                    runCustomerLookup();
-                                }
-                            }}
-                            onBlur={() => runCustomerLookup()}
-                            className="w-full pl-8 pr-20 py-1.5 text-sm border rounded-lg focus:ring-2 focus:ring-orange-500/20"
-                        />
-                        <button
-                            type="button"
-                            onMouseDown={event => event.preventDefault()}
-                            onClick={() => runCustomerLookup()}
-                            className="absolute right-10 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-orange-600"
-                            aria-label="Tìm khách"
-                            title="Tìm khách"
-                        >
-                            <Search size={15} />
-                        </button>
-                        <button
-                            type="button"
-                            onMouseDown={event => event.preventDefault()}
-                            onClick={customerQrScanning ? stopCustomerQrScanner : startCustomerQrScanner}
-                            className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-sky-600"
-                            aria-label={customerQrScanning ? 'Dừng quét QR khách' : 'Quét QR khách'}
-                            title={customerQrScanning ? 'Dừng quét QR khách' : 'Quét QR khách'}
-                        >
-                            {customerQrScanning ? <Square size={15} /> : <Camera size={15} />}
-                        </button>
-                    </div>
-                    <video
-                        ref={customerQrVideoRef}
-                        muted
-                        playsInline
-                        className={`w-full rounded-lg border border-sky-200 bg-black ${customerQrScanning ? 'block' : 'hidden'}`}
-                    />
-                    <div className="grid grid-cols-[minmax(0,1.2fr)_minmax(110px,0.8fr)] gap-2">
-                        <div className="relative">
-                            <User size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                            <input
-                                type="text"
-                                placeholder="Tên KH"
-                                value={customerName}
-                                onChange={event => setCustomerName(event.target.value)}
-                                onBlur={() => {
-                                    if (!customerLookupQuery.trim() && customerName.trim()) runCustomerLookup(customerName);
-                                }}
-                                className="w-full pl-8 pr-3 py-1.5 text-sm border rounded-lg focus:ring-2 focus:ring-orange-500/20"
-                            />
-                        </div>
-                        <div className="relative">
-                            <Phone size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                            <input
-                                type="text"
-                                placeholder="SĐT"
-                                value={customerPhone}
-                                onChange={event => {
-                                    setCustomerPhone(event.target.value.replace(/[^0-9]/g, ''));
-                                    setCustomerPrimaryContactType('phone');
-                                }}
-                                onBlur={() => {
-                                    if (customerPhone.trim()) runCustomerLookup(customerPhone);
-                                }}
-                                className="w-full pl-8 pr-3 py-1.5 text-sm border rounded-lg focus:ring-2 focus:ring-orange-500/20"
-                            />
-                        </div>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                        <button
-                            type="button"
-                            onClick={() => setShowExtraContacts(previous => !previous)}
-                            className="inline-flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-orange-600"
-                        >
-                            <ChevronDown size={14} className={`transition-transform ${showExtraContacts ? 'rotate-180' : ''}`} />
-                            Liên hệ phụ: Zalo / Facebook / Mã KH{hasStoredContactDetails ? ' đã có' : ''}
-                        </button>
-                        {hasStoredContactDetails && (
-                            <span
-                                className="truncate text-[11px] font-medium text-gray-400"
-                                title={primaryContactValue ? `Liên hệ chính: ${primaryContactOption.label}` : undefined}
-                            >
-                                {[customerId && 'Mã KH', primaryContactValue && primaryContactOption.label, customerZalo && 'Zalo', customerFacebook && 'Facebook', customerOtherContact && 'Khác']
-                                    .filter((label): label is string => Boolean(label))
-                                    .filter((label, index, labels) => labels.indexOf(label) === index)
-                                    .join(' · ')}
-                            </span>
-                        )}
-                    </div>
-                    {showExtraContacts && (
-                        <div className="grid grid-cols-2 gap-2 rounded-lg border border-gray-100 bg-gray-50 p-2">
-                            <div className="relative">
-                                <MessageCircle size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                                <input
-                                    type="text"
-                                    placeholder="Link Zalo"
-                                    value={customerZalo}
-                                    onChange={event => {
-                                        setCustomerZalo(event.target.value);
-                                        if (!customerPhone.trim()) setCustomerPrimaryContactType('zalo');
-                                    }}
-                                    onBlur={() => {
-                                        if (customerZalo.trim()) runCustomerLookup(customerZalo);
-                                    }}
-                                    className="w-full pl-8 pr-3 py-1.5 text-sm border rounded-lg bg-white focus:ring-2 focus:ring-orange-500/20"
-                                />
-                            </div>
-                            <div className="relative">
-                                <MessageCircle size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                                <input
-                                    type="text"
-                                    placeholder="Facebook"
-                                    value={customerFacebook}
-                                    onChange={event => {
-                                        setCustomerFacebook(event.target.value);
-                                        if (!customerPhone.trim() && !customerZalo.trim()) setCustomerPrimaryContactType('facebook');
-                                    }}
-                                    onBlur={() => {
-                                        if (customerFacebook.trim()) runCustomerLookup(customerFacebook);
-                                    }}
-                                    className="w-full pl-8 pr-3 py-1.5 text-sm border rounded-lg bg-white focus:ring-2 focus:ring-orange-500/20"
-                                />
-                            </div>
-                            <input
-                                type="text"
-                                placeholder="Mã KH"
-                                value={customerId}
-                                onChange={event => setCustomerId(event.target.value)}
-                                onBlur={() => {
-                                    if (customerId.trim()) runCustomerLookup(customerId);
-                                }}
-                                className="w-full px-3 py-1.5 text-sm border rounded-lg bg-white focus:ring-2 focus:ring-orange-500/20"
-                            />
-                            <input
-                                type="text"
-                                placeholder="Liên hệ khác"
-                                value={customerOtherContact}
-                                onChange={event => {
-                                    setCustomerOtherContact(event.target.value);
-                                    if (!customerPhone.trim() && !customerZalo.trim() && !customerFacebook.trim()) setCustomerPrimaryContactType('other');
-                                }}
-                                className="w-full px-3 py-1.5 text-sm border rounded-lg bg-white focus:ring-2 focus:ring-orange-500/20"
-                            />
-                        </div>
-                    )}
-                </div>
-                {missingCashierShift && (
-                    <div className="rounded-lg border border-red-200 bg-red-50 p-2 text-xs font-semibold text-red-700">
-                        Chưa mở ca thu ngân. Vào tab Thu ngân, nhập số đầu ca rồi bấm Mở ca trước khi thanh toán tiền mặt, chuyển khoản hoặc ví.
-                    </div>
-                )}
-                {customerDebt > 0 && (
-                    <div className="bg-red-50 border border-red-200 text-red-600 rounded-lg p-2 text-xs flex items-center justify-between">
-                        <span className="font-semibold flex items-center gap-1.5">
-                            <AlertTriangle size={14} /> Khách đang nợ: {formatPrice(customerDebt)}
-                        </span>
-                    </div>
-                )}
-                {repairLoading && <p className="text-xs text-gray-400 animate-pulse">Đang tra cứu phiếu sửa...</p>}
-                {linkedRepairs.length > 0 && (
-                    <div className="space-y-1.5 border border-blue-100 rounded-lg p-2 bg-blue-50/20">
-                        <div className="flex items-center justify-between text-blue-700 font-semibold mb-1">
-                            <span className="flex items-center gap-1.5">
-                                <Wrench size={13} /> Phiếu sửa chưa thanh toán ({linkedRepairs.length})
-                            </span>
-                            <button
-                                type="button"
-                                onClick={() => setShowRepairsList(!showRepairsList)}
-                                className="text-blue-500 hover:text-blue-700 underline font-normal text-[11px]"
-                            >
-                                {showRepairsList ? 'Thu gọn' : 'Hiển thị'}
-                            </button>
-                        </div>
-                        {showRepairsList && (
-                            <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1">
-                                {linkedRepairs.map(repair => (
-                                    <div key={repair.id} className="bg-white rounded-lg p-2.5 text-xs space-y-1 border border-blue-100/60 shadow-sm">
-                                        <div className="flex items-center gap-1.5 font-semibold text-blue-700">
-                                            <Wrench size={13} /> Phiếu sửa #{repair.id.slice(-6)}
-                                        </div>
-                                        <p className="text-blue-600">Máy: {repair.deviceModel} — {repair.status}</p>
-                                        {repair.parts.length > 0 && <p className="text-blue-500">LK: {repair.parts.map(part => part.productName).join(', ')}</p>}
-                                        {repair.paymentAmount > 0 && (
-                                            <div className="mt-2 pt-2 border-t border-blue-100 flex items-center justify-between gap-2">
-                                                <span className="font-semibold text-blue-800">Chi phí: {formatPrice(repair.paymentAmount)}</span>
-                                                {(repair.paymentStatus === 'paid' || repair.paymentStatus === 'refunded') ? (
-                                                    <span className="text-green-600 font-bold bg-green-100 px-2 py-1 rounded-md whitespace-nowrap">Đã thanh toán</span>
-                                                ) : (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => {
-                                                            onAddRepairToCart(repair);
-                                                            setShowRepairsList(false);
-                                                        }}
-                                                        className="py-1 px-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors whitespace-nowrap"
-                                                    >
-                                                        Thêm vào HĐ
-                                                    </button>
-                                                )}
-                                            </div>
-                                        )}
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                )}
-                {payableOrders.length > 0 && (
-                    <div className="space-y-1.5 border border-amber-100 rounded-lg p-2 bg-amber-50/30">
-                        <div className="flex items-center justify-between text-amber-700 font-semibold mb-1">
-                            <span className="flex items-center gap-1.5">
-                                <Receipt size={13} /> Hóa đơn cần thanh toán ({payableOrders.length})
-                            </span>
-                            <button
-                                type="button"
-                                onClick={() => setShowRepairsList(!showRepairsList)}
-                                className="text-amber-600 hover:text-amber-800 underline font-normal text-[11px]"
-                            >
-                                {showRepairsList ? 'Thu gọn' : 'Hiển thị'}
-                            </button>
-                        </div>
-                        {showRepairsList && (
-                            <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1">
-                                {payableOrders.map(order => {
-                                    const isInCart = cart.some(item => item.orderPaymentId === order.id);
-                                    return (
-                                    <div key={order.id} className="bg-white rounded-lg p-2.5 text-xs space-y-1 border border-amber-100/70 shadow-sm">
-                                        <div className="flex items-center justify-between gap-2">
-                                            <span className="font-semibold text-amber-800">Đơn #{order.id.slice(-6)}</span>
-                                            <span className="rounded-md bg-amber-100 px-2 py-0.5 font-bold text-amber-700">
-                                                Còn {formatPrice(order.remainingAmount)}
-                                            </span>
-                                        </div>
-                                        <p className="text-amber-700">{order.status} · {order.paymentMethod || order.paymentStatus || 'chưa rõ'} · {order.createdAtLabel}</p>
-                                        {order.itemNames.length > 0 && <p className="text-amber-600 line-clamp-1">SP: {order.itemNames.join(', ')}</p>}
-                                        <div className="mt-2 grid grid-cols-2 gap-2">
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    onAddPayableOrderToCart(order);
-                                                    setShowRepairsList(false);
-                                                }}
-                                                disabled={isInCart}
-                                                className="inline-flex items-center justify-center rounded-lg bg-amber-600 px-3 py-1.5 font-semibold text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:bg-amber-200 disabled:text-amber-700"
-                                            >
-                                                {isInCart ? 'Đã thêm' : 'Thu nợ'}
-                                            </button>
-                                            <a
-                                                href={`/admin/orders?orderId=${order.id}`}
-                                                className="inline-flex items-center justify-center rounded-lg border border-amber-200 bg-white px-3 py-1.5 font-semibold text-amber-700 hover:bg-amber-50"
-                                            >
-                                                Chi tiết
-                                            </a>
-                                        </div>
-                                    </div>
-                                    );
-                                })}
-                            </div>
-                        )}
-                    </div>
-                )}
-                {discountDetails.length > 0 && (
-                    <div className="bg-green-50 rounded-lg p-2.5 text-xs border border-green-200">
-                        <p className="font-semibold text-green-700">🎁 Giảm PK tự động:</p>
-                        {discountDetails.map((detail, index) => (
-                            <p key={`${detail.productName}-${index}`} className="text-green-600">
-                                {detail.productName}: -{detail.discountAmount.toLocaleString('vi-VN')}đ ({detail.ruleName})
-                            </p>
                         ))}
-                        <button type="button" onClick={onApplyAutoDiscount} disabled={autoDiscountApplied} className="mt-1 w-full py-1.5 bg-green-600 text-white rounded-lg text-xs font-semibold hover:bg-green-700 transition-colors disabled:cursor-not-allowed disabled:bg-green-300">
-                            {autoDiscountApplied ? 'Đã áp dụng giảm' : `Áp dụng giảm ${autoDiscountAmount.toLocaleString('vi-VN')}đ`}
-                        </button>
                     </div>
                 )}
-                <div className="grid grid-cols-5 gap-1.5">
-                    {paymentMethods.map(method => (
-                        <button
-                            key={method.key}
-                            onClick={() => setPaymentMethod(method.key)}
-                            title={method.label}
-                            className={`flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg px-1 py-1.5 text-[11px] font-medium leading-tight transition-all ${paymentMethod === method.key ? 'bg-orange-500 text-white shadow-md shadow-orange-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-                        >
-                            <method.icon size={14} />
-                            <span className="truncate">{method.label}</span>
-                        </button>
-                    ))}
-                </div>
-                {paymentMethod === 'debt' && deposit > 0 && (
-                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-2">
-                        <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-amber-800">Kênh tiền đã nhận</p>
-                        <div className="grid grid-cols-2 gap-2">
-                            <button
-                                type="button"
-                                onClick={() => setDepositPaymentMethod('cash')}
-                                className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${depositPaymentMethod === 'cash' ? 'bg-amber-500 text-white shadow-sm' : 'bg-white text-amber-800 ring-1 ring-amber-200 hover:bg-amber-100'}`}
-                            >
-                                <Banknote size={15} /> Tiền mặt
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setDepositPaymentMethod('bank')}
-                                className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${depositPaymentMethod === 'bank' ? 'bg-amber-500 text-white shadow-sm' : 'bg-white text-amber-800 ring-1 ring-amber-200 hover:bg-amber-100'}`}
-                            >
-                                <CreditCard size={15} /> Chuyển khoản/QR
-                            </button>
-                        </div>
-                    </div>
-                )}
-                <label className="block rounded-lg border border-orange-200 bg-orange-50/60 p-2">
-                    <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-orange-700">Khách đưa</span>
-                    <CurrencyInput
-                        value={deposit || ''}
-                        onChange={value => setDeposit(value)}
-                        placeholder="0"
-                        className="w-full rounded-lg border border-orange-300 bg-white px-3 py-2.5 text-right text-xl font-bold text-orange-700 shadow-sm focus:ring-2 focus:ring-orange-500/20"
+            </div>
+        </>
+    );
+}
+
+/** Payment controls section — intended for the full-width bottom area on desktop */
+export function PosPaymentSection(props: PosCartPanelProps) {
+    const state = useCartPanelState(props);
+
+    return (
+        <div className="space-y-3 px-4 py-3">
+            {state.missingCashierShift && <div className="rounded-lg border border-red-200 bg-red-50 p-2 text-xs font-semibold text-red-700">Chưa mở ca thu ngân. Vào tab Thu ngân và mở ca trước khi thanh toán tiền mặt, chuyển khoản, ví hoặc chi phí ship.</div>}
+
+            {/* Repair items + Debt items (moved here from cart items) */}
+            {(state.repairItems.length > 0 || state.debtItems.length > 0) && <div className="grid gap-3 md:grid-cols-2">
+                {state.repairItems.length > 0 && <section className="rounded-lg border border-blue-100 bg-blue-50/40 p-2.5"><h3 className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-blue-800"><Wrench size={13} /> Dịch vụ sửa chữa</h3><div className="mt-1.5 space-y-1">{state.repairItems.map((item, index) => { const firstInRepair = Boolean(item.repairTicketId) && state.repairItems.findIndex(candidate => candidate.repairTicketId === item.repairTicketId) === index; return <div key={item.cartItemId} className="flex items-center gap-2 rounded-md bg-white px-2 py-1.5 text-xs"><Wrench size={12} className="shrink-0 text-blue-600" /><span className="min-w-0 flex-1 truncate font-semibold text-blue-900">{item.name}</span><span className="font-bold text-blue-800">{props.formatPrice(item.sellingPrice * item.quantity)}</span>{firstInRepair && item.repairTicketId ? <button onClick={() => props.onRemoveRepairFromCart(item.repairTicketId!)} className="ml-1 text-red-500 hover:text-red-700">Bỏ</button> : <span className="ml-1 text-[10px] text-blue-400">Theo phiếu</span>}</div>; })}</div></section>}
+                {state.debtItems.length > 0 && <section className="rounded-lg border border-amber-100 bg-amber-50/40 p-2.5"><h3 className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-amber-800"><Receipt size={13} /> Khoản thu công nợ</h3><div className="mt-1.5 space-y-1">{state.debtItems.map(item => <div key={item.cartItemId} className="flex items-center gap-2 rounded-md bg-white px-2 py-1.5 text-xs"><Receipt size={12} className="shrink-0 text-amber-600" /><span className="min-w-0 flex-1 truncate font-semibold text-amber-900">{item.name}</span><span className="font-bold text-amber-800">{props.formatPrice(item.sellingPrice * item.quantity)}</span><button onClick={() => props.onRemoveFromCart(item.cartItemId)} className="ml-1 text-red-500 hover:text-red-700">Bỏ</button></div>)}</div></section>}
+            </div>}
+
+            <div className="grid gap-4 md:grid-cols-[1fr_1fr]">
+                {/* Left: Adjustments + Payment method */}
+                <div className="space-y-2">
+                    <button type="button" onClick={() => state.setShowAdjustments(previous => !previous)} className="flex w-full items-center justify-between rounded-lg bg-gray-50 px-3 py-2 text-left text-xs font-bold text-gray-700 hover:bg-gray-100"><span>Điều chỉnh hóa đơn{state.adjustmentCount > 0 ? ` (${state.adjustmentCount})` : ''}</span><ChevronDown size={15} className={`transition-transform ${state.showAdjustments ? 'rotate-180' : ''}`} /></button>
+                    {state.showAdjustments && <div className="space-y-2 rounded-xl border border-gray-100 p-2.5">{state.productItems.length > 0 && props.discountDetails.length > 0 && <div className="rounded-lg border border-green-200 bg-green-50 p-2.5 text-xs"><p className="font-semibold text-green-700">Giảm phụ kiện tự động:</p>{props.discountDetails.map((detail, index) => <p key={`${detail.productName}-${index}`} className="text-green-600">{detail.productName}: -{detail.discountAmount.toLocaleString('vi-VN')}đ ({detail.ruleName})</p>)}<button type="button" onClick={props.onApplyAutoDiscount} disabled={props.autoDiscountApplied} className="mt-1 w-full rounded-lg bg-green-600 py-1.5 text-xs font-semibold text-white disabled:bg-green-300">{props.autoDiscountApplied ? 'Đã áp dụng giảm' : `Áp dụng giảm ${props.autoDiscountAmount.toLocaleString('vi-VN')}đ`}</button></div>}<div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2"><label className="flex min-w-0 items-center gap-2"><span className="whitespace-nowrap text-sm text-gray-500">Giảm:</span><CurrencyInput value={props.discount || ''} onChange={value => props.setDiscount(value)} placeholder="0" className="min-w-0 flex-1 rounded-lg border px-3 py-1.5 text-right text-sm" /></label><button type="button" onClick={() => state.setShowVoucherEntry(previous => !previous)} className={`inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-semibold ${state.showVoucherEntry || props.voucherCode || props.appliedVoucher ? 'bg-blue-50 text-blue-700' : 'bg-gray-100 text-gray-600'}`}><ChevronDown size={14} className={`transition-transform ${state.showVoucherEntry ? 'rotate-180' : ''}`} />Voucher</button></div>{(state.showVoucherEntry || props.voucherCode || props.voucherStatus) && <div className="space-y-1"><div className="flex gap-1 text-sm"><input type="text" placeholder="Nhập mã giảm giá" value={props.voucherCode} onChange={event => props.setVoucherCode(event.target.value.toUpperCase())} className="min-w-0 flex-1 rounded-lg border px-3 py-1.5 uppercase" /><button onClick={props.onApplyVoucher} className="rounded-lg bg-blue-50 px-3 py-1.5 text-sm font-semibold text-blue-600">Áp dụng</button></div>{props.voucherStatus && <div className={`pr-1 text-right text-xs ${props.voucherStatus.type === 'success' ? 'text-green-600' : 'text-red-500'}`}>{props.voucherStatus.message}{props.appliedVoucher && <button onClick={() => { props.setAppliedVoucher(null); props.setVoucherCode(''); props.setVoucherStatus(null); }} className="ml-2 underline">Bỏ</button>}</div>}</div>}</div>}
+
+                    <PosPaymentComposer
+                        total={props.total}
+                        paymentMode={props.paymentMethod}
+                        setPaymentMode={props.setPaymentMethod}
+                        cashTendered={props.cashTendered}
+                        setCashTendered={props.setCashTendered}
+                        bankTransferAmount={props.bankTransferAmount}
+                        setBankTransferAmount={props.setBankTransferAmount}
+                        bankTransferConfirmed={props.bankTransferConfirmed}
+                        setBankTransferConfirmed={props.setBankTransferConfirmed}
+                        debtRequested={props.debtRequested}
+                        setDebtRequested={props.setDebtRequested}
+                        bankReference={props.bankTransferReference}
+                        bankAccounts={props.bankAccounts}
+                        hasSelectedDebtCollection={state.debtItems.length > 0}
+                        formatPrice={props.formatPrice}
                     />
-                </label>
-                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 text-sm">
-                    <label className="flex min-w-0 items-center gap-2">
-                        <span className="text-gray-500 whitespace-nowrap">Giảm:</span>
-                        <CurrencyInput value={discount || ''} onChange={value => setDiscount(value)} placeholder="0" className="min-w-0 flex-1 px-3 py-1.5 border rounded-lg text-right text-sm" />
-                    </label>
-                    <button
-                        type="button"
-                        onClick={() => setShowVoucherEntry(previous => !previous)}
-                        className={`inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-semibold ${showVoucherEntry || voucherCode || appliedVoucher ? 'bg-blue-50 text-blue-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-                    >
-                        <ChevronDown size={14} className={`transition-transform ${showVoucherEntry ? 'rotate-180' : ''}`} />
-                        Voucher{appliedVoucher ? ' đã áp dụng' : voucherCode ? ' đã nhập' : ''}
-                    </button>
+                    {props.paymentBreakdown.length > 1 && <div className="rounded-lg border border-blue-100 bg-blue-50/60 px-2.5 py-2 text-xs text-blue-900">
+                        <p className="mb-1 font-bold">Đã nhận theo từng kênh</p>
+                        {props.paymentBreakdown.map((entry, index) => <div key={`${entry.method}-${index}`} className="flex justify-between gap-3"><span>{entry.method === 'CASH' ? 'Tiền mặt' : entry.method === 'BANK' ? 'Chuyển khoản' : entry.method}</span><span className="font-semibold">{props.formatPrice(entry.amount)}</span></div>)}
+                    </div>}
+                    {state.remainingDebtAfterSelected > 0 && state.surplusAfterSelectedDebt > 0 && <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 p-2"><input type="checkbox" id="useSurplusDebt" className="mt-0.5 h-4 w-4 rounded text-blue-600" checked={props.useSurplusToPayDebt} onChange={event => props.setUseSurplusToPayDebt(event.target.checked)} /><label htmlFor="useSurplusDebt" className="flex-1 cursor-pointer text-xs text-blue-800"><b>Khách có nợ cũ: {props.formatPrice(props.customerDebt)}</b><br />Dùng tiền dư <b>{props.formatPrice(Math.min(state.surplusAfterSelectedDebt, state.remainingDebtAfterSelected))}</b> để cấn trừ nợ</label></div>}
                 </div>
-                {(showVoucherEntry || voucherCode || voucherStatus) && (
-                    <div className="space-y-1">
-                        <div className="flex items-center gap-1 text-sm">
-                            <input type="text" placeholder="Nhập mã giảm giá" value={voucherCode} onChange={event => setVoucherCode(event.target.value.toUpperCase())} className="min-w-0 flex-1 px-3 py-1.5 border rounded-lg text-sm uppercase" />
-                            <button onClick={onApplyVoucher} className="px-3 py-1.5 bg-blue-50 text-blue-600 font-semibold rounded-lg hover:bg-blue-100 text-sm whitespace-nowrap">
-                                Áp dụng
-                            </button>
-                        </div>
-                        {voucherStatus && (
-                            <div className={`text-xs text-right pr-1 ${voucherStatus.type === 'success' ? 'text-green-600' : 'text-red-500'}`}>
-                                {voucherStatus.message}
-                                {appliedVoucher && (
-                                    <button onClick={() => { setAppliedVoucher(null); setVoucherCode(''); setVoucherStatus(null); }} className="ml-2 text-red-500 underline">
-                                        Bỏ
-                                    </button>
-                                )}
-                            </div>
-                        )}
+
+                {/* Right: Totals + Checkout */}
+                <div className="space-y-2">
+                    <div className="space-y-1 rounded-xl border border-gray-100 bg-gray-50/70 p-3 text-sm">
+                        <div className="flex justify-between text-gray-500"><span>Tạm tính ({state.productQuantity} SP)</span><span>{props.formatPrice(props.subtotal)}</span></div>
+                        {props.discount > 0 && <div className="flex justify-between text-green-600"><span>Giảm giá NV</span><span>-{props.formatPrice(props.discount)}</span></div>}
+                        {props.autoDiscountApplied && props.autoDiscountAmount > 0 && <div className="flex justify-between text-green-600"><span>Giảm phụ kiện</span><span>-{props.formatPrice(props.autoDiscountAmount)}</span></div>}
+                        {props.voucherDiscountAmount > 0 && <div className="flex justify-between font-medium text-blue-600"><span>Voucher giảm giá</span><span>-{props.formatPrice(props.voucherDiscountAmount)}</span></div>}
+                        {state.shippingCustomerCharge > 0 && <div className="flex justify-between font-medium text-sky-700"><span>Phí ship khách trả</span><span>+{props.formatPrice(state.shippingCustomerCharge)}</span></div>}
+                        {props.repairShipping?.mode === 'shop_absorbs' && props.repairShipping.fee > 0 && <div className="flex justify-between text-sky-700"><span>Phí ship shop chịu</span><span>{props.formatPrice(props.repairShipping.fee)}</span></div>}
+                        {props.repairShipping?.mode === 'shop_advance_on_credit' && props.repairShipping.fee > 0 && <div className="flex justify-between text-amber-700"><span>Shop ứng, ghi nợ {props.repairShipping.billingCustomerId || 'đối tác'}</span><span>{props.formatPrice(props.repairShipping.fee)}</span></div>}
+                        <div className="flex justify-between border-t pt-1.5 text-lg font-bold text-orange-600"><span>TỔNG</span><span>{props.formatPrice(props.total)}</span></div>
+                        {state.selectedDebtTotal > 0 && <div className="flex justify-between text-amber-600"><span>Thu nợ đã chọn</span><span>{props.formatPrice(state.selectedDebtTotal)}</span></div>}
+                        {props.deposit > 0 && <div className="flex justify-between pt-1 text-blue-600"><span>Đã nhận ({state.receivedPaymentMethod === 'cash' ? 'tiền mặt' : 'chuyển khoản/QR'})</span><span>{props.formatPrice(props.deposit)}</span></div>}
+                        {state.selectedDebtCovered > 0 && <div className="flex justify-between text-amber-700"><span>Đã phân bổ thu nợ</span><span>{props.formatPrice(state.selectedDebtCovered)}</span></div>}
+                        {state.autoDebtOffset > 0 && <div className="flex justify-between text-blue-700"><span>Cấn nợ cũ</span><span>{props.formatPrice(state.autoDebtOffset)}</span></div>}
+                        {props.deposit > 0 && state.remainingCurrentPayment > 0 && <div className="flex justify-between border-t pt-1 font-bold text-red-600"><span>CÒN LẠI</span><span>{props.formatPrice(state.remainingCurrentPayment)}</span></div>}
+                        {props.deposit > 0 && state.changeDue > 0 && <div className="flex justify-between border-t pt-1 font-bold text-green-600"><span>Tiền thối lại</span><span>{props.formatPrice(state.changeDue)}</span></div>}
                     </div>
-                )}
-                {remainingDebtAfterSelected > 0 && surplusAfterSelectedDebt > 0 && (
-                    <div className="flex items-start gap-2 bg-blue-50 p-2 rounded-lg mt-2 border border-blue-200">
-                        <input type="checkbox" id="useSurplusDebt" className="mt-0.5 w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer" checked={useSurplusToPayDebt} onChange={(event) => setUseSurplusToPayDebt(event.target.checked)} />
-                        <label htmlFor="useSurplusDebt" className="text-xs text-blue-800 flex-1 cursor-pointer leading-tight">
-                            <b>Khách có nợ cũ: {formatPrice(customerDebt)}</b><br />
-                            Dùng số tiền dư <b>{formatPrice(Math.min(surplusAfterSelectedDebt, remainingDebtAfterSelected))}</b> để cấn trừ nợ
-                        </label>
-                    </div>
-                )}
-                <div className="space-y-1 text-sm">
-                    <div className="flex justify-between text-gray-500">
-                        <span>Tạm tính ({itemCount} SP)</span>
-                        <span>{formatPrice(subtotal)}</span>
-                    </div>
-                    {discount > 0 && <div className="flex justify-between text-green-600"><span>Giảm giá NV</span><span>-{formatPrice(discount)}</span></div>}
-                    {autoDiscountApplied && autoDiscountAmount > 0 && <div className="flex justify-between text-green-600"><span>Giảm phụ kiện</span><span>-{formatPrice(autoDiscountAmount)}</span></div>}
-                    {voucherDiscountAmount > 0 && <div className="flex justify-between text-blue-600 font-medium"><span>Voucher giảm giá</span><span>-{formatPrice(voucherDiscountAmount)}</span></div>}
-                    <div className="flex justify-between font-bold text-lg text-orange-600 pt-1 border-t">
-                        <span>TỔNG</span>
-                        <span>{formatPrice(total)}</span>
-                    </div>
-                    {selectedDebtTotal > 0 && <div className="flex justify-between text-amber-600"><span>Thu nợ đã chọn</span><span>{formatPrice(selectedDebtTotal)}</span></div>}
-                    {deposit > 0 && <div className="flex justify-between text-blue-600 pt-1"><span>Đã nhận ({receivedPaymentMethod === 'cash' ? 'tiền mặt' : 'chuyển khoản/QR'})</span><span>{formatPrice(deposit)}</span></div>}
-                    {selectedDebtCovered > 0 && <div className="flex justify-between text-amber-700"><span>Đã phân bổ thu nợ</span><span>{formatPrice(selectedDebtCovered)}</span></div>}
-                    {autoDebtOffset > 0 && <div className="flex justify-between text-blue-700"><span>Cấn nợ cũ</span><span>{formatPrice(autoDebtOffset)}</span></div>}
-                    {deposit > 0 && remainingCurrentPayment > 0 && <div className="flex justify-between font-bold text-red-600 pt-1"><span>CÒN LẠI</span><span>{formatPrice(remainingCurrentPayment)}</span></div>}
-                    {deposit > 0 && changeDue > 0 && <div className="flex justify-between font-bold text-green-600 pt-1"><span>Tiền thối lại</span><span>{formatPrice(changeDue)}</span></div>}
+                    <button onClick={props.onCheckout} disabled={state.checkoutDisabled} className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-orange-500 to-orange-600 py-3 font-bold text-white shadow-lg shadow-orange-200/50 transition-all hover:from-orange-600 hover:to-orange-700 disabled:cursor-not-allowed disabled:opacity-50 active:scale-[0.98]">{props.isProcessing ? <><span className="inline-block h-[18px] w-[18px] animate-spin rounded-full border-2 border-white/40 border-t-white" /> Đang xử lý...</> : state.missingCashierShift ? <><AlertTriangle size={18} /> Mở ca thu ngân trước</> : <><Receipt size={18} /> Thanh toán & Xuất hóa đơn</>}</button>
                 </div>
-                <button onClick={onCheckout} disabled={checkoutDisabled} className="w-full py-3 rounded-xl font-bold text-white bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-orange-200/50 transition-all active:scale-[0.98]">
-                    {isProcessing ? (
-                        <><span className="inline-block h-[18px] w-[18px] animate-spin rounded-full border-2 border-white/40 border-t-white" /> Đang xử lý...</>
-                    ) : missingCashierShift ? (
-                        <><AlertTriangle size={18} /> Mở ca thu ngân trước</>
+            </div>
+        </div>
+    );
+}
+
+/** Original combined PosCartPanel — used for Mobile full-screen cart sheet */
+export function PosCartPanel(props: PosCartPanelProps) {
+    const state = useCartPanelState(props);
+
+    return (
+        <>
+            <div className="flex items-center gap-2 border-b px-3 py-2">
+                <Receipt size={18} className="text-orange-500" />
+                <div>
+                    <h2 className="text-sm font-bold text-gray-800">Thanh toán</h2>
+                    <p className="text-[10px] text-gray-400">Hàng hóa, dịch vụ và khoản thu được tách riêng.</p>
+                </div>
+                <span className="ml-auto rounded-full bg-orange-100 px-2 py-0.5 text-[11px] font-bold text-orange-600">{state.productQuantity} SP</span>
+                <button onClick={props.onCloseMobileCart} className="p-1 text-gray-400 hover:text-gray-600 md:hidden" aria-label="Đóng thanh toán" title="Đóng thanh toán"><X size={18} /></button>
+            </div>
+
+            <div className="flex items-center gap-2 border-b bg-orange-50/50 px-3 py-1.5 text-xs">
+                <User size={13} className="shrink-0 text-orange-500" />
+                <span className="min-w-0 flex-1 truncate font-semibold text-gray-800 text-xs">{props.customerName || 'Khách lẻ'}</span>
+                {props.customerPhone && <span className="inline-flex shrink-0 items-center gap-1 text-gray-500 text-xs"><Phone size={11} /> {props.customerPhone}</span>}
+                {props.customerDebt > 0 && <span className="shrink-0 font-bold text-red-600 text-xs">Nợ {props.formatPrice(props.customerDebt)}</span>}
+            </div>
+
+            <div className="min-h-[120px] flex-1 space-y-2 overflow-y-auto px-3 py-2">
+                <section>
+                    <div className="mb-1.5 flex items-center justify-between"><h3 className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-gray-600"><ShoppingCart size={13} /> Hàng hóa đã chọn</h3><span className="text-[11px] font-medium text-gray-400">{state.productQuantity} sản phẩm</span></div>
+                    {state.productItems.length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-gray-200 py-5 text-center text-gray-400"><ShoppingCart size={24} className="mx-auto mb-1.5 opacity-40" /><p className="text-xs">Chưa chọn hàng hóa</p></div>
                     ) : (
-                        <><Receipt size={18} /> Thanh toán & Xuất hóa đơn</>
+                        <div className="space-y-1.5">
+                            {state.productItems.map(item => {
+                                return (
+                                    <div key={item.cartItemId} className="rounded-xl border border-gray-100 bg-white p-1.5 shadow-sm">
+                                        <div className="flex items-center gap-2">
+                                            <div className="min-w-0 flex-1"><p className="line-clamp-1 text-xs font-semibold text-gray-800">{item.name}</p>{item.lotCode && <p className="mt-0.5 text-[9px] font-bold text-orange-700">Lô: {item.lotCode}</p>}</div>
+                                            <div className="flex shrink-0 items-center rounded-lg border bg-gray-50"><button onClick={() => props.onUpdateQuantity(item.cartItemId, -1)} className="rounded-l-lg p-0.5 hover:bg-gray-100" aria-label="Giảm số lượng" title="Giảm số lượng"><Minus size={13} /></button><span className="min-w-[24px] px-1 text-center text-xs font-bold">{item.quantity}</span><button onClick={() => props.onUpdateQuantity(item.cartItemId, 1)} className="rounded-r-lg p-0.5 hover:bg-gray-100" aria-label="Tăng số lượng" title="Tăng số lượng"><Plus size={13} /></button></div>
+                                            <button onClick={() => props.onRemoveFromCart(item.cartItemId)} className="rounded p-0.5 text-red-400 hover:bg-red-50 hover:text-red-600" aria-label="Xóa khỏi giỏ" title="Xóa khỏi giỏ"><Trash2 size={13} /></button>
+                                        </div>
+                                        {item.requiresImei && <div className="mt-1.5 space-y-1 border-t border-gray-100 pt-1.5"><p className="text-[11px] font-semibold text-gray-600">IMEI / Serial ({item.quantity})</p>{Array.from({ length: item.quantity }).map((_, index) => <div key={index} className="relative"><input type="text" placeholder={`IMEI/Serial #${index + 1}`} value={item.imeis?.[index] || ''} onChange={event => { const value = event.target.value; props.setCart(previous => previous.map(cartItem => { if (cartItem.cartItemId !== item.cartItemId) return cartItem; const imeis = [...(cartItem.imeis || [])]; imeis[index] = value; return { ...cartItem, imeis }; })); }} className="w-full rounded border py-1 pl-2 pr-7 text-xs uppercase" />{(item.imeis?.[index]?.length || 0) < 5 && <AlertTriangle size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-orange-400" />}</div>)}</div>}
+                                    </div>
+                                );
+                            })}
+                        </div>
                     )}
-                </button>
+                </section>
+
+                {state.repairItems.length > 0 && <section className="rounded-xl border border-blue-100 bg-blue-50/40 p-3"><h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-blue-800"><Wrench size={14} /> Dịch vụ sửa chữa đã chọn</h3><div className="mt-2 space-y-2">{state.repairItems.map((item, index) => { const firstInRepair = Boolean(item.repairTicketId) && state.repairItems.findIndex(candidate => candidate.repairTicketId === item.repairTicketId) === index; return <div key={item.cartItemId} className="flex items-center gap-2 rounded-lg bg-white px-2.5 py-2 text-xs"><Wrench size={14} className="shrink-0 text-blue-600" /><span className="min-w-0 flex-1 truncate font-semibold text-blue-900">{item.name}</span><span className="font-bold text-blue-800">{props.formatPrice(item.sellingPrice * item.quantity)}</span>{firstInRepair && item.repairTicketId ? <button onClick={() => props.onRemoveRepairFromCart(item.repairTicketId!)} className="ml-1 text-red-500 hover:text-red-700">Bỏ</button> : <span className="ml-1 text-[10px] text-blue-400">Theo phiếu</span>}</div>; })}</div></section>}
+
+                {state.debtItems.length > 0 && <section className="rounded-xl border border-amber-100 bg-amber-50/40 p-3"><h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-amber-800"><Receipt size={14} /> Khoản thu công nợ đã chọn</h3><div className="mt-2 space-y-2">{state.debtItems.map(item => <div key={item.cartItemId} className="flex items-center gap-2 rounded-lg bg-white px-2.5 py-2 text-xs"><Receipt size={14} className="shrink-0 text-amber-600" /><span className="min-w-0 flex-1 truncate font-semibold text-amber-900">{item.name}</span><span className="font-bold text-amber-800">{props.formatPrice(item.sellingPrice * item.quantity)}</span><button onClick={() => props.onRemoveFromCart(item.cartItemId)} className="ml-1 text-red-500 hover:text-red-700">Bỏ</button></div>)}</div></section>}
+            </div>
+
+            <div className="shrink-0 space-y-1.5 border-t bg-white px-3 py-2 sm:px-4 sm:py-2.5">
+                {state.missingCashierShift && <div className="rounded-lg border border-red-200 bg-red-50 p-1.5 text-xs font-semibold text-red-700">Chưa mở ca thu ngân. Vào tab Thu ngân và mở ca trước khi thanh toán.</div>}
+                <button type="button" onClick={() => state.setShowAdjustments(previous => !previous)} className="flex w-full items-center justify-between rounded-lg bg-gray-50 px-2.5 py-1.5 text-left text-xs font-bold text-gray-700 hover:bg-gray-100"><span>Điều chỉnh hóa đơn{state.adjustmentCount > 0 ? ` (${state.adjustmentCount})` : ''}</span><ChevronDown size={14} className={`transition-transform ${state.showAdjustments ? 'rotate-180' : ''}`} /></button>
+                {state.showAdjustments && <div className="space-y-1.5 rounded-xl border border-gray-100 p-2">{props.discountDetails.length > 0 && <div className="rounded-lg border border-green-200 bg-green-50 p-2 text-xs"><p className="font-semibold text-green-700">Giảm phụ kiện tự động:</p>{props.discountDetails.map((detail, index) => <p key={`${detail.productName}-${index}`} className="text-green-600">{detail.productName}: -{detail.discountAmount.toLocaleString('vi-VN')}đ ({detail.ruleName})</p>)}<button type="button" onClick={props.onApplyAutoDiscount} disabled={props.autoDiscountApplied} className="mt-1 w-full rounded-lg bg-green-600 py-1 text-xs font-semibold text-white disabled:bg-green-300">{props.autoDiscountApplied ? 'Đã áp dụng giảm' : `Áp dụng giảm ${props.autoDiscountAmount.toLocaleString('vi-VN')}đ`}</button></div>}<div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2"><label className="flex min-w-0 items-center gap-2"><span className="whitespace-nowrap text-xs text-gray-500">Giảm:</span><CurrencyInput value={props.discount || ''} onChange={value => props.setDiscount(value)} placeholder="0" className="min-w-0 flex-1 rounded-lg border px-2.5 py-1 text-right text-xs" /></label><button type="button" onClick={() => state.setShowVoucherEntry(previous => !previous)} className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-semibold ${state.showVoucherEntry || props.voucherCode || props.appliedVoucher ? 'bg-blue-50 text-blue-700' : 'bg-gray-100 text-gray-600'}`}><ChevronDown size={13} className={`transition-transform ${state.showVoucherEntry ? 'rotate-180' : ''}`} />Voucher</button></div>{(state.showVoucherEntry || props.voucherCode || props.voucherStatus) && <div className="space-y-1"><div className="flex gap-1 text-xs"><input type="text" placeholder="Nhập mã giảm giá" value={props.voucherCode} onChange={event => props.setVoucherCode(event.target.value.toUpperCase())} className="min-w-0 flex-1 rounded-lg border px-2.5 py-1 uppercase" /><button onClick={props.onApplyVoucher} className="rounded-lg bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-600">Áp dụng</button></div>{props.voucherStatus && <div className={`pr-1 text-right text-xs ${props.voucherStatus.type === 'success' ? 'text-green-600' : 'text-red-500'}`}>{props.voucherStatus.message}{props.appliedVoucher && <button onClick={() => { props.setAppliedVoucher(null); props.setVoucherCode(''); props.setVoucherStatus(null); }} className="ml-2 underline">Bỏ</button>}</div>}</div>}</div>}
+
+                <PosPaymentComposer
+                    total={props.total}
+                    paymentMode={props.paymentMethod}
+                    setPaymentMode={props.setPaymentMethod}
+                    cashTendered={props.cashTendered}
+                    setCashTendered={props.setCashTendered}
+                    bankTransferAmount={props.bankTransferAmount}
+                    setBankTransferAmount={props.setBankTransferAmount}
+                    bankTransferConfirmed={props.bankTransferConfirmed}
+                    setBankTransferConfirmed={props.setBankTransferConfirmed}
+                    debtRequested={props.debtRequested}
+                    setDebtRequested={props.setDebtRequested}
+                    bankReference={props.bankTransferReference}
+                    bankAccounts={props.bankAccounts}
+                    hasSelectedDebtCollection={state.debtItems.length > 0}
+                    formatPrice={props.formatPrice}
+                />
+                {props.paymentBreakdown.length > 1 && <div className="rounded-lg border border-blue-100 bg-blue-50/60 px-2 py-1.5 text-xs text-blue-900">
+                    <p className="mb-0.5 font-bold">Đã nhận theo từng kênh</p>
+                    {props.paymentBreakdown.map((entry, index) => <div key={`${entry.method}-${index}`} className="flex justify-between gap-3"><span>{entry.method === 'CASH' ? 'Tiền mặt' : entry.method === 'BANK' ? 'Chuyển khoản' : entry.method}</span><span className="font-semibold">{props.formatPrice(entry.amount)}</span></div>)}
+                </div>}
+                {state.remainingDebtAfterSelected > 0 && state.surplusAfterSelectedDebt > 0 && <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 p-1.5"><input type="checkbox" id="useSurplusDebtMobile" className="mt-0.5 h-3.5 w-3.5 rounded text-blue-600" checked={props.useSurplusToPayDebt} onChange={event => props.setUseSurplusToPayDebt(event.target.checked)} /><label htmlFor="useSurplusDebtMobile" className="flex-1 cursor-pointer text-xs text-blue-800"><b>Khách có nợ cũ: {props.formatPrice(props.customerDebt)}</b><br />Dùng tiền dư <b>{props.formatPrice(Math.min(state.surplusAfterSelectedDebt, state.remainingDebtAfterSelected))}</b> để cấn trừ nợ</label></div>}
+                <div className="space-y-0.5 text-xs"><div className="flex justify-between text-gray-500"><span>Tạm tính ({state.productQuantity} SP)</span><span>{props.formatPrice(props.subtotal)}</span></div>{props.discount > 0 && <div className="flex justify-between text-green-600"><span>Giảm giá NV</span><span>-{props.formatPrice(props.discount)}</span></div>}{props.autoDiscountApplied && props.autoDiscountAmount > 0 && <div className="flex justify-between text-green-600"><span>Giảm phụ kiện</span><span>-{props.formatPrice(props.autoDiscountAmount)}</span></div>}{props.voucherDiscountAmount > 0 && <div className="flex justify-between font-medium text-blue-600"><span>Voucher giảm giá</span><span>-{props.formatPrice(props.voucherDiscountAmount)}</span></div>}{state.shippingCustomerCharge > 0 && <div className="flex justify-between font-medium text-sky-700"><span>Phí ship khách trả</span><span>+{props.formatPrice(state.shippingCustomerCharge)}</span></div>}{props.repairShipping?.mode === 'shop_absorbs' && props.repairShipping.fee > 0 && <div className="flex justify-between text-sky-700"><span>Phí ship shop chịu</span><span>{props.formatPrice(props.repairShipping.fee)}</span></div>}{props.repairShipping?.mode === 'shop_advance_on_credit' && props.repairShipping.fee > 0 && <div className="flex justify-between text-amber-700"><span>Shop ứng, ghi nợ {props.repairShipping.billingCustomerId || 'đối tác'}</span><span>{props.formatPrice(props.repairShipping.fee)}</span></div>}<div className="flex justify-between border-t pt-1 text-base font-bold text-orange-600"><span>TỔNG</span><span>{props.formatPrice(props.total)}</span></div>{state.selectedDebtTotal > 0 && <div className="flex justify-between text-amber-600"><span>Thu nợ đã chọn</span><span>{props.formatPrice(state.selectedDebtTotal)}</span></div>}{props.deposit > 0 && <div className="flex justify-between pt-0.5 text-blue-600"><span>Đã nhận ({state.receivedPaymentMethod === 'cash' ? 'tiền mặt' : 'chuyển khoản/QR'})</span><span>{props.formatPrice(props.deposit)}</span></div>}{state.selectedDebtCovered > 0 && <div className="flex justify-between text-amber-700"><span>Đã phân bổ thu nợ</span><span>{props.formatPrice(state.selectedDebtCovered)}</span></div>}{state.autoDebtOffset > 0 && <div className="flex justify-between text-blue-700"><span>Cấn nợ cũ</span><span>{props.formatPrice(state.autoDebtOffset)}</span></div>}{props.deposit > 0 && state.remainingCurrentPayment > 0 && <div className="flex justify-between border-t pt-0.5 font-bold text-red-600"><span>CÒN LẠI</span><span>{props.formatPrice(state.remainingCurrentPayment)}</span></div>}{props.deposit > 0 && state.changeDue > 0 && <div className="flex justify-between border-t pt-0.5 font-bold text-green-600"><span>Tiền thối lại</span><span>{props.formatPrice(state.changeDue)}</span></div>}</div>
+                <button onClick={props.onCheckout} disabled={state.checkoutDisabled} className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-orange-500 to-orange-600 py-2.5 text-sm font-bold text-white shadow-md shadow-orange-200/50 transition-all hover:from-orange-600 hover:to-orange-700 disabled:cursor-not-allowed disabled:opacity-50 active:scale-[0.98]">{props.isProcessing ? <><span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" /> Đang xử lý...</> : state.missingCashierShift ? <><AlertTriangle size={16} /> Mở ca thu ngân trước</> : <><Receipt size={16} /> Thanh toán & Xuất hóa đơn</>}</button>
             </div>
         </>
     );

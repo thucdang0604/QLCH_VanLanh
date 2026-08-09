@@ -68,6 +68,10 @@ function getProductPartType(product: ProductData): string {
     return String(product.partType || '').trim();
 }
 
+function getProductWarrantyPolicyId(product: ProductData): string {
+    return String(product.warrantyPolicyId || '').trim();
+}
+
 export const POST = withApi({
     name: 'repairs/confirm-parts',
     onError: (error, context) => {
@@ -225,6 +229,7 @@ export const POST = withApi({
                             status: REPAIR_PART_STATUS.SELECTED,
                             quality: String(pData.quality || ''),
                             partType: getProductPartType(pData),
+                            warrantyPolicyId: getProductWarrantyPolicyId(pData),
                             unitPriceAtUse: Number(pData.price_promo) || Number(pData.price_original) || 0,
                             unitCostAtUse: Number(pData.costPrice) || 0,
                             priceConfirmedAt: arrayTimestampValue()
@@ -316,6 +321,7 @@ export const POST = withApi({
                                 status: REPAIR_PART_STATUS.SELECTED,
                                 quality: String(pData.quality || ''),
                                 partType: line.partType || getProductPartType(pData),
+                                warrantyPolicyId: line.warrantyPolicyId || getProductWarrantyPolicyId(pData),
                                 unitPriceAtUse: Number(pData.price_promo) || Number(pData.price_original) || 0,
                                 unitCostAtUse: Number(pData.costPrice) || 0,
                                 priceConfirmedAt: arrayTimestampValue()

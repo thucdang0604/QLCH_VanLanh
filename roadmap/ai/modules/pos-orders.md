@@ -132,11 +132,16 @@ Chuyen tao/sua voucher sang server API transaction, normalize code uppercase, du
 - **Guardrail:** Thu no cu luon cap nhat don no `paymentHistory`, `customer_transactions`, ledger, aggregate doanh thu, va ca thu ngan trong cung Firestore transaction; don moi khong luu line item thu no vao `items` hay base hoa hong.
 
 ### Feature POS-REV-001: Dong tien POS va phi ship
-- **Status:** in-progress
-- **Date:** 2026-06-28
-- **Files:** `src/app/admin/pos/page.tsx`, `src/app/api/pos/checkout/route.ts`, `src/lib/revenueAggregateServer.ts`, `src/lib/commissionCalcServer.ts`
-- **Summary:** Checkout dua `paymentHistory.method` vao aggregate de tach thuc thu tien mat/chuyen khoan/khac. `shipping_fee` van nam tren don hang, khong nam trong line item tinh hoa hong san pham.
-- **Guardrail:** Phi ship la chi phi phat sinh cua cua hang va khong duoc dua vao base hoa hong nhan vien. Mua may cu cua khach can schema/luong rieng trong plan ops 2026-06-28.
+- **Status:** implemented — production deploy pending
+- **Date:** updated 2026-08-01
+- **Files:** `src/app/admin/pos/page.tsx`, `src/features/pos/RepairShippingPanel.tsx`, `src/app/api/pos/checkout/route.ts`, `src/lib/repairShipping.ts`, `src/lib/cashierShiftTallyServer.ts`, `src/lib/revenueAggregate.ts`
+- **Summary:** POS repair checkout supports exactly one delivery instruction per checkout: customer pays now, shop absorbs, or shop advances for a partner/customer and records receivable debt. Customer-paid ship increases the invoice and is a separate shipping-revenue dimension; shop-absorbed ship is a shipping expense; an advance is receivable only, so neither revenue nor expense.
+- **Guardrail:** Shipping is never commission base. Shop outflow requires an active cashier shift plus `manage_cashier_expenses`, is recorded as a deterministic expense movement, and does not use a negative sale. The advance creates a linked debt order under the billing partner so normal POS debt collection clears the receivable without creating revenue. Browser Rules reject direct mutation of the financial/delivery fields.
+- **Verification:** repair-shipping contract/tally/aggregate unit tests, TypeScript, lint, and the new E2E shipping flow pass. Full E2E has one separate existing RBAC failure: a `manage_repairs` staff session is redirected to login.
+- **POS UX 2026-08-01:** Customer identity and repair/debt actions are now a dedicated workspace at the top of POS. The checkout panel groups selected goods, repair services, and debt collections separately while retaining the same cart/checkout payload. Catalog cards use 48px thumbnails and a dense horizontal layout; shipping remains under the selected repair action, not inside the goods cart.
+- **Customer identity 2026-08-02:** A new customer can be created from either an OTP-verified Vietnamese phone number plus name, or a scanned/entered Zalo contact-card URL plus name. A Zalo contact-card uses its stable external ID as the deterministic `KH-ZALO-*` customer identity; a plain name or free-form Zalo nickname cannot create debt. The payment panel warns the cashier of the exact advance and remaining receivable before a debt checkout; server validation repeats all identity/name/link checks in the same checkout transaction.
+- **Payment composition 2026-08-02:** The checkout UI now begins with only Cash and Bank transfer. Cashier can enter cash tendered, then add an exact VietQR transfer for the balance or turn only the balance into debt; Bank transfer can likewise be reduced before the remainder becomes debt. MoMo, instalment, and full debt are under one collapsed “Other methods” control. The client sends `payment_breakdown` as ordered cash/bank lines rather than overloading one `deposit_payment_method`.
+- **Reconciliation foundation 2026-08-02:** Every bank line receives a stable `POS-*` reference, immutable payment-record ID, expected amount, linked order IDs, and a `bank_payment_reconciliations` record. The cashier currently confirms that money arrived; a future statement/webhook importer may update only `reconciliationStatus` on that record. It must never replay checkout, revenue, debt, or cashier writes. Each line remains allocated atomically to order/repair/debt/revenue/cashier records inside the existing transaction.
 
 - **Title:** POS & Đơn hàng
 - **Icon:** 🛍️

@@ -12,6 +12,8 @@ export interface Article {
     views: number;
     tags?: string[];
     createdAt: unknown;
+    publishedAt?: unknown;
+    scheduledAt?: unknown;
     updatedAt?: unknown;
 }
 

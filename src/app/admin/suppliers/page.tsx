@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { collection, query, orderBy, updateDoc, doc, serverTimestamp, where, limit, setDoc, startAfter, type QueryDocumentSnapshot } from 'firebase/firestore';
-import { getDocs } from '@/lib/firestoreLogger';
+import { collection, query, orderBy, updateDoc, doc, serverTimestamp, where, limit, setDoc, startAfter, getCountFromServer, type QueryDocumentSnapshot } from 'firebase/firestore';
+import { getDocs, getDoc } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
 import { Building2, Plus, Search, Phone, Mail, MapPin, CreditCard, Edit2, ChevronDown, ChevronUp, ArrowDownToLine, ArrowUpFromLine, X, Filter, Tags, Clock3, Loader2 } from 'lucide-react';
@@ -12,6 +12,7 @@ import type { Supplier, SupplierTransaction } from '@/lib/types';
 import { buildContactMethods, buildContactSearchKeywords, getPrimaryContact, hasProfileContact } from '@/lib/contactIdentity';
 import type { ContactMethodType } from '@/lib/types/contact';
 import { reserveSupplierDocumentId } from '@/lib/supplierDocumentIds';
+import { getSearchKeywordQuery } from '@/lib/utils';
 
 // ── Format helpers ──
 const fmt = (n: number) => n.toLocaleString('vi-VN') + 'đ';
@@ -401,6 +402,8 @@ export default function SuppliersPage() {
     const [loadingMoreSuppliers, setLoadingMoreSuppliers] = useState(false);
     const [lastSupplierDoc, setLastSupplierDoc] = useState<QueryDocumentSnapshot | null>(null);
     const [hasMoreSuppliers, setHasMoreSuppliers] = useState(true);
+    const [totalCount, setTotalCount] = useState<number | null>(null);
+    const [isSearchingDB, setIsSearchingDB] = useState(false);
     const [search, setSearch] = useState('');
     const [supplierTypeFilter, setSupplierTypeFilter] = useState('');
     const [tagFilter, setTagFilter] = useState('');
@@ -427,7 +430,10 @@ export default function SuppliersPage() {
                 ...(isReset || !cursor ? [] : [startAfter(cursor)]),
                 limit(SUPPLIER_BATCH_SIZE),
             ];
-            const snap = await getDocs(query(collection(db, 'suppliers'), ...constraints));
+            const [snap, countSnap] = await Promise.all([
+                getDocs(query(collection(db, 'suppliers'), ...constraints)),
+                isReset ? getCountFromServer(collection(db, 'suppliers')).catch(() => null) : Promise.resolve(null),
+            ]);
             const nextSuppliers = snap.docs.map(d => ({ id: d.id, ...d.data() } as Supplier & { id: string }));
             setSuppliers(current => {
                 if (isReset) return nextSuppliers;
@@ -435,6 +441,9 @@ export default function SuppliersPage() {
                 nextSuppliers.forEach(supplier => merged.set(supplier.id, supplier));
                 return [...merged.values()];
             });
+            if (isReset && countSnap) {
+                setTotalCount(countSnap.data().count);
+            }
             setLastSupplierDoc(snap.docs[snap.docs.length - 1] || cursor);
             setHasMoreSuppliers(snap.docs.length === SUPPLIER_BATCH_SIZE);
         } catch (error) {
@@ -445,6 +454,59 @@ export default function SuppliersPage() {
             else setLoadingMoreSuppliers(false);
         }
     }, []);
+
+    const searchInDatabase = async () => {
+        if (!search.trim()) {
+            toast.error('Vui lòng nhập từ khóa để tìm kiếm trên Server');
+            return;
+        }
+        setIsSearchingDB(true);
+        try {
+            const keyword = search.trim();
+            const searchToken = getSearchKeywordQuery(keyword);
+            const phone = keyword.replace(/[^0-9]/g, '').trim();
+
+            const queries = [
+                getDocs(query(collection(db, 'suppliers'), where('searchKeywords', 'array-contains', searchToken), limit(20))),
+            ];
+            if (phone.length >= 8) {
+                queries.push(getDocs(query(collection(db, 'suppliers'), where('phone', '==', phone), limit(10))));
+            }
+
+            const snaps = await Promise.all(queries);
+            const foundMap = new Map<string, Supplier & { id: string }>();
+            snaps.forEach(snap => {
+                snap.docs.forEach(d => {
+                    foundMap.set(d.id, { id: d.id, ...d.data() } as Supplier & { id: string });
+                });
+            });
+
+            try {
+                const docSnap = await getDoc(doc(db, 'suppliers', keyword));
+                if (docSnap.exists()) {
+                    foundMap.set(docSnap.id, { id: docSnap.id, ...docSnap.data() } as Supplier & { id: string });
+                }
+            } catch {}
+
+            if (foundMap.size === 0) {
+                toast.error('Không tìm thấy nhà cung cấp trên máy chủ cho từ khóa này.');
+                return;
+            }
+
+            const foundSuppliers = Array.from(foundMap.values());
+            setSuppliers(current => {
+                const merged = new Map(current.map(supplier => [supplier.id, supplier]));
+                foundSuppliers.forEach(supplier => merged.set(supplier.id, supplier));
+                return [...merged.values()];
+            });
+            toast.success(`Đã tìm thấy ${foundSuppliers.length} NCC từ Server`);
+        } catch (error) {
+            console.error("Lỗi khi tìm kiếm NCC trên DB", error);
+            toast.error('Có lỗi khi tìm kiếm');
+        } finally {
+            setIsSearchingDB(false);
+        }
+    };
 
     useEffect(() => {
         loadSuppliers().catch(error => console.error('Failed to load suppliers:', error));
@@ -574,7 +636,7 @@ export default function SuppliersPage() {
             <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
                 <div className="flex items-center gap-3 rounded-xl border bg-white p-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 text-blue-600"><Building2 size={20} /></div>
-                    <div><p className="text-xs text-gray-500">{hasMoreSuppliers ? 'NCC đã tải' : 'Tổng NCC'}</p><p className="text-lg font-bold text-gray-800">{stats.total}</p></div>
+                    <div><p className="text-xs text-gray-500">Tổng NCC trong DB</p><p className="text-lg font-bold text-gray-800">{totalCount !== null ? totalCount.toLocaleString('vi-VN') : stats.total}</p></div>
                 </div>
                 <div className="flex items-center gap-3 rounded-xl border bg-white p-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-100 text-green-600"><Clock3 size={20} /></div>
@@ -614,7 +676,7 @@ export default function SuppliersPage() {
                     <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
                         <Building2 className="text-orange-500" size={28} /> Nhà cung cấp
                     </h1>
-                    <p className="text-sm text-gray-500 mt-1">{hasMoreSuppliers ? `Đã tải ${suppliers.length} NCC` : `${suppliers.length} NCC`} · {hasMoreSuppliers ? 'Công nợ đã tải' : 'Tổng công nợ'}: <span className="font-bold text-orange-600">{fmt(totalDebt)}</span></p>
+                    <p className="text-sm text-gray-500 mt-1">{totalCount !== null ? `Tổng số ${totalCount.toLocaleString('vi-VN')} NCC (Đã tải ${suppliers.length})` : `${suppliers.length} NCC`} · {hasMoreSuppliers ? 'Công nợ đã tải' : 'Tổng công nợ'}: <span className="font-bold text-orange-600">{fmt(totalDebt)}</span></p>
                 </div>
                 <button onClick={() => { setEditSupplier(null); setShowModal(true); }}
                     className="flex items-center gap-2 bg-orange-500 text-white px-3 py-1.5 text-xs rounded-xl hover:bg-orange-600 font-medium">
@@ -623,10 +685,24 @@ export default function SuppliersPage() {
             </div>
 
             {/* Search */}
-            <div className="relative max-w-md">
-                <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                <input type="text" placeholder={hasMoreSuppliers ? 'Tìm trong NCC đã tải; tải thêm để mở rộng...' : 'Tìm tên, mã NCC, Zalo/Facebook, SĐT, MST...'} value={search} onChange={e => setSearch(e.target.value)}
-                    className="w-full pl-10 pr-4 h-8 text-sm border rounded-xl focus:ring-2 focus:ring-orange-500 focus:outline-none" />
+            <div className="flex gap-2 max-w-md">
+                <div className="relative flex-1">
+                    <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input type="text" placeholder={hasMoreSuppliers ? 'Tìm tên, mã, SĐT... (hoặc bấm Tìm Server)' : 'Tìm tên, mã NCC, SĐT...'} value={search} onChange={e => setSearch(e.target.value)}
+                        className="w-full pl-10 pr-4 h-8 text-sm border rounded-xl focus:ring-2 focus:ring-orange-500 focus:outline-none" />
+                </div>
+                {search.trim().length > 0 && (
+                    <button
+                        type="button"
+                        onClick={searchInDatabase}
+                        disabled={isSearchingDB}
+                        className="px-3 h-8 bg-orange-100 text-orange-600 rounded-xl hover:bg-orange-200 transition-colors flex items-center justify-center gap-1.5 text-xs font-semibold whitespace-nowrap"
+                        title="Tìm trực tiếp trên Server máy chủ"
+                    >
+                        {isSearchingDB ? <Loader2 className="animate-spin" size={14} /> : <Search size={14} />}
+                        <span>Tìm Server</span>
+                    </button>
+                )}
             </div>
 
             {/* List */}

@@ -1,13 +1,13 @@
 
 import { NextRequest } from 'next/server';
-import { getAdminDb } from '@/lib/firebaseAdmin';
+import { getAdminAuth, getAdminDb } from '@/lib/firebaseAdmin';
 import { requirePermission } from '@/lib/apiAuth';
 import { FieldValue } from 'firebase-admin/firestore';
 import { calculateAndSaveCommissionsServer, getActiveRulesServer } from '@/lib/commissionCalcServer';
 import type { Order, Product, RepairTicket, WorkflowNode } from '@/lib/types';
 import { PRODUCT_STATUS, isProductArchived } from '@/lib/productLifecycle';
 import { normalizeVietnamPhone } from '@/lib/phone';
-import { buildContactMethods, buildContactSearchKeywords, buildContactlessDocumentBaseId, getPrimaryContact, hasDebtSafeContact, mergeContactMethods } from '@/lib/contactIdentity';
+import { buildContactMethods, buildContactSearchKeywords, getPrimaryContact, hasDebtSafeContact, mergeContactMethods } from '@/lib/contactIdentity';
 import type { ContactMethod, ContactMethodType } from '@/lib/types/contact';
 import { fetchFifoLogsForDeduction, executeFifoDeductionsWrites, type FifoDeductionResult, type FifoDeductor, type FifoReadMetric } from '@/lib/inventoryFifo';
 import { buildCompletedOrderRevenueDelta, buildPaymentChannelRevenueDelta, incrementRevenueAggregates, mergeRevenueAggregateDeltas } from '@/lib/revenueAggregateServer';
@@ -17,20 +17,31 @@ import { reserveSequentialDocumentIdGroups, type ReservedSequentialDocumentId } 
 import { queueCashierShiftTally } from '@/lib/cashierShiftTallyServer';
 import type { RepairWorkflowSettings } from '@/lib/repairWorkflowConfig';
 import type { RevenueAggregateDelta } from '@/lib/revenueAggregate';
-import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
+import { ApiError, getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
+import { canCreatePosDebt, readPosCustomerIdentityMode, resolvePosZaloContactIdentity, type PosZaloContactIdentity } from '@/lib/posCustomerIdentity';
 import { getE2ERunMetadata } from '@/lib/e2eRunMetadata';
+import { readRepairShippingInput } from '@/lib/repairShipping';
+import { collectOrderWarrantySerials } from '@/lib/orderWarrantyLookup';
+import { createPosPaymentReference, readPosPaymentBreakdown, sumPosPaymentBreakdown, type PosPaymentBreakdownEntry } from '@/lib/posPaymentBreakdown';
 import {
     getCashierShiftChannel,
+    getFixedPosRetailPrice,
     getRepairPaidAmount,
     getRepairPaymentAmount,
+    getWarrantyExpiresAt,
     normalizeOrderPaymentId,
     normalizeRepairTicketId,
     readNonNegativeCheckoutAmount as readNonNegativeAmount,
     readOptionalNonNegativeCheckoutAmount as readOptionalNonNegativeAmount,
     readPositiveCheckoutQuantity as readPositiveQuantity,
+    requiresImeiForPosRetailProduct,
     resolveProductWarranty,
     type CheckoutItemInput,
 } from '@/lib/posCheckoutRules';
+
+type CheckoutPaymentLine = PosPaymentBreakdownEntry & {
+    paymentIndex: number;
+};
 
 function readString(value: unknown): string {
     return typeof value === 'string' ? value.trim() : '';
@@ -49,23 +60,71 @@ function normalizeIncomingContactType(value: unknown): ContactMethodType | undef
     return undefined;
 }
 
-function buildIncomingCustomerContact(customerInfo: Record<string, unknown>) {
+function buildIncomingCustomerContact(
+    customerInfo: Record<string, unknown>,
+    zaloIdentity: PosZaloContactIdentity | null = null,
+) {
     return {
         name: readString(customerInfo.name),
         phone: readString(customerInfo.phone),
-        zalo: readString(customerInfo.zalo),
+        zalo: zaloIdentity?.profileUrl || readString(customerInfo.zalo),
         facebook: readString(customerInfo.facebook),
         email: readString(customerInfo.email),
         address: readString(customerInfo.address),
         note: readString(customerInfo.note),
         other: readString(customerInfo.otherContact || customerInfo.other),
-        primaryType: normalizeIncomingContactType(customerInfo.primaryContactType),
-        source: 'pos' as const,
+        primaryType: zaloIdentity ? 'zalo' : normalizeIncomingContactType(customerInfo.primaryContactType),
+        source: zaloIdentity ? 'zalo_contact_card' as const : 'pos' as const,
+        ...(zaloIdentity ? {
+            methodMeta: {
+                zalo: {
+                    confidence: 'high' as const,
+                    externalId: zaloIdentity.externalId,
+                    profileUrl: zaloIdentity.profileUrl,
+                },
+            },
+        } : {}),
     };
 }
 
 function getCustomerContactMethodsFromData(data: FirebaseFirestore.DocumentData | undefined): ContactMethod[] {
     return Array.isArray(data?.contactMethods) ? data.contactMethods as ContactMethod[] : [];
+}
+
+function customerHasZaloContactCardIdentity(
+    data: FirebaseFirestore.DocumentData | undefined,
+    expectedExternalId: string,
+): boolean {
+    if (!data) return false;
+    const expected = expectedExternalId.toLowerCase();
+    const contactMethods = getCustomerContactMethodsFromData(data);
+    const matchesZaloValue = (value: unknown) => resolvePosZaloContactIdentity(readString(value))?.externalId === expected;
+
+    return contactMethods.some(method => method.type === 'zalo' && (
+        readString(method.externalId).toLowerCase() === expected || matchesZaloValue(method.profileUrl) || matchesZaloValue(method.value)
+    ))
+        || matchesZaloValue(data.zalo)
+        || (data.primaryContactType === 'zalo' && matchesZaloValue(data.primaryContactValue));
+}
+
+async function verifyPosPhoneOwnership(token: unknown, expectedPhone: string): Promise<string> {
+    if (typeof token !== 'string' || !token.trim()) {
+        throw new ApiError('Khách mới ghi nợ cần xác minh SĐT bằng mã OTP.', 400, 'phone_verification_required');
+    }
+
+    try {
+        const decoded = await getAdminAuth().verifyIdToken(token);
+        const verifiedPhone = typeof decoded.phone_number === 'string'
+            ? normalizeVietnamPhone(decoded.phone_number)?.local
+            : null;
+        if (!verifiedPhone || verifiedPhone !== expectedPhone) {
+            throw new ApiError('Mã OTP không khớp với SĐT khách hàng.', 400, 'phone_verification_mismatch');
+        }
+        return verifiedPhone;
+    } catch (error) {
+        if (error instanceof ApiError) throw error;
+        throw new ApiError('Xác minh SĐT đã hết hạn hoặc không hợp lệ. Vui lòng xác minh lại.', 400, 'phone_verification_invalid');
+    }
 }
 
 const ACTIVE_SHIFT_LOCK_COLLECTION = 'system_counters';
@@ -164,7 +223,7 @@ export const POST = withApi({
         markTiming('auth');
 
         const body = await context.readJson(request);
-        const { idempotencyKey, repairTicketId, repairTicketIds, customer_info, items, discount_amount, total_amount, deposit_amount, deposit_payment_method, payment_method, voucherCode, use_surplus_to_pay_debt, cashierShiftId } = body;
+        const { idempotencyKey, repairTicketId, repairTicketIds, customer_info, phone_verification_token, items, discount_amount, total_amount, deposit_amount, deposit_payment_method, payment_breakdown, payment_method, voucherCode, use_surplus_to_pay_debt, cashierShiftId, repair_shipping, pos_shipping } = body;
         markTiming('parseBody');
 
         if (!Array.isArray(items) || items.length === 0) {
@@ -179,6 +238,7 @@ export const POST = withApi({
         });
         const submittedDiscountAmount = readOptionalNonNegativeAmount(discount_amount, 'Giam gia');
         const submittedDepositAmount = readOptionalNonNegativeAmount(deposit_amount, 'So tien khach tra');
+        const submittedPaymentBreakdown = readPosPaymentBreakdown(payment_breakdown);
         const submittedTotalAmount = total_amount === undefined || total_amount === null || total_amount === ''
             ? null
             : readNonNegativeAmount(total_amount, 'Tong tien');
@@ -191,19 +251,30 @@ export const POST = withApi({
         };
 
         const customerInfoRecord = (customer_info && typeof customer_info === 'object' ? customer_info : {}) as Record<string, unknown>;
-        const incomingContactInput = buildIncomingCustomerContact(customerInfoRecord);
+        const customerIdentityMode = readPosCustomerIdentityMode(customerInfoRecord.identityMode);
+        const zaloIdentity = customerIdentityMode === 'zalo_contact'
+            ? resolvePosZaloContactIdentity(readString(customerInfoRecord.zalo))
+            : null;
+        if (customerIdentityMode === 'zalo_contact' && !zaloIdentity) {
+            throw new ApiError('Khách mới qua Zalo cần liên kết danh thiếp Zalo hợp lệ (zaloapp.com/qr/p/...).', 400, 'zalo_contact_card_required');
+        }
+        const incomingContactInput = buildIncomingCustomerContact(customerInfoRecord, zaloIdentity);
+        if ((customerIdentityMode === 'verified_phone' || customerIdentityMode === 'zalo_contact') && !incomingContactInput.name) {
+            throw new ApiError('Khách hàng mới cần nhập tên trước khi tạo hồ sơ và ghi nợ.', 400, 'customer_name_required');
+        }
         const incomingContactMethods = buildContactMethods(incomingContactInput);
         const incomingPrimaryContact = getPrimaryContact(incomingContactMethods);
         const requestedCustomerId = readString(customerInfoRecord.customerId || customerInfoRecord.id);
         const rawPhone = incomingContactInput.phone;
         const normalizedPhoneResult = rawPhone ? normalizeVietnamPhone(rawPhone) : null;
-        const resolvedCustomerId = normalizedPhoneResult?.local
-            || requestedCustomerId
-            || (
-                incomingContactMethods.length > 0 && incomingContactInput.name && incomingContactInput.name !== 'Khách lẻ'
-                    ? buildContactlessDocumentBaseId('KH', incomingContactInput)
-                    : ''
-            );
+        const verifiedPhone = customerIdentityMode === 'verified_phone'
+            ? await verifyPosPhoneOwnership(phone_verification_token, normalizedPhoneResult?.local || '')
+            : '';
+        const resolvedCustomerId = customerIdentityMode === 'existing'
+            ? requestedCustomerId
+            : customerIdentityMode === 'verified_phone'
+                ? verifiedPhone
+                : zaloIdentity?.customerId || '';
         const requestedCashierShiftId = readString(cashierShiftId);
         const repairIdSet = new Set<string>();
         if (repairTicketId) repairIdSet.add(normalizeRepairTicketId(repairTicketId));
@@ -217,6 +288,11 @@ export const POST = withApi({
             if (!item.isRepairTicket) continue;
             const normalized = normalizeRepairTicketId(item.repairTicketId || item.productId);
             if (normalized) repairIdSet.add(normalized);
+        }
+        const hasRetailProducts = checkoutItems.some(item => !item.isRepairTicket && !item.isOrderPayment);
+        const repairShipping = readRepairShippingInput(pos_shipping || repair_shipping, repairIdSet, hasRetailProducts);
+        if (repairShipping && repairShipping.mode !== 'customer_paid_now') {
+            await requirePermission(request, 'manage_cashier_expenses');
         }
         const orderPaymentIdSet = new Set<string>();
         for (const item of checkoutItems) {
@@ -236,6 +312,9 @@ export const POST = withApi({
             const opRef = idempotencyKey ? db.collection('operation_requests').doc(idempotencyKey) : null;
             const productRefs = retailProductIds.map(productId => db.collection('products').doc(productId));
             const customerRef = resolvedCustomerId ? db.collection('customers').doc(resolvedCustomerId) : null;
+            const shippingPayerRef = repairShipping?.mode === 'shop_advance_on_credit' && repairShipping.billingCustomerId
+                ? db.collection('customers').doc(repairShipping.billingCustomerId)
+                : null;
             const repairRefs = Array.from(repairIdSet, id => db.collection('repairs').doc(id));
             const orderPaymentRefs = Array.from(orderPaymentIdSet, id => db.collection('orders').doc(id));
             const requestedCashierShiftRef = requestedCashierShiftId
@@ -249,6 +328,7 @@ export const POST = withApi({
                 taxonomyRef,
                 ...productRefs,
                 ...(customerRef ? [customerRef] : []),
+                ...(shippingPayerRef ? [shippingPayerRef] : []),
                 ...repairRefs,
                 ...orderPaymentRefs,
                 ...(requestedCashierShiftRef ? [activeShiftLockRef] : []),
@@ -325,6 +405,13 @@ export const POST = withApi({
             const createdByName = caller.displayName || caller.name || (caller as { email?: string }).email || caller.uid;
             const custRef = customerRef;
             const custSnap = customerRef ? getCoreSnapshot(customerRef) || null : null;
+            const shippingPayerSnap = shippingPayerRef ? getCoreSnapshot(shippingPayerRef) || null : null;
+            if (customerIdentityMode === 'existing' && !custSnap?.exists) {
+                throw new ApiError('Hồ sơ khách hàng đã chọn không còn tồn tại. Vui lòng tra cứu và chọn lại.', 400, 'customer_not_found');
+            }
+            if (customerIdentityMode === 'zalo_contact' && custSnap?.exists && !customerHasZaloContactCardIdentity(custSnap.data(), zaloIdentity!.externalId)) {
+                throw new ApiError('Liên kết Zalo này trùng mã hồ sơ nhưng không khớp dữ liệu hiện có. Vui lòng chọn hồ sơ khách cũ hoặc liên hệ quản trị.', 409, 'zalo_customer_id_collision');
+            }
             const incomingName = customerRef ? incomingContactInput.name : '';
             const repairDocs = new Map<string, { ref: FirebaseFirestore.DocumentReference; snap: FirebaseFirestore.DocumentSnapshot }>();
             for (const ref of repairRefs) {
@@ -361,13 +448,14 @@ export const POST = withApi({
 
             // Normalize items & deduct stock
             const normalizedItems = [];
+            const warrantyStartedAt = Date.now();
             let serverSubtotal = 0;
             let orderPaymentSubtotal = 0;
 
             for (const item of checkoutItems) {
                 const pid = String(item.productId);
                 const qty = readPositiveQuantity(item.quantity, `So luong san pham ${pid || 'khong ro'}`);
-                const price = readNonNegativeAmount(item.price, `Gia dong hang ${pid || 'khong ro'}`);
+                const submittedPrice = readNonNegativeAmount(item.price, `Gia dong hang ${pid || 'khong ro'}`);
 
                 if (item.isRepairTicket) {
                     const itemRepairTicketId = normalizeRepairTicketId(item.repairTicketId || item.productId);
@@ -376,12 +464,12 @@ export const POST = withApi({
                         productId: pid,
                         repairTicketId: itemRepairTicketId || undefined,
                         productName: item.productName || '[Phiếu sửa chữa]',
-                        price,
+                        price: submittedPrice,
                         quantity: qty,
                         image: '',
                         isRepairTicket: true
                     });
-                    serverSubtotal += price * qty;
+                    serverSubtotal += submittedPrice * qty;
                     continue;
                 }
                 if (item.isOrderPayment) {
@@ -391,12 +479,12 @@ export const POST = withApi({
                         productId: pid,
                         orderPaymentId: itemOrderPaymentId || undefined,
                         productName: item.productName || '[Thanh toán đơn hàng]',
-                        price,
+                        price: submittedPrice,
                         quantity: qty,
                         image: '',
                         isOrderPayment: true
                     });
-                    const lineTotal = price * qty;
+                    const lineTotal = submittedPrice * qty;
                     serverSubtotal += lineTotal;
                     orderPaymentSubtotal += lineTotal;
                     continue;
@@ -404,22 +492,25 @@ export const POST = withApi({
 
                 const pSnap = productDocs.get(pid)!;
                 const d = pSnap.data;
+                const price = getFixedPosRetailPrice(d, `Gia san pham ${pid || 'khong ro'}`);
 
                 const warrantyInfo = resolveProductWarranty(d, retailTrees);
+                if (warrantyInfo && warrantyInfo.warrantyMonths <= 0) {
+                    throw new Error(`San pham "${d.name || pid}" da bat bao hanh nhung chua co thoi han. Vui long cap nhat san pham hoac danh muc truoc khi thanh toan.`);
+                }
                 const warrantyType = warrantyInfo?.warrantyType || 'none';
                 const warrantyMonths = warrantyInfo?.warrantyMonths || 0;
+                const warrantyExpiresAt = warrantyInfo
+                    ? getWarrantyExpiresAt(warrantyStartedAt, warrantyMonths)
+                    : undefined;
 
                 let imeis: string[] = [];
-                if (warrantyType === 'warrantyDevice') {
+                if (requiresImeiForPosRetailProduct(d)) {
                     if (Array.isArray(item.imeis)) {
                         imeis = item.imeis.map((x: unknown) => String(x).trim()).filter(Boolean);
                     }
-                    // For POS, if not pending deposit, we might require IMEI immediately.
-                    // But maybe we just save what is provided and let Admin Details warn if missing?
-                    // The plan says "validate độ dài mảng IMEI". Let's enforce it if it's not a pending deposit.
-                    // Actually, if it's pending, they might not have the item yet.
-                    if (imeis.length > qty) {
-                        throw new Error(`Sản phẩm "${d.name}" chỉ mua ${qty} nhưng cung cấp ${imeis.length} IMEI.`);
+                    if (imeis.length !== qty) {
+                        throw new Error(`Sản phẩm "${d.name}" cần đủ ${qty} IMEI/Serial.`);
                     }
                 }
 
@@ -432,6 +523,10 @@ export const POST = withApi({
                     image: d.images?.[0] || d.imageUrl || '',
                     warrantyType,
                     warrantyMonths,
+                    ...(warrantyInfo ? {
+                        warrantyStartedAt,
+                        ...(warrantyExpiresAt ? { warrantyExpiresAt } : {}),
+                    } : {}),
                     imeis,
                 });
 
@@ -440,29 +535,36 @@ export const POST = withApi({
 
             const discountableSubtotal = Math.max(0, serverSubtotal - orderPaymentSubtotal);
             const serverDiscount = Math.min(submittedDiscountAmount, discountableSubtotal);
-            const currentOrderTotal = Math.max(0, discountableSubtotal - serverDiscount);
+            const customerShippingCharge = repairShipping?.mode === 'customer_paid_now' ? repairShipping.fee : 0;
+            const currentOrderTotal = Math.max(0, discountableSubtotal - serverDiscount) + customerShippingCharge;
             const serverTotal = currentOrderTotal + orderPaymentSubtotal;
             const isDebtCollectionOnly = orderPaymentSubtotal > 0 && discountableSubtotal === 0;
             const paymentMethodCode = String(payment_method || 'CASH').toUpperCase();
+            const submittedBreakdownTotal = submittedPaymentBreakdown ? sumPosPaymentBreakdown(submittedPaymentBreakdown) : 0;
             // If payment method is not DEBT, and deposit is not provided/0, treat as fully paid for the whole POS receipt.
-            const paymentReceived = (paymentMethodCode !== 'DEBT' && submittedDepositAmount === 0)
+            const paymentReceived = submittedPaymentBreakdown
+                ? submittedBreakdownTotal
+                : (paymentMethodCode !== 'DEBT' && submittedDepositAmount === 0)
                 ? serverTotal
                 : submittedDepositAmount;
             const paidNow = !isDebtCollectionOnly ? Math.min(paymentReceived, currentOrderTotal) : 0;
-            const depositPaymentMethodCode = String(deposit_payment_method || '').trim().toUpperCase();
+            const primarySubmittedMethod = submittedPaymentBreakdown && submittedPaymentBreakdown.length > 0
+                ? submittedPaymentBreakdown[0].method
+                : undefined;
+            const depositPaymentMethodCode = String(deposit_payment_method || primarySubmittedMethod || '').trim().toUpperCase();
             const receivedPaymentMethodCode = paymentMethodCode === 'DEBT' && paidNow > 0
-                ? depositPaymentMethodCode
+                ? (depositPaymentMethodCode || 'CASH')
                 : paymentMethodCode;
 
             if (paymentMethodCode === 'DEBT' && paidNow > 0 && !['CASH', 'BANK', 'MOMO', 'QR', 'CARD'].includes(receivedPaymentMethodCode)) {
-                throw new Error('Vui lòng chọn kênh tiền mặt hoặc chuyển khoản/QR cho khoản khách đã đưa.');
+                throw new ApiError('Vui lòng chọn kênh tiền mặt hoặc chuyển khoản/QR cho khoản khách đã đưa.', 400, 'debt_deposit_channel_required');
             }
 
             if (paymentMethodCode === 'DEBT' && orderPaymentSubtotal > 0 && discountableSubtotal > 0) {
-                throw new Error('Vui lòng tách thu nợ đơn cũ và bán hàng mới thành 2 lần thanh toán riêng.');
+                throw new ApiError('Vui lòng tách thu nợ đơn cũ và bán hàng mới thành 2 lần thanh toán riêng.', 400, 'separate_debt_collection_required');
             }
             if (isDebtCollectionOnly && voucherCode) {
-                throw new Error('Không áp dụng voucher cho khoản thu nợ đơn cũ.');
+                throw new ApiError('Không áp dụng voucher cho khoản thu nợ đơn cũ.', 400, 'voucher_not_allowed_for_debt_collection');
             }
 
             markTransaction('normalizeTotals');
@@ -551,6 +653,14 @@ export const POST = withApi({
                     throw new Error(`So tien phieu sua chua #${id.slice(-6)} khong khop he thong.`);
                 }
                 repairPaymentTotals.set(id, expectedAmount);
+            }
+            if (repairShipping && repairShipping.repairTicketId && !repairPaymentTotals.has(repairShipping.repairTicketId)) {
+                throw new Error('Phí ship chỉ được tạo cùng phiếu sửa chữa chưa thanh toán trong giỏ POS.');
+            }
+            if (repairShipping?.mode === 'shop_advance_on_credit') {
+                if (!shippingPayerRef || !shippingPayerSnap?.exists || shippingPayerSnap.data()?.isActive === false) {
+                    throw new ApiError('Khách lẻ không thể ghi nợ phí ship. Vui lòng chọn hồ sơ khách hàng hoặc chọn Khách trả/Shop chịu.', 400, 'shipping_advance_debtor_required');
+                }
             }
 
             const orderPaymentRequestedTotals = new Map<string, number>();
@@ -652,6 +762,49 @@ export const POST = withApi({
 
             const orderPaymentTotal = Array.from(orderPaymentTotals.values()).reduce((sum, amount) => sum + amount, 0);
             const updatedOrderIds = Array.from(orderPaymentTotals.keys());
+            const totalCollectedAmount = paidNow + orderPaymentTotal;
+            if (submittedPaymentBreakdown && Math.abs(submittedBreakdownTotal - totalCollectedAmount) > 1) {
+                throw new Error('Các khoản thanh toán không khớp với số tiền cần thu. Vui lòng kiểm tra lại.');
+            }
+
+            const legacyReceivedPaymentMethod = paymentMethodCode === 'DEBT' && paidNow > 0
+                ? receivedPaymentMethodCode
+                : paymentMethodCode;
+            const legacyPaymentLines: PosPaymentBreakdownEntry[] = totalCollectedAmount > 0
+                && ['CASH', 'BANK', 'MOMO', 'QR', 'CARD', 'INSTALLMENT'].includes(legacyReceivedPaymentMethod)
+                ? [{ method: legacyReceivedPaymentMethod as PosPaymentBreakdownEntry['method'], amount: totalCollectedAmount }]
+                : [];
+            const checkoutPaymentLines: CheckoutPaymentLine[] = (submittedPaymentBreakdown || legacyPaymentLines)
+                .map((entry, index) => ({
+                    ...entry,
+                    paymentIndex: index + 1,
+                }));
+            const remainingPaymentLines = checkoutPaymentLines.map(entry => ({ ...entry }));
+            const takePaymentLines = (amount: number): CheckoutPaymentLine[] => {
+                let remainingAmount = Math.max(0, amount);
+                const allocated: CheckoutPaymentLine[] = [];
+                while (remainingAmount > 0 && remainingPaymentLines.length > 0) {
+                    const line = remainingPaymentLines[0];
+                    const allocatedAmount = Math.min(remainingAmount, line.amount);
+                    allocated.push({ ...line, amount: allocatedAmount });
+                    remainingAmount -= allocatedAmount;
+                    line.amount -= allocatedAmount;
+                    if (line.amount <= 0) remainingPaymentLines.shift();
+                }
+                if (remainingAmount > 0) {
+                    throw new Error('Không thể phân bổ đủ các khoản thanh toán.');
+                }
+                return allocated;
+            };
+            const currentSalePaymentLines = takePaymentLines(paidNow);
+            const orderPaymentLinesById = new Map<string, CheckoutPaymentLine[]>();
+            for (const [id, amount] of orderPaymentTotals.entries()) {
+                orderPaymentLinesById.set(id, takePaymentLines(amount));
+            }
+            const resolvePaymentMethodFromLines = (lines: readonly CheckoutPaymentLine[], fallback: string) => {
+                const methods = Array.from(new Set(lines.map(line => line.method)));
+                return methods.length > 1 ? 'MIXED' : methods[0] || fallback;
+            };
             const settledRepairRefs = new Map<string, { orderId: string; ref: FirebaseFirestore.DocumentReference }>();
             for (const [id, paymentAmount] of orderPaymentTotals.entries()) {
                 const orderPaymentDoc = orderPaymentDocs.get(id);
@@ -678,14 +831,18 @@ export const POST = withApi({
                 const entry = Array.from(settledRepairRefs.values())[index];
                 settledRepairDocs.set(snapshot.id, { orderId: entry.orderId, ticket: snapshot.data() as RepairTicket });
             });
-            const cashierShiftChannel = getCashierShiftChannel(receivedPaymentMethodCode);
-            const cashierShiftCollectedAmount = cashierShiftChannel === 'none'
+            const cashierShiftPaymentLines = checkoutPaymentLines.filter(line => getCashierShiftChannel(line.method) !== 'none');
+            const cashierShiftCollectedAmount = cashierShiftPaymentLines.reduce((sum, line) => sum + line.amount, 0);
+            const cashierShiftShippingExpenseAmount = repairShipping?.mode === 'customer_paid_now'
                 ? 0
-                : (paidNow + orderPaymentTotal);
+                : (repairShipping?.fee || 0);
+            const cashierShiftShippingExpenseChannel = repairShipping?.shopPaymentMethod
+                ? getCashierShiftChannel(repairShipping.shopPaymentMethod)
+                : 'none';
             let cashierShiftRef: FirebaseFirestore.DocumentReference | null = null;
             let cashierShiftUsesTally = false;
 
-            if (cashierShiftCollectedAmount > 0) {
+            if (cashierShiftCollectedAmount > 0 || cashierShiftShippingExpenseAmount > 0) {
                 let activeShiftDoc = requestedCashierShiftSnap;
                 const verifiedActiveShiftLockSnap = activeShiftLockSnap || await tx.get(activeShiftLockRef);
                 const activeShiftId = typeof verifiedActiveShiftLockSnap.data()?.activeShiftId === 'string'
@@ -708,7 +865,7 @@ export const POST = withApi({
                 cashierShiftRef = activeShiftDoc.ref;
                 cashierShiftUsesTally = Number(activeShiftDoc.data()?.tallyVersion) >= 1;
             }
-            const cashierShiftChanged = Boolean(cashierShiftRef && cashierShiftCollectedAmount > 0);
+            const cashierShiftChanged = Boolean(cashierShiftRef && (cashierShiftCollectedAmount > 0 || cashierShiftShippingExpenseAmount > 0));
             markTransaction('readCashierShift');
 
             const repairCompletionTargets = new Map<string, { targetStatus: string; shouldCountCompletion: boolean }>();
@@ -796,12 +953,38 @@ export const POST = withApi({
                 repairPaidNowById.set(id, paidForRepair);
                 remainingPaymentForRepairs -= paidForRepair;
             }
+            const shippingPaidNow = Math.min(customerShippingCharge, remainingPaymentForRepairs);
+            const shippingDebt = Math.max(0, customerShippingCharge - shippingPaidNow);
+            const remainingCurrentSalePaymentLines = currentSalePaymentLines.map(line => ({ ...line }));
+            const takeCurrentSalePaymentLines = (amount: number): CheckoutPaymentLine[] => {
+                let remainingAmount = Math.max(0, amount);
+                const allocated: CheckoutPaymentLine[] = [];
+                while (remainingAmount > 0 && remainingCurrentSalePaymentLines.length > 0) {
+                    const line = remainingCurrentSalePaymentLines[0];
+                    const allocatedAmount = Math.min(remainingAmount, line.amount);
+                    allocated.push({ ...line, amount: allocatedAmount });
+                    remainingAmount -= allocatedAmount;
+                    line.amount -= allocatedAmount;
+                    if (line.amount <= 0) remainingCurrentSalePaymentLines.shift();
+                }
+                if (remainingAmount > 0) throw new Error('Không thể phân bổ khoản thu cho hóa đơn.');
+                return allocated;
+            };
+            const retailPaymentLines = takeCurrentSalePaymentLines(paidRetailNow);
+            const repairPaymentLinesById = new Map<string, CheckoutPaymentLine[]>();
+            for (const [id] of repairPaymentTotals.entries()) {
+                repairPaymentLinesById.set(id, takeCurrentSalePaymentLines(repairPaidNowById.get(id) || 0));
+            }
+            const shippingPaymentLines = takeCurrentSalePaymentLines(shippingPaidNow);
             const isDebt = paymentMethodCode === 'DEBT' || newDebt > 0;
             const existingCustomerContactMethods = getCustomerContactMethodsFromData(custSnap?.data());
             const hasIncomingDebtSafeContact = hasDebtSafeContact(incomingContactMethods);
             const hasExistingDebtSafeContact = hasDebtSafeContact(existingCustomerContactMethods);
+            if (isDebt && !canCreatePosDebt(customerIdentityMode)) {
+                throw new ApiError('Khách lẻ không thể ghi nợ. Hãy chọn hồ sơ khách cũ hoặc xác minh SĐT khách mới bằng OTP.', 400, 'debt_customer_identity_required');
+            }
             if (isDebt && (!resolvedCustomerId || (!hasIncomingDebtSafeContact && !hasExistingDebtSafeContact))) {
-                throw new Error('Đơn hàng ghi nợ hoặc thanh toán thiếu bắt buộc phải có khách hàng và kênh liên hệ rõ như SĐT, Zalo, Facebook, email hoặc địa chỉ.');
+                throw new ApiError('Đơn hàng ghi nợ hoặc thanh toán thiếu bắt buộc phải có khách hàng và kênh liên hệ rõ như SĐT, Zalo, Facebook, email hoặc địa chỉ.', 400, 'debt_contact_required');
             }
 
             const deltaDebt = isDebtCollectionOnly
@@ -815,6 +998,9 @@ export const POST = withApi({
                 }
                 if (orderPaymentTotal > 0) customerLedgerCount += 1; // thu nợ đơn cũ / cấn tiền dư
             }
+            if (repairShipping?.mode === 'shop_advance_on_credit') {
+                customerLedgerCount += 1;
+            }
             const inventoryLogCount = isPending
                 ? 0
                 : Array.from(stockProductIds).reduce((count, productId) => {
@@ -823,12 +1009,19 @@ export const POST = withApi({
                     return count + (retailQty > 0 ? 1 : 0) + (repairQty > 0 ? 1 : 0);
                 }, 0);
             const customerTransactionCount = resolvedCustomerId && orderPaymentTotal > 0 ? 1 : 0;
+            const shippingExpenseCount = repairShipping?.mode === 'shop_absorbs' ? 1 : 0;
             const reservationStartedAt = Date.now();
             const reservedIdGroupsPromise = reserveSequentialDocumentIdGroups(tx, db, [
                 { key: 'inventoryLogs', collectionName: 'inventory_logs', prefix: 'IL', count: inventoryLogCount },
                 { key: 'customerLedger', collectionName: 'customer_ledger', prefix: 'CL', count: customerLedgerCount },
                 { key: 'customerTransactions', collectionName: 'customer_transactions', prefix: 'CT', count: customerTransactionCount },
-                { key: 'order', collectionName: 'orders', prefix: 'DH', count: isDebtCollectionOnly ? 0 : 1 },
+                {
+                    key: 'orders',
+                    collectionName: 'orders',
+                    prefix: 'DH',
+                    count: (isDebtCollectionOnly ? 0 : 1) + (repairShipping?.mode === 'shop_advance_on_credit' ? 1 : 0),
+                },
+                { key: 'shippingExpenses', collectionName: 'expenses', prefix: 'CP', count: shippingExpenseCount },
             ]);
             markTransaction('prepareFifo');
             try {
@@ -859,23 +1052,53 @@ export const POST = withApi({
             const inventoryLogAllocations = reservedIdGroups.get('inventoryLogs') || [];
             const customerLedgerAllocations = reservedIdGroups.get('customerLedger') || [];
             const customerTransactionAllocations = reservedIdGroups.get('customerTransactions') || [];
+            const shippingExpenseAllocations = reservedIdGroups.get('shippingExpenses') || [];
             let inventoryLogAllocationIndex = 0;
             let customerLedgerAllocationIndex = 0;
 
-            const orderAllocation: ReservedSequentialDocumentId | null = reservedIdGroups.get('order')?.[0] || null;
+            const orderAllocations = reservedIdGroups.get('orders') || [];
+            const orderAllocation: ReservedSequentialDocumentId | null = isDebtCollectionOnly ? null : orderAllocations[0] || null;
             const orderRef = orderAllocation?.ref || null;
             const orderId = orderAllocation?.id || '';
+            const shippingAdvanceOrderAllocation: ReservedSequentialDocumentId | null = repairShipping?.mode === 'shop_advance_on_credit'
+                ? orderAllocations[isDebtCollectionOnly ? 0 : 1] || null
+                : null;
+            const shippingAdvanceOrderId = shippingAdvanceOrderAllocation?.id || '';
             const debtPaymentReferenceId = updatedOrderIds.length === 1
                 ? updatedOrderIds[0]
                 : (idempotencyKey || orderId || `DEBT-${updatedOrderIds.map(id => id.slice(-6)).join('-')}`);
             const orderItems = normalizedItems.filter((item) => !item.isOrderPayment);
+            const repairShippingRecord = repairShipping ? {
+                ...(repairShipping.repairTicketId ? { repairTicketId: repairShipping.repairTicketId } : {}),
+                mode: repairShipping.mode,
+                fee: repairShipping.fee,
+                customerCharge: customerShippingCharge,
+                recipientName: repairShipping.recipientName,
+                recipientPhone: repairShipping.recipientPhone,
+                recipientAddress: repairShipping.recipientAddress,
+                ...(repairShipping.billingCustomerId ? { billingCustomerId: repairShipping.billingCustomerId } : {}),
+                ...(repairShipping.shopPaymentMethod ? { shopPaymentMethod: repairShipping.shopPaymentMethod } : {}),
+                ...(shippingAdvanceOrderId ? { shippingAdvanceOrderId } : {}),
+                ...(repairShipping.note ? { note: repairShipping.note } : {}),
+            } : null;
+            const paymentRecordReference = orderId || debtPaymentReferenceId || readString(idempotencyKey);
+            const getBankTransferReference = (line: CheckoutPaymentLine) => line.reference
+                || (line.method === 'BANK' ? createPosPaymentReference(`${paymentRecordReference}${line.paymentIndex}`) : '');
+            const getPaymentRecordId = (line: CheckoutPaymentLine) => `${paymentRecordReference}:payment:${line.paymentIndex}`;
+            const currentOrderPaymentMethod = newDebt > 0
+                ? 'DEBT'
+                : resolvePaymentMethodFromLines(currentSalePaymentLines, paymentMethodCode);
 
+            const warrantySerials = collectOrderWarrantySerials(orderItems);
             const order: Record<string, unknown> = {
                 ...e2eMetadata,
                 customer_info: {
                     customerId: resolvedCustomerId || '',
                     name: incomingContactInput.name || 'Khách lẻ',
                     phone: normalizedPhoneResult?.local || incomingContactInput.phone || '',
+                    identityMode: customerIdentityMode,
+                    ...(verifiedPhone ? { phoneVerifiedAt: FieldValue.serverTimestamp() } : {}),
+                    ...(zaloIdentity ? { zaloExternalId: zaloIdentity.externalId } : {}),
                     primaryContactType: incomingPrimaryContact?.type || null,
                     primaryContactValue: incomingPrimaryContact?.value || '',
                     contactMethods: incomingContactMethods,
@@ -884,10 +1107,13 @@ export const POST = withApi({
                     note: incomingContactInput.note || '',
                 },
                 items: orderItems,
+                ...(warrantySerials.length > 0 ? { warrantySerials } : {}),
                 subtotal_amount: discountableSubtotal,
                 discount_amount: serverDiscount,
                 deposit_amount: paidNow,
                 total_amount: currentOrderTotal,
+                ...(customerShippingCharge > 0 ? { shipping_fee: customerShippingCharge } : {}),
+                ...(repairShippingRecord ? { repairShipping: repairShippingRecord } : {}),
                 ...(appliedVoucherCode ? { voucherCode: appliedVoucherCode, discountSource: 'voucher' } : {}),
                 status: 'Completed',
                 source: 'pos',
@@ -896,28 +1122,37 @@ export const POST = withApi({
                 containsOrderPayment: orderPaymentTotals.size > 0,
                 orderPaymentIds: Array.from(orderPaymentTotals.keys()),
                 is_vat_exported: false,
-                payment_method: payment_method || 'CASH',
-                ...(paymentMethodCode === 'DEBT' && paidNow > 0 ? { deposit_payment_method: receivedPaymentMethodCode } : {}),
+                payment_method: currentOrderPaymentMethod,
+                ...(currentSalePaymentLines.length > 0 ? {
+                    paymentBreakdown: currentSalePaymentLines.map(line => ({
+                        method: line.method,
+                        amount: line.amount,
+                        ...(getBankTransferReference(line) ? { reference: getBankTransferReference(line) } : {}),
+                    })),
+                } : {}),
+                ...(newDebt > 0 && currentSalePaymentLines.length === 1 ? { deposit_payment_method: currentSalePaymentLines[0].method } : {}),
                 paymentStatus: newDebt > 0 ? 'debt' : 'paid',
                 createdAt: FieldValue.serverTimestamp(),
                 updatedAt: FieldValue.serverTimestamp(),
                 completedAt: FieldValue.serverTimestamp(),
-                paymentHistory: paidNow > 0 ? [{
+                paymentHistory: currentSalePaymentLines.map(line => ({
                     type: newDebt > 0 ? 'deposit' : 'full',
-                    amount: Math.min(paidNow, currentOrderTotal),
-                    method: receivedPaymentMethodCode,
+                    amount: line.amount,
+                    method: line.method,
+                    paymentRecordId: getPaymentRecordId(line),
+                    ...(getBankTransferReference(line) ? { bankTransferReference: getBankTransferReference(line) } : {}),
                     timestamp: Date.now(),
                     note: newDebt > 0
-                        ? `Thanh toán một phần POS (${paidNow.toLocaleString('vi-VN')}đ) — nợ lại ${newDebt.toLocaleString('vi-VN')}đ — ${payment_method}`
-                        : `Thanh toán POS — ${payment_method}`
-                }] : [],
+                        ? `Thanh toán một phần POS (${line.amount.toLocaleString('vi-VN')}đ) — nợ lại ${newDebt.toLocaleString('vi-VN')}đ`
+                        : `Thanh toán POS — ${line.method}`,
+                })),
                 createdBy: caller.uid,
                 createdByName
             };
 
             // ── Commission Server-Side Calculation ──
             const commissionableItems = orderItems;
-            const commissionableTotal = currentOrderTotal;
+            const commissionableTotal = Math.max(0, currentOrderTotal - customerShippingCharge);
             const activeCommissionRules = activeCommissionRulesPromise ? await activeCommissionRulesPromise : [];
             const commissionProductMap = Array.from(productDocs.entries()).reduce<Record<string, Product>>((map, [productId, productDoc]) => {
                 map[productId] = productDoc.data as Product;
@@ -1055,6 +1290,90 @@ export const POST = withApi({
                 orderAllocation.commitCounter();
                 tx.set(orderRef, order);
             }
+            for (const line of checkoutPaymentLines.filter(entry => entry.method === 'BANK')) {
+                const linkedOrderIds = new Set<string>();
+                if (orderId && currentSalePaymentLines.some(entry => entry.paymentIndex === line.paymentIndex)) {
+                    linkedOrderIds.add(orderId);
+                }
+                for (const [linkedOrderId, lines] of orderPaymentLinesById.entries()) {
+                    if (lines.some(entry => entry.paymentIndex === line.paymentIndex)) linkedOrderIds.add(linkedOrderId);
+                }
+                const reference = getBankTransferReference(line);
+                tx.set(db.collection('bank_payment_reconciliations').doc(`BPR-${getPaymentRecordId(line)}`), {
+                    ...e2eMetadata,
+                    paymentRecordId: getPaymentRecordId(line),
+                    reference,
+                    expectedAmount: line.amount,
+                    paymentMethod: 'BANK',
+                    provider: 'vietqr',
+                    paymentStatus: 'confirmed',
+                    reconciliationStatus: 'pending',
+                    orderIds: Array.from(linkedOrderIds),
+                    ...(readString(idempotencyKey) ? { idempotencyKey: readString(idempotencyKey) } : {}),
+                    confirmedBy: caller.uid,
+                    confirmedByName: createdByName,
+                    confirmedAt: FieldValue.serverTimestamp(),
+                    updatedAt: FieldValue.serverTimestamp(),
+                }, { merge: true });
+            }
+            if (repairShipping?.mode === 'shop_advance_on_credit') {
+                if (!shippingAdvanceOrderAllocation || !shippingPayerRef || !shippingPayerSnap?.exists) {
+                    throw new Error('Không thể tạo chứng từ công nợ phí ship.');
+                }
+                const payer = shippingPayerSnap.data() || {};
+                shippingAdvanceOrderAllocation.commitCounter();
+                tx.set(shippingAdvanceOrderAllocation.ref, {
+                    ...e2eMetadata,
+                    customer_info: {
+                        customerId: shippingPayerRef.id,
+                        name: String(payer.name || 'Khách/đối tác'),
+                        phone: String(payer.phone || ''),
+                        primaryContactType: payer.primaryContactType || null,
+                        primaryContactValue: payer.primaryContactValue || '',
+                    },
+                    items: [],
+                    subtotal_amount: repairShipping.fee,
+                    discount_amount: 0,
+                    total_amount: repairShipping.fee,
+                    deposit_amount: 0,
+                    status: 'Completed',
+                    source: 'pos',
+                    isShippingAdvance: true,
+                    shippingAdvanceRepairTicketId: repairShipping.repairTicketId || null,
+                    parentOrderId: orderId,
+                    payment_method: 'DEBT',
+                    paymentStatus: 'debt',
+                    is_vat_exported: false,
+                    createdAt: FieldValue.serverTimestamp(),
+                    updatedAt: FieldValue.serverTimestamp(),
+                    completedAt: FieldValue.serverTimestamp(),
+                    paymentHistory: [],
+                    createdBy: caller.uid,
+                    createdByName,
+                });
+            }
+            if (repairShipping?.mode === 'shop_absorbs') {
+                const expenseAllocation = shippingExpenseAllocations[0];
+                if (!expenseAllocation) {
+                    throw new Error('Không thể tạo chứng từ chi phí ship.');
+                }
+                expenseAllocation.commitCounter();
+                tx.set(expenseAllocation.ref, {
+                    ...e2eMetadata,
+                    category: 'shipping',
+                    description: repairShipping.repairTicketId
+                        ? `Phí ship phiếu sửa #${repairShipping.repairTicketId.slice(-6)} (shop chịu)`
+                        : `Phí ship đơn hàng #${orderId.slice(-6)} (shop chịu)`,
+                    amount: repairShipping.fee,
+                    paymentMethod: repairShipping.shopPaymentMethod,
+                    ...(repairShipping.repairTicketId ? { repairTicketId: repairShipping.repairTicketId } : {}),
+                    orderId,
+                    createdBy: caller.uid,
+                    createdByName,
+                    date: FieldValue.serverTimestamp(),
+                    createdAt: FieldValue.serverTimestamp(),
+                });
+            }
             const revenueDeltas: RevenueAggregateDelta[] = [];
             if (!isDebtCollectionOnly && !isPending) {
                 const repairRevenue = Array.from(repairPaidNowById.values()).reduce((sum, amount) => sum + amount, 0);
@@ -1070,36 +1389,66 @@ export const POST = withApi({
                             discount_amount: retailDiscountForPayment,
                             total_amount: retailTotalForPayment,
                             paymentStatus: paidRetailNow + 1 < retailTotalForPayment ? 'debt' : 'paid',
-                            paymentHistory: paidRetailNow > 0 ? [{
+                            paymentHistory: retailPaymentLines.map(line => ({
                                 type: paidRetailNow + 1 < retailTotalForPayment ? 'deposit' : 'full',
-                                amount: paidRetailNow,
-                                method: receivedPaymentMethodCode,
+                                amount: line.amount,
+                                method: line.method,
                                 timestamp: Date.now(),
-                                note: `Doanh thu POS retail thực thu - ${payment_method || 'CASH'}`
-                            }] : [],
+                                note: `Doanh thu POS retail thực thu - ${line.method}`,
+                            })),
                         } as unknown as Order));
                 }
                 if (repairRevenue > 0 || repairDebt > 0) {
                     const repairCount = Array.from(repairCompletionTargets.values())
                         .filter(target => target.shouldCountCompletion)
                         .length;
-                    revenueDeltas.push({ repairRevenue, debtRevenue: repairDebt, repairCount });
+                    revenueDeltas.push({
+                        repairRevenue,
+                        debtRevenue: repairDebt,
+                        repairCount,
+                        ...mergeRevenueAggregateDeltas(...Array.from(repairPaymentLinesById.values()).flat().map(line => buildPaymentChannelRevenueDelta(line.amount, line.method))),
+                    });
+                }
+                if (customerShippingCharge > 0) {
+                    revenueDeltas.push({
+                        shippingRevenue: shippingPaidNow,
+                        debtRevenue: shippingDebt,
+                        ...mergeRevenueAggregateDeltas(...shippingPaymentLines.map(line => buildPaymentChannelRevenueDelta(line.amount, line.method))),
+                    });
+                }
+                if (repairShipping?.mode === 'shop_absorbs') {
+                    revenueDeltas.push({
+                        shippingExpense: repairShipping.fee,
+                        ...(repairShipping.shopPaymentMethod === 'CASH'
+                            ? { cashExpenses: repairShipping.fee }
+                            : { bankExpenses: repairShipping.fee }),
+                    });
                 }
             }
             if (!isPending && orderPaymentTotal > 0) {
                 let debtCollectionPosRevenue = 0;
                 let debtCollectionWebRevenue = 0;
+                let debtCollectionRevenue = 0;
                 for (const [id, paymentAmount] of orderPaymentTotals.entries()) {
-                    const source = String(orderPaymentDocs.get(id)?.snap.data()?.source || '');
+                    const orderData = orderPaymentDocs.get(id)?.snap.data() || {};
+                    if (orderData.isShippingAdvance === true) continue;
+                    debtCollectionRevenue += paymentAmount;
+                    const source = String(orderData.source || '');
                     if (source === 'pos') debtCollectionPosRevenue += paymentAmount;
                     else debtCollectionWebRevenue += paymentAmount;
                 }
-                revenueDeltas.push({
-                    orderRevenue: orderPaymentTotal,
-                    ...buildPaymentChannelRevenueDelta(orderPaymentTotal, receivedPaymentMethodCode),
-                    posOrderRevenue: debtCollectionPosRevenue,
-                    webOrderRevenue: debtCollectionWebRevenue,
-                });
+                if (debtCollectionRevenue > 0) {
+                    revenueDeltas.push({
+                        orderRevenue: debtCollectionRevenue,
+                        ...mergeRevenueAggregateDeltas(...Array.from(orderPaymentTotals.keys()).flatMap(id => (
+                            orderPaymentDocs.get(id)?.snap.data()?.isShippingAdvance === true
+                                ? []
+                                : (orderPaymentLinesById.get(id) || []).map(line => buildPaymentChannelRevenueDelta(line.amount, line.method))
+                        ))),
+                        posOrderRevenue: debtCollectionPosRevenue,
+                        webOrderRevenue: debtCollectionWebRevenue,
+                    });
+                }
             }
             if (commissionCost > 0) {
                 revenueDeltas.push({ commissionCost });
@@ -1108,24 +1457,58 @@ export const POST = withApi({
 
             if (cashierShiftRef && cashierShiftCollectedAmount > 0) {
                 if (cashierShiftUsesTally) {
+                    for (const line of cashierShiftPaymentLines) {
+                        const channel = getCashierShiftChannel(line.method);
+                        queueCashierShiftTally(tx, db, {
+                            shiftId: cashierShiftRef.id,
+                            operationKey: `${readString(idempotencyKey) || orderId || debtPaymentReferenceId}:payment:${line.paymentIndex}`,
+                            orderId: isDebtCollectionOnly ? debtPaymentReferenceId : orderId,
+                            paymentMethod: line.method,
+                            cashAmount: channel === 'cash' ? line.amount : 0,
+                            bankAmount: channel === 'bank' ? line.amount : 0,
+                            actorId: caller.uid,
+                        });
+                    }
+                } else {
+                    const cashierCashAmount = cashierShiftPaymentLines
+                        .filter(line => getCashierShiftChannel(line.method) === 'cash')
+                        .reduce((sum, line) => sum + line.amount, 0);
+                    const cashierBankAmount = cashierShiftPaymentLines
+                        .filter(line => getCashierShiftChannel(line.method) === 'bank')
+                        .reduce((sum, line) => sum + line.amount, 0);
+                    tx.update(cashierShiftRef, {
+                        ...(cashierCashAmount > 0 ? { cashSalesAmount: FieldValue.increment(cashierCashAmount) } : {}),
+                        ...(cashierBankAmount > 0 ? { bankSalesAmount: FieldValue.increment(cashierBankAmount) } : {}),
+                        lastPaymentAmount: cashierShiftCollectedAmount,
+                        lastPaymentMethod: resolvePaymentMethodFromLines(cashierShiftPaymentLines, receivedPaymentMethodCode),
+                        lastOrderId: isDebtCollectionOnly ? debtPaymentReferenceId : orderId,
+                        lastPaymentAt: FieldValue.serverTimestamp(),
+                        updatedAt: FieldValue.serverTimestamp(),
+                    });
+                }
+            }
+            if (cashierShiftRef && cashierShiftShippingExpenseAmount > 0) {
+                if (cashierShiftUsesTally) {
                     queueCashierShiftTally(tx, db, {
                         shiftId: cashierShiftRef.id,
-                        operationKey: readString(idempotencyKey) || orderId || debtPaymentReferenceId,
-                        orderId: isDebtCollectionOnly ? debtPaymentReferenceId : orderId,
-                        paymentMethod: receivedPaymentMethodCode,
-                        cashAmount: cashierShiftChannel === 'cash' ? cashierShiftCollectedAmount : 0,
-                        bankAmount: cashierShiftChannel === 'bank' ? cashierShiftCollectedAmount : 0,
+                        operationKey: `${readString(idempotencyKey) || orderId}:repair-shipping`,
+                        orderId,
+                        paymentMethod: repairShipping?.shopPaymentMethod || 'CASH',
+                        cashAmount: cashierShiftShippingExpenseChannel === 'cash' ? cashierShiftShippingExpenseAmount : 0,
+                        bankAmount: cashierShiftShippingExpenseChannel === 'bank' ? cashierShiftShippingExpenseAmount : 0,
+                        direction: 'expense',
+                        movementType: 'repair_shipping',
                         actorId: caller.uid,
                     });
                 } else {
                     tx.update(cashierShiftRef, {
-                        ...(cashierShiftChannel === 'cash'
-                            ? { cashSalesAmount: FieldValue.increment(cashierShiftCollectedAmount) }
-                            : { bankSalesAmount: FieldValue.increment(cashierShiftCollectedAmount) }),
-                        lastPaymentAmount: cashierShiftCollectedAmount,
-                        lastPaymentMethod: receivedPaymentMethodCode,
-                        lastOrderId: isDebtCollectionOnly ? debtPaymentReferenceId : orderId,
-                        lastPaymentAt: FieldValue.serverTimestamp(),
+                        ...(cashierShiftShippingExpenseChannel === 'cash'
+                            ? { cashExpenseAmount: FieldValue.increment(cashierShiftShippingExpenseAmount) }
+                            : { bankExpenseAmount: FieldValue.increment(cashierShiftShippingExpenseAmount) }),
+                        lastExpenseAmount: cashierShiftShippingExpenseAmount,
+                        lastExpenseMethod: repairShipping?.shopPaymentMethod || 'CASH',
+                        lastExpenseOrderId: orderId,
+                        lastExpenseAt: FieldValue.serverTimestamp(),
                         updatedAt: FieldValue.serverTimestamp(),
                     });
                 }
@@ -1139,6 +1522,10 @@ export const POST = withApi({
             }
 
             // Customer Aggregate
+            const shippingAdvanceDebt = repairShipping?.mode === 'shop_advance_on_credit' ? repairShipping.fee : 0;
+            const shippingAdvanceUsesPrimaryCustomer = Boolean(
+                shippingAdvanceDebt > 0 && custRef && shippingPayerRef && custRef.id === shippingPayerRef.id,
+            );
             if (custRef && custSnap) {
                 if (custSnap.exists) {
                     const currentData = custSnap.data()!;
@@ -1160,7 +1547,8 @@ export const POST = withApi({
                         updateData.contactMethods = contactMethods;
                         updateData.searchKeywords = buildContactSearchKeywords(incomingContactInput, contactMethods);
                         if (incomingContactInput.email) updateData.email = incomingContactInput.email;
-                        if (incomingContactInput.address) updateData.address = incomingContactInput.address;
+                        const effectiveAddress = incomingContactInput.address || repairShipping?.recipientAddress || '';
+                        if (effectiveAddress) updateData.address = effectiveAddress;
                         if (incomingContactInput.note) updateData.note = incomingContactInput.note;
                     }
 
@@ -1169,8 +1557,9 @@ export const POST = withApi({
                         updateData.totalSpent = FieldValue.increment(customerSpendDelta);
                         updateData.totalOrders = FieldValue.increment(1);
                     }
-                    if (deltaDebt !== 0) {
-                        updateData.totalDebt = FieldValue.increment(deltaDebt);
+                    const primaryCustomerDebtDelta = deltaDebt + (shippingAdvanceUsesPrimaryCustomer ? shippingAdvanceDebt : 0);
+                    if (primaryCustomerDebtDelta !== 0) {
+                        updateData.totalDebt = FieldValue.increment(primaryCustomerDebtDelta);
                     }
 
                     if (appliedPersonalVoucher && appliedVoucherCode) {
@@ -1195,15 +1584,32 @@ export const POST = withApi({
                         primaryContactType: incomingPrimaryContact?.type || null,
                         primaryContactValue: incomingPrimaryContact?.value || '',
                         contactMethods: incomingContactMethods,
+                        ...(verifiedPhone ? {
+                            contactVerification: {
+                                method: 'phone_otp',
+                                phone: verifiedPhone,
+                                verifiedAt: FieldValue.serverTimestamp(),
+                                verifiedBy: caller.uid,
+                            },
+                        } : {}),
+                        ...(zaloIdentity ? {
+                            contactProof: {
+                                method: 'zalo_contact_card',
+                                externalId: zaloIdentity.externalId,
+                                profileUrl: zaloIdentity.profileUrl,
+                                recordedAt: FieldValue.serverTimestamp(),
+                                recordedBy: caller.uid,
+                            },
+                        } : {}),
                         searchKeywords: buildContactSearchKeywords(incomingContactInput, incomingContactMethods),
                         email: incomingContactInput.email || '',
-                        address: incomingContactInput.address || '',
+                        address: incomingContactInput.address || repairShipping?.recipientAddress || '',
                         note: incomingContactInput.note || '',
                         totalSpent: customerSpendDelta,
                         totalOrders: customerSpendDelta > 0 ? 1 : 0,
                         totalRepairs: 0,
                         totalAppointments: 0,
-                        totalDebt: deltaDebt,
+                        totalDebt: deltaDebt + (shippingAdvanceUsesPrimaryCustomer ? shippingAdvanceDebt : 0),
                         createdAt: FieldValue.serverTimestamp(),
                         updatedAt: FieldValue.serverTimestamp(),
                         lastVisit: FieldValue.serverTimestamp(),
@@ -1243,6 +1649,25 @@ export const POST = withApi({
                     });
                 }
             }
+            if (shippingAdvanceDebt > 0 && shippingPayerRef && !shippingAdvanceUsesPrimaryCustomer) {
+                tx.update(shippingPayerRef, {
+                    totalDebt: FieldValue.increment(shippingAdvanceDebt),
+                    updatedAt: FieldValue.serverTimestamp(),
+                    lastVisit: FieldValue.serverTimestamp(),
+                });
+            }
+            if (shippingAdvanceDebt > 0 && shippingPayerRef) {
+                tx.set(customerLedgerAllocations[customerLedgerAllocationIndex++].ref, {
+                    ...e2eMetadata,
+                    customerId: shippingPayerRef.id,
+                    type: 'shipping_advance',
+                    amount: shippingAdvanceDebt,
+                    referenceId: shippingAdvanceOrderId,
+                    parentOrderId: orderId,
+                    repairTicketId: repairShipping?.repairTicketId || '',
+                    date: FieldValue.serverTimestamp(),
+                });
+            }
 
             // Repair Ticket Link
             if (!isPending) {
@@ -1252,12 +1677,13 @@ export const POST = withApi({
                     if (!repairDoc) continue;
                     if (!completionTarget) continue;
                     const repairPaidNow = repairPaidNowById.get(id) || 0;
+                    const repairPaymentLines = repairPaymentLinesById.get(id) || [];
                     const repairDebt = Math.max(0, repairPrice - repairPaidNow);
                     const isRepairFullyPaid = repairDebt <= 1;
                     tx.update(repairDoc.ref, {
                         'payment.status': isRepairFullyPaid ? 'paid' : 'pay_later',
                         status: completionTarget.targetStatus,
-                        'payment.method': repairPaidNow > 0 ? receivedPaymentMethodCode : paymentMethodCode,
+                        'payment.method': repairPaidNow > 0 ? resolvePaymentMethodFromLines(repairPaymentLines, receivedPaymentMethodCode) : paymentMethodCode,
                         'payment.amount': repairPrice,
                         'payment.depositAmount': repairPaidNow,
                         ...(isRepairFullyPaid ? {
@@ -1271,6 +1697,23 @@ export const POST = withApi({
                         completedAt: FieldValue.serverTimestamp(),
                         'timing.completedAt': FieldValue.serverTimestamp(),
                         updatedAt: FieldValue.serverTimestamp(),
+                        ...(repairShipping?.repairTicketId === id ? {
+                            delivery: {
+                                status: 'pending_dispatch',
+                                mode: repairShipping.mode,
+                                fee: repairShipping.fee,
+                                recipientName: repairShipping.recipientName,
+                                recipientPhone: repairShipping.recipientPhone,
+                                recipientAddress: repairShipping.recipientAddress,
+                                ...(repairShipping.billingCustomerId ? { billingCustomerId: repairShipping.billingCustomerId } : {}),
+                                ...(repairShipping.shopPaymentMethod ? { shopPaymentMethod: repairShipping.shopPaymentMethod } : {}),
+                                checkoutOrderId: orderId,
+                                ...(shippingAdvanceOrderId ? { shippingAdvanceOrderId } : {}),
+                                ...(repairShipping.note ? { note: repairShipping.note } : {}),
+                                createdAt: FieldValue.serverTimestamp(),
+                                updatedAt: FieldValue.serverTimestamp(),
+                            },
+                        } : {}),
                         statusTimeline: FieldValue.arrayUnion({
                             eventType: 'pos_repair_payment',
                             status: completionTarget.targetStatus,
@@ -1287,15 +1730,19 @@ export const POST = withApi({
                                 ? `Thanh toán POS #${orderId.slice(-6)}`
                                 : `Hoàn tất sửa chữa, thực thu ${repairPaidNow.toLocaleString('vi-VN')}đ; ghi nợ ${repairDebt.toLocaleString('vi-VN')}đ qua POS #${orderId.slice(-6)}`
                         }),
-                        ...(repairPaidNow > 0 ? { paymentHistory: FieldValue.arrayUnion({
-                            type: 'full',
-                            amount: repairPaidNow,
-                            method: receivedPaymentMethodCode,
-                            timestamp: Date.now(),
-                            note: isRepairFullyPaid
-                                ? `Thanh toán gộp hóa đơn POS #${orderId.slice(-6)}`
-                                : `Thanh toán một phần POS #${orderId.slice(-6)}; còn nợ ${repairDebt.toLocaleString('vi-VN')}đ`
-                        }) } : {})
+                        ...(repairPaymentLines.length > 0 ? {
+                            paymentHistory: FieldValue.arrayUnion(...repairPaymentLines.map(line => ({
+                                type: 'full',
+                                amount: line.amount,
+                                method: line.method,
+                                paymentRecordId: getPaymentRecordId(line),
+                                ...(getBankTransferReference(line) ? { bankTransferReference: getBankTransferReference(line) } : {}),
+                                timestamp: Date.now(),
+                                note: isRepairFullyPaid
+                                    ? `Thanh toán gộp hóa đơn POS #${orderId.slice(-6)}`
+                                    : `Thanh toán một phần POS #${orderId.slice(-6)}; còn nợ ${repairDebt.toLocaleString('vi-VN')}đ`,
+                            }))),
+                        } : {})
                     });
                 }
             }
@@ -1315,6 +1762,7 @@ export const POST = withApi({
                         const type = String(entry?.type || '');
                         return type === 'debt_payment' || type === 'payment' || type === 'deposit' || type === 'full';
                     }).length + 1;
+                    const paymentLines = orderPaymentLinesById.get(id) || [];
                     const isFullyPaid = Math.abs(totalOrderAmount - newPaidSoFar) <= 1;
 
                     tx.update(orderPaymentDoc.ref, {
@@ -1325,20 +1773,41 @@ export const POST = withApi({
                             completedAt: orderData.completedAt || FieldValue.serverTimestamp(),
                         } : {}),
                         updatedAt: FieldValue.serverTimestamp(),
-                        paymentHistory: FieldValue.arrayUnion({
+                        paymentHistory: FieldValue.arrayUnion(...paymentLines.map((line, lineIndex) => ({
                             type: 'debt_payment',
-                            amount: paymentAmount,
-                            method: payment_method || 'CASH',
+                            amount: line.amount,
+                            method: line.method,
+                            paymentRecordId: getPaymentRecordId(line),
+                            ...(getBankTransferReference(line) ? { bankTransferReference: getBankTransferReference(line) } : {}),
                             timestamp: Date.now(),
                             referenceId: idempotencyKey || null,
-                            paymentIndex,
-                            paidAfter: newPaidSoFar,
-                            remainingAfter: remainingAfterPayment,
-                            note: `Thu nợ tại POS lần ${paymentIndex}: ${paymentAmount.toLocaleString('vi-VN')}đ`
-                        })
+                            paymentIndex: paymentIndex + lineIndex,
+                            ...(lineIndex === paymentLines.length - 1 ? {
+                                paidAfter: newPaidSoFar,
+                                remainingAfter: remainingAfterPayment,
+                            } : {}),
+                            note: `Thu nợ tại POS lần ${paymentIndex + lineIndex}: ${line.amount.toLocaleString('vi-VN')}đ`,
+                        })))
                     });
                 }
 
+                const remainingSettledRepairPaymentLines = new Map<string, CheckoutPaymentLine[]>();
+                const takeSettledRepairPaymentLines = (settledOrderId: string, amount: number) => {
+                    const remainingLines = remainingSettledRepairPaymentLines.get(settledOrderId)
+                        || (orderPaymentLinesById.get(settledOrderId) || []).map(line => ({ ...line }));
+                    remainingSettledRepairPaymentLines.set(settledOrderId, remainingLines);
+                    let remainingAmount = Math.max(0, amount);
+                    const allocated: CheckoutPaymentLine[] = [];
+                    while (remainingAmount > 0 && remainingLines.length > 0) {
+                        const line = remainingLines[0];
+                        const allocatedAmount = Math.min(remainingAmount, line.amount);
+                        allocated.push({ ...line, amount: allocatedAmount });
+                        remainingAmount -= allocatedAmount;
+                        line.amount -= allocatedAmount;
+                        if (line.amount <= 0) remainingLines.shift();
+                    }
+                    return allocated;
+                };
                 for (const [repairId, settlement] of settledRepairDocs.entries()) {
                     const outstandingOrderId = settlement.ticket.payment?.outstandingOrderId;
                     if (outstandingOrderId !== settlement.orderId) continue;
@@ -1346,6 +1815,7 @@ export const POST = withApi({
                     const repairAmount = getRepairPaymentAmount(settlement.ticket, repairId);
                     const paidBefore = getRepairPaidAmount(settlement.ticket);
                     const remainingRepairDebt = Math.max(0, repairAmount - paidBefore);
+                    const repairDebtPaymentLines = takeSettledRepairPaymentLines(settlement.orderId, remainingRepairDebt);
                     tx.update(db.collection('repairs').doc(repairId), {
                         'payment.status': 'paid',
                         'payment.depositAmount': repairAmount,
@@ -1353,15 +1823,17 @@ export const POST = withApi({
                         'payment.outstandingOrderId': FieldValue.delete(),
                         'payment.outstandingAmount': 0,
                         updatedAt: FieldValue.serverTimestamp(),
-                        ...(remainingRepairDebt > 0 ? {
-                            paymentHistory: FieldValue.arrayUnion({
+                        ...(repairDebtPaymentLines.length > 0 ? {
+                            paymentHistory: FieldValue.arrayUnion(...repairDebtPaymentLines.map(line => ({
                                 type: 'debt_payment',
-                                amount: remainingRepairDebt,
-                                method: payment_method || 'CASH',
+                                amount: line.amount,
+                                method: line.method,
+                                paymentRecordId: getPaymentRecordId(line),
+                                ...(getBankTransferReference(line) ? { bankTransferReference: getBankTransferReference(line) } : {}),
                                 timestamp: Date.now(),
                                 referenceId: idempotencyKey || null,
                                 note: `Thu nợ hóa đơn POS #${settlement.orderId.slice(-6)}`,
-                            }),
+                            }))),
                         } : {}),
                     });
                 }
@@ -1408,6 +1880,11 @@ export const POST = withApi({
                 updatedOrderIds,
                 debtOnly: isDebtCollectionOnly,
                 cashierShiftChanged,
+                paymentBreakdown: isDebtCollectionOnly ? [] : currentSalePaymentLines.map(line => ({
+                    method: line.method,
+                    amount: line.amount,
+                    ...(getBankTransferReference(line) ? { reference: getBankTransferReference(line) } : {}),
+                })),
                 warnings: checkoutWarnings
             };
             } finally {

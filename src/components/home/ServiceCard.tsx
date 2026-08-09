@@ -47,9 +47,15 @@ export default function ServiceCard({
     const displayImage = image || imageUrl || '';
 
     const shouldHidePrice = hidePrice === true;
-    const discount = !shouldHidePrice && promoPrice && originalPrice
+    const hasDiscount = !shouldHidePrice && !!promoPrice && promoPrice > 0 && originalPrice > 0 && promoPrice < originalPrice;
+    const discount = hasDiscount
         ? Math.round(((originalPrice - promoPrice) / originalPrice) * 100)
         : 0;
+
+    // Prioritize promoPrice as selling price if present (catalog/excel import), fallback to originalPrice
+    const sellingPrice = hasDiscount
+        ? promoPrice!
+        : (promoPrice && promoPrice > 0 ? promoPrice : (originalPrice > 0 ? originalPrice : 0));
 
     const formatPrice = (p: number) => {
         if (p <= 0) return 'Liên hệ';
@@ -135,20 +141,18 @@ export default function ServiceCard({
                 <div className="mt-2">
                     {shouldHidePrice ? (
                         <span className="text-copper font-semibold text-sm">Liên hệ nhận báo giá</span>
-                    ) : promoPrice && promoPrice > 0 ? (
+                    ) : hasDiscount ? (
                         <div className="flex items-baseline gap-2 flex-wrap">
                             <span className="text-accent font-bold text-base">
-                                {formatPrice(promoPrice)}
+                                {formatPrice(sellingPrice)}
                             </span>
-                            {originalPrice > 0 && (
-                                <span className="text-gray-500 text-xs line-through">
-                                    {formatPrice(originalPrice)}
-                                </span>
-                            )}
+                            <span className="text-gray-500 text-xs line-through">
+                                {formatPrice(originalPrice)}
+                            </span>
                         </div>
-                    ) : originalPrice > 0 ? (
+                    ) : sellingPrice > 0 ? (
                         <span className="text-gray-800 font-bold text-base">
-                            {formatPrice(originalPrice)}
+                            {formatPrice(sellingPrice)}
                         </span>
                     ) : (
                         <span className="text-copper font-semibold text-sm">Liên hệ</span>
