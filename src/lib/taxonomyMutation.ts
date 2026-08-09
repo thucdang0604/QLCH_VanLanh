@@ -10,6 +10,7 @@ export type TaxonomyMutationRequest = {
     nodeId?: string;
     parentId?: string | null;
     node?: unknown;
+    applyWarrantyToDescendants?: boolean;
 };
 
 export class TaxonomyMutationError extends Error {
@@ -113,7 +114,12 @@ function cloneStoredTaxonomy(value: unknown): TaxonomyTree {
     return taxonomy;
 }
 
-function normalizeMutationNode(value: unknown): Omit<TaxonomyNode, 'id' | 'children'> {
+type NormalizedMutationNode = {
+    node: Omit<TaxonomyNode, 'id' | 'children'>;
+    inheritWarranty: boolean;
+};
+
+function normalizeMutationNode(value: unknown): NormalizedMutationNode {
     if (!isRecord(value)) throw new TaxonomyMutationError('Taxonomy node payload is required.');
 
     const node: Omit<TaxonomyNode, 'id' | 'children'> = {
@@ -126,6 +132,10 @@ function normalizeMutationNode(value: unknown): Omit<TaxonomyNode, 'id' | 'child
     if (icon !== undefined) node.icon = icon;
     if (seoKeywords !== undefined) node.seoKeywords = seoKeywords;
     if (seoDescription !== undefined) node.seoDescription = seoDescription;
+
+    if (value.warrantyType === 'inherit') {
+        return { node, inheritWarranty: true };
+    }
 
     const warrantyType = value.warrantyType === undefined ? 'none' : value.warrantyType;
     if (!['none', 'warrantyDevice', 'warrantyRepair', 'warrantyAccessory'].includes(String(warrantyType))) {
@@ -140,7 +150,7 @@ function normalizeMutationNode(value: unknown): Omit<TaxonomyNode, 'id' | 'child
         }
         node.warrantyMonths = warrantyMonths;
     }
-    return node;
+    return { node, inheritWarranty: false };
 }
 
 function locateNode(nodes: TaxonomyNode[], id: string, depth = 0): LocatedNode | null {
@@ -155,6 +165,14 @@ function locateNode(nodes: TaxonomyNode[], id: string, depth = 0): LocatedNode |
     return null;
 }
 
+function clearDescendantWarrantyOverrides(nodes: TaxonomyNode[] | undefined) {
+    for (const node of nodes || []) {
+        delete node.warrantyType;
+        delete node.warrantyMonths;
+        clearDescendantWarrantyOverrides(node.children);
+    }
+}
+
 export function mutateTaxonomy(current: unknown, request: TaxonomyMutationRequest): { taxonomy: TaxonomyTree; nodeId: string } {
     if (!request || typeof request !== 'object') {
         throw new TaxonomyMutationError('Taxonomy mutation payload is required.');
@@ -167,7 +185,7 @@ export function mutateTaxonomy(current: unknown, request: TaxonomyMutationReques
     const nodes = taxonomy[request.taxonomyType];
 
     if (request.action === 'create') {
-        const nodeInput = normalizeMutationNode(request.node);
+        const { node: nodeInput } = normalizeMutationNode(request.node);
         const parentId = typeof request.parentId === 'string' && request.parentId.trim() ? request.parentId.trim() : null;
         const parent = parentId ? locateNode(nodes, parentId) : null;
         if (parentId && !parent) throw new TaxonomyMutationError('Parent taxonomy node was not found.', 404);
@@ -197,17 +215,25 @@ export function mutateTaxonomy(current: unknown, request: TaxonomyMutationReques
     }
 
     if (request.action === 'update') {
-        const nodeInput = normalizeMutationNode(request.node);
+        const { node: nodeInput, inheritWarranty } = normalizeMutationNode(request.node);
         if (nodeInput.slug !== existing.node.slug) {
             throw new TaxonomyMutationError('Taxonomy slug is immutable because it is referenced by catalog and workflow data.');
         }
-        existing.siblings[existing.index] = {
+        const updatedNode: TaxonomyNode = {
             ...existing.node,
             ...nodeInput,
             id: existing.node.id,
             slug: existing.node.slug,
             children: existing.node.children || [],
         };
+        if (inheritWarranty) {
+            delete updatedNode.warrantyType;
+            delete updatedNode.warrantyMonths;
+        }
+        if (request.applyWarrantyToDescendants === true) {
+            clearDescendantWarrantyOverrides(updatedNode.children);
+        }
+        existing.siblings[existing.index] = updatedNode;
         return { taxonomy, nodeId };
     }
 

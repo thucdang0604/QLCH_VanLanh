@@ -7,7 +7,7 @@ import {
     User as UserIcon, ArrowRightLeft, ShieldAlert
 } from 'lucide-react';
 import { collection, query, doc, where, orderBy, limit } from 'firebase/firestore';
-import { onSnapshot, getDocs } from '@/lib/firestoreLogger';
+import { onSnapshot, getDoc, getDocs } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
 import { appConfirm } from '@/lib/appDialog';
@@ -29,6 +29,12 @@ import {
 } from '@/features/technician/TechnicianWorkflowModals';
 import { TechnicianPageHeader } from '@/features/technician/TechnicianPageHeader';
 import { TechnicianTicketDetailModal } from '@/features/technician/TechnicianTicketDetailModal';
+import {
+    filterAvailableCategoryRecommendations,
+    getRecommendedPartCategoryIds,
+    getRepairServiceIds,
+    type ServiceBusinessLink,
+} from '@/lib/serviceRecommendations';
 
 
 const checklistLabels: Record<string, string> = {
@@ -149,8 +155,58 @@ export default function TechnicianPage() {
     const [partSearchQuery, setPartSearchQuery] = useState('');
     const [partSearchResults, setPartSearchResults] = useState<Product[]>([]);
     const [isSearchingParts, setIsSearchingParts] = useState(false);
+    const [serviceSuggestedParts, setServiceSuggestedParts] = useState<Product[]>([]);
+    const [isLoadingServiceSuggestions, setIsLoadingServiceSuggestions] = useState(false);
     const [selectedPartQuality, setSelectedPartQuality] = useState('Zin');
     const [customPartName, setCustomPartName] = useState('');
+
+    const selectedTicketServiceKey = getRepairServiceIds(selectedTicket || {}).join('|');
+
+    useEffect(() => {
+        let disposed = false;
+        const serviceIds = getRepairServiceIds(selectedTicket || {});
+        if (serviceIds.length === 0) {
+            setServiceSuggestedParts([]);
+            setIsLoadingServiceSuggestions(false);
+            return;
+        }
+
+        const loadSuggestions = async () => {
+            setIsLoadingServiceSuggestions(true);
+            try {
+                const serviceSnaps = await Promise.all(serviceIds.map(serviceId => getDoc(doc(db, 'services', serviceId))));
+                const services = serviceSnaps
+                    .filter(snapshot => snapshot.exists())
+                    .map(snapshot => ({ id: snapshot.id, ...snapshot.data() } as ServiceBusinessLink));
+                const categoryIds = getRecommendedPartCategoryIds(services);
+                if (categoryIds.length === 0) {
+                    if (!disposed) setServiceSuggestedParts([]);
+                    return;
+                }
+                const productSnaps = await Promise.all(categoryIds.slice(0, 10).map(categoryId => getDocs(query(
+                    collection(db, 'products'),
+                    where('categoryIds', 'array-contains', categoryId),
+                    limit(20),
+                ))));
+                const productMap = new Map<string, Product>();
+                productSnaps.forEach(snapshot => snapshot.docs.forEach(productDoc => {
+                    const product = { id: productDoc.id, ...productDoc.data() } as Product;
+                    if (product.status === 'active' && isPartCategory(product.category, product.categoryIds)) {
+                        productMap.set(productDoc.id, product);
+                    }
+                }));
+                const suggestions = filterAvailableCategoryRecommendations(Array.from(productMap.values()), categoryIds).slice(0, 10);
+                if (!disposed) setServiceSuggestedParts(suggestions);
+            } catch (error) {
+                console.error('Failed to load service-linked part suggestions', error);
+                if (!disposed) setServiceSuggestedParts([]);
+            } finally {
+                if (!disposed) setIsLoadingServiceSuggestions(false);
+            }
+        };
+        void loadSuggestions();
+        return () => { disposed = true; };
+    }, [selectedTicket, selectedTicketServiceKey]);
 
     const [dynamicStatuses, setDynamicStatuses] = useState<WorkflowNode[]>([]);
     const [warrantyStatuses, setWarrantyStatuses] = useState<WorkflowNode[]>([]);
@@ -1196,6 +1252,8 @@ export default function TechnicianPage() {
                 setPartSearchQuery={setPartSearchQuery}
                 partSearchResults={partSearchResults}
                 isSearchingParts={isSearchingParts}
+                serviceSuggestedParts={serviceSuggestedParts}
+                isLoadingServiceSuggestions={isLoadingServiceSuggestions}
                 selectedPartQuality={selectedPartQuality}
                 setSelectedPartQuality={setSelectedPartQuality}
                 customPartName={customPartName}

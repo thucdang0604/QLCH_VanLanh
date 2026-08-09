@@ -21,12 +21,14 @@ import { ApiError, getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/
 import { canCreatePosDebt, readPosCustomerIdentityMode, resolvePosZaloContactIdentity, type PosZaloContactIdentity } from '@/lib/posCustomerIdentity';
 import { getE2ERunMetadata } from '@/lib/e2eRunMetadata';
 import { readRepairShippingInput } from '@/lib/repairShipping';
+import { collectOrderWarrantySerials } from '@/lib/orderWarrantyLookup';
 import { createPosPaymentReference, readPosPaymentBreakdown, sumPosPaymentBreakdown, type PosPaymentBreakdownEntry } from '@/lib/posPaymentBreakdown';
 import {
     getCashierShiftChannel,
     getFixedPosRetailPrice,
     getRepairPaidAmount,
     getRepairPaymentAmount,
+    getWarrantyExpiresAt,
     normalizeOrderPaymentId,
     normalizeRepairTicketId,
     readNonNegativeCheckoutAmount as readNonNegativeAmount,
@@ -446,6 +448,7 @@ export const POST = withApi({
 
             // Normalize items & deduct stock
             const normalizedItems = [];
+            const warrantyStartedAt = Date.now();
             let serverSubtotal = 0;
             let orderPaymentSubtotal = 0;
 
@@ -492,8 +495,14 @@ export const POST = withApi({
                 const price = getFixedPosRetailPrice(d, `Gia san pham ${pid || 'khong ro'}`);
 
                 const warrantyInfo = resolveProductWarranty(d, retailTrees);
+                if (warrantyInfo && warrantyInfo.warrantyMonths <= 0) {
+                    throw new Error(`San pham "${d.name || pid}" da bat bao hanh nhung chua co thoi han. Vui long cap nhat san pham hoac danh muc truoc khi thanh toan.`);
+                }
                 const warrantyType = warrantyInfo?.warrantyType || 'none';
                 const warrantyMonths = warrantyInfo?.warrantyMonths || 0;
+                const warrantyExpiresAt = warrantyInfo
+                    ? getWarrantyExpiresAt(warrantyStartedAt, warrantyMonths)
+                    : undefined;
 
                 let imeis: string[] = [];
                 if (requiresImeiForPosRetailProduct(d)) {
@@ -514,6 +523,10 @@ export const POST = withApi({
                     image: d.images?.[0] || d.imageUrl || '',
                     warrantyType,
                     warrantyMonths,
+                    ...(warrantyInfo ? {
+                        warrantyStartedAt,
+                        ...(warrantyExpiresAt ? { warrantyExpiresAt } : {}),
+                    } : {}),
                     imeis,
                 });
 
@@ -1076,6 +1089,7 @@ export const POST = withApi({
                 ? 'DEBT'
                 : resolvePaymentMethodFromLines(currentSalePaymentLines, paymentMethodCode);
 
+            const warrantySerials = collectOrderWarrantySerials(orderItems);
             const order: Record<string, unknown> = {
                 ...e2eMetadata,
                 customer_info: {
@@ -1093,6 +1107,7 @@ export const POST = withApi({
                     note: incomingContactInput.note || '',
                 },
                 items: orderItems,
+                ...(warrantySerials.length > 0 ? { warrantySerials } : {}),
                 subtotal_amount: discountableSubtotal,
                 discount_amount: serverDiscount,
                 deposit_amount: paidNow,

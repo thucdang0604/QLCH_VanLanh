@@ -72,7 +72,7 @@ export interface RepairTicketInfo {
     paymentStatus: string;
     paymentOutstandingOrderId?: string;
     gifts?: string[];
-    issues?: { label?: string; estimatedPrice?: number; categoryPath?: string[]; serviceName?: string }[];
+    issues?: { label?: string; estimatedPrice?: number; categoryPath?: string[]; serviceName?: string; serviceId?: string }[];
 }
 
 export interface RepairShippingDraft {

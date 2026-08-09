@@ -6,6 +6,7 @@ import {
     getFixedPosRetailPrice,
     getRepairPaidAmount,
     getRepairPaymentAmount,
+    getWarrantyExpiresAt,
     normalizeOrderPaymentId,
     normalizeRepairTicketId,
     readNonNegativeCheckoutAmount,
@@ -66,7 +67,25 @@ test('resolves product warranty from the product first, then the deepest taxonom
     assert.deepEqual(resolveProductWarranty({ category: 'phones/android' }, taxonomy), {
         warrantyType: 'warrantyDevice', warrantyMonths: 18,
     });
+    assert.deepEqual(resolveProductWarranty({ category: 'Phones', categoryIds: ['phones', 'phones/android'] }, taxonomy), {
+        warrantyType: 'warrantyDevice', warrantyMonths: 18,
+    });
+    assert.deepEqual(resolveProductWarranty({ warrantyType: 'warrantyDevice', warrantyMonths: 0, category: 'phones/android' }, taxonomy), {
+        warrantyType: 'warrantyDevice', warrantyMonths: 18,
+    });
+    const inheritedTaxonomy = [{
+        id: 'accessories', slug: 'accessories', warrantyType: 'warrantyAccessory', warrantyMonths: 3,
+        children: [{ id: 'accessories/cables', slug: 'cables', warrantyType: 'none' }],
+    }];
+    assert.deepEqual(resolveProductWarranty({ category: 'accessories/cables' }, inheritedTaxonomy), {
+        warrantyType: 'warrantyAccessory', warrantyMonths: 3,
+    });
     assert.equal(resolveProductWarranty({ warrantyType: 'none', category: 'phones/android' }, taxonomy), null);
+});
+
+test('calculates a stable warranty expiry from the checkout timestamp', () => {
+    assert.equal(getWarrantyExpiresAt(new Date('2026-01-31T00:00:00.000Z').getTime(), 1), new Date('2026-03-03T00:00:00.000Z').getTime());
+    assert.equal(getWarrantyExpiresAt(Date.now(), 0), undefined);
 });
 
 test('classifies cashier channels without treating debt as received cash or bank money', () => {

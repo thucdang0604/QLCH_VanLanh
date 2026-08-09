@@ -16,6 +16,12 @@ import Image from 'next/image';
 import { requestRevalidate } from '@/lib/requestRevalidate';
 import { getIcon } from '@/lib/icon-map';
 
+type CategoryWarrantySelection = NonNullable<TaxonomyNode['warrantyType']> | 'inherit';
+type CategoryNodeFormData = Omit<TaxonomyNode, 'id' | 'children' | 'warrantyType' | 'warrantyMonths'> & {
+    warrantyType: CategoryWarrantySelection;
+    warrantyMonths: number;
+};
+
 export default function CategoriesTab() {
     const [activeSubTab, setActiveSubTab] = useState<'categories' | 'brands'>('categories');
     
@@ -125,9 +131,9 @@ function CategoriesList() {
         }
     };
 
-    const handleSaveNode = async (nodeData: Omit<TaxonomyNode, 'id'>) => {
+    const handleSaveNode = async (nodeData: CategoryNodeFormData, applyWarrantyToDescendants = false) => {
         await mutateTaxonomy(editingNode
-            ? { action: 'update', taxonomyType: filterType, nodeId: editingNode.id, node: nodeData }
+            ? { action: 'update', taxonomyType: filterType, nodeId: editingNode.id, node: nodeData, applyWarrantyToDescendants }
             : { action: 'create', taxonomyType: filterType, parentId: parentPath?.at(-1) ?? null, node: nodeData });
         toastSuccess(editingNode ? 'Đã cập nhật danh mục' : 'Đã thêm danh mục mới');
         setIsModalOpen(false);
@@ -252,6 +258,8 @@ function CategoriesList() {
                     isOpen={isModalOpen}
                     onClose={() => setIsModalOpen(false)}
                     initialData={editingNode}
+                    hasParent={Boolean(parentPath?.length)}
+                    hasDescendants={Boolean(editingNode?.children?.length)}
                     onSave={handleSaveNode}
                 />
             )}
@@ -317,38 +325,61 @@ function DeleteConfirmModal({
     );
 }
 
-function CategoryModal({ isOpen, onClose, initialData, onSave }: { isOpen: boolean, onClose: () => void, initialData: TaxonomyNode | null, onSave: (data: Omit<TaxonomyNode, 'id'>) => Promise<void> }) {
-    const [formData, setFormData] = useState<Omit<TaxonomyNode, 'id' | 'children'>>({
+function CategoryModal({ isOpen, onClose, initialData, hasParent, hasDescendants, onSave }: { isOpen: boolean, onClose: () => void, initialData: TaxonomyNode | null, hasParent: boolean, hasDescendants: boolean, onSave: (data: CategoryNodeFormData, applyWarrantyToDescendants?: boolean) => Promise<void> }) {
+    const [formData, setFormData] = useState<CategoryNodeFormData>({
         name: '',
         slug: '',
         icon: '',
         seoKeywords: '',
         seoDescription: '',
-        warrantyType: 'none'
+        warrantyType: 'inherit',
+        warrantyMonths: 0,
     });
     const [saving, setSaving] = useState(false);
     const [showMediaForIcon, setShowMediaForIcon] = useState(false);
+    const [applyWarrantyToDescendants, setApplyWarrantyToDescendants] = useState(false);
 
     useEffect(() => {
         if (initialData) {
+            const legacyInheritedPolicy = hasParent
+                && (initialData.warrantyType === undefined || (initialData.warrantyType === 'none' && initialData.warrantyMonths === undefined));
             setFormData({
                 name: initialData.name,
                 slug: initialData.slug,
                 icon: initialData.icon || '',
                 seoKeywords: initialData.seoKeywords || '',
                 seoDescription: initialData.seoDescription || '',
-                warrantyType: initialData.warrantyType || 'none'
+                warrantyType: legacyInheritedPolicy ? 'inherit' : (initialData.warrantyType || 'none'),
+                warrantyMonths: initialData.warrantyMonths ?? 0,
+            });
+        } else {
+            setFormData({
+                name: '',
+                slug: '',
+                icon: '',
+                seoKeywords: '',
+                seoDescription: '',
+                warrantyType: hasParent ? 'inherit' : 'none',
+                warrantyMonths: 0,
             });
         }
-    }, [initialData]);
+    }, [hasParent, initialData]);
+
+    useEffect(() => {
+        setApplyWarrantyToDescendants(false);
+    }, [initialData, isOpen]);
 
     const handleSave = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!formData.name || !formData.slug) return toastWarning('Tên và Slug không được để trống');
         
+        if (formData.warrantyType !== 'none' && formData.warrantyType !== 'inherit' && (!Number.isInteger(formData.warrantyMonths) || Number(formData.warrantyMonths) < 1 || Number(formData.warrantyMonths) > 120)) {
+            return toastWarning('Thời hạn bảo hành taxonomy phải từ 1 đến 120 tháng.');
+        }
+
         setSaving(true);
         try {
-            await onSave(formData);
+            await onSave(formData, applyWarrantyToDescendants);
         } catch {
             toastError('Lỗi khi lưu danh mục');
         } finally {
@@ -480,11 +511,48 @@ function CategoryModal({ isOpen, onClose, initialData, onSave }: { isOpen: boole
                     <p className="text-sm font-medium text-gray-700 mb-3">📄 Cấu hình In Phiếu Bảo Hành</p>
                     <div>
                         <label htmlFor="category-warranty-type" className="text-sm font-medium text-gray-700 block mb-1">Loại phiếu bảo hành mặc định</label>
+                        {hasParent && (
+                        <label className="mb-3 flex items-center gap-2 text-sm text-gray-700">
+                            <input
+                                type="checkbox"
+                                checked={formData.warrantyType === 'inherit'}
+                                onChange={(e) => setFormData(prev => ({
+                                    ...prev,
+                                    warrantyType: e.target.checked ? 'inherit' : 'none',
+                                    warrantyMonths: 0,
+                                }))}
+                            />
+                            Kế thừa chính sách bảo hành từ danh mục cha
+                        </label>
+                        )}
+                        {formData.warrantyType !== 'none' && (!hasParent || formData.warrantyType !== 'inherit') && (
+                            <div className="mb-3">
+                                <label htmlFor="category-warranty-months" className="text-sm font-medium text-gray-700 block mb-1">Thời hạn bảo hành mặc định (tháng)</label>
+                                <input
+                                    id="category-warranty-months"
+                                    type="number"
+                                    min={1}
+                                    max={120}
+                                    step={1}
+                                    required
+                                    value={formData.warrantyMonths || ''}
+                                    onChange={(e) => setFormData(prev => ({ ...prev, warrantyMonths: e.target.value ? Number(e.target.value) : 0 }))}
+                                    className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 bg-gray-50"
+                                    placeholder="Ví dụ: 12"
+                                />
+                                <p className="text-xs text-gray-500 mt-1">Áp dụng mặc định cho mọi sản phẩm thuộc danh mục này, trừ sản phẩm bật “Bảo hành riêng”.</p>
+                            </div>
+                        )}
                         <select
                             id="category-warranty-type"
                             title="Loại phiếu bảo hành mặc định"
-                            value={formData.warrantyType || 'none'}
-                            onChange={(e) => setFormData(prev => ({ ...prev, warrantyType: e.target.value as TaxonomyNode['warrantyType'] }))}
+                            value={hasParent && formData.warrantyType === 'inherit' ? 'none' : formData.warrantyType || 'none'}
+                            disabled={hasParent && formData.warrantyType === 'inherit'}
+                            onChange={(e) => setFormData(prev => ({
+                                ...prev,
+                                warrantyType: e.target.value as CategoryWarrantySelection,
+                                warrantyMonths: e.target.value === 'none' || e.target.value === 'inherit' ? 0 : prev.warrantyMonths,
+                            }))}
                             aria-label="Loại phiếu bảo hành mặc định"
                             className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 bg-gray-50"
                         >
@@ -496,6 +564,21 @@ function CategoryModal({ isOpen, onClose, initialData, onSave }: { isOpen: boole
                         <p className="text-xs text-gray-500 mt-1">Khi in hóa đơn cho sản phẩm thuộc danh mục này, hệ thống sẽ sử dụng mẫu phiếu bảo hành tương ứng được thiết lập trong Cài đặt chung.</p>
                     </div>
                 </div>
+
+                {initialData && hasDescendants && formData.warrantyType !== 'none' && formData.warrantyType !== 'inherit' && (
+                    <label className="flex items-start gap-2 rounded-lg border border-orange-200 bg-orange-50 p-3 text-sm text-orange-950">
+                        <input
+                            type="checkbox"
+                            checked={applyWarrantyToDescendants}
+                            onChange={(event) => setApplyWarrantyToDescendants(event.target.checked)}
+                            className="mt-0.5 h-4 w-4 rounded border-orange-300 text-orange-600 focus:ring-orange-500"
+                        />
+                        <span>
+                            <span className="block font-semibold">Áp dụng chính sách này cho toàn bộ danh mục con</span>
+                            <span className="mt-0.5 block text-xs text-orange-800">Các danh mục con sẽ kế thừa chính sách này; các cấu hình bảo hành riêng đang có bên dưới sẽ được xoá.</span>
+                        </span>
+                    </label>
+                )}
 
                 <div className="flex justify-end gap-3 pt-5 border-t border-gray-100">
                     <button type="button" title="Hủy" onClick={onClose} className="px-5 py-2.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors font-medium">

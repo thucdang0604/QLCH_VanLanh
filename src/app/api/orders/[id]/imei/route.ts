@@ -1,15 +1,10 @@
 ﻿import { NextRequest } from 'next/server';
-import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requireAdminOrStaff } from '@/lib/apiAuth';
-import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
-import { Order } from '@/lib/types';
-import { FieldValue } from 'firebase-admin/firestore';
-
-type UpdateOrderImeiRequestBody = { itemIndex?: number; imeis?: string[] };
+import { withApi } from '@/lib/api/handler';
 
 export const POST = withApi({
     name: 'orders/imei',
-    onError: (error, context) => context.error(getApiErrorMessage(error), getApiErrorStatus(error)),
+    onError: (_error, context) => context.error('Không thể thay đổi IMEI/Serial của đơn đã chốt.', 403),
 }, async (
     request: NextRequest,
     apiContext,
@@ -22,52 +17,10 @@ export const POST = withApi({
             return apiContext.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
-        const params = await routeContext.params;
-        const orderId = params.id;
-
-        const body = await apiContext.readJson<UpdateOrderImeiRequestBody>(request);
-        const { itemIndex, imeis } = body;
-
-        if (typeof itemIndex !== 'number' || !Array.isArray(imeis)) {
-            return apiContext.json({ error: 'Invalid payload' }, { status: 400 });
-        }
-
-        const db = getAdminDb();
-        const orderRef = db.collection('orders').doc(orderId);
-
-        return await db.runTransaction(async (tx) => {
-            const doc = await tx.get(orderRef);
-            if (!doc.exists) {
-                return apiContext.json({ error: 'Order not found' }, { status: 404 });
-            }
-
-            const order = doc.data() as Order;
-            const items = order.items || [];
-
-            if (itemIndex < 0 || itemIndex >= items.length) {
-                return apiContext.json({ error: 'Item index out of bounds' }, { status: 400 });
-            }
-
-            const item = items[itemIndex];
-            if (item.warrantyType !== 'warrantyDevice') {
-                return apiContext.json({ error: 'Sản phẩm không thuộc loại thiết bị bảo hành' }, { status: 400 });
-            }
-
-            const validImeis = imeis.map((i: string) => i.trim()).filter(Boolean);
-            if (validImeis.length !== item.quantity) {
-                return apiContext.json({ error: `Vui lòng cung cấp đủ ${item.quantity} IMEI/Serial.` }, { status: 400 });
-            }
-
-            item.imeis = validImeis;
-            items[itemIndex] = item;
-
-            tx.update(orderRef, {
-                items,
-                updatedAt: FieldValue.serverTimestamp(),
-                updatedBy: authResult.uid
-            });
-
-            return apiContext.json({ success: true, items });
-        });
+        // A serial is part of the issued warranty evidence. POS captures it before
+        // checkout; the order detail page is intentionally read-only afterwards.
+        void authResult;
+        void routeContext;
+        return apiContext.json({ error: 'IMEI/Serial là dữ liệu chứng từ và không thể sửa sau khi đơn đã chốt.' }, { status: 403 });
 
 });

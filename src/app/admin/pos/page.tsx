@@ -17,7 +17,7 @@ import { useConfig } from '@/lib/ConfigContext';
 import Modal from '@/components/admin/Modal';
 import Image from 'next/image';
 import { db, getAuthInstance } from '@/lib/firebase';
-import type { Product, TaxonomyNode } from '@/lib/types';
+import type { Product } from '@/lib/types';
 import type { ContactMethod, ContactMethodType } from '@/lib/types/contact';
 
 import { toastError, toastSuccess, toastWarning } from '@/lib/toast';
@@ -25,7 +25,7 @@ import { PART_CATEGORY, PART_CATEGORY_VALUES, isPartCategory } from '@/lib/const
 import { fetchActiveDiscountRules, calculateAccessoryDiscounts } from '@/lib/discountRuleUtils';
 import { consumeChatWorkflowHandoff } from '@/lib/chatWorkflowHandoff';
 import { extractProductCodeFromScan, getPrimaryProductCode, getProductScanCandidates, productCodeSearchText } from '@/lib/productCodes';
-import { requiresImeiForPosRetailProduct } from '@/lib/posCheckoutRules';
+import { requiresImeiForPosRetailProduct, resolveProductWarranty } from '@/lib/posCheckoutRules';
 import { normalizeVietnamPhone } from '@/lib/phone';
 import { resolvePosZaloContactIdentity, type PosCustomerIdentityMode, type PosCustomerSearchMatch } from '@/lib/posCustomerIdentity';
 import { PRODUCT_STATUS, isProductSellable } from '@/lib/productLifecycle';
@@ -39,6 +39,12 @@ import type { PosPaymentMode } from '@/features/pos/PosPaymentComposer';
 import type { AppliedVoucher, CartItem, DiscountDetail, LastOrderData, OrderLineItem, PayableOrderInfo, RepairShippingDraft, RepairTicketInfo, VoucherStatus } from '@/features/pos/posTypes';
 import CurrencyInput from '@/components/admin/CurrencyInput';
 import { buildPosPaymentBreakdown, createPosPaymentReference } from '@/lib/posPaymentBreakdown';
+import {
+    filterAvailableCategoryRecommendations,
+    getLinkedProductCategoryIds,
+    getRepairServiceIds,
+    type ServiceBusinessLink,
+} from '@/lib/serviceRecommendations';
 
 type BarcodeDetectionResult = { rawValue?: string };
 type BrowserBarcodeDetector = {
@@ -55,42 +61,6 @@ const POS_SEARCH_PRODUCT_LIMIT = 60;
 const POS_LEGACY_SCAN_FALLBACK_LIMIT = 500;
 type PosProduct = Product & { id: string };
 type PosTab = 'sales' | 'cashier';
-
-function getProductCategoryPathIds(product: Product) {
-    if (Array.isArray(product.categoryIds) && product.categoryIds.length > 0) {
-        return product.categoryIds.filter(Boolean);
-    }
-
-    const category = typeof product.category === 'string' ? product.category : '';
-    const segments = category.split('/').filter(Boolean);
-    return segments.map((_, index) => segments.slice(0, index + 1).join('/'));
-}
-
-function findTaxonomyNodeById(nodes: TaxonomyNode[], id: string): TaxonomyNode | null {
-    for (const node of nodes) {
-        if (node.id === id || node.slug === id) return node;
-        const child = findTaxonomyNodeById(node.children || [], id);
-        if (child) return child;
-    }
-    return null;
-}
-
-function resolveTaxonomyWarranty(nodes: TaxonomyNode[], categoryPathIds: string[]): Product['warrantyType'] | null {
-    let currentNodes = nodes;
-    let lastFound: Product['warrantyType'] | null = null;
-
-    for (const categoryPathId of categoryPathIds) {
-        const slug = categoryPathId.split('/').pop();
-        const node = currentNodes.find((candidate) => candidate.id === categoryPathId || candidate.slug === slug)
-            || findTaxonomyNodeById(nodes, categoryPathId);
-        if (!node) break;
-        if (node.warrantyType && node.warrantyType !== 'none') lastFound = node.warrantyType;
-        else if (node.warrantyType === 'none') lastFound = null;
-        currentNodes = node.children || [];
-    }
-
-    return lastFound;
-}
 
 function toStringArray(value: unknown): string[] {
     return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
@@ -134,6 +104,7 @@ function mapRepairTicketInfo(id: string, data: Record<string, unknown>, fallback
                 estimatedPrice: Number(item.estimatedPrice || 0),
                 categoryPath: toStringArray(item.categoryPath),
                 serviceName: typeof item.serviceName === 'string' ? item.serviceName : '',
+                serviceId: typeof item.serviceId === 'string' ? item.serviceId : '',
             };
         }) : [],
     };
@@ -307,12 +278,7 @@ export default function POSPage() {
     );
 
     const resolveWarranty = useCallback((product: Product) => {
-        if (product.warrantyType && product.warrantyType !== 'none') {
-            return product.warrantyType;
-        }
-        if (product.warrantyType === 'none') return 'none';
-
-        return resolveTaxonomyWarranty(config?.taxonomy?.retail || [], getProductCategoryPathIds(product)) || 'none';
+        return resolveProductWarranty(product, config?.taxonomy?.retail || [])?.warrantyType || 'none';
     }, [config?.taxonomy?.retail]);
 
     // Products
@@ -504,6 +470,8 @@ export default function POSPage() {
     const [autoDiscountAmount, setAutoDiscountAmount] = useState(0);
     const [discountDetails, setDiscountDetails] = useState<DiscountDetail[]>([]);
     const [autoDiscountApplied, setAutoDiscountApplied] = useState(false);
+    const [serviceAccessorySuggestions, setServiceAccessorySuggestions] = useState<PosProduct[]>([]);
+    const [isLoadingServiceAccessories, setIsLoadingServiceAccessories] = useState(false);
     const repairDiscountContextKey = useMemo(
         () => linkedRepairs.map(repair => repair.id).sort().join('|'),
         [linkedRepairs],
@@ -512,6 +480,63 @@ export default function POSPage() {
     useEffect(() => {
         setAutoDiscountApplied(false);
     }, [repairDiscountContextKey]);
+
+    const linkedRepairServiceKey = useMemo(() => {
+        const repairIdsInCart = getRepairTicketIdsInCart(cart);
+        return linkedRepairs
+            .filter(repair => repairIdsInCart.has(repair.id))
+            .flatMap(repair => getRepairServiceIds(repair))
+            .sort()
+            .join('|');
+    }, [cart, linkedRepairs]);
+
+    useEffect(() => {
+        let disposed = false;
+        const repairIdsInCart = getRepairTicketIdsInCart(cart);
+        const serviceIds = Array.from(new Set(linkedRepairs
+            .filter(repair => repairIdsInCart.has(repair.id))
+            .flatMap(repair => getRepairServiceIds(repair))));
+        if (serviceIds.length === 0) {
+            setServiceAccessorySuggestions([]);
+            setIsLoadingServiceAccessories(false);
+            return;
+        }
+
+        const loadSuggestions = async () => {
+            setIsLoadingServiceAccessories(true);
+            try {
+                const serviceSnaps = await Promise.all(serviceIds.map(serviceId => getDoc(doc(db, 'services', serviceId))));
+                const categories = getLinkedProductCategoryIds(serviceSnaps
+                    .filter(snapshot => snapshot.exists())
+                    .map(snapshot => ({ id: snapshot.id, ...snapshot.data() } as ServiceBusinessLink)));
+                if (categories.length === 0) {
+                    if (!disposed) setServiceAccessorySuggestions([]);
+                    return;
+                }
+                const productSnaps = await Promise.all(categories.slice(0, 10).map(categoryId => getDocs(query(
+                    collection(db, 'products'),
+                    where('categoryIds', 'array-contains', categoryId),
+                    limit(20),
+                ))));
+                const productMap = new Map<string, PosProduct>();
+                productSnaps.forEach(snapshot => snapshot.docs.forEach(productDoc => {
+                    const product = { id: productDoc.id, ...productDoc.data() } as PosProduct;
+                    if (product.status === PRODUCT_STATUS.ACTIVE && !isPartCategory(product.category, product.categoryIds)) {
+                        productMap.set(product.id, product);
+                    }
+                }));
+                const suggestions = filterAvailableCategoryRecommendations(Array.from(productMap.values()), categories).slice(0, 10);
+                if (!disposed) setServiceAccessorySuggestions(suggestions);
+            } catch (error) {
+                console.error('Failed to load service-linked accessory suggestions', error);
+                if (!disposed) setServiceAccessorySuggestions([]);
+            } finally {
+                if (!disposed) setIsLoadingServiceAccessories(false);
+            }
+        };
+        void loadSuggestions();
+        return () => { disposed = true; };
+    }, [cart, linkedRepairServiceKey, linkedRepairs]);
 
     useEffect(() => {
         if (chatPrefillApplied.current || searchParams.get('source') !== 'chat') return;
@@ -2075,6 +2100,32 @@ export default function POSPage() {
                                     </button>
                                 ))}
                             </div>
+
+                            {(isLoadingServiceAccessories || serviceAccessorySuggestions.length > 0) && (
+                                <div className="mb-3 rounded-xl border border-emerald-100 bg-emerald-50/70 p-2.5">
+                                    <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-emerald-800">
+                                        <Package size={14} /> Phụ kiện gợi ý theo dịch vụ sửa chữa
+                                        {isLoadingServiceAccessories && <Loader2 size={13} className="animate-spin" />}
+                                    </div>
+                                    <div className="flex gap-2 overflow-x-auto pb-0.5">
+                                        {serviceAccessorySuggestions.map(product => {
+                                            const available = Math.max(0, (product.stock || 0) - (product.held || 0));
+                                            return (
+                                                <button
+                                                    key={product.id}
+                                                    type="button"
+                                                    onClick={() => addToCart(product)}
+                                                    disabled={available <= 0}
+                                                    className="min-w-36 rounded-lg border border-emerald-100 bg-white px-2.5 py-2 text-left text-xs hover:border-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
+                                                >
+                                                    <p className="line-clamp-1 font-semibold text-gray-800">{product.name}</p>
+                                                    <p className="mt-0.5 text-emerald-700">{formatPrice(product.price_promo || product.price_original)} · Tồn {available}</p>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            )}
 
                             {/* Product Grid — limited height on desktop */}
                             <div className="md:max-h-[45vh] overflow-y-auto">

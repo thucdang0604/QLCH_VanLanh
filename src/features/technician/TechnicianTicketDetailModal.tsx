@@ -26,6 +26,8 @@ interface TechnicianTicketDetailModalProps {
     setPartSearchQuery: (value: string) => void;
     partSearchResults: Product[];
     isSearchingParts: boolean;
+    serviceSuggestedParts: Product[];
+    isLoadingServiceSuggestions: boolean;
     selectedPartQuality: string;
     setSelectedPartQuality: (value: string) => void;
     customPartName: string;
@@ -51,6 +53,8 @@ export function TechnicianTicketDetailModal({
     setPartSearchQuery,
     partSearchResults,
     isSearchingParts,
+    serviceSuggestedParts,
+    isLoadingServiceSuggestions,
     selectedPartQuality,
     setSelectedPartQuality,
     customPartName,
@@ -275,9 +279,9 @@ export function TechnicianTicketDetailModal({
                                 <Package size={16} className="text-orange-500" /> Thao tác linh kiện
                             </p>
 
-                            <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
+                                 <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
                                 <label className="text-xs font-semibold text-gray-600 mb-1.5 block">Thêm linh kiện mới</label>
-                                <div className="relative mb-3">
+                                     <div className="relative mb-3">
                                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                                         <Search size={14} className="text-gray-400" />
                                     </div>
@@ -288,9 +292,40 @@ export function TechnicianTicketDetailModal({
                                         onChange={e => setPartSearchQuery(e.target.value)}
                                         className="w-full pl-9 pr-4 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500/20"
                                     />
-                                </div>
+                                     </div>
 
-                                <div className="mb-3">
+                                {(isLoadingServiceSuggestions || serviceSuggestedParts.length > 0) && !partSearchQuery && (
+                                    <div className="mb-3 rounded-md border border-emerald-100 bg-emerald-50 p-2.5">
+                                        <p className="mb-2 text-[11px] font-semibold text-emerald-800">Gợi ý theo dịch vụ đã chọn</p>
+                                        {isLoadingServiceSuggestions ? (
+                                            <div className="flex items-center gap-2 text-xs text-emerald-700"><Loader2 size={13} className="animate-spin" /> Đang tải gợi ý…</div>
+                                        ) : (
+                                            <div className="space-y-1.5">
+                                                {serviceSuggestedParts.map(product => {
+                                                    const available = Math.max(0, (product.stock || 0) - (product.held || 0));
+                                                    return (
+                                                        <div key={product.id} className="flex items-center justify-between gap-2 rounded bg-white px-2 py-1.5">
+                                                            <div className="min-w-0">
+                                                                <p className="truncate text-xs font-medium text-gray-800">{product.name}</p>
+                                                                <p className={`text-[10px] ${available > 0 ? 'text-gray-500' : 'text-red-500'}`}>Khả dụng: {available}</p>
+                                                            </div>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleAddPart(selectedTicket, product)}
+                                                                disabled={available <= 0}
+                                                                className="shrink-0 rounded border border-emerald-200 px-2 py-1 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                                            >
+                                                                Thêm
+                                                            </button>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                 <div className="mb-3">
                                     <label className="text-[11px] font-medium text-gray-500 mb-1 block">Chất lượng / Loại hàng:</label>
                                     <select
                                         value={selectedPartQuality}

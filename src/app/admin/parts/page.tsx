@@ -20,7 +20,7 @@ import LotTrackingModal from '@/components/admin/LotTrackingModal';
 import CategoryTaxonomySelector from '@/components/admin/CategoryTaxonomySelector';
 import Modal from '@/components/admin/Modal';
 import ProductQrLabelModal from '@/components/admin/ProductQrLabelModal';
-import UniversalProductModal from '@/components/admin/UniversalProductModal';
+import UniversalProductModal, { type WarrantyPolicyOption } from '@/components/admin/UniversalProductModal';
 import ExportImportReportButton from '@/components/admin/ExportImportReportButton';
 import { PART_CATEGORY_LABEL, PART_CATEGORY_VALUES } from '@/lib/constants';
 import { generateSlug, getSearchKeywordQuery } from '@/lib/utils';
@@ -35,6 +35,7 @@ import { toastError } from '@/lib/toast';
 import { useAuth } from '@/lib/AuthContext';
 import { useConfig } from '@/lib/ConfigContext';
 import { buildPartCatalogQueryPlan } from '@/lib/partCatalogQuery';
+import { normalizeWarrantyRuleKey } from '@/lib/repairWarrantyRules';
 
 const getPartHeld = (part: Product) => Math.max(0, Number(part.held) || 0);
 const getPartAvailable = (part: Product) => Math.max(0, (Number(part.stock) || 0) - getPartHeld(part));
@@ -51,6 +52,7 @@ export default function PartsPage() {
     const [qrPart, setQrPart] = useState<(Product & { id: string }) | null>(null);
     const [isLotTrackingOpen, setIsLotTrackingOpen] = useState(false);
     const [partTypeOptions, setPartTypeOptions] = useState<string[]>([]);
+    const [warrantyPolicies, setWarrantyPolicies] = useState<WarrantyPolicyOption[]>([]);
     const [confirmModal, setConfirmModal] = useState<{
         isOpen: boolean;
         title: string;
@@ -123,6 +125,14 @@ export default function PartsPage() {
             const data = snap.data();
             const rules = Array.isArray(data.warrantyRules) ? data.warrantyRules : [];
             setPartTypeOptions(rules.map((rule: { partType?: string }) => rule.partType).filter((value): value is string => Boolean(value)));
+            setWarrantyPolicies(rules.flatMap((rule: { id?: unknown; partType?: unknown; warrantyMonths?: unknown }) => {
+                const label = typeof rule.partType === 'string' ? rule.partType.trim() : '';
+                if (!label) return [];
+                const id = typeof rule.id === 'string' && rule.id.trim()
+                    ? rule.id.trim()
+                    : normalizeWarrantyRuleKey(label);
+                return [{ id, label, months: Math.max(0, Number(rule.warrantyMonths) || 0) }];
+            }));
         });
         return () => unsub();
     }, []);
@@ -432,6 +442,7 @@ export default function PartsPage() {
                 onCreated={() => { setIsModalOpen(false); refresh(); }}
                 onUpdated={() => { setIsModalOpen(false); refresh(); }}
                 partTypeOptions={partTypeOptions}
+                warrantyPolicies={warrantyPolicies}
             />
 
             <Modal

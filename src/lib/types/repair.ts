@@ -95,6 +95,8 @@ export interface RepairIssue {
     status: 'pending' | 'resolved' | 'unresolved';
     categoryPath?: string[];
     serviceName?: string;
+    /** Concrete service record selected during intake; enables its business links. */
+    serviceId?: string;
 }
 
 // Sản phẩm quà tặng kèm khi bàn giao
@@ -157,6 +159,7 @@ export interface RepairTicket {
         reservedQuantity?: number; // Số lượng đã giữ trong kho cho dòng sửa chữa
         /** Time this line was converted from a stock hold to actual stock usage. */
         inventoryDeductedAt?: FirestoreDateValue;
+        warrantyPolicyId?: string;
         partType?: string;  // Loại linh kiện: Màn hình, Pin, Camera, Mainboard…
         // Legacy unit price (backward-compat)
         price?: number;
@@ -265,6 +268,7 @@ export interface RepairTicket {
 // ── Import Receipt (Phiếu nhập hàng) ──
 
 export interface WarrantyRule {
+    id?: string;
     partType: string;        // Loại linh kiện: "Màn hình", "Pin", "Camera"…
     warrantyMonths: number;  // Số tháng bảo hành
 }

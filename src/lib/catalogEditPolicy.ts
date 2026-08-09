@@ -15,6 +15,7 @@ export type ProductEditableField =
     | 'status'
     | 'condition'
     | 'isFlashSale'
+    | 'warranty'
     | 'quality'
     | 'partType'
     | 'supplier'
@@ -61,6 +62,7 @@ export const CATALOG_FIELD_PERMISSION_GROUPS: CatalogFieldPermissionGroup[] = [
             { id: 'condition', label: 'Tình trạng' },
             { id: 'status', label: 'Trạng thái hiển thị' },
             { id: 'isFlashSale', label: 'Flash Sale' },
+            { id: 'warranty', label: 'Chính sách bảo hành' },
             { id: 'images', label: 'Hình ảnh' },
         ],
     },

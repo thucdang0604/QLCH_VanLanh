@@ -87,36 +87,66 @@ export function normalizeOrderPaymentId(value: unknown) {
 }
 
 export function resolveProductWarranty(
-    productData: { warrantyType?: string; warrantyMonths?: string | number; category?: string },
+    productData: {
+        warrantyType?: string;
+        warrantyMonths?: string | number;
+        category?: string;
+        categoryIds?: unknown;
+    },
     retailTrees: RetailTaxonomyNode[],
 ): { warrantyType: string; warrantyMonths: number } | null {
-    if (productData.warrantyType && productData.warrantyType !== 'none') {
-        return { warrantyType: productData.warrantyType, warrantyMonths: Number(productData.warrantyMonths) || 0 };
-    }
+    const productWarranty = productData.warrantyType && productData.warrantyType !== 'none'
+        ? { warrantyType: productData.warrantyType, warrantyMonths: Number(productData.warrantyMonths) || 0 }
+        : null;
+    // Older catalog records can have a warranty type without a term.  Treat it as
+    // incomplete rather than letting it override a complete category policy.
+    if (productWarranty && productWarranty.warrantyMonths > 0) return productWarranty;
     if (productData.warrantyType === 'none') return null;
 
-    const categoryPath = productData.category || '';
-    if (!categoryPath) return null;
+    const categoryIds = Array.isArray(productData.categoryIds)
+        ? productData.categoryIds.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+        : [];
+    const categoryPath = categoryIds.length > 0
+        ? categoryIds
+        : String(productData.category || '').split('/').filter(Boolean).map((_, index, values) => values.slice(0, index + 1).join('/'));
+    if (categoryPath.length === 0) return productWarranty;
 
-    const segments = categoryPath.split('/');
     let currentNodes = retailTrees;
     let lastFoundWarranty: { warrantyType: string; warrantyMonths: number } | null = null;
 
-    for (let index = 0; index < segments.length; index += 1) {
-        const partialId = segments.slice(0, index + 1).join('/');
-        const node = currentNodes.find(candidate => candidate.id === partialId || candidate.slug === segments[index]);
+    for (const categoryId of categoryPath) {
+        const slug = categoryId.split('/').filter(Boolean).at(-1);
+        const node = currentNodes.find(candidate => candidate.id === categoryId || candidate.slug === slug)
+            || findRetailTaxonomyNode(retailTrees, categoryId);
         if (!node) break;
 
         if (node.warrantyType && node.warrantyType !== 'none') {
             lastFoundWarranty = { warrantyType: node.warrantyType, warrantyMonths: Number(node.warrantyMonths) || 0 };
-        } else if (node.warrantyType === 'none') {
+        } else if (node.warrantyType === 'none' && node.warrantyMonths !== undefined) {
             lastFoundWarranty = null;
         }
 
         if (!node.children || node.children.length === 0) break;
         currentNodes = node.children;
     }
-    return lastFoundWarranty;
+    return lastFoundWarranty || productWarranty;
+}
+
+function findRetailTaxonomyNode(nodes: RetailTaxonomyNode[], id: string): RetailTaxonomyNode | null {
+    for (const node of nodes) {
+        if (node.id === id || node.slug === id) return node;
+        const match = findRetailTaxonomyNode(node.children || [], id);
+        if (match) return match;
+    }
+    return null;
+}
+
+/** Calculate the immutable expiration timestamp that belongs on an order line. */
+export function getWarrantyExpiresAt(startedAt: number, warrantyMonths: number): number | undefined {
+    if (!Number.isFinite(startedAt) || !Number.isInteger(warrantyMonths) || warrantyMonths <= 0) return undefined;
+    const expiresAt = new Date(startedAt);
+    expiresAt.setMonth(expiresAt.getMonth() + warrantyMonths);
+    return expiresAt.getTime();
 }
 
 export function requiresImeiForPosRetailProduct(productData: { category?: unknown; categoryIds?: unknown }) {

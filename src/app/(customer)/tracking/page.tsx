@@ -8,7 +8,7 @@ import {
     Search, Loader2, Calendar, Clock, MapPin, CheckCircle2, Phone,
     XCircle, User, Wrench, ShoppingCart, Package, AlertCircle,
     Smartphone, Star, PlayCircle, CircleDot,
-    Camera, X, HeartHandshake, Shield
+    Camera, X, HeartHandshake, Shield, ChevronDown
 } from 'lucide-react';
 import { useConfig } from '@/lib/ConfigContext';
 import { appAlert } from '@/lib/appDialog';
@@ -75,25 +75,49 @@ interface OrderItem {
     storage?: string;
     quantity: number;
     price: number;
+    warrantyExpiresAt?: FirestoreDateValue;
 }
 
 interface Order {
     id: string;
     status: string;
     createdAt: FirestoreDateValue;
+    completedAt?: FirestoreDateValue;
     customer_info: { phone: string; name?: string; note?: string };
     items?: OrderItem[];
     shipping_fee?: number;
     total_amount: number;
 }
 
+interface WarrantyLookupResult {
+    productName: string;
+    image?: string;
+    warrantyMonths: number;
+    warrantyStartedAt?: FirestoreDateValue;
+    warrantyExpiresAt: FirestoreDateValue;
+    status: 'active' | 'expired';
+    remainingDays: number;
+}
+
+type TrackingResource = 'appointments' | 'repairs' | 'orders';
+
 const TERMINAL_STATUSES = ['done', 'refund', 'out'];
 
 /* ─── Helpers ─── */
 const fmtDate = (ts: unknown) => {
     if (!ts) return '—';
-    const maybe = ts as { toDate?: () => Date };
-    const d = typeof maybe?.toDate === 'function' ? maybe.toDate() : new Date(ts as string | number | Date);
+    const maybe = ts as { toDate?: () => Date; toMillis?: () => number; seconds?: number; _seconds?: number };
+    const millis = typeof maybe?.toMillis === 'function'
+        ? maybe.toMillis()
+        : typeof maybe?.toDate === 'function'
+            ? maybe.toDate().getTime()
+            : typeof maybe?.seconds === 'number'
+                ? maybe.seconds * 1000
+                : typeof maybe?._seconds === 'number'
+                    ? maybe._seconds * 1000
+                    : ts instanceof Date ? ts.getTime() : typeof ts === 'number' ? ts : new Date(ts as string).getTime();
+    if (Number.isNaN(millis)) return '—';
+    const d = new Date(millis);
     return d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 const fmtPrice = (n: number) => new Intl.NumberFormat('vi-VN').format(n) + 'đ';
@@ -106,9 +130,16 @@ export default function TrackingPage() {
     const { config } = useConfig();
     const [activeTab, setActiveTab] = useState<'appointment' | 'repair' | 'order'>('repair');
     const [phone, setPhone] = useState('');
+    const [lookupMode, setLookupMode] = useState<'phone' | 'serial'>('phone');
     const [phoneError, setPhoneError] = useState('');
     const [loading, setLoading] = useState(false);
     const [searched, setSearched] = useState(false);
+    const [pageCursors, setPageCursors] = useState<Record<TrackingResource, string | null>>({ appointments: null, repairs: null, orders: null });
+    const [loadedResources, setLoadedResources] = useState<Record<TrackingResource, boolean>>({ appointments: false, repairs: false, orders: false });
+    const [loadingMore, setLoadingMore] = useState<TrackingResource | null>(null);
+    const [warrantyResult, setWarrantyResult] = useState<WarrantyLookupResult | null>(null);
+    const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
+    const [loadingOrderId, setLoadingOrderId] = useState<string | null>(null);
 
     // Data
     const [appointments, setAppointments] = useState<Appointment[]>([]);
@@ -159,9 +190,11 @@ export default function TrackingPage() {
         e.preventDefault();
         if (!phone.trim()) return;
 
-        const normalizedPhone = normalizeVietnamPhone(phone);
-        if (!normalizedPhone) {
-            setPhoneError('Vui lòng nhập số điện thoại hợp lệ.');
+        const normalizedPhone = lookupMode === 'phone' ? normalizeVietnamPhone(phone) : null;
+        const currentResource: TrackingResource = activeTab === 'repair' ? 'repairs' : activeTab === 'order' ? 'orders' : 'appointments';
+        const normalizedSerial = phone.trim().toUpperCase().replace(/\s+/g, '');
+        if ((lookupMode === 'phone' && !normalizedPhone) || (lookupMode === 'serial' && normalizedSerial.length < 4)) {
+            setPhoneError(lookupMode === 'serial' ? 'Vui lòng nhập IMEI/Serial hợp lệ.' : 'Vui lòng nhập số điện thoại hợp lệ.');
             setSearched(false);
             setAppointments([]);
             setRepairs([]);
@@ -193,13 +226,17 @@ export default function TrackingPage() {
         setAppointments([]);
         setRepairs([]);
         setOrders([]);
+        setWarrantyResult(null);
+        setExpandedOrderId(null);
+        setPageCursors({ appointments: null, repairs: null, orders: null });
+        setLoadedResources({ appointments: false, repairs: false, orders: false });
         setPhoneError('');
 
         try {
             const res = await fetch('/api/tracking', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ phone: normalizedPhone.local }),
+                body: JSON.stringify(lookupMode === 'phone' ? { phone: normalizedPhone!.local, resource: currentResource } : { serial: normalizedSerial }),
             });
 
             if (!res.ok) {
@@ -209,6 +246,11 @@ export default function TrackingPage() {
             }
 
             const data = await res.json();
+
+            if (lookupMode === 'serial') {
+                setWarrantyResult((data.warranty || null) as WarrantyLookupResult | null);
+                return;
+            }
 
             const aData = (data.appointments || []) as Appointment[];
             aData.sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
@@ -221,10 +263,95 @@ export default function TrackingPage() {
             const oData = (data.orders || []) as Order[];
             oData.sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
             setOrders(oData);
+            setPageCursors({
+                appointments: data.pageInfo?.appointments?.nextCursor || null,
+                repairs: data.pageInfo?.repairs?.nextCursor || null,
+                orders: data.pageInfo?.orders?.nextCursor || null,
+            });
+            setLoadedResources(prev => ({ ...prev, [currentResource]: true }));
         } catch (error) {
             console.error('Search error:', error);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const loadTab = async (resource: TrackingResource) => {
+        if (lookupMode !== 'phone' || loadedResources[resource] || loadingMore) return;
+        const normalizedPhone = normalizeVietnamPhone(phone);
+        if (!normalizedPhone) return;
+        setLoadingMore(resource);
+        try {
+            const res = await fetch('/api/tracking', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ phone: normalizedPhone.local, resource }),
+            });
+            if (!res.ok) return;
+            const data = await res.json();
+            if (resource === 'appointments') setAppointments((data.appointments || []) as Appointment[]);
+            if (resource === 'repairs') setRepairs((data.repairs || []) as RepairTicket[]);
+            if (resource === 'orders') setOrders((data.orders || []) as Order[]);
+            setPageCursors(prev => ({ ...prev, [resource]: data.pageInfo?.[resource]?.nextCursor || null }));
+            setLoadedResources(prev => ({ ...prev, [resource]: true }));
+        } finally {
+            setLoadingMore(null);
+        }
+    };
+
+    const selectTab = (resource: TrackingResource) => {
+        setActiveTab(resource === 'repairs' ? 'repair' : resource === 'orders' ? 'order' : 'appointment');
+        void loadTab(resource);
+    };
+
+    const toggleOrder = async (order: Order) => {
+        if (expandedOrderId === order.id) {
+            setExpandedOrderId(null);
+            return;
+        }
+        if (order.items) {
+            setExpandedOrderId(order.id);
+            return;
+        }
+        const normalizedPhone = normalizeVietnamPhone(phone);
+        if (!normalizedPhone || loadingOrderId) return;
+        setLoadingOrderId(order.id);
+        try {
+            const res = await fetch('/api/tracking', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ phone: normalizedPhone.local, orderId: order.id }),
+            });
+            if (!res.ok) return;
+            const data = await res.json();
+            if (data.order) {
+                setOrders(prev => prev.map(current => current.id === order.id ? { ...current, ...data.order } : current));
+                setExpandedOrderId(order.id);
+            }
+        } finally {
+            setLoadingOrderId(null);
+        }
+    };
+
+    const loadMore = async (resource: TrackingResource) => {
+        const cursor = pageCursors[resource];
+        const normalizedPhone = normalizeVietnamPhone(phone);
+        if (!cursor || !normalizedPhone || loadingMore) return;
+        setLoadingMore(resource);
+        try {
+            const res = await fetch('/api/tracking', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ phone: normalizedPhone.local, resource, cursor }),
+            });
+            if (!res.ok) return;
+            const data = await res.json();
+            if (resource === 'appointments') setAppointments(prev => [...prev, ...((data.appointments || []) as Appointment[])]);
+            if (resource === 'repairs') setRepairs(prev => [...prev, ...((data.repairs || []) as RepairTicket[])]);
+            if (resource === 'orders') setOrders(prev => [...prev, ...((data.orders || []) as Order[])]);
+            setPageCursors(prev => ({ ...prev, [resource]: data.pageInfo?.[resource]?.nextCursor || null }));
+        } finally {
+            setLoadingMore(null);
         }
     };
 
@@ -506,10 +633,14 @@ export default function TrackingPage() {
 
                     {/* Search Box */}
                     <div className="bg-white p-6 rounded-2xl shadow-xl shadow-gray-200/50 border border-gray-100">
+                        <div className="mb-3 flex gap-2 text-sm font-semibold">
+                            <button type="button" onClick={() => { setLookupMode('phone'); setPhoneError(''); }} className={`rounded-lg px-3 py-2 ${lookupMode === 'phone' ? 'bg-orange-100 text-orange-700' : 'text-gray-500'}`}>Số điện thoại</button>
+                            <button type="button" onClick={() => { setLookupMode('serial'); setPhoneError(''); }} className={`rounded-lg px-3 py-2 ${lookupMode === 'serial' ? 'bg-orange-100 text-orange-700' : 'text-gray-500'}`}>IMEI / Serial</button>
+                        </div>
                         <form onSubmit={handleSearch} className="relative flex flex-col sm:flex-row gap-3">
                             <input
-                                type="tel"
-                                placeholder="Nhập số điện thoại..."
+                                type={lookupMode === 'phone' ? 'tel' : 'text'}
+                                placeholder={lookupMode === 'phone' ? 'Nhập số điện thoại...' : 'Nhập IMEI hoặc Serial...'}
                                 value={phone}
                                 onChange={(e) => {
                                     setPhone(e.target.value);
@@ -540,23 +671,34 @@ export default function TrackingPage() {
                         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
 
                             {/* Tabs with count badges */}
+                            {lookupMode === 'serial' && (
+                                warrantyResult ? (
+                                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5 text-emerald-950">
+                                        <div className="flex items-center gap-2 font-bold"><Shield size={20} /> {warrantyResult.productName}</div>
+                                        <p className="mt-2 text-sm font-semibold">{warrantyResult.status === 'active' ? `Còn bảo hành ${warrantyResult.remainingDays} ngày` : 'Đã hết thời hạn bảo hành'}</p>
+                                        <p className="mt-1 text-sm">Hạn bảo hành: {fmtDate(warrantyResult.warrantyExpiresAt)}</p>
+                                    </div>
+                                ) : (
+                                    <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm font-medium text-amber-900">Không tìm thấy thiết bị có thông tin bảo hành theo IMEI/Serial này.</div>
+                                )
+                            )}
                             <div className="flex p-1 bg-gray-100 rounded-xl">
                                 <button
-                                    onClick={() => setActiveTab('repair')}
+                                    onClick={() => selectTab('repairs')}
                                     className={`flex-1 py-3 text-sm font-semibold rounded-lg transition-all flex items-center justify-center gap-2 ${activeTab === 'repair' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
                                 >
                                     Sửa chữa
                                     {repairs.length > 0 && <span className="w-5 h-5 text-[10px] bg-orange-100 text-orange-600 rounded-full flex items-center justify-center font-bold">{repairs.length}</span>}
                                 </button>
                                 <button
-                                    onClick={() => setActiveTab('order')}
+                                    onClick={() => selectTab('orders')}
                                     className={`flex-1 py-3 text-sm font-semibold rounded-lg transition-all flex items-center justify-center gap-2 ${activeTab === 'order' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
                                 >
                                     Đơn hàng
                                     {orders.length > 0 && <span className="w-5 h-5 text-[10px] bg-orange-100 text-orange-600 rounded-full flex items-center justify-center font-bold">{orders.length}</span>}
                                 </button>
                                 <button
-                                    onClick={() => setActiveTab('appointment')}
+                                    onClick={() => selectTab('appointments')}
                                     className={`flex-1 py-3 text-sm font-semibold rounded-lg transition-all flex items-center justify-center gap-2 ${activeTab === 'appointment' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
                                 >
                                     Lịch hẹn
@@ -743,6 +885,11 @@ export default function TrackingPage() {
                                                 );
                                             })
                                         )}
+                                        {pageCursors.repairs && (
+                                            <button type="button" onClick={() => void loadMore('repairs')} disabled={loadingMore !== null} className="w-full rounded-lg border border-orange-200 px-4 py-2 text-sm font-semibold text-orange-700 hover:bg-orange-50 disabled:opacity-50">
+                                                {loadingMore === 'repairs' ? 'Đang tải...' : 'Xem thêm phiếu sửa chữa'}
+                                            </button>
+                                        )}
                                     </div>
                                 )}
 
@@ -802,6 +949,11 @@ export default function TrackingPage() {
                                                 );
                                             })
                                         )}
+                                        {pageCursors.appointments && (
+                                            <button type="button" onClick={() => void loadMore('appointments')} disabled={loadingMore !== null} className="w-full rounded-lg border border-orange-200 px-4 py-2 text-sm font-semibold text-orange-700 hover:bg-orange-50 disabled:opacity-50">
+                                                {loadingMore === 'appointments' ? 'Đang tải...' : 'Xem thêm lịch hẹn'}
+                                            </button>
+                                        )}
                                     </div>
                                 )}
 
@@ -826,22 +978,29 @@ export default function TrackingPage() {
                                                 
                                                 return (
                                                     <div key={order.id} className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-                                                        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-gray-50 pb-4 mb-4">
+                                                        <button type="button" onClick={() => void toggleOrder(order)} aria-expanded={expandedOrderId === order.id} className="flex w-full flex-wrap items-start justify-between gap-4 text-left">
                                                             <div className="flex items-center gap-3">
                                                                 <div className="w-12 h-12 rounded-xl bg-orange-50 flex items-center justify-center text-orange-600">
                                                                     <Package size={24} />
                                                                 </div>
                                                                 <div>
                                                                     <p className="font-bold text-gray-900 text-lg">Đơn hàng #{order.id.slice(-6).toUpperCase()}</p>
-                                                                    <p className="text-sm font-medium text-gray-500 mt-0.5">{fmtDate(order.createdAt)}</p>
+                                                                    <p className="text-sm font-medium text-gray-500 mt-0.5">{fmtDate(order.completedAt || order.createdAt)}</p>
                                                                 </div>
                                                             </div>
-                                                            <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold uppercase border ${st.color}`}>
-                                                                <st.icon size={14} className={order.status === 'Processing' ? "animate-spin" : ""} />
-                                                                {st.label}
-                                                            </span>
-                                                        </div>
+                                                            <div className="flex items-center gap-3">
+                                                                <div className="text-right">
+                                                                    <p className="text-sm font-bold text-orange-600">{fmtPrice(order.total_amount)}</p>
+                                                                    <span className={`mt-1 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold uppercase border ${st.color}`}>
+                                                                        <st.icon size={14} className={order.status === 'Processing' ? "animate-spin" : ""} />
+                                                                        {st.label}
+                                                                    </span>
+                                                                </div>
+                                                                <ChevronDown size={20} className={`text-gray-400 transition-transform ${expandedOrderId === order.id ? 'rotate-180' : ''}`} />
+                                                            </div>
+                                                        </button>
                                                         
+                                                        {expandedOrderId === order.id && <div className="mt-4 border-t border-gray-50 pt-4">
                                                         {/* Items */}
                                                         <div className="space-y-3 mb-4">
                                                             {order.items?.map((item: OrderItem, idx: number) => (
@@ -861,6 +1020,7 @@ export default function TrackingPage() {
                                                                             {item.color && <span>Màu: {item.color}</span>}
                                                                             {item.storage && <span className="ml-2">DL: {item.storage}</span>}
                                                                             <span className="ml-2 block sm:inline">SL: {item.quantity}</span>
+                                                                            {item.warrantyExpiresAt && <span className="ml-2 block sm:inline text-emerald-700">Bảo hành đến: {fmtDate(item.warrantyExpiresAt)}</span>}
                                                                         </div>
                                                                     </div>
                                                                     <div className="font-bold text-sm text-gray-900 whitespace-nowrap pl-4">
@@ -869,7 +1029,6 @@ export default function TrackingPage() {
                                                                 </div>
                                                             ))}
                                                         </div>
-
                                                         {/* Footer */}
                                                         <div className="flex flex-wrap items-center justify-between gap-4 pt-4 border-t border-gray-100">
                                                             <div className="text-sm">
@@ -887,9 +1046,15 @@ export default function TrackingPage() {
                                                                 <span className="font-medium">{order.customer_info.note}</span>
                                                             </div>
                                                         )}
+                                                        </div>}
                                                     </div>
                                                 );
                                             })
+                                        )}
+                                        {pageCursors.orders && (
+                                            <button type="button" onClick={() => void loadMore('orders')} disabled={loadingMore !== null} className="w-full rounded-lg border border-orange-200 px-4 py-2 text-sm font-semibold text-orange-700 hover:bg-orange-50 disabled:opacity-50">
+                                                {loadingMore === 'orders' ? 'Đang tải...' : 'Xem thêm đơn hàng'}
+                                            </button>
                                         )}
                                     </div>
                                 )}

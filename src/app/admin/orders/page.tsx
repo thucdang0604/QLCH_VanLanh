@@ -21,6 +21,7 @@ import { useAuth } from '@/lib/AuthContext';
 import { useConfig } from '@/lib/ConfigContext';
 import { Receipt } from 'lucide-react';
 import { toastError, toastSuccess } from '@/lib/toast';
+import { getWarrantyExpiresAt, resolveProductWarranty, type RetailTaxonomyNode } from '@/lib/posCheckoutRules';
 
 
 const formatPrice = (price: number) => new Intl.NumberFormat('vi-VN').format(price) + 'đ';
@@ -29,6 +30,14 @@ const formatDate = (ts: unknown) => {
     const maybe = ts as { toDate?: () => Date };
     const d = typeof maybe?.toDate === 'function' ? maybe.toDate() : new Date(ts as string | number | Date);
     return d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+};
+
+const getDateMillis = (value: unknown): number | undefined => {
+    if (!value) return undefined;
+    const timestamp = value as { toDate?: () => Date };
+    const date = typeof timestamp.toDate === 'function' ? timestamp.toDate() : new Date(value as string | number | Date);
+    const millis = date.getTime();
+    return Number.isFinite(millis) ? millis : undefined;
 };
 
 type OrderPaymentHistoryEntry = NonNullable<Order['paymentHistory']>[number];
@@ -72,6 +81,7 @@ type PrintableOrderItem = Partial<OrderItemWithRepair & {
     productName: string;
     warrantyType: string;
     warrantyMonths: number;
+    warrantyStartedAt: number;
     warrantyExpiresAt: number;
     imei: string;
     serial: string;
@@ -171,6 +181,51 @@ function getWarrantyPrintType(item: PrintableOrderItem): 'device' | 'accessory' 
     if (!hasLegacyWarranty) return null;
 
     return getOrderItemSerials(item).length > 0 ? 'device' : 'accessory';
+}
+
+function getWarrantyTypeLabel(type?: string) {
+    if (type === 'warrantyDevice') return 'Thiết bị';
+    if (type === 'warrantyAccessory') return 'Phụ kiện';
+    if (type === 'warrantyRepair') return 'Sửa chữa';
+    return type || '—';
+}
+
+type WarrantyPrintDetails = {
+    type: string;
+    warrantyMonths: number;
+};
+
+async function resolveWarrantyPrintDetails(items: Order['items']) {
+    const details = new Map<number, WarrantyPrintDetails>();
+    const legacyItemIndexes: number[] = [];
+
+    items.forEach((item, index) => {
+        const printableItem = item as PrintableOrderItem;
+        const printType = getWarrantyPrintType(printableItem);
+        const warrantyMonths = Number(printableItem.warrantyMonths || 0);
+        if (!printType) return;
+        if (warrantyMonths > 0) {
+            details.set(index, { type: printableItem.warrantyType || (printType === 'device' ? 'warrantyDevice' : 'warrantyAccessory'), warrantyMonths });
+        } else if (printableItem.productId) {
+            legacyItemIndexes.push(index);
+        }
+    });
+
+    if (legacyItemIndexes.length === 0) return details;
+
+    const taxonomySnap = await getDoc(doc(db, 'system_config', 'taxonomy_settings'));
+    const retailTrees = (taxonomySnap.data()?.taxonomy?.retail || []) as RetailTaxonomyNode[];
+    await Promise.all(legacyItemIndexes.map(async (index) => {
+        const item = items[index] as PrintableOrderItem;
+        const productSnap = await getDoc(doc(db, 'products', String(item.productId)));
+        if (!productSnap.exists()) return;
+        const warranty = resolveProductWarranty(productSnap.data(), retailTrees);
+        if (warranty && warranty.warrantyMonths > 0) {
+            details.set(index, { type: warranty.warrantyType, warrantyMonths: warranty.warrantyMonths });
+        }
+    }));
+
+    return details;
 }
 
 function escapeReceiptHtml(value: string) {
@@ -370,17 +425,31 @@ export default function OrdersPage() {
         }
     };
 
-    const handlePrintWarranty = () => {
+    const handlePrintWarranty = async () => {
         if (!selectedOrder || !receiptConfig) return;
         const items = selectedOrder.items || [];
         const payloads: { payload: WarrantyPrintPayload, config: WarrantyTemplateConfig, type: 'device'|'accessory' }[] = [];
+        let warrantyDetails: Map<number, WarrantyPrintDetails>;
+        try {
+            warrantyDetails = await resolveWarrantyPrintDetails(items);
+        } catch (error) {
+            console.error('Warranty print detail lookup failed:', error);
+            toastError('Không thể kiểm tra chính sách bảo hành của sản phẩm. Vui lòng thử lại.');
+            return;
+        }
 
         let hasIncompleteImei = false;
+        let hasIncompleteWarranty = false;
 
-        for (const item of items) {
+        for (const [itemIndex, item] of items.entries()) {
             const it = item as PrintableOrderItem;
             const printType = getWarrantyPrintType(it);
             if (printType) {
+                const warranty = warrantyDetails.get(itemIndex);
+                if (!warranty) {
+                    hasIncompleteWarranty = true;
+                    continue;
+                }
                 const qty = it.quantity || 1;
                 const serials = getOrderItemSerials(it);
                 if (printType === 'device' && serials.length < qty) {
@@ -397,6 +466,16 @@ export default function OrdersPage() {
                 const resolvedPrintType = preferredConfig ? printType : (receiptConfig.warrantyAccessory ? 'accessory' : 'device');
 
                 for(let i = 0; i < qty; i++) {
+                    const warrantyStartedAt = it.warrantyStartedAt || selectedOrder.completedAt || selectedOrder.createdAt;
+                    const recordedExpiry = getDateMillis(it.warrantyExpiresAt);
+                    const warrantyExpiresAt = recordedExpiry
+                        ? it.warrantyExpiresAt
+                        : (() => {
+                            const startedAtMillis = getDateMillis(warrantyStartedAt);
+                            return startedAtMillis
+                                ? getWarrantyExpiresAt(startedAtMillis, warranty.warrantyMonths)
+                                : undefined;
+                        })();
                     payloads.push({
                         config: wConfig,
                         type: resolvedPrintType,
@@ -406,7 +485,14 @@ export default function OrdersPage() {
                             deviceModel: getOrderItemDisplayName(it),
                             deviceImei: serials[i] || '—',
                             totalCost: it.price || 0,
-                            createdAt: selectedOrder.createdAt
+                            createdAt: warrantyStartedAt,
+                            sourceCode: selectedOrder.id,
+                            warrantyLines: [{
+                                label: getOrderItemDisplayName(it),
+                                type: getWarrantyTypeLabel(warranty.type),
+                                warrantyMonths: warranty.warrantyMonths,
+                                expiresAt: warrantyExpiresAt,
+                            }],
                         }
                     });
                 }
@@ -415,6 +501,11 @@ export default function OrdersPage() {
 
         if (hasIncompleteImei) {
             toastError('Vui lòng cập nhật đầy đủ số IMEI/Serial cho các thiết bị cần bảo hành!');
+            return;
+        }
+
+        if (hasIncompleteWarranty) {
+            toastError('Có sản phẩm đã bật bảo hành nhưng chưa có thời hạn. Vui lòng cấu hình thời hạn tại Sản phẩm hoặc Danh mục trước khi in.');
             return;
         }
 
@@ -857,6 +948,8 @@ export default function OrdersPage() {
                                                             <div key={i} className="flex items-center gap-2">
                                                                 <input
                                                                     type="text"
+                                                                    readOnly
+                                                                    tabIndex={-1}
                                                                     placeholder={`Nhập IMEI/Serial #${i + 1}`}
                                                                     defaultValue={it.imeis?.[i] || ''}
                                                                     onBlur={(e) => {

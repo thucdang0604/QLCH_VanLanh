@@ -75,6 +75,8 @@ export interface Product {
     sold?: number;
     quality?: string;
     partType?: string;
+    /** Stable repair-warranty rule key. `partType` remains a display/legacy label. */
+    warrantyPolicyId?: string;
     warrantyMonths?: number;
     description?: string;
     videoEmbedUrl?: string;
