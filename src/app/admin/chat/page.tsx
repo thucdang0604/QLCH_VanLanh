@@ -367,7 +367,16 @@ export default function AdminChatPage() {
 
         syncAdminRealtimeRole().then((warning) => {
             roleSyncWarning = warning || '';
-            if (roleSyncWarning) setSetupError(roleSyncWarning);
+            if (roleSyncWarning) {
+                // The session endpoint has already attempted the server-side
+                // projection. Do not attach an RTDB listener that Rules will
+                // reject; the next session refresh retries the projection.
+                if (!cancelled) {
+                    setSetupError(roleSyncWarning);
+                    setLoading(false);
+                }
+                return () => { };
+            }
             return subscribeToRooms((roomsMap) => {
             if (cancelled) return;
             setSetupError(roleSyncWarning);

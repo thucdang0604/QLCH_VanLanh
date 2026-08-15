@@ -5,7 +5,7 @@ import { formatRepairPrice } from './repairPageUtils';
 
 export interface RepairHandoverModalState {
     ticket: RepairTicket;
-    action: 'out' | 'refund';
+    action: 'handover' | 'refund';
     targetStatus?: string;
 }
 
@@ -43,21 +43,21 @@ export function RepairHandoverModal({
     const additionalFeeAmount = Number(additionalFees.replace(/[^0-9-]/g, '')) || 0;
     const laborCostAmount = Number(laborCost.replace(/[^0-9-]/g, '')) || 0;
     const titles: Record<RepairHandoverModalState['action'], string> = {
-        out: '↩️ Trả Máy — Xác nhận Hoàn/Thu phí',
+        handover: '↩️ Bàn giao máy — Xác nhận Hoàn/Thu phí',
         refund: '🔴 Hoàn Phí — Xác nhận Hoàn tiền',
     };
     const colors: Record<RepairHandoverModalState['action'], string> = {
-        out: 'bg-gray-500 hover:bg-gray-600',
+        handover: 'bg-gray-500 hover:bg-gray-600',
         refund: 'bg-red-500 hover:bg-red-600',
     };
-    const outRefundAmount = action === 'out' && deposit > 0 ? deposit : 0;
-    const outChargeAmount = action === 'out' && (additionalFeeAmount + laborCostAmount - deposit > 0)
+    const outRefundAmount = action === 'handover' && deposit > 0 ? deposit : 0;
+    const outChargeAmount = action === 'handover' && (additionalFeeAmount + laborCostAmount - deposit > 0)
         ? additionalFeeAmount + laborCostAmount - deposit
         : 0;
     const isConfirmDisabled =
-        (action === 'out' && outRefundAmount > 0 && !paymentConfirmed) ||
+        (action === 'handover' && outRefundAmount > 0 && !paymentConfirmed) ||
         (action === 'refund' && deposit > 0 && !paymentConfirmed) ||
-        ((action === 'refund' || action === 'out') && !note.trim());
+        ((action === 'refund' || action === 'handover') && !note.trim());
 
     return (
         <Modal isOpen={true} onClose={onClose} size="md" priority="high">
@@ -98,19 +98,19 @@ export function RepairHandoverModal({
                             <span className="font-semibold text-yellow-600">-{formatRepairPrice(deposit)}</span>
                         </div>
                     )}
-                    {action === 'out' && deposit > 0 && (
+                    {action === 'handover' && deposit > 0 && (
                         <div className="flex justify-between items-center text-sm border-t border-orange-200 pt-3 mt-2 font-bold bg-orange-50 -mx-4 -mb-4 px-4 py-3 rounded-b-xl">
                             <span className="text-orange-700">🔄 TIỀN CỬA HÀNG HOÀN LẠI KHÁCH:</span>
                             <span className="text-orange-600 text-xl">{formatRepairPrice(outRefundAmount)}</span>
                         </div>
                     )}
-                    {action === 'out' && outChargeAmount > 0 && (
+                    {action === 'handover' && outChargeAmount > 0 && (
                         <div className="flex justify-between items-center text-sm border-t border-yellow-200 pt-3 mt-2 font-bold bg-yellow-50 -mx-4 -mb-4 px-4 py-3 rounded-b-xl">
                             <span className="text-yellow-700">⚠️ KHÁCH CẦN THANH TOÁN PHÍ PHÁT SINH:</span>
                             <span className="text-yellow-600 text-xl">{formatRepairPrice(outChargeAmount)}</span>
                         </div>
                     )}
-                    {action === 'out' && deposit === 0 && additionalFeeAmount === 0 && laborCostAmount === 0 && (
+                    {action === 'handover' && deposit === 0 && additionalFeeAmount === 0 && laborCostAmount === 0 && (
                         <div className="text-sm text-gray-500 border-t pt-2 mt-2 italic flex items-center justify-center gap-2">
                             <Ban size={16} />
                             Trả lại máy, không thu/hoàn phí.
@@ -123,7 +123,7 @@ export function RepairHandoverModal({
                         </div>
                     )}
                 </div>
-                {action === 'out' && outRefundAmount > 0 && (
+                {action === 'handover' && outRefundAmount > 0 && (
                     <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
                         <label className="flex items-start gap-3 cursor-pointer">
                             <div className="mt-0.5 bg-white border rounded">

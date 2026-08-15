@@ -223,7 +223,7 @@ export function TechnicianWorkflowModals({
             })()}
 
             {noteModalPayload && (
-                <Modal isOpen={true} onClose={onCloseNote} title="Cập nhật Ghi chú kỹ thuật" size="md">
+                <Modal isOpen={true} onClose={() => { if (!isStatusChanging) onCloseNote(); }} title="Cập nhật Ghi chú kỹ thuật" size="md">
                     <div className="p-6 space-y-4">
                         <p className="text-sm text-gray-500">
                             Chuyển sang: {noteTicket
@@ -244,17 +244,18 @@ export function TechnicianWorkflowModals({
                                 rows={4}
                                 value={techNoteText}
                                 onChange={event => onTechNoteTextChange(event.target.value)}
+                                disabled={isStatusChanging}
                                 placeholder="Nhập ghi chú kỹ thuật hoặc lý do ghi đè trước khi chuyển trạng thái..."
                                 className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20"
                             />
                             <p className="text-xs text-gray-400 mt-1">Lý do này sẽ được lưu cùng với phiếu sửa chữa và admin có thể xem trong lịch sử trạng thái.</p>
                         </div>
                         <div className="flex justify-end gap-3 pt-2">
-                            <button onClick={onCloseNote} className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
+                            <button onClick={onCloseNote} disabled={isStatusChanging} className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50">
                                 Đóng
                             </button>
-                            <button onClick={onSubmitNote} className="px-4 py-2 text-sm font-semibold text-white bg-orange-500 rounded-lg hover:bg-orange-600 transition-colors">
-                                Xác nhận chuyển đổi
+                            <button onClick={onSubmitNote} disabled={isStatusChanging} className="px-4 py-2 text-sm font-semibold text-white bg-orange-500 rounded-lg hover:bg-orange-600 transition-colors disabled:opacity-50 flex items-center gap-2">
+                                {isStatusChanging ? <Loader2 size={16} className="animate-spin" /> : 'Xác nhận chuyển đổi'}
                             </button>
                         </div>
                     </div>

@@ -8,7 +8,7 @@ import Modal from '@/components/admin/Modal';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { getDoc } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
-import { WORKFLOW_FEATURES } from '@/lib/workflowFeatures';
+import { WORKFLOW_FEATURES, type WorkflowFeature } from '@/lib/workflowFeatures';
 import { appConfirm } from '@/lib/appDialog';
 import {
     normalizeRepairWorkflow,
@@ -38,19 +38,19 @@ const defaultStatuses: WorkflowNode[] = [
     { id: 'doi_khach_phan_hoi', label: 'Đợi Khách Phản Hồi', color: 'bg-purple-100 text-purple-800', allowedNext: ['tim_linh_kien', 'dang_sua_chua', 'refund', 'out'] },
     { id: 'tim_linh_kien', label: 'Tìm Linh Kiện', color: 'bg-cyan-100 text-cyan-800', allowedNext: ['da_dat_linh_kien', 'refund', 'out'] },
     { id: 'da_dat_linh_kien', label: 'Đã Đặt LK', color: 'bg-teal-100 text-teal-800', allowedNext: ['dang_sua_chua'], allowedFeatures: ['requirePartsReady'] },
-    { id: 'dang_sua_chua', label: 'Đang Sửa Chữa', color: 'bg-orange-100 text-orange-800', allowedNext: ['done', 'refund'], allowedFeatures: ['reserveSelectedParts'] },
-    { id: 'done', label: 'Hoàn Thành', color: 'bg-green-100 text-green-800', allowedNext: [], isTerminal: true },
-    { id: 'out', label: 'Trả Máy', color: 'bg-gray-100 text-gray-800', allowedNext: [], isTerminal: true },
-    { id: 'refund', label: 'Hoàn Phí', color: 'bg-red-100 text-red-800', allowedNext: [], isTerminal: true }
+    { id: 'dang_sua_chua', label: 'Đang Sửa Chữa', color: 'bg-orange-100 text-orange-800', allowedNext: ['done', 'refund'], allowedFeatures: ['reserveSelectedParts', 'countsAsActiveRepair'] },
+    { id: 'done', label: 'Hoàn Thành', color: 'bg-green-100 text-green-800', allowedNext: [], allowedFeatures: ['recordCompletion'], isTerminal: true, terminalAction: 'close' },
+    { id: 'out', label: 'Trả Máy', color: 'bg-gray-100 text-gray-800', allowedNext: [], allowedFeatures: ['requiresHandover'], isTerminal: true, terminalAction: 'handover' },
+    { id: 'refund', label: 'Hoàn Phí', color: 'bg-red-100 text-red-800', allowedNext: [], allowedFeatures: ['requiresHandover', 'refundOutcome', 'releaseHeldParts'], isTerminal: true, terminalAction: 'refund' }
 ];
 
 const defaultWarrantyStatuses: WorkflowNode[] = [
     { id: 'bh_tiep_nhan', label: 'Tiếp nhận BH', color: 'bg-yellow-100 text-yellow-800', allowedNext: ['bh_dang_kiem_tra'], allowedFeatures: ['allowAssignTech'], isTerminal: false },
     { id: 'bh_dang_kiem_tra', label: 'Đang kiểm tra BH', color: 'bg-blue-100 text-blue-800', allowedNext: ['bh_dang_sua', 'bh_tu_choi'], allowedFeatures: ['requireAssignedTechnician', 'requireChecklist'], isTerminal: false },
     { id: 'bh_dang_sua', label: 'Đang sửa BH', color: 'bg-orange-100 text-orange-800', allowedNext: ['bh_hoan_tat', 'bh_refund'], allowedFeatures: ['allowPartsSelection', 'reserveSelectedParts'], isTerminal: false },
-    { id: 'bh_hoan_tat', label: 'Hoàn tất BH', color: 'bg-green-100 text-green-800', allowedNext: [], allowedFeatures: [], isTerminal: true },
-    { id: 'bh_tu_choi', label: 'Từ chối BH', color: 'bg-gray-100 text-gray-800', allowedNext: [], allowedFeatures: [], isTerminal: true },
-    { id: 'bh_refund', label: 'Hoàn phí BH', color: 'bg-red-100 text-red-800', allowedNext: [], allowedFeatures: ['enableTechnicianCommission'], isTerminal: true }
+    { id: 'bh_hoan_tat', label: 'Hoàn tất BH', color: 'bg-green-100 text-green-800', allowedNext: [], allowedFeatures: ['requiresHandover', 'recordCompletion'], isTerminal: true, terminalAction: 'handover' },
+    { id: 'bh_tu_choi', label: 'Từ chối BH', color: 'bg-gray-100 text-gray-800', allowedNext: [], allowedFeatures: ['requiresHandover'], isTerminal: true, terminalAction: 'handover' },
+    { id: 'bh_refund', label: 'Hoàn phí BH', color: 'bg-red-100 text-red-800', allowedNext: [], allowedFeatures: ['enableTechnicianCommission', 'requiresHandover', 'refundOutcome', 'releaseHeldParts'], isTerminal: true, terminalAction: 'refund' }
 ];
 
 const colorOptions = [
@@ -59,6 +59,44 @@ const colorOptions = [
     'bg-orange-100 text-orange-800', 'bg-green-100 text-green-800', 'bg-red-100 text-red-800',
     'bg-gray-100 text-gray-800', 'bg-pink-100 text-pink-800', 'bg-amber-100 text-amber-800',
 ];
+
+const FEATURE_SECTIONS = [
+    {
+        title: '1. Chức năng sử dụng trong trạng thái này',
+        description: 'Khi phiếu đang đứng ở bước này, nhân viên được mở các công cụ nào.',
+        featureIds: ['allowAssignTech', 'allowPartsSelection'],
+    },
+    {
+        title: '2. Điều kiện phải hoàn thành để chuyển flow',
+        description: 'Hệ thống kiểm tra các điều kiện này trước khi rời khỏi trạng thái hiện tại.',
+        featureIds: ['requireChecklist', 'requireAssignedTechnician', 'requireTechnicianNote', 'requirePartsReady', 'requirePaymentGate'],
+    },
+    {
+        title: '3. Tự động khi chuyển vào trạng thái này',
+        description: 'Tác vụ hệ thống thực hiện ngay sau khi flow đi vào node này.',
+        featureIds: ['reserveSelectedParts', 'consumeSelectedParts', 'releaseHeldParts'],
+    },
+    {
+        title: '4. Hậu xử lý và báo cáo',
+        description: 'Dùng cho thống kê công việc, doanh thu và hoa hồng; không chặn luồng chuyển trạng thái.',
+        featureIds: ['recordCompletion', 'enableSellerCommission', 'enableTechnicianCommission', 'countsAsActiveRepair'],
+    },
+] as const;
+
+const TERMINAL_SEMANTIC_FEATURES = ['requiresHandover', 'refundOutcome'] as const;
+
+function getTerminalActionDescription(action: WorkflowNode['terminalAction'] | undefined) {
+    switch (action) {
+        case 'handover':
+            return 'Mở bước bàn giao và đối soát với khách trước khi đóng phiếu.';
+        case 'refund':
+            return 'Mở bước hoàn phí, yêu cầu lý do và xác nhận khoản hoàn cho khách.';
+        case 'close':
+            return 'Đóng phiếu nội bộ, không mở bước giao máy hoặc hoàn phí.';
+        default:
+            return 'Chỉ khóa phiếu; không có bước hậu xử lý bắt buộc.';
+    }
+}
 
 export default function RepairsConfigTab() {
     const [repairStatuses, setRepairStatuses] = useState<WorkflowNode[]>(defaultStatuses);
@@ -97,8 +135,9 @@ export default function RepairsConfigTab() {
                     const d = snap.data();
                     const rs = d.repairStatuses ?? d.statuses ?? defaultStatuses;
                     const ws = d.warrantyStatuses ?? defaultWarrantyStatuses;
-                    setRepairStatuses(normalizeRepairWorkflow(rs));
-                    setWarrantyStatuses(normalizeWarrantyWorkflow(ws));
+                    const normalizationOptions = { useLegacyFallback: d.workflowSchemaVersion !== 3 };
+                    setRepairStatuses(normalizeRepairWorkflow(rs, normalizationOptions));
+                    setWarrantyStatuses(normalizeWarrantyWorkflow(ws, normalizationOptions));
                     setHasLegacyStatuses(Array.isArray(d.statuses));
                     // Legacy migration: sort generic arrays to trackingGroups ensuring order
                     if (d.trackingGroups) {
@@ -140,8 +179,8 @@ export default function RepairsConfigTab() {
                 trackingGroups: orderedGroups,
                 warrantyRules,
                 warrantyNote,
-                workflowSchemaVersion: 2,
-                workflowFeatureSemantics: 'exit-gates-v1',
+                workflowSchemaVersion: 3,
+                workflowFeatureSemantics: 'node-capabilities-v1',
                 updatedAt: serverTimestamp(),
             }, { merge: true });
 
@@ -206,7 +245,33 @@ export default function RepairsConfigTab() {
             };
         }));
     };
-    const toggleTerminal = (id: string) => setActiveStatuses(prev => prev.map(s => s.id === id ? { ...s, isTerminal: !s.isTerminal } : s));
+    const synchronizeTerminalSemantics = (features: string[], action: WorkflowNode['terminalAction'] | undefined) => {
+        const withoutDerived = features.filter(feature => !TERMINAL_SEMANTIC_FEATURES.includes(feature as typeof TERMINAL_SEMANTIC_FEATURES[number]));
+        if (action === 'handover') return [...withoutDerived, 'requiresHandover'];
+        if (action === 'refund') return [...withoutDerived, 'requiresHandover', 'refundOutcome'];
+        return withoutDerived;
+    };
+    const toggleTerminal = (id: string) => setActiveStatuses(prev => prev.map(s => {
+        if (s.id !== id) return s;
+        const isTerminal = !s.isTerminal;
+        return {
+            ...s,
+            isTerminal,
+            terminalAction: isTerminal ? s.terminalAction : undefined,
+            allowedFeatures: isTerminal
+                ? s.allowedFeatures
+                : synchronizeTerminalSemantics(s.allowedFeatures || [], undefined),
+        };
+    }));
+    const updateTerminalAction = (id: string, value: string) => setActiveStatuses(prev => prev.map(s => {
+        if (s.id !== id) return s;
+        const terminalAction = value === '' ? undefined : value as NonNullable<WorkflowNode['terminalAction']>;
+        return {
+            ...s,
+            terminalAction,
+            allowedFeatures: synchronizeTerminalSemantics(s.allowedFeatures || [], terminalAction),
+        };
+    }));
     const toggleFeature = (id: string, feature: string) => {
         setActiveStatuses(prev => prev.map(s => {
             if (s.id !== id) return s;
@@ -405,23 +470,63 @@ export default function RepairsConfigTab() {
                                         <span className={`font-semibold ${status.isTerminal ? 'text-red-600' : 'text-gray-500'}`}>Điểm kết thúc (Khóa phiếu)</span>
                                     </label>
 
-                                    {/* Feature Toggles */}
-                                    <div className="mt-2 space-y-1.5 p-2 bg-gray-50 border border-gray-100 rounded-lg">
-                                        <p className="text-[10px] font-bold text-gray-500 uppercase mb-1">Tính năng đi kèm</p>
-                                        {WORKFLOW_FEATURES.map(f => (
-                                            <label key={f.id} className="flex items-center gap-1.5 cursor-pointer w-fit text-[11px] text-gray-700 hover:text-gray-900 transition-colors" title={f.description}>
-                                                <input type="checkbox"
-                                                    checked={status.allowedFeatures?.includes(f.id) || false}
-                                                    onChange={() => toggleFeature(status.id, f.id)}
-                                                    className="rounded border-gray-300 text-orange-500 focus:ring-orange-500 w-3 h-3"
-                                                />
-                                                <span>{f.label}</span>
+                                    {status.isTerminal && (
+                                        <div className="mt-2 rounded-lg border border-red-100 bg-red-50/50 p-2.5 space-y-2">
+                                            <div>
+                                                <p className="text-[10px] font-bold uppercase text-red-700">Cách kết thúc phiếu</p>
+                                                <p className="text-[11px] text-gray-600">Chỉ áp dụng cho node cuối; quyết định hệ thống đóng phiếu theo cách nào.</p>
+                                            </div>
+                                            <label className="flex flex-wrap items-center gap-2 text-[11px] text-gray-700">
+                                            <span className="font-medium">Kết quả khi kết thúc</span>
+                                            <select
+                                                title="Cách kết thúc phiếu"
+                                                value={status.terminalAction || ''}
+                                                onChange={event => updateTerminalAction(status.id, event.target.value)}
+                                                className="px-2 py-1 border rounded-md bg-white focus:outline-none"
+                                            >
+                                                <option value="">Chỉ khóa phiếu</option>
+                                                <option value="handover">Bàn giao khách</option>
+                                                <option value="refund">Hoàn phí</option>
+                                                <option value="close">Hoàn tất nội bộ</option>
+                                            </select>
                                             </label>
-                                        ))}
-                                    </div>
+                                            <p className="text-[11px] text-gray-600">{getTerminalActionDescription(status.terminalAction)}</p>
+                                        </div>
+                                    )}
+
+                                    {FEATURE_SECTIONS.map(section => {
+                                        const features = section.featureIds
+                                            .map(featureId => WORKFLOW_FEATURES.find(feature => feature.id === featureId))
+                                            .filter((feature): feature is WorkflowFeature => Boolean(feature));
+                                        if (features.length === 0) return null;
+                                        return (
+                                            <section key={section.title} className="mt-2 space-y-1.5 rounded-lg border border-gray-100 bg-gray-50 p-2.5">
+                                                <div>
+                                                    <p className="text-[10px] font-bold uppercase text-gray-700">{section.title}</p>
+                                                    <p className="text-[11px] text-gray-500">{section.description}</p>
+                                                </div>
+                                                <div className="space-y-1">
+                                                    {features.map(feature => (
+                                                        <label key={feature.id} className="flex items-start gap-1.5 cursor-pointer text-[11px] text-gray-700 hover:text-gray-900 transition-colors" title={feature.description}>
+                                                            <input type="checkbox"
+                                                                checked={status.allowedFeatures?.includes(feature.id) || false}
+                                                                onChange={() => toggleFeature(status.id, feature.id)}
+                                                                className="mt-0.5 rounded border-gray-300 text-orange-500 focus:ring-orange-500 w-3 h-3"
+                                                            />
+                                                            <span>{feature.label}</span>
+                                                        </label>
+                                                    ))}
+                                                </div>
+                                            </section>
+                                        );
+                                    })}
 
                                     {!status.isTerminal && (
-                                        <div className="relative group mt-1">
+                                        <div className="relative group mt-2 rounded-lg border border-orange-100 bg-orange-50/50 p-2.5">
+                                            <div className="mb-1.5">
+                                                <p className="text-[10px] font-bold uppercase text-orange-700">5. Luồng tiếp theo có thể chuyển</p>
+                                                <p className="text-[11px] text-gray-500">Chỉ các trạng thái được chọn bên dưới mới xuất hiện khi nhân viên chuyển flow.</p>
+                                            </div>
                                             <button className="px-3 py-1.5 border rounded-lg bg-gray-50 text-gray-700 text-left flex items-center justify-between hover:bg-gray-100 transition-colors">
                                                 <span>{status.allowedNext?.length ? `${status.allowedNext.length} luồng tiếp theo` : 'Chưa cấu hình Workflow Next'}</span>
                                                 <ArrowRight size={12} className="text-gray-400 ml-2" />

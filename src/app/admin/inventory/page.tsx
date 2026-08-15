@@ -112,6 +112,7 @@ export default function InventoryPage() {
     const [createReceiptType, setCreateReceiptType] = useState<ReceiptProposalType>('component');
     const [outOfStockRetailProducts, setOutOfStockRetailProducts] = useState<(Product & { id: string })[]>([]);
     const [outOfStockParts, setOutOfStockParts] = useState<(Product & { id: string })[]>([]);
+    const [repairDemandParts, setRepairDemandParts] = useState<(Product & { id: string; requestedQuantity?: number })[]>([]);
     const [outOfStockSuggestionsLoading, setOutOfStockSuggestionsLoading] = useState<ReceiptProposalType | null>(null);
 
     // Expanded receipt
@@ -204,12 +205,24 @@ export default function InventoryPage() {
         setOutOfStockSuggestionsLoading(receiptType);
 
         try {
-            const snapshot = await getDocs(query(
-                collection(db, 'products'),
-                where('stock', '<=', 0),
-                limit(100),
-            ));
-            const suggestions = snapshot.docs
+            const [outOfStockSnapshot, repairRequestSnapshot] = await Promise.all([
+                getDocs(query(
+                    collection(db, 'products'),
+                    where('stock', '<=', 0),
+                    // This is only a secondary, manual reference list. Do not
+                    // spend 100 reads on arbitrary stock-out products.
+                    limit(24),
+                )),
+                receiptType === 'component'
+                    ? getDocs(query(
+                        collection(db, 'import_receipts'),
+                        where('status', '==', 'draft'),
+                        where('source', '==', 'repair_request'),
+                        limit(1),
+                    ))
+                    : Promise.resolve(null),
+            ]);
+            const suggestions = outOfStockSnapshot.docs
                 .map(document => ({ id: document.id, ...document.data() } as Product & { id: string }))
                 .filter(product => product.status === 'active' && !product.isProposed)
                 .filter(product => receiptType === 'component'
@@ -217,11 +230,41 @@ export default function InventoryPage() {
                     : isRetailInventoryProduct(product),
                 );
 
+            let repairDemandSuggestions: (Product & { id: string; requestedQuantity?: number })[] = [];
+            if (repairRequestSnapshot && !repairRequestSnapshot.empty) {
+                const requestedQuantityByProductId = new Map<string, number>();
+                const requestItems = (repairRequestSnapshot.docs[0].data().items || []) as ImportReceiptItem[];
+                requestItems.forEach(item => {
+                    if (!item.productId || (item.status !== 'requested' && item.status !== 'unavailable')) return;
+                    requestedQuantityByProductId.set(
+                        item.productId,
+                        (requestedQuantityByProductId.get(item.productId) || 0) + Math.max(1, Number(item.quantity) || 1),
+                    );
+                });
+
+                const requestedProductIds = Array.from(requestedQuantityByProductId.keys()).slice(0, 30);
+                if (requestedProductIds.length > 0) {
+                    const productSnapshot = await getDocs(query(
+                        collection(db, 'products'),
+                        where('__name__', 'in', requestedProductIds),
+                    ));
+                    repairDemandSuggestions = productSnapshot.docs
+                        .map(document => ({
+                            id: document.id,
+                            ...document.data(),
+                            requestedQuantity: requestedQuantityByProductId.get(document.id) || 1,
+                        } as Product & { id: string; requestedQuantity?: number }))
+                        .filter(product => isPartCategory(product.category, product.categoryIds));
+                }
+            }
+
             setProducts(current => {
                 const merged = new Map(current.map(product => [product.id, product]));
                 suggestions.forEach(product => merged.set(product.id, product));
+                repairDemandSuggestions.forEach(product => merged.set(product.id, product));
                 return [...merged.values()];
             });
+            setRepairDemandParts(receiptType === 'component' ? repairDemandSuggestions : []);
             if (receiptType === 'component') {
                 setOutOfStockParts(suggestions);
             } else {
@@ -232,6 +275,7 @@ export default function InventoryPage() {
             toastError('Không thể tải gợi ý hàng hết tồn. Bạn vẫn có thể tìm thủ công.');
             if (receiptType === 'component') {
                 setOutOfStockParts([]);
+                setRepairDemandParts([]);
             } else {
                 setOutOfStockRetailProducts([]);
             }
@@ -1017,6 +1061,7 @@ export default function InventoryPage() {
                     suppliers={supplierList}
                     initialReceiptType={createReceiptType}
                     lockReceiptType
+                    repairDemandSuggestions={createReceiptType === 'component' ? repairDemandParts : []}
                     outOfStockSuggestions={createReceiptType === 'retail' ? outOfStockRetailProducts : outOfStockParts}
                     isLoadingOutOfStockSuggestions={outOfStockSuggestionsLoading === createReceiptType}
                 />

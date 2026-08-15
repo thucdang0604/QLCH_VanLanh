@@ -52,6 +52,10 @@ service cloud.firestore {
       return hasPermission('view_revenue');
     }
 
+    function isRepairManager() {
+      return isAdmin() || (hasPermission('manage_repairs') && hasPermission('manage_orders'));
+    }
+
     function productStockCoversHeld() {
       return (!('stock' in request.resource.data) || request.resource.data.stock is number)
         && (!('held' in request.resource.data) || request.resource.data.held is number)
@@ -339,15 +343,27 @@ service cloud.firestore {
 
     // Repairs
     match /repairs/{repairId} {
-      function canModifyRepairTicket() {
-        let hasAssignedKTV = 'staff' in resource.data && 'assignedTechnician' in resource.data.staff && resource.data.staff.assignedTechnician != null;
-        let isAssignedKTV = hasAssignedKTV && resource.data.staff.assignedTechnician == request.auth.uid;
-        let isUnassigned = !hasAssignedKTV;
-        let isManager = isAdmin() || (hasPermission('manage_repairs') && hasPermission('manage_orders'));
-        return isAssignedKTV || isUnassigned || isManager;
+      function isAssignedRepairTechnician() {
+        return 'staff' in resource.data
+          && 'assignedTechnician' in resource.data.staff
+          && resource.data.staff.assignedTechnician == request.auth.uid;
       }
 
-      allow read: if hasPermission('manage_repairs') || canViewRevenueSources();
+      function isIncomingRepairTransfer() {
+        return 'pendingTechnicianTransfer' in resource.data
+          && 'toTechnicianId' in resource.data.pendingTechnicianTransfer
+          && 'status' in resource.data.pendingTechnicianTransfer
+          && resource.data.pendingTechnicianTransfer.toTechnicianId == request.auth.uid
+          && resource.data.pendingTechnicianTransfer.status == 'pending';
+      }
+
+      function canModifyRepairTicket() {
+        return isAssignedRepairTechnician() || isRepairManager();
+      }
+
+      allow read: if canViewRevenueSources()
+        || isRepairManager()
+        || (hasPermission('manage_repairs') && (isAssignedRepairTechnician() || isIncomingRepairTransfer()));
       allow create: if false; // Tắt hoàn toàn tạo từ client, bắt buộc qua Server API
       allow update: if hasPermission('manage_repairs')
         && canModifyRepairTicket()

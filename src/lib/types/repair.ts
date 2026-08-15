@@ -3,6 +3,13 @@ import type { ContactMethod, ContactMethodType } from './contact';
 
 export type RepairStatus = string; // Changed from union to string to support dynamic statuses in DB
 
+/**
+ * The business meaning of a terminal workflow node.  This deliberately stays
+ * separate from the node ID: stores are free to rename or replace statuses
+ * without changing the handover workflow in code.
+ */
+export type WorkflowTerminalAction = 'handover' | 'refund' | 'close';
+
 export interface WorkflowNode {
     id: string;
     label: string;
@@ -10,6 +17,8 @@ export interface WorkflowNode {
     allowedNext: string[];
     allowedFeatures?: string[];
     isTerminal?: boolean;
+    /** Required only for terminal nodes that need a settlement action. */
+    terminalAction?: WorkflowTerminalAction;
     /** Legacy field retained for lossless migration; runtime uses allowedNext only. */
     next?: string;
 }

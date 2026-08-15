@@ -175,8 +175,9 @@ export default function TrackingPage() {
                         groups.sort((a, b) => a.order - b.order);
                         setTrackingGroups(groups);
                     }
-                    setDynamicStatuses(normalizeRepairWorkflow(data.repairStatuses));
-                    setWarrantyStatuses(normalizeWarrantyWorkflow(data.warrantyStatuses));
+                    const normalizationOptions = { useLegacyFallback: data.workflowSchemaVersion !== 3 };
+                    setDynamicStatuses(normalizeRepairWorkflow(data.repairStatuses, normalizationOptions));
+                    setWarrantyStatuses(normalizeWarrantyWorkflow(data.warrantyStatuses, normalizationOptions));
                 }
             } catch (err) {
                 console.error("Config fetch error:", err);

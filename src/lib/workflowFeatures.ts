@@ -38,6 +38,12 @@ export const WORKFLOW_FEATURES: WorkflowFeature[] = [
         scope: ['admin', 'technician'],
     },
     {
+        id: 'consumeSelectedParts',
+        label: 'Xuất/xác nhận linh kiện đã chọn khi vào trạng thái này',
+        description: 'Khi phiếu chuyển vào bước này, hệ thống yêu cầu xác nhận linh kiện đã dùng hoặc hoàn trả trước khi chốt tồn kho.',
+        scope: ['admin', 'technician'],
+    },
+    {
         id: 'allowPartsSelection',
         label: 'Cho phép chọn hiển thị/xin phần cứng thay thế',
         description: 'Hiển thị UI chọn linh kiện. Nếu linh kiện không có sẵn, tạo phiếu nhập tổng hợp',
@@ -77,6 +83,36 @@ export const WORKFLOW_FEATURES: WorkflowFeature[] = [
         id: 'requireTechnicianNote',
         label: 'Yêu cầu Ghi chú kỹ thuật',
         description: 'Bắt buộc nhập Ghi chú kỹ thuật khi chuyển sang hoặc lưu tại trạng thái này',
+        scope: ['admin', 'technician'],
+    },
+    {
+        id: 'requiresHandover',
+        label: 'Yêu cầu bàn giao/đối soát với khách',
+        description: 'Khi chuyển vào trạng thái này, Admin mở bước bàn giao thay vì chuyển trạng thái trực tiếp.',
+        scope: ['admin'],
+    },
+    {
+        id: 'refundOutcome',
+        label: 'Kết quả hoàn phí',
+        description: 'Bước bàn giao này là hoàn phí cho khách, yêu cầu ghi lý do và xác nhận số tiền hoàn.',
+        scope: ['admin'],
+    },
+    {
+        id: 'recordCompletion',
+        label: 'Ghi nhận hoàn thành vào báo cáo',
+        description: 'Đánh dấu đây là kết quả hoàn thành để thống kê doanh thu/số phiếu theo workflow.',
+        scope: ['admin'],
+    },
+    {
+        id: 'releaseHeldParts',
+        label: 'Hoàn giữ linh kiện khi kết thúc',
+        description: 'Khi vào trạng thái này, giải phóng các linh kiện đã giữ nhưng chưa xuất dùng.',
+        scope: ['admin', 'technician'],
+    },
+    {
+        id: 'countsAsActiveRepair',
+        label: 'Tính vào số ca đang sửa',
+        description: 'Dùng cho chỉ số công việc đang thực hiện của Kỹ thuật viên; không phụ thuộc tên trạng thái.',
         scope: ['admin', 'technician'],
     },
 ];

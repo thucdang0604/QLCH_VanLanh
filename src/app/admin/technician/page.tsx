@@ -1,12 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
     Wrench, Smartphone, Eye,
     CheckCircle2, Loader2, X,
     User as UserIcon, ArrowRightLeft, ShieldAlert
 } from 'lucide-react';
-import { collection, query, doc, where, orderBy, limit } from 'firebase/firestore';
+import { collection, query, doc, where, orderBy, limit, startAfter, type DocumentSnapshot, type QueryConstraint, type QuerySnapshot } from 'firebase/firestore';
 import { onSnapshot, getDoc, getDocs } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
@@ -15,7 +15,7 @@ import { isChecklistComplete, areAllPartsReady } from '@/lib/workflowFeatures';
 import type { RepairTicket, Product, WorkflowNode } from '@/lib/types';
 import { toastError, toastSuccess, toastWarning } from '@/lib/toast';
 import { PART_CATEGORY_LABEL, isPartCategory } from '@/lib/constants';
-import { REPAIR_PART_STATUS, REPAIR_STATUS, isPendingRepairPart, isRepairPartStatus, isRepairStatus } from '@/lib/repairStatus';
+import { REPAIR_PART_STATUS, isPendingRepairPart, isRepairPartStatus } from '@/lib/repairStatus';
 import { isRepairManager } from '@/lib/repairAccess';
 import { getAllowedNextWorkflowNodes, normalizeRepairWorkflow, normalizeWarrantyWorkflow } from '@/lib/repairWorkflowConfig';
 import { isSelectedRepairPart } from '@/lib/repairStatus';
@@ -32,6 +32,7 @@ import { TechnicianTicketDetailModal } from '@/features/technician/TechnicianTic
 import {
     filterAvailableCategoryRecommendations,
     getRecommendedPartCategoryIds,
+    getRepairServiceCategoryIds,
     getRepairServiceIds,
     type ServiceBusinessLink,
 } from '@/lib/serviceRecommendations';
@@ -42,6 +43,8 @@ const checklistLabels: Record<string, string> = {
     speaker: 'Loa/Mic', connectivity: 'Kết nối', battery: 'Pin', biometric: 'FaceID/Vân tay',
 };
 const CHECKLIST_VALUES = ['OK', 'Trầy', 'Nứt', 'Móp', 'Lỗi', 'Không có'];
+
+const TECHNICIAN_LIVE_PAGE_SIZE = 20;
 
 type RepairTimelineEntry = NonNullable<RepairTicket['statusTimeline']>[number];
 
@@ -78,7 +81,7 @@ function isTechnicianHandoffStatus(status: WorkflowNode | undefined): boolean {
 
 function isTicketWaitingForCustomerHandoff(ticket: RepairTicket, workflow: WorkflowNode[]): boolean {
     const status = workflow.find(item => item.id === ticket.status);
-    return isTechnicianHandoffStatus(status) || isRepairStatus(ticket.status, REPAIR_STATUS.CUSTOMER_HANDOVER);
+    return isTechnicianHandoffStatus(status);
 }
 
 function getTechnicianQueryableStatusIds(repairStatuses: WorkflowNode[], warrantyStatuses: WorkflowNode[]): string[] {
@@ -95,6 +98,40 @@ function getTicketCreatedAtMillis(ticket: RepairTicket): number {
 
 function sortTicketsByCreatedAtDesc(ticketsToSort: RepairTicket[]): RepairTicket[] {
     return [...ticketsToSort].sort((a, b) => getTicketCreatedAtMillis(b) - getTicketCreatedAtMillis(a));
+}
+
+type TechnicianTicketQueryScope = 'manager' | 'assigned' | 'incoming';
+
+function buildTechnicianTicketConstraints({
+    scope,
+    technicianId,
+    statusIds,
+    cursor,
+}: {
+    scope: TechnicianTicketQueryScope;
+    technicianId?: string;
+    statusIds: string[];
+    cursor?: DocumentSnapshot | null;
+}): QueryConstraint[] {
+    const constraints: QueryConstraint[] = [];
+
+    if (scope === 'assigned' && technicianId) {
+        constraints.push(where('staff.assignedTechnician', '==', technicianId));
+    }
+    if (scope === 'incoming' && technicianId) {
+        constraints.push(where('pendingTechnicianTransfer.toTechnicianId', '==', technicianId));
+        constraints.push(where('pendingTechnicianTransfer.status', '==', 'pending'));
+    }
+
+    // Firestore supports at most 30 values in an `in` query. The fallback
+    // keeps the page readable for unusually large, dynamic workflows.
+    if (statusIds.length > 0 && statusIds.length <= 30) {
+        constraints.push(where('status', 'in', statusIds));
+    }
+    constraints.push(orderBy('createdAt', 'desc'));
+    if (cursor) constraints.push(startAfter(cursor));
+    constraints.push(limit(TECHNICIAN_LIVE_PAGE_SIZE));
+    return constraints;
 }
 
 type PartSearchProduct = Product & {
@@ -134,16 +171,33 @@ function productMatchesPartSearch(product: PartSearchProduct, normalizedQuery: s
     return terms.every(term => haystack.includes(term));
 }
 
+function productMatchesPartQuality(product: Product, selectedQuality: string): boolean {
+    return normalizePartSearch(product.quality || '') === normalizePartSearch(selectedQuality);
+}
+
 export default function TechnicianPage() {
     const { user } = useAuth();
-    const [tickets, setTickets] = useState<RepairTicket[]>([]);
+    // Only the first page stays live. Older jobs are loaded on demand and are
+    // deliberately kept outside the listener so opening this screen has a
+    // predictable Firestore read cost.
+    const [liveTickets, setLiveTickets] = useState<RepairTicket[]>([]);
+    const [olderTickets, setOlderTickets] = useState<RepairTicket[]>([]);
+    const [managerCursor, setManagerCursor] = useState<DocumentSnapshot | null>(null);
+    const [assignedCursor, setAssignedCursor] = useState<DocumentSnapshot | null>(null);
+    const [incomingCursor, setIncomingCursor] = useState<DocumentSnapshot | null>(null);
+    const [managerHasMore, setManagerHasMore] = useState(false);
+    const [assignedHasMore, setAssignedHasMore] = useState(false);
+    const [incomingHasMore, setIncomingHasMore] = useState(false);
+    const [isLoadingMoreTickets, setIsLoadingMoreTickets] = useState(false);
     const [loading, setLoading] = useState(true);
     const [viewMode, setViewMode] = useState<'kanban' | 'list'>('list');
     const [selectedTicket, setSelectedTicket] = useState<RepairTicket | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
 
     const [statusConfirmModal, setStatusConfirmModal] = useState<TechnicianStatusModal | null>(null);
-    const [isStatusChanging, setIsStatusChanging] = useState(false);
+    const statusTransitionLocksRef = useRef(new Set<string>());
+    const [pendingStatusTicketIds, setPendingStatusTicketIds] = useState<string[]>([]);
+    const isStatusChanging = pendingStatusTicketIds.length > 0;
 
     const [noteModalPayload, setNoteModalPayload] = useState<TechnicianNoteModal | null>(null);
     const [techNoteText, setTechNoteText] = useState('');
@@ -156,17 +210,63 @@ export default function TechnicianPage() {
     const [partSearchResults, setPartSearchResults] = useState<Product[]>([]);
     const [isSearchingParts, setIsSearchingParts] = useState(false);
     const [serviceSuggestedParts, setServiceSuggestedParts] = useState<Product[]>([]);
+    const serviceSuggestionCacheRef = useRef(new Map<string, Product[]>());
     const [isLoadingServiceSuggestions, setIsLoadingServiceSuggestions] = useState(false);
     const [selectedPartQuality, setSelectedPartQuality] = useState('Zin');
     const [customPartName, setCustomPartName] = useState('');
 
-    const selectedTicketServiceKey = getRepairServiceIds(selectedTicket || {}).join('|');
+    // Once a suggested component group already has a selected/requested part,
+    // promote the remaining groups (e.g. show Pin after Screen). All of this
+    // stays local; selecting a component or switching quality causes no new
+    // Firestore reads.
+    const selectedSuggestedPartLeafCategoryIds = useMemo(() => {
+        const selectedProductIds = new Set(
+            (selectedTicket?.parts || [])
+                .map(part => part.productId)
+                .filter((productId): productId is string => Boolean(productId)),
+        );
+        return new Set(
+            serviceSuggestedParts
+                .filter(product => selectedProductIds.has(product.id))
+                .map(product => product.categoryIds?.at(-1) || '')
+                .filter(Boolean),
+        );
+    }, [selectedTicket?.parts, serviceSuggestedParts]);
+
+    // Suggestions and manual search must use the same quality decision.
+    const qualityFilteredServiceSuggestedParts = useMemo(
+        () => serviceSuggestedParts
+            .filter(product => productMatchesPartQuality(product, selectedPartQuality))
+            .filter(product => !selectedSuggestedPartLeafCategoryIds.has(product.categoryIds?.at(-1) || ''))
+            .slice(0, 10),
+        [selectedPartQuality, selectedSuggestedPartLeafCategoryIds, serviceSuggestedParts],
+    );
+
+    const tickets = useMemo(() => {
+        const uniqueTickets = new Map<string, RepairTicket>();
+        [...olderTickets, ...liveTickets].forEach(ticket => uniqueTickets.set(ticket.id, ticket));
+        return sortTicketsByCreatedAtDesc([...uniqueTickets.values()]);
+    }, [liveTickets, olderTickets]);
+    const isManager = isRepairManager(user);
+    const hasMoreTickets = isManager ? managerHasMore : assignedHasMore || incomingHasMore;
+
+    const selectedTicketServiceIds = getRepairServiceIds(selectedTicket || {});
+    const selectedTicketServiceCategoryIds = getRepairServiceCategoryIds(selectedTicket || {});
+    const selectedTicketServiceKey = [...selectedTicketServiceIds, ...selectedTicketServiceCategoryIds].join('|');
 
     useEffect(() => {
         let disposed = false;
         const serviceIds = getRepairServiceIds(selectedTicket || {});
-        if (serviceIds.length === 0) {
+        const serviceCategoryIds = getRepairServiceCategoryIds(selectedTicket || {});
+        if (serviceIds.length === 0 && serviceCategoryIds.length === 0) {
             setServiceSuggestedParts([]);
+            setIsLoadingServiceSuggestions(false);
+            return;
+        }
+
+        const cachedSuggestions = serviceSuggestionCacheRef.current.get(selectedTicketServiceKey);
+        if (cachedSuggestions) {
+            setServiceSuggestedParts(cachedSuggestions);
             setIsLoadingServiceSuggestions(false);
             return;
         }
@@ -174,10 +274,23 @@ export default function TechnicianPage() {
         const loadSuggestions = async () => {
             setIsLoadingServiceSuggestions(true);
             try {
-                const serviceSnaps = await Promise.all(serviceIds.map(serviceId => getDoc(doc(db, 'services', serviceId))));
-                const services = serviceSnaps
+                const [directServiceSnaps, categoryServiceSnaps] = await Promise.all([
+                    Promise.all(serviceIds.map(serviceId => getDoc(doc(db, 'services', serviceId)))),
+                    Promise.all(serviceCategoryIds.slice(0, 10).map(categoryId => getDocs(query(
+                        collection(db, 'services'),
+                        where('categoryIds', 'array-contains', categoryId),
+                        limit(20),
+                    )))),
+                ]);
+                const serviceMap = new Map<string, ServiceBusinessLink>();
+                directServiceSnaps
                     .filter(snapshot => snapshot.exists())
-                    .map(snapshot => ({ id: snapshot.id, ...snapshot.data() } as ServiceBusinessLink));
+                    .forEach(snapshot => serviceMap.set(snapshot.id, { id: snapshot.id, ...snapshot.data() } as ServiceBusinessLink));
+                categoryServiceSnaps.forEach(snapshot => snapshot.docs.forEach(serviceDoc => {
+                    const service = { id: serviceDoc.id, ...serviceDoc.data() } as ServiceBusinessLink & { isActive?: boolean };
+                    if (service.isActive !== false) serviceMap.set(serviceDoc.id, service);
+                }));
+                const services = Array.from(serviceMap.values());
                 const categoryIds = getRecommendedPartCategoryIds(services);
                 if (categoryIds.length === 0) {
                     if (!disposed) setServiceSuggestedParts([]);
@@ -195,7 +308,11 @@ export default function TechnicianPage() {
                         productMap.set(productDoc.id, product);
                     }
                 }));
-                const suggestions = filterAvailableCategoryRecommendations(Array.from(productMap.values()), categoryIds).slice(0, 10);
+                // Keep candidates for every linked group in memory. Rendering
+                // applies the 10-item cap after hiding a group that is already
+                // selected, allowing the next issue (Pin) to surface at once.
+                const suggestions = filterAvailableCategoryRecommendations(Array.from(productMap.values()), categoryIds);
+                serviceSuggestionCacheRef.current.set(selectedTicketServiceKey, suggestions);
                 if (!disposed) setServiceSuggestedParts(suggestions);
             } catch (error) {
                 console.error('Failed to load service-linked part suggestions', error);
@@ -247,20 +364,24 @@ export default function TechnicianPage() {
 
                 const results = snap.docs
                     .map(d => ({ id: d.id, ...d.data() } as Product))
-                    .filter(p => isPartCategory(p.category, p.categoryIds));
+                    .filter(p => isPartCategory(p.category, p.categoryIds))
+                    .filter(p => productMatchesPartQuality(p, selectedPartQuality));
 
                 if (results.length < 10) {
                     const existingIds = new Set(results.map(p => p.id));
                     const fallbackSnap = await getDocs(query(
                         collection(db, 'products'),
                         where('status', '==', 'active'),
-                        limit(300)
+                        // Legacy products without searchKeywords still get a
+                        // fallback, but a technician search must stay bounded.
+                        limit(60)
                     ));
 
                     fallbackSnap.docs
                         .map(d => ({ id: d.id, ...d.data() } as Product))
                         .filter(p => !existingIds.has(p.id))
                         .filter(p => isPartCategory(p.category, p.categoryIds))
+                        .filter(p => productMatchesPartQuality(p, selectedPartQuality))
                         .filter(p => productMatchesPartSearch(p, normalizedQ))
                         .forEach(p => results.push(p));
                 }
@@ -273,7 +394,7 @@ export default function TechnicianPage() {
             }
         }, 400);
         return () => clearTimeout(timer);
-    }, [partSearchQuery]);
+    }, [partSearchQuery, selectedPartQuality]);
 
     const handleAddPart = async (ticket: RepairTicket, product: Product) => {
         try {
@@ -427,8 +548,9 @@ export default function TechnicianPage() {
         const unsubStatuses = onSnapshot(doc(db, 'system_config', 'repairs'), (docSnap) => {
             if (docSnap.exists()) {
                 const data = docSnap.data();
-                setDynamicStatuses(normalizeRepairWorkflow(data.repairStatuses));
-                setWarrantyStatuses(normalizeWarrantyWorkflow(data.warrantyStatuses));
+                const normalizationOptions = { useLegacyFallback: data.workflowSchemaVersion !== 3 };
+                setDynamicStatuses(normalizeRepairWorkflow(data.repairStatuses, normalizationOptions));
+                setWarrantyStatuses(normalizeWarrantyWorkflow(data.warrantyStatuses, normalizationOptions));
             }
             setStatusConfigLoaded(true);
         });
@@ -437,30 +559,158 @@ export default function TechnicianPage() {
     }, []);
 
     useEffect(() => {
-        if (!statusConfigLoaded) return;
+        if (!statusConfigLoaded || !user?.uid) return;
 
         const statusIds = getTechnicianQueryableStatusIds(dynamicStatuses, warrantyStatuses);
-        if (statusIds.length === 0 && dynamicStatuses.length + warrantyStatuses.length > 0) {
-            setTickets([]);
+        if (statusIds.length === 0) {
+            setLiveTickets([]);
+            setOlderTickets([]);
+            setManagerHasMore(false);
+            setAssignedHasMore(false);
+            setIncomingHasMore(false);
             setLoading(false);
             return;
         }
 
-        const ticketQuery = statusIds.length > 0 && statusIds.length <= 30
-            ? query(collection(db, 'repairs'), where('status', 'in', statusIds), limit(100))
-            : query(collection(db, 'repairs'), orderBy('createdAt', 'desc'), limit(100));
-
-        const unsubTickets = onSnapshot(ticketQuery, (snap) => {
-            const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as RepairTicket[];
-            setTickets(sortTicketsByCreatedAtDesc(data));
+        const publish = (assigned: RepairTicket[], incoming: RepairTicket[]) => {
+            const uniqueTickets = new Map<string, RepairTicket>();
+            [...assigned, ...incoming].forEach(ticket => uniqueTickets.set(ticket.id, ticket));
+            setLiveTickets(sortTicketsByCreatedAtDesc([...uniqueTickets.values()]));
             setLoading(false);
-        }, (error) => {
+        };
+        const onError = (error: Error) => {
             console.error('Technician repairs listener error:', error);
             setLoading(false);
-        });
+        };
 
-        return () => unsubTickets();
-    }, [dynamicStatuses, statusConfigLoaded, warrantyStatuses]);
+        setLoading(true);
+        setLiveTickets([]);
+        setOlderTickets([]);
+        setManagerCursor(null);
+        setAssignedCursor(null);
+        setIncomingCursor(null);
+        setManagerHasMore(false);
+        setAssignedHasMore(false);
+        setIncomingHasMore(false);
+
+        if (isRepairManager(user)) {
+            const managerQuery = query(collection(db, 'repairs'), ...buildTechnicianTicketConstraints({
+                scope: 'manager',
+                statusIds,
+            }));
+            return onSnapshot(managerQuery, (snap) => {
+                setManagerCursor(snap.docs[snap.docs.length - 1] || null);
+                setManagerHasMore(snap.docs.length === TECHNICIAN_LIVE_PAGE_SIZE);
+                publish(snap.docs.map(d => ({ id: d.id, ...d.data() })) as RepairTicket[], []);
+            }, onError);
+        }
+
+        const assignedQuery = query(collection(db, 'repairs'), ...buildTechnicianTicketConstraints({
+            scope: 'assigned',
+            technicianId: user.uid,
+            statusIds,
+        }));
+        const incomingQuery = query(collection(db, 'repairs'), ...buildTechnicianTicketConstraints({
+            scope: 'incoming',
+            technicianId: user.uid,
+            statusIds,
+        }));
+        let assignedTickets: RepairTicket[] = [];
+        let incomingTickets: RepairTicket[] = [];
+        const unsubAssigned = onSnapshot(assignedQuery, (snap) => {
+            assignedTickets = snap.docs.map(d => ({ id: d.id, ...d.data() })) as RepairTicket[];
+            setAssignedCursor(snap.docs[snap.docs.length - 1] || null);
+            setAssignedHasMore(snap.docs.length === TECHNICIAN_LIVE_PAGE_SIZE);
+            publish(assignedTickets, incomingTickets);
+        }, onError);
+        const unsubIncoming = onSnapshot(incomingQuery, (snap) => {
+            incomingTickets = snap.docs.map(d => ({ id: d.id, ...d.data() })) as RepairTicket[];
+            setIncomingCursor(snap.docs[snap.docs.length - 1] || null);
+            setIncomingHasMore(snap.docs.length === TECHNICIAN_LIVE_PAGE_SIZE);
+            publish(assignedTickets, incomingTickets);
+        }, onError);
+
+        return () => {
+            unsubAssigned();
+            unsubIncoming();
+        };
+    }, [dynamicStatuses, statusConfigLoaded, user, warrantyStatuses]);
+
+    const loadMoreTickets = async () => {
+        if (!user?.uid || isLoadingMoreTickets || !hasMoreTickets) return;
+
+        const statusIds = getTechnicianQueryableStatusIds(dynamicStatuses, warrantyStatuses);
+        if (statusIds.length === 0) return;
+
+        setIsLoadingMoreTickets(true);
+        try {
+            const pageRequests: Array<Promise<{ scope: TechnicianTicketQueryScope; snap: QuerySnapshot }>> = [];
+
+            if (isManager) {
+                if (managerHasMore && managerCursor) {
+                    pageRequests.push(
+                        getDocs(query(collection(db, 'repairs'), ...buildTechnicianTicketConstraints({
+                            scope: 'manager',
+                            statusIds,
+                            cursor: managerCursor,
+                        }))).then(snap => ({ scope: 'manager', snap }))
+                    );
+                }
+            } else {
+                if (assignedHasMore && assignedCursor) {
+                    pageRequests.push(
+                        getDocs(query(collection(db, 'repairs'), ...buildTechnicianTicketConstraints({
+                            scope: 'assigned',
+                            technicianId: user.uid,
+                            statusIds,
+                            cursor: assignedCursor,
+                        }))).then(snap => ({ scope: 'assigned', snap }))
+                    );
+                }
+                if (incomingHasMore && incomingCursor) {
+                    pageRequests.push(
+                        getDocs(query(collection(db, 'repairs'), ...buildTechnicianTicketConstraints({
+                            scope: 'incoming',
+                            technicianId: user.uid,
+                            statusIds,
+                            cursor: incomingCursor,
+                        }))).then(snap => ({ scope: 'incoming', snap }))
+                    );
+                }
+            }
+
+            const pages = await Promise.all(pageRequests);
+            const additionalTickets = pages.flatMap(({ snap }) => snap.docs.map(item => ({
+                id: item.id,
+                ...(item.data() as Record<string, unknown>),
+            } as RepairTicket)));
+            setOlderTickets(previous => {
+                const merged = new Map(previous.map(ticket => [ticket.id, ticket]));
+                additionalTickets.forEach(ticket => merged.set(ticket.id, ticket));
+                return sortTicketsByCreatedAtDesc([...merged.values()]);
+            });
+
+            pages.forEach(({ scope, snap }) => {
+                const cursor = snap.docs[snap.docs.length - 1] || null;
+                const hasAnotherPage = snap.docs.length === TECHNICIAN_LIVE_PAGE_SIZE;
+                if (scope === 'manager') {
+                    setManagerCursor(cursor);
+                    setManagerHasMore(hasAnotherPage);
+                } else if (scope === 'assigned') {
+                    setAssignedCursor(cursor);
+                    setAssignedHasMore(hasAnotherPage);
+                } else {
+                    setIncomingCursor(cursor);
+                    setIncomingHasMore(hasAnotherPage);
+                }
+            });
+        } catch (error) {
+            console.error('Load more technician tickets error:', error);
+            toastError('Không thể tải thêm phiếu cũ. Vui lòng thử lại.');
+        } finally {
+            setIsLoadingMoreTickets(false);
+        }
+    };
 
     useEffect(() => {
         getDocs(query(collection(db, 'users'), where('role', '==', 'staff')))
@@ -524,7 +774,7 @@ export default function TechnicianPage() {
             }
 
             const targetCfg = workflow.find(s => s.id === newStatus);
-            if (isRepairStatus(newStatus, REPAIR_STATUS.CUSTOMER_HANDOVER) || isTechnicianHandoffStatus(targetCfg)) {
+            if (isTechnicianHandoffStatus(targetCfg)) {
                 const selectedParts = (ticket.parts || []).filter(p => isSelectedRepairPart(p));
                 if (selectedParts.length > 0) {
                     setPartsVerificationModalPayload({ ticketId, newStatus });
@@ -535,7 +785,7 @@ export default function TechnicianPage() {
                 }
             }
 
-            if (isRepairStatus(ticket.status, REPAIR_STATUS.INSPECTION) && newStatus !== REPAIR_STATUS.INSPECTION) {
+            if (currentCfg?.allowedFeatures?.includes('requireTechnicianNote') && !ticket.issue?.notes?.trim()) {
                 if (!ticket.issue?.notes?.trim()) {
                     setTechNoteText('');
                     setNoteModalPayload({ ticketId, newStatus, currentNote: '' });
@@ -576,6 +826,9 @@ export default function TechnicianPage() {
     };
 
     const handleStatusChange = async (ticketId: string, newStatus: string) => {
+        if (statusTransitionLocksRef.current.has(ticketId)) {
+            return;
+        }
         const ticket = tickets.find(t => t.id === ticketId);
         if (!ticket) return;
         if (ticket.status === newStatus) {
@@ -598,6 +851,15 @@ export default function TechnicianPage() {
         newTechNote?: string,
         partVerification?: Record<string, TechnicianPartVerificationSelection>,
     ): Promise<boolean> => {
+        // This ref lock is synchronous, unlike setState, so rapid repeated
+        // clicks cannot send two transition requests before React rerenders.
+        if (statusTransitionLocksRef.current.has(ticket.id)) {
+            return false;
+        }
+        statusTransitionLocksRef.current.add(ticket.id);
+        setPendingStatusTicketIds(previous => previous.includes(ticket.id)
+            ? previous
+            : [...previous, ticket.id]);
         try {
             const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
             const res = await fetch('/api/repairs/transition', {
@@ -621,6 +883,11 @@ export default function TechnicianPage() {
             if (!res.ok) throw new Error(data.error || 'Lỗi khi cập nhật trạng thái');
 
             toastSuccess('Cập nhật trạng thái thành công.');
+            // Older pages are intentionally one-shot reads. Reflect this
+            // user's transition locally instead of waiting for a full reload.
+            setOlderTickets(previous => previous.map(item => item.id === ticket.id
+                ? { ...item, status: newStatus, version: (item.version || 0) + 1 }
+                : item));
             if (selectedTicket?.id === ticket.id) {
                 setSelectedTicket({ ...ticket, status: newStatus, version: (ticket.version || 0) + 1 });
             }
@@ -629,6 +896,9 @@ export default function TechnicianPage() {
             console.error('Status update error:', err);
             toastError((err as Error)?.message || 'Lỗi khi cập nhật trạng thái.');
             return false;
+        } finally {
+            statusTransitionLocksRef.current.delete(ticket.id);
+            setPendingStatusTicketIds(previous => previous.filter(id => id !== ticket.id));
         }
     };
 
@@ -801,7 +1071,7 @@ export default function TechnicianPage() {
     return (
         <div className="p-3 sm:p-4 md:p-6 space-y-4">
             <TechnicianPageHeader
-                activeRepairCount={tickets.filter(ticket => ticket.status === 'dang_sua_chua').length}
+                activeRepairCount={tickets.filter(ticket => getWorkflowForTicket(ticket).find(status => status.id === ticket.status)?.allowedFeatures?.includes('countsAsActiveRepair')).length}
                 doneCount={tickets.filter(ticket => isTicketWaitingForCustomerHandoff(ticket, getWorkflowForTicket(ticket))).length}
                 searchQuery={searchQuery}
                 onSearchQueryChange={setSearchQuery}
@@ -825,9 +1095,11 @@ export default function TechnicianPage() {
                         const isIncomingTransferToMe = ticket.pendingTechnicianTransfer?.toTechnicianId === user?.uid && ticket.pendingTechnicianTransfer?.status === 'pending';
                         const isKtvLocked = user?.role !== 'admin' && (!isAssignedToMe || isIncomingTransferToMe);
                         const isReadOnly = isTerminal || isKtvLocked;
+                        const isStatusTransitionPending = pendingStatusTicketIds.includes(ticket.id);
                         const pendingTransfer = ticket.pendingTechnicianTransfer?.status === 'pending'
                             ? ticket.pendingTechnicianTransfer
                             : null;
+                        const requiresChecklist = currentCfg?.allowedFeatures?.includes('requireChecklist') === true;
                         const actionWarnings = [
                             currentCfg?.allowedFeatures?.includes('requireChecklist') && !isChecklistComplete(ticket.deviceInfo?.checklist as Record<string, unknown> | undefined)
                                 ? 'Hoàn thành checklist kiểm tra' : null,
@@ -843,22 +1115,22 @@ export default function TechnicianPage() {
                         return (
                             <div
                                 key={ticket.id}
-                                className="bg-white rounded-lg border p-3 sm:p-4 hover:shadow-md transition-shadow"
+                                className="bg-white rounded-xl border p-3 sm:p-4 xl:p-5 hover:shadow-md transition-shadow"
                                 title="Xem chi tiết"
                                 onClick={() => setSelectedTicket(ticket)}
                             >
                                 {/* Header Row */}
-                                <div className="flex items-center justify-between gap-2 border-b pb-2.5 mb-3">
-                                    <div className="flex items-center gap-2.5 min-w-0">
-                                        <div className="w-8 h-8 rounded-lg bg-orange-50 border border-orange-100 flex items-center justify-center flex-shrink-0 text-orange-600">
-                                            <Smartphone size={16} />
+                                <div className="flex items-center justify-between gap-3 border-b pb-3 mb-3">
+                                    <div className="flex items-center gap-3 min-w-0">
+                                        <div className="w-10 h-10 rounded-xl bg-orange-50 border border-orange-100 flex items-center justify-center flex-shrink-0 text-orange-600">
+                                            <Smartphone size={19} />
                                         </div>
                                         <div className="flex items-center gap-2 flex-wrap min-w-0">
-                                            <p title="Máy" className="font-bold text-gray-900 text-sm sm:text-base truncate">{ticket.deviceInfo?.model || 'Thiết bị'}</p>
-                                            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${st.color}`}>
+                                            <p title="Máy" className="font-bold text-gray-900 text-base sm:text-lg truncate">{ticket.deviceInfo?.model || 'Thiết bị'}</p>
+                                            <span className={`text-sm font-semibold px-2.5 py-0.5 rounded-full border ${st.color}`}>
                                                 {st.label}
                                             </span>
-                                            <div className="text-xs text-gray-500 flex items-center gap-1">
+                                            <div className="text-sm text-gray-500 flex items-center gap-1.5">
                                                 <span title="Mã phiếu" className="font-mono font-medium">#{ticket.id.slice(-6).toUpperCase()}</span>
                                                 {ticket.ticketType === 'warranty' && (
                                                     <span className="px-1.5 py-0.5 bg-purple-100 text-purple-700 text-[10px] rounded-full font-bold">BH</span>
@@ -871,14 +1143,15 @@ export default function TechnicianPage() {
                                     </div>
 
                                     {/* KTV Badge */}
-                                    <div className="flex-shrink-0 flex items-center gap-1 bg-orange-50 text-orange-600 border border-orange-200 rounded-full px-2.5 py-0.5 text-xs font-medium">
-                                        <UserIcon size={12} className="flex-shrink-0" />
+                                    <div className="flex-shrink-0 flex items-center gap-1.5 bg-orange-50 text-orange-600 border border-orange-200 rounded-full px-3 py-1 text-sm font-semibold">
+                                        <UserIcon size={14} className="flex-shrink-0" />
                                         <span className="truncate max-w-[120px]">{ticket.staff?.assignedTechnicianName || 'Chưa phân công'}</span>
                                     </div>
                                 </div>
 
                                 {/* Body Section */}
-                                <div className="space-y-2.5">
+                                <div className={requiresChecklist ? 'grid gap-3 xl:grid-cols-[minmax(0,0.9fr)_minmax(620px,1.7fr)]' : 'space-y-3'}>
+                                    <div className="min-w-0 space-y-3">
                                     {ticket.issues && ticket.issues.length > 0 ? (
                                         <p title="Vấn đề" className="text-xs sm:text-sm text-gray-700 line-clamp-2 bg-gray-50/80 p-2 rounded-lg border border-gray-100">{ticket.issues.map(i => i.label).join(', ')}</p>
                                     ) : ticket.issue?.description ? (
@@ -945,15 +1218,17 @@ export default function TechnicianPage() {
                                         </div>
                                     )}
 
-                                    {st?.allowedFeatures?.includes('requireChecklist') && (
-                                        <div className="border-t pt-2 mt-2">
-                                            <p className="text-[11px] font-bold text-gray-400 uppercase mb-1.5 flex items-center gap-1"><CheckCircle2 size={13} /> Checklist kiểm tra</p>
-                                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                                    </div>
+
+                                    {requiresChecklist && (
+                                        <div className="border-t pt-3 xl:mt-0 xl:border-t-0 xl:border-l xl:pl-4 xl:pt-0">
+                                            <p className="text-xs font-bold text-gray-500 uppercase mb-2 flex items-center gap-1.5"><CheckCircle2 size={14} /> Checklist kiểm tra</p>
+                                            <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-2">
                                                 {Object.keys(checklistLabels).map(key => {
                                                     const val = (ticket.deviceInfo?.checklist as Record<string, string> | undefined)?.[key] || '';
                                                     return (
-                                                        <div key={key} className="flex flex-col">
-                                                            <label className="text-xs text-gray-500 mb-0.5 truncate">{checklistLabels[key]}</label>
+                                                        <div key={key} className="flex flex-col min-w-0">
+                                                            <label className="text-xs font-medium text-gray-600 mb-1 truncate">{checklistLabels[key]}</label>
                                                             <select
                                                                 value={val}
                                                                 onClick={e => e.stopPropagation()}
@@ -961,7 +1236,7 @@ export default function TechnicianPage() {
                                                                 disabled={isReadOnly}
                                                                 aria-label={`Checklist: ${checklistLabels[key]}`}
                                                                 title={`Checklist: ${checklistLabels[key]}`}
-                                                                className={`min-h-[34px] text-xs px-2 py-1 rounded-lg border cursor-pointer transition-all appearance-none text-center font-bold ${val === 'OK' ? 'bg-green-50 border-green-300 text-green-700' :
+                                                                className={`min-h-[38px] text-sm px-2 py-1 rounded-lg border cursor-pointer transition-all appearance-none text-center font-bold ${val === 'OK' ? 'bg-green-50 border-green-300 text-green-700' :
                                                                         val === 'Lỗi' ? 'bg-red-50 border-red-300 text-red-600' :
                                                                             val ? 'bg-orange-50 border-orange-200 text-orange-700' :
                                                                                 'bg-gray-50 border-gray-200 text-gray-400'
@@ -1043,27 +1318,15 @@ export default function TechnicianPage() {
                                                 {(() => {
                                                     if (isReadOnly) return null;
 
-                                                    const hasRequestedParts = ticket.parts?.some(p => isRepairPartStatus(p.status, REPAIR_PART_STATUS.REQUESTED) || isRepairPartStatus(p.status, REPAIR_PART_STATUS.ORDERED));
-                                                    const targetStatusId = hasRequestedParts ? 'dang_tim_linh_kien' : 'dang_sua_chua';
-
                                                     const allowedNextStatuses = getAllowedNextWorkflowNodes(workflow, ticket.status);
-                                                    const targetStatus = allowedNextStatuses.find((status) => status.id === targetStatusId);
-                                                    const useDynamic = st?.allowedFeatures?.includes('allowPartsSelection') && !!targetStatus;
-
-                                                    if (useDynamic) {
-                                                        return (
-                                                            <button onClick={(e) => { e.stopPropagation(); handleStatusChange(ticket.id, targetStatus.id); }}
-                                                                className={`py-1.5 px-3 bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-lg font-bold text-xs shadow-sm hover:from-orange-600 hover:to-orange-700 active:scale-[0.98] transition-all flex items-center gap-1.5 justify-center`}>
-                                                                Chuyển → {hasRequestedParts ? 'Tìm linh kiện' : targetStatus.label}
-                                                            </button>
-                                                        );
-                                                    }
-
                                                     if (allowedNextStatuses.length > 0) {
                                                         return allowedNextStatuses.map((nextCfg) => {
+                                                            const isRefundOutcome = nextCfg.terminalAction === 'refund' || nextCfg.allowedFeatures?.includes('refundOutcome');
+                                                            const isHandoverOutcome = nextCfg.terminalAction === 'handover';
                                                             return (
                                                                 <button key={nextCfg.id} onClick={(e) => { e.stopPropagation(); handleStatusChange(ticket.id, nextCfg.id); }}
-                                                                    className={`py-1.5 px-3 text-white rounded-lg font-bold text-xs shadow-sm active:scale-[0.98] transition-all flex items-center gap-1.5 justify-center ${nextCfg.id === 'refund' ? 'bg-red-500 hover:bg-red-600' : nextCfg.id === 'out' ? 'bg-gray-700 hover:bg-gray-800' : 'bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700'}`}>
+                                                                    disabled={isStatusTransitionPending}
+                                                                    className={`py-1.5 px-3 text-white rounded-lg font-bold text-xs shadow-sm active:scale-[0.98] transition-all flex items-center gap-1.5 justify-center disabled:cursor-not-allowed disabled:opacity-60 ${isRefundOutcome ? 'bg-red-500 hover:bg-red-600' : isHandoverOutcome ? 'bg-gray-700 hover:bg-gray-800' : 'bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700'}`}>
                                                                     Chuyển → {nextCfg.label}
                                                                 </button>
                                                             );
@@ -1086,7 +1349,7 @@ export default function TechnicianPage() {
                 <div className="flex overflow-x-auto pb-4 gap-4 snap-x">
                     {Array.from(new Map(
                         [...dynamicStatuses, ...warrantyStatuses]
-                            .filter(s => !s.isTerminal && !isTechnicianHandoffStatus(s) && s.id !== 'cho_tiep_nhan' && s.id !== 'bh_tiep_nhan')
+                            .filter(s => !s.isTerminal && !isTechnicianHandoffStatus(s))
                             .map(s => [s.id, s])
                     ).values()).map(col => {
                         const colTickets = filtered.filter(t => t.status === col.id);
@@ -1195,31 +1458,17 @@ export default function TechnicianPage() {
                                                     return (
                                                         <>
                                                             {(() => {
-                                                                const hasRequestedParts = ticket.parts && ticket.parts.length > 0 && ticket.parts.some(p => isRepairPartStatus(p.status, REPAIR_PART_STATUS.REQUESTED) || isRepairPartStatus(p.status, REPAIR_PART_STATUS.ORDERED));
-                                                                const targetStatusId = hasRequestedParts ? 'dang_tim_linh_kien' : 'dang_sua_chua';
-
                                                                 const allowedNextStatuses = getAllowedNextWorkflowNodes(workflow, ticket.status);
-                                                                const targetStatus = allowedNextStatuses.find((status) => status.id === targetStatusId);
-                                                                const useDynamic = st?.allowedFeatures?.includes('allowPartsSelection') && !!targetStatus;
-
-                                                                if (useDynamic) {
-                                                                    return (
-                                                                        <div className="mt-3 pt-3 border-t flex flex-col gap-1.5">
-                                                                            <button onClick={(e) => { e.stopPropagation(); handleStatusChange(ticket.id, targetStatus.id); }}
-                                                                                className={`w-full justify-center flex items-center gap-2 text-sm px-4 py-3 rounded-xl font-bold transition-all bg-orange-500 text-white hover:bg-orange-600 shadow-md`}>
-                                                                                Chuyển → {hasRequestedParts ? 'Tìm linh kiện' : targetStatus.label}
-                                                                            </button>
-                                                                        </div>
-                                                                    );
-                                                                }
-
                                                                 if (allowedNextStatuses.length > 0) {
                                                                     return (
                                                                         <div className="mt-3 pt-3 border-t flex flex-col gap-1.5">
                                                                             {allowedNextStatuses.map((nextCfg) => {
+                                                                                const isRefundOutcome = nextCfg.terminalAction === 'refund' || nextCfg.allowedFeatures?.includes('refundOutcome');
+                                                                                const isHandoverOutcome = nextCfg.terminalAction === 'handover';
                                                                                 return (
                                                                                     <button key={nextCfg.id} onClick={(e) => { e.stopPropagation(); handleStatusChange(ticket.id, nextCfg.id); }}
-                                                                                        className={`w-full justify-center flex items-center gap-2 text-sm px-4 py-3 rounded-xl font-bold transition-all shadow-md ${nextCfg.id === 'refund' ? 'bg-red-500 text-white hover:bg-red-600' : nextCfg.id === 'out' ? 'bg-gray-700 text-white hover:bg-gray-800' : 'bg-orange-500 text-white hover:bg-orange-600'}`}>
+                                                                                        disabled={pendingStatusTicketIds.includes(ticket.id)}
+                                                                                        className={`w-full justify-center flex items-center gap-2 text-sm px-4 py-3 rounded-xl font-bold transition-all shadow-md disabled:cursor-not-allowed disabled:opacity-60 ${isRefundOutcome ? 'bg-red-500 text-white hover:bg-red-600' : isHandoverOutcome ? 'bg-gray-700 text-white hover:bg-gray-800' : 'bg-orange-500 text-white hover:bg-orange-600'}`}>
                                                                                         Chuyển → {nextCfg.label}
                                                                                     </button>
                                                                                 );
@@ -1243,6 +1492,20 @@ export default function TechnicianPage() {
                 </div>
             )}
 
+            {hasMoreTickets && !searchQuery && (
+                <div className="flex justify-center pt-2">
+                    <button
+                        type="button"
+                        onClick={loadMoreTickets}
+                        disabled={isLoadingMoreTickets}
+                        className="px-5 py-2.5 rounded-lg border border-orange-200 bg-orange-50 text-sm font-semibold text-orange-700 transition-colors hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-60 flex items-center gap-2"
+                    >
+                        {isLoadingMoreTickets && <Loader2 size={16} className="animate-spin" />}
+                        {isLoadingMoreTickets ? 'Đang tải phiếu cũ...' : 'Tải thêm phiếu cũ'}
+                    </button>
+                </div>
+            )}
+
             <TechnicianTicketDetailModal
                 selectedTicket={selectedTicket}
                 setSelectedTicket={setSelectedTicket}
@@ -1252,7 +1515,7 @@ export default function TechnicianPage() {
                 setPartSearchQuery={setPartSearchQuery}
                 partSearchResults={partSearchResults}
                 isSearchingParts={isSearchingParts}
-                serviceSuggestedParts={serviceSuggestedParts}
+                serviceSuggestedParts={qualityFilteredServiceSuggestedParts}
                 isLoadingServiceSuggestions={isLoadingServiceSuggestions}
                 selectedPartQuality={selectedPartQuality}
                 setSelectedPartQuality={setSelectedPartQuality}
@@ -1287,13 +1550,8 @@ export default function TechnicianPage() {
                 isStatusChanging={isStatusChanging}
                 onCloseStatusConfirm={() => { if (!isStatusChanging) setStatusConfirmModal(null); }}
                 onConfirmStatusChange={async (ticketId, newStatus) => {
-                    try {
-                        setIsStatusChanging(true);
-                        setStatusConfirmModal(null);
-                        await executeStatusChange(ticketId, newStatus);
-                    } finally {
-                        setIsStatusChanging(false);
-                    }
+                    setStatusConfirmModal(null);
+                    await executeStatusChange(ticketId, newStatus);
                 }}
                 partsVerificationModalPayload={partsVerificationModalPayload}
                 partsVerificationSelections={partsVerificationSelections}

@@ -72,7 +72,7 @@ let lastBadgeFetchTime = 0;
 let lastBadgeCacheKey = '';
 const BADGE_CACHE_TTL_MS = 120_000; // 2 minutes
 
-export function useAdminBadges(userUid?: string, userRole?: string, userPermissions?: string[]) {
+export function useAdminBadges(userUid?: string, userRole?: string, userPermissions?: string[], rtdbRoleSynced = false) {
     const permissionCacheKey = useMemo(() => Array.from(new Set(userPermissions || []))
         .filter((permission): permission is string => typeof permission === 'string')
         .sort()
@@ -175,7 +175,10 @@ export function useAdminBadges(userUid?: string, userRole?: string, userPermissi
     // Firestore badge counts use one-shot aggregation/bounded reads above.
     // ── 3. Chats: Realtime DB — info.hasUnread ──
     useEffect(() => {
-        if (!hasPerm('chat_support')) { setUnreadChats(0); return; }
+        // RTDB rules use a short-lived server-side projection at
+        // admin_roles/{uid}; Firestore permission alone cannot authorize this
+        // listener. Avoid attaching a listener before the projection is ready.
+        if (!hasPerm('chat_support') || !rtdbRoleSynced) { setUnreadChats(0); return; }
         let unsub: (() => void) | undefined;
         let isMounted = true;
 
@@ -211,7 +214,7 @@ export function useAdminBadges(userUid?: string, userRole?: string, userPermissi
             isMounted = false;
             if (unsub) unsub();
         };
-    }, [hasPerm]);
+    }, [hasPerm, rtdbRoleSynced]);
 
     // ── 6. Activities (unread) — kept here to consolidate ──
     useEffect(() => {

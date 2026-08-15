@@ -214,7 +214,15 @@ export function TechnicianTicketDetailModal({
                             <Package size={16} className="text-orange-500" /> Linh kiện đã chọn
                         </p>
                         <div className="space-y-2">
-                            {selectedTicket.parts.map((p, pIdx) => (
+                            {selectedTicket.parts.map((p, pIdx) => {
+                                const isRequested = isRepairPartStatus(p.status, REPAIR_PART_STATUS.REQUESTED);
+                                const isUnavailable = isRepairPartStatus(p.status, REPAIR_PART_STATUS.UNAVAILABLE);
+                                const isReserved = isRepairPartStatus(p.status, REPAIR_PART_STATUS.SELECTED)
+                                    || isRepairPartStatus(p.status, REPAIR_PART_STATUS.IN_STOCK);
+                                const canRemovePart = canManageSelectedTicketParts && (isRequested || isUnavailable || isReserved);
+                                const removeLabel = isRequested ? 'Bỏ đề xuất' : isReserved ? 'Bỏ chọn' : 'Loại trừ';
+
+                                return (
                                 <div key={p.partLineId || pIdx} className="flex flex-col sm:flex-row sm:items-center justify-between bg-orange-50/50 p-2.5 rounded-lg border border-orange-100">
                                     <div>
                                         <p className="font-medium text-sm text-gray-900">{p.productName || p.name || p.partName || 'Linh kiện'}</p>
@@ -244,19 +252,20 @@ export function TechnicianTicketDetailModal({
                                                         ? 'Không có hàng'
                                                         : 'Đang yêu cầu'}
                                         </span>
-                                        {canManageSelectedTicketParts && isRepairPartStatus(p.status, REPAIR_PART_STATUS.UNAVAILABLE) && (
+                                        {canRemovePart && (
                                             <button
                                                 type="button"
                                                 onClick={() => handleRemovePart(selectedTicket, pIdx)}
                                                 className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-white px-2 py-1 text-[10px] font-bold text-red-600 hover:bg-red-50"
-                                                title="Loại trừ linh kiện không có hàng"
+                                                title={`${removeLabel} linh kiện khỏi phiếu`}
                                             >
-                                                <Trash2 size={12} /> Loại trừ
+                                                <Trash2 size={12} /> {removeLabel}
                                             </button>
                                         )}
                                     </div>
                                 </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     </div>
                 )}
@@ -296,27 +305,45 @@ export function TechnicianTicketDetailModal({
 
                                 {(isLoadingServiceSuggestions || serviceSuggestedParts.length > 0) && !partSearchQuery && (
                                     <div className="mb-3 rounded-md border border-emerald-100 bg-emerald-50 p-2.5">
-                                        <p className="mb-2 text-[11px] font-semibold text-emerald-800">Gợi ý theo dịch vụ đã chọn</p>
+                                        <p className="mb-2 text-[11px] font-semibold text-emerald-800">Gợi ý theo dịch vụ đã chọn · {selectedPartQuality}</p>
                                         {isLoadingServiceSuggestions ? (
                                             <div className="flex items-center gap-2 text-xs text-emerald-700"><Loader2 size={13} className="animate-spin" /> Đang tải gợi ý…</div>
                                         ) : (
                                             <div className="space-y-1.5">
                                                 {serviceSuggestedParts.map(product => {
                                                     const available = Math.max(0, (product.stock || 0) - (product.held || 0));
+                                                    const isAlreadyRequested = selectedTicket.parts?.some(
+                                                        part => part.productId === product.id && isRepairPartStatus(part.status, REPAIR_PART_STATUS.REQUESTED),
+                                                    );
                                                     return (
                                                         <div key={product.id} className="flex items-center justify-between gap-2 rounded bg-white px-2 py-1.5">
                                                             <div className="min-w-0">
-                                                                <p className="truncate text-xs font-medium text-gray-800">{product.name}</p>
+                                                                <p className="break-words text-xs font-medium leading-4 text-gray-800" title={product.name}>{product.name}</p>
                                                                 <p className={`text-[10px] ${available > 0 ? 'text-gray-500' : 'text-red-500'}`}>Khả dụng: {available}</p>
                                                             </div>
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => handleAddPart(selectedTicket, product)}
-                                                                disabled={available <= 0}
-                                                                className="shrink-0 rounded border border-emerald-200 px-2 py-1 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
-                                                            >
-                                                                Thêm
-                                                            </button>
+                                                            <div className="flex shrink-0 items-center gap-1">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleAddPart(selectedTicket, product)}
+                                                                    disabled={available <= 0}
+                                                                    className="rounded border border-emerald-200 px-2 py-1 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                                                >
+                                                                    Có sẵn (Thêm)
+                                                                </button>
+                                                                {available <= 0 && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleRequestPart(selectedTicket, product)}
+                                                                        disabled={isAlreadyRequested}
+                                                                        className={`rounded border px-2 py-1 text-[11px] font-semibold ${isAlreadyRequested
+                                                                            ? 'cursor-not-allowed border-gray-200 bg-gray-100 text-gray-500 opacity-70'
+                                                                            : 'border-orange-200 bg-orange-100 text-orange-700 hover:bg-orange-200'
+                                                                            }`}
+                                                                    >
+                                                                        {isAlreadyRequested ? 'Đã đề xuất' : 'Hết (Đề xuất)'}
+                                                                    </button>
+                                                                )}
+                                                            </div>
                                                         </div>
                                                     );
                                                 })}
@@ -352,12 +379,12 @@ export function TechnicianTicketDetailModal({
                                             partSearchResults.map(product => (
                                                 <div key={product.id} className="p-2 hover:bg-orange-50 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                                                     <div>
-                                                        <p className="text-sm font-medium text-gray-800 line-clamp-1">{product.name}</p>
+                                                        <p className="break-words text-sm font-medium leading-5 text-gray-800" title={product.name}>{product.name}</p>
                                                         {(() => {
                                                             const available = Math.max(0, (product.stock || 0) - (product.held || 0));
                                                             return (
                                                                 <p className={`text-[10px] ${available > 0 ? 'text-gray-500' : 'text-red-500 font-medium'}`}>
-                                                                    Khả dụng: {available}
+                                                                    {product.quality ? `${product.quality} · ` : ''}Khả dụng: {available}
                                                                     {((product.held || 0) > 0) && ` (Đang giữ: ${product.held})`}
                                                                 </p>
                                                             );

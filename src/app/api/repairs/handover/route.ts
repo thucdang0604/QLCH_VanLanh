@@ -5,16 +5,15 @@ import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handle
 import { FieldValue } from 'firebase-admin/firestore';
 import type { RepairTicket } from '@/lib/types';
 import { calculateAndSaveCommissionsServer } from '@/lib/commissionCalcServer';
-import { REPAIR_STATUS, isSelectedRepairPart, isWarrantyEligibleRepairPart } from '@/lib/repairStatus';
+import { isSelectedRepairPart, isWarrantyEligibleRepairPart } from '@/lib/repairStatus';
 import { isInventoryConsumedRepairPart } from '@/lib/repairPartConsumption';
-import { getConfiguredWorkflow } from '@/lib/repairWorkflowConfig';
+import { getConfiguredWorkflow, isHandoverTerminalAction } from '@/lib/repairWorkflowConfig';
 import { fetchFifoLogsForDeduction, executeFifoDeductionsWrites, type FifoDeductionResult, type FifoDeductor } from '@/lib/inventoryFifo';
 import { incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 import { stampRepairWarrantyOnParts } from '@/lib/repairWarrantyRules';
 import { reserveSequentialDocumentIds } from '@/lib/serverDocumentIds';
 import { getE2ERunMetadata } from '@/lib/e2eRunMetadata';
 
-const LEGACY_TERMINAL_STATUSES = [REPAIR_STATUS.DONE, REPAIR_STATUS.OUT, REPAIR_STATUS.REFUND, 'bh_hoan_tat', 'bh_tu_choi', 'bh_refund'];
 type HandoverRequestBody = {
     ticketId?: string;
     targetStatus?: string;
@@ -112,35 +111,34 @@ export const POST = withApi({
             // Terminal Guard & Warranty Rules Config
             let isCurrentTerminal = false;
             let isTargetTerminal = false;
+            let targetRecordsCompletion = false;
+            let targetAllowsTechnicianCommission = false;
+            let targetAllowsSellerCommission = false;
+            let targetIsAllowed = false;
             let warrantyRules: Record<string, unknown>[] = [];
             let serviceWarrantyMonths = 3;
             const configSnap = await tx.get(db.collection('system_config').doc('repairs'));
-            if (configSnap.exists) {
-                const configData = configSnap.data();
-                warrantyRules = configData?.warrantyRules || [];
-                const workflow = getConfiguredWorkflow(configData ?? {}, ticket.ticketType);
-
-                if (Array.isArray(workflow)) {
-                    const currentNode = workflow.find((n: { id?: string; isTerminal?: boolean }) => n.id === ticket.status);
-                    const targetNode = workflow.find((n: { id?: string; isTerminal?: boolean }) => n.id === targetStatus);
-                    if (currentNode?.isTerminal) {
-                        isCurrentTerminal = true;
-                    }
-                    if (targetNode?.isTerminal) {
-                        isTargetTerminal = true;
-                    }
-                }
+            if (!configSnap.exists) {
+                throw new Error('Khong tim thay cau hinh workflow sua chua trong Firebase.');
             }
+            const configData = configSnap.data();
+            warrantyRules = configData?.warrantyRules || [];
+            const workflow = getConfiguredWorkflow(configData ?? {}, ticket.ticketType);
+            const currentNode = workflow.find(node => node.id === ticket.status);
+            const targetNode = workflow.find(node => node.id === targetStatus);
+            if (!currentNode || !targetNode) {
+                throw new Error('Trang thai phieu khong ton tai trong workflow dang cau hinh.');
+            }
+            const targetTerminalAction = targetNode.terminalAction;
+            isCurrentTerminal = currentNode.isTerminal === true;
+            isTargetTerminal = targetNode.isTerminal === true;
+            targetRecordsCompletion = targetNode.allowedFeatures?.includes('recordCompletion') === true;
+            targetAllowsTechnicianCommission = targetNode.allowedFeatures?.includes('enableTechnicianCommission') === true;
+            targetAllowsSellerCommission = targetNode.allowedFeatures?.includes('enableSellerCommission') === true;
+            targetIsAllowed = currentNode.allowedNext?.includes(targetStatus) === true;
             const taxonomySnap = await tx.get(db.collection('system_config').doc('taxonomy_settings'));
             if (taxonomySnap.exists) {
                 serviceWarrantyMonths = resolveServiceWarrantyMonths(taxonomySnap.data()?.taxonomy, ticket.categoryPath);
-            }
-
-            if (!isTargetTerminal && LEGACY_TERMINAL_STATUSES.includes(targetStatus)) {
-                isTargetTerminal = true;
-            }
-            if (!isCurrentTerminal && LEGACY_TERMINAL_STATUSES.includes(ticket.status)) {
-                isCurrentTerminal = true;
             }
 
             if (isCurrentTerminal) {
@@ -149,6 +147,12 @@ export const POST = withApi({
 
             if (!isTargetTerminal) {
                 throw new Error(`Tráº¡ng thĂ¡i ${targetStatus} khĂ´ng pháº£i lĂ  tráº¡ng thĂ¡i BĂ n giao (Káº¿t thĂºc). Vui lĂ²ng dĂ¹ng chá»©c nÄƒng Chuyá»ƒn Tráº¡ng ThĂ¡i.`);
+            }
+            if (!isHandoverTerminalAction(targetTerminalAction)) {
+                throw new Error('Trạng thái kết thúc này không yêu cầu bàn giao hoặc hoàn phí. Vui lòng dùng Chuyển trạng thái trực tiếp.');
+            }
+            if (!targetIsAllowed) {
+                throw new Error(`Khong cho phep chuyen tu ${ticket.status} sang ${targetStatus} theo workflow.`);
             }
 
             // Check if any selected part missing priceConfirmedAt
@@ -188,7 +192,7 @@ export const POST = withApi({
                 updatedAt: FieldValue.serverTimestamp()
             };
 
-            const isWarranty = targetStatus.startsWith('bh_');
+            const isWarranty = ticket.ticketType === 'warranty';
 
             let fifoResultsMap = new Map<string, FifoDeductionResult[]>();
             let fifoLogsDataMap: Awaited<ReturnType<typeof fetchFifoLogsForDeduction>> = new Map();
@@ -391,17 +395,24 @@ export const POST = withApi({
                     payment: updateData.payment
                 } as RepairTicket;
 
-                await calculateAndSaveCommissionsServer(tx, { uid: caller.uid, displayName: '' }, 'repair', docDataForCommission);
+                if (targetAllowsTechnicianCommission || targetAllowsSellerCommission) {
+                    await calculateAndSaveCommissionsServer(tx, { uid: caller.uid, displayName: '' }, 'repair', docDataForCommission, {
+                        repairRecipients: {
+                            technician: targetAllowsTechnicianCommission,
+                            seller: targetAllowsSellerCommission,
+                        },
+                    });
+                }
                 incrementRevenueAggregates(tx, db, {
                     repairRevenue: amount,
-                    repairCount: targetStatus === REPAIR_STATUS.DONE ? 1 : 0,
-                    totalGiftDiscount: targetStatus === REPAIR_STATUS.DONE ? Number(currentPayment.giftDiscount) || 0 : 0,
+                    repairCount: targetRecordsCompletion ? 1 : 0,
+                    totalGiftDiscount: targetRecordsCompletion ? Number(currentPayment.giftDiscount) || 0 : 0,
                 });
             } else {
                 // Warranty case: we may not charge anything, or just record handover
                 // For simplicity, we just mark as handed over.
                 incrementRevenueAggregates(tx, db, {
-                    warrantyCount: targetStatus === REPAIR_STATUS.DONE ? 1 : 0,
+                    warrantyCount: targetRecordsCompletion ? 1 : 0,
                 });
             }
 

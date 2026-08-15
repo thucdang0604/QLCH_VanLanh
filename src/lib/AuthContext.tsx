@@ -23,6 +23,7 @@ interface AuthContextType {
     user: AppUser | null;
     loading: boolean;
     sessionBootstrapReady: boolean;
+    rtdbRoleSynced: boolean;
     sessionBootstrapError: string | null;
     retrySessionBootstrap: () => Promise<void>;
     login: (email: string, password: string) => Promise<void>;
@@ -39,6 +40,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [loading, setLoading] = useState(true);
     const [shouldInitializeAuth, setShouldInitializeAuth] = useState(false);
     const [sessionBootstrapReady, setSessionBootstrapReady] = useState(false);
+    const [rtdbRoleSynced, setRtdbRoleSynced] = useState(false);
     const [sessionBootstrapError, setSessionBootstrapError] = useState<string | null>(null);
 
     const sessionGenRef = useRef(0);
@@ -124,8 +126,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             });
 
             if (sessionGenRef.current !== gen) return false;
+            const payload = await sessionRes.json().catch(() => ({}));
+            if (sessionGenRef.current !== gen) return false;
+            // A 202 has a valid web session, but its RTDB role projection is
+            // still pending. Chat must wait for a confirmed grant.
+            setRtdbRoleSynced(sessionRes.ok && payload.rtdbRoleSynced === true);
             return sessionRes.ok;
         } catch {
+            if (sessionGenRef.current === gen) setRtdbRoleSynced(false);
             return false;
         }
     }, []);
@@ -154,6 +162,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                             if (isMounted && sessionGenRef.current === gen) {
                                 setUser(null);
                                 setSessionBootstrapReady(true);
+                                setRtdbRoleSynced(false);
                                 setSessionBootstrapError(null);
                                 setLoading(false);
                             }
@@ -184,6 +193,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                                     if (isMounted && sessionGenRef.current === gen && auth.currentUser?.uid === currentUid) {
                                         setUser(appUser);
                                         setSessionBootstrapReady(true);
+                                        setRtdbRoleSynced(false);
                                         setSessionBootstrapError(null);
                                     }
                                 }
@@ -192,6 +202,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                                 if (isMounted && sessionGenRef.current === gen) {
                                     setUser(null);
                                     setSessionBootstrapReady(false);
+                                    setRtdbRoleSynced(false);
                                 }
                             }
                             if (isMounted && sessionGenRef.current === gen) {
@@ -213,6 +224,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                                     body: JSON.stringify({ idToken }),
                                     signal: controller.signal,
                                 })
+                                    .then(async (response) => {
+                                        const payload = await response.json().catch(() => ({}));
+                                        if (isMounted && sessionGenRef.current === gen) {
+                                            setRtdbRoleSynced(response.ok && payload.rtdbRoleSynced === true);
+                                        }
+                                    })
                                     .catch((error) => console.warn('Session refresh failed:', error))
                                     .finally(() => {
                                         window.clearTimeout(timeout);
@@ -230,6 +247,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                         if (isMounted) {
                             setUser(null);
                             setSessionBootstrapReady(true);
+                            setRtdbRoleSynced(false);
                             setSessionBootstrapError(null);
                             setLoading(false);
                         }
@@ -320,7 +338,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 const controller = new AbortController();
                 activeAbortControllerRef.current = controller;
                 const timeout = window.setTimeout(() => controller.abort(), 8000);
-                await fetch('/api/auth/session', {
+                const response = await fetch('/api/auth/session', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ idToken }),
@@ -331,6 +349,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                         activeAbortControllerRef.current = null;
                     }
                 });
+                const payload = await response.json().catch(() => ({}));
+                if (sessionGenRef.current === gen) {
+                    setRtdbRoleSynced(response.ok && payload.rtdbRoleSynced === true);
+                }
             } catch (error) {
                 console.warn('Background session refresh failed:', error);
             }
@@ -409,6 +431,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         setUser(null);
         setSessionBootstrapReady(true);
+        setRtdbRoleSynced(false);
         setSessionBootstrapError(serverCleanupFailed
             ? 'Phiên cục bộ đã đăng xuất nhưng máy chủ chưa xác nhận thu hồi. Vui lòng đăng nhập lại để thử đồng bộ.'
             : null);
@@ -424,7 +447,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, [triggerAuthInit]);
 
     return (
-        <AuthContext.Provider value={{ user, loading, sessionBootstrapReady, sessionBootstrapError, retrySessionBootstrap, login, signup, logout, googleSignIn }}>
+        <AuthContext.Provider value={{ user, loading, sessionBootstrapReady, rtdbRoleSynced, sessionBootstrapError, retrySessionBootstrap, login, signup, logout, googleSignIn }}>
             {children}
         </AuthContext.Provider>
     );

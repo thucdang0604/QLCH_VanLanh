@@ -3,6 +3,16 @@ import type { WorkflowNode } from '@/lib/types';
 export type RepairWorkflowSettings = {
     repairStatuses?: WorkflowNode[];
     warrantyStatuses?: WorkflowNode[];
+    workflowSchemaVersion?: number;
+};
+
+export type WorkflowNormalizationOptions = {
+    /**
+     * Version-2 settings did not persist all feature semantics.  Keep this
+     * only while reading them; saving from Settings writes the inferred values
+     * explicitly as schema v3.
+     */
+    useLegacyFallback?: boolean;
 };
 
 const REQUIRED_REPAIR_FEATURES: Record<string, string[]> = {
@@ -11,16 +21,26 @@ const REQUIRED_REPAIR_FEATURES: Record<string, string[]> = {
     bao_tinh_trang_va_gia: ['allowPartsSelection'],
     dang_tim_linh_kien: ['allowPartsSelection'],
     da_dat_linh_kien: ['requirePartsReady'],
-    dang_sua_chua: ['requireTechnicianNote', 'reserveSelectedParts'],
+    dang_sua_chua: ['requireTechnicianNote', 'reserveSelectedParts', 'countsAsActiveRepair'],
     cho_ban_giao_khach: ['requirePaymentGate', 'consumeSelectedParts'],
-    done: ['enableTechnicianCommission', 'enableSellerCommission'],
+    done: ['enableTechnicianCommission', 'enableSellerCommission', 'recordCompletion'],
+    refund: ['releaseHeldParts'],
 };
 
 const REQUIRED_WARRANTY_FEATURES: Record<string, string[]> = {
     bh_tiep_nhan: ['allowAssignTech', 'requireAssignedTechnician'],
     bh_dang_kiem_tra: ['requireChecklist', 'requireTechnicianNote'],
     bh_dang_sua: ['allowPartsSelection', 'reserveSelectedParts'],
-    bh_refund: ['enableTechnicianCommission'],
+    bh_hoan_tat: ['recordCompletion'],
+    bh_refund: ['enableTechnicianCommission', 'releaseHeldParts'],
+};
+
+const LEGACY_TERMINAL_ACTIONS: Record<string, NonNullable<WorkflowNode['terminalAction']>> = {
+    out: 'handover',
+    refund: 'refund',
+    bh_hoan_tat: 'handover',
+    bh_tu_choi: 'handover',
+    bh_refund: 'refund',
 };
 
 function unique(values: string[] | undefined): string[] {
@@ -29,11 +49,14 @@ function unique(values: string[] | undefined): string[] {
 
 function normalizeNodes(
     workflow: WorkflowNode[] | undefined,
-    requiredFeatures: Record<string, string[]>
+    requiredFeatures: Record<string, string[]>,
+    options: WorkflowNormalizationOptions = {},
 ): WorkflowNode[] {
     if (!Array.isArray(workflow)) return [];
 
     return workflow.map(node => {
+        const terminalAction = node.terminalAction
+            ?? (options.useLegacyFallback !== false ? LEGACY_TERMINAL_ACTIONS[node.id] : undefined);
         const normalized: WorkflowNode = {
             id: node.id,
             label: node.label,
@@ -41,31 +64,37 @@ function normalizeNodes(
             allowedNext: unique(node.allowedNext),
             allowedFeatures: unique([
                 ...(node.allowedFeatures ?? []),
-                ...(requiredFeatures[node.id] ?? []),
+                ...(options.useLegacyFallback !== false ? (requiredFeatures[node.id] ?? []) : []),
             ]),
             isTerminal: node.isTerminal === true,
         };
 
+        // Firestore rejects undefined field values.  Omit optional semantics
+        // entirely until the administrator has explicitly configured them.
+        if (terminalAction) normalized.terminalAction = terminalAction;
         if (typeof node.next === 'string') normalized.next = node.next;
         return normalized;
     });
 }
 
-export function normalizeRepairWorkflow(workflow: WorkflowNode[] | undefined): WorkflowNode[] {
-    return normalizeNodes(workflow, REQUIRED_REPAIR_FEATURES);
+export function normalizeRepairWorkflow(workflow: WorkflowNode[] | undefined, options?: WorkflowNormalizationOptions): WorkflowNode[] {
+    return normalizeNodes(workflow, REQUIRED_REPAIR_FEATURES, options);
 }
 
-export function normalizeWarrantyWorkflow(workflow: WorkflowNode[] | undefined): WorkflowNode[] {
-    return normalizeNodes(workflow, REQUIRED_WARRANTY_FEATURES);
+export function normalizeWarrantyWorkflow(workflow: WorkflowNode[] | undefined, options?: WorkflowNormalizationOptions): WorkflowNode[] {
+    return normalizeNodes(workflow, REQUIRED_WARRANTY_FEATURES, options);
 }
 
 export function getConfiguredWorkflow(
     settings: RepairWorkflowSettings,
     ticketType: 'repair' | 'warranty' | undefined
 ): WorkflowNode[] {
+    const options: WorkflowNormalizationOptions = {
+        useLegacyFallback: settings.workflowSchemaVersion !== 3,
+    };
     return ticketType === 'warranty'
-        ? normalizeWarrantyWorkflow(settings.warrantyStatuses)
-        : normalizeRepairWorkflow(settings.repairStatuses);
+        ? normalizeWarrantyWorkflow(settings.warrantyStatuses, options)
+        : normalizeRepairWorkflow(settings.repairStatuses, options);
 }
 
 /**
@@ -85,6 +114,18 @@ export function getAllowedNextWorkflowNodes(
         .filter((nextId) => nextId !== currentStatusId)
         .map((nextId) => nodesById.get(nextId))
         .filter((node): node is WorkflowNode => Boolean(node));
+}
+
+/**
+ * End-node business semantics are stored in `terminalAction`, never inferred
+ * from an arbitrary status ID chosen by an administrator.
+ */
+export function isHandoverTerminalAction(action: WorkflowNode['terminalAction'] | undefined): boolean {
+    return action === 'handover' || action === 'refund';
+}
+
+export function canTransitionDirectlyToTerminal(node: WorkflowNode): boolean {
+    return node.isTerminal !== true || node.terminalAction === 'close';
 }
 
 export function validateWorkflow(workflow: WorkflowNode[], name: string): string[] {
@@ -107,6 +148,9 @@ export function validateWorkflow(workflow: WorkflowNode[], name: string): string
         }
         if (node.isTerminal && node.allowedNext.length > 0) {
             errors.push(`Trạng thái kết thúc ${node.id} không được có bước tiếp theo.`);
+        }
+        if (node.terminalAction && !node.isTerminal) {
+            errors.push(`Trạng thái ${node.id} có hành động kết thúc nhưng chưa được đánh dấu là điểm kết thúc.`);
         }
     }
 

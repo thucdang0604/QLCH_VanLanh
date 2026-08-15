@@ -98,7 +98,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     const [hasStoredMobileQuickActions, setHasStoredMobileQuickActions] = useState(false);
     const pathname = usePathname();
     const router = useRouter();
-    const { user, loading, logout } = useAuth();
+    const { user, loading, logout, rtdbRoleSynced } = useAuth();
 
     useEffect(() => {
         if (loading) return;
@@ -127,7 +127,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         }
     }, [user, loading, router, pathname, logout]);
 
-    const { badges, activities } = useAdminBadges(user?.uid, user?.role, user?.permissions);
+    const { badges, activities } = useAdminBadges(user?.uid, user?.role, user?.permissions, rtdbRoleSynced);
 
     const badgeMap = useMemo<Record<string, number>>(() => {
         const entries = Object.entries(ADMIN_BADGE_ROUTE_MAP).map(([href, badgeKey]) => [href, badges[badgeKey]]);

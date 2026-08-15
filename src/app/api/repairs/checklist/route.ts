@@ -4,11 +4,11 @@ import { requirePermission } from '@/lib/apiAuth';
 import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { isRepairManager } from '@/lib/repairAccess';
+import { getConfiguredWorkflow } from '@/lib/repairWorkflowConfig';
 
 const CHECKLIST_KEYS = new Set(['body', 'screen', 'touch', 'camera', 'speaker', 'connectivity', 'battery', 'biometric']);
 const CHECKLIST_VALUES = new Set(['', 'OK', 'Trầy', 'Nứt', 'Móp', 'Lỗi', 'Không có']);
 const HISTORY_KEYS = new Set(['hasPriorRepair', 'hasWaterDamage', 'hasNonGenuineParts']);
-const LOCKED_STATUSES = new Set(['done', 'out', 'refund']);
 
 type ChecklistPatchRequest = {
     ticketId?: string;
@@ -57,11 +57,21 @@ export const POST = withApi({
 
             const ticket = ticketSnap.data() as {
                 status?: string;
+                ticketType?: 'repair' | 'warranty';
                 version?: number;
                 staff?: { assignedTechnician?: string };
             };
 
-            if (LOCKED_STATUSES.has(String(ticket.status || ''))) {
+            const configSnap = await tx.get(db.collection('system_config').doc('repairs'));
+            if (!configSnap.exists) {
+                throw new Error('Khong tim thay cau hinh workflow sua chua trong Firebase.');
+            }
+            const workflow = getConfiguredWorkflow(configSnap.data() ?? {}, ticket.ticketType);
+            const currentNode = workflow.find(node => node.id === ticket.status);
+            if (!currentNode) {
+                throw new Error('Trang thai phieu khong ton tai trong workflow dang cau hinh.');
+            }
+            if (currentNode.isTerminal) {
                 throw new Error('Phieu da khoa checklist o trang thai hien tai.');
             }
 
@@ -81,7 +91,10 @@ export const POST = withApi({
                     status: ticket.status || '',
                     eventType: 'checklist_updated',
                     field: key,
-                    timestamp: FieldValue.serverTimestamp(),
+                    // Firestore sentinel values are not valid inside an
+                    // arrayUnion element. Store a concrete client-independent
+                    // server-side epoch value for this audit event instead.
+                    timestamp: Date.now(),
                     userId: caller.uid,
                 }),
             });

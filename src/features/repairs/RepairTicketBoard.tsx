@@ -9,7 +9,7 @@ import { db } from '@/lib/firebase';
 import type { PaymentStatus, RepairTicket, WorkflowNode } from '@/lib/types';
 import { uploadMedia } from '@/lib/storage';
 import { isYouTubeUrl } from '@/lib/workflowFeatures';
-import { REPAIR_STATUS, isPendingRepairPart, isRepairStatus, isSelectedRepairPart, isWarrantyEligibleRepairPart } from '@/lib/repairStatus';
+import { isPendingRepairPart, isSelectedRepairPart, isWarrantyEligibleRepairPart } from '@/lib/repairStatus';
 import { toastError } from '@/lib/toast';
 import { appPrompt } from '@/lib/appDialog';
 import type { WarrantyTemplateConfig } from '@/app/admin/settings/receipt/WarrantyComponents';
@@ -188,9 +188,9 @@ export function RepairTicketBoard({
                                             if (!nextCfg) return null;
                                             let btnClass = 'bg-orange-50 text-orange-700 border-orange-200';
                                             let icon = <ArrowRight size={12} />;
-                                            if (nextId === 'refund') { btnClass = 'bg-red-50 text-red-600 border-red-200'; icon = <RotateCcw size={12} />; }
-                                            else if (nextId === 'out' || nextId.includes('tra_may_khong_sua')) { btnClass = 'bg-gray-50 text-gray-700 border-gray-200'; icon = <Ban size={12} />; }
-                                            else if (nextId === 'done') { btnClass = 'bg-emerald-50 text-emerald-700 border-emerald-200'; icon = <CheckCircle2 size={12} />; }
+                                            if (nextCfg.terminalAction === 'refund' || nextCfg.allowedFeatures?.includes('refundOutcome')) { btnClass = 'bg-red-50 text-red-600 border-red-200'; icon = <RotateCcw size={12} />; }
+                                            else if (nextCfg.terminalAction === 'handover') { btnClass = 'bg-gray-50 text-gray-700 border-gray-200'; icon = <Ban size={12} />; }
+                                            else if (nextCfg.allowedFeatures?.includes('recordCompletion')) { btnClass = 'bg-emerald-50 text-emerald-700 border-emerald-200'; icon = <CheckCircle2 size={12} />; }
                                             return (
                                                 <button key={nextId} onClick={() => handleQuickStatus(ticket, nextId)}
                                                     className={`flex whitespace-nowrap items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded border ${btnClass}`}>
@@ -330,13 +330,13 @@ export function RepairTicketBoard({
 
                                                     let btnClass = 'bg-orange-50 text-orange-700 hover:bg-orange-100 border-orange-200';
                                                     let icon = <ArrowRight size={12} />;
-                                                    if (nextId === 'refund') {
+                                                    if (nextCfg.terminalAction === 'refund' || nextCfg.allowedFeatures?.includes('refundOutcome')) {
                                                         btnClass = 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100';
                                                         icon = <RotateCcw size={12} />;
-                                                    } else if (nextId === 'out' || nextId.includes('tra_may_khong_sua')) {
+                                                    } else if (nextCfg.terminalAction === 'handover') {
                                                         btnClass = 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100';
                                                         icon = <Ban size={12} />;
-                                                    } else if (nextId === 'done') {
+                                                    } else if (nextCfg.allowedFeatures?.includes('recordCompletion')) {
                                                         btnClass = 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100';
                                                         icon = <CheckCircle2 size={12} />;
                                                     }
@@ -362,7 +362,7 @@ export function RepairTicketBoard({
                                                 className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg" title="In phiếu tiếp nhận">
                                                 <Printer size={16} />
                                             </button>
-                                            {isRepairStatus(ticket.status, REPAIR_STATUS.DONE) && (
+                                            {st?.allowedFeatures?.includes('recordCompletion') && (
                                                 <button onClick={() => openPrint(ticket, 'invoice')}
                                                     className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg" title="In hóa đơn">
                                                     <FileText size={16} />
@@ -385,7 +385,7 @@ export function RepairTicketBoard({
                                                         <AlertCircle size={12} /> Bảo hành
                                                     </button>
                                                 )}
-                                            {['done', 'out', 'refund'].includes(ticket.status) && (
+                                            {st?.isTerminal && (
                                                 ticket.postRepairMedia?.length > 0 ? (
                                                     <div className="flex items-center gap-1">
                                                         <span className="text-[10px] bg-green-50 text-green-600 border border-green-200 px-2 py-1 rounded-lg font-semibold flex items-center gap-1">

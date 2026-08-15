@@ -4,8 +4,9 @@ import { requirePermission } from '@/lib/apiAuth';
 import { FieldValue, type DocumentReference } from 'firebase-admin/firestore';
 import type { RepairTicket } from '@/lib/types';
 import { loadRepairWorkflow, requireWorkflowNode, workflowNodeHasFeature } from '@/lib/repairWorkflowServer';
+import { canTransitionDirectlyToTerminal } from '@/lib/repairWorkflowConfig';
 import { isChecklistComplete } from '@/lib/workflowFeatures';
-import { REPAIR_PART_STATUS, REPAIR_STATUS, isPendingRepairPart, isSelectedRepairPart } from '@/lib/repairStatus';
+import { REPAIR_PART_STATUS, isPendingRepairPart, isSelectedRepairPart } from '@/lib/repairStatus';
 import { isRepairManager } from '@/lib/repairAccess';
 import { getMissingReservationQuantity, getRecordedReservationQuantity } from '@/lib/repairPartReservations';
 import { isInventoryConsumedRepairPart, planRepairPartVerification, type RepairPartVerificationAction } from '@/lib/repairPartConsumption';
@@ -26,17 +27,6 @@ interface RepairTransitionRequest {
 
 type RepairPartLine = NonNullable<RepairTicket['parts']>[number];
 
-const CANCEL_TERMINAL_STATUSES = new Set([
-    REPAIR_STATUS.REFUND,
-    'cancelled',
-    'canceled',
-    'huy',
-    'da_huy',
-    'tu_choi',
-    'bh_tu_choi',
-    'bh_refund',
-]);
-
 function normalizeRepairNote(value: string) {
     return value
         .trim()
@@ -50,10 +40,6 @@ function hasExistingRepairNote(existingNotes: string | undefined, note: string) 
     return (existingNotes || '')
         .split(/\r?\n/)
         .some(line => normalizeRepairNote(line) === normalizedNote);
-}
-
-function isCancelTerminalStatus(status: string) {
-    return CANCEL_TERMINAL_STATUSES.has(status);
 }
 
 function getReservedReleaseQuantity(part: RepairPartLine) {
@@ -126,7 +112,7 @@ export const POST = withApi({
             const targetNode = requireWorkflowNode(workflow, targetStatus);
             const isCurrentTerminal = !!currentNode.isTerminal;
             const isTargetTerminal = !!targetNode.isTerminal;
-            const isTargetCancelTerminal = isTargetTerminal && isCancelTerminalStatus(targetStatus);
+            const isTargetDirectTerminal = canTransitionDirectlyToTerminal(targetNode);
             const shouldReserveSelectedParts = workflowNodeHasFeature(targetNode, 'reserveSelectedParts');
             const shouldConsumeSelectedParts = workflowNodeHasFeature(targetNode, 'consumeSelectedParts');
             const isAllowed = currentNode.allowedNext?.includes(targetStatus) ?? false;
@@ -143,7 +129,7 @@ export const POST = withApi({
                 throw new Error(`Phiếu đã ở trạng thái kết thúc (${ticket.status}), không thể thay đổi.`);
             }
 
-            if (isTargetTerminal && !isTargetCancelTerminal) {
+            if (isTargetTerminal && !isTargetDirectTerminal) {
                 throw new Error(`Trạng thái ${targetStatus} là trạng thái kết thúc/bàn giao. Vui lòng dùng chức năng Bàn giao (handover).`);
             }
 
@@ -189,7 +175,7 @@ export const POST = withApi({
                 throw new Error('Trạng thái này yêu cầu phải phân công Kỹ thuật viên phụ trách. Vui lòng gán KTV trước khi chuyển trạng thái.');
             }
 
-            const shouldReleaseHeldParts = isTargetCancelTerminal;
+            const shouldReleaseHeldParts = workflowNodeHasFeature(targetNode, 'releaseHeldParts');
             const verificationPlan = shouldConsumeSelectedParts
                 ? planRepairPartVerification(ticket.parts || [], partVerification)
                 : { used: [], returned: [] };

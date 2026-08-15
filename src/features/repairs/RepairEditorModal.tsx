@@ -125,28 +125,8 @@ export function RepairEditorModal({
                             <fieldset className="space-y-3">
                                 <legend className="flex items-center gap-2 font-semibold text-gray-900"><User size={18} className="text-orange-500" /> Khách hàng</legend>
                                 <div className="grid md:grid-cols-2 gap-4">
-                                    <InputField label="Ma KH" value={formData.customerId} onChange={v => setFormData(p => ({ ...p, customerId: v }))} placeholder="De trong neu tao moi" />
-                                    <InputField label="Ten *" value={formData.customerName} onChange={v => setFormData(p => ({ ...p, customerName: v }))} required />
-                                    <InputField label="So dien thoai" value={formData.customerPhone} onChange={v => setFormData(p => ({ ...p, customerPhone: v }))} type="tel" placeholder="Tuy chon" />
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">Kenh lien he chinh</label>
-                                        <select
-                                            value={formData.customerPrimaryContactType}
-                                            onChange={event => setFormData(p => ({ ...p, customerPrimaryContactType: event.target.value as ContactMethodType }))}
-                                            className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20 focus:outline-none bg-white"
-                                            title="Kenh lien he chinh"
-                                        >
-                                            <option value="phone">SDT</option>
-                                            <option value="zalo">Zalo</option>
-                                            <option value="facebook">Facebook</option>
-                                            <option value="other">Khac</option>
-                                        </select>
-                                    </div>
-                                    <InputField label="Zalo" value={formData.customerZalo} onChange={v => setFormData(p => ({ ...p, customerZalo: v }))} />
-                                    <InputField label="Facebook/Messenger" value={formData.customerFacebook} onChange={v => setFormData(p => ({ ...p, customerFacebook: v }))} />
-                                    <div className="md:col-span-2">
-                                        <InputField label="Lien he khac" value={formData.customerOtherContact} onChange={v => setFormData(p => ({ ...p, customerOtherContact: v }))} />
-                                    </div>
+                                    <InputField label="Tên khách hàng *" value={formData.customerName} onChange={v => setFormData(p => ({ ...p, customerName: v }))} required />
+                                    <InputField label="Số điện thoại *" value={formData.customerPhone} onChange={v => setFormData(p => ({ ...p, customerPhone: v }))} type="tel" required />
                                 </div>
                             </fieldset>
                             <hr className="border-gray-100" />
@@ -170,43 +150,13 @@ export function RepairEditorModal({
                             {/* ── Issue ── */}
                             <fieldset className="space-y-3">
                                 <legend className="flex items-center gap-2 font-semibold text-gray-900"><Wrench size={18} className="text-orange-500" /> Chi tiết sửa chữa</legend>
-                                {/* Service selector with auto-fill */}
-                                <div className="bg-orange-50 rounded-lg p-3 border border-orange-100">
-                                    <label className="block text-sm font-medium text-orange-800 mb-2">Chọn nhóm dịch vụ (Category)</label>
-
-                                    {/* Display legacy or auto-filled service if not yet classified in the new taxonomy */}
-                                    {formData.selectedServiceName && formData.selectedCategoryPath.length === 0 && (
-                                        <div className="flex items-center justify-between bg-orange-100/50 px-3 py-2 rounded-lg border border-orange-200 mb-3 text-sm">
-                                            <span className="text-orange-800">
-                                                Dịch vụ hiện tại: <strong className="font-semibold">{formData.selectedServiceName}</strong> (Chưa phân loại)
-                                            </span>
-                                            <button
-                                                type="button"
-                                                onClick={() => setFormData(p => ({ ...p, selectedServiceName: '' }))}
-                                                className="text-xs text-orange-600 hover:text-orange-800 underline font-medium"
-                                            >
-                                                Xóa
-                                            </button>
-                                        </div>
-                                    )}
-                                    <CategoryTaxonomySelector
-                                        type="service"
-                                        value={formData.selectedCategoryPath}
-                                        onChange={(ids, catName, subCatName) => {
-                                            setFormData(p => ({
-                                                ...p,
-                                                selectedCategoryPath: ids,
-                                                selectedServiceName: subCatName || catName || '',
-                                            }));
-                                        }}
-                                    />
-                                </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">Danh sách lỗi / vấn đề</label>
                                     {formData.issues.map((issue, idx) => (
-                                        <div key={issue.id} className="flex items-center gap-2 mb-2">
-                                            <span className="text-xs text-gray-400 w-5 text-center">{idx + 1}</span>
-                                            <div className="min-w-0 flex-1 space-y-1">
+                                        <div key={issue.id} className="mb-3 rounded-xl border border-gray-200 bg-gray-50/60 p-3">
+                                            <div className="flex items-start gap-2">
+                                            <span className="mt-2 text-xs text-gray-400 w-5 text-center">{idx + 1}</span>
+                                            <div className="min-w-0 flex-1 space-y-2">
                                                 <input
                                                     type="text"
                                                     placeholder="Tên lỗi (VD: Thay màn hình)"
@@ -217,13 +167,27 @@ export function RepairEditorModal({
                                                     }))}
                                                     className="w-full px-3 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-orange-500/20"
                                                 />
+                                                <div className="rounded-lg border border-orange-100 bg-orange-50 p-2.5">
+                                                    <label className="mb-1.5 block text-xs font-semibold text-orange-800">Nhóm dịch vụ áp dụng cho lỗi này</label>
+                                                    <CategoryTaxonomySelector
+                                                        type="service"
+                                                        value={issue.categoryPath || []}
+                                                        onChange={(ids, catName, subCatName) => setFormData(p => ({
+                                                            ...p,
+                                                            issues: p.issues.map(i => i.id === issue.id ? {
+                                                                ...i,
+                                                                categoryPath: ids,
+                                                                serviceName: subCatName || catName || '',
+                                                                serviceId: '',
+                                                            } : i),
+                                                        }))}
+                                                    />
+                                                </div>
                                                 <IssueServiceSuggestions
                                                     issue={issue}
                                                     suggestions={serviceSuggestions}
                                                     onSelect={suggestion => setFormData(p => ({
                                                         ...p,
-                                                        selectedCategoryPath: suggestion.path,
-                                                        selectedServiceName: suggestion.name,
                                                         issues: p.issues.map(i => i.id === issue.id ? {
                                                             ...i,
                                                             categoryPath: suggestion.path,
@@ -261,11 +225,19 @@ export function RepairEditorModal({
                                                 <Trash2 size={14} />
                                             </button>
                                         </div>
+                                        </div>
                                     ))}
                                     <button type="button"
                                         onClick={() => setFormData(p => ({
                                             ...p,
-                                            issues: [...p.issues, { id: crypto.randomUUID(), label: '', estimatedPrice: 0, status: 'pending' }]
+                                            issues: [...p.issues, {
+                                                id: crypto.randomUUID(),
+                                                label: '',
+                                                estimatedPrice: 0,
+                                                status: 'pending',
+                                                categoryPath: p.selectedCategoryPath,
+                                                serviceName: p.selectedServiceName,
+                                            }]
                                         }))}
                                         className="flex items-center gap-1 text-sm text-orange-600 hover:text-orange-800 font-medium mt-1">
                                         <Plus size={14} /> Thêm lỗi
@@ -399,8 +371,8 @@ export function RepairEditorModal({
                                     </button>
                                 </div>
                             </fieldset>
-                            {/* ── Media Upload: Ảnh/Video sau sửa (chỉ hiển khi Done/Out/Hoàn Phí) ── */}
-                            {['done', 'out', 'refund'].includes(formData.status) && (
+                            {/* ── Media Upload: chỉ hiển thị ở node kết thúc của workflow ── */}
+                            {selectedStatus?.isTerminal && (
                                 <>
                                     <hr className="border-gray-100" />
                                     <fieldset className="space-y-3">
@@ -483,7 +455,7 @@ export function RepairEditorModal({
                                         ) : (
                                             <div className="w-full px-4 py-2 border rounded-lg bg-gray-50 text-gray-800">
                                                 <div className="font-medium">{selectedStatus?.label || formData.status}</div>
-                                                <div className="text-xs text-gray-500">Phiếu mới luôn bắt đầu ở trạng thái tiếp nhận.</div>
+                                                <div className="text-xs text-gray-500">Phiếu mới bắt đầu từ node đầu tiên của workflow hiện hành.</div>
                                             </div>
                                         )}
                                     </div>

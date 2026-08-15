@@ -201,8 +201,9 @@ export function useCustomerActivity({
         const unsubStatuses = onSnapshot(doc(db, 'system_config', 'repairs'), snapshot => {
             statusesLoaded = true;
             const data = snapshot.data();
-            setRepairStatuses(normalizeRepairWorkflow(data?.repairStatuses as WorkflowNode[] | undefined));
-            setWarrantyStatuses(normalizeWarrantyWorkflow(data?.warrantyStatuses as WorkflowNode[] | undefined));
+            const normalizationOptions = { useLegacyFallback: data?.workflowSchemaVersion !== 3 };
+            setRepairStatuses(normalizeRepairWorkflow(data?.repairStatuses as WorkflowNode[] | undefined, normalizationOptions));
+            setWarrantyStatuses(normalizeWarrantyWorkflow(data?.warrantyStatuses as WorkflowNode[] | undefined, normalizationOptions));
             markLoaded();
         }, () => {
             statusesLoaded = true;

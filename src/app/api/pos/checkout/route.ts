@@ -133,7 +133,12 @@ const ACTIVE_SHIFT_LOCK_ID = 'active_cashier_shift';
 function resolvePaymentCompletionTarget(workflow: WorkflowNode[], currentStatus: string) {
     const currentNode = requireWorkflowNode(workflow, currentStatus);
     if (currentNode.isTerminal) {
-        return { targetStatus: currentNode.id, shouldCountCompletion: false };
+        return {
+            targetStatus: currentNode.id,
+            shouldCountCompletion: false,
+            enableTechnicianCommission: workflowNodeHasFeature(currentNode, 'enableTechnicianCommission'),
+            enableSellerCommission: workflowNodeHasFeature(currentNode, 'enableSellerCommission'),
+        };
     }
 
     const allowedTerminalNodes = (currentNode.allowedNext || [])
@@ -150,7 +155,12 @@ function resolvePaymentCompletionTarget(workflow: WorkflowNode[], currentStatus:
         throw new Error(`Trạng thái ${currentStatus} chưa có bước hoàn tất thanh toán hợp lệ trong workflow sửa chữa.`);
     }
 
-    return { targetStatus: targetNode.id, shouldCountCompletion: true };
+    return {
+        targetStatus: targetNode.id,
+        shouldCountCompletion: true,
+        enableTechnicianCommission: workflowNodeHasFeature(targetNode, 'enableTechnicianCommission'),
+        enableSellerCommission: workflowNodeHasFeature(targetNode, 'enableSellerCommission'),
+    };
 }
 
 export const POST = withApi({
@@ -868,7 +878,12 @@ export const POST = withApi({
             const cashierShiftChanged = Boolean(cashierShiftRef && (cashierShiftCollectedAmount > 0 || cashierShiftShippingExpenseAmount > 0));
             markTransaction('readCashierShift');
 
-            const repairCompletionTargets = new Map<string, { targetStatus: string; shouldCountCompletion: boolean }>();
+            const repairCompletionTargets = new Map<string, {
+                targetStatus: string;
+                shouldCountCompletion: boolean;
+                enableTechnicianCommission: boolean;
+                enableSellerCommission: boolean;
+            }>();
             for (const [id, repairDoc] of repairDocs.entries()) {
                 if (!repairPaymentTotals.has(id)) continue;
                 const repairTicket = repairDoc.snap.data() as RepairTicket;
@@ -1179,7 +1194,7 @@ export const POST = withApi({
                     const completionTarget = repairCompletionTargets.get(id);
                     if (!repairDoc || !completionTarget) continue;
                     const repairTicket = repairDoc.snap.data() as RepairTicket;
-                    const commissionResult = await calculateAndSaveCommissionsServer(tx, { uid: caller.uid, displayName: createdByName as string }, 'repair', {
+                const commissionResult = await calculateAndSaveCommissionsServer(tx, { uid: caller.uid, displayName: createdByName as string }, 'repair', {
                         ...repairTicket,
                         id,
                         status: completionTarget.targetStatus,
@@ -1188,10 +1203,14 @@ export const POST = withApi({
                             status: 'paid',
                             amount: repairPrice,
                         },
-                    } as RepairTicket, {
-                        activeRules: activeCommissionRules,
-                        skipRevenueAggregate: true,
-                    });
+                } as RepairTicket, {
+                    activeRules: activeCommissionRules,
+                    skipRevenueAggregate: true,
+                    repairRecipients: {
+                        technician: completionTarget.enableTechnicianCommission,
+                        seller: completionTarget.enableSellerCommission,
+                    },
+                });
                     commissionCost += commissionResult.commissionCost;
                 }
             }
