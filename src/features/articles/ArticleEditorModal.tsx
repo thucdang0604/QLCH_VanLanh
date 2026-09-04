@@ -1075,6 +1075,7 @@ export default function ArticleEditorModal({ article, onClose }: ArticleEditorMo
                 updatedAt: serverTimestamp(),
             };
 
+            let shouldClearScheduledAt = false;
             if (formData.status === 'scheduled') {
                 const scheduledDate = new Date(formData.scheduledAt);
                 if (scheduledDate.getTime() <= Date.now()) {
@@ -1082,7 +1083,7 @@ export default function ArticleEditorModal({ article, onClose }: ArticleEditorMo
                     if (!article || article.status !== 'published') {
                         payload.publishedAt = serverTimestamp();
                     }
-                    payload.scheduledAt = deleteField();
+                    shouldClearScheduledAt = true;
                     toastInfo('Thời gian hẹn đã qua, bài viết đã được đăng ngay!');
                 } else {
                     payload.scheduledAt = Timestamp.fromDate(scheduledDate);
@@ -1091,8 +1092,14 @@ export default function ArticleEditorModal({ article, onClose }: ArticleEditorMo
                 if (!article || article.status !== 'published') {
                     payload.publishedAt = serverTimestamp();
                 }
-                payload.scheduledAt = deleteField();
+                shouldClearScheduledAt = true;
             } else {
+                shouldClearScheduledAt = true;
+            }
+
+            // deleteField() is valid for updateDoc(), but not for a new setDoc().
+            // New articles simply omit scheduledAt until one is actually scheduled.
+            if (article && shouldClearScheduledAt) {
                 payload.scheduledAt = deleteField();
             }
 
@@ -1102,13 +1109,6 @@ export default function ArticleEditorModal({ article, onClose }: ArticleEditorMo
             } else {
                 payload.views = 0;
                 payload.createdAt = serverTimestamp();
-
-                // Clean up deleteField() sentinels when creating a new document with setDoc()
-                Object.keys(payload).forEach(key => {
-                    if (payload[key] === deleteField()) {
-                        delete payload[key];
-                    }
-                });
 
                 const baseSlug = generateSlug(payload.title as string);
                 const checkRef = await getDoc(doc(db, 'articles', baseSlug));
@@ -1713,7 +1713,13 @@ export default function ArticleEditorModal({ article, onClose }: ArticleEditorMo
                         className="flex-1 py-3 bg-orange-500 text-white rounded-lg font-medium hover:bg-orange-600 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                     >
                         {saving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
-                        {article ? 'Cập nhật' : formData.status === 'scheduled' ? 'Lên lịch đăng' : 'Đăng bài'}
+                        {article
+                            ? 'Cập nhật'
+                            : formData.status === 'draft'
+                                ? 'Lưu nháp'
+                                : formData.status === 'scheduled'
+                                    ? 'Lên lịch đăng'
+                                    : 'Đăng bài'}
                     </button>
                 </div>
             </div>
