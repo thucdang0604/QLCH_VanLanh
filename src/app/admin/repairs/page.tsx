@@ -10,9 +10,9 @@ import { useAuth } from '@/lib/AuthContext';
 import { useConfig } from '@/lib/ConfigContext';
 import type { RepairTicket, RepairStatus, PaymentStatus, DeviceChecklist, WorkflowNode, RepairIssue } from '@/lib/types';
 import { isChecklistComplete, areAllPartsReady } from '@/lib/workflowFeatures';
-import { REPAIR_STATUS, isPendingRepairPart, isRepairStatus, isSelectedRepairPart, isWarrantyEligibleRepairPart } from '@/lib/repairStatus';
+import { isPendingRepairPart, isSelectedRepairPart, isWarrantyEligibleRepairPart } from '@/lib/repairStatus';
 import { normalizeVietnamPhone } from '@/lib/phone';
-import { appAlert } from '@/lib/appDialog';
+import { appAlert, appConfirm } from '@/lib/appDialog';
 import {
     buildContactMethods,
     buildContactSearchKeywords,
@@ -25,6 +25,9 @@ import type { ReceiptConfig } from '@/components/admin/PrintableReceipt';
 import type { WarrantyTemplateConfig } from '@/app/admin/settings/receipt/WarrantyComponents';
 import { toastError, toastSuccess, toastWarning } from '@/lib/toast';
 import { useClientPagination } from '@/lib/useClientPagination';
+import { getWorkflowNormalizationOptions, normalizeRepairWorkflow, normalizeWarrantyWorkflow } from '@/lib/repairWorkflowConfig';
+import { requiresRepairPaymentAtPos } from '@/lib/repairPaymentGate';
+import { getRepairIssueLaborCost } from '@/lib/repairIssuePricing';
 import {
     canOverrideRepairTerminalStatus,
     formatRepairPrice,
@@ -160,7 +163,7 @@ export default function RepairPage() {
     const [noteModal, setNoteModal] = useState<{ ticket: RepairTicket; targetStatus: RepairStatus } | null>(null);
     const [deliveryNote, setDeliveryNote] = useState('');
     const [posRedirectModal, setPosRedirectModal] = useState<{ ticket: RepairTicket } | null>(null);
-    const [handoverModal, setHandoverModal] = useState<{ ticket: RepairTicket; action: 'out' | 'refund', targetStatus?: string } | null>(null);
+    const [handoverModal, setHandoverModal] = useState<{ ticket: RepairTicket; action: 'handover' | 'refund'; targetStatus?: string } | null>(null);
     const [handoverNote, setHandoverNote] = useState('');
     const [paymentConfirmed, setPaymentConfirmed] = useState(false);
     const [handoverAdditionalFees, setHandoverAdditionalFees] = useState<string>('');
@@ -221,12 +224,13 @@ export default function RepairPage() {
         issueDescription: '',
         techNotes: '',
         issues: [] as RepairIssue[],
+        initialParts: [],
         partsCost: '' as string | number,
         laborCost: '' as string | number,
         depositAmount: '' as string | number,
         paymentStatus: 'unpaid' as PaymentStatus,
         technicianId: '',
-        status: REPAIR_STATUS.INTAKE as RepairStatus,
+        status: '' as RepairStatus,
         estimatedReturnDate: '',
         selectedServiceName: '',
         selectedCategoryPath: [] as string[],
@@ -244,15 +248,11 @@ export default function RepairPage() {
                         const fetchedName = customerData.name || customerData.displayName || '';
                         if (fetchedName) {
                             setFormData(p => {
-                                const contactMethods = Array.isArray(customerData.contactMethods) ? customerData.contactMethods : [];
                                 return {
                                     ...p,
                                     customerId: p.customerId || snap.id,
                                     customerName: p.customerName || fetchedName,
-                                    customerZalo: p.customerZalo || String(contactMethods.find((method: { type?: string }) => method.type === 'zalo')?.value || ''),
-                                    customerFacebook: p.customerFacebook || String(contactMethods.find((method: { type?: string }) => method.type === 'facebook')?.value || ''),
-                                    customerOtherContact: p.customerOtherContact || String(customerData.primaryContactValue || ''),
-                                    customerPrimaryContactType: (customerData.primaryContactType as ContactMethodType) || p.customerPrimaryContactType,
+                                    customerPrimaryContactType: 'phone',
                                 };
                             });
                         }
@@ -301,8 +301,9 @@ export default function RepairPage() {
         const unsubStatuses = onSnapshot(doc(db, 'system_config', 'repairs'), (docSnap) => {
             if (docSnap.exists()) {
                 const data = docSnap.data();
-                setDynamicStatuses(data.repairStatuses ?? data.statuses ?? []);
-                setWarrantyStatuses(data.warrantyStatuses ?? []);
+                const normalizationOptions = getWorkflowNormalizationOptions(data.workflowSchemaVersion);
+                setDynamicStatuses(normalizeRepairWorkflow(data.repairStatuses ?? data.statuses ?? [], normalizationOptions));
+                setWarrantyStatuses(normalizeWarrantyWorkflow(data.warrantyStatuses ?? [], normalizationOptions));
             }
             setStatusConfigLoaded(true);
         }, (err) => {
@@ -512,7 +513,8 @@ export default function RepairPage() {
         if (chatPrefillApplied.current || searchParams.get('source') !== 'chat') return;
         const handoff = consumeChatWorkflowHandoff(searchParams);
         if (!handoff) return;
-        const initialStatus = (dynamicStatuses[0]?.id || REPAIR_STATUS.INTAKE) as RepairStatus;
+        const initialStatus = dynamicStatuses[0]?.id as RepairStatus | undefined;
+        if (!initialStatus) return;
         const handoffContactType = isContactMethodType(handoff.primaryContactType) ? handoff.primaryContactType : handoff.customerPhone ? 'phone' : 'other';
         const handoffContactValue = handoff.primaryContactValue || '';
         setEditingTicket(null);
@@ -565,12 +567,6 @@ export default function RepairPage() {
             toastError('Phiếu đã đóng, không thể thay đổi trạng thái!');
             return;
         }
-        if (isRepairStatus(ticket.status, REPAIR_STATUS.INSPECTION) && nextStatus !== REPAIR_STATUS.INSPECTION) {
-            if (!ticket.issue?.notes || ticket.issue.notes.trim().length === 0) {
-                toastError('Vui lòng nhập ghi chú kỹ thuật (mục "Ghi chú kỹ thuật") trước khi chuyển trạng thái tiếp theo.');
-                return;
-            }
-        }
         if (currentCfg?.allowedFeatures?.includes('allowPartsSelection')) {
             const partsCount = (ticket.parts || []).length;
             if (partsCount === 0) {
@@ -583,22 +579,26 @@ export default function RepairPage() {
                 return;
             }
         }
-        if (currentCfg?.allowedFeatures?.includes('requirePaymentGate')) {
+        const nextCfg = workflow.find(s => s.id === nextStatus);
+        if (nextCfg?.allowedFeatures?.includes('recordCustomerApproval') || nextCfg?.allowedFeatures?.includes('recordCustomerDecline')) {
+            setViewingTicket(ticket);
+            toastWarning('Hãy mở chi tiết phiếu để Tiếp nhận ghi nhận phản hồi của khách.');
+            return;
+        }
+        // Payment is a gate on the CURRENT workflow node. It must take
+        // precedence over the terminal action configured on the destination.
+        if (requiresRepairPaymentAtPos(ticket, currentCfg)) {
+            setPosRedirectModal({ ticket });
+            return;
+        }
+        const terminalAction = nextCfg?.terminalAction;
+        if (terminalAction === 'handover' || terminalAction === 'refund') {
             const defaultLaborCost = ticket.payment?.laborCost !== undefined
                 ? ticket.payment.laborCost
                 : Math.max(0, (ticket.issues || []).reduce((sum, i) => sum + (Number(i.estimatedPrice) || 0), 0) - (Number(ticket.payment?.partsCost) || 0));
-            if (nextStatus === 'refund') {
-                setHandoverLaborCost(defaultLaborCost.toString() || '');
-                setHandoverModal({ ticket, action: 'refund', targetStatus: nextStatus });
-                return;
-            } else if (nextStatus === 'out') {
-                setHandoverLaborCost(defaultLaborCost.toString() || '');
-                setHandoverModal({ ticket, action: 'out', targetStatus: nextStatus });
-                return;
-            } else {
-                setPosRedirectModal({ ticket });
-                return;
-            }
+            setHandoverLaborCost(defaultLaborCost.toString() || '');
+            setHandoverModal({ ticket, action: terminalAction, targetStatus: nextStatus });
+            return;
         }
         if (currentCfg?.allowedFeatures?.includes('requirePartsReady')) {
             if (!areAllPartsReady(ticket)) {
@@ -611,7 +611,6 @@ export default function RepairPage() {
                 return;
             }
         }
-        const nextCfg = workflow.find(s => s.id === nextStatus);
         if (nextCfg?.allowedFeatures?.includes('requireAssignedTechnician') && !ticket.staff?.assignedTechnician) {
             toastError('Cần phân công Kỹ thuật viên trước khi thực hiện bước này!');
             setAssignModal({ ticket });
@@ -621,8 +620,15 @@ export default function RepairPage() {
         if (ticket.staff?.assignedTechnician) {
             const isAssignedKTV = ticket.staff.assignedTechnician === user?.uid;
             const isManager = user?.role === 'admin' || user?.permissions?.includes('manage_staff') || user?.permissions?.includes('manage_settings');
+            const configuredActors = currentCfg?.transitionActors?.[nextStatus];
+            const workflowActor = isManager ? 'manager' : isAssignedKTV ? 'technician' : ticket.staff?.createdBy === user?.uid ? 'reception' : null;
 
-            if (!isAssignedKTV) {
+            if (configuredActors && (!workflowActor || !configuredActors.includes(workflowActor))) {
+                toastError('Vai trò của bạn không được phép chuyển bước này.');
+                return;
+            }
+
+            if (!configuredActors && !isAssignedKTV) {
                 if (isManager) {
                     setManagerOverrideModal({ ticket, targetStatus: nextStatus });
                     return;
@@ -785,6 +791,11 @@ export default function RepairPage() {
     const handleCreateWarrantyTicket = async (originalTicket: RepairTicket, claimedPartIndexes: number[]) => {
         const warrantyType = getWarrantyTypeForTicket(originalTicket);
         const hasServiceWarrantyConfig = Boolean(getWarrantyConfigForType(warrantyType));
+        const initialWarrantyStatus = warrantyStatuses[0]?.id;
+        if (!initialWarrantyStatus) {
+            toastError('Chưa có trạng thái mở đầu trong workflow bảo hành.');
+            return;
+        }
         if (claimedPartIndexes.length === 0 && !hasServiceWarrantyConfig) {
             toastWarning('Vui lòng chọn ít nhất 1 linh kiện cần bảo hành.');
             return;
@@ -860,8 +871,8 @@ export default function RepairPage() {
                     assignedTechnician: '',
                     assignedTechnicianName: '',
                 },
-                status: warrantyStatuses[0]?.id || 'bh_tiep_nhan',
-                statusTimeline: [{ status: warrantyStatuses[0]?.id || 'bh_tiep_nhan', timestamp: Date.now() }],
+                status: initialWarrantyStatus,
+                statusTimeline: [{ status: initialWarrantyStatus, timestamp: Date.now() }],
                 timing: { receivedAt: serverTimestamp() },
                 createdAt: serverTimestamp(),
                 updatedAt: serverTimestamp(),
@@ -976,6 +987,18 @@ export default function RepairPage() {
     const handleOpenModal = (ticket?: RepairTicket) => {
         if (ticket) {
             const cl = ticket.deviceInfo?.checklist;
+            const ticketIssues = ticket.issues && ticket.issues.length > 0
+                ? ticket.issues
+                : ticket.issue?.description
+                    ? [{ id: crypto.randomUUID(), label: ticket.issue.description, estimatedPrice: 0, status: 'pending' as const }]
+                    : [];
+            // Legacy tickets had a single service at ticket level. Surface it
+            // on every existing issue so staff can refine each one separately.
+            const issuesWithServiceGroups = ticketIssues.map(issue => ({
+                ...issue,
+                categoryPath: issue.categoryPath?.length ? issue.categoryPath : (ticket.categoryPath || []),
+                serviceName: issue.serviceName || ticket.serviceName || '',
+            }));
             setFormData({
                 appointmentId: ticket.appointmentId || '',
                 appointmentIntakeMethod: (ticket as RepairTicket & { appointmentIntakeMethod?: string | null }).appointmentIntakeMethod || '',
@@ -1004,11 +1027,8 @@ export default function RepairPage() {
                 historyOtherNote: cl?.historyOtherNote || '',
                 issueDescription: ticket.issue?.description || '',
                 techNotes: ticket.issue?.notes || '',
-                issues: ticket.issues && ticket.issues.length > 0
-                    ? ticket.issues
-                    : ticket.issue?.description
-                        ? [{ id: crypto.randomUUID(), label: ticket.issue.description, estimatedPrice: 0, status: 'pending' as const }]
-                        : [],
+                issues: issuesWithServiceGroups,
+                initialParts: [],
                 partsCost: ticket.payment?.partsCost || ticket.payment?.amount || '',
                 laborCost: ticket.payment?.laborCost !== undefined ? ticket.payment.laborCost : Math.max(0, (ticket.issues || []).reduce((sum, i) => sum + (Number(i.estimatedPrice) || 0), 0) - (Number(ticket.payment?.partsCost) || 0)),
                 depositAmount: ticket.payment?.depositAmount || '',
@@ -1023,16 +1043,160 @@ export default function RepairPage() {
             setPostMediaFiles(ticket.postRepairMedia || []);
             setEditingTicket(ticket);
         } else {
-            const initialStatus = (dynamicStatuses[0]?.id || REPAIR_STATUS.INTAKE) as RepairStatus;
+            const initialStatus = dynamicStatuses[0]?.id as RepairStatus | undefined;
+            if (!initialStatus) {
+                toastError('Chưa có trạng thái mở đầu trong workflow sửa chữa.');
+                return;
+            }
             setEditingTicket(null);
-            setFormData({ ...emptyForm, technicianId: '', status: initialStatus });
+            setFormData({ ...emptyForm, technicianId: '', status: initialStatus, appointmentIntakeMethod: '' });
             setPreMediaFiles([]);
             setPostMediaFiles([]);
         }
         setShowModal(true);
     };
+
+    const handleConfirmReturnedPart = async (ticket: RepairTicket, partIndex: number) => {
+        const part = ticket.parts?.[partIndex];
+        if (!part?.partLineId) {
+            toastError('Linh kiện chưa có mã dòng. Vui lòng tải lại phiếu.');
+            return;
+        }
+        if (!await appConfirm(`Xác nhận đã nhận lại ${part.productName || 'linh kiện'} từ KTV?`, {
+            title: 'Nhận lại linh kiện hoàn kho',
+            confirmText: 'Xác nhận đã nhận',
+        })) return;
+
+        try {
+            const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(auth => auth.currentUser?.getIdToken());
+            const res = await fetch('/api/repairs/confirm-parts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
+                body: JSON.stringify({
+                    ticketId: ticket.id,
+                    ticketVersion: ticket.version || 0,
+                    operationKey: crypto.randomUUID(),
+                    command: { type: 'confirm_return_received', partLineId: part.partLineId, quantity: 1 },
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Không thể xác nhận nhận lại linh kiện.');
+
+            const updatedTicket = {
+                ...ticket,
+                parts: data.parts,
+                payment: data.payment,
+                version: (ticket.version || 0) + 1,
+            };
+            setTickets(previous => previous.map(item => item.id === ticket.id ? updatedTicket : item));
+            setViewingTicket(current => current?.id === ticket.id ? updatedTicket : current);
+            toastSuccess('Đã xác nhận nhận lại linh kiện hoàn kho.');
+        } catch (error: unknown) {
+            console.error('Confirm returned repair part error:', error);
+            toastError(error instanceof Error ? error.message : 'Không thể xác nhận nhận lại linh kiện.');
+        }
+    };
+
+    const handleHandoverPart = async (ticket: RepairTicket, partIndex: number) => {
+        const part = ticket.parts?.[partIndex];
+        if (!part?.partLineId) {
+            toastError('Linh kiện chưa có mã dòng. Vui lòng tải lại phiếu.');
+            return;
+        }
+        if (!await appConfirm(`Bàn giao ${part.productName || 'linh kiện'} cho KTV? KTV sẽ cần xác nhận đã nhận.`, {
+            title: 'Bàn giao linh kiện', confirmText: 'Bàn giao LK',
+        })) return;
+        try {
+            const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(auth => auth.currentUser?.getIdToken());
+            const res = await fetch('/api/repairs/confirm-parts', {
+                method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
+                body: JSON.stringify({
+                    ticketId: ticket.id, ticketVersion: ticket.version || 0, operationKey: crypto.randomUUID(),
+                    command: { type: 'handover_to_technician', partLineId: part.partLineId, quantity: 1 },
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Không thể bàn giao linh kiện.');
+            const updatedTicket = { ...ticket, parts: data.parts, payment: data.payment, version: (ticket.version || 0) + 1 };
+            setTickets(previous => previous.map(item => item.id === ticket.id ? updatedTicket : item));
+            setViewingTicket(current => current?.id === ticket.id ? updatedTicket : current);
+            toastSuccess('Đã bàn giao linh kiện, chờ KTV xác nhận.');
+        } catch (error: unknown) {
+            console.error('Handover repair part error:', error);
+            toastError(error instanceof Error ? error.message : 'Không thể bàn giao linh kiện.');
+        }
+    };
+
+    const handleRecordCustomerDecision = async (
+        ticket: RepairTicket,
+        decision: 'approved' | 'declined',
+        targetStatus: string,
+        customerNote: string,
+    ) => {
+        const workflow = getWorkflowForTicket(ticket);
+        const currentNode = workflow.find(node => node.id === ticket.status);
+        const targetNode = workflow.find(node => node.id === targetStatus);
+        const recordsOnCurrentNode = decision === 'approved'
+            ? currentNode?.allowedFeatures?.includes('recordCustomerApproval')
+            : currentNode?.allowedFeatures?.includes('recordCustomerDecline');
+        const recordsOnTargetNode = decision === 'approved'
+            ? targetNode?.allowedFeatures?.includes('recordCustomerApproval')
+            : targetNode?.allowedFeatures?.includes('recordCustomerDecline');
+        if (!currentNode || !targetNode || (!recordsOnCurrentNode && !recordsOnTargetNode)) {
+            toastError('Trạng thái phản hồi khách hàng không còn hợp lệ. Vui lòng tải lại phiếu.');
+            return;
+        }
+        const decisionLabel = decision === 'approved' ? 'khách đã đồng ý sửa' : 'khách không đồng ý sửa';
+        if (!await appConfirm(`Xác nhận Tiếp nhận đã trao đổi và ${decisionLabel}?`, {
+            title: 'Ghi nhận phản hồi khách',
+            confirmText: 'Xác nhận',
+        })) return;
+
+        try {
+            const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(auth => auth.currentUser?.getIdToken());
+            const res = await fetch('/api/repairs/transition', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
+                body: JSON.stringify({
+                    ticketId: ticket.id,
+                    targetStatus,
+                    customerDecision: decision,
+                    customerNote,
+                    ticketVersion: ticket.version || 0,
+                    idempotencyKey: crypto.randomUUID(),
+                    source: 'repairs',
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Không thể ghi nhận phản hồi khách hàng.');
+            const updatedTicket: RepairTicket = {
+                ...ticket,
+                status: targetStatus,
+                version: (ticket.version || 0) + 1,
+                customerApproval: {
+                    ...ticket.customerApproval,
+                    decision,
+                    note: customerNote || undefined,
+                    respondedAt: new Date(),
+                },
+            };
+            setTickets(previous => previous.map(item => item.id === ticket.id ? updatedTicket : item));
+            setViewingTicket(current => current?.id === ticket.id ? updatedTicket : current);
+            toastSuccess(`Đã ghi nhận ${decisionLabel}. KTV sẽ thấy thông tin này trên phiếu.`);
+        } catch (error: unknown) {
+            console.error('Record customer repair decision error:', error);
+            toastError(error instanceof Error ? error.message : 'Không thể ghi nhận phản hồi khách hàng.');
+            throw error;
+        }
+    };
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+
+        if (!formData.customerPhone.trim()) {
+            toastError('Can nhap so dien thoai khach hang.');
+            return;
+        }
 
         let normalizedCustomerPhone = '';
         if (formData.customerPhone) {
@@ -1050,7 +1214,7 @@ export default function RepairPage() {
             zalo: String(formData.customerZalo || ''),
             facebook: String(formData.customerFacebook || ''),
             other: String(formData.customerOtherContact || ''),
-            primaryType: formData.customerPrimaryContactType as ContactMethodType,
+            primaryType: 'phone' as ContactMethodType,
             source: 'repair' as const,
         };
         const contactMethods = buildContactMethods(customerContactInput);
@@ -1068,6 +1232,22 @@ export default function RepairPage() {
             toastError('Can co Ma KH, SDT, Zalo, Facebook hoac lien he khac de tao phieu sua chua.');
             return;
         }
+        const submittedIssues: RepairIssue[] = formData.issues.map(issue => ({
+            ...issue,
+            categoryPath: Array.isArray(issue.categoryPath) ? issue.categoryPath : [],
+            serviceName: typeof issue.serviceName === 'string' ? issue.serviceName : '',
+            serviceId: typeof issue.serviceId === 'string' ? issue.serviceId : '',
+            billingMode: issue.billingMode === 'parts_only' || issue.billingMode === 'parts_and_service' || issue.billingMode === 'free'
+                ? issue.billingMode
+                : issue.billingMode === 'service_only' ? 'service_only' : undefined,
+        }));
+        const calculatedLaborCost = getRepairIssueLaborCost(submittedIssues, formData.initialParts, Number(formData.laborCost) || 0);
+        // Keep the existing ticket-level fields as a representative projection
+        // for older reports, warranty logic, and integrations. New logic reads
+        // the service group from each issue above.
+        const representativeIssue = submittedIssues.find(issue => (issue.categoryPath?.length || 0) > 0 || issue.serviceName);
+        const representativeCategoryPath = representativeIssue?.categoryPath || formData.selectedCategoryPath;
+        const representativeServiceName = representativeIssue?.serviceName || formData.selectedServiceName;
         const customerSnapshot = {
             id: resolvedCustomerId,
             customerId: resolvedCustomerId,
@@ -1099,8 +1279,8 @@ export default function RepairPage() {
                         profileData: {
                             appointmentId: formData.appointmentId || null,
                             appointmentIntakeMethod: formData.appointmentIntakeMethod || null,
-                            categoryPath: formData.selectedCategoryPath,
-                            serviceName: formData.selectedServiceName,
+                            categoryPath: representativeCategoryPath,
+                            serviceName: representativeServiceName,
                             customer: customerSnapshot,
                             deviceInfo: {
                                 model: formData.deviceModel,
@@ -1130,7 +1310,7 @@ export default function RepairPage() {
                                     : formData.issueDescription,
                                 notes: formData.techNotes
                             },
-                            issues: formData.issues.length > 0 ? formData.issues : null,
+                            issues: submittedIssues.length > 0 ? submittedIssues : null,
                             estimatedReturnAt: formData.estimatedReturnDate
                                 ? new Date(formData.estimatedReturnDate).toISOString()
                                 : null,
@@ -1139,8 +1319,13 @@ export default function RepairPage() {
                         },
                         paymentData: {
                             deposit: Number(formData.depositAmount) || 0,
-                            laborCost: Number(formData.laborCost) || 0,
-                        }
+                            laborCost: calculatedLaborCost,
+                        },
+                        initialParts: formData.initialParts.map(part => ({
+                            productId: part.productId,
+                            issueId: part.issueId,
+                            quantity: part.quantity,
+                        })),
                     })
                 });
 
@@ -1148,12 +1333,15 @@ export default function RepairPage() {
                 if (!editRes.ok) {
                     throw new Error(editDataResp.error || 'Loi cap nhat phieu sua chua');
                 }            } else {
-                const initialStatus = (dynamicStatuses[0]?.id || REPAIR_STATUS.INTAKE) as RepairStatus;
+                const initialStatus = dynamicStatuses[0]?.id as RepairStatus | undefined;
+                if (!initialStatus) {
+                    throw new Error('Chưa có trạng thái mở đầu trong workflow sửa chữa.');
+                }
                 const ticketData: Record<string, unknown> = {
                     appointmentId: formData.appointmentId || null,
                     appointmentIntakeMethod: formData.appointmentIntakeMethod || null,
-                    categoryPath: formData.selectedCategoryPath,
-                    serviceName: formData.selectedServiceName,
+                    categoryPath: representativeCategoryPath,
+                    serviceName: representativeServiceName,
                     customer: customerSnapshot,
                     deviceInfo: {
                         model: formData.deviceModel,
@@ -1184,7 +1372,12 @@ export default function RepairPage() {
                             : formData.issueDescription,
                         notes: formData.techNotes
                     },
-                    issues: formData.issues.length > 0 ? formData.issues : undefined,
+                    issues: submittedIssues.length > 0 ? submittedIssues : undefined,
+                    initialParts: formData.initialParts.map(part => ({
+                        productId: part.productId,
+                        issueId: part.issueId,
+                        quantity: part.quantity,
+                    })),
                     timing: {
                         receivedAt: serverTimestamp(),
                         estimatedReturnAt: formData.estimatedReturnDate
@@ -1193,9 +1386,9 @@ export default function RepairPage() {
                     },
                     payment: {
                         status: formData.paymentStatus,
-                        partsCost: Number(formData.partsCost) || 0,
-                        laborCost: Number(formData.laborCost) || 0,
-                        amount: Number(formData.partsCost) + Number(formData.laborCost) || 0,
+                        partsCost: 0,
+                        laborCost: calculatedLaborCost,
+                        amount: calculatedLaborCost,
                         depositAmount: Number(formData.depositAmount) || 0,
                     },
                     staff: {
@@ -1212,10 +1405,10 @@ export default function RepairPage() {
                 const depositAmt = Number(formData.depositAmount) || 0;
                 if (depositAmt > 0) {
                     ticketData.paymentHistory = [{
-                        type: depositAmt >= (Number(formData.partsCost) || 0) ? 'full' : 'deposit',
+                        type: depositAmt >= calculatedLaborCost ? 'full' : 'deposit',
                         amount: depositAmt,
                         timestamp: Date.now(),
-                        note: depositAmt >= (Number(formData.partsCost) || 0)
+                        note: depositAmt >= calculatedLaborCost
                             ? 'Thanh toán trước toàn bộ khi tạo phiếu'
                             : 'Đặt cọc khi tạo phiếu',
                     }];
@@ -1291,7 +1484,10 @@ export default function RepairPage() {
     }
     return (
         <div className="space-y-6">
-            <RepairPageHeader onCreate={() => handleOpenModal()} totalCount={totalCount} />
+            <RepairPageHeader
+                onCreate={() => handleOpenModal()}
+                totalCount={totalCount}
+            />
             <RepairStatsGrid stats={stats} />
             <div className="flex flex-wrap items-center gap-2 print:hidden">
                 {[
@@ -1351,6 +1547,9 @@ export default function RepairPage() {
                 getWarrantyConfigForType={getWarrantyConfigForType}
                 formatPrice={formatPrice}
                 handleQuickStatus={handleQuickStatus}
+                handleCustomerConfirmation={setViewingTicket}
+                onHandoverPart={handleHandoverPart}
+                onConfirmReturnedPart={handleConfirmReturnedPart}
                 handleOpenModal={handleOpenModal}
                 openPrint={openPrint}
                 setViewingTicket={setViewingTicket}
@@ -1384,6 +1583,12 @@ export default function RepairPage() {
             <RepairEditorModal
                 showModal={showModal}
                 editingTicket={editingTicket}
+                isInboundIntakeUpdate={editingTicket?.appointmentIntakeMethod === 'send_to_store'
+                    && dynamicStatuses.find(status => status.id === editingTicket.status)?.allowedFeatures?.includes('requireInboundArrival') === true
+                    && !editingTicket.inboundShipping?.intakeCompletedAt}
+                isInboundFreightLocked={editingTicket?.appointmentIntakeMethod === 'send_to_store'
+                    && dynamicStatuses.find(status => status.id === editingTicket.status)?.allowedFeatures?.includes('requireInboundArrival') === true
+                    && editingTicket.inboundShipping?.status === 'received'}
                 formData={formData}
                 setFormData={setFormData}
                 dynamicStatuses={dynamicStatuses}
@@ -1429,6 +1634,17 @@ export default function RepairPage() {
             <RepairDetailModal
                 ticket={viewingTicket}
                 dynamicStatuses={dynamicStatuses}
+                onConfirmReturnedPart={handleConfirmReturnedPart}
+                onHandoverPart={handleHandoverPart}
+                onRecordCustomerDecision={handleRecordCustomerDecision}
+                onInboundShippingPaid={(ticketId, inboundShipping) => {
+                    setTickets(current => current.map(item => item.id === ticketId ? { ...item, inboundShipping } : item));
+                    setViewingTicket(current => current?.id === ticketId ? { ...current, inboundShipping } : current);
+                }}
+                onEditTicket={ticket => {
+                    setViewingTicket(null);
+                    handleOpenModal(ticket);
+                }}
                 onClose={() => setViewingTicket(null)}
             />
             <RepairWarrantyModal

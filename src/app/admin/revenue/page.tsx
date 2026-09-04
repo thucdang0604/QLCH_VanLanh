@@ -21,6 +21,18 @@ import {
 } from '@/lib/revenueAggregate';
 import { useAuth } from '@/lib/AuthContext';
 
+type InventoryFreightExpense = {
+    id: string;
+    importReceiptId?: string;
+    amount?: number;
+    paymentMethod?: string;
+    carrierName?: string;
+    trackingNumber?: string;
+    note?: string;
+    createdByName?: string;
+    createdAt?: unknown;
+};
+
 // ── Expense categories ──
 const expenseCategories = [
     { key: 'rent', label: 'Thuê mặt bằng', icon: '🏠' },
@@ -114,6 +126,7 @@ export default function RevenuePage() {
     const [importReceipts, setImportReceipts] = useState<ImportReceipt[]>([]);
     const [commissions, setCommissions] = useState<Commission[]>([]);
     const [expenses, setExpenses] = useState<(Expense & { id: string })[]>([]);
+    const [inventoryFreightExpenses, setInventoryFreightExpenses] = useState<InventoryFreightExpense[]>([]);
     const [aggregateDays, setAggregateDays] = useState<RevenueAggregateDoc[]>([]);
     const [useAggregateData, setUseAggregateData] = useState(false);
     const [loading, setLoading] = useState(true);
@@ -180,6 +193,10 @@ export default function RevenuePage() {
     }, [getDateRange]);
 
     useEffect(() => {
+        if (!user) {
+            setLoading(false);
+            return;
+        }
         let cancelled = false;
 
         const load = async () => {
@@ -189,6 +206,20 @@ export default function RevenuePage() {
             // đã được tạo trước khi aggregate được sửa. Khoảng dài hơn dùng aggregate.
             const rangeDays = Math.ceil((to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24));
             const canUseAggregates = isAggregateRangeAvailable(from) && rangeDays > 32;
+            const loadInventoryFreightExpenses = async (rangeFrom?: Date, rangeTo?: Date) => {
+                const { getAuthInstance } = await import('@/lib/firebase');
+                const auth = await getAuthInstance();
+                const token = await auth.currentUser?.getIdToken();
+                const params = new URLSearchParams({ limit: '200' });
+                if (rangeFrom) params.set('from', rangeFrom.toISOString());
+                if (rangeTo) params.set('to', rangeTo.toISOString());
+                const response = await fetch(`/api/revenue/inventory-freight?${params.toString()}`, {
+                    headers: token ? { Authorization: `Bearer ${token}` } : {},
+                });
+                const data = await response.json() as { expenses?: InventoryFreightExpense[]; error?: string };
+                if (!response.ok) throw new Error(data.error || 'Không thể tải phí ship nhập hàng.');
+                return data.expenses || [];
+            };
 
             const loadSourceCollections = async () => {
                 const diffTime = to.getTime() - from.getTime();
@@ -202,18 +233,20 @@ export default function RevenuePage() {
                     setImportReceipts([]);
                     setCommissions([]);
                     setExpenses([]);
+                    setInventoryFreightExpenses([]);
                     return;
                 }
 
                 const fromTs = Timestamp.fromDate(from);
                 const toTs = Timestamp.fromDate(to);
 
-                const [oSnap, rSnap, iSnap, cSnap, eSnap] = await Promise.all([
+                const [oSnap, rSnap, iSnap, cSnap, eSnap, freightExpenses] = await Promise.all([
                     getDocs(query(collection(db, 'orders'), where('createdAt', '>=', fromTs), where('createdAt', '<=', toTs), orderBy('createdAt', 'desc'), limit(200))),
                     getDocs(query(collection(db, 'repairs'), where('createdAt', '>=', fromTs), where('createdAt', '<=', toTs), orderBy('createdAt', 'desc'), limit(200))),
                     getDocs(query(collection(db, 'import_receipts'), where('createdAt', '>=', fromTs), where('createdAt', '<=', toTs), orderBy('createdAt', 'desc'), limit(200))),
                     getDocs(query(collection(db, 'commissions'), where('createdAt', '>=', fromTs), where('createdAt', '<=', toTs), orderBy('createdAt', 'desc'), limit(200))),
                     getDocs(query(collection(db, 'expenses'), where('createdAt', '>=', fromTs), where('createdAt', '<=', toTs), orderBy('createdAt', 'desc'), limit(200))),
+                    loadInventoryFreightExpenses(from, to),
                 ]);
                 if (cancelled) return;
                 setUseAggregateData(false);
@@ -223,12 +256,13 @@ export default function RevenuePage() {
                 setImportReceipts(iSnap.docs.map(d => ({ id: d.id, ...d.data() } as ImportReceipt)));
                 setCommissions(cSnap.docs.map(d => ({ id: d.id, ...d.data() } as Commission)));
                 setExpenses(eSnap.docs.map(d => ({ id: d.id, ...d.data() } as Expense & { id: string })));
+                setInventoryFreightExpenses(freightExpenses);
             };
 
             try {
                 if (canUseAggregates) {
                     try {
-                        const [aggregateSnap, recentExpensesSnap] = await Promise.all([
+                        const [aggregateSnap, recentExpensesSnap, recentFreightExpenses] = await Promise.all([
                             getDocs(query(
                                 collection(db, 'revenue_daily_aggregates'),
                                 where('date', '>=', toRevenueDateId(from)),
@@ -236,6 +270,7 @@ export default function RevenuePage() {
                                 orderBy('date', 'asc'),
                             )),
                             getDocs(query(collection(db, 'expenses'), orderBy('createdAt', 'desc'), limit(50))),
+                            loadInventoryFreightExpenses(),
                         ]);
                         if (cancelled) return;
                         setAggregateDays(aggregateSnap.docs.map(d => ({ id: d.id, ...d.data() } as RevenueAggregateDoc)));
@@ -245,6 +280,7 @@ export default function RevenuePage() {
                         setImportReceipts([]);
                         setCommissions([]);
                         setExpenses(recentExpensesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Expense & { id: string })));
+                        setInventoryFreightExpenses(recentFreightExpenses);
                         return;
                     } catch (aggregateError) {
                         if (!isFirestorePermissionError(aggregateError)) {
@@ -258,6 +294,7 @@ export default function RevenuePage() {
                         setImportReceipts([]);
                         setCommissions([]);
                         setExpenses([]);
+                        setInventoryFreightExpenses([]);
                         return;
                     }
                 }
@@ -276,7 +313,7 @@ export default function RevenuePage() {
         return () => {
             cancelled = true;
         };
-    }, [getDateRange]);
+    }, [getDateRange, user]);
 
     // ── Revenue calculations ──
     const calculations = useMemo(() => {
@@ -416,21 +453,33 @@ export default function RevenuePage() {
             .reduce((s, c) => s + (c.amount || 0), 0);
 
         const filteredExpenses = expenses.filter(e => inRange(e.createdAt));
+        const filteredInventoryFreight = inventoryFreightExpenses.filter(e => inRange(e.createdAt));
         const supplierPaymentCost = filteredExpenses
             .filter(e => (e as { category?: string }).category === 'supplier_payment')
             .reduce((s, e) => s + (e.amount || 0), 0);
         const manualExpenses = filteredExpenses
             .filter(e => !['supplier_payment', 'shipping'].includes(String((e as { category?: string }).category || '')))
             .reduce((s, e) => s + (e.amount || 0), 0);
-        const shippingExpense = filteredExpenses
+        const repairShippingExpense = filteredExpenses
             .filter(e => (e as { category?: string }).category === 'shipping')
             .reduce((s, e) => s + (e.amount || 0), 0);
-        const shippingCashExpense = filteredExpenses
+        const repairShippingCashExpense = filteredExpenses
             .filter(e => (e as { category?: string; paymentMethod?: string }).category === 'shipping' && String((e as { paymentMethod?: string }).paymentMethod || '').toUpperCase() === 'CASH')
             .reduce((s, e) => s + (e.amount || 0), 0);
-        const shippingBankExpense = filteredExpenses
+        const repairShippingBankExpense = filteredExpenses
             .filter(e => (e as { category?: string; paymentMethod?: string }).category === 'shipping' && String((e as { paymentMethod?: string }).paymentMethod || '').toUpperCase() === 'BANK')
             .reduce((s, e) => s + (e.amount || 0), 0);
+        const inventoryFreightExpense = filteredInventoryFreight
+            .reduce((s, e) => s + (Number(e.amount) || 0), 0);
+        const inventoryFreightCashExpense = filteredInventoryFreight
+            .filter(e => getPaymentChannel(e.paymentMethod) === 'cash')
+            .reduce((s, e) => s + (Number(e.amount) || 0), 0);
+        const inventoryFreightBankExpense = filteredInventoryFreight
+            .filter(e => getPaymentChannel(e.paymentMethod) === 'bank')
+            .reduce((s, e) => s + (Number(e.amount) || 0), 0);
+        const shippingExpense = repairShippingExpense + inventoryFreightExpense;
+        const shippingCashExpense = repairShippingCashExpense + inventoryFreightCashExpense;
+        const shippingBankExpense = repairShippingBankExpense + inventoryFreightBankExpense;
         const cashExpenses = importReceipts
             .filter(i => i.status === 'completed' && !isImportDebt(i) && getPaymentChannel(i.paymentMethod) === 'cash' && inRange(i.completedAt || i.createdAt))
             .reduce((s, i) => s + (i.totalAmount || 0), 0) + manualExpenses + shippingCashExpense;
@@ -468,7 +517,19 @@ export default function RevenuePage() {
             repairCount: repairs.filter(r => r.status === 'done' && r.ticketType !== 'warranty' && inRange(r.timing?.completedAt || r.createdAt)).length,
             warrantyCount: repairs.filter(r => r.ticketType === 'warranty' && inRange(r.timing?.completedAt || r.createdAt)).length,
         };
-    }, [useAggregateData, aggregateDays, orders, repairs, importReceipts, commissions, expenses, inRange]);
+    }, [useAggregateData, aggregateDays, orders, repairs, importReceipts, commissions, expenses, inventoryFreightExpenses, inRange]);
+
+    const displayExpenses = useMemo(() => [
+        ...expenses,
+        ...inventoryFreightExpenses.map((expense) => ({
+            id: `inventory-freight-${expense.id}`,
+            category: 'shipping',
+            amount: Number(expense.amount) || 0,
+            description: expense.note || `Phí ship hàng về phiếu ${expense.importReceiptId || 'nhập kho'}`,
+            createdByName: expense.createdByName || '—',
+            createdAt: expense.createdAt,
+        } as Expense & { id: string })),
+    ].sort((a, b) => (toDate(b.createdAt)?.getTime() || 0) - (toDate(a.createdAt)?.getTime() || 0)), [expenses, inventoryFreightExpenses]);
 
     const revenueDisplay = useMemo(() => {
         const channelTotal = calculations.cashRevenue + calculations.bankRevenue + calculations.otherRevenue;
@@ -561,13 +622,14 @@ export default function RevenuePage() {
 
             const exp = importReceipts.filter(i => i.status === 'completed' && !isImportDebt(i) && isInDay(i.completedAt || i.createdAt)).reduce((s, i) => s + (i.totalAmount || 0), 0)
                 + commissions.filter(c => isInDay(c.createdAt)).reduce((s, c) => s + (c.amount || 0), 0)
-                + expenses.filter(e => isInDay(e.createdAt)).reduce((s, e) => s + (e.amount || 0), 0);
+                + expenses.filter(e => isInDay(e.createdAt)).reduce((s, e) => s + (e.amount || 0), 0)
+                + inventoryFreightExpenses.filter(e => isInDay(e.createdAt)).reduce((s, e) => s + (Number(e.amount) || 0), 0);
 
             days.push({ date: dayStr, revenue: rev, expense: exp });
             d.setDate(d.getDate() + 1);
         }
         return days;
-    }, [useAggregateData, aggregateDays, orders, repairs, importReceipts, commissions, expenses, getDateRange]);
+    }, [useAggregateData, aggregateDays, orders, repairs, importReceipts, commissions, expenses, inventoryFreightExpenses, getDateRange]);
 
     // Chart max value for scaling
     const chartMax = Math.max(1, ...chartData.map(d => Math.max(d.revenue, d.expense)));
@@ -675,29 +737,29 @@ export default function RevenuePage() {
             {/* ═══ Main KPI Cards ═══ */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {/* TỔNG THU */}
-                <div className="bg-gradient-to-br from-green-500 to-emerald-600 rounded-2xl p-5 text-white shadow-lg shadow-green-200/50 flex flex-col justify-between">
+                <div className="bg-[#0866FF] rounded-2xl p-5 text-white shadow-lg shadow-blue-200/50 flex flex-col justify-between">
                     <div>
-                        <div className="flex items-center gap-2 text-green-100 text-sm mb-1">
+                        <div className="flex items-center gap-2 text-white text-sm mb-1">
                             <ArrowUpRight size={18} /> THỰC THU (ĐÃ NHẬN)
                         </div>
                         <p className="text-3xl font-bold">{formatPrice(calculations.totalRevenue)}</p>
                         {calculations.debtRevenue > 0 && (
-                            <p className="text-sm text-orange-200 mt-1 font-medium border-t border-white/20 pt-1">
+                            <p className="text-sm text-white mt-1 font-medium border-t border-white/40 pt-1">
                                 Còn phải thu (ghi nợ): {formatPrice(calculations.debtRevenue)}
                             </p>
                         )}
                     </div>
-                    <div className="mt-3 space-y-1 text-xs text-green-100">
-                        <div className="text-[11px] font-bold uppercase tracking-wide text-green-50/80">Theo kênh thu</div>
+                    <div className="mt-3 space-y-1 text-xs text-white">
+                        <div className="text-[11px] font-bold uppercase tracking-wide text-white">Theo kênh thu</div>
                         <div className="flex justify-between"><span>Tiền mặt</span><span>{formatPrice(calculations.cashRevenue)}</span></div>
                         <div className="flex justify-between"><span>Chuyển khoản/QR</span><span>{formatPrice(calculations.bankRevenue)}</span></div>
                         {calculations.otherRevenue > 0 && (
                             <div className="flex justify-between"><span>Khác</span><span>{formatPrice(calculations.otherRevenue)}</span></div>
                         )}
                         {revenueDisplay.unclassifiedRevenue > 0 && (
-                            <div className="flex justify-between text-amber-100"><span>Chưa phân loại kênh</span><span>{formatPrice(revenueDisplay.unclassifiedRevenue)}</span></div>
+                            <div className="flex justify-between text-white"><span>Chưa phân loại kênh</span><span>{formatPrice(revenueDisplay.unclassifiedRevenue)}</span></div>
                         )}
-                        <div className="pt-2 text-[11px] font-bold uppercase tracking-wide text-green-50/80">Theo nguồn thu</div>
+                        <div className="pt-2 text-[11px] font-bold uppercase tracking-wide text-white">Theo nguồn thu</div>
                         <div className="flex justify-between"><span>🌐 Web ({calculations.webOrderCount})</span><span>{formatPrice(revenueDisplay.webOrderRevenue)}</span></div>
                         <div className="flex justify-between"><span>🏪 POS ({calculations.posOrderCount})</span><span>{formatPrice(revenueDisplay.posOrderRevenue)}</span></div>
                         <div className="flex justify-between"><span>🔧 Sửa chữa ({calculations.repairCount})</span><span>{formatPrice(revenueDisplay.repairRevenue)}</span></div>
@@ -706,26 +768,26 @@ export default function RevenuePage() {
                 </div>
 
                 {/* TỔNG CHI */}
-                <div className="bg-gradient-to-br from-red-500 to-rose-600 rounded-2xl p-5 text-white shadow-lg shadow-red-200/50">
-                    <div className="flex items-center gap-2 text-red-100 text-sm mb-1">
+                <div className="bg-orange-400 rounded-2xl p-5 text-black shadow-lg shadow-orange-200/50">
+                    <div className="flex items-center gap-2 text-black text-sm mb-1">
                         <ArrowDownLeft size={18} /> TỔNG CHI
                     </div>
                     <p className="text-3xl font-bold">{formatPrice(calculations.totalExpenses)}</p>
-                    <div className="mt-3 space-y-1 text-xs text-red-100">
+                    <div className="mt-3 space-y-1 text-xs text-black">
                         <div className="flex justify-between"><span>Tien mat</span><span>{formatPrice(calculations.cashExpenses)}</span></div>
                         <div className="flex justify-between"><span>Chuyen khoan</span><span>{formatPrice(calculations.bankExpenses)}</span></div>
                         {calculations.debtExpenses > 0 && (
-                            <div className="flex justify-between text-orange-100"><span>Ghi no</span><span>{formatPrice(calculations.debtExpenses)}</span></div>
+                            <div className="flex justify-between text-black"><span>Ghi no</span><span>{formatPrice(calculations.debtExpenses)}</span></div>
                         )}
                         <div className="flex justify-between"><span>📦 Nhập hàng đã trả</span><span>{formatPrice(calculations.importCost)}</span></div>
                         {calculations.importDebt > 0 && (
-                            <div className="flex justify-between text-orange-100"><span>Công nợ NCC</span><span>{formatPrice(calculations.importDebt)}</span></div>
+                            <div className="flex justify-between text-black"><span>Công nợ NCC</span><span>{formatPrice(calculations.importDebt)}</span></div>
                         )}
                         <div className="flex justify-between"><span>🏆 Hoa hồng</span><span>{formatPrice(calculations.commissionCost)}</span></div>
                         {calculations.supplierPaymentCost > 0 && (
                             <div className="flex justify-between"><span>💸 Trả nợ NCC</span><span>{formatPrice(calculations.supplierPaymentCost)}</span></div>
                         )}
-                        {calculations.shippingExpense > 0 && <div className="flex justify-between"><span>🚚 Ship shop chịu</span><span>{formatPrice(calculations.shippingExpense)}</span></div>}
+                        {calculations.shippingExpense > 0 && <div className="flex justify-between"><span>🚚 Ship shop chịu (theo kỳ)</span><span>{formatPrice(calculations.shippingExpense)}</span></div>}
                         <div className="flex justify-between"><span>📝 Chi phí khác</span><span>{formatPrice(calculations.manualExpenses)}</span></div>
                         {calculations.totalGiftDiscount > 0 && (
                             <div className="flex justify-between"><span>🎁 Quà tặng</span><span>{formatPrice(calculations.totalGiftDiscount)}</span></div>
@@ -803,7 +865,7 @@ export default function RevenuePage() {
                 </div>
                 {/* Mobile Card View */}
                 <div className="block lg:hidden divide-y divide-gray-100">
-                    {(showAllExpenses ? expenses : expenses.slice(0, 10)).map(e => {
+                    {(showAllExpenses ? displayExpenses : displayExpenses.slice(0, 10)).map(e => {
                         const cat = expenseCategories.find(c => c.key === e.category);
                         return (
                             <div key={e.id} className="p-4 hover:bg-gray-50 transition-colors">
@@ -839,7 +901,7 @@ export default function RevenuePage() {
                             </tr>
                         </thead>
                         <tbody>
-                            {(showAllExpenses ? expenses : expenses.slice(0, 10)).map(e => {
+                            {(showAllExpenses ? displayExpenses : displayExpenses.slice(0, 10)).map(e => {
                                 const cat = expenseCategories.find(c => c.key === e.category);
                                 return (
                                     <tr key={e.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors duration-200">
@@ -861,13 +923,13 @@ export default function RevenuePage() {
                         </tbody>
                     </table>
                 </div>
-                {expenses.length > 10 && (
+                {displayExpenses.length > 10 && (
                     <div className="flex justify-center py-3 border-t">
                         <button
                             onClick={() => setShowAllExpenses(prev => !prev)}
                             className="text-sm text-orange-500 hover:text-orange-600 font-medium px-4 py-1.5 rounded-lg hover:bg-orange-50 transition-colors"
                         >
-                            {showAllExpenses ? 'Thu gọn' : `Xem tất cả (${expenses.length})`}
+                            {showAllExpenses ? 'Thu gọn' : `Xem tất cả (${displayExpenses.length})`}
                         </button>
                     </div>
                 )}

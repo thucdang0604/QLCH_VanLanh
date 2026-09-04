@@ -2,6 +2,7 @@ import { isSelectedRepairPart } from '@/lib/repairStatus';
 
 export type SelectableRepairPartLine = {
     productId?: string;
+    issueId?: string;
     status?: string;
     quantity?: number;
     reservedQuantity?: number;
@@ -14,8 +15,11 @@ function toQuantity(value: unknown): number {
 export function findSelectedRepairPartIndex(
     parts: SelectableRepairPartLine[],
     productId: string,
+    issueId?: string,
 ): number {
-    return parts.findIndex((part) => part.productId === productId && isSelectedRepairPart(part));
+    return parts.findIndex((part) => part.productId === productId
+        && (part.issueId || '') === (issueId || '')
+        && isSelectedRepairPart(part));
 }
 
 /** Adds a repeated selection to the same repair line without repricing it. */

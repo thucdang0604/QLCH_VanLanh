@@ -178,7 +178,7 @@ export function TechnicianWorkflowModals({
                                 <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
                                 <div className="text-sm">
                                     <p className="font-semibold mb-1">Phiếu đã hoàn tất sửa chữa!</p>
-                                    <p>Vui lòng xác nhận các linh kiện đã thêm vào phiếu. Linh kiện <b>Hoàn kho (Test)</b> được trả kho; linh kiện <b>Đã dùng</b> được trừ kho ngay khi chuyển sang Chờ bàn giao.</p>
+                                    <p>Vui lòng xác nhận từng linh kiện. Linh kiện <b>Hoàn lại Tiếp nhận</b> sẽ chờ Tiếp nhận xác nhận đã nhận lại; linh kiện <b>Đã dùng</b> được trừ kho ngay khi chuyển sang Chờ bàn giao.</p>
                                 </div>
                             </div>
                             <div className="space-y-4 max-h-[60vh] overflow-y-auto">
@@ -199,7 +199,7 @@ export function TechnicianWorkflowModals({
                                                 onClick={() => setPartsVerificationSelections(prev => ({ ...prev, [part.partLineId!]: 'return' }))}
                                                 className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${partsVerificationSelections[part.partLineId!] === 'return' ? 'bg-white text-amber-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
                                             >
-                                                Hoàn kho (Test)
+                                                Hoàn lại Tiếp nhận
                                             </button>
                                         </div>
                                     </div>
@@ -223,7 +223,7 @@ export function TechnicianWorkflowModals({
             })()}
 
             {noteModalPayload && (
-                <Modal isOpen={true} onClose={onCloseNote} title="Cập nhật Ghi chú kỹ thuật" size="md">
+                <Modal isOpen={true} onClose={() => { if (!isStatusChanging) onCloseNote(); }} title="Cập nhật Ghi chú kỹ thuật" size="md">
                     <div className="p-6 space-y-4">
                         <p className="text-sm text-gray-500">
                             Chuyển sang: {noteTicket
@@ -244,17 +244,18 @@ export function TechnicianWorkflowModals({
                                 rows={4}
                                 value={techNoteText}
                                 onChange={event => onTechNoteTextChange(event.target.value)}
+                                disabled={isStatusChanging}
                                 placeholder="Nhập ghi chú kỹ thuật hoặc lý do ghi đè trước khi chuyển trạng thái..."
                                 className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20"
                             />
                             <p className="text-xs text-gray-400 mt-1">Lý do này sẽ được lưu cùng với phiếu sửa chữa và admin có thể xem trong lịch sử trạng thái.</p>
                         </div>
                         <div className="flex justify-end gap-3 pt-2">
-                            <button onClick={onCloseNote} className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
+                            <button onClick={onCloseNote} disabled={isStatusChanging} className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50">
                                 Đóng
                             </button>
-                            <button onClick={onSubmitNote} className="px-4 py-2 text-sm font-semibold text-white bg-orange-500 rounded-lg hover:bg-orange-600 transition-colors">
-                                Xác nhận chuyển đổi
+                            <button onClick={onSubmitNote} disabled={isStatusChanging} className="px-4 py-2 text-sm font-semibold text-white bg-orange-500 rounded-lg hover:bg-orange-600 transition-colors disabled:opacity-50 flex items-center gap-2">
+                                {isStatusChanging ? <Loader2 size={16} className="animate-spin" /> : 'Xác nhận chuyển đổi'}
                             </button>
                         </div>
                     </div>

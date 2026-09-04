@@ -12,6 +12,8 @@ export interface ImportReceiptItem {
     availability?: 'in_stock' | 'unavailable';
     supplier?: string;
     supplierId?: string;
+    freightAllocatedAmount?: number;
+    landedUnitCost?: number;
     ticketId?: string;
     partLineId?: string;
     requestKey?: string;
@@ -35,6 +37,12 @@ export interface ImportReceipt {
     paymentMethod?: 'cash' | 'bank' | 'debt';
     paymentStatus?: 'paid' | 'partial' | 'unpaid'; // Trạng thái thanh toán NCC
     paidAmount?: number;         // Số tiền đã trả NCC
+    freightPaidAmount?: number;  // Phí ship NCC đã chi, chờ/đã phân bổ vào giá vốn
+    freightTotal?: number;       // Phí ship đã được phân bổ khi nhập kho
+    landedTotalAmount?: number;  // Giá mua + phí ship đã phân bổ
+    cashierShiftId?: string;     // Chỉ có khi thanh toán tiền mặt từ POS
+    paidBy?: string;
+    paidByName?: string;
     createdBy: string;
     createdByName: string;
     createdAt: FirestoreDateValue;
@@ -69,6 +77,9 @@ export interface InventoryLot {
     productId: string;
     supplierId: string | null;
     importPrice: number;
+    purchaseUnitCost?: number;
+    freightAllocatedAmount?: number;
+    landedUnitCost?: number;
     initialQuantity: number;
     remainingQuantity: number;
     status: 'active' | 'empty';

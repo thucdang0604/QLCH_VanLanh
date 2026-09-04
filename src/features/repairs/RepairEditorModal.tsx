@@ -1,17 +1,30 @@
 'use client';
 /* eslint-disable @next/next/no-img-element */
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { Dispatch, FormEvent, SetStateAction } from 'react';
 import { AlertTriangle, CheckCircle2, DollarSign, Image as ImageIcon, Plus, Save, Smartphone, Trash2, Upload, User, Video, Wrench } from 'lucide-react';
 import Modal from '@/components/admin/Modal';
 import CategoryTaxonomySelector from '@/components/admin/CategoryTaxonomySelector';
 import CurrencyInput from '@/components/admin/CurrencyInput';
 import { useConfig } from '@/lib/ConfigContext';
-import type { PaymentStatus, RepairIssue, RepairStatus, RepairTicket, TaxonomyNode, WorkflowNode } from '@/lib/types';
+import type { PaymentStatus, Product, RepairIssue, RepairStatus, RepairTicket, TaxonomyNode, WorkflowNode } from '@/lib/types';
 import type { ContactMethodType } from '@/lib/types/contact';
 import type { ServiceModel } from './repairPageUtils';
+import { db } from '@/lib/firebase';
+import { collection, limit, query, where } from 'firebase/firestore';
+import { getDocs } from '@/lib/firestoreLogger';
+import { PART_CATEGORY_LABEL, isPartCategory } from '@/lib/constants';
+import { getRepairPartSearchLookupTokens, productMatchesRepairPartSearch } from '@/lib/repairPartSearch';
+import { getRepairIssueLaborCost, resolveRepairIssueBillingMode } from '@/lib/repairIssuePricing';
 
-type RepairFormValue = string | number | boolean | RepairIssue[] | string[] | PaymentStatus | RepairStatus;
+export type InitialRepairPart = {
+    productId: string;
+    productName: string;
+    issueId: string;
+    quantity: number;
+};
+
+type RepairFormValue = string | number | boolean | RepairIssue[] | InitialRepairPart[] | string[] | PaymentStatus | RepairStatus;
 
 type ServiceSuggestion = {
     id: string;
@@ -48,6 +61,7 @@ export type RepairEditorFormData = {
     selectedServiceName: string;
     selectedCategoryPath: string[];
     issues: RepairIssue[];
+    initialParts: InitialRepairPart[];
     issueDescription: string;
     techNotes: string;
     status: RepairStatus;
@@ -66,6 +80,8 @@ export type RepairEditorFormData = {
 interface RepairEditorModalProps {
     showModal: boolean;
     editingTicket: RepairTicket | null;
+    isInboundIntakeUpdate: boolean;
+    isInboundFreightLocked: boolean;
     formData: RepairEditorFormData;
     setFormData: Dispatch<SetStateAction<RepairEditorFormData>>;
     dynamicStatuses: WorkflowNode[];
@@ -86,6 +102,8 @@ interface RepairEditorModalProps {
 export function RepairEditorModal({
     showModal,
     editingTicket,
+    isInboundIntakeUpdate,
+    isInboundFreightLocked,
     formData,
     setFormData,
     dynamicStatuses,
@@ -108,6 +126,7 @@ export function RepairEditorModal({
         () => mergeServiceSuggestions(flattenServiceSuggestions(config.taxonomy?.service || []), services),
         [config.taxonomy?.service, services]
     );
+    const calculatedLaborCost = getRepairIssueLaborCost(formData.issues, formData.initialParts, Number(formData.laborCost) || 0);
 
     return (
         <>
@@ -125,36 +144,28 @@ export function RepairEditorModal({
                             <fieldset className="space-y-3">
                                 <legend className="flex items-center gap-2 font-semibold text-gray-900"><User size={18} className="text-orange-500" /> Khách hàng</legend>
                                 <div className="grid md:grid-cols-2 gap-4">
-                                    <InputField label="Ma KH" value={formData.customerId} onChange={v => setFormData(p => ({ ...p, customerId: v }))} placeholder="De trong neu tao moi" />
-                                    <InputField label="Ten *" value={formData.customerName} onChange={v => setFormData(p => ({ ...p, customerName: v }))} required />
-                                    <InputField label="So dien thoai" value={formData.customerPhone} onChange={v => setFormData(p => ({ ...p, customerPhone: v }))} type="tel" placeholder="Tuy chon" />
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">Kenh lien he chinh</label>
-                                        <select
-                                            value={formData.customerPrimaryContactType}
-                                            onChange={event => setFormData(p => ({ ...p, customerPrimaryContactType: event.target.value as ContactMethodType }))}
-                                            className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20 focus:outline-none bg-white"
-                                            title="Kenh lien he chinh"
-                                        >
-                                            <option value="phone">SDT</option>
-                                            <option value="zalo">Zalo</option>
-                                            <option value="facebook">Facebook</option>
-                                            <option value="other">Khac</option>
-                                        </select>
-                                    </div>
-                                    <InputField label="Zalo" value={formData.customerZalo} onChange={v => setFormData(p => ({ ...p, customerZalo: v }))} />
-                                    <InputField label="Facebook/Messenger" value={formData.customerFacebook} onChange={v => setFormData(p => ({ ...p, customerFacebook: v }))} />
-                                    <div className="md:col-span-2">
-                                        <InputField label="Lien he khac" value={formData.customerOtherContact} onChange={v => setFormData(p => ({ ...p, customerOtherContact: v }))} />
-                                    </div>
+                                    <InputField label="Tên khách hàng *" value={formData.customerName} onChange={v => setFormData(p => ({ ...p, customerName: v }))} required disabled={isInboundFreightLocked} />
+                                    <InputField label="Số điện thoại *" value={formData.customerPhone} onChange={v => setFormData(p => ({ ...p, customerPhone: v }))} type="tel" required disabled={isInboundFreightLocked} />
                                 </div>
+                                <label className="block max-w-md">
+                                    <span className="mb-1 block text-sm font-medium text-gray-700">Cách nhận máy</span>
+                                    <select
+                                        value={formData.appointmentIntakeMethod || 'walk_in'}
+                                        onChange={event => setFormData(previous => ({ ...previous, appointmentIntakeMethod: event.target.value }))}
+                                        disabled={isInboundFreightLocked}
+                                        className="w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-orange-500 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-500"
+                                    >
+                                        <option value="walk_in">Khách đến trực tiếp</option>
+                                        <option value="send_to_store">Khách gửi máy đến shop</option>
+                                    </select>
+                                </label>
                             </fieldset>
                             <hr className="border-gray-100" />
                             {/* ── Device ── */}
                             <fieldset className="space-y-3">
                                 <legend className="flex items-center gap-2 font-semibold text-gray-900"><Smartphone size={18} className="text-orange-500" /> Thiết bị</legend>
                                 <div className="grid md:grid-cols-2 gap-4">
-                                    <InputField label="Model *" value={formData.deviceModel} onChange={v => setFormData(p => ({ ...p, deviceModel: v }))} required />
+                                    <InputField label={formData.appointmentIntakeMethod === 'send_to_store' && !isInboundIntakeUpdate ? 'Model (có thể bổ sung khi máy đến)' : 'Model *'} value={formData.deviceModel} onChange={v => setFormData(p => ({ ...p, deviceModel: v }))} required={formData.appointmentIntakeMethod !== 'send_to_store' || isInboundIntakeUpdate} />
                                     <InputField label="IMEI / Serial" value={formData.deviceImei} onChange={v => setFormData(p => ({ ...p, deviceImei: v }))} />
                                     <div className="md:col-span-2 space-y-2">
                                         <InputField label="Mật khẩu màn hình" value={formData.devicePasscode} onChange={v => setFormData(p => ({ ...p, devicePasscode: v }))} placeholder="Để trống nếu không có" />
@@ -170,43 +181,13 @@ export function RepairEditorModal({
                             {/* ── Issue ── */}
                             <fieldset className="space-y-3">
                                 <legend className="flex items-center gap-2 font-semibold text-gray-900"><Wrench size={18} className="text-orange-500" /> Chi tiết sửa chữa</legend>
-                                {/* Service selector with auto-fill */}
-                                <div className="bg-orange-50 rounded-lg p-3 border border-orange-100">
-                                    <label className="block text-sm font-medium text-orange-800 mb-2">Chọn nhóm dịch vụ (Category)</label>
-
-                                    {/* Display legacy or auto-filled service if not yet classified in the new taxonomy */}
-                                    {formData.selectedServiceName && formData.selectedCategoryPath.length === 0 && (
-                                        <div className="flex items-center justify-between bg-orange-100/50 px-3 py-2 rounded-lg border border-orange-200 mb-3 text-sm">
-                                            <span className="text-orange-800">
-                                                Dịch vụ hiện tại: <strong className="font-semibold">{formData.selectedServiceName}</strong> (Chưa phân loại)
-                                            </span>
-                                            <button
-                                                type="button"
-                                                onClick={() => setFormData(p => ({ ...p, selectedServiceName: '' }))}
-                                                className="text-xs text-orange-600 hover:text-orange-800 underline font-medium"
-                                            >
-                                                Xóa
-                                            </button>
-                                        </div>
-                                    )}
-                                    <CategoryTaxonomySelector
-                                        type="service"
-                                        value={formData.selectedCategoryPath}
-                                        onChange={(ids, catName, subCatName) => {
-                                            setFormData(p => ({
-                                                ...p,
-                                                selectedCategoryPath: ids,
-                                                selectedServiceName: subCatName || catName || '',
-                                            }));
-                                        }}
-                                    />
-                                </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">Danh sách lỗi / vấn đề</label>
                                     {formData.issues.map((issue, idx) => (
-                                        <div key={issue.id} className="flex items-center gap-2 mb-2">
-                                            <span className="text-xs text-gray-400 w-5 text-center">{idx + 1}</span>
-                                            <div className="min-w-0 flex-1 space-y-1">
+                                        <div key={issue.id} className="mb-3 rounded-xl border border-gray-200 bg-gray-50/60 p-3">
+                                            <div className="flex items-start gap-2">
+                                            <span className="mt-2 text-xs text-gray-400 w-5 text-center">{idx + 1}</span>
+                                            <div className="min-w-0 flex-1 space-y-2">
                                                 <input
                                                     type="text"
                                                     placeholder="Tên lỗi (VD: Thay màn hình)"
@@ -217,13 +198,27 @@ export function RepairEditorModal({
                                                     }))}
                                                     className="w-full px-3 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-orange-500/20"
                                                 />
+                                                <div className="rounded-lg border border-orange-100 bg-orange-50 p-2.5">
+                                                    <label className="mb-1.5 block text-xs font-semibold text-orange-800">Nhóm dịch vụ áp dụng cho lỗi này</label>
+                                                    <CategoryTaxonomySelector
+                                                        type="service"
+                                                        value={issue.categoryPath || []}
+                                                        onChange={(ids, catName, subCatName) => setFormData(p => ({
+                                                            ...p,
+                                                            issues: p.issues.map(i => i.id === issue.id ? {
+                                                                ...i,
+                                                                categoryPath: ids,
+                                                                serviceName: subCatName || catName || '',
+                                                                serviceId: '',
+                                                            } : i),
+                                                        }))}
+                                                    />
+                                                </div>
                                                 <IssueServiceSuggestions
                                                     issue={issue}
                                                     suggestions={serviceSuggestions}
                                                     onSelect={suggestion => setFormData(p => ({
                                                         ...p,
-                                                        selectedCategoryPath: suggestion.path,
-                                                        selectedServiceName: suggestion.name,
                                                         issues: p.issues.map(i => i.id === issue.id ? {
                                                             ...i,
                                                             categoryPath: suggestion.path,
@@ -236,36 +231,84 @@ export function RepairEditorModal({
                                                                 ...i,
                                                                 estimatedPrice: Number(i.estimatedPrice) > 0 ? i.estimatedPrice : suggestion.estimatedPrice || i.estimatedPrice,
                                                             } : i);
-                                                            const nextSum = nextIssues.reduce((sum, item) => sum + (Number(item.estimatedPrice) || 0), 0);
-                                                            return nextSum || p.laborCost;
+                                                            return getRepairIssueLaborCost(nextIssues, p.initialParts, Number(p.laborCost) || 0);
                                                         })(),
                                                     }))}
                                                 />
                                             </div>
                                             <CurrencyInput
-                                                placeholder="Giá dự kiến"
+                                                placeholder="Phí công"
                                                 value={issue.estimatedPrice || ''}
                                                 onChange={v => setFormData(p => {
                                                     const newIssues = p.issues.map(i => i.id === issue.id ? { ...i, estimatedPrice: v } : i);
-                                                    const newSum = newIssues.reduce((sum, i) => sum + (Number(i.estimatedPrice) || 0), 0);
-                                                    return { ...p, issues: newIssues, laborCost: newSum || p.laborCost };
+                                                    return { ...p, issues: newIssues, laborCost: getRepairIssueLaborCost(newIssues, p.initialParts, Number(p.laborCost) || 0) };
                                                 })}
                                                 className="w-28 px-3 py-1.5 border rounded-lg text-sm text-right focus:ring-2 focus:ring-orange-500/20"
                                             />
                                             <button type="button" onClick={() => setFormData(p => {
                                                 const newIssues = p.issues.filter(i => i.id !== issue.id);
-                                                const newSum = newIssues.reduce((sum, i) => sum + (Number(i.estimatedPrice) || 0), 0);
-                                                return { ...p, issues: newIssues, laborCost: newSum || (newIssues.length === 0 ? '' : p.laborCost) };
+                                                const initialParts = p.initialParts.filter(part => part.issueId !== issue.id);
+                                                return { ...p, issues: newIssues, initialParts, laborCost: getRepairIssueLaborCost(newIssues, initialParts, Number(p.laborCost) || 0) };
                                             })}
                                                 className="p-1 text-red-400 hover:text-red-600" title="Xóa">
                                                 <Trash2 size={14} />
                                             </button>
                                         </div>
+                                        {(!editingTicket || (isInboundIntakeUpdate && isInboundFreightLocked)) && (
+                                            <IssueInitialPartsPicker
+                                                issue={issue}
+                                                parts={formData.initialParts}
+                                                onAdd={(product) => setFormData(previous => {
+                                                    const existing = previous.initialParts.find(part => part.issueId === issue.id && part.productId === product.id);
+                                                    const initialParts = existing
+                                                        ? previous.initialParts.map(part => part === existing ? { ...part, quantity: part.quantity + 1 } : part)
+                                                        : [...previous.initialParts, { productId: product.id, productName: product.name, issueId: issue.id, quantity: 1 }];
+                                                    const issues = previous.issues.map(item => item.id === issue.id && !item.billingMode
+                                                        ? { ...item, billingMode: 'parts_only' as const }
+                                                        : item);
+                                                    return { ...previous, issues, initialParts, laborCost: getRepairIssueLaborCost(issues, initialParts, Number(previous.laborCost) || 0) };
+                                                })}
+                                                onRemove={(productId) => setFormData(previous => {
+                                                    const initialParts = previous.initialParts.filter(part => !(part.issueId === issue.id && part.productId === productId));
+                                                    const hasRemainingForIssue = initialParts.some(part => part.issueId === issue.id);
+                                                    const issues = previous.issues.map(item => item.id === issue.id && !hasRemainingForIssue && item.billingMode === 'parts_only'
+                                                        ? { ...item, billingMode: undefined }
+                                                        : item);
+                                                    return { ...previous, issues, initialParts, laborCost: getRepairIssueLaborCost(issues, initialParts, Number(previous.laborCost) || 0) };
+                                                })}
+                                            />
+                                        )}
+                                        <div className="mt-2 flex items-center gap-2 text-xs text-gray-600">
+                                            <label htmlFor={`issue-billing-${issue.id}`} className="font-medium">Tính tiền:</label>
+                                            <select
+                                                id={`issue-billing-${issue.id}`}
+                                                value={resolveRepairIssueBillingMode(issue, formData.initialParts)}
+                                                onChange={event => setFormData(previous => {
+                                                    const issues = previous.issues.map(item => item.id === issue.id ? { ...item, billingMode: event.target.value as RepairIssue['billingMode'] } : item);
+                                                    return { ...previous, issues, laborCost: getRepairIssueLaborCost(issues, previous.initialParts, Number(previous.laborCost) || 0) };
+                                                })}
+                                                className="rounded border border-gray-300 bg-white px-2 py-1 text-xs"
+                                            >
+                                                <option value="service_only">Chỉ tính công</option>
+                                                <option value="parts_only">Chỉ tính linh kiện</option>
+                                                <option value="parts_and_service">Linh kiện + công</option>
+                                                <option value="free">Không thu</option>
+                                            </select>
+                                        </div>
+                                        </div>
                                     ))}
                                     <button type="button"
                                         onClick={() => setFormData(p => ({
                                             ...p,
-                                            issues: [...p.issues, { id: crypto.randomUUID(), label: '', estimatedPrice: 0, status: 'pending' }]
+                                            issues: [...p.issues, {
+                                                id: crypto.randomUUID(),
+                                                label: '',
+                                                estimatedPrice: 0,
+                                                status: 'pending',
+                                                categoryPath: p.selectedCategoryPath,
+                                                serviceName: p.selectedServiceName,
+                                                billingMode: undefined,
+                                            }]
                                         }))}
                                         className="flex items-center gap-1 text-sm text-orange-600 hover:text-orange-800 font-medium mt-1">
                                         <Plus size={14} /> Thêm lỗi
@@ -399,8 +442,8 @@ export function RepairEditorModal({
                                     </button>
                                 </div>
                             </fieldset>
-                            {/* ── Media Upload: Ảnh/Video sau sửa (chỉ hiển khi Done/Out/Hoàn Phí) ── */}
-                            {['done', 'out', 'refund'].includes(formData.status) && (
+                            {/* ── Media Upload: chỉ hiển thị ở node kết thúc của workflow ── */}
+                            {selectedStatus?.isTerminal && (
                                 <>
                                     <hr className="border-gray-100" />
                                     <fieldset className="space-y-3">
@@ -434,14 +477,16 @@ export function RepairEditorModal({
                                 <legend className="flex items-center gap-2 font-semibold text-gray-900"><DollarSign size={18} className="text-orange-500" /> Thanh toán & Phân công</legend>
                                 <div className="grid md:grid-cols-3 gap-4">
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">Chi phí SC (VNĐ)</label>
-                                        <input type="text" value={formData.laborCost ? Number(formData.laborCost).toLocaleString('vi-VN') : ''}
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Phí công (theo từng lỗi)</label>
+                                        <input type="text"
                                             onChange={e => {
                                                 const val = Number(e.target.value.replace(/\D/g, '')) || 0;
                                                 setFormData(p => ({ ...p, laborCost: val || '' }));
                                             }}
                                             placeholder="0"
-                                            className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20" />
+                                            readOnly={formData.issues.length > 0}
+                                            value={formData.issues.length > 0 ? (calculatedLaborCost ? calculatedLaborCost.toLocaleString('vi-VN') : '') : (formData.laborCost ? Number(formData.laborCost).toLocaleString('vi-VN') : '')}
+                                            className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20 read-only:bg-gray-50 read-only:text-gray-600" />
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Đặt cọc (VNĐ)</label>
@@ -483,7 +528,7 @@ export function RepairEditorModal({
                                         ) : (
                                             <div className="w-full px-4 py-2 border rounded-lg bg-gray-50 text-gray-800">
                                                 <div className="font-medium">{selectedStatus?.label || formData.status}</div>
-                                                <div className="text-xs text-gray-500">Phiếu mới luôn bắt đầu ở trạng thái tiếp nhận.</div>
+                                                <div className="text-xs text-gray-500">Phiếu mới bắt đầu từ node đầu tiên của workflow hiện hành.</div>
                                             </div>
                                         )}
                                     </div>
@@ -529,9 +574,9 @@ export function RepairEditorModal({
     );
 }
 
-function InputField({ label, value, onChange, type = 'text', placeholder, required }: {
+function InputField({ label, value, onChange, type = 'text', placeholder, required, disabled }: {
     label: string; value: string; onChange: (value: string) => void;
-    type?: string; placeholder?: string; required?: boolean;
+    type?: string; placeholder?: string; required?: boolean; disabled?: boolean;
 }) {
     return (
         <div>
@@ -542,8 +587,101 @@ function InputField({ label, value, onChange, type = 'text', placeholder, requir
                 onChange={event => onChange(event.target.value)}
                 placeholder={placeholder}
                 required={required}
-                className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20 focus:outline-none"
+                disabled={disabled}
+                className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500/20 focus:outline-none disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-500"
             />
+        </div>
+    );
+}
+
+function IssueInitialPartsPicker({
+    issue,
+    parts,
+    onAdd,
+    onRemove,
+}: {
+    issue: RepairIssue;
+    parts: InitialRepairPart[];
+    onAdd: (product: Product) => void;
+    onRemove: (productId: string) => void;
+}) {
+    const [search, setSearch] = useState('');
+    const [results, setResults] = useState<Product[]>([]);
+    const [isSearching, setIsSearching] = useState(false);
+    const selectedParts = parts.filter(part => part.issueId === issue.id);
+
+    useEffect(() => {
+        const term = search.trim();
+        if (!term) {
+            setResults([]);
+            return;
+        }
+        const tokens = getRepairPartSearchLookupTokens(term);
+        if (tokens.length === 0) {
+            setResults([]);
+            return;
+        }
+
+        let cancelled = false;
+        const timer = window.setTimeout(async () => {
+            setIsSearching(true);
+            try {
+                const snapshot = await getDocs(query(
+                    collection(db, 'products'),
+                    where('status', '==', 'active'),
+                    where('searchKeywords', 'array-contains-any', tokens),
+                    limit(10),
+                ));
+                const matches = snapshot.docs
+                    .map(document => ({ id: document.id, ...document.data() } as Product))
+                    .filter(product => isPartCategory(product.category, product.categoryIds))
+                    .filter(product => productMatchesRepairPartSearch(product, term));
+                if (!cancelled) setResults(matches);
+            } catch (error) {
+                console.error('Repair intake part search failed:', error);
+                if (!cancelled) setResults([]);
+            } finally {
+                if (!cancelled) setIsSearching(false);
+            }
+        }, 250);
+        return () => {
+            cancelled = true;
+            window.clearTimeout(timer);
+        };
+    }, [search]);
+
+    return (
+        <div className="mt-2 rounded-lg border border-sky-100 bg-sky-50/70 p-2.5">
+            <p className="text-xs font-semibold text-sky-900">Linh kiện dự kiến <span className="font-normal text-sky-700">(để trống nếu chỉ tính công)</span></p>
+            {selectedParts.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                    {selectedParts.map(part => (
+                        <span key={`${part.issueId}-${part.productId}`} className="inline-flex items-center gap-1 rounded bg-white px-2 py-1 text-xs text-sky-900 shadow-sm ring-1 ring-sky-100">
+                            {part.productName} ×{part.quantity}
+                            <button type="button" onClick={() => onRemove(part.productId)} className="font-bold text-sky-600 hover:text-red-600" aria-label={`Bỏ ${part.productName}`}>×</button>
+                        </span>
+                    ))}
+                </div>
+            )}
+            <input
+                value={search}
+                onChange={event => setSearch(event.target.value)}
+                placeholder={`Tìm ${PART_CATEGORY_LABEL.toLowerCase()} chính xác…`}
+                className="mt-2 w-full rounded border border-sky-200 bg-white px-2.5 py-1.5 text-xs outline-none focus:border-sky-500"
+            />
+            {search && (
+                <div className="mt-1 max-h-36 divide-y overflow-y-auto rounded border border-sky-100 bg-white">
+                    {isSearching ? <p className="p-2 text-xs text-gray-500">Đang tìm…</p> : results.length > 0 ? results.map(product => {
+                        const available = Math.max(0, Number(product.stock || 0) - Number(product.held || 0));
+                        return (
+                            <button key={product.id} type="button" disabled={available <= 0} onClick={() => { onAdd(product); setSearch(''); }} className="flex w-full items-center justify-between gap-3 p-2 text-left text-xs hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50">
+                                <span className="min-w-0 truncate font-medium text-gray-800">{product.name}</span>
+                                <span className={available > 0 ? 'shrink-0 text-emerald-700' : 'shrink-0 text-red-600'}>Còn {available}</span>
+                            </button>
+                        );
+                    }) : <p className="p-2 text-xs text-gray-500">Không tìm thấy linh kiện phù hợp.</p>}
+                </div>
+            )}
         </div>
     );
 }

@@ -34,6 +34,7 @@ import { PosCartPanel, PosCartItemsSection, PosPaymentSection } from '@/features
 import { PosCustomerWorkspace } from '@/features/pos/PosCustomerWorkspace';
 import { calculatePosDiscountBreakdown } from '@/features/pos/posDiscountTotals';
 import { getRepairTicketIdsInCart, removeCartItem, removeRepairTicketFromCart } from '@/features/pos/posCartRules';
+import { getRepairIssueLaborCost } from '@/lib/repairIssuePricing';
 import { isRepairReadyForPosPayment } from '@/features/pos/posRepairPaymentEligibility';
 import type { PosPaymentMode } from '@/features/pos/PosPaymentComposer';
 import type { AppliedVoucher, CartItem, DiscountDetail, LastOrderData, OrderLineItem, PayableOrderInfo, RepairShippingDraft, RepairTicketInfo, VoucherStatus } from '@/features/pos/posTypes';
@@ -87,6 +88,7 @@ function mapRepairTicketInfo(id: string, data: Record<string, unknown>, fallback
             return {
                 productName: String(item.productName || item.name || item.partName || ''),
                 partType: String(item.partType || ''),
+                issueId: typeof item.issueId === 'string' ? item.issueId : '',
                 unitPriceAtUse: Number(item.unitPriceAtUse || 0),
                 status: String(item.status || ''),
                 quantity: Number(item.quantity || 1),
@@ -100,8 +102,13 @@ function mapRepairTicketInfo(id: string, data: Record<string, unknown>, fallback
         issues: Array.isArray(data.issues) ? data.issues.map((issue) => {
             const item = (issue || {}) as Record<string, unknown>;
             return {
+                id: typeof item.id === 'string' ? item.id : '',
                 label: typeof item.label === 'string' ? item.label : '',
                 estimatedPrice: Number(item.estimatedPrice || 0),
+                status: item.status === 'resolved' || item.status === 'unresolved' ? item.status : 'pending',
+                billingMode: item.billingMode === 'parts_only' || item.billingMode === 'parts_and_service' || item.billingMode === 'free' || item.billingMode === 'service_only'
+                    ? item.billingMode
+                    : undefined,
                 categoryPath: toStringArray(item.categoryPath),
                 serviceName: typeof item.serviceName === 'string' ? item.serviceName : '',
                 serviceId: typeof item.serviceId === 'string' ? item.serviceId : '',
@@ -255,6 +262,9 @@ interface CashierShiftView {
     bankSalesAmount: number;
     otherSalesAmount?: number;
     cashExpenseAmount?: number;
+    cashInventoryExpenseAmount?: number;
+    cashShippingExpenseAmount?: number;
+    cashShippingExpenseTodayAmount?: number;
     bankExpenseAmount?: number;
     otherExpenseAmount?: number;
     expectedCashAmount: number;
@@ -1250,9 +1260,7 @@ export default function POSPage() {
             }
         });
 
-        const laborCost = repair.paymentLaborCost > 0
-            ? repair.paymentLaborCost
-            : Math.max(0, (repair.issues || []).reduce((sum, i) => sum + (Number(i.estimatedPrice) || 0), 0));
+        const laborCost = getRepairIssueLaborCost(repair.issues, repair.parts, repair.paymentLaborCost);
 
         if (laborCost > 0 || (usedPartsCount === 0 && repair.paymentAmount > 0)) {
             const finalLaborCost = laborCost > 0 ? laborCost : repair.paymentAmount;
@@ -1412,8 +1420,13 @@ export default function POSPage() {
         ? activeCashierShift.openingCashAmount + activeCashierShift.cashSalesAmount - (activeCashierShift.cashExpenseAmount || 0)
         : openingCashAmount;
     const currentBankAmount = activeCashierShift
-        ? activeCashierShift.openingBankAmount + activeCashierShift.bankSalesAmount - (activeCashierShift.bankExpenseAmount || 0)
+        ? activeCashierShift.openingBankAmount + activeCashierShift.bankSalesAmount
         : openingBankAmount;
+    const currentCashInventoryExpenseAmount = activeCashierShift?.cashInventoryExpenseAmount || 0;
+    const currentCashShippingExpenseAmount = activeCashierShift?.cashShippingExpenseAmount
+        ?? Math.max(0, (activeCashierShift?.cashExpenseAmount || 0) - currentCashInventoryExpenseAmount);
+    const currentCashShippingExpenseTodayAmount = activeCashierShift?.cashShippingExpenseTodayAmount
+        ?? currentCashShippingExpenseAmount;
     const openingShiftTotal = openingCashAmount + openingBankAmount;
     const formatDateTime = (value?: string | null) => {
         if (!value) return '';
@@ -1834,14 +1847,14 @@ export default function POSPage() {
                                     <div className="text-xs font-bold uppercase tracking-wide text-gray-500">Tiền mặt hiện có</div>
                                     <div className="mt-1 text-2xl font-black text-gray-950">{formatPrice(currentCashAmount)}</div>
                                     <div className="mt-2 text-xs font-medium text-gray-500">
-                                        Đầu ca {formatPrice(activeCashierShift.openingCashAmount)} + thu POS {formatPrice(activeCashierShift.cashSalesAmount)} − chi ship {formatPrice(activeCashierShift.cashExpenseAmount || 0)}
+                                        Đầu ca {formatPrice(activeCashierShift.openingCashAmount)} + thu POS {formatPrice(activeCashierShift.cashSalesAmount)} − tổng chi tiền mặt {formatPrice(activeCashierShift.cashExpenseAmount || 0)}
                                     </div>
                                 </div>
                                 <div className="rounded-2xl border border-blue-100 bg-blue-50 p-3">
                                     <div className="text-xs font-bold uppercase tracking-wide text-blue-600">Chuyển khoản trong ca</div>
                                     <div className="mt-1 text-2xl font-black text-blue-900">{formatPrice(currentBankAmount)}</div>
                                     <div className="mt-2 text-xs font-medium text-blue-600">
-                                        Đầu ca {formatPrice(activeCashierShift.openingBankAmount)} + thu POS {formatPrice(activeCashierShift.bankSalesAmount)} − chi ship {formatPrice(activeCashierShift.bankExpenseAmount || 0)}
+                                        Đầu ca {formatPrice(activeCashierShift.openingBankAmount)} + thu POS {formatPrice(activeCashierShift.bankSalesAmount)}
                                     </div>
                                 </div>
                             </div>
@@ -1858,12 +1871,15 @@ export default function POSPage() {
                                         <div className="font-black text-gray-900">{formatPrice(activeCashierShift.bankSalesAmount)}</div>
                                     </div>
                                     <div className="rounded-xl bg-red-50 p-3">
-                                        <div className="text-xs text-red-600">Chi ship tiền mặt</div>
-                                        <div className="font-black text-red-800">-{formatPrice(activeCashierShift.cashExpenseAmount || 0)}</div>
+                                        <div className="text-xs text-red-600">Chi tiền nhập hàng</div>
+                                        <div className="font-black text-red-800">-{formatPrice(currentCashInventoryExpenseAmount)}</div>
                                     </div>
                                     <div className="rounded-xl bg-red-50 p-3">
-                                        <div className="text-xs text-red-600">Chi ship chuyển khoản</div>
-                                        <div className="font-black text-red-800">-{formatPrice(activeCashierShift.bankExpenseAmount || 0)}</div>
+                                        <div className="text-xs text-red-600">Chi ship tiền mặt (trong ca)</div>
+                                        <div className="font-black text-red-800">-{formatPrice(currentCashShippingExpenseAmount)}</div>
+                                        {currentCashShippingExpenseTodayAmount !== currentCashShippingExpenseAmount && (
+                                            <div className="mt-1 text-[11px] text-red-600">Hôm nay: -{formatPrice(currentCashShippingExpenseTodayAmount)}</div>
+                                        )}
                                     </div>
                                 </div>
                             </div>

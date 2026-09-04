@@ -5,7 +5,7 @@ import { useCallback, useState, useEffect, useRef } from 'react';
 import {
     Package, Search, CheckCircle2, Clock,
     Loader2, ChevronDown, ChevronRight,
-    ArrowDownToLine, ExternalLink, PackagePlus, Trash2
+    ArrowDownToLine, ExternalLink, PackagePlus, Trash2, Truck
 } from 'lucide-react';
 import { collection, deleteDoc, doc, serverTimestamp, query, orderBy, setDoc, limit, startAfter, getCountFromServer, where, type DocumentSnapshot, type QueryConstraint, type QuerySnapshot, type QueryDocumentSnapshot, type DocumentData } from 'firebase/firestore';
 import { getDocs, onSnapshot } from '@/lib/firestoreLogger';
@@ -112,6 +112,7 @@ export default function InventoryPage() {
     const [createReceiptType, setCreateReceiptType] = useState<ReceiptProposalType>('component');
     const [outOfStockRetailProducts, setOutOfStockRetailProducts] = useState<(Product & { id: string })[]>([]);
     const [outOfStockParts, setOutOfStockParts] = useState<(Product & { id: string })[]>([]);
+    const [repairDemandParts, setRepairDemandParts] = useState<(Product & { id: string; requestedQuantity?: number })[]>([]);
     const [outOfStockSuggestionsLoading, setOutOfStockSuggestionsLoading] = useState<ReceiptProposalType | null>(null);
 
     // Expanded receipt
@@ -121,6 +122,7 @@ export default function InventoryPage() {
 
     const parts = products.filter(product => isPartCategory(product.category, product.categoryIds));
     const retailProducts = products.filter(isRetailInventoryProduct);
+    const canSpendCashierCash = user?.role === 'admin' || Boolean(user?.permissions?.includes('manage_cashier_expenses'));
 
     const buildReceiptQueryConstraints = useCallback((cursor?: DocumentSnapshot | null): QueryConstraint[] => {
         const constraints: QueryConstraint[] = [orderBy('createdAt', 'desc')];
@@ -204,12 +206,24 @@ export default function InventoryPage() {
         setOutOfStockSuggestionsLoading(receiptType);
 
         try {
-            const snapshot = await getDocs(query(
-                collection(db, 'products'),
-                where('stock', '<=', 0),
-                limit(100),
-            ));
-            const suggestions = snapshot.docs
+            const [outOfStockSnapshot, repairRequestSnapshot] = await Promise.all([
+                getDocs(query(
+                    collection(db, 'products'),
+                    where('stock', '<=', 0),
+                    // This is only a secondary, manual reference list. Do not
+                    // spend 100 reads on arbitrary stock-out products.
+                    limit(24),
+                )),
+                receiptType === 'component'
+                    ? getDocs(query(
+                        collection(db, 'import_receipts'),
+                        where('status', '==', 'draft'),
+                        where('source', '==', 'repair_request'),
+                        limit(1),
+                    ))
+                    : Promise.resolve(null),
+            ]);
+            const suggestions = outOfStockSnapshot.docs
                 .map(document => ({ id: document.id, ...document.data() } as Product & { id: string }))
                 .filter(product => product.status === 'active' && !product.isProposed)
                 .filter(product => receiptType === 'component'
@@ -217,11 +231,41 @@ export default function InventoryPage() {
                     : isRetailInventoryProduct(product),
                 );
 
+            let repairDemandSuggestions: (Product & { id: string; requestedQuantity?: number })[] = [];
+            if (repairRequestSnapshot && !repairRequestSnapshot.empty) {
+                const requestedQuantityByProductId = new Map<string, number>();
+                const requestItems = (repairRequestSnapshot.docs[0].data().items || []) as ImportReceiptItem[];
+                requestItems.forEach(item => {
+                    if (!item.productId || (item.status !== 'requested' && item.status !== 'unavailable')) return;
+                    requestedQuantityByProductId.set(
+                        item.productId,
+                        (requestedQuantityByProductId.get(item.productId) || 0) + Math.max(1, Number(item.quantity) || 1),
+                    );
+                });
+
+                const requestedProductIds = Array.from(requestedQuantityByProductId.keys()).slice(0, 30);
+                if (requestedProductIds.length > 0) {
+                    const productSnapshot = await getDocs(query(
+                        collection(db, 'products'),
+                        where('__name__', 'in', requestedProductIds),
+                    ));
+                    repairDemandSuggestions = productSnapshot.docs
+                        .map(document => ({
+                            id: document.id,
+                            ...document.data(),
+                            requestedQuantity: requestedQuantityByProductId.get(document.id) || 1,
+                        } as Product & { id: string; requestedQuantity?: number }))
+                        .filter(product => isPartCategory(product.category, product.categoryIds));
+                }
+            }
+
             setProducts(current => {
                 const merged = new Map(current.map(product => [product.id, product]));
                 suggestions.forEach(product => merged.set(product.id, product));
+                repairDemandSuggestions.forEach(product => merged.set(product.id, product));
                 return [...merged.values()];
             });
+            setRepairDemandParts(receiptType === 'component' ? repairDemandSuggestions : []);
             if (receiptType === 'component') {
                 setOutOfStockParts(suggestions);
             } else {
@@ -232,6 +276,7 @@ export default function InventoryPage() {
             toastError('Không thể tải gợi ý hàng hết tồn. Bạn vẫn có thể tìm thủ công.');
             if (receiptType === 'component') {
                 setOutOfStockParts([]);
+                setRepairDemandParts([]);
             } else {
                 setOutOfStockRetailProducts([]);
             }
@@ -333,6 +378,15 @@ export default function InventoryPage() {
         supplierListRequestRef.current = request;
         return request;
     }, [supplierListLoaded]);
+
+    const handleSupplierCreated = useCallback((supplier: SupplierOption) => {
+        setSupplierList(current => {
+            const merged = new Map(current.map(item => [item.id, item]));
+            merged.set(supplier.id, supplier);
+            return Array.from(merged.values()).sort((left, right) => left.name.localeCompare(right.name, 'vi'));
+        });
+        setSupplierListLoaded(true);
+    }, []);
 
     const isExpandedDraftReceipt = Boolean(expandedId && receipts.some(receipt => receipt.id === expandedId && receipt.status === 'draft'));
 
@@ -555,6 +609,45 @@ export default function InventoryPage() {
         } catch (err) {
             console.error(err);
             toastError(err instanceof Error ? err.message : 'Lỗi nhập kho.');
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
+    const handleCashFreight = async (receipt: ImportReceipt & { id: string }) => {
+        const rawAmount = await appPrompt('Nhập phí ship đã chi tiền mặt cho phiếu này:', {
+            title: `Chi ship ${receipt.id}`,
+            placeholder: 'Ví dụ: 30.000',
+        });
+        if (rawAmount === null) return;
+        const amount = Number(rawAmount.replace(/[^0-9]/g, ''));
+        if (!Number.isFinite(amount) || amount <= 0) {
+            toastError('Phí ship phải lớn hơn 0.');
+            return;
+        }
+
+        setIsProcessing(true);
+        try {
+            const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(auth => auth.currentUser?.getIdToken());
+            const response = await fetch('/api/inventory/freight', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${idToken}`,
+                },
+                body: JSON.stringify({
+                    receiptId: receipt.id,
+                    amount,
+                    idempotencyKey: crypto.randomUUID(),
+                }),
+            });
+            const data = await response.json() as { error?: string };
+            if (!response.ok) throw new Error(data.error || 'Không thể ghi nhận phí ship.');
+            await refreshReceipts();
+            toastSuccess(`Đã chi ${formatPrice(amount)} tiền mặt cho phí ship.`);
+        } catch (error) {
+            console.error('Inventory freight payment failed:', error);
+            toastError(error instanceof Error ? error.message : 'Không thể ghi nhận phí ship.');
         } finally {
             setIsProcessing(false);
         }
@@ -861,14 +954,16 @@ export default function InventoryPage() {
                                                                                             const contactValue = await appPrompt('Nhập SĐT, Zalo, Facebook hoặc liên hệ khác cho nhà cung cấp (có thể bỏ trống):', { title: 'Thêm nhà cung cấp', placeholder: 'SĐT, Zalo hoặc Facebook' }) || '';
                                                                                             const contactInput = buildInlineSupplierContactInput(supplierName, contactValue);
                                                                                             const supplierId = await reserveSupplierDocumentId(contactInput);
+                                                                                            const contactFields = buildSupplierContactDocumentFields(contactInput);
                                                                                             await setDoc(doc(db, 'suppliers', supplierId), {
                                                                                                 name: supplierName,
-                                                                                                ...buildSupplierContactDocumentFields(contactInput),
+                                                                                                ...contactFields,
                                                                                                 totalDebt: 0,
                                                                                                 isActive: true,
                                                                                                 createdAt: serverTimestamp(),
                                                                                                 updatedAt: serverTimestamp(),
                                                                                             });
+                                                                                            handleSupplierCreated({ id: supplierId, name: supplierName, totalDebt: 0, ...contactFields });
                                                                                             setSupplierActiveKey(null);
                                                                                             handleAutoSaveSupplier(receipt.id, i, supplierName, supplierId);
                                                                                         }}
@@ -918,6 +1013,11 @@ export default function InventoryPage() {
                                         </table>
                                     </div>
                                     {receipt.note && <p className="mt-2 text-xs text-gray-500">{receipt.note}</p>}
+                                    {Number(receipt.freightPaidAmount) > 0 && (
+                                        <p className="mt-2 inline-flex items-center gap-1 rounded-lg bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-800">
+                                            <Truck size={13} /> Phí ship đã chi, chờ cộng giá vốn: {formatPrice(Number(receipt.freightPaidAmount))}
+                                        </p>
+                                    )}
                                     {receipt.status === 'draft' && missingSupplierCount > 0 && (
                                         <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700">
                                             Còn {missingSupplierCount}/{importableItems.length} dòng cần đặt chưa gắn NCC.
@@ -937,6 +1037,9 @@ export default function InventoryPage() {
                                         )}
                                         {receipt.status === 'ordered' && (
                                             <>
+                                                <button onClick={() => handleCashFreight(receipt)} disabled={isProcessing || !canSpendCashierCash} title={canSpendCashierCash ? 'Chi tiền mặt từ ca POS của bạn' : 'Cần quyền Chi tiền từ ca POS'} className="flex items-center gap-1.5 rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50">
+                                                    <Truck size={12} /> Chi ship tiền mặt
+                                                </button>
                                                 <button onClick={() => handleDelete(receipt.id)} disabled={isProcessing} className="flex items-center gap-1.5 rounded-lg bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100 disabled:opacity-50">
                                                     <Trash2 size={12} /> Hủy phiếu
                                                 </button>
@@ -1015,8 +1118,10 @@ export default function InventoryPage() {
                     }}
                     currentUser={user}
                     suppliers={supplierList}
+                    onSupplierCreated={handleSupplierCreated}
                     initialReceiptType={createReceiptType}
                     lockReceiptType
+                    repairDemandSuggestions={createReceiptType === 'component' ? repairDemandParts : []}
                     outOfStockSuggestions={createReceiptType === 'retail' ? outOfStockRetailProducts : outOfStockParts}
                     isLoadingOutOfStockSuggestions={outOfStockSuggestionsLoading === createReceiptType}
                 />

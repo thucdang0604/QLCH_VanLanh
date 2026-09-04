@@ -34,6 +34,7 @@ const TAXONOMY_ADMIN_ROUTE_PREFIXES = [
     '/admin/repairs',
     '/admin/services',
     '/admin/settings',
+    '/admin/technician',
     '/admin/vouchers',
 ] as const;
 

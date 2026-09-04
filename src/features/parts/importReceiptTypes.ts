@@ -12,6 +12,8 @@ export interface ImportReceiptItem {
     availability?: 'in_stock' | 'unavailable';
     supplier?: string;
     supplierId?: string;
+    freightAllocatedAmount?: number;
+    landedUnitCost?: number;
     ticketId?: string;
     partLineId?: string;
     requestKey?: string;
@@ -36,6 +38,10 @@ export interface ImportReceipt {
     createdAt: FirestoreDateValue;
     completedAt?: FirestoreDateValue;
     repairTicketId?: string;
+    freightPaidAmount?: number;
+    freightTotal?: number;
+    landedTotalAmount?: number;
+    cashierShiftId?: string;
 }
 
 export interface SupplierOption {

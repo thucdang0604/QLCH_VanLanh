@@ -4,11 +4,12 @@ import { requirePermission } from '@/lib/apiAuth';
 import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { isRepairManager } from '@/lib/repairAccess';
+import { getConfiguredWorkflow } from '@/lib/repairWorkflowConfig';
+import { assertInboundArrivalConfirmedForTransition } from '@/lib/repairInboundIntake';
 
 const CHECKLIST_KEYS = new Set(['body', 'screen', 'touch', 'camera', 'speaker', 'connectivity', 'battery', 'biometric']);
 const CHECKLIST_VALUES = new Set(['', 'OK', 'Trầy', 'Nứt', 'Móp', 'Lỗi', 'Không có']);
 const HISTORY_KEYS = new Set(['hasPriorRepair', 'hasWaterDamage', 'hasNonGenuineParts']);
-const LOCKED_STATUSES = new Set(['done', 'out', 'refund']);
 
 type ChecklistPatchRequest = {
     ticketId?: string;
@@ -57,12 +58,31 @@ export const POST = withApi({
 
             const ticket = ticketSnap.data() as {
                 status?: string;
+                ticketType?: 'repair' | 'warranty';
                 version?: number;
                 staff?: { assignedTechnician?: string };
             };
 
-            if (LOCKED_STATUSES.has(String(ticket.status || ''))) {
+            const configSnap = await tx.get(db.collection('system_config').doc('repairs'));
+            if (!configSnap.exists) {
+                throw new Error('Khong tim thay cau hinh workflow sua chua trong Firebase.');
+            }
+            const workflow = getConfiguredWorkflow(configSnap.data() ?? {}, ticket.ticketType);
+            const currentNode = workflow.find(node => node.id === ticket.status);
+            if (!currentNode) {
+                throw new Error('Trang thai phieu khong ton tai trong workflow dang cau hinh.');
+            }
+            if (currentNode.isTerminal) {
                 throw new Error('Phieu da khoa checklist o trang thai hien tai.');
+            }
+
+            assertInboundArrivalConfirmedForTransition(ticket, currentNode);
+
+            // The first node is the intake stage in a dynamic workflow. KTV
+            // must first move the ticket into its technical step; checklist
+            // work is unavailable while the ticket is still waiting intake.
+            if (ticket.staff?.assignedTechnician === caller.uid && workflow[0]?.id === currentNode.id) {
+                throw new Error('KTV cần bấm Bắt đầu kiểm tra trước khi cập nhật checklist.');
             }
 
             if (ticket.version !== undefined && ticket.version !== body.ticketVersion) {
@@ -81,7 +101,10 @@ export const POST = withApi({
                     status: ticket.status || '',
                     eventType: 'checklist_updated',
                     field: key,
-                    timestamp: FieldValue.serverTimestamp(),
+                    // Firestore sentinel values are not valid inside an
+                    // arrayUnion element. Store a concrete client-independent
+                    // server-side epoch value for this audit event instead.
+                    timestamp: Date.now(),
                     userId: caller.uid,
                 }),
             });

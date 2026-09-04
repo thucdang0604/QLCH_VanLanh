@@ -2,22 +2,24 @@
 
 import { useState, useEffect } from 'react';
 import {
-    Settings, Plus, Trash2, GripVertical, Save, Loader2, ArrowRight, Eye, Shield, AlertTriangle
+    Settings, Plus, Trash2, GripVertical, Save, Loader2, ArrowRight, Eye, Shield, AlertTriangle, RotateCcw
 } from 'lucide-react';
 import Modal from '@/components/admin/Modal';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { getDoc } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
-import { WORKFLOW_FEATURES } from '@/lib/workflowFeatures';
+import { WORKFLOW_FEATURES, type WorkflowFeature } from '@/lib/workflowFeatures';
 import { appConfirm } from '@/lib/appDialog';
 import {
+    getWorkflowNormalizationOptions,
     normalizeRepairWorkflow,
     normalizeWarrantyWorkflow,
     validateTrackingGroups,
     validateWorkflow,
+    WORKFLOW_SCHEMA_VERSION,
 } from '@/lib/repairWorkflowConfig';
 
-import type { WorkflowNode, TrackingGroup, WarrantyRule } from '@/lib/types';
+import type { RepairWorkflowActor, WorkflowNode, TrackingGroup, WarrantyRule } from '@/lib/types';
 
 const DEFAULT_WARRANTY_RULES: WarrantyRule[] = [
     { partType: 'Màn hình', warrantyMonths: 6 },
@@ -32,25 +34,32 @@ const DEFAULT_WARRANTY_RULES: WarrantyRule[] = [
 import { toastError, toastSuccess } from '@/lib/toast';
 
 const defaultStatuses: WorkflowNode[] = [
-    { id: 'cho_tiep_nhan', label: 'Chờ Tiếp nhận', color: 'bg-yellow-100 text-yellow-800', allowedNext: ['dang_kiem_tra', 'out'] },
-    { id: 'dang_kiem_tra', label: 'Đang Kiểm Tra', color: 'bg-blue-100 text-blue-800', allowedNext: ['bao_tinh_trang_va_gia', 'dang_sua_chua', 'done', 'out'], allowedFeatures: ['requireAssignedTechnician'] },
-    { id: 'bao_tinh_trang_va_gia', label: 'Báo Tình Trạng & Giá', color: 'bg-indigo-100 text-indigo-800', allowedNext: ['doi_khach_phan_hoi', 'out'] },
-    { id: 'doi_khach_phan_hoi', label: 'Đợi Khách Phản Hồi', color: 'bg-purple-100 text-purple-800', allowedNext: ['tim_linh_kien', 'dang_sua_chua', 'refund', 'out'] },
-    { id: 'tim_linh_kien', label: 'Tìm Linh Kiện', color: 'bg-cyan-100 text-cyan-800', allowedNext: ['da_dat_linh_kien', 'refund', 'out'] },
-    { id: 'da_dat_linh_kien', label: 'Đã Đặt LK', color: 'bg-teal-100 text-teal-800', allowedNext: ['dang_sua_chua'], allowedFeatures: ['requirePartsReady'] },
-    { id: 'dang_sua_chua', label: 'Đang Sửa Chữa', color: 'bg-orange-100 text-orange-800', allowedNext: ['done', 'refund'], allowedFeatures: ['reserveSelectedParts'] },
-    { id: 'done', label: 'Hoàn Thành', color: 'bg-green-100 text-green-800', allowedNext: [], isTerminal: true },
-    { id: 'out', label: 'Trả Máy', color: 'bg-gray-100 text-gray-800', allowedNext: [], isTerminal: true },
-    { id: 'refund', label: 'Hoàn Phí', color: 'bg-red-100 text-red-800', allowedNext: [], isTerminal: true }
+    { id: 'cho_tiep_nhan', label: 'Chờ Tiếp nhận', color: 'bg-yellow-100 text-yellow-800', allowedNext: ['dang_kiem_tra', 'out'], transitionActors: { dang_kiem_tra: ['technician', 'reception', 'manager'], out: ['reception', 'manager'] }, allowedFeatures: ['allowAssignTech', 'requireAssignedTechnician', 'requireInboundArrival'] },
+    { id: 'dang_kiem_tra', label: 'Đang Kiểm Tra', color: 'bg-blue-100 text-blue-800', allowedNext: ['bao_tinh_trang_va_gia', 'refund'], transitionActors: { bao_tinh_trang_va_gia: ['technician', 'manager'], refund: ['manager'] }, allowedFeatures: ['requireAssignedTechnician', 'requireChecklist', 'requireTechnicianNote', 'allowTechnicianDiagnosis'] },
+    { id: 'bao_tinh_trang_va_gia', label: 'Báo Tình Trạng & Giá Sau Kiểm Tra', color: 'bg-indigo-100 text-indigo-800', allowedNext: ['khach_da_dong_y_sua', 'khach_khong_dong_y_sua'], transitionActors: { khach_da_dong_y_sua: ['reception', 'manager'], khach_khong_dong_y_sua: ['reception', 'manager'] }, allowedFeatures: ['confirmCustomerResponse'] },
+    { id: 'khach_da_dong_y_sua', label: 'Khách Đã Đồng Ý Sửa', color: 'bg-pink-100 text-pink-800', allowedNext: ['tim_linh_kien', 'dang_sua_chua'], transitionActors: { tim_linh_kien: ['technician', 'manager'], dang_sua_chua: ['technician', 'manager'] }, allowedFeatures: ['recordCustomerApproval'] },
+    { id: 'khach_khong_dong_y_sua', label: 'Khách Không Đồng Ý Sửa', color: 'bg-red-100 text-red-800', allowedNext: ['out'], transitionActors: { out: ['technician', 'manager'] }, allowedFeatures: ['recordCustomerDecline'] },
+    { id: 'tim_linh_kien', label: 'Tìm Linh Kiện', color: 'bg-cyan-100 text-cyan-800', allowedNext: ['da_dat_linh_kien', 'dang_sua_chua', 'refund'], transitionActors: { da_dat_linh_kien: ['technician', 'manager'], dang_sua_chua: ['technician', 'manager'], refund: ['manager'] }, allowedFeatures: ['allowPartsSelection', 'requirePartsReady', 'requirePartsReceivedByTechnician'] },
+    { id: 'da_dat_linh_kien', label: 'Đã Đặt LK', color: 'bg-teal-100 text-teal-800', allowedNext: ['dang_sua_chua', 'refund'], transitionActors: { dang_sua_chua: ['technician', 'manager'], refund: ['manager'] }, allowedFeatures: ['allowPartsSelection', 'requirePartsReady', 'requirePartsReceivedByTechnician'] },
+    { id: 'dang_sua_chua', label: 'Đang Sửa Chữa', color: 'bg-orange-100 text-orange-800', allowedNext: ['cho_ban_giao_khach', 'refund'], transitionActors: { cho_ban_giao_khach: ['technician', 'manager'], refund: ['manager'] }, allowedFeatures: ['allowPartsSelection', 'requirePartsReceivedByTechnician', 'reserveSelectedParts', 'countsAsActiveRepair'] },
+    { id: 'cho_ban_giao_khach', label: 'Chờ Bàn Giao Khách', color: 'bg-amber-100 text-amber-800', allowedNext: ['out'], transitionActors: { out: ['reception', 'manager'] }, allowedFeatures: ['consumeSelectedParts', 'requireReturnedPartsReceived', 'requirePaymentGate'] },
+    { id: 'out', label: 'Trả Máy', color: 'bg-gray-100 text-gray-800', allowedNext: [], allowedFeatures: ['requiresHandover', 'recordCompletion', 'enableSellerCommission', 'enableTechnicianCommission'], isTerminal: true, terminalAction: 'handover' },
+    { id: 'refund', label: 'Hoàn Phí', color: 'bg-red-100 text-red-800', allowedNext: [], allowedFeatures: ['requiresHandover', 'refundOutcome', 'releaseHeldParts'], isTerminal: true, terminalAction: 'refund' }
 ];
+
+const transitionActorLabels: Record<RepairWorkflowActor, string> = {
+    reception: 'Tiếp nhận',
+    technician: 'KTV',
+    manager: 'Quản lý',
+};
 
 const defaultWarrantyStatuses: WorkflowNode[] = [
     { id: 'bh_tiep_nhan', label: 'Tiếp nhận BH', color: 'bg-yellow-100 text-yellow-800', allowedNext: ['bh_dang_kiem_tra'], allowedFeatures: ['allowAssignTech'], isTerminal: false },
-    { id: 'bh_dang_kiem_tra', label: 'Đang kiểm tra BH', color: 'bg-blue-100 text-blue-800', allowedNext: ['bh_dang_sua', 'bh_tu_choi'], allowedFeatures: ['requireAssignedTechnician', 'requireChecklist'], isTerminal: false },
+    { id: 'bh_dang_kiem_tra', label: 'Đang kiểm tra BH', color: 'bg-blue-100 text-blue-800', allowedNext: ['bh_dang_sua', 'bh_tu_choi'], allowedFeatures: ['requireAssignedTechnician', 'requireChecklist', 'allowTechnicianDiagnosis'], isTerminal: false },
     { id: 'bh_dang_sua', label: 'Đang sửa BH', color: 'bg-orange-100 text-orange-800', allowedNext: ['bh_hoan_tat', 'bh_refund'], allowedFeatures: ['allowPartsSelection', 'reserveSelectedParts'], isTerminal: false },
-    { id: 'bh_hoan_tat', label: 'Hoàn tất BH', color: 'bg-green-100 text-green-800', allowedNext: [], allowedFeatures: [], isTerminal: true },
-    { id: 'bh_tu_choi', label: 'Từ chối BH', color: 'bg-gray-100 text-gray-800', allowedNext: [], allowedFeatures: [], isTerminal: true },
-    { id: 'bh_refund', label: 'Hoàn phí BH', color: 'bg-red-100 text-red-800', allowedNext: [], allowedFeatures: ['enableTechnicianCommission'], isTerminal: true }
+    { id: 'bh_hoan_tat', label: 'Hoàn tất BH', color: 'bg-green-100 text-green-800', allowedNext: [], allowedFeatures: ['requiresHandover', 'recordCompletion'], isTerminal: true, terminalAction: 'handover' },
+    { id: 'bh_tu_choi', label: 'Từ chối BH', color: 'bg-gray-100 text-gray-800', allowedNext: [], allowedFeatures: ['requiresHandover'], isTerminal: true, terminalAction: 'handover' },
+    { id: 'bh_refund', label: 'Hoàn phí BH', color: 'bg-red-100 text-red-800', allowedNext: [], allowedFeatures: ['enableTechnicianCommission', 'requiresHandover', 'refundOutcome', 'releaseHeldParts'], isTerminal: true, terminalAction: 'refund' }
 ];
 
 const colorOptions = [
@@ -59,6 +68,98 @@ const colorOptions = [
     'bg-orange-100 text-orange-800', 'bg-green-100 text-green-800', 'bg-red-100 text-red-800',
     'bg-gray-100 text-gray-800', 'bg-pink-100 text-pink-800', 'bg-amber-100 text-amber-800',
 ];
+
+const FEATURE_SECTIONS = [
+    {
+        title: '1. Chức năng sử dụng trong trạng thái này',
+        description: 'Khi phiếu đang đứng ở bước này, nhân viên được mở các công cụ nào.',
+        featureIds: ['allowAssignTech', 'allowPartsSelection', 'allowTechnicianDiagnosis', 'confirmCustomerResponse'],
+    },
+    {
+        title: '2. Điều kiện phải hoàn thành để chuyển flow',
+        description: 'Hệ thống kiểm tra các điều kiện này trước khi rời khỏi trạng thái hiện tại.',
+        featureIds: ['requireInboundArrival', 'requireChecklist', 'requireAssignedTechnician', 'requireTechnicianNote', 'requirePartsReady', 'requirePartsReceivedByTechnician', 'requireReturnedPartsReceived', 'requirePaymentGate'],
+    },
+    {
+        title: '3. Tự động khi chuyển vào trạng thái này',
+        description: 'Tác vụ hệ thống thực hiện ngay sau khi flow đi vào node này.',
+        featureIds: ['reserveSelectedParts', 'consumeSelectedParts', 'releaseHeldParts'],
+    },
+    {
+        title: '4. Hậu xử lý và báo cáo',
+        description: 'Dùng cho thống kê công việc, doanh thu và hoa hồng; không chặn luồng chuyển trạng thái.',
+        featureIds: ['recordCompletion', 'enableSellerCommission', 'enableTechnicianCommission', 'countsAsActiveRepair'],
+    },
+] as const;
+
+const TERMINAL_SEMANTIC_FEATURES = ['requiresHandover', 'refundOutcome'] as const;
+const WORKFLOW_BACKUP_LIMIT = 5;
+
+type WorkflowBackup = {
+    id: string;
+    createdAtMillis: number;
+    repairStatuses: WorkflowNode[];
+    warrantyStatuses: WorkflowNode[];
+    trackingGroups: TrackingGroup[];
+    warrantyRules: WarrantyRule[];
+    warrantyNote: string;
+    workflowSchemaVersion: number;
+};
+
+type WorkflowSaveContent = Omit<WorkflowBackup, 'id' | 'createdAtMillis'>;
+
+function sortTrackingGroups(groups: TrackingGroup[] | undefined): TrackingGroup[] {
+    return [...(groups || [])]
+        .map((group, index) => ({ ...group, order: Number.isFinite(group.order) ? group.order : index }))
+        .sort((a, b) => a.order - b.order);
+}
+
+function getWorkflowSaveContent(data: Record<string, unknown>): WorkflowSaveContent {
+    const normalizationOptions = getWorkflowNormalizationOptions(data.workflowSchemaVersion);
+    const repairStatuses = normalizeRepairWorkflow(
+        (Array.isArray(data.repairStatuses) ? data.repairStatuses : data.statuses) as WorkflowNode[] | undefined,
+        normalizationOptions,
+    );
+    const warrantyStatuses = normalizeWarrantyWorkflow(
+        data.warrantyStatuses as WorkflowNode[] | undefined,
+        normalizationOptions,
+    );
+
+    return {
+        repairStatuses,
+        warrantyStatuses,
+        trackingGroups: sortTrackingGroups(data.trackingGroups as TrackingGroup[] | undefined),
+        warrantyRules: Array.isArray(data.warrantyRules) ? data.warrantyRules as WarrantyRule[] : DEFAULT_WARRANTY_RULES,
+        warrantyNote: typeof data.warrantyNote === 'string' ? data.warrantyNote : '',
+        workflowSchemaVersion: WORKFLOW_SCHEMA_VERSION,
+    };
+}
+
+function isWorkflowBackup(value: unknown): value is WorkflowBackup {
+    if (!value || typeof value !== 'object') return false;
+    const backup = value as Partial<WorkflowBackup>;
+    return typeof backup.id === 'string'
+        && typeof backup.createdAtMillis === 'number'
+        && Array.isArray(backup.repairStatuses)
+        && Array.isArray(backup.warrantyStatuses);
+}
+
+function workflowContentsEqual(left: WorkflowSaveContent, right: WorkflowSaveContent): boolean {
+    return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function getTerminalActionDescription(action: WorkflowNode['terminalAction'] | undefined) {
+    switch (action) {
+        case 'handover':
+            return 'Mở bước bàn giao và đối soát với khách trước khi đóng phiếu.';
+        case 'refund':
+            return 'Mở bước hoàn phí, yêu cầu lý do và xác nhận khoản hoàn cho khách.';
+        case 'close':
+            return 'Đóng phiếu nội bộ, không mở bước giao máy hoặc hoàn phí.';
+        default:
+            return 'Chỉ khóa phiếu; không có bước hậu xử lý bắt buộc.';
+    }
+}
 
 export default function RepairsConfigTab() {
     const [repairStatuses, setRepairStatuses] = useState<WorkflowNode[]>(defaultStatuses);
@@ -71,6 +172,7 @@ export default function RepairsConfigTab() {
     const [trackingGroups, setTrackingGroups] = useState<TrackingGroup[]>([]);
     const [warrantyRules, setWarrantyRules] = useState<WarrantyRule[]>(DEFAULT_WARRANTY_RULES);
     const [warrantyNote, setWarrantyNote] = useState('');
+    const [workflowBackups, setWorkflowBackups] = useState<WorkflowBackup[]>([]);
 
     // UI states
     const [loading, setLoading] = useState(true);
@@ -97,15 +199,17 @@ export default function RepairsConfigTab() {
                     const d = snap.data();
                     const rs = d.repairStatuses ?? d.statuses ?? defaultStatuses;
                     const ws = d.warrantyStatuses ?? defaultWarrantyStatuses;
-                    setRepairStatuses(normalizeRepairWorkflow(rs));
-                    setWarrantyStatuses(normalizeWarrantyWorkflow(ws));
+                    const normalizationOptions = getWorkflowNormalizationOptions(d.workflowSchemaVersion);
+                    setRepairStatuses(normalizeRepairWorkflow(rs, normalizationOptions));
+                    setWarrantyStatuses(normalizeWarrantyWorkflow(ws, normalizationOptions));
                     setHasLegacyStatuses(Array.isArray(d.statuses));
                     // Legacy migration: sort generic arrays to trackingGroups ensuring order
-                    if (d.trackingGroups) {
-                        setTrackingGroups(d.trackingGroups.sort((a: TrackingGroup, b: TrackingGroup) => a.order - b.order));
-                    }
+                    if (d.trackingGroups) setTrackingGroups(sortTrackingGroups(d.trackingGroups));
                     if (d.warrantyRules) setWarrantyRules(d.warrantyRules);
                     if (d.warrantyNote !== undefined) setWarrantyNote(d.warrantyNote);
+                    setWorkflowBackups(Array.isArray(d.workflowBackups)
+                        ? d.workflowBackups.filter(isWorkflowBackup).sort((a: WorkflowBackup, b: WorkflowBackup) => b.createdAtMillis - a.createdAtMillis)
+                        : []);
                 }
             } catch (err) {
                 console.error(err);
@@ -121,8 +225,9 @@ export default function RepairsConfigTab() {
         try {
             // Guarantee order is fixed on save
             const orderedGroups = trackingGroups.map((g, i) => ({ ...g, order: i }));
-            const normalizedRepairStatuses = normalizeRepairWorkflow(repairStatuses);
-            const normalizedWarrantyStatuses = normalizeWarrantyWorkflow(warrantyStatuses);
+            const persistenceOptions = { useLegacyFallback: false, useInboundArrivalFeatureFallback: false };
+            const normalizedRepairStatuses = normalizeRepairWorkflow(repairStatuses, persistenceOptions);
+            const normalizedWarrantyStatuses = normalizeWarrantyWorkflow(warrantyStatuses, persistenceOptions);
             const validationErrors = [
                 ...validateWorkflow(normalizedRepairStatuses, 'Workflow sửa chữa'),
                 ...validateWorkflow(normalizedWarrantyStatuses, 'Workflow bảo hành'),
@@ -134,21 +239,49 @@ export default function RepairsConfigTab() {
                 return;
             }
 
-            await setDoc(doc(db, 'system_config', 'repairs'), {
+            const configRef = doc(db, 'system_config', 'repairs');
+            const currentConfigSnap = await getDoc(configRef);
+            const nextContent: WorkflowSaveContent = {
                 repairStatuses: normalizedRepairStatuses,
                 warrantyStatuses: normalizedWarrantyStatuses,
                 trackingGroups: orderedGroups,
                 warrantyRules,
                 warrantyNote,
-                workflowSchemaVersion: 2,
-                workflowFeatureSemantics: 'exit-gates-v1',
+                workflowSchemaVersion: WORKFLOW_SCHEMA_VERSION,
+            };
+            const storedBackups = currentConfigSnap.exists() && Array.isArray(currentConfigSnap.data().workflowBackups)
+                ? currentConfigSnap.data().workflowBackups.filter(isWorkflowBackup)
+                : workflowBackups;
+            const currentContent = currentConfigSnap.exists()
+                ? getWorkflowSaveContent(currentConfigSnap.data())
+                : null;
+            const nextBackups = currentContent && !workflowContentsEqual(currentContent, nextContent)
+                ? [{
+                    id: `workflow_${Date.now()}`,
+                    createdAtMillis: Date.now(),
+                    ...currentContent,
+                }, ...storedBackups].slice(0, WORKFLOW_BACKUP_LIMIT)
+                : storedBackups.slice(0, WORKFLOW_BACKUP_LIMIT);
+
+            await setDoc(configRef, {
+                repairStatuses: normalizedRepairStatuses,
+                warrantyStatuses: normalizedWarrantyStatuses,
+                trackingGroups: orderedGroups,
+                warrantyRules,
+                warrantyNote,
+                workflowSchemaVersion: WORKFLOW_SCHEMA_VERSION,
+                workflowFeatureSemantics: 'node-capabilities-v2',
+                workflowBackups: nextBackups,
                 updatedAt: serverTimestamp(),
             }, { merge: true });
 
             setRepairStatuses(normalizedRepairStatuses);
             setWarrantyStatuses(normalizedWarrantyStatuses);
             setTrackingGroups(orderedGroups);
-            toastSuccess('Đã chuẩn hóa và lưu cấu hình workflow!');
+            setWorkflowBackups(nextBackups);
+            toastSuccess(currentContent && !workflowContentsEqual(currentContent, nextContent)
+                ? 'Đã lưu workflow và tạo bản sao lưu trước đó.'
+                : 'Đã chuẩn hóa và lưu cấu hình workflow!');
         } catch (err) {
             console.error(err);
             toastError('Lỗi khi lưu!');
@@ -200,13 +333,93 @@ export default function RepairsConfigTab() {
         setActiveStatuses(prev => prev.map(s => {
             if (s.id !== id) return s;
             const allowed = s.allowedNext || [];
+            const transitionActors = { ...(s.transitionActors || {}) };
+            if (allowed.includes(nextId)) delete transitionActors[nextId];
             return {
                 ...s,
-                allowedNext: allowed.includes(nextId) ? allowed.filter(n => n !== nextId) : [...allowed, nextId]
+                allowedNext: allowed.includes(nextId) ? allowed.filter(n => n !== nextId) : [...allowed, nextId],
+                transitionActors: Object.keys(transitionActors).length > 0 ? transitionActors : undefined,
             };
         }));
     };
-    const toggleTerminal = (id: string) => setActiveStatuses(prev => prev.map(s => s.id === id ? { ...s, isTerminal: !s.isTerminal } : s));
+
+    const toggleTransitionActor = (id: string, nextId: string, actor: RepairWorkflowActor) => {
+        setActiveStatuses(prev => prev.map(status => {
+            if (status.id !== id) return status;
+            const transitionActors = { ...(status.transitionActors || {}) };
+            const current = transitionActors[nextId] || [];
+            transitionActors[nextId] = current.includes(actor)
+                ? current.filter(item => item !== actor)
+                : [...current, actor];
+            if (transitionActors[nextId].length === 0) delete transitionActors[nextId];
+            return { ...status, transitionActors: Object.keys(transitionActors).length > 0 ? transitionActors : undefined };
+        }));
+    };
+    const synchronizeTerminalSemantics = (features: string[], action: WorkflowNode['terminalAction'] | undefined) => {
+        const withoutDerived = features.filter(feature => !TERMINAL_SEMANTIC_FEATURES.includes(feature as typeof TERMINAL_SEMANTIC_FEATURES[number]));
+        if (action === 'handover') return [...withoutDerived, 'requiresHandover'];
+        if (action === 'refund') return [...withoutDerived, 'requiresHandover', 'refundOutcome'];
+        return withoutDerived;
+    };
+    const toggleTerminal = (id: string) => setActiveStatuses(prev => prev.map(s => {
+        if (s.id !== id) return s;
+        const isTerminal = !s.isTerminal;
+        return {
+            ...s,
+            isTerminal,
+            terminalAction: isTerminal ? s.terminalAction : undefined,
+            allowedFeatures: isTerminal
+                ? s.allowedFeatures
+                : synchronizeTerminalSemantics(s.allowedFeatures || [], undefined),
+        };
+    }));
+    const updateTerminalAction = (id: string, value: string) => setActiveStatuses(prev => prev.map(s => {
+        if (s.id !== id) return s;
+        const terminalAction = value === '' ? undefined : value as NonNullable<WorkflowNode['terminalAction']>;
+        return {
+            ...s,
+            terminalAction,
+            allowedFeatures: synchronizeTerminalSemantics(s.allowedFeatures || [], terminalAction),
+        };
+    }));
+    const applyReceptionTechnicianTemplate = async () => {
+        const confirmed = await appConfirm(
+            'Mẫu này thay thế các trạng thái và đường chuyển của workflow Sửa chữa hiện tại. Workflow Bảo hành không bị ảnh hưởng.',
+            { title: 'Áp dụng mẫu Tiếp nhận / KTV', confirmText: 'Dùng mẫu', destructive: true },
+        );
+        if (!confirmed) return;
+
+        setRepairStatuses(defaultStatuses.map(status => ({
+            ...status,
+            allowedNext: [...status.allowedNext],
+            allowedFeatures: [...(status.allowedFeatures || [])],
+            transitionActors: status.transitionActors
+                ? Object.fromEntries(Object.entries(status.transitionActors).map(([nextId, actors]) => [nextId, [...(actors || [])]]))
+                : undefined,
+        })));
+        setWorkflowTab('repair');
+        toastSuccess('Đã nạp mẫu 2 nhân sự. Nhấn “Lưu toàn bộ thay đổi” để áp dụng.');
+    };
+    const restoreLatestWorkflowBackup = async () => {
+        const backup = workflowBackups[0];
+        if (!backup) return;
+        const formattedTime = new Date(backup.createdAtMillis).toLocaleString('vi-VN', {
+            day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+        });
+        const confirmed = await appConfirm(
+            `Khôi phục bản workflow đã sao lưu lúc ${formattedTime}? Bản này sẽ được nạp vào màn hình trước; bạn cần bấm Lưu để áp dụng.`,
+            { title: 'Khôi phục workflow', confirmText: 'Nạp bản sao lưu', destructive: true },
+        );
+        if (!confirmed) return;
+
+        setRepairStatuses(normalizeRepairWorkflow(backup.repairStatuses, getWorkflowNormalizationOptions(backup.workflowSchemaVersion)));
+        setWarrantyStatuses(normalizeWarrantyWorkflow(backup.warrantyStatuses, getWorkflowNormalizationOptions(backup.workflowSchemaVersion)));
+        setTrackingGroups(sortTrackingGroups(backup.trackingGroups));
+        setWarrantyRules(backup.warrantyRules);
+        setWarrantyNote(backup.warrantyNote);
+        setWorkflowTab('repair');
+        toastSuccess('Đã nạp bản sao lưu. Nhấn “Lưu toàn bộ thay đổi” để áp dụng.');
+    };
     const toggleFeature = (id: string, feature: string) => {
         setActiveStatuses(prev => prev.map(s => {
             if (s.id !== id) return s;
@@ -347,6 +560,27 @@ export default function RepairsConfigTab() {
                         >
                             Bảo hành
                         </button>
+                        {workflowTab === 'repair' && (
+                            <>
+                                <button
+                                    type="button"
+                                    onClick={applyReceptionTechnicianTemplate}
+                                    className="px-4 py-2 font-semibold text-sm rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors"
+                                    title="Nạp workflow mẫu có Tiếp nhận, KTV, xác nhận khách đồng ý và bàn giao linh kiện"
+                                >
+                                    Mẫu Tiếp nhận / KTV
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={restoreLatestWorkflowBackup}
+                                    disabled={workflowBackups.length === 0}
+                                    className="inline-flex items-center gap-1 px-4 py-2 font-semibold text-sm rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
+                                    title={workflowBackups.length > 0 ? 'Nạp bản sao lưu workflow gần nhất vào màn hình' : 'Chưa có bản sao lưu workflow'}
+                                >
+                                    <RotateCcw size={15} /> Khôi phục gần nhất
+                                </button>
+                            </>
+                        )}
                     </div>
 
                     {/* Flow Preview */}
@@ -405,23 +639,63 @@ export default function RepairsConfigTab() {
                                         <span className={`font-semibold ${status.isTerminal ? 'text-red-600' : 'text-gray-500'}`}>Điểm kết thúc (Khóa phiếu)</span>
                                     </label>
 
-                                    {/* Feature Toggles */}
-                                    <div className="mt-2 space-y-1.5 p-2 bg-gray-50 border border-gray-100 rounded-lg">
-                                        <p className="text-[10px] font-bold text-gray-500 uppercase mb-1">Tính năng đi kèm</p>
-                                        {WORKFLOW_FEATURES.map(f => (
-                                            <label key={f.id} className="flex items-center gap-1.5 cursor-pointer w-fit text-[11px] text-gray-700 hover:text-gray-900 transition-colors" title={f.description}>
-                                                <input type="checkbox"
-                                                    checked={status.allowedFeatures?.includes(f.id) || false}
-                                                    onChange={() => toggleFeature(status.id, f.id)}
-                                                    className="rounded border-gray-300 text-orange-500 focus:ring-orange-500 w-3 h-3"
-                                                />
-                                                <span>{f.label}</span>
+                                    {status.isTerminal && (
+                                        <div className="mt-2 rounded-lg border border-red-100 bg-red-50/50 p-2.5 space-y-2">
+                                            <div>
+                                                <p className="text-[10px] font-bold uppercase text-red-700">Cách kết thúc phiếu</p>
+                                                <p className="text-[11px] text-gray-600">Chỉ áp dụng cho node cuối; quyết định hệ thống đóng phiếu theo cách nào.</p>
+                                            </div>
+                                            <label className="flex flex-wrap items-center gap-2 text-[11px] text-gray-700">
+                                            <span className="font-medium">Kết quả khi kết thúc</span>
+                                            <select
+                                                title="Cách kết thúc phiếu"
+                                                value={status.terminalAction || ''}
+                                                onChange={event => updateTerminalAction(status.id, event.target.value)}
+                                                className="px-2 py-1 border rounded-md bg-white focus:outline-none"
+                                            >
+                                                <option value="">Chỉ khóa phiếu</option>
+                                                <option value="handover">Bàn giao khách</option>
+                                                <option value="refund">Hoàn phí</option>
+                                                <option value="close">Hoàn tất nội bộ</option>
+                                            </select>
                                             </label>
-                                        ))}
-                                    </div>
+                                            <p className="text-[11px] text-gray-600">{getTerminalActionDescription(status.terminalAction)}</p>
+                                        </div>
+                                    )}
+
+                                    {FEATURE_SECTIONS.map(section => {
+                                        const features = section.featureIds
+                                            .map(featureId => WORKFLOW_FEATURES.find(feature => feature.id === featureId))
+                                            .filter((feature): feature is WorkflowFeature => Boolean(feature));
+                                        if (features.length === 0) return null;
+                                        return (
+                                            <section key={section.title} className="mt-2 space-y-1.5 rounded-lg border border-gray-100 bg-gray-50 p-2.5">
+                                                <div>
+                                                    <p className="text-[10px] font-bold uppercase text-gray-700">{section.title}</p>
+                                                    <p className="text-[11px] text-gray-500">{section.description}</p>
+                                                </div>
+                                                <div className="space-y-1">
+                                                    {features.map(feature => (
+                                                        <label key={feature.id} className="flex items-start gap-1.5 cursor-pointer text-[11px] text-gray-700 hover:text-gray-900 transition-colors" title={feature.description}>
+                                                            <input type="checkbox"
+                                                                checked={status.allowedFeatures?.includes(feature.id) || false}
+                                                                onChange={() => toggleFeature(status.id, feature.id)}
+                                                                className="mt-0.5 rounded border-gray-300 text-orange-500 focus:ring-orange-500 w-3 h-3"
+                                                            />
+                                                            <span>{feature.label}</span>
+                                                        </label>
+                                                    ))}
+                                                </div>
+                                            </section>
+                                        );
+                                    })}
 
                                     {!status.isTerminal && (
-                                        <div className="relative group mt-1">
+                                        <div className="relative group mt-2 rounded-lg border border-orange-100 bg-orange-50/50 p-2.5">
+                                            <div className="mb-1.5">
+                                                <p className="text-[10px] font-bold uppercase text-orange-700">5. Luồng tiếp theo có thể chuyển</p>
+                                                <p className="text-[11px] text-gray-500">Chỉ các trạng thái được chọn bên dưới mới xuất hiện khi nhân viên chuyển flow.</p>
+                                            </div>
                                             <button className="px-3 py-1.5 border rounded-lg bg-gray-50 text-gray-700 text-left flex items-center justify-between hover:bg-gray-100 transition-colors">
                                                 <span>{status.allowedNext?.length ? `${status.allowedNext.length} luồng tiếp theo` : 'Chưa cấu hình Workflow Next'}</span>
                                                 <ArrowRight size={12} className="text-gray-400 ml-2" />
@@ -429,18 +703,41 @@ export default function RepairsConfigTab() {
                                             <div className="absolute top-full left-0 mt-1 w-[280px] bg-white border rounded-xl p-2 shadow-xl z-[100] hidden group-hover:block max-h-[300px] overflow-y-auto">
                                                 <p className="text-[10px] text-gray-500 font-semibold mb-2 sticky top-0 bg-white z-10 pb-1 border-b">Tick chọn các đường đi tiếp theo cho [{status.label}]:</p>
                                                 <div className="flex flex-col gap-0.5">
-                                                    {activeStatuses.filter(s => s.id !== status.id).map(s => (
-                                                        <label key={s.id} className="flex items-center gap-2 p-1.5 hover:bg-orange-50 rounded-lg cursor-pointer transition-colors">
-                                                            <input type="checkbox"
-                                                                className="rounded border-gray-300 text-orange-500 focus:ring-orange-500"
-                                                                checked={status.allowedNext?.includes(s.id) || false}
-                                                                onChange={() => toggleNext(status.id, s.id)}
-                                                            />
-                                                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium shadow-sm ${s.color}`}>
-                                                                {s.label}
-                                                            </span>
-                                                        </label>
-                                                    ))}
+                                                    {activeStatuses.filter(s => s.id !== status.id).map(s => {
+                                                        const isAllowed = status.allowedNext?.includes(s.id) || false;
+                                                        const actors = status.transitionActors?.[s.id] || [];
+                                                        return (
+                                                            <div key={s.id} className="rounded-lg p-1.5 hover:bg-orange-50 transition-colors">
+                                                                <label className="flex items-center gap-2 cursor-pointer">
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        className="rounded border-gray-300 text-orange-500 focus:ring-orange-500"
+                                                                        checked={isAllowed}
+                                                                        onChange={() => toggleNext(status.id, s.id)}
+                                                                    />
+                                                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium shadow-sm ${s.color}`}>
+                                                                        {s.label}
+                                                                    </span>
+                                                                </label>
+                                                                {isAllowed && (
+                                                                    <div className="ml-5 mt-1 flex flex-wrap gap-x-2 gap-y-1 text-[10px] text-gray-600">
+                                                                        {(Object.keys(transitionActorLabels) as RepairWorkflowActor[]).map(actor => (
+                                                                            <label key={actor} className="flex items-center gap-1 cursor-pointer">
+                                                                                <input
+                                                                                    type="checkbox"
+                                                                                    checked={actors.includes(actor)}
+                                                                                    onChange={() => toggleTransitionActor(status.id, s.id, actor)}
+                                                                                    className="h-3 w-3 rounded border-gray-300 text-indigo-500 focus:ring-indigo-500"
+                                                                                />
+                                                                                {transitionActorLabels[actor]}
+                                                                            </label>
+                                                                        ))}
+                                                                        {actors.length === 0 && <span className="text-amber-700">Chưa giới hạn vai trò (dùng rule cũ)</span>}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })}
                                                 </div>
                                             </div>
                                         </div>

@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
     filterAvailableCategoryRecommendations,
     getRecommendedPartCategoryIds,
+    getRepairServiceCategoryIds,
     getRepairServiceIds,
 } from './serviceRecommendations';
 
@@ -11,7 +12,21 @@ test('derives deduplicated service-linked categories from real service ids', () 
     assert.deepEqual(getRecommendedPartCategoryIds([
         { id: 'screen', recommendedPartCategoryIds: ['parts/screen', 'parts/display'] },
         { id: 'battery', recommendedPartCategoryIds: ['parts/display', 'parts/battery'] },
-    ]), ['parts/screen', 'parts/display', 'parts/battery']);
+    ]), ['parts/display', 'parts/battery']);
+    assert.deepEqual(getRepairServiceCategoryIds({
+        categoryPath: ['service/phone', 'service/phone/apple'],
+        issues: [
+            { categoryPath: ['service/phone', 'service/phone/apple', 'service/phone/apple/screen'] },
+            { categoryPath: ['service/phone', 'service/phone/apple', 'service/phone/apple/screen'] },
+        ],
+    }), ['service/phone/apple', 'service/phone/apple/screen']);
+});
+
+test('uses only the deepest linked taxonomy node so generic device categories do not leak into suggestions', () => {
+    assert.deepEqual(getRecommendedPartCategoryIds([
+        { id: 'screen', recommendedPartCategoryIds: ['dien-thoai', 'dien-thoai/iphone', 'dien-thoai/iphone/man-hinh'] },
+        { id: 'battery', recommendedPartCategoryIds: ['dien-thoai', 'dien-thoai/iphone', 'dien-thoai/iphone/pin'] },
+    ]), ['dien-thoai/iphone/man-hinh', 'dien-thoai/iphone/pin']);
 });
 
 test('keeps only category-matched recommendations and prioritizes available stock', () => {

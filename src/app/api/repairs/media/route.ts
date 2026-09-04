@@ -4,8 +4,8 @@ import { requirePermission } from '@/lib/apiAuth';
 import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { isYouTubeUrl } from '@/lib/workflowFeatures';
+import { getConfiguredWorkflow } from '@/lib/repairWorkflowConfig';
 
-const MEDIA_EDITABLE_STATUSES = new Set(['done', 'out', 'refund']);
 type RepairMediaRequestBody = { ticketId?: string; mediaUrl?: string; source?: 'upload' | 'youtube' };
 
 function isValidMediaUrl(value: string): boolean {
@@ -46,9 +46,15 @@ export const POST = withApi({
                 throw new Error('Phieu sua chua khong ton tai.');
             }
 
-            const ticket = ticketSnap.data() as { status?: string };
+            const ticket = ticketSnap.data() as { status?: string; ticketType?: 'repair' | 'warranty' };
             const status = String(ticket.status || '');
-            if (!MEDIA_EDITABLE_STATUSES.has(status)) {
+            const configSnap = await tx.get(db.collection('system_config').doc('repairs'));
+            if (!configSnap.exists) {
+                throw new Error('Khong tim thay cau hinh workflow sua chua trong Firebase.');
+            }
+            const workflow = getConfiguredWorkflow(configSnap.data() ?? {}, ticket.ticketType);
+            const currentNode = workflow.find(node => node.id === status);
+            if (!currentNode?.isTerminal) {
                 throw new Error('Chi duoc them media ban giao cho phieu da hoan tat/ban giao/hoan tien.');
             }
 

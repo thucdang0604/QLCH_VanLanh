@@ -1508,3 +1508,38 @@ Make every taxonomy-assigned part discoverable from `/admin/parts` without readi
 - A Zalo contact-card represents a stable contact reference, not proof that the cashier controls that Zalo account; it is stored as `contactProof`, not OTP-style verification.
 - Rollback is limited to the new identity mode and UI/API/test/docs hunks. No migration is required because customer IDs are created only for new POS Zalo records.
 - After deployment, an authenticated cashier should smoke: enter a name and a scanned/entered Zalo card, choose debt with an advance, confirm the pre-submit warning, and verify the created customer has a scannable QR in the Customer drawer.
+## Codex local implementation review — inventory cash outflow and supplier freight
+
+**Time:** `2026-09-02T00:00:00+07:00`
+
+**Decision:** `APPROVED — local validation passes; authenticated browser and Emulator proof remain.`
+
+- Scope: supplier-import cash payment, company-bank/debt separation, and supplier inbound freight paid from the active cashier shift before stock arrives.
+- Cash operations require `manage_inventory` plus `manage_cashier_expenses`, verify the active-shift lock and that the caller opened that shift in the same transaction, then write a server-only idempotent cashier movement linked to the import receipt. Bank payment has no shift movement.
+- Inbound freight stays pending against the ordered receipt, then is allocated by purchase value at completion and stored as landed cost per receipt line and FIFO lot. No generic expense document is created, avoiding duplicate P&L recognition.
+- Validation: focused Node tests 4/4, focused ESLint, `pnpm typecheck`, and scoped `git diff --check` passed. Browser/Emulator and Rules deployment were not run.
+
+### Follow-up 2026-09-02 — cashier ownership guard
+
+- Cash-only outflows now additionally require the active shift's `openedBy` to match the acting user. This covers supplier freight, cash import payment, and POS shop-paid cash shipping; another employee with the cash-expense permission cannot use a colleague's drawer.
+- Repair shipping paid by company bank is no longer recorded as a bank expense in the cashier shift.
+
+### Follow-up 2026-09-02 — non-negative cash drawer guard
+
+- Supplier freight, cash import payment, and POS shop-paid cash shipping now read the live cash tally, reject an expense above the expected cash drawer balance, and update one shared guard document in the transaction. The guard forces concurrent expense requests to retry against the latest tally instead of allowing separate tally shards to overdraw the drawer.
+- Existing negative shifts are historical data and deliberately are not mutated automatically; reconcile each against the actual payment source before closing it.
+
+### Follow-up 2026-09-02 — cashier outflow presentation
+
+- Cashier tallies separately retain supplier import payments. The POS cashier panel shows **Chi tiền nhập hàng** and cash-only **Chi ship tiền mặt**; the latter excludes supplier import payments. Company-bank expenses are excluded from the cashier shift and its displayed bank balance.
+
+### Follow-up 2026-09-02 — repair inbound shipping
+
+- Reception can create a phone-intake repair ticket marked `send_to_store` before the customer device arrives. Its inbound-shipping API writes an idempotent expense linked to `repairTicketId`; the ticket creator and payer may differ.
+- Cash requires `manage_repairs`, `manage_cashier_expenses`, sufficient cash, and the payer's own active POS shift. Bank creates a company expense/revenue aggregate only and never changes a cashier shift.
+
+### Follow-up 2026-09-03 — inbound-device arrival gate
+
+- The repairs header retains one create button; staff select `send_to_store` inside the normal repair form instead of getting a duplicate “Khách gửi máy” action.
+- Inbound shipping itself now requires customer name, phone, model, and reported issue. Its CASH/BANK expense is the arrival confirmation, records the reception actor and `inbound_device_received`, and does not leave a separate manual-confirmation step.
+- Transition, handover, and POS repair completion call the same server guard, so an inbound draft cannot progress by bypassing the detail UI.

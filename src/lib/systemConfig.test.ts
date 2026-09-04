@@ -29,6 +29,7 @@ test('taxonomy listener is only enabled on admin screens that need its tree', ()
     assert.equal(getConfigDocumentsForAdminRoute('/admin/appearance').includes('taxonomy_settings'), true);
     assert.equal(getConfigDocumentsForAdminRoute('/admin/products').includes('taxonomy_settings'), true);
     assert.equal(getConfigDocumentsForAdminRoute('/admin/settings').includes('taxonomy_settings'), true);
+    assert.equal(getConfigDocumentsForAdminRoute('/admin/technician').includes('taxonomy_settings'), true);
 });
 
 test('storefront config excludes the taxonomy tree from shared customer payloads', () => {

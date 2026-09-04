@@ -126,11 +126,11 @@ export const POST = withApi({
       timeoutAfter(RTDB_ROLE_SYNC_TIMEOUT_MS, 'RTDB authorization projection timed out'),
     ]);
     rtdbRoleSynced = true;
-  } catch {
+    await markAuthorizationProjectionSynced(projection);
+  } catch (projectionError) {
     rtdbRoleSyncError = 'RTDB authorization projection is pending reconciliation.';
-    console.error('RTDB authorization projection failed during session bootstrap.');
-    await getAdminDb().collection(AUTHORIZATION_PROJECTION_JOBS).doc(uid)
-      .set(createPendingAuthorizationProjection(projection), { merge: true });
+    console.error('RTDB authorization projection failed during session bootstrap:', projectionError);
+    await markAuthorizationProjectionPending(projection, projectionError);
   }
 
   // Every successful bootstrap is also a bounded retry opportunity for durable

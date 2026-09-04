@@ -3,19 +3,21 @@
 import { useEffect, useState } from 'react';
 import type React from 'react';
 import { Building2, CheckCircle2, ChevronDown, Loader2, PackagePlus, Plus, Save, Search, Trash2 } from 'lucide-react';
-import { collection, doc, getDoc, getDocs, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, limit, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
 
 import CategoryTaxonomySelector from '@/components/admin/CategoryTaxonomySelector';
 import CurrencyInput from '@/components/admin/CurrencyInput';
 import Modal from '@/components/admin/Modal';
 import { db } from '@/lib/firebase';
 import type { Product } from '@/lib/types';
+import { isPartCategory } from '@/lib/constants';
 import { normalizeDocId } from '@/lib/idNormalizer';
 import { appPrompt } from '@/lib/appDialog';
 import { buildProductCodeFromId } from '@/lib/productCodes';
 import { createProductWithCodes } from '@/lib/productCodeRegistry';
 import { buildInlineSupplierContactInput, buildSupplierContactDocumentFields, reserveSupplierDocumentId } from '@/lib/supplierDocumentIds';
 import { toastError, toastSuccess } from '@/lib/toast';
+import { getSearchKeywordQuery } from '@/lib/utils';
 import type { ImportPreviewState, ImportReceiptItem, SupplierOption } from './importReceiptTypes';
 
 function buildImportReceiptBaseId() {
@@ -144,7 +146,7 @@ export function ImportPreviewModal({
                                 : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
                                 }`}
                         >
-                            💰 Thanh toán ngay
+                            💵 Tiền mặt từ ca POS
                         </button>
                         <button
                             type="button"
@@ -154,14 +156,21 @@ export function ImportPreviewModal({
                                 : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
                                 }`}
                         >
-                            Chuyen khoan
+                            Chuyển khoản công ty
                         </button>
                     </div>
                     <p className="text-xs text-gray-500 mt-2">
                         {paymentMethod === 'debt'
                             ? 'Số tiền sẽ được cộng vào công nợ NCC (theo từng SP).'
-                            : 'Ghi nhận đã thanh toán, không cộng công nợ.'}
+                            : paymentMethod === 'cash'
+                                ? 'Bắt buộc có ca POS đang mở; tiền mặt sẽ được trừ khỏi quỹ của ca.'
+                                : 'Ghi nhận chi từ tài khoản công ty, không ảnh hưởng quỹ thu ngân.'}
                     </p>
+                    {Number(receipt.freightPaidAmount) > 0 && (
+                        <p className="mt-2 rounded-lg bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-800">
+                            Phí ship NCC đã chi: {new Intl.NumberFormat('vi-VN').format(Number(receipt.freightPaidAmount))}đ. Khoản này sẽ được cộng vào giá vốn khi chốt nhập.
+                        </p>
+                    )}
                     {/* Per-item supplier summary */}
                     {(() => {
                         const supplierMap = new Map<string, number>();
@@ -375,12 +384,21 @@ interface CreateReceiptModalProps {
     parts: (Product & { id: string })[];
     retailProducts: (Product & { id: string })[];
     onCreated: () => void;
+    onSupplierCreated?: (supplier: SupplierOption) => void;
     currentUser: { uid: string; displayName?: string | null; email?: string | null } | null;
     suppliers: SupplierOption[];
     initialReceiptType?: 'component' | 'retail';
     lockReceiptType?: boolean;
+    repairDemandSuggestions?: (Product & { id: string; requestedQuantity?: number })[];
     outOfStockSuggestions?: (Product & { id: string })[];
     isLoadingOutOfStockSuggestions?: boolean;
+}
+
+function isRetailImportProduct(product: Product): boolean {
+    const firstCategoryId = product.categoryIds?.[0] || '';
+    return !isPartCategory(product.category, product.categoryIds)
+        && product.category !== 'service'
+        && !firstCategoryId.startsWith('sua-chua');
 }
 // Create Receipt Modal
 export function CreateReceiptModal({
@@ -389,10 +407,12 @@ export function CreateReceiptModal({
     parts,
     retailProducts,
     onCreated,
+    onSupplierCreated,
     currentUser,
     suppliers,
     initialReceiptType = 'component',
     lockReceiptType = false,
+    repairDemandSuggestions = [],
     outOfStockSuggestions = [],
     isLoadingOutOfStockSuggestions = false,
 }: CreateReceiptModalProps) {
@@ -401,6 +421,8 @@ export function CreateReceiptModal({
     const [note, setNote] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [receiptType, setReceiptType] = useState<'component' | 'retail'>(initialReceiptType);
+    const [searchResults, setSearchResults] = useState<(Product & { id: string })[]>([]);
+    const [isSearchingCatalog, setIsSearchingCatalog] = useState(false);
     // Per-item supplier dropdown state
     const [activeSupplierIdx, setActiveSupplierIdx] = useState<number | null>(null);
     const [itemSupplierSearch, setItemSupplierSearch] = useState('');
@@ -412,20 +434,62 @@ export function CreateReceiptModal({
         setNote('');
         setActiveSupplierIdx(null);
         setItemSupplierSearch('');
+        setSearchResults([]);
     }, [initialReceiptType, isOpen]);
 
     const searchSource = receiptType === 'component' ? parts : (retailProducts || []);
-    const knownCatalogProducts = [...searchSource, ...outOfStockSuggestions];
-    const filteredOptions = search.length > 1
-        ? searchSource.filter((p: Product & { id: string }) => p.name.toLowerCase().includes(search.toLowerCase()))
-        : [];
+    const knownCatalogProducts = [...searchSource, ...repairDemandSuggestions, ...outOfStockSuggestions];
+    const filteredOptions = (() => {
+        if (search.length <= 1) return [];
+        const matchingLocal = searchSource.filter((product: Product & { id: string }) => product.name.toLowerCase().includes(search.toLowerCase()));
+        return Array.from(new Map([...searchResults, ...matchingLocal].map(product => [product.id, product])).values()).slice(0, 20);
+    })();
+
+    useEffect(() => {
+        if (!isOpen || search.trim().length < 2) {
+            setSearchResults([]);
+            setIsSearchingCatalog(false);
+            return;
+        }
+
+        let disposed = false;
+        const timer = setTimeout(async () => {
+            setIsSearchingCatalog(true);
+            try {
+                const token = getSearchKeywordQuery(search);
+                if (!token) return;
+                const snapshot = await getDocs(query(
+                    collection(db, 'products'),
+                    where('searchKeywords', 'array-contains', token),
+                    limit(25),
+                ));
+                const matchingProducts = snapshot.docs
+                    .map(document => ({ id: document.id, ...document.data() } as Product & { id: string }))
+                    .filter(product => product.status === 'active' && !product.isProposed)
+                    .filter(product => receiptType === 'component'
+                        ? isPartCategory(product.category, product.categoryIds)
+                        : isRetailImportProduct(product));
+                if (!disposed) setSearchResults(matchingProducts);
+            } catch (error) {
+                console.error('Failed to search import products', error);
+                if (!disposed) setSearchResults([]);
+            } finally {
+                if (!disposed) setIsSearchingCatalog(false);
+            }
+        }, 350);
+
+        return () => {
+            disposed = true;
+            clearTimeout(timer);
+        };
+    }, [isOpen, receiptType, search]);
     const addItem = (part: Product & { id: string }) => {
         setItems(currentItems => {
             if (currentItems.some(item => item.productId === part.id)) return currentItems;
             return [...currentItems, {
             productId: part.id,
             productName: part.name,
-            quantity: 1,
+            quantity: Math.max(1, Number((part as Product & { requestedQuantity?: number }).requestedQuantity) || 1),
             importPrice: part.costPrice || part.price_original || 0,
             quality: part.quality || 'Zin'
             }];
@@ -556,13 +620,44 @@ export function CreateReceiptModal({
                         placeholder="Vd: Nhập hàng gấp cho iPhone 13"
                     />
                 </div>
+                {receiptType === 'component' && repairDemandSuggestions.length > 0 && (
+                    <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-4">
+                        <div className="mb-3 flex items-center justify-between gap-3">
+                            <div>
+                                <h4 className="text-sm font-semibold text-emerald-900">Yêu cầu linh kiện từ phiếu sửa chữa</h4>
+                                <p className="mt-0.5 text-xs text-emerald-700">Ưu tiên các linh kiện KTV đã đề xuất và đang chờ nhập kho.</p>
+                            </div>
+                            <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">{repairDemandSuggestions.length}</span>
+                        </div>
+                        <div className="grid max-h-52 grid-cols-1 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+                            {repairDemandSuggestions.map(product => {
+                                const isSelected = items.some(item => item.productId === product.id);
+                                return (
+                                    <button
+                                        key={product.id}
+                                        type="button"
+                                        onClick={() => addItem(product)}
+                                        aria-pressed={isSelected}
+                                        className={`flex min-w-0 items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors ${isSelected ? 'border-emerald-300 bg-emerald-100 text-emerald-900' : 'border-white bg-white text-gray-700 hover:border-emerald-200 hover:shadow-sm'}`}
+                                    >
+                                        <span className="min-w-0">
+                                            <span className="block truncate text-sm font-medium" title={product.name}>{product.name}</span>
+                                            <span className="mt-0.5 block text-xs text-emerald-700">KTV cần: {product.requestedQuantity || 1} · Tồn: {product.stock || 0}</span>
+                                        </span>
+                                        {isSelected ? <CheckCircle2 size={18} className="shrink-0 text-emerald-600" /> : <Plus size={18} className="shrink-0 text-emerald-600" />}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
                 <div className={`rounded-xl border p-4 ${receiptType === 'retail' ? 'border-blue-100 bg-blue-50/50' : 'border-orange-100 bg-orange-50/50'}`}>
                     <div className="mb-3 flex items-center justify-between gap-3">
                         <div>
                             <h4 className="text-sm font-semibold text-gray-800">
-                                {receiptType === 'retail' ? 'Gợi ý sản phẩm hết hàng' : 'Gợi ý linh kiện hết hàng'}
+                                {receiptType === 'retail' ? 'Sản phẩm hết hàng (tham khảo)' : 'Linh kiện hết hàng (tham khảo)'}
                             </h4>
-                            <p className="mt-0.5 text-xs text-gray-500">Chọn nhanh các mặt hàng có tồn kho bằng 0 để thêm vào phiếu.</p>
+                            <p className="mt-0.5 text-xs text-gray-500">Danh sách phụ, tối đa 24 mặt hàng; hãy ưu tiên yêu cầu từ phiếu sửa chữa ở trên.</p>
                         </div>
                         {outOfStockSuggestions.length > 0 && (
                             <span className={`rounded-full px-2 py-1 text-xs font-semibold ${receiptType === 'retail' ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'}`}>
@@ -619,7 +714,9 @@ export function CreateReceiptModal({
 
                     {search.length > 1 && (
                         <div className="absolute left-0 right-0 mt-1 bg-white border rounded-xl shadow-lg z-20 max-h-60 overflow-y-auto">
-                            {filteredOptions.length > 0 ? (
+                            {isSearchingCatalog ? (
+                                <div className="flex items-center gap-2 px-4 py-3 text-sm text-gray-500"><Loader2 size={16} className="animate-spin" /> Đang tìm trong danh mục...</div>
+                            ) : filteredOptions.length > 0 ? (
                                 filteredOptions.map((p: Product & { id: string }) => (
                                     <button
                                         key={p.id} type="button" onClick={() => addItem(p)}
@@ -726,14 +823,18 @@ export function CreateReceiptModal({
                                                                         const contactValue = await appPrompt('Nhập SĐT, Zalo, Facebook hoặc liên hệ khác cho nhà cung cấp (có thể bỏ trống):', { title: 'Thêm nhà cung cấp', placeholder: 'SĐT, Zalo hoặc Facebook' }) || '';
                                                                         const contactInput = buildInlineSupplierContactInput(nm, contactValue);
                                                                         const supplierId = await reserveSupplierDocumentId(contactInput);
+                                                                        const contactFields = buildSupplierContactDocumentFields(contactInput);
                                                                         await setDoc(doc(db, 'suppliers', supplierId), {
                                                                             name: nm,
-                                                                            ...buildSupplierContactDocumentFields(contactInput),
+                                                                            ...contactFields,
                                                                             totalDebt: 0,
                                                                             isActive: true,
                                                                             createdAt: serverTimestamp(),
                                                                             updatedAt: serverTimestamp(),
                                                                         });
+                                                                        // Keep the in-progress receipt's supplier picker current;
+                                                                        // the parent list is intentionally loaded only once per modal.
+                                                                        onSupplierCreated?.({ id: supplierId, name: nm, totalDebt: 0, ...contactFields });
                                                                         const newItems = [...items];
                                                                         newItems[idx] = { ...newItems[idx], supplier: nm, supplierId };
                                                                         setItems(newItems);

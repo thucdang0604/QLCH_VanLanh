@@ -6,7 +6,9 @@ import { FieldValue, type DocumentReference } from 'firebase-admin/firestore';
 import type { FirestoreDateValue, RepairTicket } from '@/lib/types';
 import { loadRepairWorkflow, requireWorkflowNode } from '@/lib/repairWorkflowServer';
 import { REPAIR_PART_STATUS, isSelectedRepairPart } from '@/lib/repairStatus';
+import { isRepairManager } from '@/lib/repairAccess';
 import { findSelectedRepairPartIndex, increaseSelectedRepairPartQuantity } from '@/lib/repairPartSelection';
+import { getRepairIssueLaborCost } from '@/lib/repairIssuePricing';
 import { randomUUID } from 'crypto';
 import { reserveSequentialDocumentId, type ReservedSequentialDocumentId } from '@/lib/serverDocumentIds';
 
@@ -19,6 +21,7 @@ type RepairUpdateData = {
     version: number;
     updatedAt: FieldValue;
     partsLockedAt?: FirestoreDateValue;
+    statusTimeline?: FieldValue;
 };
 type DraftReceiptData = {
     status: string;
@@ -47,6 +50,7 @@ type RepairPartCommand = {
     quantity: number;
     quality?: string;
     partLineId?: string;
+    issueId?: string;
 };
 type ConfirmPartsRequestBody = {
     ticketId?: string;
@@ -132,6 +136,12 @@ export const POST = withApi({
             }
 
             const parts = [...(ticket.parts || [])];
+            const issueIds = new Set((ticket.issues || []).map(issue => issue.id).filter(Boolean));
+            for (const cmd of cmdList) {
+                if ((cmd.type === 'add_selected' || cmd.type === 'request_part') && cmd.issueId && !issueIds.has(cmd.issueId)) {
+                    throw new Error('Linh kiện phải được gắn với một lỗi đang có trên phiếu.');
+                }
+            }
             let partsLockedAt = ticket.partsLockedAt;
             const updatedProductRefs = new Map<string, ProductCacheEntry>();
             const dirtyProductIds = new Set<string>();
@@ -212,7 +222,7 @@ export const POST = withApi({
 
                     updateProductHeld(productId, quantity);
 
-                    const existingSelectedPartIndex = findSelectedRepairPartIndex(parts, productId);
+                    const existingSelectedPartIndex = findSelectedRepairPartIndex(parts, productId, cmd.issueId);
                     if (existingSelectedPartIndex >= 0) {
                         // Repeated selection remains one repair line. The original price snapshot is retained.
                         parts[existingSelectedPartIndex] = increaseSelectedRepairPartQuantity(
@@ -222,6 +232,7 @@ export const POST = withApi({
                     } else {
                         parts.push({
                             partLineId: randomUUID(),
+                            issueId: cmd.issueId || undefined,
                             productId,
                             productName: String(pData.name || 'Unknown'),
                             quantity,
@@ -255,6 +266,7 @@ export const POST = withApi({
                     const partLineId = randomUUID();
                     parts.push({
                         partLineId,
+                        issueId: cmd.issueId || undefined,
                         productId: productId || '',
                         productName: pName || 'Linh kiện yêu cầu',
                         quantity,
@@ -280,6 +292,9 @@ export const POST = withApi({
                     if (lineIndex === -1) throw new Error('Part line not found');
 
                     const line = parts[lineIndex];
+                    if (line.receptionHandedOverAt || line.technicianReceivedAt) {
+                        throw new Error('Linh kiện đã được Tiếp nhận bàn giao hoặc KTV đã nhận. Không thể bỏ chọn; hãy xử lý theo luồng hoàn linh kiện.');
+                    }
                     const reservedQuantity = getReservedQuantity(line);
                     if (line.productId && reservedQuantity > 0) {
                         await getProduct(line.productId); // fetch to update held
@@ -314,6 +329,7 @@ export const POST = withApi({
                             // Split line for the delta to capture new price
                             parts.push({
                                 partLineId: randomUUID(),
+                                issueId: line.issueId,
                                 productId: line.productId,
                                 productName: line.productName,
                                 quantity: delta,
@@ -360,6 +376,84 @@ export const POST = withApi({
 
                     parts[lineIndex].status = REPAIR_PART_STATUS.REJECTED;
                     parts[lineIndex].reservedQuantity = 0;
+                } else if (cmd.type === 'handover_to_technician') {
+                    const { partLineId } = cmd;
+                    const lineIndex = parts.findIndex(p => p.partLineId === partLineId);
+                    if (lineIndex === -1) throw new Error('Part line not found');
+                    if (ticket.staff?.assignedTechnician === caller.uid && !isRepairManager(caller)) {
+                        throw new Error('KTV không thể tự bàn giao linh kiện cho chính mình.');
+                    }
+                    const line = parts[lineIndex];
+                    if (!isSelectedRepairPart(line) || line.inventoryDeductedAt || line.technicianReceivedAt) {
+                        throw new Error('Chỉ có thể bàn giao linh kiện đã sẵn sàng và chưa được KTV nhận.');
+                    }
+                    if (line.receptionHandedOverAt) {
+                        throw new Error('Linh kiện đang chờ KTV xác nhận nhận hàng.');
+                    }
+                    const { technicianReceiptRejectedAt: _rejectedAt, technicianReceiptRejectedBy: _rejectedBy, ...lineWithoutRejection } = line;
+                    parts[lineIndex] = {
+                        ...lineWithoutRejection,
+                        receptionHandedOverAt: arrayTimestampValue(),
+                        receptionHandedOverBy: caller.uid,
+                    };
+                } else if (cmd.type === 'confirm_technician_received') {
+                    const { partLineId } = cmd;
+                    const lineIndex = parts.findIndex(p => p.partLineId === partLineId);
+                    if (lineIndex === -1) throw new Error('Part line not found');
+                    if (ticket.staff?.assignedTechnician !== caller.uid && !isRepairManager(caller)) {
+                        throw new Error('Chỉ KTV được phân công mới có thể xác nhận đã nhận linh kiện.');
+                    }
+                    const line = parts[lineIndex];
+                    if (!isSelectedRepairPart(line) || line.inventoryDeductedAt || !line.receptionHandedOverAt) {
+                        throw new Error('Tiếp nhận cần bàn giao linh kiện trước khi KTV xác nhận đã nhận.');
+                    }
+                    if (!line.technicianReceivedAt) {
+                        parts[lineIndex] = {
+                            ...line,
+                            technicianReceivedAt: arrayTimestampValue(),
+                            technicianReceivedBy: caller.uid,
+                        };
+                    }
+                } else if (cmd.type === 'technician_not_received') {
+                    const { partLineId } = cmd;
+                    const lineIndex = parts.findIndex(p => p.partLineId === partLineId);
+                    if (lineIndex === -1) throw new Error('Part line not found');
+                    if (ticket.staff?.assignedTechnician !== caller.uid && !isRepairManager(caller)) {
+                        throw new Error('Chỉ KTV được phân công mới có thể báo chưa nhận linh kiện.');
+                    }
+                    const line = parts[lineIndex];
+                    if (!isSelectedRepairPart(line) || !line.receptionHandedOverAt || line.technicianReceivedAt) {
+                        throw new Error('Linh kiện không ở trạng thái chờ KTV nhận.');
+                    }
+                    const { receptionHandedOverAt: _handoverAt, receptionHandedOverBy: _handoverBy, ...lineWithoutHandover } = line;
+                    parts[lineIndex] = {
+                        ...lineWithoutHandover,
+                        technicianReceiptRejectedAt: arrayTimestampValue(),
+                        technicianReceiptRejectedBy: caller.uid,
+                    };
+                } else if (cmd.type === 'confirm_return_received') {
+                    const { partLineId } = cmd;
+                    const lineIndex = parts.findIndex(p => p.partLineId === partLineId);
+                    if (lineIndex === -1) throw new Error('Part line not found');
+                    if (ticket.staff?.assignedTechnician === caller.uid && !isRepairManager(caller)) {
+                        throw new Error('Tiếp nhận hoặc Quản lý phải xác nhận đã nhận lại linh kiện hoàn kho.');
+                    }
+                    const line = parts[lineIndex];
+                    if (!line.returnedToReceptionPendingAt || line.returnedToReceptionReceivedAt) {
+                        throw new Error('Linh kiện này không có yêu cầu hoàn lại đang chờ xác nhận.');
+                    }
+                    const reservedQuantity = getReservedQuantity(line);
+                    if (line.productId && reservedQuantity > 0) {
+                        await getProduct(line.productId);
+                        updateProductHeld(line.productId, -reservedQuantity);
+                    }
+                    parts[lineIndex] = {
+                        ...line,
+                        status: REPAIR_PART_STATUS.REJECTED,
+                        reservedQuantity: 0,
+                        returnedToReceptionReceivedAt: arrayTimestampValue(),
+                        returnedToReceptionReceivedBy: caller.uid,
+                    };
                 } else {
                     throw new Error(`Unknown command type: ${cmd.type}`);
                 }
@@ -370,7 +464,7 @@ export const POST = withApi({
             const partsCost = selectedParts.reduce((sum, p) => sum + ((p.unitPriceAtUse || 0) * p.quantity), 0);
 
             const currentPayment = ticket.payment || {};
-            const laborCost = currentPayment.laborCost || 0;
+            const laborCost = getRepairIssueLaborCost(ticket.issues, parts, Number(currentPayment.laborCost) || 0);
             const additionalFees = currentPayment.additionalFees || 0;
             const discountAmount = currentPayment.discountAmount || 0;
 
@@ -379,6 +473,7 @@ export const POST = withApi({
             const paymentUpdate = {
                 ...currentPayment,
                 partsCost,
+                laborCost,
                 amount
             };
 
@@ -388,6 +483,79 @@ export const POST = withApi({
                 version: (ticket.version || 0) + 1,
                 updatedAt: FieldValue.serverTimestamp()
             };
+
+            const getOriginalPartName = (partLineId?: string) => {
+                const originalLine = (ticket.parts || []).find(part => part.partLineId === partLineId);
+                return originalLine?.productName || originalLine?.name || originalLine?.partName || 'Linh kiện';
+            };
+            const getCommandPartName = (cmd: RepairPartCommand) => {
+                if (cmd.productId) {
+                    const product = updatedProductRefs.get(cmd.productId)?.data;
+                    const productName = String(product?.name || '').trim();
+                    if (productName) return productName;
+                }
+                return cmd.customName?.trim() || 'Linh kiện';
+            };
+            const auditEvents = cmdList.flatMap((cmd) => {
+                if (cmd.type === 'add_selected') {
+                    return [{
+                        eventType: 'part_selected',
+                        status: ticket.status,
+                        timestamp: Date.now(),
+                        by: caller.uid,
+                        partName: getCommandPartName(cmd),
+                    }];
+                }
+                if (cmd.type === 'request_part') {
+                    return [{
+                        eventType: 'part_requested',
+                        status: ticket.status,
+                        timestamp: Date.now(),
+                        by: caller.uid,
+                        partName: getCommandPartName(cmd),
+                    }];
+                }
+                if (cmd.type === 'confirm_technician_received') {
+                    return [{
+                        eventType: 'part_received_by_technician',
+                        status: ticket.status,
+                        timestamp: Date.now(),
+                        by: caller.uid,
+                        partLineId: cmd.partLineId || null,
+                        partName: getOriginalPartName(cmd.partLineId),
+                    }];
+                }
+                if (cmd.type === 'handover_to_technician') {
+                    return [{ eventType: 'part_handed_over_to_technician', status: ticket.status, timestamp: Date.now(), by: caller.uid, partLineId: cmd.partLineId || null, partName: getOriginalPartName(cmd.partLineId) }];
+                }
+                if (cmd.type === 'technician_not_received') {
+                    return [{ eventType: 'part_handover_declined', status: ticket.status, timestamp: Date.now(), by: caller.uid, partLineId: cmd.partLineId || null, partName: getOriginalPartName(cmd.partLineId) }];
+                }
+                if (cmd.type === 'remove_line' || cmd.type === 'reject_request') {
+                    return [{
+                        eventType: cmd.type === 'remove_line' ? 'part_selection_cancelled' : 'part_request_rejected',
+                        status: ticket.status,
+                        timestamp: Date.now(),
+                        by: caller.uid,
+                        partLineId: cmd.partLineId || null,
+                        partName: getOriginalPartName(cmd.partLineId),
+                    }];
+                }
+                if (cmd.type === 'confirm_return_received') {
+                    return [{
+                        eventType: 'part_return_received',
+                        status: ticket.status,
+                        timestamp: Date.now(),
+                        by: caller.uid,
+                        partLineId: cmd.partLineId || null,
+                        partName: getOriginalPartName(cmd.partLineId),
+                    }];
+                }
+                return [];
+            });
+            if (auditEvents.length > 0) {
+                updateData.statusTimeline = FieldValue.arrayUnion(...auditEvents);
+            }
 
             if (partsLockedAt) {
                 updateData.partsLockedAt = partsLockedAt;

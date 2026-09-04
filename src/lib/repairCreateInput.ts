@@ -1,12 +1,20 @@
 import { Timestamp } from 'firebase-admin/firestore';
 import type { PaymentHistoryEntry } from '@/lib/types';
 
+export type InitialRepairPartInput = {
+    productId: string;
+    issueId: string;
+    quantity: number;
+};
+
 const SERVER_MANAGED_REPAIR_FIELDS = [
     'createdAt',
     'updatedAt',
     'status',
     'statusTimeline',
     'version',
+    'parts',
+    'partsLockedAt',
     'pendingTechnicianTransfer',
     'paymentHistory',
 ] as const;
@@ -43,6 +51,29 @@ export function normalizeRepairPaymentHistory(value: unknown): PaymentHistoryEnt
     });
 }
 
+export function normalizeInitialRepairParts(value: unknown): InitialRepairPartInput[] {
+    if (value === undefined || value === null) return [];
+    if (!Array.isArray(value)) throw new Error('Danh sách linh kiện ban đầu không hợp lệ.');
+
+    const parts = new Map<string, InitialRepairPartInput>();
+    for (const [index, raw] of value.entries()) {
+        if (!raw || typeof raw !== 'object') {
+            throw new Error(`Linh kiện ban đầu #${index + 1} không hợp lệ.`);
+        }
+        const item = raw as Record<string, unknown>;
+        const productId = typeof item.productId === 'string' ? item.productId.trim() : '';
+        const issueId = typeof item.issueId === 'string' ? item.issueId.trim() : '';
+        const quantity = Math.floor(Number(item.quantity) || 0);
+        if (!productId || !issueId || quantity <= 0) {
+            throw new Error(`Linh kiện ban đầu #${index + 1} thiếu sản phẩm, lỗi sửa chữa hoặc số lượng.`);
+        }
+        const key = `${productId}\u0000${issueId}`;
+        const existing = parts.get(key);
+        parts.set(key, { productId, issueId, quantity: (existing?.quantity || 0) + quantity });
+    }
+    return [...parts.values()];
+}
+
 export function buildSafeRepairCreateBody(body: Record<string, unknown>, paymentHistory: PaymentHistoryEntry[] | undefined) {
     const safeBody = { ...body };
     for (const field of SERVER_MANAGED_REPAIR_FIELDS) {
@@ -51,5 +82,6 @@ export function buildSafeRepairCreateBody(body: Record<string, unknown>, payment
     if (paymentHistory) {
         safeBody.paymentHistory = paymentHistory;
     }
+    delete safeBody.initialParts;
     return safeBody;
 }

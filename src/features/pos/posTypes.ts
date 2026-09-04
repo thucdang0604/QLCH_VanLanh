@@ -64,7 +64,7 @@ export interface RepairTicketInfo {
     primaryContactValue?: string;
     deviceModel: string;
     status: string;
-    parts: { productName: string; partType?: string; unitPriceAtUse?: number; status?: string; quantity?: number }[];
+    parts: { productName: string; partType?: string; issueId?: string; unitPriceAtUse?: number; status?: string; quantity?: number }[];
     serviceName?: string;
     categoryPath?: string[];
     paymentAmount: number;
@@ -72,7 +72,7 @@ export interface RepairTicketInfo {
     paymentStatus: string;
     paymentOutstandingOrderId?: string;
     gifts?: string[];
-    issues?: { label?: string; estimatedPrice?: number; categoryPath?: string[]; serviceName?: string; serviceId?: string }[];
+    issues?: { id: string; label: string; estimatedPrice: number; status: 'pending' | 'resolved' | 'unresolved'; billingMode?: 'service_only' | 'parts_only' | 'parts_and_service' | 'free'; categoryPath?: string[]; serviceName?: string; serviceId?: string }[];
 }
 
 export interface RepairShippingDraft {

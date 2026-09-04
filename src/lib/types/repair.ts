@@ -3,13 +3,25 @@ import type { ContactMethod, ContactMethodType } from './contact';
 
 export type RepairStatus = string; // Changed from union to string to support dynamic statuses in DB
 
+/**
+ * The business meaning of a terminal workflow node.  This deliberately stays
+ * separate from the node ID: stores are free to rename or replace statuses
+ * without changing the handover workflow in code.
+ */
+export type WorkflowTerminalAction = 'handover' | 'refund' | 'close';
+export type RepairWorkflowActor = 'reception' | 'technician' | 'manager';
+
 export interface WorkflowNode {
     id: string;
     label: string;
     color: string;
     allowedNext: string[];
+    /** Optional permissions for each outgoing edge; omitted keeps legacy behavior. */
+    transitionActors?: Partial<Record<string, RepairWorkflowActor[]>>;
     allowedFeatures?: string[];
     isTerminal?: boolean;
+    /** Required only for terminal nodes that need a settlement action. */
+    terminalAction?: WorkflowTerminalAction;
     /** Legacy field retained for lossless migration; runtime uses allowedNext only. */
     next?: string;
 }
@@ -46,7 +58,7 @@ export interface StatusTimelineEntry {
     at?: FirestoreDateValue;
     durationInMinutes?: number;
     // Audit fields for tracking transition and assignments
-    eventType?: 'status_transition' | 'technician_assigned' | 'transfer_requested' | 'transfer_accepted' | 'transfer_rejected' | 'transfer_cancelled' | 'manager_override' | 'warranty_created';
+    eventType?: 'status_transition' | 'technician_assigned' | 'transfer_requested' | 'transfer_accepted' | 'transfer_rejected' | 'transfer_cancelled' | 'manager_override' | 'warranty_created' | 'customer_approved' | 'customer_declined' | 'part_selected' | 'part_requested' | 'part_received_by_technician' | 'part_return_received' | 'checklist_updated' | 'diagnosis_updated' | 'part_handed_over_to_technician' | 'part_handover_declined' | 'part_selection_cancelled' | 'part_request_rejected' | 'inbound_device_received';
     fromStatus?: string;
     toStatus?: string;
     actorId?: string;
@@ -61,6 +73,8 @@ export interface StatusTimelineEntry {
     toTechnicianName?: string;
     by?: string;
     note?: string | null;
+    partLineId?: string | null;
+    partName?: string;
     isOverride?: boolean;
     warrantyTicketId?: string;
     claimedPartsSnapshot?: {
@@ -88,6 +102,8 @@ export interface DeviceChecklist {
     historyOtherNote?: string;
 }
 
+export type RepairIssueBillingMode = 'service_only' | 'parts_only' | 'parts_and_service' | 'free';
+
 export interface RepairIssue {
     id: string;
     label: string;
@@ -97,6 +113,11 @@ export interface RepairIssue {
     serviceName?: string;
     /** Concrete service record selected during intake; enables its business links. */
     serviceId?: string;
+    /**
+     * Determines whether the issue's estimated price is billed as service work.
+     * Parts are always billed from their own immutable price snapshots.
+     */
+    billingMode?: RepairIssueBillingMode;
 }
 
 // Sản phẩm quà tặng kèm khi bàn giao
@@ -113,6 +134,8 @@ export interface RepairTicket {
     version?: number; // Dùng cho Optimistic Locking để tránh ghi đè dữ liệu
     partsLockedAt?: FirestoreDateValue; // Thời điểm khoá linh kiện
     appointmentId?: string;
+    /** How the device reaches the shop; send_to_store may exist without a web appointment. */
+    appointmentIntakeMethod?: 'walk_in' | 'send_to_store' | string | null;
     workflowConfigId?: string; // Tùy chỉnh workflow
     categoryPath?: string[];
     serviceName?: string;
@@ -148,8 +171,25 @@ export interface RepairTicket {
     issues?: RepairIssue[];     // Support multiple issues
     serviceReflection?: string; // Phản ánh dịch vụ
     gifts?: string[];           // Quà tặng kèm
+    /**
+     * Audit record written by reception after discussing the repair quote with
+     * the customer. The old approved* fields remain so existing documents and
+     * printed/audit consumers stay backward compatible.
+     */
+    customerApproval?: {
+        decision?: 'approved' | 'declined';
+        respondedAt?: FirestoreDateValue;
+        respondedBy?: string;
+        respondedByName?: string;
+        approvedAt?: FirestoreDateValue;
+        approvedBy?: string;
+        approvedByName?: string;
+        note?: string;
+    };
     parts?: {
         partLineId?: string;
+        /** The diagnosed issue this exact part is intended to resolve. */
+        issueId?: string;
         productId?: string;
         productName: string;
         name?: string;
@@ -157,6 +197,19 @@ export interface RepairTicket {
         quality: string;
         quantity: number;
         reservedQuantity?: number; // Số lượng đã giữ trong kho cho dòng sửa chữa
+        /** KTV confirms the physical item was received from reception. */
+        receptionHandedOverAt?: FirestoreDateValue;
+        receptionHandedOverBy?: string;
+        /** KTV explicitly reports that a reception handover was not received. */
+        technicianReceiptRejectedAt?: FirestoreDateValue;
+        technicianReceiptRejectedBy?: string;
+        technicianReceivedAt?: FirestoreDateValue;
+        technicianReceivedBy?: string;
+        /** KTV has returned this unused item; reception must acknowledge it. */
+        returnedToReceptionPendingAt?: FirestoreDateValue;
+        returnedToReceptionBy?: string;
+        returnedToReceptionReceivedAt?: FirestoreDateValue;
+        returnedToReceptionReceivedBy?: string;
         /** Time this line was converted from a stock hold to actual stock usage. */
         inventoryDeductedAt?: FirestoreDateValue;
         warrantyPolicyId?: string;
@@ -220,6 +273,29 @@ export interface RepairTicket {
         shippingAdvanceOrderId?: string;
         note?: string;
         createdAt?: FirestoreDateValue;
+        updatedAt?: FirestoreDateValue;
+    };
+    /** Shop-paid inbound freight when a customer sends a device to the shop. */
+    inboundShipping?: {
+        status: 'awaiting_arrival' | 'received' | 'cancelled';
+        /** Who settled the carrier fee when the device physically arrived. */
+        settlementType?: 'shop_paid' | 'customer_paid';
+        paidAmount: number;
+        customerPaidAmount?: number;
+        lastExpenseId?: string;
+        lastPaymentMethod?: 'CASH' | 'BANK' | 'CUSTOMER';
+        lastPaidBy?: string;
+        lastPaidByName?: string;
+        carrierName?: string;
+        trackingNumber?: string;
+        note?: string;
+        receivedAt?: FirestoreDateValue;
+        receivedBy?: string;
+        receivedByName?: string;
+        /** Reception completed the physical device/issue information after arrival. */
+        intakeCompletedAt?: FirestoreDateValue;
+        intakeCompletedBy?: string;
+        intakeCompletedByName?: string;
         updatedAt?: FirestoreDateValue;
     };
     staff: {

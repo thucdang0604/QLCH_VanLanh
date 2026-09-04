@@ -7,6 +7,10 @@ export type CommissionCalculationOptions = {
     activeRules?: CommissionRule[];
     productMap?: Record<string, Product>;
     skipRevenueAggregate?: boolean;
+    repairRecipients?: {
+        technician?: boolean;
+        seller?: boolean;
+    };
 };
 
 export type CommissionCalculationResult = {
@@ -107,6 +111,28 @@ export function getCommissionRecipient(order: Order): { uid: string; displayName
     return null; // Không trả hoa hồng nếu chưa assign
 }
 
+export function getRepairCommissionRecipients(
+    repair: RepairTicket,
+    enabled: CommissionCalculationOptions['repairRecipients'] = { technician: true },
+): Array<{ uid: string; displayName: string }> {
+    const recipients = new Map<string, { uid: string; displayName: string }>();
+
+    if (enabled.technician && repair.staff?.assignedTechnician) {
+        recipients.set(repair.staff.assignedTechnician, {
+            uid: repair.staff.assignedTechnician,
+            displayName: repair.staff.assignedTechnicianName || '',
+        });
+    }
+    if (enabled.seller && repair.staff?.createdBy) {
+        recipients.set(repair.staff.createdBy, {
+            uid: repair.staff.createdBy,
+            displayName: repair.staff.createdByName || '',
+        });
+    }
+
+    return [...recipients.values()];
+}
+
 /**
  * Calculates and saves commissions for an Order or Repair ticket in an Admin SDK Transaction.
  */
@@ -202,10 +228,8 @@ export async function calculateAndSaveCommissionsServer(
             const repair = docData as RepairTicket;
             const rule = findBestRule(rules, 'repair');
             
-            // Repair ticket commission goes to assignedTechnician
-            const techUid = repair.staff?.assignedTechnician;
-            const techName = repair.staff?.assignedTechnicianName;
-            if (!techUid) return { commissionCost: 0 };
+            const recipients = getRepairCommissionRecipients(repair, options.repairRecipients);
+            if (recipients.length === 0) return { commissionCost: 0 };
             
             if (rule) {
                 const baseAmount = safeNumber(repair.payment?.amount) - safeNumber(repair.payment?.giftDiscount);
@@ -214,15 +238,17 @@ export async function calculateAndSaveCommissionsServer(
                 const commissionAmount = calculateCommissionAmount(rule, baseAmount);
 
                 if (commissionAmount && commissionAmount !== 0) {
-                    commissionsToSave.push({
-                        staffId: techUid,
-                        staffName: techName || '',
-                        ruleId: rule.id,
-                        sourceType: 'repair',
-                        sourceId: repair.id,
-                        amount: commissionAmount,
-                        baseAmount: baseAmount,
-                        createdAt: FieldValue.serverTimestamp() as unknown as Commission['createdAt']
+                    recipients.forEach((recipient) => {
+                        commissionsToSave.push({
+                            staffId: recipient.uid,
+                            staffName: recipient.displayName,
+                            ruleId: rule.id,
+                            sourceType: 'repair',
+                            sourceId: repair.id,
+                            amount: commissionAmount,
+                            baseAmount: baseAmount,
+                            createdAt: FieldValue.serverTimestamp() as unknown as Commission['createdAt']
+                        });
                     });
                 }
             }

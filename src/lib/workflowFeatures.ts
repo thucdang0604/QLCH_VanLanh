@@ -20,6 +20,12 @@ export interface WorkflowFeature {
 // Thêm feature mới: chỉ cần thêm 1 object vào đây
 export const WORKFLOW_FEATURES: WorkflowFeature[] = [
     {
+        id: 'requireInboundArrival',
+        label: 'Yêu cầu xác nhận máy gửi đến shop',
+        description: 'Chỉ áp dụng cho phiếu chọn “Khách gửi máy đến shop”: chặn KTV thao tác cho đến khi Tiếp nhận xác nhận máy đã đến và hoàn tất thông tin máy.',
+        scope: ['admin', 'technician'],
+    },
+    {
         id: 'requireChecklist',
         label: 'Yêu cầu test full chức năng (Checklist 8 mục)',
         description: 'Chặn chuyển trạng thái nếu chưa hoàn thành checklist kiểm tra thiết bị',
@@ -32,9 +38,33 @@ export const WORKFLOW_FEATURES: WorkflowFeature[] = [
         scope: ['admin', 'technician'],
     },
     {
+        id: 'requirePartsReceivedByTechnician',
+        label: 'Yêu cầu KTV xác nhận đã nhận từng linh kiện',
+        description: 'Chặn chuyển sang bước sửa chữa nếu bất kỳ linh kiện được chọn nào chưa được KTV xác nhận nhận từ Tiếp nhận.',
+        scope: ['admin', 'technician'],
+    },
+    {
+        id: 'requireReturnedPartsReceived',
+        label: 'Yêu cầu Tiếp nhận xác nhận linh kiện hoàn lại',
+        description: 'Chặn bàn giao khách nếu còn linh kiện KTV trả về nhưng Tiếp nhận chưa xác nhận đã nhận lại.',
+        scope: ['admin'],
+    },
+    {
+        id: 'confirmCustomerResponse',
+        label: 'Xác nhận từ khách hàng',
+        description: 'Chỉ Tiếp nhận xác nhận sau khi đã báo tình trạng và giá. Khi mở sẽ chọn khách đồng ý hoặc không đồng ý sửa.',
+        scope: ['admin'],
+    },
+    {
         id: 'reserveSelectedParts',
         label: 'Giữ tạm linh kiện khi vào trạng thái này',
         description: 'Khi phiếu chuyển vào trạng thái này, hệ thống đối soát và giữ các linh kiện đã chọn để tồn khả dụng giảm chính xác.',
+        scope: ['admin', 'technician'],
+    },
+    {
+        id: 'consumeSelectedParts',
+        label: 'Xuất/xác nhận linh kiện đã chọn khi vào trạng thái này',
+        description: 'Khi phiếu chuyển vào bước này, hệ thống yêu cầu xác nhận linh kiện đã dùng hoặc hoàn trả trước khi chốt tồn kho.',
         scope: ['admin', 'technician'],
     },
     {
@@ -77,6 +107,42 @@ export const WORKFLOW_FEATURES: WorkflowFeature[] = [
         id: 'requireTechnicianNote',
         label: 'Yêu cầu Ghi chú kỹ thuật',
         description: 'Bắt buộc nhập Ghi chú kỹ thuật khi chuyển sang hoặc lưu tại trạng thái này',
+        scope: ['admin', 'technician'],
+    },
+    {
+        id: 'allowTechnicianDiagnosis',
+        label: 'Cho phép KTV cập nhật chẩn đoán',
+        description: 'KTV được thêm/sửa lỗi, taxonomy và giá dự kiến. Dữ liệu này được Tiếp nhận dùng để báo giá khách.',
+        scope: ['technician'],
+    },
+    {
+        id: 'requiresHandover',
+        label: 'Yêu cầu bàn giao/đối soát với khách',
+        description: 'Khi chuyển vào trạng thái này, Admin mở bước bàn giao thay vì chuyển trạng thái trực tiếp.',
+        scope: ['admin'],
+    },
+    {
+        id: 'refundOutcome',
+        label: 'Kết quả hoàn phí',
+        description: 'Bước bàn giao này là hoàn phí cho khách, yêu cầu ghi lý do và xác nhận số tiền hoàn.',
+        scope: ['admin'],
+    },
+    {
+        id: 'recordCompletion',
+        label: 'Ghi nhận hoàn thành vào báo cáo',
+        description: 'Đánh dấu đây là kết quả hoàn thành để thống kê doanh thu/số phiếu theo workflow.',
+        scope: ['admin'],
+    },
+    {
+        id: 'releaseHeldParts',
+        label: 'Hoàn giữ linh kiện khi kết thúc',
+        description: 'Khi vào trạng thái này, giải phóng các linh kiện đã giữ nhưng chưa xuất dùng.',
+        scope: ['admin', 'technician'],
+    },
+    {
+        id: 'countsAsActiveRepair',
+        label: 'Tính vào số ca đang sửa',
+        description: 'Dùng cho chỉ số công việc đang thực hiện của Kỹ thuật viên; không phụ thuộc tên trạng thái.',
         scope: ['admin', 'technician'],
     },
 ];
