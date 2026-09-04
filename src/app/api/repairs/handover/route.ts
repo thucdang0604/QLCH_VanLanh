@@ -5,14 +5,18 @@ import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handle
 import { FieldValue } from 'firebase-admin/firestore';
 import type { RepairTicket } from '@/lib/types';
 import { calculateAndSaveCommissionsServer } from '@/lib/commissionCalcServer';
-import { isSelectedRepairPart, isWarrantyEligibleRepairPart } from '@/lib/repairStatus';
+import { isWarrantyEligibleRepairPart } from '@/lib/repairStatus';
 import { isInventoryConsumedRepairPart } from '@/lib/repairPartConsumption';
+import { isBillableRepairPart } from '@/lib/repairPartBilling';
 import { getConfiguredWorkflow, isHandoverTerminalAction } from '@/lib/repairWorkflowConfig';
 import { fetchFifoLogsForDeduction, executeFifoDeductionsWrites, type FifoDeductionResult, type FifoDeductor } from '@/lib/inventoryFifo';
 import { incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 import { stampRepairWarrantyOnParts } from '@/lib/repairWarrantyRules';
 import { reserveSequentialDocumentIds } from '@/lib/serverDocumentIds';
 import { getE2ERunMetadata } from '@/lib/e2eRunMetadata';
+import { assertInboundArrivalConfirmedForTransition } from '@/lib/repairInboundIntake';
+import { requiresRepairPaymentAtPos } from '@/lib/repairPaymentGate';
+import { getRepairIssueLaborCost } from '@/lib/repairIssuePricing';
 
 type HandoverRequestBody = {
     ticketId?: string;
@@ -129,6 +133,7 @@ export const POST = withApi({
             if (!currentNode || !targetNode) {
                 throw new Error('Trang thai phieu khong ton tai trong workflow dang cau hinh.');
             }
+            assertInboundArrivalConfirmedForTransition(ticket, currentNode);
             const targetTerminalAction = targetNode.terminalAction;
             isCurrentTerminal = currentNode.isTerminal === true;
             isTargetTerminal = targetNode.isTerminal === true;
@@ -154,9 +159,21 @@ export const POST = withApi({
             if (!targetIsAllowed) {
                 throw new Error(`Khong cho phep chuyen tu ${ticket.status} sang ${targetStatus} theo workflow.`);
             }
+            if (requiresRepairPaymentAtPos(ticket, currentNode)) {
+                throw new Error('Phiếu chưa thanh toán. Vui lòng thanh toán tại POS trước khi hoàn tất hoặc bàn giao máy.');
+            }
+
+            if (currentNode.allowedFeatures?.includes('requireReturnedPartsReceived')) {
+                const pendingReturns = (ticket.parts || []).filter(part =>
+                    Boolean(part.returnedToReceptionPendingAt) && !part.returnedToReceptionReceivedAt,
+                );
+                if (pendingReturns.length > 0) {
+                    throw new Error(`Tiếp nhận chưa xác nhận đã nhận lại ${pendingReturns.length} linh kiện hoàn kho.`);
+                }
+            }
 
             // Check if any selected part missing priceConfirmedAt
-            const selectedParts = (ticket.parts || []).filter(isSelectedRepairPart);
+            const selectedParts = (ticket.parts || []).filter(isBillableRepairPart);
             // Parts can be deducted when the repair is completed (before customer handover).
             // Keep them in selectedParts for pricing/warranty, but never deduct inventory twice.
             const partsToDeduct = selectedParts.filter((part) => !isInventoryConsumedRepairPart(part));
@@ -170,8 +187,12 @@ export const POST = withApi({
             const currentPayment = ticket.payment || {} as RepairTicket['payment'];
             const finalAdditionalFees = requestedAdditionalFees ?? (Number(currentPayment.additionalFees) || 0);
             const discountAmount = Number(currentPayment.discountAmount) || 0;
-            const calculatedLaborCost = (ticket.issues || []).reduce((sum, i) => sum + (Number(i.estimatedPrice) || 0), 0);
-            const finalLaborCost = laborCost !== undefined ? Number(laborCost) : (currentPayment.laborCost !== undefined ? currentPayment.laborCost : calculatedLaborCost);
+            const hasIssueLevelPricing = (ticket.issues || []).some(issue => issue.billingMode
+                || selectedParts.some(part => part.issueId === issue.id));
+            const calculatedLaborCost = getRepairIssueLaborCost(ticket.issues, selectedParts, Number(currentPayment.laborCost) || 0);
+            const finalLaborCost = hasIssueLevelPricing
+                ? calculatedLaborCost
+                : laborCost !== undefined ? Number(laborCost) : (currentPayment.laborCost !== undefined ? currentPayment.laborCost : calculatedLaborCost);
             const amount = partsCost + finalLaborCost + finalAdditionalFees - discountAmount;
 
             const updateData: Record<string, unknown> = {

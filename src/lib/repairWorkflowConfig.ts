@@ -1,4 +1,4 @@
-import type { WorkflowNode } from '@/lib/types';
+import type { RepairWorkflowActor, WorkflowNode } from '@/lib/types';
 
 export type RepairWorkflowSettings = {
     repairStatuses?: WorkflowNode[];
@@ -6,18 +6,26 @@ export type RepairWorkflowSettings = {
     workflowSchemaVersion?: number;
 };
 
+export const WORKFLOW_SCHEMA_VERSION = 5;
+
 export type WorkflowNormalizationOptions = {
     /**
      * Version-2 settings did not persist all feature semantics.  Keep this
      * only while reading them; saving from Settings writes the inferred values
-     * explicitly as schema v3.
+     * explicitly as schema v4.
      */
     useLegacyFallback?: boolean;
+    /**
+     * Version-4 workflow documents predate the inbound-device gate. Infer it
+     * only for the former default intake node until Settings saves the feature
+     * explicitly to Firestore as schema v5.
+     */
+    useInboundArrivalFeatureFallback?: boolean;
 };
 
 const REQUIRED_REPAIR_FEATURES: Record<string, string[]> = {
-    cho_tiep_nhan: ['allowAssignTech', 'requireChecklist', 'requireAssignedTechnician'],
-    dang_kiem_tra: ['requireChecklist', 'requireTechnicianNote'],
+    cho_tiep_nhan: ['allowAssignTech', 'requireAssignedTechnician'],
+    dang_kiem_tra: ['requireChecklist', 'requireTechnicianNote', 'allowTechnicianDiagnosis'],
     bao_tinh_trang_va_gia: ['allowPartsSelection'],
     dang_tim_linh_kien: ['allowPartsSelection'],
     da_dat_linh_kien: ['requirePartsReady'],
@@ -29,10 +37,14 @@ const REQUIRED_REPAIR_FEATURES: Record<string, string[]> = {
 
 const REQUIRED_WARRANTY_FEATURES: Record<string, string[]> = {
     bh_tiep_nhan: ['allowAssignTech', 'requireAssignedTechnician'],
-    bh_dang_kiem_tra: ['requireChecklist', 'requireTechnicianNote'],
+    bh_dang_kiem_tra: ['requireChecklist', 'requireTechnicianNote', 'allowTechnicianDiagnosis'],
     bh_dang_sua: ['allowPartsSelection', 'reserveSelectedParts'],
     bh_hoan_tat: ['recordCompletion'],
     bh_refund: ['enableTechnicianCommission', 'releaseHeldParts'],
+};
+
+const LEGACY_INBOUND_ARRIVAL_FEATURES: Record<string, string[]> = {
+    cho_tiep_nhan: ['requireInboundArrival'],
 };
 
 const LEGACY_TERMINAL_ACTIONS: Record<string, NonNullable<WorkflowNode['terminalAction']>> = {
@@ -47,6 +59,22 @@ function unique(values: string[] | undefined): string[] {
     return [...new Set((values ?? []).filter(Boolean))];
 }
 
+const WORKFLOW_ACTORS: RepairWorkflowActor[] = ['reception', 'technician', 'manager'];
+
+function normalizeTransitionActors(node: WorkflowNode, allowedNext: string[]) {
+    const configured = node.transitionActors;
+    if (!configured || typeof configured !== 'object') return undefined;
+
+    const normalized = Object.entries(configured).reduce<Partial<Record<string, RepairWorkflowActor[]>>>((result, [nextId, actors]) => {
+        if (!allowedNext.includes(nextId) || !Array.isArray(actors)) return result;
+        const validActors = [...new Set(actors.filter((actor): actor is RepairWorkflowActor => WORKFLOW_ACTORS.includes(actor as RepairWorkflowActor)))];
+        if (validActors.length > 0) result[nextId] = validActors;
+        return result;
+    }, {});
+
+    return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
 function normalizeNodes(
     workflow: WorkflowNode[] | undefined,
     requiredFeatures: Record<string, string[]>,
@@ -57,14 +85,16 @@ function normalizeNodes(
     return workflow.map(node => {
         const terminalAction = node.terminalAction
             ?? (options.useLegacyFallback !== false ? LEGACY_TERMINAL_ACTIONS[node.id] : undefined);
+        const allowedNext = unique(node.allowedNext);
         const normalized: WorkflowNode = {
             id: node.id,
             label: node.label,
             color: node.color,
-            allowedNext: unique(node.allowedNext),
+            allowedNext,
             allowedFeatures: unique([
                 ...(node.allowedFeatures ?? []),
-                ...(options.useLegacyFallback !== false ? (requiredFeatures[node.id] ?? []) : []),
+                ...(options.useLegacyFallback === true ? (requiredFeatures[node.id] ?? []) : []),
+                ...(options.useInboundArrivalFeatureFallback === true ? (LEGACY_INBOUND_ARRIVAL_FEATURES[node.id] ?? []) : []),
             ]),
             isTerminal: node.isTerminal === true,
         };
@@ -72,6 +102,8 @@ function normalizeNodes(
         // Firestore rejects undefined field values.  Omit optional semantics
         // entirely until the administrator has explicitly configured them.
         if (terminalAction) normalized.terminalAction = terminalAction;
+        const transitionActors = normalizeTransitionActors(node, allowedNext);
+        if (transitionActors) normalized.transitionActors = transitionActors;
         if (typeof node.next === 'string') normalized.next = node.next;
         return normalized;
     });
@@ -85,13 +117,19 @@ export function normalizeWarrantyWorkflow(workflow: WorkflowNode[] | undefined, 
     return normalizeNodes(workflow, REQUIRED_WARRANTY_FEATURES, options);
 }
 
+export function getWorkflowNormalizationOptions(schemaVersion: unknown): WorkflowNormalizationOptions {
+    const version = typeof schemaVersion === 'number' ? schemaVersion : 0;
+    return {
+        useLegacyFallback: version < 4,
+        useInboundArrivalFeatureFallback: version < WORKFLOW_SCHEMA_VERSION,
+    };
+}
+
 export function getConfiguredWorkflow(
     settings: RepairWorkflowSettings,
     ticketType: 'repair' | 'warranty' | undefined
 ): WorkflowNode[] {
-    const options: WorkflowNormalizationOptions = {
-        useLegacyFallback: settings.workflowSchemaVersion !== 3,
-    };
+    const options = getWorkflowNormalizationOptions(settings.workflowSchemaVersion);
     return ticketType === 'warranty'
         ? normalizeWarrantyWorkflow(settings.warrantyStatuses, options)
         : normalizeRepairWorkflow(settings.repairStatuses, options);
@@ -114,6 +152,19 @@ export function getAllowedNextWorkflowNodes(
         .filter((nextId) => nextId !== currentStatusId)
         .map((nextId) => nodesById.get(nextId))
         .filter((node): node is WorkflowNode => Boolean(node));
+}
+
+/**
+ * Resolves the first non-terminal branch from a workflow node. The technician
+ * screen uses this for the single "Bắt đầu kiểm tra" action at intake, without
+ * coupling the behavior to a particular status id or display label.
+ */
+export function getFirstNonTerminalWorkflowTransition(
+    workflow: WorkflowNode[],
+    currentStatusId: string,
+): WorkflowNode | undefined {
+    return getAllowedNextWorkflowNodes(workflow, currentStatusId)
+        .find(node => !node.isTerminal);
 }
 
 /**

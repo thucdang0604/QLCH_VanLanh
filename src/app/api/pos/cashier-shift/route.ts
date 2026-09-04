@@ -3,7 +3,13 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { requirePermission } from '@/lib/apiAuth';
 import { getApiErrorMessage, getApiErrorStatus, type ApiRouteContext, withApi } from '@/lib/api/handler';
 import { getAdminDb } from '@/lib/firebaseAdmin';
-import { readCashierShiftTallyTotals, type CashierShiftTallyTotals } from '@/lib/cashierShiftTallyServer';
+import { toRevenueDateId } from '@/lib/revenueAggregate';
+import {
+    readCashierShiftCashExpenseBreakdown,
+    readCashierShiftTallyTotals,
+    type CashierShiftCashExpenseBreakdown,
+    type CashierShiftTallyTotals,
+} from '@/lib/cashierShiftTallyServer';
 
 type CashierShiftData = FirebaseFirestore.DocumentData & {
     status?: string;
@@ -13,6 +19,7 @@ type CashierShiftData = FirebaseFirestore.DocumentData & {
     bankSalesAmount?: number;
     otherSalesAmount?: number;
     cashExpenseAmount?: number;
+    cashInventoryExpenseAmount?: number;
     bankExpenseAmount?: number;
     otherExpenseAmount?: number;
     openedByName?: string;
@@ -51,17 +58,33 @@ function cashierShiftFailure(error: unknown, context: ApiRouteContext, fallbackS
     return context.error(message, getApiErrorStatus(error, derivedStatus));
 }
 
-function serializeShift(id: string, data: CashierShiftData, liveTotals?: CashierShiftTallyTotals) {
+function serializeShift(
+    id: string,
+    data: CashierShiftData,
+    liveTotals?: CashierShiftTallyTotals,
+    cashExpenseBreakdown?: CashierShiftCashExpenseBreakdown,
+) {
     const openingCashAmount = asAmount(data.openingCashAmount);
     const openingBankAmount = asAmount(data.openingBankAmount);
     const cashSalesAmount = liveTotals ? asAmount(liveTotals.cashSalesAmount) : asAmount(data.cashSalesAmount);
     const bankSalesAmount = liveTotals ? asAmount(liveTotals.bankSalesAmount) : asAmount(data.bankSalesAmount);
     const otherSalesAmount = liveTotals ? asAmount(liveTotals.otherSalesAmount) : asAmount(data.otherSalesAmount);
     const cashExpenseAmount = liveTotals ? asAmount(liveTotals.cashExpenseAmount) : asAmount(data.cashExpenseAmount);
+    const cashInventoryExpenseAmount = liveTotals
+        ? asAmount(liveTotals.cashInventoryExpenseAmount)
+        : asAmount(data.cashInventoryExpenseAmount);
+    // Fall back only for old shifts without an immutable movement ledger.
+    const cashShippingExpenseAmount = cashExpenseBreakdown?.hasCashExpenseMovements
+        ? cashExpenseBreakdown.cashShippingExpenseAmount
+        : Math.max(0, cashExpenseAmount - cashInventoryExpenseAmount);
+    const cashShippingExpenseTodayAmount = cashExpenseBreakdown?.hasCashExpenseMovements
+        ? cashExpenseBreakdown.cashShippingExpenseSinceAmount
+        : cashShippingExpenseAmount;
     const bankExpenseAmount = liveTotals ? asAmount(liveTotals.bankExpenseAmount) : asAmount(data.bankExpenseAmount);
     const otherExpenseAmount = liveTotals ? asAmount(liveTotals.otherExpenseAmount) : asAmount(data.otherExpenseAmount);
     const expectedCashAmount = openingCashAmount + cashSalesAmount - cashExpenseAmount;
-    const expectedBankAmount = openingBankAmount + bankSalesAmount - bankExpenseAmount;
+    // Company-bank spending is not a cashier-shift outflow.
+    const expectedBankAmount = openingBankAmount + bankSalesAmount;
 
     return {
         id,
@@ -72,6 +95,9 @@ function serializeShift(id: string, data: CashierShiftData, liveTotals?: Cashier
         bankSalesAmount,
         otherSalesAmount,
         cashExpenseAmount,
+        cashInventoryExpenseAmount,
+        cashShippingExpenseAmount,
+        cashShippingExpenseTodayAmount,
         bankExpenseAmount,
         otherExpenseAmount,
         expectedCashAmount,
@@ -114,12 +140,17 @@ export const GET = withApi({
             historyPromise,
         ]);
         const activeShiftData = activeShift?.data() as CashierShiftData | undefined;
-        const liveTotals = activeShift && activeShiftData && usesShardedTally(activeShiftData)
-            ? await readCashierShiftTallyTotals(db, db, activeShift.id)
-            : undefined;
+        const [liveTotals, cashExpenseBreakdown] = await Promise.all([
+            activeShift && activeShiftData && usesShardedTally(activeShiftData)
+                ? readCashierShiftTallyTotals(db, db, activeShift.id)
+                : Promise.resolve(undefined),
+            activeShift
+                ? readCashierShiftCashExpenseBreakdown(db, activeShift.id, new Date(`${toRevenueDateId(new Date())}T00:00:00+07:00`))
+                : Promise.resolve(undefined),
+        ]);
         return context.json({
             success: true,
-            shift: activeShift ? serializeShift(activeShift.id, activeShift.data(), liveTotals) : null,
+            shift: activeShift ? serializeShift(activeShift.id, activeShift.data(), liveTotals, cashExpenseBreakdown) : null,
             history: historySnap?.docs.map(doc => serializeShift(doc.id, doc.data())) || [],
         });
     });
@@ -169,6 +200,7 @@ export const POST = withApi({
                 bankSalesAmount: 0,
                 otherSalesAmount: 0,
                 cashExpenseAmount: 0,
+                cashInventoryExpenseAmount: 0,
                 bankExpenseAmount: 0,
                 otherExpenseAmount: 0,
                 tallyVersion: 1,
@@ -192,6 +224,7 @@ export const POST = withApi({
                 bankSalesAmount: 0,
                 otherSalesAmount: 0,
                 cashExpenseAmount: 0,
+                cashInventoryExpenseAmount: 0,
                 bankExpenseAmount: 0,
                 otherExpenseAmount: 0,
                 tallyVersion: 1,
@@ -258,10 +291,13 @@ export const PATCH = withApi({
             const bankSalesAmount = liveTotals ? liveTotals.bankSalesAmount : asAmount(shiftData.bankSalesAmount);
             const otherSalesAmount = liveTotals ? liveTotals.otherSalesAmount : asAmount(shiftData.otherSalesAmount);
             const cashExpenseAmount = liveTotals ? liveTotals.cashExpenseAmount : asAmount(shiftData.cashExpenseAmount);
+            const cashInventoryExpenseAmount = liveTotals
+                ? liveTotals.cashInventoryExpenseAmount
+                : asAmount(shiftData.cashInventoryExpenseAmount);
             const bankExpenseAmount = liveTotals ? liveTotals.bankExpenseAmount : asAmount(shiftData.bankExpenseAmount);
             const otherExpenseAmount = liveTotals ? liveTotals.otherExpenseAmount : asAmount(shiftData.otherExpenseAmount);
             const expectedCashAmount = asAmount(shiftData.openingCashAmount) + cashSalesAmount - cashExpenseAmount;
-            const expectedBankAmount = asAmount(shiftData.openingBankAmount) + bankSalesAmount - bankExpenseAmount;
+            const expectedBankAmount = asAmount(shiftData.openingBankAmount) + bankSalesAmount;
 
             tx.update(activeDoc.ref, {
                 status: 'closed',
@@ -269,6 +305,7 @@ export const PATCH = withApi({
                 bankSalesAmount,
                 otherSalesAmount,
                 cashExpenseAmount,
+                cashInventoryExpenseAmount,
                 bankExpenseAmount,
                 otherExpenseAmount,
                 expectedCashAmount,
@@ -295,6 +332,7 @@ export const PATCH = withApi({
                     bankSalesAmount,
                     otherSalesAmount,
                     cashExpenseAmount,
+                    cashInventoryExpenseAmount,
                     bankExpenseAmount,
                     otherExpenseAmount,
                     closedBy: caller.uid,

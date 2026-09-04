@@ -5,6 +5,7 @@ import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handle
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { isRepairManager } from '@/lib/repairAccess';
 import { getConfiguredWorkflow } from '@/lib/repairWorkflowConfig';
+import { assertInboundArrivalConfirmedForTransition } from '@/lib/repairInboundIntake';
 
 const CHECKLIST_KEYS = new Set(['body', 'screen', 'touch', 'camera', 'speaker', 'connectivity', 'battery', 'biometric']);
 const CHECKLIST_VALUES = new Set(['', 'OK', 'Trầy', 'Nứt', 'Móp', 'Lỗi', 'Không có']);
@@ -73,6 +74,15 @@ export const POST = withApi({
             }
             if (currentNode.isTerminal) {
                 throw new Error('Phieu da khoa checklist o trang thai hien tai.');
+            }
+
+            assertInboundArrivalConfirmedForTransition(ticket, currentNode);
+
+            // The first node is the intake stage in a dynamic workflow. KTV
+            // must first move the ticket into its technical step; checklist
+            // work is unavailable while the ticket is still waiting intake.
+            if (ticket.staff?.assignedTechnician === caller.uid && workflow[0]?.id === currentNode.id) {
+                throw new Error('KTV cần bấm Bắt đầu kiểm tra trước khi cập nhật checklist.');
             }
 
             if (ticket.version !== undefined && ticket.version !== body.ticketVersion) {

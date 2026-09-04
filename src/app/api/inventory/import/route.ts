@@ -11,6 +11,16 @@ import { applyProductImport, assertStockCoversHeld, planRepairImportAllocation }
 import { incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 import { reserveSequentialDocumentIdGroups } from '@/lib/serverDocumentIds';
 import { getApiErrorStatus, withApi } from '@/lib/api/handler';
+import {
+    assertCashierShiftExpenseActor,
+    assertCashierShiftHasSufficientCash,
+    getCashierShiftAvailableCash,
+    queueCashierShiftCashExpenseGuard,
+    queueCashierShiftTally,
+    readCashierShiftCashGuard,
+    readCashierShiftTallyTotals,
+} from '@/lib/cashierShiftTallyServer';
+import { allocateInboundFreightByValue } from '@/lib/inventoryFreightAllocation';
 
 type RepairLine = NonNullable<RepairTicket['parts']>[number];
 type ReceiptItem = ImportReceiptItem & {
@@ -171,6 +181,9 @@ export const POST = withApi({
         const requestedPaymentMethod = action === 'complete_import'
             ? normalizeImportPaymentMethod(body.paymentMethod)
             : null;
+        if (requestedPaymentMethod === 'cash') {
+            await requirePermission(request, 'manage_cashier_expenses');
+        }
 
         const db = getAdminDb();
 
@@ -208,6 +221,37 @@ export const POST = withApi({
             }
 
             const receipt = receiptSnap.data() as ReceiptData;
+            const pendingFreightPromise = action === 'complete_import'
+                ? tx.get(db.collection('inventory_freight_expenses')
+                    .where('importReceiptId', '==', receiptId)
+                    .where('status', '==', 'pending_allocation'))
+                : Promise.resolve(null);
+            const activeCashierShiftPromise = requestedPaymentMethod === 'cash'
+                ? (async () => {
+                    const lockSnap = await tx.get(db.collection('system_counters').doc('active_cashier_shift'));
+                    const activeShiftId = typeof lockSnap.data()?.activeShiftId === 'string'
+                        ? String(lockSnap.data()?.activeShiftId)
+                        : '';
+                    if (!activeShiftId) throw new Error('Vui lòng mở ca thu ngân trước khi thanh toán tiền mặt.');
+                    const shiftSnap = await tx.get(db.collection('cashier_shifts').doc(activeShiftId));
+                    if (!shiftSnap.exists || shiftSnap.data()?.status !== 'open') {
+                        throw new Error('Ca thu ngân đang mở không hợp lệ. Vui lòng tải lại POS.');
+                    }
+                    const shiftData = shiftSnap.data() || {};
+                    assertCashierShiftExpenseActor(shiftData, caller.uid);
+                    const tallyTotals = Number(shiftData.tallyVersion) >= 1
+                        ? await readCashierShiftTallyTotals(tx, db, activeShiftId)
+                        : {
+                            cashSalesAmount: Number(shiftData.cashSalesAmount) || 0,
+                            cashExpenseAmount: Number(shiftData.cashExpenseAmount) || 0,
+                        };
+                    await readCashierShiftCashGuard(tx, db, activeShiftId);
+                    return {
+                        id: activeShiftId,
+                        availableCash: getCashierShiftAvailableCash(shiftData.openingCashAmount, tallyTotals),
+                    };
+                })()
+                : Promise.resolve(null);
 
             if (receipt.version !== undefined && receipt.version !== receiptVersion) {
                 throw new Error('Dữ liệu phiếu nhập đã bị thay đổi (Version mismatch). Vui lòng tải lại trang.');
@@ -381,6 +425,7 @@ export const POST = withApi({
 
             try {
                 await loadRelatedDocuments();
+                await activeCashierShiftPromise;
             } catch (error) {
                 await completionReservation?.reservedIdGroupsPromise.catch(() => undefined);
                 throw error;
@@ -531,6 +576,21 @@ export const POST = withApi({
                     reserveIdsStartedAt,
                     reservedIdGroupsPromise,
                 } = completion;
+                const pendingFreightSnap = await pendingFreightPromise;
+                const activeCashierShift = await activeCashierShiftPromise;
+                const cashierShiftId = activeCashierShift?.id || '';
+                const pendingFreightDocs = pendingFreightSnap?.docs || [];
+                const freightTotal = pendingFreightDocs.reduce(
+                    (sum, freightDoc) => sum + Math.max(0, Math.round(Number(freightDoc.data().amount) || 0)),
+                    0,
+                );
+                const freightByItem = allocateInboundFreightByValue(
+                    importedItems.map(item => ({ quantity: item.quantity, unitPurchaseCost: item.importPrice })),
+                    freightTotal,
+                );
+                if (paymentMethod === 'cash') {
+                    assertCashierShiftHasSufficientCash(activeCashierShift?.availableCash || 0, totalAmount);
+                }
                 const reservedIdGroups = await reservedIdGroupsPromise;
                 markTransaction('reserveIdsWait');
                 recordTransactionDuration('reserveIdsTotal', Date.now() - reserveIdsStartedAt);
@@ -553,7 +613,7 @@ export const POST = withApi({
                 let inventoryLogAllocationIndex = 0;
 
                 // Calculate all product mutations first. Each product is written once after aggregation.
-                for (const item of importedItems) {
+                for (const [importedItemIndex, item] of importedItems.entries()) {
                     const importedQuantity = Number(item.quantity);
                     const originalTicketId = item.ticketId;
                     const originalPartLineId = item.partLineId;
@@ -623,10 +683,14 @@ export const POST = withApi({
                         delete item.partLineId;
                     }
 
+                    const freightAllocatedAmount = freightByItem[importedItemIndex] || 0;
+                    const landedUnitCost = (item.importPrice * importedQuantity + freightAllocatedAmount) / importedQuantity;
+                    item.freightAllocatedAmount = freightAllocatedAmount;
+                    item.landedUnitCost = landedUnitCost;
                     const nextProductState = applyProductImport(
                         workingProduct,
                         importedQuantity,
-                        item.importPrice,
+                        landedUnitCost,
                         allocation.heldQuantity,
                     );
                     workingProduct.stock = nextProductState.stock;
@@ -704,7 +768,10 @@ export const POST = withApi({
                         lotCode: lotCode,
                         productId: targetProductId,
                         supplierId: item.supplierId || receipt.supplierId || null,
-                        importPrice: item.importPrice,
+                        importPrice: landedUnitCost,
+                        purchaseUnitCost: item.importPrice,
+                        freightAllocatedAmount,
+                        landedUnitCost,
                         initialQuantity: importedQuantity,
                         remainingQuantity: importedQuantity,
                         status: 'active',
@@ -786,17 +853,35 @@ export const POST = withApi({
                     completedAt: FieldValue.serverTimestamp(),
                     completedBy: caller.uid,
                     totalAmount,
+                    freightTotal,
+                    landedTotalAmount: totalAmount + freightTotal,
                     paymentMethod,
+                    ...(paymentMethod === 'cash' ? {
+                        cashierShiftId,
+                        paidBy: caller.uid,
+                        paidByName: caller.displayName || caller.name || caller.uid,
+                    } : {}),
                     version: (receipt.version || 0) + 1,
                     updatedAt: FieldValue.serverTimestamp()
                 });
                 if (paymentMethod === 'debt') {
-                    incrementRevenueAggregates(tx, db, { importDebt: totalAmount, debtExpenses: totalAmount });
+                    incrementRevenueAggregates(tx, db, {
+                        importDebt: totalAmount,
+                        debtExpenses: totalAmount,
+                    });
                 } else {
                     const paidImportDelta = paymentMethod === 'bank'
                         ? { importCost: totalAmount, bankExpenses: totalAmount }
                         : { importCost: totalAmount, cashExpenses: totalAmount };
                     incrementRevenueAggregates(tx, db, paidImportDelta);
+                }
+
+                for (const freightDoc of pendingFreightDocs) {
+                    tx.update(freightDoc.ref, {
+                        status: 'allocated',
+                        allocatedAt: FieldValue.serverTimestamp(),
+                        lotCode,
+                    });
                 }
 
                 // Add Supplier Transaction if debt
@@ -831,6 +916,28 @@ export const POST = withApi({
                         referenceId: receiptId,
                         referenceType: 'import_receipt',
                         createdBy: caller.uid
+                    });
+                }
+
+                if (paymentMethod === 'cash') {
+                    queueCashierShiftTally(tx, db, {
+                        shiftId: cashierShiftId,
+                        operationKey: `${idempotencyKey || receiptId}:inventory-purchase`,
+                        orderId: receiptId,
+                        paymentMethod: 'CASH',
+                        cashAmount: totalAmount,
+                        direction: 'expense',
+                        movementType: 'inventory_purchase',
+                        referenceType: 'import_receipt',
+                        referenceId: receiptId,
+                        note: `Thanh toán phiếu nhập kho ${receiptId}`,
+                        actorId: caller.uid,
+                    });
+                    queueCashierShiftCashExpenseGuard(tx, db, {
+                        shiftId: cashierShiftId,
+                        operationKey: `${idempotencyKey || receiptId}:inventory-purchase`,
+                        actorId: caller.uid,
+                        amount: totalAmount,
                     });
                 }
 

@@ -2,7 +2,7 @@
 
 import {
     AlertCircle, ArrowRight, Ban, Camera, CheckCircle2, Clock, Eye, FileText,
-    Package, Printer, RotateCcw, Smartphone, User, Wrench,
+    Package, Printer, RotateCcw, Smartphone, Truck, User, Wrench,
 } from 'lucide-react';
 import { doc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
@@ -35,6 +35,9 @@ interface RepairTicketBoardProps {
     getWarrantyConfigForType: (type: WarrantyPrintType | null) => WarrantyTemplateConfig | undefined;
     formatPrice: (price: number) => string;
     handleQuickStatus: (ticket: RepairTicket, nextStatus: string) => void | Promise<void>;
+    handleCustomerConfirmation: (ticket: RepairTicket) => void;
+    onHandoverPart: (ticket: RepairTicket, partIndex: number) => void | Promise<void>;
+    onConfirmReturnedPart: (ticket: RepairTicket, partIndex: number) => void | Promise<void>;
     handleOpenModal: (ticket?: RepairTicket) => void;
     openPrint: (ticket: RepairTicket, mode: 'receipt' | 'invoice' | 'warranty', warrantyType?: WarrantyPrintType | null) => void;
     setViewingTicket: (ticket: RepairTicket) => void;
@@ -72,6 +75,42 @@ function getCustomerContactLabel(ticket: RepairTicket) {
         || '';
 }
 
+/**
+ * The workflow owns the visual identity of every status.  A transition button
+ * represents its destination status, so it must use the target node's colour
+ * rather than infer a colour from a terminal action or a feature flag.
+ */
+function getWorkflowTransitionButtonClass(target: WorkflowNode): string {
+    return `border border-current transition-[filter] hover:brightness-95 ${target.color || 'bg-orange-100 text-orange-800'}`;
+}
+
+function needsInboundArrivalOverlay(ticket: RepairTicket, currentNode: WorkflowNode | undefined) {
+    return currentNode?.allowedFeatures?.includes('requireInboundArrival') === true
+        && ticket.appointmentIntakeMethod === 'send_to_store'
+        && !ticket.inboundShipping?.intakeCompletedAt;
+}
+
+function InboundArrivalOverlay({ ticket, onOpen }: { ticket: RepairTicket; onOpen: () => void }) {
+    const shippingSettled = ticket.inboundShipping?.status === 'received';
+    return (
+        <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sky-900 shadow-sm" role="status">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                    <p className="flex items-center gap-1 text-xs font-bold"><Truck size={14} /> Khách gửi máy đến shop</p>
+                    <p className="mt-0.5 text-[11px] font-medium text-sky-800">
+                        {shippingSettled
+                            ? 'Máy đã đến shop. Cập nhật thông tin tiếp nhận để tiếp tục xử lý.'
+                            : 'Xác nhận thanh toán phí ship trước để nhận máy từ người giao hàng.'}
+                    </p>
+                </div>
+                <button type="button" onClick={onOpen} className={shippingSettled ? 'rounded-md border border-sky-300 bg-white px-2 py-1.5 text-[11px] font-bold text-sky-800 hover:bg-sky-100' : 'rounded-md bg-sky-600 px-2 py-1.5 text-[11px] font-bold text-white hover:bg-sky-700'}>
+                    {shippingSettled ? 'Cập nhật thông tin tiếp nhận' : 'Thanh toán ship nhận máy'}
+                </button>
+            </div>
+        </div>
+    );
+}
+
 export function RepairTicketBoard({
     filtered,
     paginatedTickets,
@@ -89,6 +128,9 @@ export function RepairTicketBoard({
     getWarrantyConfigForType,
     formatPrice,
     handleQuickStatus,
+    handleCustomerConfirmation,
+    onHandoverPart,
+    onConfirmReturnedPart,
     handleOpenModal,
     openPrint,
     setViewingTicket,
@@ -120,6 +162,7 @@ export function RepairTicketBoard({
                     const canCreateWarranty = Boolean(st?.isTerminal)
                         && ticket.ticketType !== 'warranty'
                         && (hasActiveWarrantyPart(ticket) || hasWarrantyCandidatePart(ticket) || Boolean(warrantyConfig));
+                    const showInboundArrivalOverlay = needsInboundArrivalOverlay(ticket, st);
 
                     return (
                         <div key={ticket.id} className={`p-4 space-y-3 bg-white hover:bg-gray-50 transition-colors ${ticket.payment?.status === 'unpaid' ? 'bg-red-50/50' : ''}`}>
@@ -134,10 +177,15 @@ export function RepairTicketBoard({
                                     <p className="text-sm font-medium text-gray-900">{ticket.customer.name}</p>
                                     <p className="text-xs text-gray-500">{getCustomerContactLabel(ticket)}</p>
                                 </div>
-                                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold flex-shrink-0 rounded-full border ${st.color}`}>
-                                    <StIcon size={12} /> {st.label}
-                                </span>
+                                {!showInboundArrivalOverlay && (
+                                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold flex-shrink-0 rounded-full border ${st.color}`}>
+                                        <StIcon size={12} /> {st.label}
+                                    </span>
+                                )}
                             </div>
+                            {showInboundArrivalOverlay ? (
+                                <InboundArrivalOverlay ticket={ticket} onOpen={() => setViewingTicket(ticket)} />
+                            ) : (<>
                             <div className="grid grid-cols-2 gap-2 text-sm bg-gray-50/50 p-2.5 rounded-lg border border-gray-100">
                                 <div className="col-span-2 flex items-center gap-1.5">
                                     <Smartphone size={14} className="text-gray-400" />
@@ -177,23 +225,37 @@ export function RepairTicketBoard({
                                 </div>
                             </div>
                             <div className="pt-2 flex flex-col gap-2 border-t border-gray-100">
+                                {ticket.parts?.map((part, partIndex) => part.returnedToReceptionPendingAt && !part.returnedToReceptionReceivedAt ? (
+                                    <button key={part.partLineId || partIndex} type="button" onClick={() => onConfirmReturnedPart(ticket, partIndex)} className="flex items-center justify-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-2 text-xs font-bold text-amber-800">
+                                        <Package size={13} /> Nhận lại LK: {part.productName || part.name || part.partName || 'Linh kiện'}
+                                    </button>
+                                ) : null)}
+                                {ticket.parts?.map((part, partIndex) => isSelectedRepairPart(part) && !part.receptionHandedOverAt && !part.technicianReceivedAt && !part.inventoryDeductedAt && !part.returnedToReceptionPendingAt ? (
+                                    <button key={part.partLineId || partIndex} type="button" onClick={() => onHandoverPart(ticket, partIndex)} className="flex items-center justify-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-2 text-xs font-bold text-blue-700">
+                                        <Package size={13} /> Bàn giao LK: {part.productName || part.name || part.partName || 'Linh kiện'}
+                                    </button>
+                                ) : null)}
                                 <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-hide">
                                     {st?.isTerminal ? (
                                         <span className="inline-flex items-center gap-1 px-3 py-1 bg-gray-100 text-gray-500 rounded-lg text-[10px] font-semibold border border-gray-200">
                                             🔒 {st.label}
                                         </span>
+                                    ) : st.allowedFeatures?.includes('confirmCustomerResponse') ? (
+                                        <button onClick={() => handleCustomerConfirmation(ticket)}
+                                            className="flex whitespace-nowrap items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded border bg-indigo-50 text-indigo-700 border-indigo-200">
+                                            <CheckCircle2 size={12} /> Xác nhận từ khách hàng
+                                        </button>
                                     ) : (
                                         st.allowedNext?.map((nextId: string) => {
                                             const nextCfg = workflow.find(ds => ds.id === nextId);
                                             if (!nextCfg) return null;
-                                            let btnClass = 'bg-orange-50 text-orange-700 border-orange-200';
                                             let icon = <ArrowRight size={12} />;
-                                            if (nextCfg.terminalAction === 'refund' || nextCfg.allowedFeatures?.includes('refundOutcome')) { btnClass = 'bg-red-50 text-red-600 border-red-200'; icon = <RotateCcw size={12} />; }
-                                            else if (nextCfg.terminalAction === 'handover') { btnClass = 'bg-gray-50 text-gray-700 border-gray-200'; icon = <Ban size={12} />; }
-                                            else if (nextCfg.allowedFeatures?.includes('recordCompletion')) { btnClass = 'bg-emerald-50 text-emerald-700 border-emerald-200'; icon = <CheckCircle2 size={12} />; }
+                                            if (nextCfg.terminalAction === 'refund' || nextCfg.allowedFeatures?.includes('refundOutcome')) icon = <RotateCcw size={12} />;
+                                            else if (nextCfg.terminalAction === 'handover') icon = <Ban size={12} />;
+                                            else if (nextCfg.allowedFeatures?.includes('recordCompletion')) icon = <CheckCircle2 size={12} />;
                                             return (
                                                 <button key={nextId} onClick={() => handleQuickStatus(ticket, nextId)}
-                                                    className={`flex whitespace-nowrap items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded border ${btnClass}`}>
+                                                    className={`flex whitespace-nowrap items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded ${getWorkflowTransitionButtonClass(nextCfg)}`}>
                                                     {icon} {nextCfg.label}
                                                 </button>
                                             );
@@ -225,6 +287,7 @@ export function RepairTicketBoard({
                                     )}
                                 </div>
                             </div>
+                            </>)}
                         </div>
                     );
                 })}
@@ -263,6 +326,7 @@ export function RepairTicketBoard({
                             const canCreateWarranty = Boolean(st?.isTerminal)
                                 && ticket.ticketType !== 'warranty'
                                 && (hasActiveWarrantyPart(ticket) || hasWarrantyCandidatePart(ticket) || Boolean(warrantyConfig));
+                            const showInboundArrivalOverlay = needsInboundArrivalOverlay(ticket, st);
                             return (
                                 <tr key={ticket.id} className={`hover:bg-gray-50/50 transition-colors ${ticket.payment?.status === 'unpaid' ? 'bg-red-50' : ''}`}>
                                     <td className="px-4 py-3 font-mono text-xs text-gray-500">
@@ -277,6 +341,11 @@ export function RepairTicketBoard({
                                         <p className="font-medium text-gray-900 text-sm">{ticket.customer.name}</p>
                                         <p className="text-xs text-gray-500">{getCustomerContactLabel(ticket)}</p>
                                     </td>
+                                    {showInboundArrivalOverlay ? (
+                                        <td colSpan={5} className="p-2">
+                                            <InboundArrivalOverlay ticket={ticket} onOpen={() => setViewingTicket(ticket)} />
+                                        </td>
+                                    ) : (<>
                                     <td className="px-4 py-3">
                                         <div className="flex items-center gap-1.5">
                                             <Smartphone size={14} className="text-gray-400" />
@@ -323,26 +392,27 @@ export function RepairTicketBoard({
                                                 <span className="inline-flex items-center gap-1 px-3 py-1.5 bg-gray-100 text-gray-500 rounded-lg text-[11px] font-semibold border border-gray-200">
                                                     🔒 Đã đóng ({st.label})
                                                 </span>
+                                            ) : st.allowedFeatures?.includes('confirmCustomerResponse') ? (
+                                                <button onClick={() => handleCustomerConfirmation(ticket)}
+                                                    className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-lg transition-colors border bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border-indigo-200">
+                                                    <CheckCircle2 size={12} /> Xác nhận từ khách hàng
+                                                </button>
                                             ) : (
                                                 st.allowedNext?.map((nextId: string) => {
                                                     const nextCfg = workflow.find(ds => ds.id === nextId);
                                                     if (!nextCfg) return null;
 
-                                                    let btnClass = 'bg-orange-50 text-orange-700 hover:bg-orange-100 border-orange-200';
                                                     let icon = <ArrowRight size={12} />;
                                                     if (nextCfg.terminalAction === 'refund' || nextCfg.allowedFeatures?.includes('refundOutcome')) {
-                                                        btnClass = 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100';
                                                         icon = <RotateCcw size={12} />;
                                                     } else if (nextCfg.terminalAction === 'handover') {
-                                                        btnClass = 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100';
                                                         icon = <Ban size={12} />;
                                                     } else if (nextCfg.allowedFeatures?.includes('recordCompletion')) {
-                                                        btnClass = 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100';
                                                         icon = <CheckCircle2 size={12} />;
                                                     }
                                                     return (
                                                         <button key={nextId} onClick={() => handleQuickStatus(ticket, nextId)}
-                                                            className={`flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-lg transition-colors border ${btnClass}`}
+                                                            className={`flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-lg ${getWorkflowTransitionButtonClass(nextCfg)}`}
                                                             title={`Chuyển → ${nextCfg.label}`}>
                                                             {icon}
                                                             {nextCfg.label}
@@ -350,6 +420,16 @@ export function RepairTicketBoard({
                                                     );
                                                 })
                                             )}
+                                            {ticket.parts?.map((part, partIndex) => isSelectedRepairPart(part) && !part.receptionHandedOverAt && !part.technicianReceivedAt && !part.inventoryDeductedAt && !part.returnedToReceptionPendingAt ? (
+                                                <button key={part.partLineId || partIndex} onClick={() => onHandoverPart(ticket, partIndex)} className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-lg border bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100" title={`Bàn giao ${part.productName || 'linh kiện'} cho KTV`}>
+                                                    <Package size={12} /> Bàn giao LK
+                                                </button>
+                                            ) : null)}
+                                            {ticket.parts?.map((part, partIndex) => part.returnedToReceptionPendingAt && !part.returnedToReceptionReceivedAt ? (
+                                                <button key={part.partLineId || partIndex} onClick={() => onConfirmReturnedPart(ticket, partIndex)} className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-lg border bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100" title={`Xác nhận nhận lại ${part.productName || 'linh kiện'} do KTV hoàn`}>
+                                                    <Package size={12} /> Nhận lại LK
+                                                </button>
+                                            ) : null)}
                                             <button onClick={() => setViewingTicket(ticket)}
                                                 className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg" title="Xem chi tiết">
                                                 <Eye size={16} />
@@ -501,6 +581,7 @@ export function RepairTicketBoard({
                                             )}
                                         </div>
                                     </td>
+                                    </>)}
                                 </tr>
                             );
                         })}

@@ -446,3 +446,18 @@ transaction.update(productRef, { stock: increment(-qty), held: increment(-qty) }
 ### Fix 2026-06-30
 - Changed files: `src/app/api/repairs/create/route.ts`.
 - Verification: repair create now normalizes `paymentHistory`, rejects negative/non-finite amounts and invalid types, and computes deposit revenue only from validated entries.
+
+## FEATURE-REP-017: Khách gửi máy và chi ship nhận máy
+- **Status:** implemented-local-validation
+- **Severity:** high
+- **Date:** 2026-09-02
+- **Files:** `src/app/admin/repairs/page.tsx`, `src/features/repairs/RepairEditorModal.tsx`, `src/features/repairs/RepairDetailModal.tsx`, `src/app/api/repairs/inbound-shipping/route.ts`
+### Summary
+- Tiếp nhận có thể tạo phiếu sửa chữa từ cuộc gọi bằng lựa chọn **Khách gửi máy**, tạo `repairTicketId` trước khi máy tới.
+- Phí ship nhận máy được ghi trên chính phiếu: tiền mặt yêu cầu `manage_repairs`, `manage_cashier_expenses`, đúng người mở ca và két đủ tiền; chuyển khoản là chi phí công ty, không chạm ca POS.
+- Mỗi khoản chi có `repairTicketId`, `paidBy`, và (nếu tiền mặt) `cashierShiftId`; vì vậy người tạo phiếu và người chi ở ca sau có thể khác nhau nhưng vẫn truy vết được.
+- Không có nút tạo riêng trên đầu trang: nhân viên chỉ chọn **Khách gửi máy đến shop** trong form tạo phiếu để giữ giao diện gọn.
+- Nhân viên cập nhật tên/SĐT/model/lỗi trước khi chi ship. Giao dịch chi ship có phương thức thanh toán đồng thời xác nhận máy đã đến shop, lưu audit `inbound_device_received`, và mở khóa chuyển trạng thái/POS/bàn giao; không có thao tác xác nhận đến shop riêng.
+### Verification
+- Focused ESLint, `pnpm typecheck`, cashier/repair focused tests, và scoped `git diff --check` — pass.
+- Authenticated browser/Emulator flow remains required before production use.

@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import {
     Wrench, Smartphone, Eye,
     CheckCircle2, Loader2, X,
-    User as UserIcon, ArrowRightLeft, ShieldAlert
+    User as UserIcon, ArrowRightLeft, ShieldAlert, Truck
 } from 'lucide-react';
 import { collection, query, doc, where, orderBy, limit, startAfter, type DocumentSnapshot, type QueryConstraint, type QuerySnapshot } from 'firebase/firestore';
 import { onSnapshot, getDoc, getDocs } from '@/lib/firestoreLogger';
@@ -12,13 +12,14 @@ import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
 import { appConfirm } from '@/lib/appDialog';
 import { isChecklistComplete, areAllPartsReady } from '@/lib/workflowFeatures';
-import type { RepairTicket, Product, WorkflowNode } from '@/lib/types';
+import type { RepairIssue, RepairTicket, Product, WorkflowNode } from '@/lib/types';
 import { toastError, toastSuccess, toastWarning } from '@/lib/toast';
 import { PART_CATEGORY_LABEL, isPartCategory } from '@/lib/constants';
 import { REPAIR_PART_STATUS, isPendingRepairPart, isRepairPartStatus } from '@/lib/repairStatus';
 import { isRepairManager } from '@/lib/repairAccess';
-import { getAllowedNextWorkflowNodes, normalizeRepairWorkflow, normalizeWarrantyWorkflow } from '@/lib/repairWorkflowConfig';
+import { getAllowedNextWorkflowNodes, getFirstNonTerminalWorkflowTransition, getWorkflowNormalizationOptions, normalizeRepairWorkflow, normalizeWarrantyWorkflow } from '@/lib/repairWorkflowConfig';
 import { isSelectedRepairPart } from '@/lib/repairStatus';
+import { getInboundTechnicianHoldMessage } from '@/lib/repairInboundIntake';
 import {
     TechnicianWorkflowModals,
     type TechnicianNoteModal,
@@ -36,6 +37,16 @@ import {
     getRepairServiceIds,
     type ServiceBusinessLink,
 } from '@/lib/serviceRecommendations';
+import {
+    getRepairPartSearchLookupTokens,
+    getScopedRepairPartSearchValues,
+    normalizeRepairPartSearch,
+    productMatchesRepairDeviceModel,
+    productMatchesRepairPartQuality,
+    productMatchesRepairPartSearch,
+    queryTargetsRepairDeviceModel,
+    rankRepairPartSearchResults,
+} from '@/lib/repairPartSearch';
 
 
 const checklistLabels: Record<string, string> = {
@@ -45,6 +56,7 @@ const checklistLabels: Record<string, string> = {
 const CHECKLIST_VALUES = ['OK', 'Trầy', 'Nứt', 'Móp', 'Lỗi', 'Không có'];
 
 const TECHNICIAN_LIVE_PAGE_SIZE = 20;
+const TECHNICIAN_PART_RESULT_LIMIT = 40;
 
 type RepairTimelineEntry = NonNullable<RepairTicket['statusTimeline']>[number];
 
@@ -57,6 +69,8 @@ function getTimelineTimestamp(entry: RepairTimelineEntry): Date {
 }
 
 function getTimelineTitle(entry: RepairTimelineEntry, workflow: WorkflowNode[]): string {
+    const partName = entry.partName || 'linh kiện';
+
     switch (entry.eventType) {
         case 'technician_assigned':
             return `Đã gán cho ${entry.toTechnicianName || 'KTV'}`;
@@ -70,6 +84,24 @@ function getTimelineTitle(entry: RepairTimelineEntry, workflow: WorkflowNode[]):
             return 'Đã hủy yêu cầu chuyển KTV';
         case 'manager_override':
             return `Quản lý chuyển ${entry.fromStatus || 'trạng thái'} → ${entry.toStatus || entry.status}`;
+        case 'diagnosis_updated':
+            return 'KTV đã cập nhật chẩn đoán và giá dự kiến';
+        case 'part_selected':
+            return `KTV đã chọn ${partName} cho phiếu sửa chữa`;
+        case 'part_requested':
+            return `KTV đã yêu cầu ${partName}`;
+        case 'part_handed_over_to_technician':
+            return `Tiếp nhận đã bàn giao ${partName} cho KTV`;
+        case 'part_received_by_technician':
+            return `KTV đã nhận ${partName}`;
+        case 'part_handover_declined':
+            return `KTV báo chưa nhận ${partName}`;
+        case 'part_selection_cancelled':
+            return `Đã bỏ chọn ${partName}`;
+        case 'part_request_rejected':
+            return `Đã hủy yêu cầu ${partName}`;
+        case 'part_return_received':
+            return `Tiếp nhận đã nhận lại ${partName}`;
         default:
             return workflow.find(status => status.id === entry.status)?.label || entry.status;
     }
@@ -89,6 +121,47 @@ function getTechnicianQueryableStatusIds(repairStatuses: WorkflowNode[], warrant
         .filter(status => !status.isTerminal && !isTechnicianHandoffStatus(status))
         .map(status => status.id)
         .filter(Boolean)));
+}
+
+function isAssignedTechnicianAtWorkflowEntry(ticket: RepairTicket, workflow: WorkflowNode[], userId: string | undefined): boolean {
+    return Boolean(userId)
+        && ticket.staff?.assignedTechnician === userId
+        && workflow[0]?.id === ticket.status;
+}
+
+function getTechnicianAllowedNextStatuses(ticket: RepairTicket, workflow: WorkflowNode[], userId: string | undefined, isManager: boolean): WorkflowNode[] {
+    const currentNode = workflow.find(node => node.id === ticket.status);
+    if (getInboundTechnicianHoldMessage(ticket, currentNode)) return [];
+
+    // The technician assignment is more specific than a broad permission.
+    // Some KTV accounts also have management-related permissions.
+    const isAssignedTechnician = ticket.staff?.assignedTechnician === userId;
+    const actor = isAssignedTechnician ? 'technician' : isManager ? 'manager' : 'technician';
+    const allowedNext = getAllowedNextWorkflowNodes(workflow, ticket.status).filter(nextNode => {
+        const allowedActors = currentNode?.transitionActors?.[nextNode.id];
+        return !allowedActors || allowedActors.includes(actor);
+    });
+    const customerDecision = ticket.customerApproval?.decision
+        || (ticket.customerApproval?.approvedAt ? 'approved' : undefined);
+
+    // At the quotation node, KTV must wait for reception to record the
+    // customer's answer. A declined quote can only move to the configured
+    // handover exit; approved work keeps the normal configured branches.
+    if (currentNode?.allowedFeatures?.includes('confirmCustomerResponse')) {
+        if (!customerDecision) return [];
+        if (customerDecision === 'declined') {
+            return allowedNext.filter(node => node.terminalAction === 'handover');
+        }
+    }
+
+    // The first node is the dynamic intake node. An assigned KTV gets one
+    // action here: begin the first non-terminal technical step.
+    if (isAssignedTechnicianAtWorkflowEntry(ticket, workflow, userId)) {
+        const startNode = getFirstNonTerminalWorkflowTransition(workflow, ticket.status);
+        return startNode && allowedNext.some(node => node.id === startNode.id) ? [startNode] : [];
+    }
+
+    return allowedNext;
 }
 
 function getTicketCreatedAtMillis(ticket: RepairTicket): number {
@@ -134,47 +207,6 @@ function buildTechnicianTicketConstraints({
     return constraints;
 }
 
-type PartSearchProduct = Product & {
-    code?: string;
-    model?: string;
-    searchKeywords?: string[];
-};
-
-function normalizePartSearch(value: string): string {
-    return value
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .replace(/đ/gi, 'd')
-        .toLowerCase()
-        .trim();
-}
-
-function productMatchesPartSearch(product: PartSearchProduct, normalizedQuery: string): boolean {
-    const terms = normalizedQuery.split(/\s+/).filter(Boolean);
-    if (terms.length === 0) return false;
-
-    const haystack = normalizePartSearch([
-        product.name,
-        product.code,
-        product.sku,
-        product.productCode,
-        product.barcode,
-        ...(product.qrCodes || []),
-        product.brand,
-        product.model,
-        product.partType,
-        product.category,
-        ...(product.categoryIds || []),
-        ...(product.searchKeywords || []),
-    ].filter(Boolean).join(' '));
-
-    return terms.every(term => haystack.includes(term));
-}
-
-function productMatchesPartQuality(product: Product, selectedQuality: string): boolean {
-    return normalizePartSearch(product.quality || '') === normalizePartSearch(selectedQuality);
-}
-
 export default function TechnicianPage() {
     const { user } = useAuth();
     // Only the first page stays live. Older jobs are loaded on demand and are
@@ -210,7 +242,13 @@ export default function TechnicianPage() {
     const [partSearchResults, setPartSearchResults] = useState<Product[]>([]);
     const [isSearchingParts, setIsSearchingParts] = useState(false);
     const [serviceSuggestedParts, setServiceSuggestedParts] = useState<Product[]>([]);
-    const serviceSuggestionCacheRef = useRef(new Map<string, Product[]>());
+    const [serviceSuggestedCategoryIds, setServiceSuggestedCategoryIds] = useState<string[]>([]);
+    const [serviceSuggestionHint, setServiceSuggestionHint] = useState('');
+    const serviceSuggestionCacheRef = useRef(new Map<string, {
+        products: Product[];
+        categoryIds: string[];
+        hint: string;
+    }>());
     const [isLoadingServiceSuggestions, setIsLoadingServiceSuggestions] = useState(false);
     const [selectedPartQuality, setSelectedPartQuality] = useState('Zin');
     const [customPartName, setCustomPartName] = useState('');
@@ -236,7 +274,7 @@ export default function TechnicianPage() {
     // Suggestions and manual search must use the same quality decision.
     const qualityFilteredServiceSuggestedParts = useMemo(
         () => serviceSuggestedParts
-            .filter(product => productMatchesPartQuality(product, selectedPartQuality))
+            .filter(product => productMatchesRepairPartQuality(product, selectedPartQuality))
             .filter(product => !selectedSuggestedPartLeafCategoryIds.has(product.categoryIds?.at(-1) || ''))
             .slice(0, 10),
         [selectedPartQuality, selectedSuggestedPartLeafCategoryIds, serviceSuggestedParts],
@@ -252,21 +290,41 @@ export default function TechnicianPage() {
 
     const selectedTicketServiceIds = getRepairServiceIds(selectedTicket || {});
     const selectedTicketServiceCategoryIds = getRepairServiceCategoryIds(selectedTicket || {});
-    const selectedTicketServiceKey = [...selectedTicketServiceIds, ...selectedTicketServiceCategoryIds].join('|');
+    const selectedTicketDeviceModel = selectedTicket?.deviceInfo?.model || '';
+    const selectedTicketServiceKey = [
+        ...selectedTicketServiceCategoryIds,
+        ...selectedTicketServiceIds,
+        normalizeRepairPartSearch(selectedTicketDeviceModel),
+    ].join('|');
 
     useEffect(() => {
         let disposed = false;
         const serviceIds = getRepairServiceIds(selectedTicket || {});
         const serviceCategoryIds = getRepairServiceCategoryIds(selectedTicket || {});
-        if (serviceIds.length === 0 && serviceCategoryIds.length === 0) {
+        const clearSuggestions = (hint = '') => {
             setServiceSuggestedParts([]);
+            setServiceSuggestedCategoryIds([]);
+            setServiceSuggestionHint(hint);
             setIsLoadingServiceSuggestions(false);
+        };
+        if (!selectedTicket) {
+            clearSuggestions();
+            return;
+        }
+        if (serviceCategoryIds.length === 0 && serviceIds.length === 0) {
+            clearSuggestions('Phiếu chưa gán danh mục dịch vụ cho lỗi nên không thể gợi ý linh kiện.');
+            return;
+        }
+        if (!selectedTicketDeviceModel.trim()) {
+            clearSuggestions('Phiếu chưa có model thiết bị để lọc linh kiện tương thích.');
             return;
         }
 
         const cachedSuggestions = serviceSuggestionCacheRef.current.get(selectedTicketServiceKey);
         if (cachedSuggestions) {
-            setServiceSuggestedParts(cachedSuggestions);
+            setServiceSuggestedParts(cachedSuggestions.products);
+            setServiceSuggestedCategoryIds(cachedSuggestions.categoryIds);
+            setServiceSuggestionHint(cachedSuggestions.hint);
             setIsLoadingServiceSuggestions(false);
             return;
         }
@@ -274,7 +332,7 @@ export default function TechnicianPage() {
         const loadSuggestions = async () => {
             setIsLoadingServiceSuggestions(true);
             try {
-                const [directServiceSnaps, categoryServiceSnaps] = await Promise.all([
+                const [directServiceSnaps, taxonomyServiceSnaps] = await Promise.all([
                     Promise.all(serviceIds.map(serviceId => getDoc(doc(db, 'services', serviceId)))),
                     Promise.all(serviceCategoryIds.slice(0, 10).map(categoryId => getDocs(query(
                         collection(db, 'services'),
@@ -282,48 +340,100 @@ export default function TechnicianPage() {
                         limit(20),
                     )))),
                 ]);
-                const serviceMap = new Map<string, ServiceBusinessLink>();
+                const serviceMap = new Map<string, ServiceBusinessLink & { device_model?: unknown; isActive?: unknown }>();
                 directServiceSnaps
                     .filter(snapshot => snapshot.exists())
-                    .forEach(snapshot => serviceMap.set(snapshot.id, { id: snapshot.id, ...snapshot.data() } as ServiceBusinessLink));
-                categoryServiceSnaps.forEach(snapshot => snapshot.docs.forEach(serviceDoc => {
-                    const service = { id: serviceDoc.id, ...serviceDoc.data() } as ServiceBusinessLink & { isActive?: boolean };
-                    if (service.isActive !== false) serviceMap.set(serviceDoc.id, service);
+                    .forEach(snapshot => serviceMap.set(snapshot.id, { id: snapshot.id, ...snapshot.data() } as ServiceBusinessLink & { device_model?: unknown; isActive?: unknown }));
+                taxonomyServiceSnaps.forEach(snapshot => snapshot.docs.forEach(serviceDoc => {
+                    const service = { id: serviceDoc.id, ...serviceDoc.data() } as ServiceBusinessLink & { device_model?: unknown; isActive?: unknown };
+                    if (service.isActive !== false) serviceMap.set(service.id, service);
                 }));
-                const services = Array.from(serviceMap.values());
+                const services = Array.from(serviceMap.values()).filter(service => service.isActive !== false);
+                // A repair ticket is classified by its taxonomy. The service
+                // catalog supplies the part-category links for that taxonomy;
+                // model matching happens only after part candidates are read.
                 const categoryIds = getRecommendedPartCategoryIds(services);
                 if (categoryIds.length === 0) {
-                    if (!disposed) setServiceSuggestedParts([]);
+                    if (!disposed) {
+                        const hint = `Chưa có cấu hình liên kết linh kiện cho danh mục sửa chữa và model ${selectedTicketDeviceModel}.`;
+                        serviceSuggestionCacheRef.current.set(selectedTicketServiceKey, { products: [], categoryIds: [], hint });
+                        setServiceSuggestedParts([]);
+                        setServiceSuggestedCategoryIds([]);
+                        setServiceSuggestionHint(hint);
+                    }
                     return;
                 }
-                const productSnaps = await Promise.all(categoryIds.slice(0, 10).map(categoryId => getDocs(query(
-                    collection(db, 'products'),
-                    where('categoryIds', 'array-contains', categoryId),
-                    limit(20),
-                ))));
-                const productMap = new Map<string, Product>();
-                productSnaps.forEach(snapshot => snapshot.docs.forEach(productDoc => {
-                    const product = { id: productDoc.id, ...productDoc.data() } as Product;
-                    if (product.status === 'active' && isPartCategory(product.category, product.categoryIds)) {
-                        productMap.set(productDoc.id, product);
+                const scopedSearchValues = getScopedRepairPartSearchValues(categoryIds, selectedTicketDeviceModel);
+                if (scopedSearchValues.length === 0) {
+                    if (!disposed) {
+                        const hint = 'Không xác định được mã model để tìm linh kiện tương thích.';
+                        serviceSuggestionCacheRef.current.set(selectedTicketServiceKey, { products: [], categoryIds, hint });
+                        setServiceSuggestedParts([]);
+                        setServiceSuggestedCategoryIds(categoryIds);
+                        setServiceSuggestionHint(hint);
                     }
-                }));
-                // Keep candidates for every linked group in memory. Rendering
-                // applies the 10-item cap after hiding a group that is already
-                // selected, allowing the next issue (Pin) to surface at once.
-                const suggestions = filterAvailableCategoryRecommendations(Array.from(productMap.values()), categoryIds);
-                serviceSuggestionCacheRef.current.set(selectedTicketServiceKey, suggestions);
-                if (!disposed) setServiceSuggestedParts(suggestions);
+                    return;
+                }
+                const productSnap = await getDocs(query(
+                    collection(db, 'products'),
+                    where('status', '==', 'active'),
+                    where('searchCategoryKeywords', 'array-contains-any', scopedSearchValues),
+                    limit(TECHNICIAN_PART_RESULT_LIMIT),
+                ));
+                const filterSuggestedProducts = (products: Product[]) => filterAvailableCategoryRecommendations(
+                    products
+                        .filter(product => isPartCategory(product.category, product.categoryIds))
+                        .filter(product => productMatchesRepairDeviceModel(product, selectedTicketDeviceModel)),
+                    categoryIds,
+                );
+                let suggestedProducts = filterSuggestedProducts(
+                    productSnap.docs.map(productDoc => ({ id: productDoc.id, ...productDoc.data() } as Product)),
+                );
+                // Older catalog records may not yet have the combined category
+                // index. Fall back to the regular indexed model lookup and
+                // retain the linked category filter locally; never scan stock.
+                if (suggestedProducts.length === 0) {
+                    const modelTokens = getRepairPartSearchLookupTokens(selectedTicketDeviceModel);
+                    if (modelTokens.length > 0) {
+                        const legacyIndexSnap = await getDocs(query(
+                            collection(db, 'products'),
+                            where('status', '==', 'active'),
+                            where('searchKeywords', 'array-contains-any', modelTokens),
+                            limit(TECHNICIAN_PART_RESULT_LIMIT),
+                        ));
+                        suggestedProducts = filterSuggestedProducts(
+                            legacyIndexSnap.docs.map(productDoc => ({ id: productDoc.id, ...productDoc.data() } as Product)),
+                        );
+                    }
+                }
+                const suggestions = rankRepairPartSearchResults(
+                    suggestedProducts,
+                    selectedTicketDeviceModel,
+                    selectedTicketDeviceModel,
+                );
+                const hint = suggestions.length === 0
+                    ? `Chưa có linh kiện ${selectedTicketDeviceModel} trong nhóm đã liên kết với dịch vụ.`
+                    : '';
+                serviceSuggestionCacheRef.current.set(selectedTicketServiceKey, { products: suggestions, categoryIds, hint });
+                if (!disposed) {
+                    setServiceSuggestedParts(suggestions);
+                    setServiceSuggestedCategoryIds(categoryIds);
+                    setServiceSuggestionHint(hint);
+                }
             } catch (error) {
                 console.error('Failed to load service-linked part suggestions', error);
-                if (!disposed) setServiceSuggestedParts([]);
+                if (!disposed) {
+                    setServiceSuggestedParts([]);
+                    setServiceSuggestedCategoryIds([]);
+                    setServiceSuggestionHint('Không thể tải gợi ý linh kiện. Vui lòng thử lại.');
+                }
             } finally {
                 if (!disposed) setIsLoadingServiceSuggestions(false);
             }
         };
         void loadSuggestions();
         return () => { disposed = true; };
-    }, [selectedTicket, selectedTicketServiceKey]);
+    }, [selectedTicket, selectedTicketDeviceModel, selectedTicketServiceKey]);
 
     const [dynamicStatuses, setDynamicStatuses] = useState<WorkflowNode[]>([]);
     const [warrantyStatuses, setWarrantyStatuses] = useState<WorkflowNode[]>([]);
@@ -345,58 +455,53 @@ export default function TechnicianPage() {
             setPartSearchResults([]);
             return;
         }
+        let disposed = false;
         const timer = setTimeout(async () => {
             setIsSearchingParts(true);
             try {
-                const normalizedQ = normalizePartSearch(partSearchQuery);
-
-                if (!normalizedQ) {
+                const lookupTokens = getRepairPartSearchLookupTokens(partSearchQuery);
+                if (lookupTokens.length === 0) {
                     setPartSearchResults([]);
                     return;
                 }
-
-                const snap = await getDocs(query(
-                    collection(db, 'products'),
-                    where('status', '==', 'active'),
-                    where('searchKeywords', 'array-contains', normalizedQ),
-                    limit(20)
-                ));
-
-                const results = snap.docs
-                    .map(d => ({ id: d.id, ...d.data() } as Product))
-                    .filter(p => isPartCategory(p.category, p.categoryIds))
-                    .filter(p => productMatchesPartQuality(p, selectedPartQuality));
-
-                if (results.length < 10) {
-                    const existingIds = new Set(results.map(p => p.id));
-                    const fallbackSnap = await getDocs(query(
+                const scopedSearchValues = getScopedRepairPartSearchValues(serviceSuggestedCategoryIds, partSearchQuery);
+                const readProducts = async (scoped: boolean) => {
+                    const searchSnapshot = await getDocs(query(
                         collection(db, 'products'),
                         where('status', '==', 'active'),
-                        // Legacy products without searchKeywords still get a
-                        // fallback, but a technician search must stay bounded.
-                        limit(60)
+                        where(scoped ? 'searchCategoryKeywords' : 'searchKeywords', 'array-contains-any', scoped ? scopedSearchValues : lookupTokens),
+                        limit(TECHNICIAN_PART_RESULT_LIMIT),
                     ));
+                    return searchSnapshot.docs.map(item => ({ id: item.id, ...item.data() } as Product));
+                };
+                const filterSearchResults = (products: Product[]) => products
+                    .filter(product => isPartCategory(product.category, product.categoryIds))
+                    .filter(product => productMatchesRepairPartQuality(product, selectedPartQuality))
+                    .filter(product => productMatchesRepairPartSearch(product, partSearchQuery))
+                    .filter(product => !queryTargetsRepairDeviceModel(partSearchQuery, selectedTicketDeviceModel)
+                        || productMatchesRepairDeviceModel(product, selectedTicketDeviceModel));
 
-                    fallbackSnap.docs
-                        .map(d => ({ id: d.id, ...d.data() } as Product))
-                        .filter(p => !existingIds.has(p.id))
-                        .filter(p => isPartCategory(p.category, p.categoryIds))
-                        .filter(p => productMatchesPartQuality(p, selectedPartQuality))
-                        .filter(p => productMatchesPartSearch(p, normalizedQ))
-                        .forEach(p => results.push(p));
+                let results = filterSearchResults(await readProducts(scopedSearchValues.length > 0));
+                // A service link is a strong first scope, not a restriction on
+                // a KTV who discovered an additional issue. The fallback stays
+                // indexed and bounded; it never scans arbitrary active stock.
+                if (results.length === 0 && scopedSearchValues.length > 0) {
+                    results = filterSearchResults(await readProducts(false));
                 }
-
-                setPartSearchResults(results.slice(0, 10));
+                if (!disposed) setPartSearchResults(rankRepairPartSearchResults(results, partSearchQuery, selectedTicketDeviceModel).slice(0, 10));
             } catch (err) {
                 console.error(err);
             } finally {
-                setIsSearchingParts(false);
+                if (!disposed) setIsSearchingParts(false);
             }
         }, 400);
-        return () => clearTimeout(timer);
-    }, [partSearchQuery, selectedPartQuality]);
+        return () => {
+            disposed = true;
+            clearTimeout(timer);
+        };
+    }, [partSearchQuery, selectedPartQuality, selectedTicketDeviceModel, serviceSuggestedCategoryIds]);
 
-    const handleAddPart = async (ticket: RepairTicket, product: Product) => {
+    const handleAddPart = async (ticket: RepairTicket, product: Product, issueId?: string) => {
         try {
             const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
             const res = await fetch('/api/repairs/confirm-parts', {
@@ -412,6 +517,7 @@ export default function TechnicianPage() {
                     command: {
                         type: 'add_selected',
                         productId: product.id,
+                        issueId,
                         quantity: 1
                     }
                 })
@@ -435,7 +541,7 @@ export default function TechnicianPage() {
         }
     };
 
-    const handleRequestPart = async (ticket: RepairTicket, product: Product) => {
+    const handleRequestPart = async (ticket: RepairTicket, product: Product, issueId?: string) => {
         try {
             const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
             const res = await fetch('/api/repairs/confirm-parts', {
@@ -451,6 +557,7 @@ export default function TechnicianPage() {
                     command: {
                         type: 'request_part',
                         productId: product.id,
+                        issueId,
                         quantity: 1
                     }
                 })
@@ -468,7 +575,7 @@ export default function TechnicianPage() {
         }
     };
 
-    const handleAddCustomPart = async (ticket: RepairTicket) => {
+    const handleAddCustomPart = async (ticket: RepairTicket, issueId?: string) => {
         if (!customPartName.trim()) return;
 
         try {
@@ -489,6 +596,7 @@ export default function TechnicianPage() {
                         type: 'request_part',
                         productId: '',
                         customName: exactName,
+                        issueId,
                         quality: selectedPartQuality,
                         quantity: 1
                     }
@@ -544,11 +652,61 @@ export default function TechnicianPage() {
         }
     };
 
+    const handleConfirmPartReceived = async (ticket: RepairTicket, partIndex: number) => {
+        try {
+            const partLineId = ticket.parts?.[partIndex]?.partLineId;
+            if (!partLineId) throw new Error('Linh kiện này chưa có mã dòng. Vui lòng tải lại phiếu.');
+            const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
+            const res = await fetch('/api/repairs/confirm-parts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
+                body: JSON.stringify({
+                    ticketId: ticket.id,
+                    ticketVersion: ticket.version || 0,
+                    operationKey: crypto.randomUUID(),
+                    command: { type: 'confirm_technician_received', partLineId, quantity: 1 },
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Không thể xác nhận nhận linh kiện.');
+            setSelectedTicket({ ...ticket, parts: data.parts, payment: data.payment, version: (ticket.version || 0) + 1 });
+            toastSuccess('Đã xác nhận nhận linh kiện từ Tiếp nhận.');
+        } catch (err: unknown) {
+            console.error('Error confirming technician part receipt:', err);
+            toastError(err instanceof Error ? err.message : 'Không thể xác nhận nhận linh kiện.');
+        }
+    };
+
+    const handleReportPartNotReceived = async (ticket: RepairTicket, partIndex: number) => {
+        try {
+            const partLineId = ticket.parts?.[partIndex]?.partLineId;
+            if (!partLineId) throw new Error('Linh kiện này chưa có mã dòng. Vui lòng tải lại phiếu.');
+            const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(auth => auth.currentUser?.getIdToken());
+            const res = await fetch('/api/repairs/confirm-parts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
+                body: JSON.stringify({
+                    ticketId: ticket.id,
+                    ticketVersion: ticket.version || 0,
+                    operationKey: crypto.randomUUID(),
+                    command: { type: 'technician_not_received', partLineId, quantity: 1 },
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Không thể báo chưa nhận linh kiện.');
+            setSelectedTicket({ ...ticket, parts: data.parts, payment: data.payment, version: (ticket.version || 0) + 1 });
+            toastSuccess('Đã báo Tiếp nhận: KTV chưa nhận được linh kiện.');
+        } catch (err: unknown) {
+            console.error('Error reporting missing handover part:', err);
+            toastError(err instanceof Error ? err.message : 'Không thể báo chưa nhận linh kiện.');
+        }
+    };
+
     useEffect(() => {
         const unsubStatuses = onSnapshot(doc(db, 'system_config', 'repairs'), (docSnap) => {
             if (docSnap.exists()) {
                 const data = docSnap.data();
-                const normalizationOptions = { useLegacyFallback: data.workflowSchemaVersion !== 3 };
+                const normalizationOptions = getWorkflowNormalizationOptions(data.workflowSchemaVersion);
                 setDynamicStatuses(normalizeRepairWorkflow(data.repairStatuses, normalizationOptions));
                 setWarrantyStatuses(normalizeWarrantyWorkflow(data.warrantyStatuses, normalizationOptions));
             }
@@ -1043,6 +1201,32 @@ export default function TechnicianPage() {
         }
     };
 
+    const handleDiagnosisUpdate = async (ticket: RepairTicket, issues: RepairIssue[], technicianNote: string) => {
+        const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(auth => auth.currentUser?.getIdToken());
+        const res = await fetch('/api/repairs/diagnosis', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
+            body: JSON.stringify({ ticketId: ticket.id, ticketVersion: ticket.version || 0, issues, technicianNote }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Không thể cập nhật chẩn đoán kỹ thuật.');
+
+        const updatedTicket: RepairTicket = {
+            ...ticket,
+            issues: data.issues,
+            issue: data.issue,
+            categoryPath: data.categoryPath,
+            serviceName: data.serviceName,
+            payment: data.payment,
+            version: data.version,
+        };
+        setLiveTickets(previous => previous.map(item => item.id === ticket.id ? updatedTicket : item));
+        setOlderTickets(previous => previous.map(item => item.id === ticket.id ? updatedTicket : item));
+        setSelectedTicket(current => current?.id === ticket.id ? updatedTicket : current);
+        toastSuccess('Đã cập nhật chẩn đoán để Tiếp nhận báo khách.');
+        return updatedTicket;
+    };
+
     const filtered = tickets.filter(t => {
         const workflow = getWorkflowForTicket(t);
         const st = workflow.find(s => s.id === t.status);
@@ -1091,16 +1275,22 @@ export default function TechnicianPage() {
                         const st = workflow.find(s => s.id === ticket.status) || { id: ticket.status, label: ticket.status, color: 'text-gray-700 bg-gray-50 border-gray-200', allowedNext: [] } as WorkflowNode;
                         const currentCfg = workflow.find(s => s.id === ticket.status);
                         const isTerminal = isTicketWaitingForCustomerHandoff(ticket, workflow) || !!currentCfg?.isTerminal;
+                        const inboundTechnicianHoldMessage = getInboundTechnicianHoldMessage(ticket, currentCfg);
                         const isAssignedToMe = ticket.staff?.assignedTechnician === user?.uid;
                         const isIncomingTransferToMe = ticket.pendingTechnicianTransfer?.toTechnicianId === user?.uid && ticket.pendingTechnicianTransfer?.status === 'pending';
                         const isKtvLocked = user?.role !== 'admin' && (!isAssignedToMe || isIncomingTransferToMe);
-                        const isReadOnly = isTerminal || isKtvLocked;
+                        const isReadOnly = isTerminal || isKtvLocked || Boolean(inboundTechnicianHoldMessage);
                         const isStatusTransitionPending = pendingStatusTicketIds.includes(ticket.id);
                         const pendingTransfer = ticket.pendingTechnicianTransfer?.status === 'pending'
                             ? ticket.pendingTechnicianTransfer
                             : null;
-                        const requiresChecklist = currentCfg?.allowedFeatures?.includes('requireChecklist') === true;
-                        const actionWarnings = [
+                        const isKtvAwaitingInspectionStart = user?.role !== 'admin'
+                            && !inboundTechnicianHoldMessage
+                            && isAssignedTechnicianAtWorkflowEntry(ticket, workflow, user?.uid);
+                        const requiresChecklist = !inboundTechnicianHoldMessage
+                            && !isKtvAwaitingInspectionStart
+                            && currentCfg?.allowedFeatures?.includes('requireChecklist') === true;
+                        const actionWarnings = isKtvAwaitingInspectionStart || inboundTechnicianHoldMessage ? [] : [
                             currentCfg?.allowedFeatures?.includes('requireChecklist') && !isChecklistComplete(ticket.deviceInfo?.checklist as Record<string, unknown> | undefined)
                                 ? 'Hoàn thành checklist kiểm tra' : null,
                             currentCfg?.allowedFeatures?.includes('requireTechnicianNote') && !ticket.issue?.notes?.trim()
@@ -1110,7 +1300,7 @@ export default function TechnicianPage() {
                             currentCfg?.allowedFeatures?.includes('requirePartsReady') && !areAllPartsReady(ticket)
                                 ? 'Chờ linh kiện sẵn sàng' : null,
                         ].filter((item): item is string => Boolean(item));
-                        const canRequestTransfer = !isTerminal && !pendingTransfer && (isAssignedToMe || isRepairManager(user));
+                        const canRequestTransfer = !isTerminal && !inboundTechnicianHoldMessage && !pendingTransfer && (isAssignedToMe || isRepairManager(user));
 
                         return (
                             <div
@@ -1127,9 +1317,15 @@ export default function TechnicianPage() {
                                         </div>
                                         <div className="flex items-center gap-2 flex-wrap min-w-0">
                                             <p title="Máy" className="font-bold text-gray-900 text-base sm:text-lg truncate">{ticket.deviceInfo?.model || 'Thiết bị'}</p>
-                                            <span className={`text-sm font-semibold px-2.5 py-0.5 rounded-full border ${st.color}`}>
-                                                {st.label}
-                                            </span>
+                                            {inboundTechnicianHoldMessage ? (
+                                                <span className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-0.5 text-sm font-semibold text-sky-800">
+                                                    <Truck size={13} /> {inboundTechnicianHoldMessage}
+                                                </span>
+                                            ) : (
+                                                <span className={`text-sm font-semibold px-2.5 py-0.5 rounded-full border ${st.color}`}>
+                                                    {st.label}
+                                                </span>
+                                            )}
                                             <div className="text-sm text-gray-500 flex items-center gap-1.5">
                                                 <span title="Mã phiếu" className="font-mono font-medium">#{ticket.id.slice(-6).toUpperCase()}</span>
                                                 {ticket.ticketType === 'warranty' && (
@@ -1158,8 +1354,14 @@ export default function TechnicianPage() {
                                         <p className="text-xs sm:text-sm text-gray-700 line-clamp-2 bg-gray-50/80 p-2 rounded-lg border border-gray-100">{ticket.issue.description}</p>
                                     ) : null}
 
-                                    {(pendingTransfer || actionWarnings.length > 0) && (
+                                    {(inboundTechnicianHoldMessage || pendingTransfer || actionWarnings.length > 0) && (
                                         <div className="space-y-1.5">
+                                            {inboundTechnicianHoldMessage && (
+                                                <div className="rounded-lg border border-sky-200 bg-sky-50 p-2 text-xs text-sky-900">
+                                                    <p className="flex items-center gap-1.5 font-semibold"><Truck size={14} /> {inboundTechnicianHoldMessage}</p>
+                                                    <p className="mt-0.5 text-[11px] text-sky-800">Chưa thể bắt đầu kiểm tra cho đến khi Tiếp nhận xác nhận máy đã đến và hoàn tất thông tin.</p>
+                                                </div>
+                                            )}
                                             {pendingTransfer && (
                                                 <div className="rounded-lg border border-blue-200 bg-blue-50 p-2 text-xs text-blue-900">
                                                     <p className="font-semibold flex items-center gap-1.5"><ArrowRightLeft size={14} /> Chờ {pendingTransfer.toTechnicianName} tiếp nhận</p>
@@ -1178,7 +1380,7 @@ export default function TechnicianPage() {
                                         </div>
                                     )}
 
-                                    {st?.allowedFeatures?.includes('allowPartsSelection') && (
+                                    {!inboundTechnicianHoldMessage && !isKtvAwaitingInspectionStart && st?.allowedFeatures?.includes('allowPartsSelection') && (
                                         <div className="flex flex-wrap gap-1.5 items-center pt-1">
                                             <span className="text-[10px] font-semibold text-gray-500 uppercase">Linh kiện:</span>
                                             {(!ticket.parts || ticket.parts.length === 0) && (
@@ -1271,14 +1473,16 @@ export default function TechnicianPage() {
 
                                 {/* Footer Action Toolbar */}
                                 <div className="border-t pt-2.5 mt-3 flex flex-wrap items-center justify-end gap-2">
-                                    <button
-                                        onClick={(e) => { e.stopPropagation(); setSelectedTicket(ticket); }}
-                                        className="px-3 py-1.5 border border-gray-200 bg-white text-gray-700 rounded-lg transition-colors flex items-center justify-center gap-1.5 text-xs font-bold hover:bg-gray-50" title="Xem chi tiết"
-                                    >
-                                        <Eye size={15} className="text-gray-500" /> Chi tiết
-                                    </button>
+                                    {!isKtvAwaitingInspectionStart && (
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); setSelectedTicket(ticket); }}
+                                            className="px-3 py-1.5 border border-gray-200 bg-white text-gray-700 rounded-lg transition-colors flex items-center justify-center gap-1.5 text-xs font-bold hover:bg-gray-50" title="Xem chi tiết"
+                                        >
+                                            <Eye size={15} className="text-gray-500" /> Chi tiết
+                                        </button>
+                                    )}
 
-                                    {canRequestTransfer && (
+                                    {!isKtvAwaitingInspectionStart && canRequestTransfer && (
                                         <button
                                             onClick={(event) => { event.stopPropagation(); setTransferModal({ ticket }); setTransferTechnicianId(''); setTransferReason(''); }}
                                             className="px-3 py-1.5 border border-blue-200 bg-blue-50 text-blue-700 rounded-lg flex items-center justify-center gap-1.5 text-xs font-bold hover:bg-blue-100"
@@ -1318,7 +1522,7 @@ export default function TechnicianPage() {
                                                 {(() => {
                                                     if (isReadOnly) return null;
 
-                                                    const allowedNextStatuses = getAllowedNextWorkflowNodes(workflow, ticket.status);
+                                        const allowedNextStatuses = getTechnicianAllowedNextStatuses(ticket, workflow, user?.uid, isRepairManager(user));
                                                     if (allowedNextStatuses.length > 0) {
                                                         return allowedNextStatuses.map((nextCfg) => {
                                                             const isRefundOutcome = nextCfg.terminalAction === 'refund' || nextCfg.allowedFeatures?.includes('refundOutcome');
@@ -1327,7 +1531,7 @@ export default function TechnicianPage() {
                                                                 <button key={nextCfg.id} onClick={(e) => { e.stopPropagation(); handleStatusChange(ticket.id, nextCfg.id); }}
                                                                     disabled={isStatusTransitionPending}
                                                                     className={`py-1.5 px-3 text-white rounded-lg font-bold text-xs shadow-sm active:scale-[0.98] transition-all flex items-center gap-1.5 justify-center disabled:cursor-not-allowed disabled:opacity-60 ${isRefundOutcome ? 'bg-red-500 hover:bg-red-600' : isHandoverOutcome ? 'bg-gray-700 hover:bg-gray-800' : 'bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700'}`}>
-                                                                    Chuyển → {nextCfg.label}
+                                                                    {isKtvAwaitingInspectionStart ? 'Bắt đầu kiểm tra' : `Chuyển → ${nextCfg.label}`}
                                                                 </button>
                                                             );
                                                         });
@@ -1371,10 +1575,14 @@ export default function TechnicianPage() {
                                         const workflow = getWorkflowForTicket(ticket);
                                         const st = workflow.find(s => s.id === ticket.status) as WorkflowNode | undefined;
                                         const isTerminal = isTicketWaitingForCustomerHandoff(ticket, workflow) || !!st?.isTerminal;
+                                        const inboundTechnicianHoldMessage = getInboundTechnicianHoldMessage(ticket, st);
                                         const isAssignedToMe = ticket.staff?.assignedTechnician === user?.uid;
                                         const isIncomingTransferToMe = ticket.pendingTechnicianTransfer?.toTechnicianId === user?.uid && ticket.pendingTechnicianTransfer?.status === 'pending';
                                         const isKtvLocked = user?.role !== 'admin' && (!isAssignedToMe || isIncomingTransferToMe);
-                                        const isReadOnly = isTerminal || isKtvLocked;
+                                        const isReadOnly = isTerminal || isKtvLocked || Boolean(inboundTechnicianHoldMessage);
+                                        const isKtvAwaitingInspectionStart = user?.role !== 'admin'
+                                            && !inboundTechnicianHoldMessage
+                                            && isAssignedTechnicianAtWorkflowEntry(ticket, workflow, user?.uid);
 
                                         return (
                                             <div key={ticket.id} className="bg-white rounded-lg border p-3 shadow-sm hover:shadow-md transition-shadow relative group">
@@ -1400,13 +1608,19 @@ export default function TechnicianPage() {
                                                     )}
                                                 </div>
                                                 <p className="text-sm text-gray-600 mt-0.5 max-w-full truncate">{ticket.customer?.name}</p>
+                                                {inboundTechnicianHoldMessage && (
+                                                    <div className="mt-2 flex items-center gap-1 rounded-md border border-sky-200 bg-sky-50 px-2 py-1.5 text-[11px] font-semibold text-sky-800">
+                                                        <Truck size={12} className="shrink-0" />
+                                                        <span>{inboundTechnicianHoldMessage}</span>
+                                                    </div>
+                                                )}
                                                 {ticket.issues && ticket.issues.length > 0 ? (
                                                     <p className="text-sm text-gray-500 mt-2 line-clamp-2 bg-gray-50 p-2 rounded">{ticket.issues.map(i => i.label).join(', ')}</p>
                                                 ) : ticket.issue?.description && (
                                                     <p className="text-sm text-gray-500 mt-2 line-clamp-2 bg-gray-50 p-2 rounded">{ticket.issue.description}</p>
                                                 )}
 
-                                                {st?.allowedFeatures?.includes('requireChecklist') && (
+                                                {!inboundTechnicianHoldMessage && !isKtvAwaitingInspectionStart && st?.allowedFeatures?.includes('requireChecklist') && (
                                                     <div className="mt-2 pt-2 border-t">
                                                         <div className="grid grid-cols-2 gap-0.5">
                                                             {Object.keys(checklistLabels).map(key => {
@@ -1458,7 +1672,7 @@ export default function TechnicianPage() {
                                                     return (
                                                         <>
                                                             {(() => {
-                                                                const allowedNextStatuses = getAllowedNextWorkflowNodes(workflow, ticket.status);
+                                                                const allowedNextStatuses = getTechnicianAllowedNextStatuses(ticket, workflow, user?.uid, isRepairManager(user));
                                                                 if (allowedNextStatuses.length > 0) {
                                                                     return (
                                                                         <div className="mt-3 pt-3 border-t flex flex-col gap-1.5">
@@ -1469,7 +1683,7 @@ export default function TechnicianPage() {
                                                                                     <button key={nextCfg.id} onClick={(e) => { e.stopPropagation(); handleStatusChange(ticket.id, nextCfg.id); }}
                                                                                         disabled={pendingStatusTicketIds.includes(ticket.id)}
                                                                                         className={`w-full justify-center flex items-center gap-2 text-sm px-4 py-3 rounded-xl font-bold transition-all shadow-md disabled:cursor-not-allowed disabled:opacity-60 ${isRefundOutcome ? 'bg-red-500 text-white hover:bg-red-600' : isHandoverOutcome ? 'bg-gray-700 text-white hover:bg-gray-800' : 'bg-orange-500 text-white hover:bg-orange-600'}`}>
-                                                                                        Chuyển → {nextCfg.label}
+                                                                                        {isKtvAwaitingInspectionStart ? 'Bắt đầu kiểm tra' : `Chuyển → ${nextCfg.label}`}
                                                                                     </button>
                                                                                 );
                                                                             })}
@@ -1516,6 +1730,7 @@ export default function TechnicianPage() {
                 partSearchResults={partSearchResults}
                 isSearchingParts={isSearchingParts}
                 serviceSuggestedParts={qualityFilteredServiceSuggestedParts}
+                serviceSuggestionHint={serviceSuggestionHint}
                 isLoadingServiceSuggestions={isLoadingServiceSuggestions}
                 selectedPartQuality={selectedPartQuality}
                 setSelectedPartQuality={setSelectedPartQuality}
@@ -1527,9 +1742,12 @@ export default function TechnicianPage() {
                 formatPrice={formatPrice}
                 handleTransferResponse={handleTransferResponse}
                 handleRemovePart={handleRemovePart}
+                handleConfirmPartReceived={handleConfirmPartReceived}
+                handleReportPartNotReceived={handleReportPartNotReceived}
                 handleAddPart={handleAddPart}
                 handleRequestPart={handleRequestPart}
                 handleAddCustomPart={handleAddCustomPart}
+                handleDiagnosisUpdate={handleDiagnosisUpdate}
                 handleStatusChange={handleStatusChange}
             />
 

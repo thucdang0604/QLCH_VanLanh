@@ -13,8 +13,17 @@ import { fetchFifoLogsForDeduction, executeFifoDeductionsWrites, type FifoDeduct
 import { buildCompletedOrderRevenueDelta, buildPaymentChannelRevenueDelta, incrementRevenueAggregates, mergeRevenueAggregateDeltas } from '@/lib/revenueAggregateServer';
 import { getWorkflowFromSettings, requireWorkflowNode, workflowNodeHasFeature } from '@/lib/repairWorkflowServer';
 import { isSelectedRepairPart } from '@/lib/repairStatus';
+import { isInventoryConsumedRepairPart } from '@/lib/repairPartConsumption';
 import { reserveSequentialDocumentIdGroups, type ReservedSequentialDocumentId } from '@/lib/serverDocumentIds';
-import { queueCashierShiftTally } from '@/lib/cashierShiftTallyServer';
+import {
+    assertCashierShiftExpenseActor,
+    assertCashierShiftHasSufficientCash,
+    getCashierShiftAvailableCash,
+    queueCashierShiftCashExpenseGuard,
+    queueCashierShiftTally,
+    readCashierShiftCashGuard,
+    readCashierShiftTallyTotals,
+} from '@/lib/cashierShiftTallyServer';
 import type { RepairWorkflowSettings } from '@/lib/repairWorkflowConfig';
 import type { RevenueAggregateDelta } from '@/lib/revenueAggregate';
 import { ApiError, getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
@@ -22,6 +31,7 @@ import { canCreatePosDebt, readPosCustomerIdentityMode, resolvePosZaloContactIde
 import { getE2ERunMetadata } from '@/lib/e2eRunMetadata';
 import { readRepairShippingInput } from '@/lib/repairShipping';
 import { collectOrderWarrantySerials } from '@/lib/orderWarrantyLookup';
+import { assertInboundArrivalConfirmedForTransition } from '@/lib/repairInboundIntake';
 import { createPosPaymentReference, readPosPaymentBreakdown, sumPosPaymentBreakdown, type PosPaymentBreakdownEntry } from '@/lib/posPaymentBreakdown';
 import {
     getCashierShiftChannel,
@@ -843,12 +853,16 @@ export const POST = withApi({
             });
             const cashierShiftPaymentLines = checkoutPaymentLines.filter(line => getCashierShiftChannel(line.method) !== 'none');
             const cashierShiftCollectedAmount = cashierShiftPaymentLines.reduce((sum, line) => sum + line.amount, 0);
-            const cashierShiftShippingExpenseAmount = repairShipping?.mode === 'customer_paid_now'
-                ? 0
-                : (repairShipping?.fee || 0);
+            const cashierShiftCashCollectedAmount = cashierShiftPaymentLines
+                .filter(line => getCashierShiftChannel(line.method) === 'cash')
+                .reduce((sum, line) => sum + line.amount, 0);
             const cashierShiftShippingExpenseChannel = repairShipping?.shopPaymentMethod
                 ? getCashierShiftChannel(repairShipping.shopPaymentMethod)
                 : 'none';
+            const cashierShiftShippingExpenseAmount = repairShipping?.mode === 'customer_paid_now'
+                || cashierShiftShippingExpenseChannel !== 'cash'
+                ? 0
+                : (repairShipping?.fee || 0);
             let cashierShiftRef: FirebaseFirestore.DocumentReference | null = null;
             let cashierShiftUsesTally = false;
 
@@ -874,6 +888,21 @@ export const POST = withApi({
                 }
                 cashierShiftRef = activeShiftDoc.ref;
                 cashierShiftUsesTally = Number(activeShiftDoc.data()?.tallyVersion) >= 1;
+                if (cashierShiftShippingExpenseAmount > 0) {
+                    const shiftData = activeShiftDoc.data() || {};
+                    assertCashierShiftExpenseActor(shiftData, caller.uid);
+                    const tallyTotals = cashierShiftUsesTally
+                        ? await readCashierShiftTallyTotals(tx, db, activeShiftDoc.id)
+                        : {
+                            cashSalesAmount: Number(shiftData.cashSalesAmount) || 0,
+                            cashExpenseAmount: Number(shiftData.cashExpenseAmount) || 0,
+                        };
+                    await readCashierShiftCashGuard(tx, db, activeShiftDoc.id);
+                    assertCashierShiftHasSufficientCash(
+                        getCashierShiftAvailableCash(shiftData.openingCashAmount, tallyTotals, cashierShiftCashCollectedAmount),
+                        cashierShiftShippingExpenseAmount,
+                    );
+                }
             }
             const cashierShiftChanged = Boolean(cashierShiftRef && (cashierShiftCollectedAmount > 0 || cashierShiftShippingExpenseAmount > 0));
             markTransaction('readCashierShift');
@@ -891,12 +920,15 @@ export const POST = withApi({
                     throw new Error('Không tìm thấy cấu hình workflow sửa chữa trong Firebase.');
                 }
                 const workflow = getWorkflowFromSettings((repairSettingsSnap.data() || {}) as RepairWorkflowSettings, repairTicket);
+                assertInboundArrivalConfirmedForTransition(repairTicket, workflow.find(node => node.id === repairTicket.status));
                 const completionTarget = resolvePaymentCompletionTarget(workflow, repairTicket.status);
                 repairCompletionTargets.set(id, completionTarget);
                 if (!completionTarget.shouldCountCompletion) continue;
 
                 for (const part of repairTicket.parts || []) {
-                    if (!isSelectedRepairPart(part) || !part.productId) continue;
+                    // A KTV may have already consumed this part when moving to
+                    // the customer-handover step. Never deduct it a second time.
+                    if (!isSelectedRepairPart(part) || isInventoryConsumedRepairPart(part) || !part.productId) continue;
                     const quantity = Math.max(0, Math.floor(Number(part.quantity) || 0));
                     if (quantity <= 0) continue;
                     const reservedQuantity = Math.max(0, Math.min(quantity, Number(part.reservedQuantity) || quantity));
@@ -1514,16 +1546,19 @@ export const POST = withApi({
                         orderId,
                         paymentMethod: repairShipping?.shopPaymentMethod || 'CASH',
                         cashAmount: cashierShiftShippingExpenseChannel === 'cash' ? cashierShiftShippingExpenseAmount : 0,
-                        bankAmount: cashierShiftShippingExpenseChannel === 'bank' ? cashierShiftShippingExpenseAmount : 0,
                         direction: 'expense',
                         movementType: 'repair_shipping',
                         actorId: caller.uid,
                     });
+                    queueCashierShiftCashExpenseGuard(tx, db, {
+                        shiftId: cashierShiftRef.id,
+                        operationKey: `${readString(idempotencyKey) || orderId}:repair-shipping`,
+                        actorId: caller.uid,
+                        amount: cashierShiftShippingExpenseAmount,
+                    });
                 } else {
                     tx.update(cashierShiftRef, {
-                        ...(cashierShiftShippingExpenseChannel === 'cash'
-                            ? { cashExpenseAmount: FieldValue.increment(cashierShiftShippingExpenseAmount) }
-                            : { bankExpenseAmount: FieldValue.increment(cashierShiftShippingExpenseAmount) }),
+                        cashExpenseAmount: FieldValue.increment(cashierShiftShippingExpenseAmount),
                         lastExpenseAmount: cashierShiftShippingExpenseAmount,
                         lastExpenseMethod: repairShipping?.shopPaymentMethod || 'CASH',
                         lastExpenseOrderId: orderId,

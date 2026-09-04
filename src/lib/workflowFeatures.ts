@@ -20,6 +20,12 @@ export interface WorkflowFeature {
 // Thêm feature mới: chỉ cần thêm 1 object vào đây
 export const WORKFLOW_FEATURES: WorkflowFeature[] = [
     {
+        id: 'requireInboundArrival',
+        label: 'Yêu cầu xác nhận máy gửi đến shop',
+        description: 'Chỉ áp dụng cho phiếu chọn “Khách gửi máy đến shop”: chặn KTV thao tác cho đến khi Tiếp nhận xác nhận máy đã đến và hoàn tất thông tin máy.',
+        scope: ['admin', 'technician'],
+    },
+    {
         id: 'requireChecklist',
         label: 'Yêu cầu test full chức năng (Checklist 8 mục)',
         description: 'Chặn chuyển trạng thái nếu chưa hoàn thành checklist kiểm tra thiết bị',
@@ -30,6 +36,24 @@ export const WORKFLOW_FEATURES: WorkflowFeature[] = [
         label: 'Yêu cầu tất cả linh kiện đã về kho',
         description: 'Chặn chuyển sang trạng thái tiếp theo nếu còn linh kiện chưa nhập kho (status: requested hoặc ordered). Dùng cho trạng thái chuyển sang Đang sửa chữa.',
         scope: ['admin', 'technician'],
+    },
+    {
+        id: 'requirePartsReceivedByTechnician',
+        label: 'Yêu cầu KTV xác nhận đã nhận từng linh kiện',
+        description: 'Chặn chuyển sang bước sửa chữa nếu bất kỳ linh kiện được chọn nào chưa được KTV xác nhận nhận từ Tiếp nhận.',
+        scope: ['admin', 'technician'],
+    },
+    {
+        id: 'requireReturnedPartsReceived',
+        label: 'Yêu cầu Tiếp nhận xác nhận linh kiện hoàn lại',
+        description: 'Chặn bàn giao khách nếu còn linh kiện KTV trả về nhưng Tiếp nhận chưa xác nhận đã nhận lại.',
+        scope: ['admin'],
+    },
+    {
+        id: 'confirmCustomerResponse',
+        label: 'Xác nhận từ khách hàng',
+        description: 'Chỉ Tiếp nhận xác nhận sau khi đã báo tình trạng và giá. Khi mở sẽ chọn khách đồng ý hoặc không đồng ý sửa.',
+        scope: ['admin'],
     },
     {
         id: 'reserveSelectedParts',
@@ -84,6 +108,12 @@ export const WORKFLOW_FEATURES: WorkflowFeature[] = [
         label: 'Yêu cầu Ghi chú kỹ thuật',
         description: 'Bắt buộc nhập Ghi chú kỹ thuật khi chuyển sang hoặc lưu tại trạng thái này',
         scope: ['admin', 'technician'],
+    },
+    {
+        id: 'allowTechnicianDiagnosis',
+        label: 'Cho phép KTV cập nhật chẩn đoán',
+        description: 'KTV được thêm/sửa lỗi, taxonomy và giá dự kiến. Dữ liệu này được Tiếp nhận dùng để báo giá khách.',
+        scope: ['technician'],
     },
     {
         id: 'requiresHandover',

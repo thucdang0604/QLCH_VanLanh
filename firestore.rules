@@ -438,6 +438,12 @@ service cloud.firestore {
     match /cashier_shift_tallies/{docId} {
       allow read, write: if false;
     }
+    match /cashier_shift_cash_guards/{docId} {
+      allow read, write: if false;
+    }
+    match /inventory_freight_expenses/{expenseId} {
+      allow read, write: if false;
+    }
 
     // Expenses
     match /expenses/{expenseId} {

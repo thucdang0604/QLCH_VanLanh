@@ -5,7 +5,7 @@ import { collection, doc, query, where, getDocs, limit, QueryDocumentSnapshot, D
 import { onSnapshot } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import type { FirestoreDateValue, Order, RepairTicket, WorkflowNode } from '@/lib/types';
-import { normalizeRepairWorkflow, normalizeWarrantyWorkflow } from '@/lib/repairWorkflowConfig';
+import { getWorkflowNormalizationOptions, normalizeRepairWorkflow, normalizeWarrantyWorkflow } from '@/lib/repairWorkflowConfig';
 
 export interface CustomerOrderActivity {
     id: string;
@@ -201,7 +201,7 @@ export function useCustomerActivity({
         const unsubStatuses = onSnapshot(doc(db, 'system_config', 'repairs'), snapshot => {
             statusesLoaded = true;
             const data = snapshot.data();
-            const normalizationOptions = { useLegacyFallback: data?.workflowSchemaVersion !== 3 };
+            const normalizationOptions = getWorkflowNormalizationOptions(data?.workflowSchemaVersion);
             setRepairStatuses(normalizeRepairWorkflow(data?.repairStatuses as WorkflowNode[] | undefined, normalizationOptions));
             setWarrantyStatuses(normalizeWarrantyWorkflow(data?.warrantyStatuses as WorkflowNode[] | undefined, normalizationOptions));
             markLoaded();

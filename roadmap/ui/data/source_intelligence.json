@@ -1,9 +1,12 @@
 {
   "_meta": {
     "description": "Bản đồ trí tuệ mã nguồn — tự động tích lũy khi AI đọc/sửa code. Giúp AI sau chỉ cần đọc file này là hiểu ngay cấu trúc, liên kết, và cách sửa.",
-    "lastUpdated": "2026-08-02T12:00:00.000+07:00",
-    "version": 80,
+    "lastUpdated": "2026-09-03T00:00:00.000+07:00",
+    "version": 83,
     "changelog": [
+      "v83: send_to_store intake now requires complete physical details before inbound shipping is paid. The cash/BANK shipping expense itself confirms device arrival and unlocks the repair workflow; the UI calls this Cập nhật thông tin, not a separate arrival-confirmation step.",
+      "v82: send_to_store repairs use the normal create form only. Before any repair transition, handover, or POS completion, the server requires a paid CASH/BANK inbound shipment, complete physical intake data, and an auditable confirmation that the device reached the shop.",
+      "v81: Repair reception can create a send_to_store ticket from a phone call before the device arrives. /api/repairs/inbound-shipping records a repairTicketId-linked, idempotent shop freight expense; cash uses the payer's own funded POS shift while bank is company-only.",
       "v80: POS payment composition now sends ordered payment_breakdown lines so cash and VietQR bank transfers can be combined or partially paid before the exact remainder is made debt. Checkout allocates every line once across the current sale, repair settlement, selected old debt, revenue and cashier tally while preserving debt as a status rather than a payment channel. Every BANK line has a stable POS-* reference/payment-record ID and a pending bank_payment_reconciliations record; a future statement/webhook importer must only update reconciliation status, never replay checkout financial writes.",
       "v79: POS customer debt identity now has two safe new-customer paths: phone OTP plus name, or a Zalo contact-card URL plus name. A Zalo card is canonicalized to its stable external ID and deterministic KH-ZALO-* document ID; free-form name/nickname cannot create debt. The checkout route repeats identity, name, contact-card, and collision checks before its transaction writes, while the POS panel exposes advance versus remaining debt before submit.",
       "v78: POS sales UI is now organized as a workspace: customer identity and repair/debt actions are at the top, the product catalog uses dense horizontal cards with 48px thumbnails, and checkout groups selected goods, repair services, and debt collections separately. The existing cart remains the transaction contract, so this is presentation-only: checkout, FIFO, cashier, shipping, revenue, and debt behavior are unchanged.",
@@ -96,6 +99,7 @@
         "cashSalesAmount",
         "bankSalesAmount",
         "cashExpenseAmount",
+        "cashInventoryExpenseAmount",
         "bankExpenseAmount",
         "tallyVersion",
         "expectedCashAmount",
@@ -111,6 +115,7 @@
         "api/pos/checkout/route.ts"
       ],
       "changeLog": [
+        "v78: Cash supplier-import payments are separately tallied so POS can show import outflow apart from cash shipping; company-bank expenses do not reduce a cashier shift.",
         "v77: Repair shipping paid by the shop is an idempotent expense movement/tally; close subtracts cash/bank expenses from the expected balance.",
         "v64: Newly opened shifts aggregate checkout movements through 16 deterministic tally shards; close snapshots the tallies into cashSalesAmount/bankSalesAmount for history.",
         "v27: GET /api/pos/cashier-shift returns recent closed shifts; POS cashier tab displays closed-shift history for reconciliation.",
@@ -151,6 +156,7 @@
         "bankSalesAmount",
         "otherSalesAmount",
         "cashExpenseAmount",
+        "cashInventoryExpenseAmount",
         "bankExpenseAmount",
         "otherExpenseAmount",
         "updatedAt"
@@ -161,6 +167,7 @@
         "lib/cashierShiftTallyServer.ts"
       ],
       "changeLog": [
+        "v78: Cash inventory purchases increment cashInventoryExpenseAmount in addition to the total cash outflow, allowing shipping to exclude import payments.",
         "v77: Tally shards now separately aggregate cashier expense buckets for shop-paid repair delivery.",
         "v64: Added to remove the active cashier shift document as a high-frequency checkout write target."
       ]
@@ -279,6 +286,8 @@
         "payment.status",
         "payment.amount",
         "delivery",
+        "appointmentIntakeMethod",
+        "inboundShipping",
         "parts[]",
         "deviceModel",
         "staff.assignedTechnician",
@@ -290,6 +299,9 @@
         "parts/page.tsx (link from import_receipt)"
       ],
       "changeLog": [
+        "v83: inbound freight payment confirms arrival immediately after complete intake; previously paid awaiting_arrival tickets become received when reception saves the completed intake.",
+        "v82: send_to_store ticket status changes require inboundShipping payment, complete intake, and confirmed physical arrival; the confirmation has a receiving actor and timeline audit.",
+        "v81: Phone-created send_to_store repairs retain inboundShipping (paid amount, payer, last expense) before the device reaches the shop.",
         "v77: POS repair checkout records server-controlled delivery instructions and links any partner shipping advance to the repair and debt order.",
         "v2: POS now queries repairs by customerPhone onBlur to auto-link repair tickets.",
         "v3: Assignment/transfer dùng transaction, version, idempotency và audit log; client bị chặn đổi trực tiếp staff assignment."
@@ -503,11 +515,13 @@
       ]
     },
     "expenses": {
-      "description": "Chi phí của cửa hàng (marketing, mặt bằng, điện nước...).",
+      "description": "Chi phí của cửa hàng (marketing, mặt bằng, điện nước, ship...). Repair inbound shipping stores repairTicketId and shippingDirection=inbound for audit.",
       "keyFields": [
         "title",
         "amount",
         "category",
+        "repairTicketId",
+        "shippingDirection",
         "date",
         "note"
       ],
@@ -1822,6 +1836,7 @@
       "/api/integrations/zalo/webhook": "GET/POST: Nơi nhận Webhook sự kiện nhắn tin từ Zalo OA."
     },
     "inventory": {
+      "/api/inventory/freight": "POST: Thu ngan chi tien mat ship hang NCC cho phieu nhap da dat. Requires active POS shift and links an idempotent cashier expense to the import receipt; carrier/tracking are optional.",
       "/api/inventory/import": "POST: Xử lý chốt phiếu nhập kho, cộng tồn kho thực tế, tính lại giá vốn bình quân (costPrice)."
     },
     "orders": {
@@ -1840,6 +1855,7 @@
       "/api/repairs/confirm-parts": "POST: Chốt linh kiện dùng cho ca sửa chữa. Snap giá linh kiện và chuyển trạng thái linh kiện sang in_stock/selected.",
       "/api/repairs/create": "POST: Tạo phiếu sửa chữa qua Admin SDK, ép entry status từ workflow Firebase và xác minh KTV được gán.",
       "/api/repairs/handover": "POST: Bàn giao máy cho khách. Trừ kho vật lý các linh kiện đã dùng, ghi log Inventory, tính hoa hồng.",
+      "/api/repairs/inbound-shipping": "POST: Ghi nhận phí ship shop trả để nhận máy theo repairTicketId; cash dùng ca POS của chính người chi, bank là chi phí công ty.",
       "/api/repairs/payment-edit": "POST: Cập nhật thông tin thanh toán (deposit, discount, final amount) cho phiếu sửa chữa.",
       "/api/repairs/technician/assign": "POST: Quản lý Sale/Admin gán KTV lần đầu; xác minh user đích và ghi audit log.",
       "/api/repairs/technician/transfer": "POST: Tạo, chấp nhận, từ chối hoặc hủy yêu cầu chuyển KTV. Chỉ KTV nhận mới được chấp nhận.",
@@ -2065,6 +2081,13 @@
       "description": "Auto-mapped from app/api/inventory/import/route.ts",
       "file": "src/app/api/inventory/import/route.ts"
     },
+    "/api/inventory/freight": {
+      "methods": [
+        "POST"
+      ],
+      "description": "Cash-only supplier inbound freight linked to an ordered import receipt and active cashier shift.",
+      "file": "src/app/api/inventory/freight/route.ts"
+    },
     "/api/orders/assign-seller": {
       "methods": [
         "POST"
@@ -2127,6 +2150,13 @@
       ],
       "description": "Auto-mapped from app/api/repairs/handover/route.ts",
       "file": "src/app/api/repairs/handover/route.ts"
+    },
+    "/api/repairs/inbound-shipping": {
+      "methods": [
+        "POST"
+      ],
+      "description": "Records shop-paid inbound freight linked to a send_to_store repair ticket.",
+      "file": "src/app/api/repairs/inbound-shipping/route.ts"
     },
     "/api/repairs/payment-edit": {
       "methods": [

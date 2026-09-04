@@ -146,7 +146,7 @@ export function ImportPreviewModal({
                                 : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
                                 }`}
                         >
-                            💰 Thanh toán ngay
+                            💵 Tiền mặt từ ca POS
                         </button>
                         <button
                             type="button"
@@ -156,14 +156,21 @@ export function ImportPreviewModal({
                                 : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
                                 }`}
                         >
-                            Chuyen khoan
+                            Chuyển khoản công ty
                         </button>
                     </div>
                     <p className="text-xs text-gray-500 mt-2">
                         {paymentMethod === 'debt'
                             ? 'Số tiền sẽ được cộng vào công nợ NCC (theo từng SP).'
-                            : 'Ghi nhận đã thanh toán, không cộng công nợ.'}
+                            : paymentMethod === 'cash'
+                                ? 'Bắt buộc có ca POS đang mở; tiền mặt sẽ được trừ khỏi quỹ của ca.'
+                                : 'Ghi nhận chi từ tài khoản công ty, không ảnh hưởng quỹ thu ngân.'}
                     </p>
+                    {Number(receipt.freightPaidAmount) > 0 && (
+                        <p className="mt-2 rounded-lg bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-800">
+                            Phí ship NCC đã chi: {new Intl.NumberFormat('vi-VN').format(Number(receipt.freightPaidAmount))}đ. Khoản này sẽ được cộng vào giá vốn khi chốt nhập.
+                        </p>
+                    )}
                     {/* Per-item supplier summary */}
                     {(() => {
                         const supplierMap = new Map<string, number>();
@@ -377,6 +384,7 @@ interface CreateReceiptModalProps {
     parts: (Product & { id: string })[];
     retailProducts: (Product & { id: string })[];
     onCreated: () => void;
+    onSupplierCreated?: (supplier: SupplierOption) => void;
     currentUser: { uid: string; displayName?: string | null; email?: string | null } | null;
     suppliers: SupplierOption[];
     initialReceiptType?: 'component' | 'retail';
@@ -399,6 +407,7 @@ export function CreateReceiptModal({
     parts,
     retailProducts,
     onCreated,
+    onSupplierCreated,
     currentUser,
     suppliers,
     initialReceiptType = 'component',
@@ -814,14 +823,18 @@ export function CreateReceiptModal({
                                                                         const contactValue = await appPrompt('Nhập SĐT, Zalo, Facebook hoặc liên hệ khác cho nhà cung cấp (có thể bỏ trống):', { title: 'Thêm nhà cung cấp', placeholder: 'SĐT, Zalo hoặc Facebook' }) || '';
                                                                         const contactInput = buildInlineSupplierContactInput(nm, contactValue);
                                                                         const supplierId = await reserveSupplierDocumentId(contactInput);
+                                                                        const contactFields = buildSupplierContactDocumentFields(contactInput);
                                                                         await setDoc(doc(db, 'suppliers', supplierId), {
                                                                             name: nm,
-                                                                            ...buildSupplierContactDocumentFields(contactInput),
+                                                                            ...contactFields,
                                                                             totalDebt: 0,
                                                                             isActive: true,
                                                                             createdAt: serverTimestamp(),
                                                                             updatedAt: serverTimestamp(),
                                                                         });
+                                                                        // Keep the in-progress receipt's supplier picker current;
+                                                                        // the parent list is intentionally loaded only once per modal.
+                                                                        onSupplierCreated?.({ id: supplierId, name: nm, totalDebt: 0, ...contactFields });
                                                                         const newItems = [...items];
                                                                         newItems[idx] = { ...newItems[idx], supplier: nm, supplierId };
                                                                         setItems(newItems);

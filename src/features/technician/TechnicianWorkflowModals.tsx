@@ -178,7 +178,7 @@ export function TechnicianWorkflowModals({
                                 <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
                                 <div className="text-sm">
                                     <p className="font-semibold mb-1">Phiếu đã hoàn tất sửa chữa!</p>
-                                    <p>Vui lòng xác nhận các linh kiện đã thêm vào phiếu. Linh kiện <b>Hoàn kho (Test)</b> được trả kho; linh kiện <b>Đã dùng</b> được trừ kho ngay khi chuyển sang Chờ bàn giao.</p>
+                                    <p>Vui lòng xác nhận từng linh kiện. Linh kiện <b>Hoàn lại Tiếp nhận</b> sẽ chờ Tiếp nhận xác nhận đã nhận lại; linh kiện <b>Đã dùng</b> được trừ kho ngay khi chuyển sang Chờ bàn giao.</p>
                                 </div>
                             </div>
                             <div className="space-y-4 max-h-[60vh] overflow-y-auto">
@@ -199,7 +199,7 @@ export function TechnicianWorkflowModals({
                                                 onClick={() => setPartsVerificationSelections(prev => ({ ...prev, [part.partLineId!]: 'return' }))}
                                                 className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${partsVerificationSelections[part.partLineId!] === 'return' ? 'bg-white text-amber-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
                                             >
-                                                Hoàn kho (Test)
+                                                Hoàn lại Tiếp nhận
                                             </button>
                                         </div>
                                     </div>

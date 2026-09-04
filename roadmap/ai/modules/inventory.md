@@ -482,3 +482,18 @@ Theo dõi chính xác nguồn gốc, nhà cung cấp (NCC) và lịch sử nhậ
 
 #### 5. Danh sách Lô trong chi tiết linh kiện (Tùy chọn)
 - Trong trang chi tiết kho của sản phẩm, bổ sung tab "Tồn kho theo Lô" cho phép Admin xem sản phẩm này đang rải rác tồn ở những lô nào (NCC nào).
+## FEATURE-INV-022: Cashier cash outflows and landed freight for supplier imports
+- **Status:** implemented-local-validation
+- **Severity:** high
+- **Date:** 2026-09-02
+- **Files:** `src/app/admin/inventory/page.tsx`, `src/features/parts/ImportReceiptModals.tsx`, `src/app/api/inventory/freight/route.ts`, `src/app/api/inventory/import/route.ts`, `src/lib/inventoryFreightAllocation.ts`, `src/lib/cashierShiftTallyServer.ts`
+### Summary
+- Ordered import receipts expose a one-field **Chi ship tiền mặt** action. It requires both inventory and cashier-expense permission, an active POS shift opened by the acting employee, and creates an idempotent cash-out movement linked to that receipt. Carrier, tracking number and note remain optional and are not requested by the fast UI.
+- Cash payment when confirming an import requires an active POS shift opened by the acting employee and records an `inventory_purchase` cash-out. Bank payment is explicitly company-bank only and does not touch a cashier shift; debt creates no cash movement.
+- Supplier inbound freight is stored as pending allocation until the receipt is completed. Completion allocates every linked freight amount by purchase value, stores purchase/freight/landed cost on lines and lots, and adds landed freight to financial aggregates exactly once.
+- Every cash outflow reads live cashier tallies and must fit the expected drawer cash. A shared server-only guard serializes concurrent cash expenses so the balance cannot fall below zero.
+- POS now shows cash import payments separately from cash shipping. The shipping total excludes import payments, while company-bank expenses never reduce or appear as an outflow in a cashier shift.
+### Verification
+- `pnpm exec tsx --test src/lib/inventoryFreightAllocation.test.ts src/lib/cashierShiftTallyServer.test.ts src/lib/inventoryImportAllocation.test.ts` — 4/4 pass.
+- Focused ESLint and `pnpm typecheck` — pass.
+- Authenticated browser/Emulator proof and Firestore Rules deployment remain required before production use.

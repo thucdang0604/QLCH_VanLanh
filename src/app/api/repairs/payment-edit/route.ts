@@ -6,6 +6,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { createHash } from 'crypto';
 import type { RepairTicket } from '@/lib/types';
 import { loadRepairWorkflow, requireWorkflowNode } from '@/lib/repairWorkflowServer';
+import { getRepairIssueLaborCost } from '@/lib/repairIssuePricing';
 
 const PAYMENT_SIGNATURE_FIELDS = ['deposit', 'quote', 'giftDiscount', 'additionalFees', 'laborCost', 'paymentMethod'] as const;
 type PaymentEditRequestBody = {
@@ -97,7 +98,11 @@ export const POST = withApi({
             if ('quote' in paymentData) (updatedPayment as Record<string, unknown>).quote = Number(paymentData.quote) || 0;
             if ('giftDiscount' in paymentData) updatedPayment.giftDiscount = Number(paymentData.giftDiscount) || 0;
             if ('additionalFees' in paymentData) updatedPayment.additionalFees = Number(paymentData.additionalFees) || 0;
-            if ('laborCost' in paymentData) updatedPayment.laborCost = Number(paymentData.laborCost) || 0;
+            if (ticket.issues?.length) {
+                updatedPayment.laborCost = getRepairIssueLaborCost(ticket.issues, ticket.parts || [], Number(paymentData.laborCost) || Number(updatedPayment.laborCost) || 0);
+            } else if ('laborCost' in paymentData) {
+                updatedPayment.laborCost = Number(paymentData.laborCost) || 0;
+            }
             if ('paymentMethod' in paymentData) (updatedPayment as Record<string, unknown>).paymentMethod = paymentData.paymentMethod;
 
             // Compute amount

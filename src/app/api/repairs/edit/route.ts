@@ -1,4 +1,4 @@
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { NextRequest } from 'next/server';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { requirePermission } from '@/lib/apiAuth';
@@ -6,6 +6,9 @@ import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handle
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import type { RepairTicket } from '@/lib/types';
 import { loadRepairWorkflow, requireWorkflowNode } from '@/lib/repairWorkflowServer';
+import { canSelectInitialPartsDuringInboundIntake, getInboundIntakeDetailsError } from '@/lib/repairInboundIntake';
+import { getRepairIssueLaborCost } from '@/lib/repairIssuePricing';
+import { normalizeInitialRepairParts } from '@/lib/repairCreateInput';
 
 const PAYMENT_SIGNATURE_FIELDS = ['deposit', 'quote', 'giftDiscount', 'additionalFees', 'laborCost', 'paymentMethod'] as const;
 type RepairEditRequestBody = {
@@ -14,18 +17,19 @@ type RepairEditRequestBody = {
     idempotencyKey?: string;
     paymentData?: Record<string, unknown>;
     profileData?: Record<string, unknown>;
+    initialParts?: unknown;
 };
 
 function stableSignature(value: unknown) {
     return createHash('sha256').update(JSON.stringify(value || {})).digest('hex');
 }
 
-function paymentPayloadSignature(paymentData: Record<string, unknown>, profileData: Record<string, unknown>) {
+function paymentPayloadSignature(paymentData: Record<string, unknown>, profileData: Record<string, unknown>, initialParts: unknown) {
     const normalizedPayment = PAYMENT_SIGNATURE_FIELDS.reduce((acc, field) => {
         if (field in paymentData) acc[field] = paymentData[field];
         return acc;
     }, {} as Record<string, unknown>);
-    return stableSignature({ payment: normalizedPayment, profile: profileData });
+    return stableSignature({ payment: normalizedPayment, profile: profileData, initialParts });
 }
 
 function parseDate(value: unknown) {
@@ -37,6 +41,19 @@ function parseDate(value: unknown) {
     return null;
 }
 
+function asRecord(value: unknown) {
+    return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function normalizeCustomerName(value: unknown) {
+    return typeof value === 'string' ? value.trim().replace(/\s+/g, ' ').toLocaleLowerCase('vi-VN') : '';
+}
+
+function normalizeCustomerPhone(value: unknown) {
+    const digits = typeof value === 'string' ? value.replace(/\D/g, '') : '';
+    return digits.startsWith('84') ? `0${digits.slice(2)}` : digits;
+}
+
 export const POST = withApi({
     name: 'repairs/edit',
     onError: (error, context) => context.error(getApiErrorMessage(error), getApiErrorStatus(error, 400)),
@@ -46,12 +63,13 @@ export const POST = withApi({
         const { ticketId, ticketVersion, idempotencyKey } = body;
         const paymentData = (body.paymentData || {}) as Record<string, unknown>;
         const profileData = (body.profileData || {}) as Record<string, unknown>;
+        const initialParts = normalizeInitialRepairParts(body.initialParts);
 
         if (!ticketId || !profileData || !paymentData) {
             return context.error('Missing parameters');
         }
 
-        const payloadSignature = paymentPayloadSignature(paymentData, profileData);
+        const payloadSignature = paymentPayloadSignature(paymentData, profileData, initialParts);
         const db = getAdminDb();
 
         const result = await db.runTransaction(async (tx) => {
@@ -94,20 +112,113 @@ export const POST = withApi({
                 throw new Error(`Khong the sua phieu o trang thai ket thuc (${ticket.status}).`);
             }
 
+            const existingInboundShipping = ticket.inboundShipping;
+            const inboundFreightWasRecorded = (Number(existingInboundShipping?.paidAmount) || 0) > 0
+                || existingInboundShipping?.status === 'received';
+            if (ticket.appointmentIntakeMethod === 'send_to_store' && inboundFreightWasRecorded) {
+                if (profileData.appointmentIntakeMethod !== 'send_to_store') {
+                    throw new Error('Không thể đổi cách nhận máy sau khi đã ghi nhận phí ship nhận máy.');
+                }
+                const existingCustomer = asRecord(ticket.customer);
+                const requestedCustomer = asRecord(profileData.customer);
+                const requestedName = normalizeCustomerName(requestedCustomer.name || existingCustomer.name);
+                const requestedPhone = normalizeCustomerPhone(requestedCustomer.phone || existingCustomer.phone);
+                if (
+                    requestedName !== normalizeCustomerName(existingCustomer.name)
+                    || requestedPhone !== normalizeCustomerPhone(existingCustomer.phone)
+                ) {
+                    throw new Error('Không thể đổi khách hàng sau khi đã ghi nhận phí ship nhận máy.');
+                }
+            }
+
+            const updatedIssues = Array.isArray(profileData.issues) ? profileData.issues as RepairTicket['issues'] : ticket.issues;
+            const updatedInboundTicket = {
+                ...ticket,
+                customer: profileData.customer || ticket.customer,
+                deviceInfo: profileData.deviceInfo || ticket.deviceInfo,
+                issue: profileData.issue || ticket.issue || {},
+                issues: updatedIssues,
+            } as unknown as Record<string, unknown>;
+            const canSelectInitialParts = canSelectInitialPartsDuringInboundIntake(ticket, currentNode);
+            const shouldCompleteInboundIntake = canSelectInitialParts
+                && !getInboundIntakeDetailsError(updatedInboundTicket);
+
+            if (initialParts.length > 0 && !canSelectInitialParts) {
+                throw new Error('Chỉ được chọn linh kiện dự kiến khi hoàn tất tiếp nhận máy khách gửi đến shop.');
+            }
+            if (initialParts.length > 0 && !shouldCompleteInboundIntake) {
+                throw new Error(getInboundIntakeDetailsError(updatedInboundTicket) || 'Vui lòng hoàn tất thông tin tiếp nhận trước khi chọn linh kiện dự kiến.');
+            }
+            if (initialParts.length > 0 && (ticket.parts || []).length > 0) {
+                throw new Error('Phiếu đã có linh kiện. Hãy dùng thao tác linh kiện của KTV để cập nhật.');
+            }
+
+            const issueIds = new Set((updatedIssues || []).map(issue => String(issue.id || '').trim()).filter(Boolean));
+            for (const part of initialParts) {
+                if (!issueIds.has(part.issueId)) {
+                    throw new Error('Linh kiện dự kiến phải được gắn với một lỗi có trên phiếu.');
+                }
+            }
+
+            const productRefs = [...new Set(initialParts.map(part => part.productId))]
+                .map(productId => db.collection('products').doc(productId));
+            const productSnaps = productRefs.length > 0 ? await tx.getAll(...productRefs) : [];
+            const products = new Map(productSnaps.map(snapshot => [snapshot.id, snapshot]));
+            const heldByProduct = new Map<string, number>();
+            const storedInitialParts = initialParts.map(part => {
+                const productSnap = products.get(part.productId);
+                if (!productSnap?.exists) throw new Error(`Linh kiện ${part.productId} không còn tồn tại.`);
+
+                const product = productSnap.data() || {};
+                const stock = Math.max(0, Number(product.stock) || 0);
+                const held = heldByProduct.has(part.productId)
+                    ? heldByProduct.get(part.productId)!
+                    : Math.max(0, Number(product.held) || 0);
+                if (stock - held < part.quantity) {
+                    throw new Error(`Linh kiện ${String(product.name || part.productId)} không đủ tồn kho khả dụng (Có: ${stock - held}, Cần: ${part.quantity}).`);
+                }
+
+                heldByProduct.set(part.productId, held + part.quantity);
+                return {
+                    partLineId: randomUUID(),
+                    issueId: part.issueId,
+                    productId: part.productId,
+                    productName: String(product.name || 'Linh kiện'),
+                    quantity: part.quantity,
+                    reservedQuantity: part.quantity,
+                    status: 'selected' as const,
+                    quality: String(product.quality || ''),
+                    partType: String(product.partType || ''),
+                    warrantyPolicyId: String(product.warrantyPolicyId || ''),
+                    unitPriceAtUse: Number(product.price_promo) || Number(product.price_original) || 0,
+                    unitCostAtUse: Number(product.costPrice) || 0,
+                    priceConfirmedAt: new Date(),
+                };
+            });
+
             const currentPayment = ticket.payment || {} as RepairTicket['payment'];
             const updatedPayment = { ...currentPayment };
             if ('deposit' in paymentData) (updatedPayment as Record<string, unknown>).deposit = Number(paymentData.deposit) || 0;
             if ('quote' in paymentData) (updatedPayment as Record<string, unknown>).quote = Number(paymentData.quote) || 0;
             if ('giftDiscount' in paymentData) updatedPayment.giftDiscount = Number(paymentData.giftDiscount) || 0;
             if ('additionalFees' in paymentData) updatedPayment.additionalFees = Number(paymentData.additionalFees) || 0;
-            if ('laborCost' in paymentData) updatedPayment.laborCost = Number(paymentData.laborCost) || 0;
+            if (updatedIssues?.length) {
+                updatedPayment.laborCost = getRepairIssueLaborCost(updatedIssues, [...(ticket.parts || []), ...storedInitialParts], Number(paymentData.laborCost) || Number(updatedPayment.laborCost) || 0);
+            } else if ('laborCost' in paymentData) {
+                updatedPayment.laborCost = Number(paymentData.laborCost) || 0;
+            }
             if ('paymentMethod' in paymentData) (updatedPayment as Record<string, unknown>).paymentMethod = paymentData.paymentMethod;
 
+            if (storedInitialParts.length > 0) {
+                updatedPayment.partsCost = storedInitialParts.reduce((total, part) => total + part.unitPriceAtUse * part.quantity, 0);
+            }
             const partsCost = updatedPayment.partsCost || 0;
             const laborCost = updatedPayment.laborCost || 0;
             const additionalFees = updatedPayment.additionalFees || 0;
             const discountAmount = updatedPayment.discountAmount || 0;
             updatedPayment.amount = partsCost + laborCost + additionalFees - discountAmount;
+
+            const actorName = caller.displayName || caller.name || caller.uid;
 
             const nextVersion = (ticket.version || 0) + 1;
             tx.update(ticketRef, {
@@ -132,9 +243,35 @@ export const POST = withApi({
                     assignedTechnicianName: profileData.assignedTechnicianName || '',
                 },
                 payment: updatedPayment,
+                ...(storedInitialParts.length > 0 ? {
+                    parts: storedInitialParts,
+                    partsLockedAt: FieldValue.serverTimestamp(),
+                } : {}),
+                ...(shouldCompleteInboundIntake ? {
+                    inboundShipping: {
+                        ...existingInboundShipping,
+                        intakeCompletedAt: FieldValue.serverTimestamp(),
+                        intakeCompletedBy: caller.uid,
+                        intakeCompletedByName: actorName,
+                        updatedAt: FieldValue.serverTimestamp(),
+                    },
+                    statusTimeline: FieldValue.arrayUnion({
+                        eventType: 'inbound_device_received',
+                        status: ticket.status,
+                        timestamp: Date.now(),
+                        actorId: caller.uid,
+                        actorName,
+                        source: 'repairs',
+                        note: 'Hoàn tất cập nhật thông tin tiếp nhận sau khi máy đã đến shop',
+                    }),
+                } : {}),
                 updatedAt: FieldValue.serverTimestamp(),
                 version: nextVersion,
             });
+
+            for (const [productId, held] of heldByProduct) {
+                tx.update(db.collection('products').doc(productId), { held });
+            }
 
             if (idempotencyKey) {
                 tx.set(db.collection('operation_requests').doc(idempotencyKey), {
