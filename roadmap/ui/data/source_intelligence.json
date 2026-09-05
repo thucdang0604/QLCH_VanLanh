@@ -1,9 +1,10 @@
 {
   "_meta": {
     "description": "Bản đồ trí tuệ mã nguồn — tự động tích lũy khi AI đọc/sửa code. Giúp AI sau chỉ cần đọc file này là hiểu ngay cấu trúc, liên kết, và cách sửa.",
-    "lastUpdated": "2026-09-03T00:00:00.000+07:00",
-    "version": 83,
+    "lastUpdated": "2026-09-05T00:00:00.000+07:00",
+    "version": 84,
     "changelog": [
+      "v84: Supplier returns now select one immutable inventory_lots document, so the original supplier cannot be changed in the UI. /api/inventory/supplier-return atomically verifies available stock against held, decrements that lot and product, revalues the remaining product cost, writes SUPPLIER_RETURN plus RETURN_CREDIT audit records, and is idempotent. It creates a credit_pending note only; debt, cashier movement, and revenue are intentionally unchanged until a separate reconciliation. New inbound lots retain importReceiptId; supplier debt imports use the standard IMPORT/createdAt timeline shape. inventory_lots is server-write-only and the supplier timeline reads legacy date records compatibly.",
       "v83: send_to_store intake now requires complete physical details before inbound shipping is paid. The cash/BANK shipping expense itself confirms device arrival and unlocks the repair workflow; the UI calls this Cập nhật thông tin, not a separate arrival-confirmation step.",
       "v82: send_to_store repairs use the normal create form only. Before any repair transition, handover, or POS completion, the server requires a paid CASH/BANK inbound shipment, complete physical intake data, and an auditable confirmation that the device reached the shop.",
       "v81: Repair reception can create a send_to_store ticket from a phone call before the device arrives. /api/repairs/inbound-shipping records a repairTicketId-linked, idempotent shop freight expense; cash uses the payer's own funded POS shift while bank is company-only.",
@@ -220,7 +221,7 @@
       ]
     },
     "import_receipts": {
-      "description": "Phiếu nhập kho. status: draft→ordered→completed. Khi completed, executeFinalImport chạy runTransaction cập nhật stock+costPrice+supplierDebt. supplier/supplierId giờ ở item-level.",
+      "description": "Phiếu nhập kho. status: draft→ordered→completed. Khi completed, executeFinalImport chạy runTransaction cập nhật stock+costPrice+supplierDebt và stamp importReceiptId lên từng FIFO lot mới. supplier/supplierId giờ ở item-level.",
       "keyFields": [
         "supplier?",
         "supplierId?",
@@ -261,20 +262,43 @@
       ]
     },
     "supplier_transactions": {
-      "description": "Lịch sử giao dịch NCC. type=IMPORT (ghi nợ) | IMPORT_PAID (thanh toán ngay) | PAYMENT (trả nợ).",
+      "description": "Lịch sử giao dịch NCC. type=IMPORT (ghi nợ) | IMPORT_PAID (thanh toán ngay) | PAYMENT (trả nợ) | RETURN_CREDIT (ghi giảm chờ đối soát). Legacy import_debt/date records remain readable.",
       "keyFields": [
         "supplierId",
         "supplierName",
         "type",
         "amount",
-        "importReceiptId"
+        "importReceiptId",
+        "supplierReturnId",
+        "settlementStatus"
       ],
       "usedIn": [
-        "parts/page.tsx (executeFinalImport transaction)"
+        "parts/page.tsx (executeFinalImport transaction)",
+        "admin/suppliers (bounded current and legacy timeline)"
       ],
       "changeLog": [
         "v2: Now auto-created when import receipt is completed with a linked supplierId.",
-        "v3: type IMPORT_PAID for thanh toán ngay. Grouped by supplierId (1 phiếu tạo nhiều transactions cho nhiều NCC). COMPLETED."
+        "v3: type IMPORT_PAID for thanh toán ngay. Grouped by supplierId (1 phiếu tạo nhiều transactions cho nhiều NCC). COMPLETED.",
+        "v84: Debt imports write IMPORT plus createdAt; RETURN_CREDIT is informational while settlementStatus is credit_pending and does not mutate totalDebt."
+      ]
+    },
+    "supplier_returns": {
+      "description": "Phiếu trả từng dòng linh kiện về NCC gốc theo inventory_lots/{lotId}. Chỉ server API có thể tạo; financial reconciliation occurs separately.",
+      "keyFields": [
+        "lotId",
+        "lotCode",
+        "productId",
+        "supplierId",
+        "importReceiptId?",
+        "quantity",
+        "supplierCreditAmount",
+        "settlementStatus",
+        "reason"
+      ],
+      "usedIn": [
+        "api/inventory/supplier-return",
+        "admin/inventory LotTrackingModal",
+        "admin/suppliers supplier_transactions timeline"
       ]
     },
     "repairs": {
@@ -364,6 +388,7 @@
       "description": "Trạng thái lô hàng. Dùng cho Batch Tracking & FIFO.",
       "keyFields": [
         "lotCode",
+        "importReceiptId?",
         "productId",
         "supplierId",
         "importPrice",
@@ -375,7 +400,8 @@
       "usedIn": [
         "parts/page.tsx",
         "pos/page.tsx",
-        "repairs/page.tsx"
+        "repairs/page.tsx",
+        "admin/inventory LotTrackingModal"
       ]
     },
     "inventory_logs": {

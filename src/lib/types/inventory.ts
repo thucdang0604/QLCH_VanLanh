@@ -60,9 +60,9 @@ export interface InventoryLog {
     type: 'IMPORT' | 'SALE' | 'WEB_ORDER'
     | 'REPAIR_USE' | 'REPAIR_REFUND' | 'REPAIR_RELEASE' | 'REPAIR_RETURN'
     | 'TECH_ISSUE' | 'TECH_RETURN'
-    | 'ORDER_CANCEL' | 'ORDER_COMPLETE' | 'ORDER_REACTIVATE';
+    | 'ORDER_CANCEL' | 'ORDER_COMPLETE' | 'ORDER_REACTIVATE' | 'SUPPLIER_RETURN';
     referenceId: string;
-    referenceType: 'import_receipt' | 'order' | 'repair';
+    referenceType: 'import_receipt' | 'order' | 'repair' | 'supplier_return';
     lotsDeducted?: { lotCode: string | null; supplierId: string | null; qty: number }[];
     createdBy: string;
     createdByName: string;
@@ -76,6 +76,7 @@ export interface InventoryLot {
     lotCode: string;             // PN-YYMM-XXXX
     productId: string;
     supplierId: string | null;
+    importReceiptId?: string;
     importPrice: number;
     purchaseUnitCost?: number;
     freightAllocatedAmount?: number;
@@ -124,14 +125,18 @@ export interface SupplierTransaction {
     id: string;
     supplierId: string;
     supplierName: string;
-    type: 'IMPORT' | 'PAYMENT';       // Nhập hàng tạo nợ | Thanh toán giảm nợ
+    type: 'IMPORT' | 'IMPORT_PAID' | 'PAYMENT' | 'RETURN_CREDIT' | 'import_debt';
     amount: number;                     // Số tiền giao dịch
     importReceiptId?: string;           // Link tới phiếu nhập hàng (khi type=IMPORT)
+    supplierReturnId?: string;
+    settlementStatus?: 'credit_pending' | 'settled';
     paymentMethod?: string;             // Phương thức thanh toán (khi type=PAYMENT)
     note?: string;
     createdBy: string;
     createdByName: string;
-    createdAt: FirestoreDateValue;
+    createdAt?: FirestoreDateValue;
+    /** Compatibility timestamp for debt-import transactions created before createdAt was standardized. */
+    date?: FirestoreDateValue;
 }
 
 // ── Accessory Discount Rule (Cấu hình giảm giá phụ kiện) ──

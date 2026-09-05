@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import Modal from './Modal';
 import { collection, query, where, doc } from 'firebase/firestore';
 import { getDocs, getDoc } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
-import { Search, Loader2, Package, Building2, Calendar, FileText, ArrowDownRight, Tag } from 'lucide-react';
+import { Search, Loader2, Package, Building2, Calendar, FileText, ArrowDownRight, Tag, RotateCcw } from 'lucide-react';
 import type { FirestoreDateValue } from '@/lib/types';
+import { appConfirm } from '@/lib/appDialog';
 
 interface LotTrackingModalProps {
     isOpen: boolean;
@@ -19,9 +20,11 @@ interface LotInfo {
     lotCode: string;
     supplierId?: string;
     supplierName?: string;
+    importReceiptId?: string;
     quantity: number;
     remainingQuantity: number;
     costPriceAtLog: number;
+    purchaseUnitCost?: number;
     createdAt: FirestoreDateValue;
 }
 
@@ -63,6 +66,12 @@ export default function LotTrackingModal({ isOpen, onClose, initialSearchCode }:
     const [lotInfos, setLotInfos] = useState<LotInfo[]>([]);
     const [usageLogs, setUsageLogs] = useState<LotUsageLog[]>([]);
     const [error, setError] = useState('');
+    const [returningLot, setReturningLot] = useState<LotInfo | null>(null);
+    const [returnQuantity, setReturnQuantity] = useState(1);
+    const [returnReason, setReturnReason] = useState('');
+    const [isSubmittingReturn, setIsSubmittingReturn] = useState(false);
+    const [returnSuccess, setReturnSuccess] = useState('');
+    const returnIdempotencyKeyRef = useRef<string | null>(null);
 
     const handleSearch = async (e?: React.FormEvent, forceCode?: string) => {
         if (e) e.preventDefault();
@@ -116,9 +125,11 @@ export default function LotTrackingModal({ isOpen, onClose, initialSearchCode }:
                 lotCode: data.lotCode,
                 supplierId: data.supplierId,
                 supplierName: data.supplierId ? (supplierNameMap.get(data.supplierId) || 'Không xác định') : 'Không xác định',
+                importReceiptId: data.importReceiptId,
                 quantity: data.initialQuantity || data.quantity,
                 remainingQuantity: data.remainingQuantity,
                 costPriceAtLog: data.importPrice || data.costPriceAtLog,
+                purchaseUnitCost: data.purchaseUnitCost,
                 createdAt: data.createdAt,
             }));
             setLotInfos(lots);
@@ -137,7 +148,7 @@ export default function LotTrackingModal({ isOpen, onClose, initialSearchCode }:
                 const usageQ = query(
                     collection(db, 'inventory_logs'),
                     where('productId', 'in', chunk),
-                    where('type', 'in', ['POS_SALE', 'SALE', 'REPAIR_USE', 'EXPORT'])
+                    where('type', 'in', ['POS_SALE', 'SALE', 'REPAIR_USE', 'EXPORT', 'SUPPLIER_RETURN'])
                 );
                 const usageSnap = await getDocs(usageQ);
 
@@ -184,6 +195,11 @@ export default function LotTrackingModal({ isOpen, onClose, initialSearchCode }:
             setLotInfos([]);
             setUsageLogs([]);
             setError('');
+            setReturningLot(null);
+            setReturnQuantity(1);
+            setReturnReason('');
+            setReturnSuccess('');
+            returnIdempotencyKeyRef.current = null;
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isOpen, initialSearchCode]);
@@ -206,7 +222,72 @@ export default function LotTrackingModal({ isOpen, onClose, initialSearchCode }:
             case 'SALE': return 'Bán lẻ POS';
             case 'REPAIR_USE': return 'Xuất cho sửa chữa';
             case 'EXPORT': return 'Xuất kho khác';
+            case 'SUPPLIER_RETURN': return 'Trả nhà cung cấp';
             default: return type;
+        }
+    };
+
+    const openReturnForm = (lot: LotInfo) => {
+        setReturningLot(lot);
+        setReturnQuantity(1);
+        setReturnReason('');
+        setReturnSuccess('');
+        returnIdempotencyKeyRef.current = crypto.randomUUID();
+    };
+
+    const submitSupplierReturn = async (event: React.FormEvent) => {
+        event.preventDefault();
+        if (!returningLot || isSubmittingReturn) return;
+
+        const quantity = Math.floor(Number(returnQuantity));
+        if (!Number.isInteger(quantity) || quantity <= 0 || quantity > returningLot.remainingQuantity) {
+            setError(`Số lượng trả phải từ 1 đến ${returningLot.remainingQuantity}.`);
+            return;
+        }
+        const reason = returnReason.trim();
+        if (reason.length < 3) {
+            setError('Vui lòng ghi rõ lý do trả NCC (ít nhất 3 ký tự).');
+            return;
+        }
+        if (!await appConfirm(
+            `Trả ${quantity} ${returningLot.productName} về ${returningLot.supplierName} từ lô ${returningLot.lotCode}? Hệ thống sẽ giảm tồn kho và tạo phiếu ghi giảm chờ đối soát, chưa tự cấn công nợ hay nhận tiền.`,
+            { title: 'Xác nhận trả NCC', confirmText: 'Tạo phiếu trả', destructive: true },
+        )) return;
+
+        setIsSubmittingReturn(true);
+        setError('');
+        try {
+            const idempotencyKey = returnIdempotencyKeyRef.current || crypto.randomUUID();
+            returnIdempotencyKeyRef.current = idempotencyKey;
+            const auth = await (await import('@/lib/firebase')).getAuthInstance();
+            const idToken = await auth.currentUser?.getIdToken();
+            if (!idToken) throw new Error('Phiên đăng nhập đã hết hạn.');
+            const response = await fetch('/api/inventory/supplier-return', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${idToken}`,
+                },
+                body: JSON.stringify({
+                    lotId: returningLot.id,
+                    quantity,
+                    reason,
+                    idempotencyKey,
+                }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || 'Không thể tạo phiếu trả NCC.');
+
+            setReturnSuccess(`Đã tạo ${data.supplierReturnId}. Ghi giảm NCC: ${formatPrice(Number(data.supplierCreditAmount) || 0)}; chờ đối soát tài chính.`);
+            setReturningLot(null);
+            setReturnQuantity(1);
+            setReturnReason('');
+            returnIdempotencyKeyRef.current = null;
+            await handleSearch(undefined, searchCode);
+        } catch (returnError: unknown) {
+            setError(returnError instanceof Error ? returnError.message : 'Không thể tạo phiếu trả NCC.');
+        } finally {
+            setIsSubmittingReturn(false);
         }
     };
 
@@ -274,6 +355,7 @@ export default function LotTrackingModal({ isOpen, onClose, initialSearchCode }:
                                         <th className="px-3 py-2 font-semibold text-right">Giá nhập</th>
                                         <th className="px-3 py-2 font-semibold text-center">SL nhập</th>
                                         <th className="px-3 py-2 font-semibold text-center">Tồn kho</th>
+                                        <th className="px-3 py-2 font-semibold text-right">Thao tác</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y">
@@ -288,6 +370,19 @@ export default function LotTrackingModal({ isOpen, onClose, initialSearchCode }:
                                                     {lot.remainingQuantity}
                                                 </span>
                                             </td>
+                                            <td className="px-3 py-2 text-right">
+                                                {lot.supplierId && lot.remainingQuantity > 0 ? (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => openReturnForm(lot)}
+                                                        className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-100"
+                                                    >
+                                                        <RotateCcw className="h-3.5 w-3.5" /> Trả NCC
+                                                    </button>
+                                                ) : (
+                                                    <span className="text-xs text-gray-400">—</span>
+                                                )}
+                                            </td>
                                         </tr>
                                     ))}
                                 </tbody>
@@ -296,11 +391,63 @@ export default function LotTrackingModal({ isOpen, onClose, initialSearchCode }:
                                         <td colSpan={3} className="px-3 py-2 text-right">Tổng:</td>
                                         <td className="px-3 py-2 text-center">{totalInitial}</td>
                                         <td className="px-3 py-2 text-center text-blue-700">{totalRemaining}</td>
+                                        <td />
                                     </tr>
                                 </tfoot>
                             </table>
                         </div>
                     </div>
+                )}
+
+                {returningLot && (
+                    <form onSubmit={submitSupplierReturn} className="rounded-lg border border-rose-200 bg-rose-50 p-4">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                            <div>
+                                <h3 className="font-semibold text-rose-900">Phiếu trả NCC theo lô</h3>
+                                <p className="mt-1 text-sm text-rose-800">{returningLot.productName} · {returningLot.supplierName} · {returningLot.lotCode}</p>
+                            </div>
+                            <button type="button" onClick={() => setReturningLot(null)} className="text-sm font-medium text-rose-700 hover:underline">Hủy</button>
+                        </div>
+                        <div className="mt-3 grid gap-3 sm:grid-cols-[150px_1fr]">
+                            <label className="text-sm font-medium text-gray-700">
+                                Số lượng trả (còn {returningLot.remainingQuantity})
+                                <input
+                                    type="number"
+                                    min={1}
+                                    max={returningLot.remainingQuantity}
+                                    step={1}
+                                    value={returnQuantity}
+                                    onChange={(event) => setReturnQuantity(Number(event.target.value))}
+                                    disabled={isSubmittingReturn}
+                                    className="mt-1 h-10 w-full rounded-md border border-rose-200 bg-white px-3 focus:border-rose-500 focus:outline-none focus:ring-2 focus:ring-rose-200"
+                                />
+                            </label>
+                            <label className="text-sm font-medium text-gray-700">
+                                Lý do trả
+                                <input
+                                    type="text"
+                                    value={returnReason}
+                                    onChange={(event) => setReturnReason(event.target.value)}
+                                    maxLength={300}
+                                    required
+                                    disabled={isSubmittingReturn}
+                                    placeholder="Ví dụ: linh kiện lỗi, NCC đồng ý đổi"
+                                    className="mt-1 h-10 w-full rounded-md border border-rose-200 bg-white px-3 focus:border-rose-500 focus:outline-none focus:ring-2 focus:ring-rose-200"
+                                />
+                            </label>
+                        </div>
+                        <p className="mt-3 text-xs text-rose-800">Tồn kho và lô sẽ giảm ngay khi xác nhận. Phiếu chỉ là ghi giảm NCC chờ đối soát, không tự thay đổi công nợ, quỹ tiền mặt hoặc doanh thu.</p>
+                        <div className="mt-3 flex justify-end gap-2">
+                            <button type="button" onClick={() => setReturningLot(null)} disabled={isSubmittingReturn} className="rounded-md border border-rose-200 bg-white px-3 py-2 text-sm font-medium text-rose-700 hover:bg-rose-100 disabled:opacity-60">Hủy</button>
+                            <button type="submit" disabled={isSubmittingReturn} className="inline-flex items-center gap-2 rounded-md bg-rose-600 px-3 py-2 text-sm font-semibold text-white hover:bg-rose-700 disabled:opacity-60">
+                                {isSubmittingReturn ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />} Tạo phiếu trả
+                            </button>
+                        </div>
+                    </form>
+                )}
+
+                {returnSuccess && (
+                    <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">{returnSuccess}</p>
                 )}
 
                 {/* ── Usage History ── */}
@@ -337,6 +484,7 @@ export default function LotTrackingModal({ isOpen, onClose, initialSearchCode }:
                                                 <td className="px-4 py-3">
                                                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${log.type === 'POS_SALE' || log.type === 'SALE' ? 'bg-purple-100 text-purple-700' :
                                                             log.type === 'REPAIR_USE' ? 'bg-amber-100 text-amber-700' :
+                                                                log.type === 'SUPPLIER_RETURN' ? 'bg-rose-100 text-rose-700' :
                                                                 'bg-gray-100 text-gray-700'
                                                         }`}>
                                                         {translateType(log.type)}

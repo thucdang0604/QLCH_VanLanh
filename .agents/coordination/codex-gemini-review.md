@@ -1543,3 +1543,15 @@ Make every taxonomy-assigned part discoverable from `/admin/parts` without readi
 - The repairs header retains one create button; staff select `send_to_store` inside the normal repair form instead of getting a duplicate “Khách gửi máy” action.
 - Inbound shipping itself now requires customer name, phone, model, and reported issue. Its CASH/BANK expense is the arrival confirmation, records the reception actor and `inbound_device_received`, and does not leave a separate manual-confirmation step.
 - Transition, handover, and POS repair completion call the same server guard, so an inbound draft cannot progress by bypassing the detail UI.
+
+## Codex local implementation review — supplier lot return
+
+**Time:** `2026-09-05T00:00:00+07:00`
+
+**Decision:** `APPROVED — local validation passes; deploy Rules/index and authenticated browser smoke remain.`
+
+- Scope: return one selected component line to the original supplier recorded on `inventory_lots/{lotId}`. The server transaction checks the returned quantity against both the selected lot's balance and global available stock (`stock - held`), then updates the lot, product stock/cost, supplier-return record, inventory audit record, supplier credit timeline record, and idempotency record together. It creates a `credit_pending` note only; it does not mutate supplier debt, cashier tally, or financial aggregates.
+- Security: `inventory_lots` and the new `supplier_returns` collection are server-write-only. Existing `inventory_logs` client writes remain unchanged because the legacy Excel bootstrap currently creates its initial-stock audit entry through the client transaction; migrating that behavior is separate work.
+- Compatibility: new import lots retain `importReceiptId`; debt imports now use `IMPORT` with `createdAt`. The supplier drawer combines a bounded current `createdAt` query with legacy `date` records, with the new Firestore index declared in source.
+- Validation: focused ESLint, `pnpm typecheck`, `pnpm build`, `git diff --check`, and focused Node tests (26/26) pass. The new Emulator E2E supplier-lot-return test passes. Full E2E is 10/13 because of three pre-existing failures: repair-staff browser routing, repair handover, and a bank-shipping tally expectation that conflicts with the current company-bank design.
+- Release: deploy Firestore Rules and indexes, then smoke the authenticated inventory modal with a controlled test lot. Rollback is limited to the supplier-return API/helper/UI/types/rules/index/timeline and its dedicated E2E seed/test changes; no production documents were changed locally.

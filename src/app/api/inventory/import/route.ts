@@ -766,6 +766,7 @@ export const POST = withApi({
                     const lotRef = lotAllocation.ref;
                     tx.set(lotRef, {
                         lotCode: lotCode,
+                        importReceiptId: receiptId,
                         productId: targetProductId,
                         supplierId: item.supplierId || receipt.supplierId || null,
                         importPrice: landedUnitCost,
@@ -891,11 +892,13 @@ export const POST = withApi({
                         const suppTxRef = supplierTransactionAllocations[supplierTransactionAllocationIndex++].ref;
                         tx.set(suppTxRef, {
                             supplierId: sId,
-                            type: 'import_debt',
+                            type: 'IMPORT',
                             amount: amount,
                             importReceiptId: receiptId,
-                            date: FieldValue.serverTimestamp(),
-                            createdBy: caller.uid
+                            note: `Công nợ từ phiếu nhập kho ${receiptId}`,
+                            createdBy: caller.uid,
+                            createdByName: caller.displayName || caller.name || caller.uid,
+                            createdAt: FieldValue.serverTimestamp(),
                         });
 
                         const suppRef = db.collection('suppliers').doc(sId);

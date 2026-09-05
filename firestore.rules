@@ -412,7 +412,10 @@ service cloud.firestore {
       allow read, write: if hasPermission('manage_inventory');
     }
     match /inventory_lots/{lotId} {
-      allow read, write: if hasPermission('manage_inventory');
+      allow read: if hasPermission('manage_inventory');
+      // Lot balances are the FIFO source of truth and may only change inside
+      // server transactions (import, POS/repair consumption, supplier return).
+      allow write: if false;
     }
 
     // Commissions
@@ -443,6 +446,12 @@ service cloud.firestore {
     }
     match /inventory_freight_expenses/{expenseId} {
       allow read, write: if false;
+    }
+    // Supplier returns must go through the server transaction so the selected
+    // lot, product stock, immutable audit log, and idempotency record agree.
+    match /supplier_returns/{returnId} {
+      allow read: if hasPermission('manage_inventory');
+      allow write: if false;
     }
 
     // Expenses

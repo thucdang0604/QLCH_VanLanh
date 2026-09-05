@@ -24,6 +24,9 @@ export async function seedE2EData(): Promise<void> {
   const users = seedUsers(runId);
   const productId = getScopedId('pos-product', runId);
   const repairPartId = getScopedId('repair-part', runId);
+  const supplierId = getScopedId('supplier', runId);
+  const supplierReturnProductId = getScopedId('supplier-return-product', runId);
+  const supplierReturnLotId = getScopedId('supplier-return-lot', runId);
   const shiftId = getScopedId('cashier-shift', runId);
   const customerId = getScopedId('customer-record', runId);
   const taxonomyPath = path.join(process.cwd(), 'roadmap', 'repair_workflow_settings.json');
@@ -73,7 +76,7 @@ export async function seedE2EData(): Promise<void> {
   batch.set(remember(`inventory_lots/${getScopedId('pos-lot', runId)}`), {
     productId,
     lotCode: getScopedId('pos-lot-code', runId),
-    supplierId: getScopedId('supplier', runId),
+    supplierId,
     remainingQuantity: 10,
     status: 'active',
     e2eRunId: runId,
@@ -100,7 +103,48 @@ export async function seedE2EData(): Promise<void> {
   batch.set(remember(`inventory_lots/${getScopedId('repair-lot', runId)}`), {
     productId: repairPartId,
     lotCode: getScopedId('repair-lot-code', runId),
-    supplierId: getScopedId('supplier', runId),
+    supplierId,
+    remainingQuantity: 5,
+    status: 'active',
+    e2eRunId: runId,
+    createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  batch.set(remember(`suppliers/${supplierId}`), {
+    id: supplierId,
+    name: 'E2E Supplier',
+    totalDebt: 500_000,
+    isActive: true,
+    e2eRunId: runId,
+    createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+  batch.set(remember(`products/${supplierReturnProductId}`), {
+    id: supplierReturnProductId,
+    name: 'E2E Supplier Return Part',
+    category: 'component',
+    status: 'active',
+    stock: 10,
+    held: 1,
+    costPrice: 100_000,
+    price_original: 180_000,
+    price_promo: 180_000,
+    inventoryTrackingMode: 'fifo',
+    e2eRunId: runId,
+    createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+  batch.set(remember(`inventory_lots/${supplierReturnLotId}`), {
+    productId: supplierReturnProductId,
+    productName: 'E2E Supplier Return Part',
+    lotCode: getScopedId('supplier-return-lot-code', runId),
+    importReceiptId: getScopedId('supplier-return-receipt', runId),
+    supplierId,
+    purchaseUnitCost: 80_000,
+    landedUnitCost: 120_000,
+    importPrice: 120_000,
+    initialQuantity: 5,
     remainingQuantity: 5,
     status: 'active',
     e2eRunId: runId,

@@ -389,6 +389,14 @@
             ]
         },
         {
+            "collectionGroup": "supplier_transactions",
+            "queryScope": "COLLECTION",
+            "fields": [
+                { "fieldPath": "supplierId", "order": "ASCENDING" },
+                { "fieldPath": "date", "order": "DESCENDING" }
+            ]
+        },
+        {
             "collectionGroup": "customer_transactions",
             "queryScope": "COLLECTION",
             "fields": [

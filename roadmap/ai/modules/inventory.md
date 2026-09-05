@@ -497,3 +497,19 @@ Theo dõi chính xác nguồn gốc, nhà cung cấp (NCC) và lịch sử nhậ
 - `pnpm exec tsx --test src/lib/inventoryFreightAllocation.test.ts src/lib/cashierShiftTallyServer.test.ts src/lib/inventoryImportAllocation.test.ts` — 4/4 pass.
 - Focused ESLint and `pnpm typecheck` — pass.
 - Authenticated browser/Emulator proof and Firestore Rules deployment remain required before production use.
+
+## FEATURE-INV-023: Return a component to its original supplier lot
+- **Status:** implemented-local-validation
+- **Severity:** high
+- **Date:** 2026-09-05
+- **Files:** `src/app/api/inventory/supplier-return/route.ts`, `src/lib/supplierLotReturn.ts`, `src/components/admin/LotTrackingModal.tsx`, `src/app/admin/suppliers/page.tsx`, `src/app/api/inventory/import/route.ts`, `firestore.rules`, `firestore.indexes.json`
+### Summary
+- The stock operator opens a lot and returns one selected line only. The UI never accepts a replacement supplier; the server reloads the selected `inventory_lots/{lotId}` and uses its original `supplierId`.
+- The transaction rejects a return above the lot balance, or above `stock - held`, then atomically updates the lot balance/status and product stock/costPrice, preserving `held`. It creates `supplier_returns`, an immutable `SUPPLIER_RETURN` inventory log, a `RETURN_CREDIT` supplier timeline entry, and an idempotency record.
+- A return creates only a `credit_pending` note. It deliberately does not change supplier `totalDebt`, cashier shift, expense/revenue aggregates, or money movement; financial reconciliation is a separate future approval step. Return credit uses the stored purchase cost when available; legacy lots transparently mark the landed-cost fallback as their credit basis.
+- New inbound lots persist `importReceiptId`. Debt imports now write canonical `IMPORT` and `createdAt` fields; the supplier drawer merges the bounded canonical timeline with legacy `date` records. `inventory_lots` and `supplier_returns` are server-write-only in Firestore Rules.
+### Verification
+- Focused unit and contract tests: 26/26 pass, including supplier-return plan, stock/held/FIFO-adjacent, cashier, freight, revenue, and contactless import contracts.
+- `pnpm typecheck`, focused ESLint, `git diff --check`, and production build pass. Build retains only pre-existing warnings outside this slice.
+- Emulator E2E: new `supplier-lot-return.spec.ts` passes, proving exact-lot/supplier selection, partial return, cost revaluation, pending credit, idempotent retry, and rejection above the remaining lot quantity. Full E2E result is 10/13 pass; three unrelated existing failures remain in RBAC repair-staff routing, repair handover, and the outdated company-bank shipping-tally expectation.
+- Required release action: deploy the Firestore Rules and indexes before using the admin UI in production, then perform one authenticated browser smoke with a non-production test lot.

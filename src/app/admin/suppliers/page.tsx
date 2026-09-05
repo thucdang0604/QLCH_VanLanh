@@ -21,6 +21,19 @@ const fmtDate = (d: unknown) => {
     const ts = typeof (d as { toDate?: () => Date }).toDate === 'function' ? (d as { toDate: () => Date }).toDate() : new Date(d as string);
     return ts.toLocaleDateString('vi-VN');
 };
+const transactionTime = (transaction: SupplierTransaction) => transaction.createdAt || transaction.date;
+const transactionTimeMillis = (transaction: SupplierTransaction) => {
+    const value = transactionTime(transaction);
+    if (!value) return 0;
+    if (typeof (value as { toMillis?: () => number }).toMillis === 'function') {
+        return (value as { toMillis: () => number }).toMillis();
+    }
+    if (typeof (value as { toDate?: () => Date }).toDate === 'function') {
+        return (value as { toDate: () => Date }).toDate().getTime();
+    }
+    const parsed = new Date(value as string | number).getTime();
+    return Number.isFinite(parsed) ? parsed : 0;
+};
 const SUPPLIER_BATCH_SIZE = 50;
 
 // ── Supplier Form Modal ──
@@ -362,16 +375,27 @@ function SupplierDetailDrawer({
                                 <div className="space-y-2">
                                     {transactions.map(tx => (
                                         <div key={tx.id} className="flex items-center gap-3 rounded-lg bg-gray-50 p-3 text-sm">
-                                            <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${tx.type === 'IMPORT' ? 'bg-blue-50 text-blue-600' : 'bg-green-50 text-green-600'}`}>
-                                                {tx.type === 'IMPORT' ? <ArrowDownToLine size={16} /> : <ArrowUpFromLine size={16} />}
+                                            <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${tx.type === 'IMPORT' || tx.type === 'import_debt' || tx.type === 'IMPORT_PAID' ? 'bg-blue-50 text-blue-600' : tx.type === 'RETURN_CREDIT' ? 'bg-rose-50 text-rose-600' : 'bg-green-50 text-green-600'}`}>
+                                                {tx.type === 'IMPORT' || tx.type === 'import_debt' || tx.type === 'IMPORT_PAID'
+                                                    ? <ArrowDownToLine size={16} />
+                                                    : <ArrowUpFromLine size={16} />}
                                             </div>
                                             <div className="min-w-0 flex-1">
-                                                <p className="font-semibold text-gray-800">{tx.type === 'IMPORT' ? 'Nhập hàng' : 'Thanh toán'}</p>
+                                                <p className="font-semibold text-gray-800">
+                                                    {tx.type === 'IMPORT' || tx.type === 'import_debt'
+                                                        ? 'Nhập hàng ghi nợ'
+                                                        : tx.type === 'IMPORT_PAID'
+                                                            ? 'Nhập hàng đã thanh toán'
+                                                            : tx.type === 'RETURN_CREDIT'
+                                                                ? 'Ghi giảm NCC chờ đối soát'
+                                                                : 'Thanh toán công nợ'}
+                                                </p>
                                                 <p className="truncate text-xs text-gray-500">{tx.note || tx.paymentMethod || 'Không ghi chú'}</p>
                                             </div>
-                                            <div className={`text-right font-bold ${tx.type === 'IMPORT' ? 'text-red-600' : 'text-green-600'}`}>
-                                                {tx.type === 'IMPORT' ? '+' : '-'}{formatPrice(tx.amount)}
-                                                <p className="text-[11px] font-normal text-gray-400">{fmtDate(tx.createdAt)}</p>
+                                            <div className={`text-right font-bold ${tx.type === 'IMPORT' || tx.type === 'import_debt' || tx.type === 'IMPORT_PAID' ? 'text-red-600' : 'text-green-600'}`}>
+                                                {tx.type === 'RETURN_CREDIT' ? 'Có ' : tx.type === 'IMPORT' || tx.type === 'import_debt' || tx.type === 'IMPORT_PAID' ? '+' : '-'}{formatPrice(tx.amount)}
+                                                {tx.type === 'RETURN_CREDIT' && tx.settlementStatus === 'credit_pending' && <p className="text-[11px] font-medium text-rose-600">Chờ đối soát</p>}
+                                                <p className="text-[11px] font-normal text-gray-400">{fmtDate(transactionTime(tx))}</p>
                                             </div>
                                         </div>
                                     ))}
@@ -516,9 +540,28 @@ export default function SuppliersPage() {
     const loadTransactions = useCallback(async (supplierId: string) => {
         setLoadingTx(true);
         try {
-            const q = query(collection(db, 'supplier_transactions'), where('supplierId', '==', supplierId), orderBy('createdAt', 'desc'), limit(100));
-            const snap = await getDocs(q);
-            setTransactions(snap.docs.map(d => ({ id: d.id, ...d.data() } as SupplierTransaction)));
+            const transactionsRef = collection(db, 'supplier_transactions');
+            const [currentResult, legacyResult] = await Promise.allSettled([
+                getDocs(query(transactionsRef, where('supplierId', '==', supplierId), orderBy('createdAt', 'desc'), limit(100))),
+                getDocs(query(transactionsRef, where('supplierId', '==', supplierId), orderBy('date', 'desc'), limit(100))),
+            ]);
+            if (currentResult.status === 'rejected' && legacyResult.status === 'rejected') {
+                throw currentResult.reason;
+            }
+            if (legacyResult.status === 'rejected') {
+                console.warn('Legacy supplier transaction timeline could not be loaded:', legacyResult.reason);
+            }
+
+            const byId = new Map<string, SupplierTransaction>();
+            for (const result of [currentResult, legacyResult]) {
+                if (result.status !== 'fulfilled') continue;
+                result.value.docs.forEach(snapshot => {
+                    byId.set(snapshot.id, { id: snapshot.id, ...snapshot.data() } as SupplierTransaction);
+                });
+            }
+            setTransactions(Array.from(byId.values())
+                .sort((left, right) => transactionTimeMillis(right) - transactionTimeMillis(left))
+                .slice(0, 100));
         } catch (error) {
             console.error('Failed to load supplier transactions:', error);
             toast.error('Không thể tải lịch sử giao dịch của nhà cung cấp');
