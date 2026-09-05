@@ -10,7 +10,7 @@ import Modal from '@/components/admin/Modal';
 import MediaManager from '@/components/admin/MediaManager';
 import { db, getAuthInstance, getStorageInstance } from '@/lib/firebase';
 import { generateSlug } from '@/lib/utils';
-import { optimizeImage } from '@/lib/imageOptimizer';
+import { dataUrlToImageFile, optimizeImage } from '@/lib/imageOptimizer';
 import { triggerRevalidate } from '@/lib/revalidate';
 import { toastError, toastSuccess, toastInfo } from '@/lib/toast';
 import { resolveInternalLinkPlaceholdersInHtml } from '@/lib/internalLinkResolver';
@@ -264,7 +264,7 @@ async function processBase64Images(htmlContent: string): Promise<string> {
 
     const base64Images: HTMLImageElement[] = [];
     images.forEach(img => {
-        if (img.src && img.src.startsWith('data:image/')) {
+        if (img.src && /^data:image\//i.test(img.src)) {
             base64Images.push(img);
         }
     });
@@ -278,9 +278,7 @@ async function processBase64Images(htmlContent: string): Promise<string> {
         const base64Src = img.src;
 
         try {
-            const res = await fetch(base64Src);
-            const blob = await res.blob();
-            const originalFile = new File([blob], `pasted_image_${Date.now()}_${i}.png`, { type: blob.type });
+            const originalFile = dataUrlToImageFile(base64Src, `pasted_image_${Date.now()}_${i}`);
 
             const optimizeResponse = await optimizeImage(originalFile, 1200, 800, 0.8);
             const optimizedFile = optimizeResponse.file;
@@ -321,11 +319,18 @@ async function processBase64Images(htmlContent: string): Promise<string> {
 
             img.src = url;
         } catch (err) {
-            console.error('Failed to process base64 image:', err);
+            console.error('Failed to process pasted image:', err);
+            const detail = err instanceof Error ? err.message : 'Lỗi không xác định.';
+            throw new Error(`Không thể xử lý ảnh dán thứ ${i + 1}: ${detail}`);
         }
     }
 
-    return docNode.body.innerHTML;
+    const processedContent = docNode.body.innerHTML;
+    if (Array.from(docNode.images).some(img => /^data:image\//i.test(img.src))) {
+        throw new Error('Không thể thay thế toàn bộ ảnh dán trước khi lưu bài viết.');
+    }
+
+    return processedContent;
 }
 
 interface ArticleEditorModalProps {
@@ -1062,6 +1067,10 @@ export default function ArticleEditorModal({ article, onClose }: ArticleEditorMo
         setSaving(true);
         try {
             const processedContent = await processBase64Images(formData.content);
+            const contentSize = new TextEncoder().encode(processedContent).byteLength;
+            if (contentSize > 900 * 1024) {
+                throw new Error('Nội dung bài viết quá lớn để lưu. Hãy rút gọn nội dung hoặc giảm số lượng ảnh.');
+            }
 
             const payload: Record<string, unknown> = {
                 title: formData.title.trim(),
@@ -1125,7 +1134,7 @@ export default function ArticleEditorModal({ article, onClose }: ArticleEditorMo
             onClose();
         } catch (err) {
             console.error('Save error:', err);
-            toastError('Lỗi khi lưu bài viết!');
+            toastError(err instanceof Error ? err.message : 'Lỗi khi lưu bài viết!');
         } finally {
             setSaving(false);
         }

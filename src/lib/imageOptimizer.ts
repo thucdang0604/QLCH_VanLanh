@@ -1,6 +1,51 @@
+import { MAX_FILE_SIZE, validateImageFile } from './validateImage';
+
 export interface WatermarkOptions {
     logoUrl?: string;
     storeName?: string;
+}
+
+const DATA_URL_IMAGE_PATTERN = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=\s]+)$/i;
+
+/**
+ * Converts a pasted image data URL into a validated File without fetching the
+ * data URL. Fetching data: is treated as a connect-src request by CSP.
+ */
+export function dataUrlToImageFile(dataUrl: string, name: string): File {
+    const match = DATA_URL_IMAGE_PATTERN.exec(dataUrl);
+    if (!match) {
+        throw new Error('Ảnh dán chỉ hỗ trợ định dạng JPG, PNG hoặc WebP.');
+    }
+
+    const type = match[1].toLowerCase();
+    const base64 = match[2].replace(/\s/g, '');
+    const paddingLength = base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0;
+    const estimatedSize = Math.floor((base64.length * 3) / 4) - paddingLength;
+
+    if (estimatedSize > MAX_FILE_SIZE) {
+        throw new Error('Ảnh dán vượt quá dung lượng tối đa 4 MB.');
+    }
+
+    let binary: string;
+    try {
+        binary = atob(base64);
+    } catch {
+        throw new Error('Dữ liệu ảnh dán không hợp lệ.');
+    }
+
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index++) {
+        bytes[index] = binary.charCodeAt(index);
+    }
+
+    const extension = type === 'image/jpeg' ? 'jpg' : type.slice('image/'.length);
+    const file = new File([bytes], `${name}.${extension}`, { type });
+    const validationError = validateImageFile(file);
+    if (validationError) {
+        throw new Error(validationError);
+    }
+
+    return file;
 }
 
 /**
