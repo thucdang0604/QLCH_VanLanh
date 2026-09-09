@@ -18,7 +18,9 @@ test('create body cannot persist client supplied parts without the stock reserva
         customer: { name: 'Khách' },
         parts: [{ productId: 'unsafe' }],
         initialParts: [{ productId: 'battery', issueId: 'issue-a', quantity: 1 }],
+        idempotencyKey: 'repair-create-key',
     }, undefined);
     assert.equal('parts' in safe, false);
     assert.equal('initialParts' in safe, false);
+    assert.equal('idempotencyKey' in safe, false);
 });

@@ -16,6 +16,7 @@ import { getDocs } from '@/lib/firestoreLogger';
 import { PART_CATEGORY_LABEL, isPartCategory } from '@/lib/constants';
 import { getRepairPartSearchLookupTokens, productMatchesRepairPartSearch } from '@/lib/repairPartSearch';
 import { getRepairIssueLaborCost, resolveRepairIssueBillingMode } from '@/lib/repairIssuePricing';
+import type { RepairMediaPlacement } from '@/lib/repairMediaSession';
 
 export type InitialRepairPart = {
     productId: string;
@@ -88,13 +89,13 @@ interface RepairEditorModalProps {
     canOverrideTerminalStatus: boolean;
     staffs: { uid: string; displayName: string }[];
     preMediaFiles: string[];
-    setPreMediaFiles: Dispatch<SetStateAction<string[]>>;
     postMediaFiles: string[];
-    setPostMediaFiles: Dispatch<SetStateAction<string[]>>;
+    onRemoveMedia: (placement: RepairMediaPlacement, url: string) => void;
     setShowPreMediaManager: (value: boolean) => void;
     setShowPostMediaManager: (value: boolean) => void;
     paymentLabels: Record<PaymentStatus, { label: string; color: string }>;
     services: ServiceModel[];
+    isSubmitting: boolean;
     onClose: () => void;
     onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }
@@ -110,13 +111,13 @@ export function RepairEditorModal({
     canOverrideTerminalStatus,
     staffs,
     preMediaFiles,
-    setPreMediaFiles,
     postMediaFiles,
-    setPostMediaFiles,
+    onRemoveMedia,
     setShowPreMediaManager,
     setShowPostMediaManager,
     paymentLabels,
     services,
+    isSubmitting,
     onClose,
     onSubmit,
 }: RepairEditorModalProps) {
@@ -133,7 +134,9 @@ export function RepairEditorModal({
             {showModal && (
                 <Modal
                     isOpen={true}
-                    onClose={() => onClose()}
+                    onClose={() => {
+                        if (!isSubmitting) onClose();
+                    }}
                     title={editingTicket ? 'Cập nhật phiếu' : 'Tạo phiếu sửa chữa'}
                     size="4xl"
                     priority="high"
@@ -431,7 +434,7 @@ export function RepairEditorModal({
                                             ) : (
                                                 <img src={url} alt="" className="w-full h-full object-cover" />
                                             )}
-                                            <button type="button" onClick={() => setPreMediaFiles(prev => prev.filter((_, idx) => idx !== i))}
+                                            <button type="button" disabled={isSubmitting} onClick={() => onRemoveMedia('pre_repair', url)}
                                                 className="absolute top-0.5 right-0.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity">×</button>
                                         </div>
                                     ))}
@@ -458,7 +461,7 @@ export function RepairEditorModal({
                                                     ) : (
                                                         <img src={url} alt="" className="w-full h-full object-cover" />
                                                     )}
-                                                    <button type="button" onClick={() => setPostMediaFiles(prev => prev.filter((_, idx) => idx !== i))}
+                                                    <button type="button" disabled={isSubmitting} onClick={() => onRemoveMedia('post_repair', url)}
                                                         className="absolute top-0.5 right-0.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity">×</button>
                                                 </div>
                                             ))}
@@ -558,11 +561,11 @@ export function RepairEditorModal({
                                 </div>
                             </fieldset>
                             <div className="flex justify-end gap-3 pt-4 border-t sticky bottom-0 bg-white pb-2">
-                                <button type="button" title="Hủy bỏ" onClick={() => onClose()}
+                                <button type="button" title="Hủy bỏ" onClick={() => onClose()} disabled={isSubmitting}
                                     className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200">Hủy bỏ</button>
-                                <button type="submit" title="Lưu phiếu"
-                                    className="px-5 py-2 text-sm font-semibold text-white bg-orange-500 rounded-lg hover:bg-orange-600 flex items-center gap-2">
-                                    <Save size={18} /> Lưu phiếu
+                                <button type="submit" title="Lưu phiếu" disabled={isSubmitting}
+                                    className="px-5 py-2 text-sm font-semibold text-white bg-orange-500 rounded-lg hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-60 flex items-center gap-2">
+                                    <Save size={18} /> {isSubmitting ? 'Đang lưu…' : 'Lưu phiếu'}
                                 </button>
                             </div>
                         </form>

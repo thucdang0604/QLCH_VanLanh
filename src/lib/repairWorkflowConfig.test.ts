@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
     canTransitionDirectlyToTerminal,
+    getConfiguredWorkflowEntryNode,
     getFirstNonTerminalWorkflowTransition,
     getAllowedNextWorkflowNodes,
     getConfiguredWorkflow,
@@ -138,4 +139,18 @@ test('uses terminalAction rather than status IDs to choose direct and handover e
     assert.equal(isHandoverTerminalAction(handoverNode.terminalAction), true);
     assert.equal(isHandoverTerminalAction(refundNode.terminalAction), true);
     assert.equal(isHandoverTerminalAction(closeNode.terminalAction), false);
+});
+
+test('keeps an explicit entry node when administrators reorder the displayed workflow', () => {
+    const settings = {
+        workflowSchemaVersion: 5,
+        repairEntryStatusId: 'intake',
+        repairStatuses: [
+            { id: 'inspect', label: 'Kiểm tra', color: '', allowedNext: [] },
+            { id: 'intake', label: 'Tiếp nhận', color: '', allowedNext: ['inspect'] },
+            { id: 'done', label: 'Hoàn tất', color: '', allowedNext: [], isTerminal: true, terminalAction: 'close' as const },
+        ],
+    };
+
+    assert.equal(getConfiguredWorkflowEntryNode(settings, 'repair')?.id, 'intake');
 });

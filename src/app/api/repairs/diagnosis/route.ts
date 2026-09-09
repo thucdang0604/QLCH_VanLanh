@@ -5,10 +5,9 @@ import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handle
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { isRepairManager } from '@/lib/repairAccess';
 import { loadRepairWorkflow, requireWorkflowNode, workflowNodeHasFeature } from '@/lib/repairWorkflowServer';
-import type { RepairIssue, RepairTicket } from '@/lib/types';
+import type { RepairTicket } from '@/lib/types';
 import { getRepairIssueLaborCost } from '@/lib/repairIssuePricing';
-
-type DiagnosisIssueInput = Pick<RepairIssue, 'id' | 'label' | 'estimatedPrice' | 'status' | 'categoryPath' | 'serviceName' | 'billingMode'>;
+import { normalizeDiagnosisIssue, type DiagnosisIssueInput } from '@/lib/repairDiagnosisInput';
 
 type DiagnosisUpdateRequest = {
     ticketId?: string;
@@ -16,36 +15,6 @@ type DiagnosisUpdateRequest = {
     issues?: DiagnosisIssueInput[];
     technicianNote?: string;
 };
-
-function normalizeIssue(issue: DiagnosisIssueInput, index: number): RepairIssue {
-    const label = typeof issue?.label === 'string' ? issue.label.trim() : '';
-    if (!label || label.length > 300) throw new Error(`Lỗi thứ ${index + 1} chưa hợp lệ.`);
-
-    const estimatedPrice = Number(issue.estimatedPrice);
-    if (!Number.isFinite(estimatedPrice) || estimatedPrice < 0 || estimatedPrice > 1_000_000_000) {
-        throw new Error(`Giá dự kiến của lỗi thứ ${index + 1} chưa hợp lệ.`);
-    }
-
-    const categoryPath = Array.isArray(issue.categoryPath)
-        ? issue.categoryPath.filter((item): item is string => typeof item === 'string').map(item => item.trim()).filter(Boolean).slice(0, 3)
-        : [];
-    const status = issue.status === 'resolved' || issue.status === 'unresolved' ? issue.status : 'pending';
-
-    return {
-        id: typeof issue.id === 'string' && issue.id.trim() ? issue.id.trim().slice(0, 120) : `diagnosis-${index + 1}`,
-        label,
-        estimatedPrice,
-        status,
-        // Taxonomy is the source of classification. A concrete service is not
-        // written from the technician diagnosis screen.
-        categoryPath,
-        serviceName: typeof issue.serviceName === 'string' ? issue.serviceName.trim().slice(0, 160) : '',
-        serviceId: '',
-        billingMode: issue.billingMode === 'parts_only' || issue.billingMode === 'parts_and_service' || issue.billingMode === 'free'
-            ? issue.billingMode
-            : issue.billingMode === 'service_only' ? 'service_only' : undefined,
-    };
-}
 
 export const POST = withApi({
     name: 'repairs/diagnosis',
@@ -63,7 +32,7 @@ export const POST = withApi({
     if (body.issues.length === 0 || body.issues.length > 20) return context.error('Cần có từ 1 đến 20 lỗi trong chẩn đoán.', 400);
     if (technicianNote.length > 4_000) return context.error('Ghi chú kỹ thuật không được vượt quá 4.000 ký tự.', 400);
 
-    const issues = body.issues.map(normalizeIssue);
+    const issues = body.issues.map(normalizeDiagnosisIssue);
     const representativeIssue = issues.find(issue => issue.categoryPath && issue.categoryPath.length > 0) || issues[0];
     const db = getAdminDb();
 

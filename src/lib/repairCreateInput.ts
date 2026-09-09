@@ -17,6 +17,7 @@ const SERVER_MANAGED_REPAIR_FIELDS = [
     'partsLockedAt',
     'pendingTechnicianTransfer',
     'paymentHistory',
+    'idempotencyKey',
 ] as const;
 
 export function parseRepairClientTimestamp(value: unknown): Timestamp | null {

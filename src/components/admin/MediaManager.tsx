@@ -4,15 +4,15 @@
 import { useState, useEffect, useRef, useCallback, useId } from 'react';
 import { collection, deleteDoc, doc, getDoc, getDocs, limit, orderBy, query, serverTimestamp, setDoc, startAfter, updateDoc, where, type QueryDocumentSnapshot, type QuerySnapshot, type DocumentReference, type DocumentData } from 'firebase/firestore';
 import { db, getStorageInstance } from '@/lib/firebase';
-import { X, Upload, Image as ImageIcon, Film, Trash2, Loader2, Check, Search, AlertTriangle } from 'lucide-react';
+import { X, Upload, Image as ImageIcon, Film, Trash2, Loader2, Check, Search, AlertTriangle, Eye } from 'lucide-react';
 import type { FirestoreDateValue } from '@/lib/types';
 import { optimizeImage } from '@/lib/imageOptimizer';
 import { validateImageFile } from '@/lib/validateImage';
 import { cleanBrokenMedia } from '@/lib/storage';
-import { compressVideo } from '@/lib/videoOptimizer';
+import { compressVideo, shouldSkipCompression } from '@/lib/videoOptimizer';
 import { appAlert, appConfirm } from '@/lib/appDialog';
 
-const MAX_VIDEO_SIZE_MB = 50;
+const MAX_VIDEO_SIZE_MB = 200;
 const MAX_VIDEO_SIZE_BYTES = MAX_VIDEO_SIZE_MB * 1024 * 1024;
 const MAX_BANNER_SOURCE_IMAGE_SIZE_MB = 12;
 const MAX_BANNER_SOURCE_IMAGE_SIZE_BYTES = MAX_BANNER_SOURCE_IMAGE_SIZE_MB * 1024 * 1024;
@@ -52,6 +52,10 @@ interface MediaManagerProps {
     multiple?: boolean;
     title?: string;
     defaultFolder?: string;
+    /** Identifies the form that started an upload so completion can be attached safely. */
+    uploadContext?: string | null;
+    /** Called for each file as soon as it has a reusable media URL. */
+    onUploadComplete?: (urls: string[], uploadContext: string | null | undefined) => void;
 }
 
 function isVideoType(type: string): boolean {
@@ -103,7 +107,17 @@ function mapMediaDocument(d: QueryDocumentSnapshot<DocumentData>): MediaItem {
     } as MediaItem;
 }
 
-export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultiple, multiple = false, title = 'Chọn media', defaultFolder = 'general' }: MediaManagerProps) {
+export default function MediaManager({
+    isOpen,
+    onClose,
+    onSelect,
+    onSelectMultiple,
+    multiple = false,
+    title = 'Chọn media',
+    defaultFolder = 'general',
+    uploadContext,
+    onUploadComplete,
+}: MediaManagerProps) {
     const uploadInputId = useId();
     const [tab, setTab] = useState<'upload' | 'library'>('upload');
     const [items, setItems] = useState<MediaItem[]>([]);
@@ -121,6 +135,8 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
     const [compressProgress, setCompressProgress] = useState<{ name: string, ratio: number } | null>(null);
     const [uploadFolder, setUploadFolder] = useState<string>(defaultFolder);
     const [filterFolder, setFilterFolder] = useState<string>('all');
+    const [previewItem, setPreviewItem] = useState<MediaItem | null>(null);
+    const [previewError, setPreviewError] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const lastDocRef = useRef<QueryDocumentSnapshot<DocumentData> | null>(null);
     const loadedFolderRef = useRef<string | null>(null);
@@ -182,6 +198,8 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
         setUploadError(null);
         setUploadNotice(null);
         setItems([]);
+        setPreviewItem(null);
+        setPreviewError(null);
         setLoading(false);
         setLoadingMore(false);
         setHasMore(false);
@@ -197,9 +215,16 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
         }
     };
 
+    const openPreview = (item: MediaItem) => {
+        setPreviewError(null);
+        setPreviewItem(item);
+    };
+
     const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = e.target.files;
         if (!files || files.length === 0) return;
+        // A later form must never receive files selected by an earlier form.
+        const uploadContextAtStart = uploadContext;
         setUploading(true);
         setUploadError(null);
         setUploadNotice(null);
@@ -237,6 +262,10 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                                 createdAt: serverTimestamp(),
                             });
                             setUploadNotice(`"${file.name}" da co trong thu vien, da dua len dau danh sach.`);
+                            const existingUrl = docSnap.data().url;
+                            if (typeof existingUrl === 'string' && existingUrl) {
+                                onUploadComplete?.([existingUrl], uploadContextAtStart);
+                            }
                             completedAny = true;
                             continue;
                         } catch {
@@ -255,20 +284,33 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                 if (isVideoType(file.type)) {
                     if (file.size > MAX_VIDEO_SIZE_BYTES) {
                         setUploadError(`Video "${file.name}" vượt quá ${MAX_VIDEO_SIZE_MB}MB. Vui lòng chọn file nhỏ hơn.`);
+                        failedAny = true;
                         continue;
                     }
 
-                    try {
-                        fileToUpload = await compressVideo(file, (ratio) => {
-                            setCompressProgress({ name: file.name, ratio });
-                        });
-                    } catch (err) {
-                        console.error('Lỗi nén video:', err);
-                        setUploadError(`Không thể nén video "${file.name}". Vui lòng thử file khác.`);
-                        continue;
-                    } finally {
-                        setCompressProgress(null);
+                    if (!shouldSkipCompression(file)) {
+                        try {
+                            fileToUpload = await compressVideo(file, (ratio) => {
+                                setCompressProgress({ name: file.name, ratio });
+                            });
+                        } catch (err) {
+                            console.error('Lỗi nén video:', err);
+                            const message = err instanceof Error
+                                ? err.message
+                                : 'Không thể nén video trên trình duyệt. Vui lòng thử lại.';
+                            setUploadError(`Không thể nén video "${file.name}": ${message}`);
+                            failedAny = true;
+                            continue;
+                        } finally {
+                            setCompressProgress(null);
+                        }
                     }
+                    if (fileToUpload.size > MAX_VIDEO_SIZE_BYTES) {
+                        setUploadError(`Video "${file.name}" sau khi nén vẫn vượt quá ${MAX_VIDEO_SIZE_MB}MB. Vui lòng chọn video ngắn hơn.`);
+                        failedAny = true;
+                        continue;
+                    }
+                    // else: video is small MP4 → upload as-is
                 } else if (file.type.startsWith('image/')) {
                     const validationError = validateImageFile(file, uploadFolder === 'banners'
                         ? {
@@ -387,6 +429,7 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                 setUploadNotice(replacingBrokenEntry
                     ? `"${file.name}" da bi mat file tren Storage, da upload lai thanh cong.`
                     : `Da upload "${file.name}" thanh cong.`);
+                onUploadComplete?.([url], uploadContextAtStart);
                 completedAny = true;
             } catch (err) {
                 console.error('Upload error:', err);
@@ -470,7 +513,25 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
         return matchSearch && matchFolder;
     });
 
-    if (!isOpen) return null;
+    if (!isOpen) {
+        if (!uploading) return null;
+
+        return (
+            <div
+                className="fixed bottom-4 right-4 z-[210] flex max-w-sm items-center gap-3 rounded-xl border border-blue-200 bg-white px-4 py-3 shadow-xl"
+                role="status"
+                aria-live="polite"
+            >
+                <Loader2 size={18} className="shrink-0 animate-spin text-blue-600" />
+                <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-800">Đang xử lý media nền</p>
+                    <p className="truncate text-xs text-slate-500">
+                        {compressProgress ? `Đang nén ${compressProgress.name} (${Math.round(compressProgress.ratio * 100)}%)` : 'Bạn có thể tiếp tục tạo phiếu.'}
+                    </p>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50">
@@ -481,7 +542,12 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                 {/* Header */}
                 <div className="flex items-center justify-between px-6 py-4 border-b">
                     <h2 className="text-lg font-bold text-gray-800">{title}</h2>
-                    <button type="button" title="Đóng" onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1">
+                    <button
+                        type="button"
+                        title={uploading ? 'Ẩn cửa sổ, tiếp tục chạy nền' : 'Đóng'}
+                        onClick={onClose}
+                        className="text-gray-400 hover:text-gray-600 p-1"
+                    >
                         <X size={20} />
                     </button>
                 </div>
@@ -506,6 +572,12 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                     </button>
                 </div>
 
+                {uploading && (
+                    <div className="border-b border-blue-100 bg-blue-50 px-6 py-2 text-xs text-blue-700">
+                        Bạn có thể đóng cửa sổ này để tiếp tục lập phiếu; quá trình nén và upload vẫn chạy nền.
+                    </div>
+                )}
+
                 {/* Content */}
                 <div className="flex-1 overflow-y-auto p-6">
                     {uploadNotice && (
@@ -529,6 +601,7 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                                     title="Lưu vào thư mục"
                                     value={uploadFolder}
                                     onChange={(e) => setUploadFolder(e.target.value)}
+                                    disabled={uploading}
                                     className="flex-1 p-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:border-orange-500"
                                 >
                                     {MEDIA_FOLDERS.map(f => (
@@ -544,6 +617,7 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                                 type="file"
                                 accept="image/*,video/mp4,video/webm"
                                 multiple
+                                disabled={uploading}
                                 onChange={handleUpload}
                                 className="sr-only"
                             />
@@ -582,7 +656,7 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                                 </div>
                                 <ul className="text-xs text-blue-700 list-disc pl-6 space-y-1">
                                     <li><strong>Ảnh:</strong> Tự động nén sang WebP, giữ nguyên độ nét, giảm 70% dung lượng.</li>
-                                    <li><strong>Video:</strong> Tự động nén nhẹ trực tiếp trên thiết bị của bạn trước khi tải lên (CRF 28). Việc nén video có thể mất thêm từ 5 - 20 giây tuỳ thuộc cấu hình thiết bị. File gốc giới hạn tối đa {MAX_VIDEO_SIZE_MB}MB.</li>
+                                    <li><strong>Video:</strong> Video MP4 dưới 5MB sẽ tải lên nguyên gốc. Video lớn hơn được tự động nén trên thiết bị: giảm xuống 720p, chất lượng tự động theo dung lượng, tối đa 5 phút. File gốc giới hạn tối đa {MAX_VIDEO_SIZE_MB}MB.</li>
                                 </ul>
                             </div>
                         </div>
@@ -711,6 +785,15 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                                                     <Check size={14} className="text-white" />
                                                 </div>
                                             )}
+                                            <button
+                                                type="button"
+                                                aria-label={`Xem trước ${item.name}`}
+                                                title="Xem trước"
+                                                onClick={(e) => { e.stopPropagation(); openPreview(item); }}
+                                                className="absolute left-1/2 top-1/2 flex h-9 w-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-black/60 text-white shadow-sm transition-colors hover:bg-black/85"
+                                            >
+                                                <Eye size={17} />
+                                            </button>
                                             {/* Delete button */}
                                             <button
                                                 type="button"
@@ -766,6 +849,57 @@ export default function MediaManager({ isOpen, onClose, onSelect, onSelectMultip
                     </div>
                 </div>
             </div>
+            {previewItem && (
+                <div
+                    className="fixed inset-0 z-[220] flex items-center justify-center bg-black/80 p-4"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label={`Xem trước ${previewItem.name}`}
+                    onMouseDown={(event) => {
+                        if (event.target === event.currentTarget) setPreviewItem(null);
+                    }}
+                >
+                    <div className="flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl" onMouseDown={(event) => event.stopPropagation()}>
+                        <div className="flex items-center justify-between gap-4 border-b px-5 py-3">
+                            <p className="min-w-0 truncate text-sm font-semibold text-gray-800">{previewItem.name}</p>
+                            <button
+                                type="button"
+                                aria-label="Đóng xem trước"
+                                title="Đóng xem trước"
+                                onClick={() => setPreviewItem(null)}
+                                className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
+                            >
+                                <X size={20} />
+                            </button>
+                        </div>
+                        <div className="relative flex min-h-0 flex-1 items-center justify-center bg-black p-3">
+                            {isVideoType(previewItem.type) ? (
+                                <video
+                                    src={previewItem.url}
+                                    controls
+                                    autoPlay
+                                    playsInline
+                                    preload="metadata"
+                                    className="max-h-[70vh] max-w-full object-contain"
+                                    onError={() => setPreviewError('Không thể tải video xem trước. File có thể đã bị xoá hoặc không còn quyền truy cập.')}
+                                />
+                            ) : (
+                                <img
+                                    src={previewItem.url}
+                                    alt={previewItem.name}
+                                    className="max-h-[70vh] max-w-full object-contain"
+                                    onError={() => setPreviewError('Không thể tải ảnh xem trước. File có thể đã bị xoá hoặc không còn quyền truy cập.')}
+                                />
+                            )}
+                            {previewError && (
+                                <div className="absolute inset-3 flex items-center justify-center rounded-lg bg-black/75 p-6 text-center text-sm text-white">
+                                    {previewError}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

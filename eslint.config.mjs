@@ -34,6 +34,8 @@ const eslintConfig = [
       "firebase-debug.log",
       "firestore-debug.log",
       "next-env.d.ts",
+      // Vendored FFmpeg WebAssembly is generated third-party code.
+      "public/ffmpeg/**",
       "roadmap_v2/**",
       "temp_git_page.tsx",
     ],

@@ -123,13 +123,13 @@ function getTechnicianQueryableStatusIds(repairStatuses: WorkflowNode[], warrant
         .filter(Boolean)));
 }
 
-function isAssignedTechnicianAtWorkflowEntry(ticket: RepairTicket, workflow: WorkflowNode[], userId: string | undefined): boolean {
+function isAssignedTechnicianAtWorkflowEntry(ticket: RepairTicket, workflow: WorkflowNode[], userId: string | undefined, entryStatusId: string): boolean {
     return Boolean(userId)
         && ticket.staff?.assignedTechnician === userId
-        && workflow[0]?.id === ticket.status;
+        && (workflow.find(node => node.id === entryStatusId)?.id || workflow[0]?.id) === ticket.status;
 }
 
-function getTechnicianAllowedNextStatuses(ticket: RepairTicket, workflow: WorkflowNode[], userId: string | undefined, isManager: boolean): WorkflowNode[] {
+function getTechnicianAllowedNextStatuses(ticket: RepairTicket, workflow: WorkflowNode[], userId: string | undefined, isManager: boolean, entryStatusId: string): WorkflowNode[] {
     const currentNode = workflow.find(node => node.id === ticket.status);
     if (getInboundTechnicianHoldMessage(ticket, currentNode)) return [];
 
@@ -156,7 +156,7 @@ function getTechnicianAllowedNextStatuses(ticket: RepairTicket, workflow: Workfl
 
     // The first node is the dynamic intake node. An assigned KTV gets one
     // action here: begin the first non-terminal technical step.
-    if (isAssignedTechnicianAtWorkflowEntry(ticket, workflow, userId)) {
+    if (isAssignedTechnicianAtWorkflowEntry(ticket, workflow, userId, entryStatusId)) {
         const startNode = getFirstNonTerminalWorkflowTransition(workflow, ticket.status);
         return startNode && allowedNext.some(node => node.id === startNode.id) ? [startNode] : [];
     }
@@ -437,6 +437,8 @@ export default function TechnicianPage() {
 
     const [dynamicStatuses, setDynamicStatuses] = useState<WorkflowNode[]>([]);
     const [warrantyStatuses, setWarrantyStatuses] = useState<WorkflowNode[]>([]);
+    const [repairEntryStatusId, setRepairEntryStatusId] = useState('');
+    const [warrantyEntryStatusId, setWarrantyEntryStatusId] = useState('');
     const [statusConfigLoaded, setStatusConfigLoaded] = useState(false);
     const [technicians, setTechnicians] = useState<{ uid: string; displayName: string }[]>([]);
     // userNamesMap removed
@@ -447,6 +449,9 @@ export default function TechnicianPage() {
 
     const getWorkflowForTicket = (ticket: RepairTicket): WorkflowNode[] => {
         return ticket.ticketType === 'warranty' ? warrantyStatuses : dynamicStatuses;
+    };
+    const getEntryStatusIdForTicket = (ticket: RepairTicket): string => {
+        return ticket.ticketType === 'warranty' ? warrantyEntryStatusId : repairEntryStatusId;
     };
 
 
@@ -707,8 +712,12 @@ export default function TechnicianPage() {
             if (docSnap.exists()) {
                 const data = docSnap.data();
                 const normalizationOptions = getWorkflowNormalizationOptions(data.workflowSchemaVersion);
-                setDynamicStatuses(normalizeRepairWorkflow(data.repairStatuses, normalizationOptions));
-                setWarrantyStatuses(normalizeWarrantyWorkflow(data.warrantyStatuses, normalizationOptions));
+                const repairWorkflow = normalizeRepairWorkflow(data.repairStatuses, normalizationOptions);
+                const warrantyWorkflow = normalizeWarrantyWorkflow(data.warrantyStatuses, normalizationOptions);
+                setDynamicStatuses(repairWorkflow);
+                setWarrantyStatuses(warrantyWorkflow);
+                setRepairEntryStatusId(repairWorkflow.find(status => status.id === data.repairEntryStatusId)?.id || repairWorkflow[0]?.id || '');
+                setWarrantyEntryStatusId(warrantyWorkflow.find(status => status.id === data.warrantyEntryStatusId)?.id || warrantyWorkflow[0]?.id || '');
             }
             setStatusConfigLoaded(true);
         });
@@ -1272,6 +1281,7 @@ export default function TechnicianPage() {
                         </div>
                     ) : filtered.map(ticket => {
                         const workflow = getWorkflowForTicket(ticket);
+                        const entryStatusId = getEntryStatusIdForTicket(ticket);
                         const st = workflow.find(s => s.id === ticket.status) || { id: ticket.status, label: ticket.status, color: 'text-gray-700 bg-gray-50 border-gray-200', allowedNext: [] } as WorkflowNode;
                         const currentCfg = workflow.find(s => s.id === ticket.status);
                         const isTerminal = isTicketWaitingForCustomerHandoff(ticket, workflow) || !!currentCfg?.isTerminal;
@@ -1286,7 +1296,7 @@ export default function TechnicianPage() {
                             : null;
                         const isKtvAwaitingInspectionStart = user?.role !== 'admin'
                             && !inboundTechnicianHoldMessage
-                            && isAssignedTechnicianAtWorkflowEntry(ticket, workflow, user?.uid);
+                            && isAssignedTechnicianAtWorkflowEntry(ticket, workflow, user?.uid, entryStatusId);
                         const requiresChecklist = !inboundTechnicianHoldMessage
                             && !isKtvAwaitingInspectionStart
                             && currentCfg?.allowedFeatures?.includes('requireChecklist') === true;
@@ -1522,7 +1532,7 @@ export default function TechnicianPage() {
                                                 {(() => {
                                                     if (isReadOnly) return null;
 
-                                        const allowedNextStatuses = getTechnicianAllowedNextStatuses(ticket, workflow, user?.uid, isRepairManager(user));
+                                        const allowedNextStatuses = getTechnicianAllowedNextStatuses(ticket, workflow, user?.uid, isRepairManager(user), entryStatusId);
                                                     if (allowedNextStatuses.length > 0) {
                                                         return allowedNextStatuses.map((nextCfg) => {
                                                             const isRefundOutcome = nextCfg.terminalAction === 'refund' || nextCfg.allowedFeatures?.includes('refundOutcome');
@@ -1573,6 +1583,7 @@ export default function TechnicianPage() {
                                         <div className="text-center py-8 text-gray-300 text-xs bg-white/50 rounded-lg border border-dashed">Thùng rỗng</div>
                                     ) : colTickets.map(ticket => {
                                         const workflow = getWorkflowForTicket(ticket);
+                                        const entryStatusId = getEntryStatusIdForTicket(ticket);
                                         const st = workflow.find(s => s.id === ticket.status) as WorkflowNode | undefined;
                                         const isTerminal = isTicketWaitingForCustomerHandoff(ticket, workflow) || !!st?.isTerminal;
                                         const inboundTechnicianHoldMessage = getInboundTechnicianHoldMessage(ticket, st);
@@ -1582,7 +1593,7 @@ export default function TechnicianPage() {
                                         const isReadOnly = isTerminal || isKtvLocked || Boolean(inboundTechnicianHoldMessage);
                                         const isKtvAwaitingInspectionStart = user?.role !== 'admin'
                                             && !inboundTechnicianHoldMessage
-                                            && isAssignedTechnicianAtWorkflowEntry(ticket, workflow, user?.uid);
+                                            && isAssignedTechnicianAtWorkflowEntry(ticket, workflow, user?.uid, entryStatusId);
 
                                         return (
                                             <div key={ticket.id} className="bg-white rounded-lg border p-3 shadow-sm hover:shadow-md transition-shadow relative group">
@@ -1672,7 +1683,7 @@ export default function TechnicianPage() {
                                                     return (
                                                         <>
                                                             {(() => {
-                                                                const allowedNextStatuses = getTechnicianAllowedNextStatuses(ticket, workflow, user?.uid, isRepairManager(user));
+                                                                const allowedNextStatuses = getTechnicianAllowedNextStatuses(ticket, workflow, user?.uid, isRepairManager(user), entryStatusId);
                                                                 if (allowedNextStatuses.length > 0) {
                                                                     return (
                                                                         <div className="mt-3 pt-3 border-t flex flex-col gap-1.5">

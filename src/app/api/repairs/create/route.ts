@@ -2,9 +2,9 @@ import { NextRequest } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requirePermission } from '@/lib/apiAuth';
 import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
-import { loadRepairWorkflow } from '@/lib/repairWorkflowServer';
+import { loadRepairWorkflowDefinition } from '@/lib/repairWorkflowServer';
 import { FieldValue } from 'firebase-admin/firestore';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { isTechnicianUser } from '@/lib/repairAccess';
 import { incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 import { reserveSequentialDocumentId } from '@/lib/serverDocumentIds';
@@ -17,7 +17,42 @@ type CreateRepairBody = Record<string, unknown> & {
     ticketType?: 'repair' | 'warranty';
     timing?: Record<string, unknown>;
     staff?: Record<string, unknown>;
+    idempotencyKey?: string;
 };
+
+function stableStringify(value: unknown): string {
+    if (value === null || typeof value !== 'object') return JSON.stringify(value);
+    if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+
+    const object = value as Record<string, unknown>;
+    return `{${Object.keys(object)
+        .sort()
+        .map(key => `${JSON.stringify(key)}:${stableStringify(object[key])}`)
+        .join(',')}}`;
+}
+
+function createPayloadSignature(body: CreateRepairBody): string {
+    const payload = { ...body } as Record<string, unknown>;
+    for (const field of ['idempotencyKey', 'createdAt', 'updatedAt', 'status', 'statusTimeline', 'version']) {
+        delete payload[field];
+    }
+
+    if (payload.timing && typeof payload.timing === 'object' && !Array.isArray(payload.timing)) {
+        const timing = { ...payload.timing as Record<string, unknown> };
+        delete timing.receivedAt;
+        payload.timing = timing;
+    }
+    if (Array.isArray(payload.paymentHistory)) {
+        payload.paymentHistory = payload.paymentHistory.map(entry => {
+            if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry;
+            const payment = { ...entry as Record<string, unknown> };
+            delete payment.timestamp;
+            return payment;
+        });
+    }
+
+    return createHash('sha256').update(stableStringify(payload)).digest('hex');
+}
 
 export const POST = withApi({
     name: 'repairs/create',
@@ -26,12 +61,38 @@ export const POST = withApi({
         const caller = await requirePermission(request, 'manage_repairs');
         const e2eMetadata = getE2ERunMetadata(request);
         const body = await context.readJson<CreateRepairBody>(request);
+        const idempotencyKey = typeof body.idempotencyKey === 'string' ? body.idempotencyKey.trim() : '';
+        if (!/^[A-Za-z0-9_-]{16,128}$/.test(idempotencyKey)) {
+            return context.error('Missing or invalid idempotencyKey');
+        }
+        const payloadSignature = createPayloadSignature(body);
 
         const db = getAdminDb();
 
         const result = await db.runTransaction(async (tx) => {
-            const workflow = await loadRepairWorkflow(tx, db, { ticketType: body.ticketType });
-            const entryNode = workflow[0];
+            const operationRef = db.collection('operation_requests').doc(idempotencyKey);
+            const operationSnap = await tx.get(operationRef);
+            if (operationSnap.exists) {
+                const operation = operationSnap.data();
+                if (
+                    operation?.status === 'completed'
+                    && operation.type === 'repair_create'
+                    && operation.actorId === caller.uid
+                    && operation.payloadSignature === payloadSignature
+                    && typeof operation.referenceId === 'string'
+                    && typeof operation.targetStatus === 'string'
+                ) {
+                    return {
+                        id: operation.referenceId,
+                        status: operation.targetStatus,
+                        fromCache: true,
+                    };
+                }
+                throw new Error('Idempotency key da duoc dung cho thao tac khac.');
+            }
+
+            const workflowDefinition = await loadRepairWorkflowDefinition(tx, db, { ticketType: body.ticketType });
+            const entryNode = workflowDefinition.entryNode;
 
             if (!entryNode) {
                 throw new Error('Không tìm thấy entry node trong workflow');
@@ -151,6 +212,9 @@ export const POST = withApi({
                     receivedAt: FieldValue.serverTimestamp(),
                 },
                 version: 1,
+                // The short revision preserves audit context without duplicating
+                // a full workflow snapshot into every ticket document.
+                workflowRevision: workflowDefinition.revision,
             };
 
             const ticketAllocation = await reserveSequentialDocumentId(tx, db, {
@@ -160,6 +224,16 @@ export const POST = withApi({
             const newTicketRef = ticketAllocation.ref;
             ticketAllocation.commitCounter();
             tx.set(newTicketRef, finalData);
+            tx.set(operationRef, {
+                ...e2eMetadata,
+                status: 'completed',
+                completedAt: FieldValue.serverTimestamp(),
+                type: 'repair_create',
+                referenceId: ticketAllocation.id,
+                targetStatus: entryNode.id,
+                actorId: caller.uid,
+                payloadSignature,
+            });
             for (const [productId, held] of heldByProduct) {
                 tx.update(db.collection('products').doc(productId), { held });
             }

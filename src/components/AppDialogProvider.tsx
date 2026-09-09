@@ -38,7 +38,7 @@ export default function AppDialogProvider({ children }: { children: React.ReactN
     return (
         <>
             {children}
-            <Modal isOpen={Boolean(request)} onClose={() => closeDialog(isPrompt ? null : false)} title={title} size="sm" priority="high">
+            <Modal isOpen={Boolean(request)} onClose={() => closeDialog(isPrompt ? null : false)} title={title} size="sm" priority="top">
                 <div className="p-6 space-y-5">
                     <p className="whitespace-pre-line text-sm leading-relaxed text-gray-700">{request?.message}</p>
                     {isPrompt && (

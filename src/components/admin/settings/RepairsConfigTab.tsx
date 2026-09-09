@@ -5,7 +5,7 @@ import {
     Settings, Plus, Trash2, GripVertical, Save, Loader2, ArrowRight, Eye, Shield, AlertTriangle, RotateCcw
 } from 'lucide-react';
 import Modal from '@/components/admin/Modal';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc } from 'firebase/firestore';
 import { getDoc } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import { WORKFLOW_FEATURES, type WorkflowFeature } from '@/lib/workflowFeatures';
@@ -93,46 +93,23 @@ const FEATURE_SECTIONS = [
 ] as const;
 
 const TERMINAL_SEMANTIC_FEATURES = ['requiresHandover', 'refundOutcome'] as const;
-const WORKFLOW_BACKUP_LIMIT = 5;
-
 type WorkflowBackup = {
     id: string;
     createdAtMillis: number;
     repairStatuses: WorkflowNode[];
     warrantyStatuses: WorkflowNode[];
+    repairEntryStatusId?: string;
+    warrantyEntryStatusId?: string;
     trackingGroups: TrackingGroup[];
     warrantyRules: WarrantyRule[];
     warrantyNote: string;
     workflowSchemaVersion: number;
 };
 
-type WorkflowSaveContent = Omit<WorkflowBackup, 'id' | 'createdAtMillis'>;
-
 function sortTrackingGroups(groups: TrackingGroup[] | undefined): TrackingGroup[] {
     return [...(groups || [])]
         .map((group, index) => ({ ...group, order: Number.isFinite(group.order) ? group.order : index }))
         .sort((a, b) => a.order - b.order);
-}
-
-function getWorkflowSaveContent(data: Record<string, unknown>): WorkflowSaveContent {
-    const normalizationOptions = getWorkflowNormalizationOptions(data.workflowSchemaVersion);
-    const repairStatuses = normalizeRepairWorkflow(
-        (Array.isArray(data.repairStatuses) ? data.repairStatuses : data.statuses) as WorkflowNode[] | undefined,
-        normalizationOptions,
-    );
-    const warrantyStatuses = normalizeWarrantyWorkflow(
-        data.warrantyStatuses as WorkflowNode[] | undefined,
-        normalizationOptions,
-    );
-
-    return {
-        repairStatuses,
-        warrantyStatuses,
-        trackingGroups: sortTrackingGroups(data.trackingGroups as TrackingGroup[] | undefined),
-        warrantyRules: Array.isArray(data.warrantyRules) ? data.warrantyRules as WarrantyRule[] : DEFAULT_WARRANTY_RULES,
-        warrantyNote: typeof data.warrantyNote === 'string' ? data.warrantyNote : '',
-        workflowSchemaVersion: WORKFLOW_SCHEMA_VERSION,
-    };
 }
 
 function isWorkflowBackup(value: unknown): value is WorkflowBackup {
@@ -142,10 +119,6 @@ function isWorkflowBackup(value: unknown): value is WorkflowBackup {
         && typeof backup.createdAtMillis === 'number'
         && Array.isArray(backup.repairStatuses)
         && Array.isArray(backup.warrantyStatuses);
-}
-
-function workflowContentsEqual(left: WorkflowSaveContent, right: WorkflowSaveContent): boolean {
-    return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function getTerminalActionDescription(action: WorkflowNode['terminalAction'] | undefined) {
@@ -164,10 +137,15 @@ function getTerminalActionDescription(action: WorkflowNode['terminalAction'] | u
 export default function RepairsConfigTab() {
     const [repairStatuses, setRepairStatuses] = useState<WorkflowNode[]>(defaultStatuses);
     const [warrantyStatuses, setWarrantyStatuses] = useState<WorkflowNode[]>(defaultWarrantyStatuses);
+    const [repairEntryStatusId, setRepairEntryStatusId] = useState(defaultStatuses[0].id);
+    const [warrantyEntryStatusId, setWarrantyEntryStatusId] = useState(defaultWarrantyStatuses[0].id);
+    const [workflowRevision, setWorkflowRevision] = useState(0);
     const [workflowTab, setWorkflowTab] = useState<'repair' | 'warranty'>('repair');
 
     const activeStatuses = workflowTab === 'repair' ? repairStatuses : warrantyStatuses;
     const setActiveStatuses = workflowTab === 'repair' ? setRepairStatuses : setWarrantyStatuses;
+    const activeEntryStatusId = workflowTab === 'repair' ? repairEntryStatusId : warrantyEntryStatusId;
+    const setActiveEntryStatusId = workflowTab === 'repair' ? setRepairEntryStatusId : setWarrantyEntryStatusId;
 
     const [trackingGroups, setTrackingGroups] = useState<TrackingGroup[]>([]);
     const [warrantyRules, setWarrantyRules] = useState<WarrantyRule[]>(DEFAULT_WARRANTY_RULES);
@@ -200,8 +178,13 @@ export default function RepairsConfigTab() {
                     const rs = d.repairStatuses ?? d.statuses ?? defaultStatuses;
                     const ws = d.warrantyStatuses ?? defaultWarrantyStatuses;
                     const normalizationOptions = getWorkflowNormalizationOptions(d.workflowSchemaVersion);
-                    setRepairStatuses(normalizeRepairWorkflow(rs, normalizationOptions));
-                    setWarrantyStatuses(normalizeWarrantyWorkflow(ws, normalizationOptions));
+                    const normalizedRepairStatuses = normalizeRepairWorkflow(rs, normalizationOptions);
+                    const normalizedWarrantyStatuses = normalizeWarrantyWorkflow(ws, normalizationOptions);
+                    setRepairStatuses(normalizedRepairStatuses);
+                    setWarrantyStatuses(normalizedWarrantyStatuses);
+                    setRepairEntryStatusId(normalizedRepairStatuses.find(status => status.id === d.repairEntryStatusId)?.id || normalizedRepairStatuses[0]?.id || '');
+                    setWarrantyEntryStatusId(normalizedWarrantyStatuses.find(status => status.id === d.warrantyEntryStatusId)?.id || normalizedWarrantyStatuses[0]?.id || '');
+                    setWorkflowRevision(Number.isSafeInteger(d.workflowRevision) && d.workflowRevision >= 0 ? d.workflowRevision : 0);
                     setHasLegacyStatuses(Array.isArray(d.statuses));
                     // Legacy migration: sort generic arrays to trackingGroups ensuring order
                     if (d.trackingGroups) setTrackingGroups(sortTrackingGroups(d.trackingGroups));
@@ -229,59 +212,51 @@ export default function RepairsConfigTab() {
             const normalizedRepairStatuses = normalizeRepairWorkflow(repairStatuses, persistenceOptions);
             const normalizedWarrantyStatuses = normalizeWarrantyWorkflow(warrantyStatuses, persistenceOptions);
             const validationErrors = [
-                ...validateWorkflow(normalizedRepairStatuses, 'Workflow sửa chữa'),
-                ...validateWorkflow(normalizedWarrantyStatuses, 'Workflow bảo hành'),
+                ...validateWorkflow(normalizedRepairStatuses, 'Workflow sửa chữa', repairEntryStatusId),
+                ...validateWorkflow(normalizedWarrantyStatuses, 'Workflow bảo hành', warrantyEntryStatusId),
                 ...validateTrackingGroups(orderedGroups, normalizedRepairStatuses),
             ];
+
+            const repairIds = new Set(normalizedRepairStatuses.map(status => status.id));
+            if (normalizedWarrantyStatuses.some(status => repairIds.has(status.id))) {
+                validationErrors.push('ID trạng thái không được dùng đồng thời cho Workflow Sửa chữa và Bảo hành.');
+            }
 
             if (validationErrors.length > 0) {
                 toastError(validationErrors[0]);
                 return;
             }
 
-            const configRef = doc(db, 'system_config', 'repairs');
-            const currentConfigSnap = await getDoc(configRef);
-            const nextContent: WorkflowSaveContent = {
+            const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(auth => auth.currentUser?.getIdToken());
+            const response = await fetch('/api/admin/repairs/workflow', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
+                },
+                body: JSON.stringify({
                 repairStatuses: normalizedRepairStatuses,
                 warrantyStatuses: normalizedWarrantyStatuses,
+                repairEntryStatusId,
+                warrantyEntryStatusId,
                 trackingGroups: orderedGroups,
                 warrantyRules,
                 warrantyNote,
                 workflowSchemaVersion: WORKFLOW_SCHEMA_VERSION,
-            };
-            const storedBackups = currentConfigSnap.exists() && Array.isArray(currentConfigSnap.data().workflowBackups)
-                ? currentConfigSnap.data().workflowBackups.filter(isWorkflowBackup)
-                : workflowBackups;
-            const currentContent = currentConfigSnap.exists()
-                ? getWorkflowSaveContent(currentConfigSnap.data())
-                : null;
-            const nextBackups = currentContent && !workflowContentsEqual(currentContent, nextContent)
-                ? [{
-                    id: `workflow_${Date.now()}`,
-                    createdAtMillis: Date.now(),
-                    ...currentContent,
-                }, ...storedBackups].slice(0, WORKFLOW_BACKUP_LIMIT)
-                : storedBackups.slice(0, WORKFLOW_BACKUP_LIMIT);
-
-            await setDoc(configRef, {
-                repairStatuses: normalizedRepairStatuses,
-                warrantyStatuses: normalizedWarrantyStatuses,
-                trackingGroups: orderedGroups,
-                warrantyRules,
-                warrantyNote,
-                workflowSchemaVersion: WORKFLOW_SCHEMA_VERSION,
-                workflowFeatureSemantics: 'node-capabilities-v2',
-                workflowBackups: nextBackups,
-                updatedAt: serverTimestamp(),
-            }, { merge: true });
+                    expectedWorkflowRevision: workflowRevision,
+                }),
+            });
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(result.error || 'Không thể lưu workflow.');
 
             setRepairStatuses(normalizedRepairStatuses);
             setWarrantyStatuses(normalizedWarrantyStatuses);
             setTrackingGroups(orderedGroups);
-            setWorkflowBackups(nextBackups);
-            toastSuccess(currentContent && !workflowContentsEqual(currentContent, nextContent)
-                ? 'Đã lưu workflow và tạo bản sao lưu trước đó.'
-                : 'Đã chuẩn hóa và lưu cấu hình workflow!');
+            setWorkflowBackups(Array.isArray(result.workflowBackups) ? result.workflowBackups.filter(isWorkflowBackup) : workflowBackups);
+            setWorkflowRevision(Number.isSafeInteger(result.workflowRevision) ? result.workflowRevision : workflowRevision);
+            toastSuccess(result.changed
+                ? 'Đã lưu workflow an toàn và tạo bản sao lưu trước đó.'
+                : 'Workflow không thay đổi; không phát sinh ghi dữ liệu.');
         } catch (err) {
             console.error(err);
             toastError('Lỗi khi lưu!');
@@ -306,6 +281,10 @@ export default function RepairsConfigTab() {
     };
 
     const handleDeleteStatus = async (id: string) => {
+        if (activeEntryStatusId === id) {
+            toastError('Hãy chọn trạng thái bắt đầu khác trước khi xóa trạng thái này.');
+            return;
+        }
         if (!await appConfirm(`Xóa trạng thái "${id}"? Lưu ý: Cần gỡ khỏi nhóm tra cứu (nếu có) trước khi lưu.`, { title: 'Xóa trạng thái', confirmText: 'Xóa', destructive: true })) return;
         setActiveStatuses(prev => prev.filter(s => s.id !== id));
         // Remove from tracking groups as well
@@ -397,6 +376,7 @@ export default function RepairsConfigTab() {
                 ? Object.fromEntries(Object.entries(status.transitionActors).map(([nextId, actors]) => [nextId, [...(actors || [])]]))
                 : undefined,
         })));
+        setRepairEntryStatusId(defaultStatuses[0].id);
         setWorkflowTab('repair');
         toastSuccess('Đã nạp mẫu 2 nhân sự. Nhấn “Lưu toàn bộ thay đổi” để áp dụng.');
     };
@@ -414,6 +394,8 @@ export default function RepairsConfigTab() {
 
         setRepairStatuses(normalizeRepairWorkflow(backup.repairStatuses, getWorkflowNormalizationOptions(backup.workflowSchemaVersion)));
         setWarrantyStatuses(normalizeWarrantyWorkflow(backup.warrantyStatuses, getWorkflowNormalizationOptions(backup.workflowSchemaVersion)));
+        setRepairEntryStatusId(backup.repairEntryStatusId || backup.repairStatuses[0]?.id || '');
+        setWarrantyEntryStatusId(backup.warrantyEntryStatusId || backup.warrantyStatuses[0]?.id || '');
         setTrackingGroups(sortTrackingGroups(backup.trackingGroups));
         setWarrantyRules(backup.warrantyRules);
         setWarrantyNote(backup.warrantyNote);
@@ -596,6 +578,25 @@ export default function RepairsConfigTab() {
                                 </div>
                             ))}
                         </div>
+                    </div>
+
+                    <div className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-3">
+                        <label className="block text-xs font-semibold text-indigo-900" htmlFor="workflow-entry-status">
+                            Trạng thái bắt đầu cho phiếu mới
+                        </label>
+                        <select
+                            id="workflow-entry-status"
+                            value={activeEntryStatusId}
+                            onChange={event => setActiveEntryStatusId(event.target.value)}
+                            className="mt-1.5 w-full rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none"
+                        >
+                            {activeStatuses.filter(status => !status.isTerminal).map(status => (
+                                <option key={status.id} value={status.id}>{status.label}</option>
+                            ))}
+                        </select>
+                        <p className="mt-1.5 text-[11px] text-indigo-800">
+                            Kéo thả chỉ đổi thứ tự hiển thị; trạng thái này mới quyết định phiếu mới bắt đầu ở đâu.
+                        </p>
                     </div>
 
                     <div className="space-y-2">

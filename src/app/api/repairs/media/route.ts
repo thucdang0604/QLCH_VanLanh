@@ -5,8 +5,14 @@ import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handle
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { isYouTubeUrl } from '@/lib/workflowFeatures';
 import { getConfiguredWorkflow } from '@/lib/repairWorkflowConfig';
+import { buildRepairMediaTimelineEntry } from '@/lib/repairMediaSession';
 
-type RepairMediaRequestBody = { ticketId?: string; mediaUrl?: string; source?: 'upload' | 'youtube' };
+type RepairMediaRequestBody = {
+    ticketId?: string;
+    mediaUrl?: string;
+    source?: 'upload' | 'youtube';
+    placement?: 'pre_repair' | 'post_repair';
+};
 
 function isValidMediaUrl(value: string): boolean {
     if (value.length > 2048) return false;
@@ -27,6 +33,7 @@ export const POST = withApi({
         const ticketId = typeof body.ticketId === 'string' ? body.ticketId.trim() : '';
         const mediaUrl = typeof body.mediaUrl === 'string' ? body.mediaUrl.trim() : '';
         const source = body.source || 'upload';
+        const placement = body.placement === 'pre_repair' ? 'pre_repair' : 'post_repair';
 
         if (!ticketId || !mediaUrl) {
             return context.error('Missing ticketId or mediaUrl');
@@ -54,19 +61,19 @@ export const POST = withApi({
             }
             const workflow = getConfiguredWorkflow(configSnap.data() ?? {}, ticket.ticketType);
             const currentNode = workflow.find(node => node.id === status);
-            if (!currentNode?.isTerminal) {
+            if (placement === 'post_repair' && !currentNode?.isTerminal) {
                 throw new Error('Chi duoc them media ban giao cho phieu da hoan tat/ban giao/hoan tien.');
             }
 
+            const mediaField = placement === 'pre_repair' ? 'preRepairMedia' : 'postRepairMedia';
+            // A retry after a lost response must not append another timeline entry.
+            const existingMedia: unknown = ticketSnap.get(mediaField);
+            if (Array.isArray(existingMedia) && existingMedia.includes(mediaUrl)) return;
+
             tx.update(ticketRef, {
-                postRepairMedia: FieldValue.arrayUnion(mediaUrl),
+                [mediaField]: FieldValue.arrayUnion(mediaUrl),
                 updatedAt: FieldValue.serverTimestamp(),
-                statusTimeline: FieldValue.arrayUnion({
-                    status,
-                    note: source === 'youtube' ? 'Them link YouTube ban giao' : 'Them media ban giao',
-                    timestamp: FieldValue.serverTimestamp(),
-                    userId: caller.uid,
-                }),
+                statusTimeline: FieldValue.arrayUnion(buildRepairMediaTimelineEntry(status, placement, source, caller.uid)),
             });
         });
 

@@ -1,4 +1,3 @@
-import type { Dispatch, SetStateAction } from 'react';
 import MediaManager from '@/components/admin/MediaManager';
 
 interface RepairMediaManagersProps {
@@ -6,8 +5,11 @@ interface RepairMediaManagersProps {
     setShowPreMediaManager: (value: boolean) => void;
     showPostMediaManager: boolean;
     setShowPostMediaManager: (value: boolean) => void;
-    setPreMediaFiles: Dispatch<SetStateAction<string[]>>;
-    setPostMediaFiles: Dispatch<SetStateAction<string[]>>;
+    onPreMediaSelected: (urls: string[]) => void;
+    onPostMediaSelected: (urls: string[]) => void;
+    uploadContext: string | null;
+    onPreMediaUploaded: (urls: string[], uploadContext: string | null | undefined) => void;
+    onPostMediaUploaded: (urls: string[], uploadContext: string | null | undefined) => void;
 }
 
 export function RepairMediaManagers({
@@ -15,8 +17,11 @@ export function RepairMediaManagers({
     setShowPreMediaManager,
     showPostMediaManager,
     setShowPostMediaManager,
-    setPreMediaFiles,
-    setPostMediaFiles,
+    onPreMediaSelected,
+    onPostMediaSelected,
+    uploadContext,
+    onPreMediaUploaded,
+    onPostMediaUploaded,
 }: RepairMediaManagersProps) {
     return (
         <>
@@ -26,9 +31,9 @@ export function RepairMediaManagers({
                 title="Chọn Ảnh/Video lúc nhận máy"
                 multiple={true}
                 defaultFolder="repairs"
-                onSelectMultiple={(urls) => {
-                    setPreMediaFiles(prev => [...prev, ...urls]);
-                }}
+                uploadContext={uploadContext}
+                onUploadComplete={onPreMediaUploaded}
+                onSelectMultiple={onPreMediaSelected}
             />
             <MediaManager
                 isOpen={showPostMediaManager}
@@ -36,9 +41,9 @@ export function RepairMediaManagers({
                 title="Chọn Ảnh/Video sau sửa chữa"
                 multiple={true}
                 defaultFolder="repairs"
-                onSelectMultiple={(urls) => {
-                    setPostMediaFiles(prev => [...prev, ...urls]);
-                }}
+                uploadContext={uploadContext}
+                onUploadComplete={onPostMediaUploaded}
+                onSelectMultiple={onPostMediaSelected}
             />
         </>
     );

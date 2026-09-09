@@ -9,7 +9,7 @@ import { appConfirm } from '@/lib/appDialog';
  */
 
 type ModalSize = 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl' | '4xl' | 'full';
-type ModalPriority = 'normal' | 'high'; // normal = z-50, high = z-[60]
+type ModalPriority = 'normal' | 'high' | 'top'; // normal = z-50, high = z-[60], top = z-[300]
 
 interface ModalProps {
     isOpen: boolean;
@@ -96,7 +96,7 @@ export default function Modal({
 
     if (!isOpen) return null;
 
-    const zClass = priority === 'high' ? 'z-[60]' : 'z-50';
+    const zClass = priority === 'top' ? 'z-[300]' : priority === 'high' ? 'z-[60]' : 'z-50';
     const blurClass = blur ? 'backdrop-blur-sm' : '';
     const printClass = printHidden ? 'print:hidden' : '';
     const mobileAlign = mobileSheet ? 'items-end md:items-center' : 'items-center';

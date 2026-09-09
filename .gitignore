@@ -49,6 +49,8 @@ ts_errors.txt
 eslint_output.json
 compile.log
 temp_git_page.tsx
+# Generated at dev/build time from @ffmpeg/core; do not commit the 30MB WASM asset.
+public/ffmpeg/
 
 # Firebase & Agents
 .firebase/

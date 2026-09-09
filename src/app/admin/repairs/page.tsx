@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { collection, query, where, updateDoc, doc, serverTimestamp, orderBy, Timestamp, limit, startAfter, getCountFromServer, DocumentSnapshot, arrayUnion, type QueryConstraint } from 'firebase/firestore';
@@ -28,6 +28,7 @@ import { useClientPagination } from '@/lib/useClientPagination';
 import { getWorkflowNormalizationOptions, normalizeRepairWorkflow, normalizeWarrantyWorkflow } from '@/lib/repairWorkflowConfig';
 import { requiresRepairPaymentAtPos } from '@/lib/repairPaymentGate';
 import { getRepairIssueLaborCost } from '@/lib/repairIssuePricing';
+import { canAttachBackgroundMedia, createBackgroundRepairMediaSession, type BackgroundRepairMediaSession, type RepairMediaPlacement } from '@/lib/repairMediaSession';
 import {
     canOverrideRepairTerminalStatus,
     formatRepairPrice,
@@ -59,7 +60,6 @@ const formatPrice = formatRepairPrice;
 const REPAIRS_PAGE_SIZE = 50;
 const REPAIR_SEARCH_LIMIT = 50;
 type RepairListTab = 'active' | 'closed';
-
 function getRepairCustomerContact(ticket: RepairTicket): string {
     return ticket.customer.primaryContactValue
         || ticket.customer.contactValue
@@ -75,6 +75,11 @@ function isContactMethodType(value: string | null | undefined): value is Contact
 
 function getWorkflowForTicketFromLists(ticket: RepairTicket, repairStatuses: WorkflowNode[], warrantyStatuses: WorkflowNode[]): WorkflowNode[] {
     return ticket.ticketType === 'warranty' ? warrantyStatuses : repairStatuses;
+}
+
+function getEntryStatusId(statuses: WorkflowNode[], configuredEntryStatusId: string): RepairStatus | undefined {
+    return statuses.find(status => status.id === configuredEntryStatusId)?.id as RepairStatus | undefined
+        || statuses[0]?.id as RepairStatus | undefined;
 }
 
 function isTerminalTicket(ticket: RepairTicket, repairStatuses: WorkflowNode[], warrantyStatuses: WorkflowNode[]): boolean {
@@ -150,6 +155,7 @@ export default function RepairPage() {
     const [postMediaFiles, setPostMediaFiles] = useState<string[]>([]);
     const [showPreMediaManager, setShowPreMediaManager] = useState(false);
     const [showPostMediaManager, setShowPostMediaManager] = useState(false);
+    const [activeMediaUploadContext, setActiveMediaUploadContext] = useState<string | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState<string>('all');
     const [techFilter, setTechFilter] = useState<string>('all');
@@ -173,11 +179,145 @@ export default function RepairPage() {
     const [warrantyHistory, setWarrantyHistory] = useState<RepairTicket[]>([]);
     const [warrantySelectedIndexes, setWarrantySelectedIndexes] = useState<number[]>([]);
     const [warrantyCreating, setWarrantyCreating] = useState(false);
+    const [repairSaving, setRepairSaving] = useState(false);
     const [assignModal, setAssignModal] = useState<{ ticket: RepairTicket } | null>(null);
     const [assignTechnicianId, setAssignTechnicianId] = useState('');
     const [managerOverrideModal, setManagerOverrideModal] = useState<{ ticket: RepairTicket; targetStatus: string } | null>(null);
     const [managerOverrideNote, setManagerOverrideNote] = useState('');
     const chatPrefillApplied = useRef(false);
+    const repairSaveInFlightRef = useRef(false);
+    const repairCreateOperationKeyRef = useRef<string | null>(null);
+    const activeMediaUploadContextRef = useRef<string | null>(null);
+    const appointmentMediaContextRef = useRef<string | null>(null);
+    const backgroundRepairMediaSessionsRef = useRef(new Map<string, BackgroundRepairMediaSession>());
+    const warrantyCreateInFlightRef = useRef(false);
+    const warrantyCreateOperationKeyRef = useRef<string | null>(null);
+
+    const startRepairMediaSession = useCallback(() => {
+        const previousContext = activeMediaUploadContextRef.current;
+        if (previousContext && !backgroundRepairMediaSessionsRef.current.get(previousContext)?.ticketId) {
+            backgroundRepairMediaSessionsRef.current.delete(previousContext);
+        }
+
+        const nextContext = crypto.randomUUID();
+        backgroundRepairMediaSessionsRef.current.set(nextContext, createBackgroundRepairMediaSession());
+        activeMediaUploadContextRef.current = nextContext;
+        setActiveMediaUploadContext(nextContext);
+        return nextContext;
+    }, []);
+
+    const persistBackgroundRepairMedia = async (uploadContext: string, placement: RepairMediaPlacement) => {
+        const session = backgroundRepairMediaSessionsRef.current.get(uploadContext);
+        if (!session?.ticketId) return;
+
+        const { getAuthInstance } = await import('@/lib/firebase');
+        const auth = await getAuthInstance();
+        const token = await auth.currentUser?.getIdToken();
+        if (!token) {
+            toastError('Không thể tự gắn media nền vì phiên đăng nhập đã hết hạn.');
+            return;
+        }
+
+        for (const url of session.uploaded[placement]) {
+            if (!canAttachBackgroundMedia(session, placement, url)) {
+                continue;
+            }
+
+            session.attaching[placement].add(url);
+            try {
+                const response = await fetch('/api/repairs/media', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`,
+                    },
+                    body: JSON.stringify({
+                        ticketId: session.ticketId,
+                        mediaUrl: url,
+                        source: 'upload',
+                        placement,
+                    }),
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(data.error || 'Không thể gắn media vào phiếu.');
+                }
+                session.attached[placement].add(url);
+            } catch (error) {
+                console.error('Unable to attach background repair media:', error);
+                toastError(error instanceof Error ? error.message : 'Không thể gắn media nền vào phiếu.');
+            } finally {
+                session.attaching[placement].delete(url);
+            }
+        }
+    };
+
+    const handleBackgroundRepairMediaUploaded = (
+        placement: RepairMediaPlacement,
+        urls: string[],
+        uploadContext: string | null | undefined,
+    ) => {
+        if (!uploadContext) return;
+        const session = backgroundRepairMediaSessionsRef.current.get(uploadContext);
+        if (!session) return;
+
+        const uniqueUrls = Array.from(new Set(urls.filter(url => url && !session.excluded[placement].has(url))));
+        uniqueUrls.forEach(url => session.uploaded[placement].add(url));
+
+        if (activeMediaUploadContextRef.current === uploadContext) {
+            const appendUrls = (current: string[]) => Array.from(new Set([...current, ...uniqueUrls]));
+            if (placement === 'pre_repair') {
+                setPreMediaFiles(appendUrls);
+            } else {
+                setPostMediaFiles(appendUrls);
+            }
+        }
+
+        void persistBackgroundRepairMedia(uploadContext, placement);
+    };
+
+    const handleRemoveRepairMedia = (placement: RepairMediaPlacement, url: string) => {
+        if (repairSaveInFlightRef.current) return;
+        const context = activeMediaUploadContextRef.current;
+        if (context) backgroundRepairMediaSessionsRef.current.get(context)?.excluded[placement].add(url);
+        const update = placement === 'pre_repair' ? setPreMediaFiles : setPostMediaFiles;
+        update(current => current.filter(value => value !== url));
+    };
+
+    const handleSelectRepairMedia = (placement: RepairMediaPlacement, urls: string[]) => {
+        const context = activeMediaUploadContextRef.current;
+        const session = context ? backgroundRepairMediaSessionsRef.current.get(context) : undefined;
+        urls.forEach(url => session?.excluded[placement].delete(url));
+        const update = placement === 'pre_repair' ? setPreMediaFiles : setPostMediaFiles;
+        update(current => Array.from(new Set([...current, ...urls])));
+    };
+
+    const bindBackgroundRepairMediaToTicket = (
+        ticketId: string,
+        submittedPreMedia: string[],
+        submittedPostMedia: string[],
+    ) => {
+        const uploadContext = activeMediaUploadContextRef.current;
+        if (!uploadContext) return;
+        const session = backgroundRepairMediaSessionsRef.current.get(uploadContext);
+        if (!session) return;
+
+        session.ticketId = ticketId;
+        submittedPreMedia.forEach(url => session.submitted.pre_repair.add(url));
+        submittedPostMedia.forEach(url => session.submitted.post_repair.add(url));
+        void persistBackgroundRepairMedia(uploadContext, 'pre_repair');
+        void persistBackgroundRepairMedia(uploadContext, 'post_repair');
+    };
+
+    const handleCloseRepairEditor = () => {
+        const uploadContext = activeMediaUploadContextRef.current;
+        if (uploadContext && !backgroundRepairMediaSessionsRef.current.get(uploadContext)?.ticketId) {
+            backgroundRepairMediaSessionsRef.current.delete(uploadContext);
+        }
+        activeMediaUploadContextRef.current = null;
+        setActiveMediaUploadContext(null);
+        setShowModal(false);
+    };
 
     useEffect(() => {
         if (warrantyModal) {
@@ -275,6 +415,8 @@ export default function RepairPage() {
 
     const [dynamicStatuses, setDynamicStatuses] = useState<WorkflowNode[]>([]);
     const [warrantyStatuses, setWarrantyStatuses] = useState<WorkflowNode[]>([]);
+    const [repairEntryStatusId, setRepairEntryStatusId] = useState('');
+    const [warrantyEntryStatusId, setWarrantyEntryStatusId] = useState('');
     const [statusConfigLoaded, setStatusConfigLoaded] = useState(false);
     const getWorkflowForTicket = (ticket: RepairTicket): WorkflowNode[] => {
         return getWorkflowForTicketFromLists(ticket, dynamicStatuses, warrantyStatuses);
@@ -302,8 +444,12 @@ export default function RepairPage() {
             if (docSnap.exists()) {
                 const data = docSnap.data();
                 const normalizationOptions = getWorkflowNormalizationOptions(data.workflowSchemaVersion);
-                setDynamicStatuses(normalizeRepairWorkflow(data.repairStatuses ?? data.statuses ?? [], normalizationOptions));
-                setWarrantyStatuses(normalizeWarrantyWorkflow(data.warrantyStatuses ?? [], normalizationOptions));
+                const repairWorkflow = normalizeRepairWorkflow(data.repairStatuses ?? data.statuses ?? [], normalizationOptions);
+                const warrantyWorkflow = normalizeWarrantyWorkflow(data.warrantyStatuses ?? [], normalizationOptions);
+                setDynamicStatuses(repairWorkflow);
+                setWarrantyStatuses(warrantyWorkflow);
+                setRepairEntryStatusId(repairWorkflow.find(status => status.id === data.repairEntryStatusId)?.id || repairWorkflow[0]?.id || '');
+                setWarrantyEntryStatusId(warrantyWorkflow.find(status => status.id === data.warrantyEntryStatusId)?.id || warrantyWorkflow[0]?.id || '');
             }
             setStatusConfigLoaded(true);
         }, (err) => {
@@ -502,24 +648,31 @@ export default function RepairPage() {
                     return updated;
                 });
                 setEditingTicket(null);
+                if (appointmentMediaContextRef.current !== appointmentId) {
+                    appointmentMediaContextRef.current = appointmentId;
+                    setPreMediaFiles([]);
+                    setPostMediaFiles([]);
+                    startRepairMediaSession();
+                }
                 setShowModal(true);
             } catch (e) {
                 console.error('Error auto-filling from appointment:', e);
             }
         })();
-    }, [searchParams, services, user?.uid]);
+    }, [searchParams, services, user?.uid, startRepairMediaSession]);
 
     useEffect(() => {
         if (chatPrefillApplied.current || searchParams.get('source') !== 'chat') return;
         const handoff = consumeChatWorkflowHandoff(searchParams);
         if (!handoff) return;
-        const initialStatus = dynamicStatuses[0]?.id as RepairStatus | undefined;
+        const initialStatus = getEntryStatusId(dynamicStatuses, repairEntryStatusId);
         if (!initialStatus) return;
         const handoffContactType = isContactMethodType(handoff.primaryContactType) ? handoff.primaryContactType : handoff.customerPhone ? 'phone' : 'other';
         const handoffContactValue = handoff.primaryContactValue || '';
         setEditingTicket(null);
         setPreMediaFiles([]);
         setPostMediaFiles([]);
+        startRepairMediaSession();
         setFormData({
             ...emptyForm,
             status: initialStatus,
@@ -533,7 +686,7 @@ export default function RepairPage() {
         });
         setShowModal(true);
         chatPrefillApplied.current = true;
-    }, [dynamicStatuses, emptyForm, searchParams]);
+    }, [dynamicStatuses, emptyForm, repairEntryStatusId, searchParams, startRepairMediaSession]);
     const isTerminal = (ticket: RepairTicket) => {
         return isTerminalTicket(ticket, dynamicStatuses, warrantyStatuses);
     };
@@ -791,7 +944,7 @@ export default function RepairPage() {
     const handleCreateWarrantyTicket = async (originalTicket: RepairTicket, claimedPartIndexes: number[]) => {
         const warrantyType = getWarrantyTypeForTicket(originalTicket);
         const hasServiceWarrantyConfig = Boolean(getWarrantyConfigForType(warrantyType));
-        const initialWarrantyStatus = warrantyStatuses[0]?.id;
+        const initialWarrantyStatus = getEntryStatusId(warrantyStatuses, warrantyEntryStatusId);
         if (!initialWarrantyStatus) {
             toastError('Chưa có trạng thái mở đầu trong workflow bảo hành.');
             return;
@@ -800,7 +953,12 @@ export default function RepairPage() {
             toastWarning('Vui lòng chọn ít nhất 1 linh kiện cần bảo hành.');
             return;
         }
+        if (warrantyCreateInFlightRef.current) return;
+
+        warrantyCreateInFlightRef.current = true;
         setWarrantyCreating(true);
+        const idempotencyKey = warrantyCreateOperationKeyRef.current || crypto.randomUUID();
+        warrantyCreateOperationKeyRef.current = idempotencyKey;
         try {
             const existingQ = query(
                 collection(db, 'repairs'),
@@ -815,7 +973,6 @@ export default function RepairPage() {
             });
             if (activeWarranty) {
                 toastWarning(`Đã có phiếu bảo hành #${activeWarranty.id.slice(-6).toUpperCase()} đang xử lý cho phiếu này.`);
-                setWarrantyCreating(false);
                 return;
             }
             const claimedPartsSnapshot = claimedPartIndexes
@@ -836,6 +993,7 @@ export default function RepairPage() {
                 })
                 .filter(Boolean);
             const warrantyTicketData = {
+                idempotencyKey,
                 ticketType: 'warranty' as const,
                 warrantyClaim: {
                     originalTicketId: originalTicket.id,
@@ -930,6 +1088,7 @@ export default function RepairPage() {
             console.error('Error creating warranty ticket:', err);
             toastError('Không thể tạo phiếu bảo hành. Vui lòng thử lại.');
         } finally {
+            warrantyCreateInFlightRef.current = false;
             setWarrantyCreating(false);
         }
     };
@@ -949,6 +1108,8 @@ export default function RepairPage() {
     };
 
     const handleOpenWarrantyModal = async (ticket: RepairTicket) => {
+        warrantyCreateInFlightRef.current = false;
+        warrantyCreateOperationKeyRef.current = null;
         setWarrantySelectedIndexes([]);
         if (!shouldSyncRepairWarranty(ticket)) {
             setWarrantyModal(ticket);
@@ -985,7 +1146,11 @@ export default function RepairPage() {
         }
     };
     const handleOpenModal = (ticket?: RepairTicket) => {
+        repairSaveInFlightRef.current = false;
+        setRepairSaving(false);
+        startRepairMediaSession();
         if (ticket) {
+            repairCreateOperationKeyRef.current = null;
             const cl = ticket.deviceInfo?.checklist;
             const ticketIssues = ticket.issues && ticket.issues.length > 0
                 ? ticket.issues
@@ -1043,12 +1208,13 @@ export default function RepairPage() {
             setPostMediaFiles(ticket.postRepairMedia || []);
             setEditingTicket(ticket);
         } else {
-            const initialStatus = dynamicStatuses[0]?.id as RepairStatus | undefined;
+            const initialStatus = getEntryStatusId(dynamicStatuses, repairEntryStatusId);
             if (!initialStatus) {
                 toastError('Chưa có trạng thái mở đầu trong workflow sửa chữa.');
                 return;
             }
             setEditingTicket(null);
+            repairCreateOperationKeyRef.current = crypto.randomUUID();
             setFormData({ ...emptyForm, technicianId: '', status: initialStatus, appointmentIntakeMethod: '' });
             setPreMediaFiles([]);
             setPostMediaFiles([]);
@@ -1193,77 +1359,84 @@ export default function RepairPage() {
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
 
-        if (!formData.customerPhone.trim()) {
-            toastError('Can nhap so dien thoai khach hang.');
-            return;
-        }
+        if (repairSaveInFlightRef.current) return;
+        repairSaveInFlightRef.current = true;
+        setRepairSaving(true);
+        const submittedPreMedia = [...preMediaFiles];
+        const submittedPostMedia = [...postMediaFiles];
+        let savedTicketId = editingTicket?.id || '';
 
-        let normalizedCustomerPhone = '';
-        if (formData.customerPhone) {
-            const normalizedPhone = normalizeVietnamPhone(formData.customerPhone);
-            if (!normalizedPhone) {
-                await appAlert('Số điện thoại không hợp lệ. Vui lòng nhập đúng định dạng số điện thoại Việt Nam.', { title: 'Số điện thoại không hợp lệ' });
+        try {
+            if (!formData.customerPhone.trim()) {
+                toastError('Can nhap so dien thoai khach hang.');
                 return;
             }
-            normalizedCustomerPhone = normalizedPhone.local;
-        }
 
-        const customerContactInput = {
-            name: formData.customerName,
-            phone: normalizedCustomerPhone,
-            zalo: String(formData.customerZalo || ''),
-            facebook: String(formData.customerFacebook || ''),
-            other: String(formData.customerOtherContact || ''),
-            primaryType: 'phone' as ContactMethodType,
-            source: 'repair' as const,
-        };
-        const contactMethods = buildContactMethods(customerContactInput);
-        const primaryContact = getPrimaryContact(contactMethods);
-        const explicitCustomerId = String(formData.customerId || '').trim();
-        const resolvedCustomerId = explicitCustomerId
-            || buildCustomerDocumentBaseId({
-                ...customerContactInput,
-            });
-        if (!formData.customerName.trim()) {
-            toastError('Can nhap ten khach hang.');
-            return;
-        }
-        if (!explicitCustomerId && contactMethods.length === 0) {
-            toastError('Can co Ma KH, SDT, Zalo, Facebook hoac lien he khac de tao phieu sua chua.');
-            return;
-        }
-        const submittedIssues: RepairIssue[] = formData.issues.map(issue => ({
-            ...issue,
-            categoryPath: Array.isArray(issue.categoryPath) ? issue.categoryPath : [],
-            serviceName: typeof issue.serviceName === 'string' ? issue.serviceName : '',
-            serviceId: typeof issue.serviceId === 'string' ? issue.serviceId : '',
-            billingMode: issue.billingMode === 'parts_only' || issue.billingMode === 'parts_and_service' || issue.billingMode === 'free'
-                ? issue.billingMode
-                : issue.billingMode === 'service_only' ? 'service_only' : undefined,
-        }));
-        const calculatedLaborCost = getRepairIssueLaborCost(submittedIssues, formData.initialParts, Number(formData.laborCost) || 0);
-        // Keep the existing ticket-level fields as a representative projection
-        // for older reports, warranty logic, and integrations. New logic reads
-        // the service group from each issue above.
-        const representativeIssue = submittedIssues.find(issue => (issue.categoryPath?.length || 0) > 0 || issue.serviceName);
-        const representativeCategoryPath = representativeIssue?.categoryPath || formData.selectedCategoryPath;
-        const representativeServiceName = representativeIssue?.serviceName || formData.selectedServiceName;
-        const customerSnapshot = {
-            id: resolvedCustomerId,
-            customerId: resolvedCustomerId,
-            name: formData.customerName.trim(),
-            phone: normalizedCustomerPhone,
-            contactType: primaryContact?.type || null,
-            contactLabel: primaryContact?.label || '',
-            contactValue: primaryContact?.value || '',
-            primaryContactType: primaryContact?.type || null,
-            primaryContactValue: primaryContact?.value || '',
-            contactMethods,
-            searchKeywords: buildContactSearchKeywords(customerContactInput, contactMethods),
-        };
+            let normalizedCustomerPhone = '';
+            if (formData.customerPhone) {
+                const normalizedPhone = normalizeVietnamPhone(formData.customerPhone);
+                if (!normalizedPhone) {
+                    await appAlert('Số điện thoại không hợp lệ. Vui lòng nhập đúng định dạng số điện thoại Việt Nam.', { title: 'Số điện thoại không hợp lệ' });
+                    return;
+                }
+                normalizedCustomerPhone = normalizedPhone.local;
+            }
 
-        const tech = staffs.find(s => s.uid === formData.technicianId);
-        try {
+            const customerContactInput = {
+                name: formData.customerName,
+                phone: normalizedCustomerPhone,
+                zalo: String(formData.customerZalo || ''),
+                facebook: String(formData.customerFacebook || ''),
+                other: String(formData.customerOtherContact || ''),
+                primaryType: 'phone' as ContactMethodType,
+                source: 'repair' as const,
+            };
+            const contactMethods = buildContactMethods(customerContactInput);
+            const primaryContact = getPrimaryContact(contactMethods);
+            const explicitCustomerId = String(formData.customerId || '').trim();
+            const resolvedCustomerId = explicitCustomerId
+                || buildCustomerDocumentBaseId({
+                    ...customerContactInput,
+                });
+            if (!formData.customerName.trim()) {
+                toastError('Can nhap ten khach hang.');
+                return;
+            }
+            if (!explicitCustomerId && contactMethods.length === 0) {
+                toastError('Can co Ma KH, SDT, Zalo, Facebook hoac lien he khac de tao phieu sua chua.');
+                return;
+            }
+            const submittedIssues: RepairIssue[] = formData.issues.map(issue => ({
+                ...issue,
+                categoryPath: Array.isArray(issue.categoryPath) ? issue.categoryPath : [],
+                serviceName: typeof issue.serviceName === 'string' ? issue.serviceName : '',
+                serviceId: typeof issue.serviceId === 'string' ? issue.serviceId : '',
+                billingMode: issue.billingMode === 'parts_only' || issue.billingMode === 'parts_and_service' || issue.billingMode === 'free'
+                    ? issue.billingMode
+                    : issue.billingMode === 'service_only' ? 'service_only' : undefined,
+            }));
+            const calculatedLaborCost = getRepairIssueLaborCost(submittedIssues, formData.initialParts, Number(formData.laborCost) || 0);
+            // Keep the existing ticket-level fields as a representative projection
+            // for older reports, warranty logic, and integrations. New logic reads
+            // the service group from each issue above.
+            const representativeIssue = submittedIssues.find(issue => (issue.categoryPath?.length || 0) > 0 || issue.serviceName);
+            const representativeCategoryPath = representativeIssue?.categoryPath || formData.selectedCategoryPath;
+            const representativeServiceName = representativeIssue?.serviceName || formData.selectedServiceName;
+            const customerSnapshot = {
+                id: resolvedCustomerId,
+                customerId: resolvedCustomerId,
+                name: formData.customerName.trim(),
+                phone: normalizedCustomerPhone,
+                contactType: primaryContact?.type || null,
+                contactLabel: primaryContact?.label || '',
+                contactValue: primaryContact?.value || '',
+                primaryContactType: primaryContact?.type || null,
+                primaryContactValue: primaryContact?.value || '',
+                contactMethods,
+                searchKeywords: buildContactSearchKeywords(customerContactInput, contactMethods),
+            };
+
+            const tech = staffs.find(s => s.uid === formData.technicianId);
             if (editingTicket) {
                 const idToken = await (await import('@/lib/firebase')).getAuthInstance().then(a => a.currentUser?.getIdToken());
                 const editRes = await fetch('/api/repairs/edit', {
@@ -1302,8 +1475,8 @@ export default function RepairPage() {
                                     historyOtherNote: formData.historyOtherNote.trim(),
                                 } as DeviceChecklist,
                             },
-                            preRepairMedia: preMediaFiles,
-                            postRepairMedia: postMediaFiles,
+                            preRepairMedia: submittedPreMedia,
+                            postRepairMedia: submittedPostMedia,
                             issue: {
                                 description: formData.issues.length > 0
                                     ? formData.issues.map(i => i.label).join(' | ')
@@ -1332,12 +1505,16 @@ export default function RepairPage() {
                 const editDataResp = await editRes.json();
                 if (!editRes.ok) {
                     throw new Error(editDataResp.error || 'Loi cap nhat phieu sua chua');
-                }            } else {
-                const initialStatus = dynamicStatuses[0]?.id as RepairStatus | undefined;
+                }
+            } else {
+                const initialStatus = getEntryStatusId(dynamicStatuses, repairEntryStatusId);
                 if (!initialStatus) {
                     throw new Error('Chưa có trạng thái mở đầu trong workflow sửa chữa.');
                 }
+                const idempotencyKey = repairCreateOperationKeyRef.current || crypto.randomUUID();
+                repairCreateOperationKeyRef.current = idempotencyKey;
                 const ticketData: Record<string, unknown> = {
+                    idempotencyKey,
                     appointmentId: formData.appointmentId || null,
                     appointmentIntakeMethod: formData.appointmentIntakeMethod || null,
                     categoryPath: representativeCategoryPath,
@@ -1363,8 +1540,8 @@ export default function RepairPage() {
                             historyOtherNote: formData.historyOtherNote.trim(),
                         } as DeviceChecklist,
                     },
-                    preRepairMedia: preMediaFiles,
-                    postRepairMedia: postMediaFiles,
+                    preRepairMedia: submittedPreMedia,
+                    postRepairMedia: submittedPostMedia,
                     statusTimeline: [{ status: initialStatus, timestamp: Date.now() }],
                     issue: {
                         description: formData.issues.length > 0
@@ -1426,16 +1603,24 @@ export default function RepairPage() {
                     body: JSON.stringify(ticketData)
                 });
 
+                const createResult = await res.json().catch(() => ({}));
                 if (!res.ok) {
-                    const err = await res.json();
-                    throw new Error(err.error || 'Lỗi khi tạo phiếu sửa chữa');
+                    throw new Error(createResult.error || 'Lỗi khi tạo phiếu sửa chữa');
                 }
+                if (typeof createResult.id !== 'string' || !createResult.id) {
+                    throw new Error('Không nhận được mã phiếu sau khi tạo.');
+                }
+                savedTicketId = createResult.id;
                 if (formData.appointmentId) {
                     await updateDoc(doc(db, 'appointments', formData.appointmentId), {
                         status: 'completed',
                         updatedAt: serverTimestamp(),
                     });
                 }
+            }
+
+            if (savedTicketId) {
+                bindBackgroundRepairMediaToTicket(savedTicketId, submittedPreMedia, submittedPostMedia);
             }
 
             if (normalizedCustomerPhone) {
@@ -1455,6 +1640,9 @@ export default function RepairPage() {
         } catch (err: unknown) {
             console.error(err);
             toastError(err instanceof Error ? err.message : 'Có lỗi xảy ra!');
+        } finally {
+            repairSaveInFlightRef.current = false;
+            setRepairSaving(false);
         }
     };
     const openPrint = (ticket: RepairTicket, mode: 'receipt' | 'invoice' | 'warranty', warrantyType: WarrantyPrintType | null = null) => {
@@ -1595,14 +1783,14 @@ export default function RepairPage() {
                 canOverrideTerminalStatus={!!canOverrideTerminalStatus}
                 staffs={staffs}
                 preMediaFiles={preMediaFiles}
-                setPreMediaFiles={setPreMediaFiles}
                 postMediaFiles={postMediaFiles}
-                setPostMediaFiles={setPostMediaFiles}
+                onRemoveMedia={handleRemoveRepairMedia}
                 setShowPreMediaManager={setShowPreMediaManager}
                 setShowPostMediaManager={setShowPostMediaManager}
                 paymentLabels={paymentLabels}
                 services={services}
-                onClose={() => setShowModal(false)}
+                isSubmitting={repairSaving}
+                onClose={handleCloseRepairEditor}
                 onSubmit={handleSubmit}
             />
             <RepairPrintTemplates
@@ -1661,8 +1849,15 @@ export default function RepairPage() {
                 setShowPreMediaManager={setShowPreMediaManager}
                 showPostMediaManager={showPostMediaManager}
                 setShowPostMediaManager={setShowPostMediaManager}
-                setPreMediaFiles={setPreMediaFiles}
-                setPostMediaFiles={setPostMediaFiles}
+                onPreMediaSelected={urls => handleSelectRepairMedia('pre_repair', urls)}
+                onPostMediaSelected={urls => handleSelectRepairMedia('post_repair', urls)}
+                uploadContext={activeMediaUploadContext}
+                onPreMediaUploaded={(urls, uploadContext) => {
+                    handleBackgroundRepairMediaUploaded('pre_repair', urls, uploadContext);
+                }}
+                onPostMediaUploaded={(urls, uploadContext) => {
+                    handleBackgroundRepairMediaUploaded('post_repair', urls, uploadContext);
+                }}
             />
         </div >
     );

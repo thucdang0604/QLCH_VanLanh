@@ -4,7 +4,7 @@ import { requirePermission } from '@/lib/apiAuth';
 import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handler';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { isRepairManager } from '@/lib/repairAccess';
-import { getConfiguredWorkflow } from '@/lib/repairWorkflowConfig';
+import { getLoadedWorkflowFromSettings } from '@/lib/repairWorkflowServer';
 import { assertInboundArrivalConfirmedForTransition } from '@/lib/repairInboundIntake';
 
 const CHECKLIST_KEYS = new Set(['body', 'screen', 'touch', 'camera', 'speaker', 'connectivity', 'battery', 'biometric']);
@@ -67,7 +67,8 @@ export const POST = withApi({
             if (!configSnap.exists) {
                 throw new Error('Khong tim thay cau hinh workflow sua chua trong Firebase.');
             }
-            const workflow = getConfiguredWorkflow(configSnap.data() ?? {}, ticket.ticketType);
+            const workflowDefinition = getLoadedWorkflowFromSettings(configSnap.data() ?? {}, ticket);
+            const workflow = workflowDefinition.workflow;
             const currentNode = workflow.find(node => node.id === ticket.status);
             if (!currentNode) {
                 throw new Error('Trang thai phieu khong ton tai trong workflow dang cau hinh.');
@@ -78,10 +79,10 @@ export const POST = withApi({
 
             assertInboundArrivalConfirmedForTransition(ticket, currentNode);
 
-            // The first node is the intake stage in a dynamic workflow. KTV
+            // The configured entry node is the intake stage in a dynamic workflow. KTV
             // must first move the ticket into its technical step; checklist
             // work is unavailable while the ticket is still waiting intake.
-            if (ticket.staff?.assignedTechnician === caller.uid && workflow[0]?.id === currentNode.id) {
+            if (ticket.staff?.assignedTechnician === caller.uid && workflowDefinition.entryNode.id === currentNode.id) {
                 throw new Error('KTV cần bấm Bắt đầu kiểm tra trước khi cập nhật checklist.');
             }
 

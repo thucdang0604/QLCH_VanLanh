@@ -256,10 +256,17 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Workflow edits are validated by the Admin SDK endpoint. Direct browser
+    // writes could otherwise remove a status still used by an open repair.
+    match /system_config/repairs {
+      allow read: if true;
+      allow write: if false;
+    }
+
     // Remaining system config is public read, admin-only write.
     match /system_config/{docId} {
       allow read: if true;
-      allow write: if isAdmin() && docId != 'taxonomy_settings';
+      allow write: if isAdmin() && docId != 'taxonomy_settings' && docId != 'repairs';
     }
 
     // Private server-side configuration. Access only through Admin SDK APIs.

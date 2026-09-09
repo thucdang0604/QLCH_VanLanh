@@ -1,8 +1,10 @@
 import { collection, getDocs, orderBy, query, deleteDoc, doc, limit as firestoreLimit, startAfter, type QueryDocumentSnapshot, type DocumentData } from 'firebase/firestore';
 import { db, getStorageInstance } from './firebase';
 
-const MAX_VIDEO_SIZE_MB = 50;
+const MAX_VIDEO_SIZE_MB = 200;
 const MAX_VIDEO_SIZE_BYTES = MAX_VIDEO_SIZE_MB * 1024 * 1024;
+const MAX_REVIEW_VIDEO_SIZE_MB = 50;
+const MAX_REVIEW_VIDEO_SIZE_BYTES = MAX_REVIEW_VIDEO_SIZE_MB * 1024 * 1024;
 
 /**
  * Upload a media file (image or video) to Firebase Storage
@@ -33,6 +35,18 @@ export async function uploadMedia(file: File, path: string = 'products'): Promis
     }
 
     try {
+        if (file.type.includes('video') && typeof window !== 'undefined') {
+            const { compressVideo, shouldSkipCompression } = await import('./videoOptimizer');
+            if (!shouldSkipCompression(file)) {
+                file = await compressVideo(file);
+            }
+            const maxUploadBytes = path === 'reviews' ? MAX_REVIEW_VIDEO_SIZE_BYTES : MAX_VIDEO_SIZE_BYTES;
+            if (file.size > maxUploadBytes) {
+                const maxUploadMb = path === 'reviews' ? MAX_REVIEW_VIDEO_SIZE_MB : MAX_VIDEO_SIZE_MB;
+                throw new Error(`Video sau khi xử lý vẫn vượt quá ${maxUploadMb}MB. Vui lòng chọn video ngắn hơn.`);
+            }
+        }
+
         const storage = await getStorageInstance();
         const { ref, uploadBytes, getDownloadURL, getMetadata } = await import('firebase/storage');
 

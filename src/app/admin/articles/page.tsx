@@ -5,7 +5,7 @@ import {
     Plus, Search, Edit, Trash2, FileText,
     Loader2, Video, MessageCircle, Clock
 } from 'lucide-react';
-import { collection, query, orderBy, limit, deleteDoc, doc, updateDoc, deleteField, serverTimestamp } from 'firebase/firestore';
+import { collection, query, orderBy, limit, deleteDoc, doc } from 'firebase/firestore';
 import { onSnapshot } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import Image from 'next/image';
@@ -27,7 +27,7 @@ export default function ArticlesPage() {
     const [managingCommentsFor, setManagingCommentsFor] = useState<Article | null>(null);
     const [activeTab, setActiveTab] = useState<'articles' | 'comments'>('articles');
 
-    // ── Realtime subscription to Firestore & Auto-publish due scheduled articles ──
+    // ── Realtime subscription to Firestore ──
     useEffect(() => {
         const q = query(collection(db, 'articles'), orderBy('createdAt', 'desc'), limit(50));
         const unsub = onSnapshot(q, (snap) => {
@@ -35,35 +35,6 @@ export default function ArticlesPage() {
             setArticles(items);
             setLoading(false);
 
-            // Auto-publish any scheduled articles that are now due
-            const now = Date.now();
-            items.forEach(async (article) => {
-                if (article.status === 'scheduled' && article.scheduledAt) {
-                    let scheduledTime = 0;
-                    const sat = article.scheduledAt as { seconds?: number };
-                    if (typeof sat === 'object' && sat !== null && 'seconds' in sat && typeof sat.seconds === 'number') {
-                        scheduledTime = sat.seconds * 1000;
-                    } else if (typeof article.scheduledAt === 'number') {
-                        scheduledTime = article.scheduledAt;
-                    } else if (typeof article.scheduledAt === 'string') {
-                        scheduledTime = new Date(article.scheduledAt).getTime();
-                    }
-
-                    if (scheduledTime > 0 && scheduledTime <= now) {
-                        try {
-                            await updateDoc(doc(db, 'articles', article.id), {
-                                status: 'published',
-                                publishedAt: serverTimestamp(),
-                                scheduledAt: deleteField(),
-                                updatedAt: serverTimestamp(),
-                            });
-                            await triggerRevalidate(['/', `/tin-tuc/${article.id}`, '/tin-tuc', '/sitemap.xml'], ['articles']);
-                        } catch (err) {
-                            console.error('Auto publish scheduled article error:', article.id, err);
-                        }
-                    }
-                }
-            });
         }, (err) => {
             console.error('Articles fetch error:', err);
             setLoading(false);

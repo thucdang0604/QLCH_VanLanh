@@ -3,7 +3,7 @@ import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requirePermission } from '@/lib/apiAuth';
 import { FieldValue, type DocumentReference } from 'firebase-admin/firestore';
 import type { RepairTicket, RepairWorkflowActor } from '@/lib/types';
-import { loadRepairWorkflow, requireWorkflowNode, workflowNodeHasFeature } from '@/lib/repairWorkflowServer';
+import { loadRepairWorkflowDefinition, requireWorkflowNode, workflowNodeHasFeature } from '@/lib/repairWorkflowServer';
 import { canTransitionDirectlyToTerminal, getFirstNonTerminalWorkflowTransition } from '@/lib/repairWorkflowConfig';
 import { isChecklistComplete } from '@/lib/workflowFeatures';
 import { REPAIR_PART_STATUS, isPendingRepairPart, isSelectedRepairPart } from '@/lib/repairStatus';
@@ -147,7 +147,8 @@ export const POST = withApi({
                 throw new Error('Không thể chuyển phiếu sang chính trạng thái hiện tại.');
             }
 
-            const workflow = await loadRepairWorkflow(tx, db, ticket);
+            const workflowDefinition = await loadRepairWorkflowDefinition(tx, db, ticket);
+            const workflow = workflowDefinition.workflow;
             const currentNode = requireWorkflowNode(workflow, ticket.status);
             const targetNode = requireWorkflowNode(workflow, targetStatus);
             if (ticket.status !== targetStatus) {
@@ -161,7 +162,7 @@ export const POST = withApi({
             const isAllowed = currentNode.allowedNext?.includes(targetStatus) ?? false;
             const requireChecklist = workflowNodeHasFeature(currentNode, 'requireChecklist');
             const requirePartsReady = workflowNodeHasFeature(currentNode, 'requirePartsReady');
-            const entryNode = workflow[0];
+            const entryNode = workflowDefinition.entryNode;
             const leavingIntakeForWork = currentNode.id === entryNode?.id && !targetNode.isTerminal;
             const requireAssignedTechnician = leavingIntakeForWork
                 || workflowNodeHasFeature(targetNode, 'requireAssignedTechnician')

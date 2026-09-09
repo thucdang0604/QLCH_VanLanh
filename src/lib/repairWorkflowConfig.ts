@@ -3,6 +3,11 @@ import type { RepairWorkflowActor, WorkflowNode } from '@/lib/types';
 export type RepairWorkflowSettings = {
     repairStatuses?: WorkflowNode[];
     warrantyStatuses?: WorkflowNode[];
+    /** Explicit entry nodes keep display reordering from changing new-ticket behavior. */
+    repairEntryStatusId?: string;
+    warrantyEntryStatusId?: string;
+    /** Monotonic audit value written when an administrator changes the workflow. */
+    workflowRevision?: number;
     workflowSchemaVersion?: number;
 };
 
@@ -136,6 +141,31 @@ export function getConfiguredWorkflow(
 }
 
 /**
+ * The entry step is business configuration, not the visual order of cards in
+ * Settings. Older documents have no explicit value, so retain their first
+ * node as the backwards-compatible entry point.
+ */
+export function getWorkflowEntryNode(
+    workflow: WorkflowNode[],
+    configuredEntryStatusId?: string,
+): WorkflowNode | undefined {
+    const entryId = configuredEntryStatusId?.trim();
+    if (entryId) return workflow.find(node => node.id === entryId);
+    return workflow[0];
+}
+
+export function getConfiguredWorkflowEntryNode(
+    settings: RepairWorkflowSettings,
+    ticketType: 'repair' | 'warranty' | undefined,
+): WorkflowNode | undefined {
+    const workflow = getConfiguredWorkflow(settings, ticketType);
+    return getWorkflowEntryNode(
+        workflow,
+        ticketType === 'warranty' ? settings.warrantyEntryStatusId : settings.repairEntryStatusId,
+    );
+}
+
+/**
  * Resolves only real, configured outgoing transitions for a workflow node.
  * Invalid, duplicate and self-referential IDs are ignored defensively so the UI
  * can never offer a transition back to the ticket's current status.
@@ -179,7 +209,7 @@ export function canTransitionDirectlyToTerminal(node: WorkflowNode): boolean {
     return node.isTerminal !== true || node.terminalAction === 'close';
 }
 
-export function validateWorkflow(workflow: WorkflowNode[], name: string): string[] {
+export function validateWorkflow(workflow: WorkflowNode[], name: string, entryStatusId?: string): string[] {
     const errors: string[] = [];
     if (workflow.length === 0) return [`${name} chưa có trạng thái nào.`];
 
@@ -189,7 +219,12 @@ export function validateWorkflow(workflow: WorkflowNode[], name: string): string
     if (ids.some(id => !id)) errors.push(`${name} có trạng thái thiếu ID.`);
     if (idSet.size !== ids.length) errors.push(`${name} có ID trạng thái bị trùng.`);
     if (!workflow.some(node => node.isTerminal)) errors.push(`${name} cần ít nhất một trạng thái kết thúc.`);
-    if (workflow[0]?.isTerminal) errors.push(`${name} không thể bắt đầu bằng trạng thái kết thúc.`);
+    const entryNode = getWorkflowEntryNode(workflow, entryStatusId);
+    if (!entryNode) {
+        errors.push(`${name} chưa chọn trạng thái bắt đầu.`);
+    } else if (entryNode.isTerminal) {
+        errors.push(`${name} không thể bắt đầu bằng trạng thái kết thúc.`);
+    }
 
     for (const node of workflow) {
         if (!node.label.trim()) errors.push(`Trạng thái ${node.id || '(thiếu ID)'} chưa có tên hiển thị.`);

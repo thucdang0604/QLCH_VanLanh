@@ -1,5 +1,4 @@
 import { getAdminDb, isAdminAvailable } from '@/lib/firebaseAdmin';
-import { FieldValue } from 'firebase-admin/firestore';
 import { unstable_cache } from 'next/cache';
 import { PRODUCT_STATUS } from '@/lib/productLifecycle';
 import { filterFlashSaleProducts } from '@/lib/flashSale';
@@ -135,30 +134,6 @@ export const fetchArticles = unstable_cache(
 
         const db = getAdminDb();
 
-        // Auto-publish any scheduled articles that are due
-        try {
-            const now = new Date();
-            const dueScheduledSnap = await db.collection('articles')
-                .where('status', '==', 'scheduled')
-                .where('scheduledAt', '<=', now)
-                .get();
-
-            if (!dueScheduledSnap.empty) {
-                const batch = db.batch();
-                dueScheduledSnap.docs.forEach(doc => {
-                    batch.update(doc.ref, {
-                        status: 'published',
-                        publishedAt: doc.data().scheduledAt || now,
-                        scheduledAt: FieldValue.delete(),
-                        updatedAt: now,
-                    });
-                });
-                await batch.commit();
-            }
-        } catch (err) {
-            console.error('Error auto-publishing scheduled articles in fetchArticles:', err);
-        }
-
         const snapshot = await db.collection('articles')
             .where('status', '==', 'published')
             .orderBy('createdAt', 'desc')
@@ -233,39 +208,6 @@ export const fetchArticleDetail = unstable_cache(
         }
 
         const data = doc.data() as Record<string, unknown>;
-
-        // Check if scheduled article is due for publish
-        if (data.status === 'scheduled' && data.scheduledAt) {
-            let scheduledTime = 0;
-            const sat = data.scheduledAt as { toDate?: () => Date; seconds?: number };
-            if (typeof sat === 'object' && sat !== null) {
-                if (typeof sat.toDate === 'function') {
-                    scheduledTime = sat.toDate().getTime();
-                } else if (typeof sat.seconds === 'number') {
-                    scheduledTime = sat.seconds * 1000;
-                }
-            } else if (typeof data.scheduledAt === 'number') {
-                scheduledTime = data.scheduledAt;
-            } else if (typeof data.scheduledAt === 'string') {
-                scheduledTime = new Date(data.scheduledAt).getTime();
-            }
-
-            if (scheduledTime > 0 && scheduledTime <= Date.now()) {
-                const now = new Date();
-                try {
-                    await doc.ref.update({
-                        status: 'published',
-                        publishedAt: data.scheduledAt || now,
-                        scheduledAt: FieldValue.delete(),
-                        updatedAt: now,
-                    });
-                    data.status = 'published';
-                    data.publishedAt = data.scheduledAt || now;
-                } catch (err) {
-                    console.error('Error auto-publishing scheduled article detail:', err);
-                }
-            }
-        }
 
         if (data.status !== 'published') {
             return null;

@@ -20,59 +20,67 @@ test.describe('Repair Lifecycle & Warranty Assertions', () => {
     const partLineId = getScopedId('part-line', runId);
 
     // 1. Create Repair Ticket with complete deviceInfo.checklist, assignedTechnician, and parts
-    const createRes = await request.post('/api/repairs/create', {
+    const repairCreatePayload = {
+      idempotencyKey: getScopedId('repair-create', runId),
+      customerName: 'E2E Repair Customer',
+      phone: '0901234567',
+      deviceModel: 'iPhone 13 Pro',
+      issueDescription: 'Hỏng pin E2E',
+      staff: {
+        assignedTechnician: staffUid,
+      },
+      deviceInfo: {
+        checklist: {
+          body: 'pass',
+          screen: 'pass',
+          touch: 'pass',
+          camera: 'pass',
+          speaker: 'pass',
+          connectivity: 'pass',
+          battery: 'pass',
+          biometric: 'pass',
+        },
+      },
+      parts: [
+        {
+          partLineId,
+          productId: repairPartId,
+          productName: 'E2E Repair Part',
+          quantity: 1,
+          price: 180_000,
+          unitPriceAtUse: 180_000,
+          priceConfirmedAt: Date.now(),
+          status: 'selected',
+        },
+      ],
+      selectedParts: [
+        {
+          id: repairPartId,
+          name: 'E2E Repair Part',
+          quantity: 1,
+          price: 180_000,
+        },
+      ],
+    };
+    const createRequest = () => request.post('/api/repairs/create', {
       headers: {
         'Content-Type': 'application/json',
         ...authHeaders,
         'x-e2e-run-id': runId,
       },
-      data: {
-        customerName: 'E2E Repair Customer',
-        phone: '0901234567',
-        deviceModel: 'iPhone 13 Pro',
-        issueDescription: 'Hỏng pin E2E',
-        staff: {
-          assignedTechnician: staffUid,
-        },
-        deviceInfo: {
-          checklist: {
-            body: 'pass',
-            screen: 'pass',
-            touch: 'pass',
-            camera: 'pass',
-            speaker: 'pass',
-            connectivity: 'pass',
-            battery: 'pass',
-            biometric: 'pass',
-          },
-        },
-        parts: [
-          {
-            partLineId,
-            productId: repairPartId,
-            productName: 'E2E Repair Part',
-            quantity: 1,
-            price: 180_000,
-            unitPriceAtUse: 180_000,
-            priceConfirmedAt: Date.now(),
-            status: 'selected',
-          },
-        ],
-        selectedParts: [
-          {
-            id: repairPartId,
-            name: 'E2E Repair Part',
-            quantity: 1,
-            price: 180_000,
-          },
-        ],
-      },
+      data: repairCreatePayload,
     });
 
+    const [createRes, retryRes] = await Promise.all([createRequest(), createRequest()]);
     expect(createRes.ok()).toBe(true);
+    expect(retryRes.ok()).toBe(true);
     const createData = await createRes.json();
+    const retryData = await retryRes.json();
     const repairId = createData.id || createData.repairId || createData.ticketId;
     expect(repairId).toBeTruthy();
+    expect(retryData.id).toBe(repairId);
+    const operation = (await db.doc(`operation_requests/${repairCreatePayload.idempotencyKey}`).get()).data();
+    expect(operation?.referenceId).toBe(repairId);
 
     // Verify Repair Document in Firestore
     const repairDocRef = db.doc(`repairs/${repairId}`);

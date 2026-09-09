@@ -8,7 +8,10 @@
   },
   "scripts": {
     "dev": "next dev",
+    "predev": "pnpm run prepare:ffmpeg-core",
     "build": "next build",
+    "prebuild": "pnpm run prepare:ffmpeg-core",
+    "prepare:ffmpeg-core": "node scripts/copy-ffmpeg-core.mjs",
     "typegen": "next typegen",
     "typecheck": "next typegen && tsc --noEmit",
     "audit:system-config": "tsx scripts/audit-system-config.ts",
@@ -23,10 +26,12 @@
     "clean": "npx rimraf .next .firebase tsconfig.tsbuildinfo"
   },
   "dependencies": {
+    "@ffmpeg/core": "0.12.9",
     "@ffmpeg/ffmpeg": "^0.12.15",
     "@ffmpeg/util": "^0.12.2",
     "@google/generative-ai": "^0.24.1",
     "@tailwindcss/typography": "^0.5.19",
+    "@types/sanitize-html": "2.16.1",
     "@types/svg-pan-zoom": "^3.4.0",
     "@zxing/browser": "^0.1.5",
     "@zxing/library": "0.21.3",
@@ -46,6 +51,7 @@
     "react-dom": "^19.0.0",
     "react-player": "^3.4.0",
     "react-quill-new": "^3.8.3",
+    "sanitize-html": "2.17.7",
     "sharp": "0.33.5",
     "sonner": "^2.0.7",
     "svg-pan-zoom": "^3.6.2",

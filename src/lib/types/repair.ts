@@ -137,6 +137,8 @@ export interface RepairTicket {
     /** How the device reaches the shop; send_to_store may exist without a web appointment. */
     appointmentIntakeMethod?: 'walk_in' | 'send_to_store' | string | null;
     workflowConfigId?: string; // Tùy chỉnh workflow
+    /** Revision of the dynamic workflow when this ticket was created; audit-only. */
+    workflowRevision?: number;
     categoryPath?: string[];
     serviceName?: string;
     customer: {

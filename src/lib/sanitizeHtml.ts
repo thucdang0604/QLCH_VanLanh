@@ -1,25 +1,71 @@
+import sanitize from 'sanitize-html';
+
 /**
- * Sanitize HTML content before rendering via dangerouslySetInnerHTML.
- * Strips dangerous elements: <script>, <style>, event handlers, javascript: URLs.
- * Allows safe iframes (YouTube, Facebook) only.
+ * Server-side allowlist for article and catalog rich text. This intentionally
+ * accepts only the formatting emitted by the editor; it never attempts to
+ * remove dangerous fragments with regular expressions.
  */
+const RICH_TEXT_SANITIZE_OPTIONS = {
+    allowedTags: [
+        'p', 'br', 'strong', 'b', 'em', 'i', 'u', 's', 'strike',
+        'blockquote', 'pre', 'code', 'ul', 'ol', 'li',
+        'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+        'a', 'img', 'figure', 'figcaption', 'iframe',
+        'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'hr', 'div', 'span',
+    ],
+    allowedAttributes: {
+        '*': ['class', 'style'],
+        a: ['href', 'name', 'target', 'rel'],
+        img: ['src', 'alt', 'width', 'height', 'loading'],
+        iframe: ['src', 'width', 'height', 'title', 'allow', 'allowfullscreen', 'frameborder'],
+        th: ['colspan', 'rowspan'],
+        td: ['colspan', 'rowspan'],
+    },
+    allowedClasses: {
+        '*': [/^ql-(align|indent)-[a-z0-9-]+$/i],
+    },
+    allowedStyles: {
+        '*': {
+            'text-align': [/^(left|right|center|justify)$/],
+            color: [/^#[0-9a-f]{3,8}$/i, /^rgba?\((?:\d{1,3}%?\s*,\s*){2}\d{1,3}%?(?:\s*,\s*(?:0|1|0?\.\d+))?\)$/i],
+            'background-color': [/^#[0-9a-f]{3,8}$/i, /^rgba?\((?:\d{1,3}%?\s*,\s*){2}\d{1,3}%?(?:\s*,\s*(?:0|1|0?\.\d+))?\)$/i],
+        },
+    },
+    allowedSchemes: ['http', 'https', 'mailto', 'tel'],
+    allowedSchemesByTag: {
+        img: ['http', 'https'],
+        iframe: ['http', 'https'],
+    },
+    allowedIframeHostnames: [
+        'youtube.com', 'www.youtube.com', 'www.youtube-nocookie.com',
+        'youtu.be', 'www.facebook.com', 'web.facebook.com',
+    ],
+    allowProtocolRelative: false,
+    disallowedTagsMode: 'discard' as const,
+    // If the iframe host allowlist stripped its source, discard the inert shell too.
+    exclusiveFilter: (frame: { tag: string; attribs: Record<string, string> }) => frame.tag === 'iframe' && !frame.attribs.src,
+    transformTags: {
+        a: (tagName: string, attribs: Record<string, string>) => ({
+            tagName,
+            attribs: attribs.target === '_blank'
+                ? { ...attribs, rel: 'noopener noreferrer' }
+                : attribs,
+        }),
+        img: (tagName: string, attribs: Record<string, string>) => ({
+            tagName,
+            attribs: { ...attribs, loading: 'lazy' },
+        }),
+    },
+};
+
+/** Sanitize untrusted article/product rich text before `dangerouslySetInnerHTML`. */
 export function sanitizeHtml(html: string): string {
     const input = html || '';
-    return input
-        // Replace &nbsp; with regular spaces to fix word-wrap / text overflow
-        .replace(/&nbsp;/gi, ' ')
-        .replace(/\u00A0/g, ' ')
-        // Drop script/style blocks entirely
-        .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
-        .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, '')
-        // Remove inline event handlers like onclick="..."
-        .replace(/\son\w+\s*=\s*(["']).*?\1/gi, '')
-        // Neutralize javascript: URLs
-        .replace(/(href|src)\s*=\s*(["'])\s*javascript:[\s\S]*?\2/gi, '$1="#"')
-        // Basic iframe allowlist: only YouTube/Facebook embeds; strip others
-        .replace(/<iframe\b([^>]*?)\bsrc=(["'])([^"']+)\2([^>]*)\/?>.*?(<\/iframe>)?/gi, (m, pre, q, src, post) => {
-            const s = String(src || '');
-            const ok = /^(https?:)?\/\/(www\.)?(youtube\.com|youtu\.be|www\.facebook\.com|web\.facebook\.com)\//i.test(s);
-            return ok ? `<iframe${pre} src="${s}"${post}></iframe>` : '';
-        });
+    return sanitize(
+        input
+            // Preserve the previous presentation behavior without weakening the allowlist.
+            .replace(/&nbsp;/gi, ' ')
+            .replace(/\u00A0/g, ' '),
+        RICH_TEXT_SANITIZE_OPTIONS,
+    );
 }
