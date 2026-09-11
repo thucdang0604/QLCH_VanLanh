@@ -1,9 +1,11 @@
 import type { Product } from './types';
+import { isPartCategory } from './constants';
 
 type PartSearchProduct = Product & {
     code?: string;
     model?: string;
     searchKeywords?: string[];
+    compatibleModels?: string[];
 };
 
 const DEVICE_BRAND_TOKENS = new Set([
@@ -35,6 +37,8 @@ function productSearchHaystack(product: PartSearchProduct): string {
         ...(product.qrCodes || []),
         product.brand,
         product.model,
+        product.description,
+        ...(product.compatibleModels || []),
         product.partType,
         product.category,
         ...(product.categoryIds || []),
@@ -105,6 +109,52 @@ export function queryTargetsRepairDeviceModel(query: string, deviceModel: string
 
 export function productMatchesRepairPartQuality(product: Product, selectedQuality: string): boolean {
     return normalizeRepairPartSearch(product.quality || '') === normalizeRepairPartSearch(selectedQuality);
+}
+
+export type RepairPartCatalogFilter = {
+    query?: string;
+    deviceModel?: string;
+    quality?: string;
+    categoryIds?: string[];
+};
+
+/**
+ * The one local decision used after every bounded Firestore lookup for repair
+ * parts.  Keeping this here prevents intake and technician screens from
+ * drifting on category, model, quality, or legacy-catalog behaviour.
+ */
+export function filterRepairPartCatalogResults(
+    products: Product[],
+    filter: RepairPartCatalogFilter,
+): Product[] {
+    const query = filter.query?.trim() || '';
+    const deviceModel = filter.deviceModel?.trim() || '';
+    const quality = filter.quality?.trim() || '';
+    const wantedCategories = new Set((filter.categoryIds || []).map(value => value.trim()).filter(Boolean));
+    const modelTerms = getRepairDeviceModelTerms(deviceModel);
+
+    const matches = products
+        .filter(product => product.status === 'active')
+        .filter(product => isPartCategory(product.category, product.categoryIds))
+        .filter(product => wantedCategories.size === 0 || (product.categoryIds || []).some(categoryId => wantedCategories.has(categoryId)))
+        .filter(product => !query || productMatchesRepairPartSearch(product, query))
+        .filter(product => modelTerms.length === 0 || productMatchesRepairDeviceModel(product, deviceModel))
+        .filter(product => !quality || productMatchesRepairPartQuality(product, quality));
+
+    return rankRepairPartSearchResults(matches, query || deviceModel, deviceModel);
+}
+
+/**
+ * The lookup query is intentionally broad enough for Firestore's single array
+ * membership filter.  Apply both the requested part words and the ticket model
+ * locally before the result reaches reception, then rank exact names first.
+ */
+export function filterRepairPartSearchResults(
+    products: Product[],
+    query: string,
+    deviceModel = '',
+): Product[] {
+    return filterRepairPartCatalogResults(products, { query, deviceModel });
 }
 
 export function rankRepairPartSearchResults(

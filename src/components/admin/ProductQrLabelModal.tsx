@@ -6,12 +6,23 @@ import { Barcode, Printer, QrCode } from 'lucide-react';
 import Modal from '@/components/admin/Modal';
 import { useConfig } from '@/lib/ConfigContext';
 import type { Product } from '@/lib/types';
+import { buildInventoryLotTraceCode } from '@/lib/inventoryLotTraceCode';
+import {
+    DEFAULT_LABEL_PRINT_PROFILE,
+    LABEL_PRINT_PROFILE_STORAGE_KEY,
+    parseLabelPrintProfile,
+    type LabelBarcodePayloadMode,
+    type LabelContentMode,
+    type LabelPaperPresetId,
+    type LabelPrintProfile,
+    type LabelTextMode as StoredLabelTextMode,
+} from '@/lib/labelPrintProfile';
 import { buildProductQrImageUrl, getCompactProductBarcode, getPrimaryProductCode } from '@/lib/productCodes';
 
-type LabelMode = 'both' | 'qr' | 'barcode';
-type LabelTextMode = 'full' | 'compact' | 'code-only';
-type BarcodePayloadMode = 'compact' | 'full';
-type PaperPresetId = '30x20' | '40x20' | '40x25' | '40x30' | '50x30' | '58x40' | '58-roll' | 'a4-grid' | 'custom';
+type LabelMode = LabelContentMode;
+type LabelTextMode = StoredLabelTextMode;
+type BarcodePayloadMode = LabelBarcodePayloadMode;
+type PaperPresetId = LabelPaperPresetId;
 
 interface PaperPreset {
     id: PaperPresetId;
@@ -41,6 +52,8 @@ const PAPER_PRESETS: PaperPreset[] = [
 export interface PrintBatchItem {
     product: Product & { id: string };
     lotCode?: string;
+    /** The precise inventory allocation behind a QR label printed after import. */
+    inventoryLotId?: string;
     copies: number;
 }
 
@@ -86,17 +99,63 @@ function renderBarcodeSvg(code: string, height: number, fontSize: number): strin
 export default function ProductQrLabelModal({ product, lotCode, batchItems, onClose }: ProductQrLabelModalProps) {
     const { config } = useConfig();
     const barcodePreviewRef = useRef<SVGSVGElement>(null);
-    const [paperId, setPaperId] = useState<PaperPresetId>('40x25');
-    const [labelMode, setLabelMode] = useState<LabelMode>('both');
-    const [textMode, setTextMode] = useState<LabelTextMode>('compact');
+    const isInventoryLotTraceLabel = Boolean(batchItems?.some(item => item.inventoryLotId));
+    const [paperId, setPaperId] = useState<PaperPresetId>(DEFAULT_LABEL_PRINT_PROFILE.paperId);
+    const [labelMode, setLabelMode] = useState<LabelMode>(DEFAULT_LABEL_PRINT_PROFILE.labelMode);
+    const [textMode, setTextMode] = useState<LabelTextMode>(DEFAULT_LABEL_PRINT_PROFILE.textMode);
     const [copies, setCopies] = useState(1);
-    const [customWidthMm, setCustomWidthMm] = useState(40);
-    const [customHeightMm, setCustomHeightMm] = useState(20);
-    const [safeMarginMm, setSafeMarginMm] = useState(0.8);
-    const [contentScale, setContentScale] = useState(88);
-    const [labelsPerRow, setLabelsPerRow] = useState<1 | 2>(2);
-    const [columnGapMm, setColumnGapMm] = useState(1.4);
-    const [barcodePayloadMode, setBarcodePayloadMode] = useState<BarcodePayloadMode>('compact');
+    const [customWidthMm, setCustomWidthMm] = useState(DEFAULT_LABEL_PRINT_PROFILE.customWidthMm);
+    const [customHeightMm, setCustomHeightMm] = useState(DEFAULT_LABEL_PRINT_PROFILE.customHeightMm);
+    const [safeMarginMm, setSafeMarginMm] = useState(DEFAULT_LABEL_PRINT_PROFILE.safeMarginMm);
+    const [contentScale, setContentScale] = useState(DEFAULT_LABEL_PRINT_PROFILE.contentScale);
+    const [labelsPerRow, setLabelsPerRow] = useState<1 | 2>(DEFAULT_LABEL_PRINT_PROFILE.labelsPerRow);
+    const [columnGapMm, setColumnGapMm] = useState(DEFAULT_LABEL_PRINT_PROFILE.columnGapMm);
+    const [barcodePayloadMode, setBarcodePayloadMode] = useState<BarcodePayloadMode>(DEFAULT_LABEL_PRINT_PROFILE.barcodePayloadMode);
+    const [hasLoadedPrintProfile, setHasLoadedPrintProfile] = useState(false);
+
+    useEffect(() => {
+        try {
+            const profile = parseLabelPrintProfile(window.localStorage.getItem(LABEL_PRINT_PROFILE_STORAGE_KEY));
+            if (profile) {
+                setPaperId(profile.paperId);
+                setLabelMode(profile.labelMode);
+                setTextMode(profile.textMode);
+                setCustomWidthMm(profile.customWidthMm);
+                setCustomHeightMm(profile.customHeightMm);
+                setSafeMarginMm(profile.safeMarginMm);
+                setContentScale(profile.contentScale);
+                setLabelsPerRow(profile.labelsPerRow);
+                setColumnGapMm(profile.columnGapMm);
+                setBarcodePayloadMode(profile.barcodePayloadMode);
+            }
+        } catch {
+            // Storage can be disabled; the current-session defaults still work.
+        } finally {
+            setHasLoadedPrintProfile(true);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (!hasLoadedPrintProfile) return;
+
+        const profile: LabelPrintProfile = {
+            paperId,
+            labelMode,
+            textMode,
+            customWidthMm,
+            customHeightMm,
+            safeMarginMm,
+            contentScale,
+            labelsPerRow,
+            columnGapMm,
+            barcodePayloadMode,
+        };
+        try {
+            window.localStorage.setItem(LABEL_PRINT_PROFILE_STORAGE_KEY, JSON.stringify(profile));
+        } catch {
+            // Keep the selected settings for the current session when storage is unavailable.
+        }
+    }, [barcodePayloadMode, columnGapMm, contentScale, customHeightMm, customWidthMm, hasLoadedPrintProfile, labelMode, labelsPerRow, paperId, safeMarginMm, textMode]);
 
     const paper = useMemo(() => {
         if (paperId === 'custom') {
@@ -119,14 +178,15 @@ export default function ProductQrLabelModal({ product, lotCode, batchItems, onCl
     }, [customHeightMm, customWidthMm, paperId]);
 
     const previewProduct = product || (batchItems && batchItems.length > 0 ? batchItems[0].product : null);
-    const previewLotCode = lotCode || (batchItems && batchItems.length > 0 ? batchItems[0].lotCode : undefined);
+    const previewInventoryLotId = batchItems && batchItems.length > 0 ? batchItems[0].inventoryLotId : undefined;
     
     const baseCode = previewProduct ? getPrimaryProductCode(previewProduct) : '';
-    const code = previewLotCode ? `${baseCode}#${previewLotCode}` : baseCode;
+    const code = previewInventoryLotId ? buildInventoryLotTraceCode(previewInventoryLotId) : baseCode;
     const compactBarcodeCode = previewProduct ? getCompactProductBarcode(previewProduct) : '';
     const barcodeCode = barcodePayloadMode === 'compact' 
-        ? (previewLotCode ? `${compactBarcodeCode}#${previewLotCode}` : compactBarcodeCode) 
+        ? compactBarcodeCode
         : code;
+    const activeLabelMode: LabelMode = isInventoryLotTraceLabel ? 'qr' : labelMode;
     const shopName = (config.siteName || 'Văn Lành Service').trim();
     const price = previewProduct ? previewProduct.price_promo || previewProduct.price_original || 0 : 0;
     const qrUrl = buildProductQrImageUrl(code, 260);
@@ -140,7 +200,7 @@ export default function ProductQrLabelModal({ product, lotCode, batchItems, onCl
     const printedLabelCount = paper.grid ? totalBatchCopies : totalBatchCopies * labelsPerRow;
 
     useEffect(() => {
-        if (!barcodePreviewRef.current || !barcodeCode || labelMode === 'qr') return;
+        if (!barcodePreviewRef.current || !barcodeCode || activeLabelMode === 'qr') return;
         JsBarcode(barcodePreviewRef.current, barcodeCode, {
             format: 'CODE128',
             displayValue: true,
@@ -149,7 +209,7 @@ export default function ProductQrLabelModal({ product, lotCode, batchItems, onCl
             height: scaledBarcodeHeight,
             margin: 0,
         });
-    }, [barcodeCode, barcodeFontSize, labelMode, scaledBarcodeHeight]);
+    }, [activeLabelMode, barcodeCode, barcodeFontSize, scaledBarcodeHeight]);
 
     if (!product && (!batchItems || batchItems.length === 0)) return null;
 
@@ -164,22 +224,22 @@ export default function ProductQrLabelModal({ product, lotCode, batchItems, onCl
 
         for (const item of itemsToPrint) {
             const itemBaseCode = getPrimaryProductCode(item.product);
-            const itemCode = item.lotCode ? `${itemBaseCode}#${item.lotCode}` : itemBaseCode;
+            const itemCode = item.inventoryLotId ? buildInventoryLotTraceCode(item.inventoryLotId) : itemBaseCode;
             const itemCompactCode = getCompactProductBarcode(item.product);
             const itemBarcodeCode = barcodePayloadMode === 'compact' 
-                ? (item.lotCode ? `${itemCompactCode}#${item.lotCode}` : itemCompactCode) 
+                ? itemCompactCode
                 : itemCode;
                 
-            const barcodeSvg = labelMode === 'qr' ? '' : renderBarcodeSvg(itemBarcodeCode, scaledBarcodeHeight, barcodeFontSize);
+            const barcodeSvg = activeLabelMode === 'qr' ? '' : renderBarcodeSvg(itemBarcodeCode, scaledBarcodeHeight, barcodeFontSize);
             const qrUrl = buildProductQrImageUrl(itemCode, 260);
-            const qrMarkup = labelMode === 'barcode' ? '' : `<img class="qr" src="${qrUrl}" alt="${escapeHtml(itemCode)}" />`;
-            const barcodeMarkup = labelMode === 'qr' ? '' : `<div class="barcode">${barcodeSvg}</div>`;
+            const qrMarkup = activeLabelMode === 'barcode' ? '' : `<img class="qr" src="${qrUrl}" alt="${escapeHtml(itemCode)}" />`;
+            const barcodeMarkup = activeLabelMode === 'qr' ? '' : `<div class="barcode">${barcodeSvg}</div>`;
             const nameMarkup = textMode === 'code-only' ? '' : `<div class="name">${escapeHtml(item.product.name)}</div>`;
             const priceVal = item.product.price_promo || item.product.price_original || 0;
             const priceMarkup = textMode === 'full' ? `<div class="price">${priceVal.toLocaleString('vi-VN')}đ</div>` : '';
-            const codeMarkup = textMode === 'code-only' && labelMode === 'qr' ? `<div class="code">${escapeHtml(itemCode)}</div>` : '';
+            const codeMarkup = textMode === 'code-only' && activeLabelMode === 'qr' ? `<div class="code">${escapeHtml(itemCode)}</div>` : '';
             const labelMarkup = `
-                <article class="label mode-${labelMode} text-${textMode}">
+                <article class="label mode-${activeLabelMode} text-${textMode}">
                     <div class="brand">${escapeHtml(shopName)}</div>
                     <div class="media">
                         ${qrMarkup}
@@ -268,17 +328,17 @@ export default function ProductQrLabelModal({ product, lotCode, batchItems, onCl
                     <div className="flex min-h-44 w-full flex-col justify-center overflow-hidden border border-gray-800 bg-white p-3 text-center shadow-sm">
                         <p className="mb-1 truncate text-[10px] font-black uppercase leading-none text-gray-900">{shopName}</p>
                         <div className="flex items-center justify-center gap-2">
-                            {labelMode !== 'barcode' && (
+                            {activeLabelMode !== 'barcode' && (
                                 // eslint-disable-next-line @next/next/no-img-element
-                                <img src={qrUrl} alt={code} className={labelMode === 'qr' ? 'h-24 w-24' : 'h-16 w-16'} />
+                                <img src={qrUrl} alt={code} className={activeLabelMode === 'qr' ? 'h-24 w-24' : 'h-16 w-16'} />
                             )}
-                            {labelMode !== 'qr' && (
-                                <svg ref={barcodePreviewRef} className={labelMode === 'barcode' ? 'w-full' : 'min-w-0 flex-1'} />
+                            {activeLabelMode !== 'qr' && (
+                                <svg ref={barcodePreviewRef} className={activeLabelMode === 'barcode' ? 'w-full' : 'min-w-0 flex-1'} />
                             )}
                         </div>
                         {textMode !== 'code-only' && previewProduct && <p className="mt-2 truncate text-xs font-bold text-gray-900">{previewProduct.name}</p>}
                         {textMode === 'full' && <p className="mt-1 text-sm font-bold text-orange-600">{price.toLocaleString('vi-VN')}đ</p>}
-                        {textMode === 'code-only' && labelMode === 'qr' && <p className="mt-2 truncate font-mono text-xs font-bold text-gray-900">{code}</p>}
+                        {textMode === 'code-only' && activeLabelMode === 'qr' && <p className="mt-2 truncate font-mono text-xs font-bold text-gray-900">{code}</p>}
                     </div>
                     {batchItems && batchItems.length > 0 ? (
                         <div className="mt-2 text-center text-xs text-orange-600 font-bold bg-orange-50 px-2 py-1 rounded">
@@ -293,6 +353,7 @@ export default function ProductQrLabelModal({ product, lotCode, batchItems, onCl
                 <div className="space-y-4">
                     <div>
                         <label className="mb-1.5 block text-sm font-semibold text-gray-700">Khổ giấy in</label>
+                        <p className="mb-1.5 text-xs text-gray-500">Thiết lập được nhớ riêng trên máy/trình duyệt này.</p>
                         <select
                             title="Khổ giấy in"
                             value={paperId}
@@ -372,34 +433,40 @@ export default function ProductQrLabelModal({ product, lotCode, batchItems, onCl
                         </div>
                     )}
 
-                    <div>
-                        <p className="mb-1.5 text-sm font-semibold text-gray-700">Nội dung tem</p>
-                        <div className="grid grid-cols-3 gap-2">
-                            {([
-                                { id: 'both', label: 'QR + Barcode', icon: Barcode },
-                                { id: 'qr', label: 'Chỉ QR', icon: QrCode },
-                                { id: 'barcode', label: 'Chỉ Barcode', icon: Barcode },
-                            ] as const).map((item) => {
-                                const Icon = item.icon;
-                                return (
-                                    <button
-                                        key={item.id}
-                                        type="button"
-                                        title={item.label}
-                                        onClick={() => setLabelMode(item.id)}
-                                        className={`flex min-h-16 flex-col items-center justify-center gap-1 rounded-lg border px-2 py-2 text-xs font-semibold transition-colors ${
-                                            labelMode === item.id ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'
-                                        }`}
-                                    >
-                                        <Icon size={17} />
-                                        {item.label}
-                                    </button>
-                                );
-                            })}
+                    {isInventoryLotTraceLabel ? (
+                        <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+                            Tem lô chỉ in một QR <code>VL1:&lt;lot-id&gt;</code>; mã này xác định đồng thời sản phẩm và nguồn lô.
                         </div>
-                    </div>
+                    ) : (
+                        <div>
+                            <p className="mb-1.5 text-sm font-semibold text-gray-700">Nội dung tem</p>
+                            <div className="grid grid-cols-3 gap-2">
+                                {([
+                                    { id: 'both', label: 'QR + Barcode', icon: Barcode },
+                                    { id: 'qr', label: 'Chỉ QR', icon: QrCode },
+                                    { id: 'barcode', label: 'Chỉ Barcode', icon: Barcode },
+                                ] as const).map((item) => {
+                                    const Icon = item.icon;
+                                    return (
+                                        <button
+                                            key={item.id}
+                                            type="button"
+                                            title={item.label}
+                                            onClick={() => setLabelMode(item.id)}
+                                            className={`flex min-h-16 flex-col items-center justify-center gap-1 rounded-lg border px-2 py-2 text-xs font-semibold transition-colors ${
+                                                labelMode === item.id ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                                            }`}
+                                        >
+                                            <Icon size={17} />
+                                            {item.label}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
 
-                    {labelMode !== 'qr' && (
+                    {!isInventoryLotTraceLabel && activeLabelMode !== 'qr' && (
                         <div>
                             <p className="mb-1.5 text-sm font-semibold text-gray-700">Mã vạch</p>
                             <div className="grid grid-cols-2 gap-2">
@@ -500,7 +567,9 @@ export default function ProductQrLabelModal({ product, lotCode, batchItems, onCl
                     </div>
 
                     <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                        QR dùng mã đầy đủ <code>{batchItems ? '<Mã>#<Lô>' : code}</code>; barcode có thể dùng mã ngắn để dễ scan trên tem nhỏ.
+                        {isInventoryLotTraceLabel
+                            ? <>QR lô là mã duy nhất để POS bán đúng hàng và kho truy xuất đúng nguồn nhập.</>
+                            : <>QR dùng mã sản phẩm <code>{code}</code>; barcode có thể dùng mã ngắn để dễ scan trên tem nhỏ.</>}
                     </div>
                 </div>
 

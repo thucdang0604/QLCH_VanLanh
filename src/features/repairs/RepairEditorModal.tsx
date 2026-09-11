@@ -10,11 +10,8 @@ import { useConfig } from '@/lib/ConfigContext';
 import type { PaymentStatus, Product, RepairIssue, RepairStatus, RepairTicket, TaxonomyNode, WorkflowNode } from '@/lib/types';
 import type { ContactMethodType } from '@/lib/types/contact';
 import type { ServiceModel } from './repairPageUtils';
-import { db } from '@/lib/firebase';
-import { collection, limit, query, where } from 'firebase/firestore';
-import { getDocs } from '@/lib/firestoreLogger';
-import { PART_CATEGORY_LABEL, isPartCategory } from '@/lib/constants';
-import { getRepairPartSearchLookupTokens, productMatchesRepairPartSearch } from '@/lib/repairPartSearch';
+import { PART_CATEGORY_LABEL } from '@/lib/constants';
+import { searchRepairPartCatalog, suggestRepairParts, type RepairPartCatalogSearchResult } from '@/lib/repairPartCatalogSearch';
 import { getRepairIssueLaborCost, resolveRepairIssueBillingMode } from '@/lib/repairIssuePricing';
 import type { RepairMediaPlacement } from '@/lib/repairMediaSession';
 
@@ -25,7 +22,16 @@ export type InitialRepairPart = {
     quantity: number;
 };
 
-type RepairFormValue = string | number | boolean | RepairIssue[] | InitialRepairPart[] | string[] | PaymentStatus | RepairStatus;
+export type InitialRepairPartRequest = {
+    requestId: string;
+    productId: string;
+    productName: string;
+    issueId: string;
+    quantity: number;
+    quality: string;
+};
+
+type RepairFormValue = string | number | boolean | RepairIssue[] | InitialRepairPart[] | InitialRepairPartRequest[] | string[] | PaymentStatus | RepairStatus;
 
 type ServiceSuggestion = {
     id: string;
@@ -63,6 +69,7 @@ export type RepairEditorFormData = {
     selectedCategoryPath: string[];
     issues: RepairIssue[];
     initialParts: InitialRepairPart[];
+    initialPartRequests: InitialRepairPartRequest[];
     issueDescription: string;
     techNotes: string;
     status: RepairStatus;
@@ -83,6 +90,7 @@ interface RepairEditorModalProps {
     editingTicket: RepairTicket | null;
     isInboundIntakeUpdate: boolean;
     isInboundFreightLocked: boolean;
+    canSelectInitialParts: boolean;
     formData: RepairEditorFormData;
     setFormData: Dispatch<SetStateAction<RepairEditorFormData>>;
     dynamicStatuses: WorkflowNode[];
@@ -105,6 +113,7 @@ export function RepairEditorModal({
     editingTicket,
     isInboundIntakeUpdate,
     isInboundFreightLocked,
+    canSelectInitialParts,
     formData,
     setFormData,
     dynamicStatuses,
@@ -128,6 +137,14 @@ export function RepairEditorModal({
         [config.taxonomy?.service, services]
     );
     const calculatedLaborCost = getRepairIssueLaborCost(formData.issues, formData.initialParts, Number(formData.laborCost) || 0);
+    const lockedParts = editingTicket?.parts || [];
+    const canEditInitialParts = canSelectInitialParts && lockedParts.length === 0;
+    const canCreatePartRequests = canSelectInitialParts;
+    const initialPartsBlockedReason = lockedParts.length > 0
+        ? 'Linh kiện đã được giữ trong kho. Dùng thao tác linh kiện của KTV để thay đổi nhằm bảo toàn tồn kho.'
+        : editingTicket && !canSelectInitialParts
+            ? 'Trạng thái hiện tại chưa cho phép chọn linh kiện dự kiến.'
+            : '';
 
     return (
         <>
@@ -251,36 +268,56 @@ export function RepairEditorModal({
                                             <button type="button" onClick={() => setFormData(p => {
                                                 const newIssues = p.issues.filter(i => i.id !== issue.id);
                                                 const initialParts = p.initialParts.filter(part => part.issueId !== issue.id);
-                                                return { ...p, issues: newIssues, initialParts, laborCost: getRepairIssueLaborCost(newIssues, initialParts, Number(p.laborCost) || 0) };
+                                                const initialPartRequests = p.initialPartRequests.filter(part => part.issueId !== issue.id);
+                                                return { ...p, issues: newIssues, initialParts, initialPartRequests, laborCost: getRepairIssueLaborCost(newIssues, initialParts, Number(p.laborCost) || 0) };
                                             })}
                                                 className="p-1 text-red-400 hover:text-red-600" title="Xóa">
                                                 <Trash2 size={14} />
                                             </button>
                                         </div>
-                                        {(!editingTicket || (isInboundIntakeUpdate && isInboundFreightLocked)) && (
-                                            <IssueInitialPartsPicker
-                                                issue={issue}
-                                                parts={formData.initialParts}
-                                                onAdd={(product) => setFormData(previous => {
-                                                    const existing = previous.initialParts.find(part => part.issueId === issue.id && part.productId === product.id);
-                                                    const initialParts = existing
-                                                        ? previous.initialParts.map(part => part === existing ? { ...part, quantity: part.quantity + 1 } : part)
-                                                        : [...previous.initialParts, { productId: product.id, productName: product.name, issueId: issue.id, quantity: 1 }];
-                                                    const issues = previous.issues.map(item => item.id === issue.id && !item.billingMode
-                                                        ? { ...item, billingMode: 'parts_only' as const }
-                                                        : item);
-                                                    return { ...previous, issues, initialParts, laborCost: getRepairIssueLaborCost(issues, initialParts, Number(previous.laborCost) || 0) };
-                                                })}
-                                                onRemove={(productId) => setFormData(previous => {
-                                                    const initialParts = previous.initialParts.filter(part => !(part.issueId === issue.id && part.productId === productId));
-                                                    const hasRemainingForIssue = initialParts.some(part => part.issueId === issue.id);
-                                                    const issues = previous.issues.map(item => item.id === issue.id && !hasRemainingForIssue && item.billingMode === 'parts_only'
-                                                        ? { ...item, billingMode: undefined }
-                                                        : item);
-                                                    return { ...previous, issues, initialParts, laborCost: getRepairIssueLaborCost(issues, initialParts, Number(previous.laborCost) || 0) };
-                                                })}
-                                            />
-                                        )}
+                                        <IssueInitialPartsPicker
+                                            issue={issue}
+                                            issueIndex={idx}
+                                            deviceModel={formData.deviceModel}
+                                            parts={formData.initialParts}
+                                            requestedParts={formData.initialPartRequests}
+                                            lockedParts={lockedParts}
+                                            canSelect={canEditInitialParts}
+                                            canRequest={canCreatePartRequests}
+                                            blockedReason={initialPartsBlockedReason}
+                                            onAdd={(product) => setFormData(previous => {
+                                                const existing = previous.initialParts.find(part => part.issueId === issue.id && part.productId === product.id);
+                                                const initialParts = existing
+                                                    ? previous.initialParts.map(part => part === existing ? { ...part, quantity: part.quantity + 1 } : part)
+                                                    : [...previous.initialParts, { productId: product.id, productName: product.name, issueId: issue.id, quantity: 1 }];
+                                                const issues = previous.issues.map(item => item.id === issue.id && !item.billingMode
+                                                    ? { ...item, billingMode: 'parts_only' as const }
+                                                    : item);
+                                                return { ...previous, issues, initialParts, laborCost: getRepairIssueLaborCost(issues, initialParts, Number(previous.laborCost) || 0) };
+                                            })}
+                                            onRemove={(productId) => setFormData(previous => {
+                                                const initialParts = previous.initialParts.filter(part => !(part.issueId === issue.id && part.productId === productId));
+                                                const hasRemainingForIssue = initialParts.some(part => part.issueId === issue.id);
+                                                const issues = previous.issues.map(item => item.id === issue.id && !hasRemainingForIssue && item.billingMode === 'parts_only'
+                                                    ? { ...item, billingMode: undefined }
+                                                    : item);
+                                                return { ...previous, issues, initialParts, laborCost: getRepairIssueLaborCost(issues, initialParts, Number(previous.laborCost) || 0) };
+                                            })}
+                                            onRequest={(request) => setFormData(previous => {
+                                                const existing = previous.initialPartRequests.find(part => part.issueId === issue.id
+                                                    && part.productId === request.productId
+                                                    && part.productName.trim().toLocaleLowerCase('vi-VN') === request.productName.trim().toLocaleLowerCase('vi-VN')
+                                                    && part.quality === request.quality);
+                                                const initialPartRequests = existing
+                                                    ? previous.initialPartRequests.map(part => part.requestId === existing.requestId ? { ...part, quantity: part.quantity + 1 } : part)
+                                                    : [...previous.initialPartRequests, { ...request, requestId: crypto.randomUUID(), issueId: issue.id, quantity: 1 }];
+                                                return { ...previous, initialPartRequests };
+                                            })}
+                                            onRemoveRequest={(requestId) => setFormData(previous => ({
+                                                ...previous,
+                                                initialPartRequests: previous.initialPartRequests.filter(part => part.requestId !== requestId),
+                                            }))}
+                                        />
                                         <div className="mt-2 flex items-center gap-2 text-xs text-gray-600">
                                             <label htmlFor={`issue-billing-${issue.id}`} className="font-medium">Tính tiền:</label>
                                             <select
@@ -599,29 +636,79 @@ function InputField({ label, value, onChange, type = 'text', placeholder, requir
 
 function IssueInitialPartsPicker({
     issue,
+    issueIndex,
+    deviceModel,
     parts,
+    requestedParts,
+    lockedParts,
+    canSelect,
+    canRequest,
+    blockedReason,
     onAdd,
     onRemove,
+    onRequest,
+    onRemoveRequest,
 }: {
     issue: RepairIssue;
+    issueIndex: number;
+    deviceModel: string;
     parts: InitialRepairPart[];
+    requestedParts: InitialRepairPartRequest[];
+    lockedParts: NonNullable<RepairTicket['parts']>;
+    canSelect: boolean;
+    canRequest: boolean;
+    blockedReason: string;
     onAdd: (product: Product) => void;
     onRemove: (productId: string) => void;
+    onRequest: (request: Omit<InitialRepairPartRequest, 'requestId' | 'issueId' | 'quantity'>) => void;
+    onRemoveRequest: (requestId: string) => void;
 }) {
     const [search, setSearch] = useState('');
     const [results, setResults] = useState<Product[]>([]);
     const [isSearching, setIsSearching] = useState(false);
+    const [suggestedParts, setSuggestedParts] = useState<Product[]>([]);
+    const [suggestedCategoryIds, setSuggestedCategoryIds] = useState<string[]>([]);
+    const [suggestionHint, setSuggestionHint] = useState('');
+    const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
+    const [manualSearchSource, setManualSearchSource] = useState<RepairPartCatalogSearchResult['source']>('none');
+    const [customRequestName, setCustomRequestName] = useState('');
+    const [requestQuality, setRequestQuality] = useState('Zin');
     const selectedParts = parts.filter(part => part.issueId === issue.id);
+    const pendingRequests = requestedParts.filter(part => part.issueId === issue.id);
+    const persistedParts = lockedParts.filter(part => part.issueId === issue.id || (!part.issueId && issueIndex === 0));
+    const issueServiceKey = [issue.serviceId || '', ...(issue.categoryPath || [])].join('|');
+
+    useEffect(() => {
+        let cancelled = false;
+        setIsLoadingSuggestions(true);
+        void suggestRepairParts({ ticket: { issues: [issue] }, deviceModel })
+            .then(result => {
+                if (cancelled) return;
+                setSuggestedParts(result.products);
+                setSuggestedCategoryIds(result.categoryIds);
+                setSuggestionHint(result.hint);
+            })
+            .catch(error => {
+                console.error('Repair intake part suggestion failed:', error);
+                if (!cancelled) {
+                    setSuggestedParts([]);
+                    setSuggestedCategoryIds([]);
+                    setSuggestionHint('Không thể tải gợi ý linh kiện. Vui lòng thử lại.');
+                }
+            })
+            .finally(() => {
+                if (!cancelled) setIsLoadingSuggestions(false);
+            });
+        return () => { cancelled = true; };
+        // A label edit must not re-read catalog data; only service linkage and model matter.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [deviceModel, issueServiceKey]);
 
     useEffect(() => {
         const term = search.trim();
         if (!term) {
             setResults([]);
-            return;
-        }
-        const tokens = getRepairPartSearchLookupTokens(term);
-        if (tokens.length === 0) {
-            setResults([]);
+            setManualSearchSource('none');
             return;
         }
 
@@ -629,20 +716,21 @@ function IssueInitialPartsPicker({
         const timer = window.setTimeout(async () => {
             setIsSearching(true);
             try {
-                const snapshot = await getDocs(query(
-                    collection(db, 'products'),
-                    where('status', '==', 'active'),
-                    where('searchKeywords', 'array-contains-any', tokens),
-                    limit(10),
-                ));
-                const matches = snapshot.docs
-                    .map(document => ({ id: document.id, ...document.data() } as Product))
-                    .filter(product => isPartCategory(product.category, product.categoryIds))
-                    .filter(product => productMatchesRepairPartSearch(product, term));
-                if (!cancelled) setResults(matches);
+                const result = await searchRepairPartCatalog({
+                    query: term,
+                    deviceModel,
+                    categoryIds: suggestedCategoryIds,
+                });
+                if (!cancelled) {
+                    setResults(result.products);
+                    setManualSearchSource(result.source);
+                }
             } catch (error) {
                 console.error('Repair intake part search failed:', error);
-                if (!cancelled) setResults([]);
+                if (!cancelled) {
+                    setResults([]);
+                    setManualSearchSource('none');
+                }
             } finally {
                 if (!cancelled) setIsSearching(false);
             }
@@ -651,40 +739,99 @@ function IssueInitialPartsPicker({
             cancelled = true;
             window.clearTimeout(timer);
         };
-    }, [search]);
+    }, [search, deviceModel, suggestedCategoryIds]);
+
+    const renderCandidate = (product: Product, accent: 'sky' | 'emerald') => {
+        const available = Math.max(0, Number(product.stock || 0) - Number(product.held || 0));
+        return (
+            <div key={product.id} className={`flex items-center justify-between gap-2 rounded bg-white px-2 py-1.5 text-xs ${accent === 'emerald' ? 'hover:bg-emerald-100' : 'hover:bg-sky-50'}`}>
+                <div className="min-w-0">
+                    <p className="truncate font-medium text-gray-800">{product.name}</p>
+                    <p className={available > 0 ? 'text-emerald-700' : 'text-red-600'}>Còn {available}</p>
+                </div>
+                <div className="flex shrink-0 gap-1">
+                    {canSelect && <button type="button" disabled={available <= 0} onClick={() => onAdd(product)} className="rounded border border-sky-200 px-1.5 py-1 font-medium text-sky-700 disabled:cursor-not-allowed disabled:opacity-40">Giữ kho</button>}
+                    {canRequest && <button type="button" onClick={() => onRequest({ productId: product.id, productName: product.name, quality: product.quality || requestQuality })} className="rounded border border-amber-200 bg-amber-50 px-1.5 py-1 font-medium text-amber-800">Đề xuất</button>}
+                </div>
+            </div>
+        );
+    };
 
     return (
         <div className="mt-2 rounded-lg border border-sky-100 bg-sky-50/70 p-2.5">
             <p className="text-xs font-semibold text-sky-900">Linh kiện dự kiến <span className="font-normal text-sky-700">(để trống nếu chỉ tính công)</span></p>
+            {persistedParts.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                    {persistedParts.map((part, index) => (
+                        <span key={part.partLineId || `${issue.id}-${part.productId || index}`} className="inline-flex items-center gap-1 rounded bg-white px-2 py-1 text-xs text-sky-900 shadow-sm ring-1 ring-sky-100">
+                            {part.productName || part.partName || part.name || 'Linh kiện'} ×{part.quantity}
+                            <span className="font-medium text-sky-600">{part.status === 'requested' ? 'đã đề xuất' : 'đã giữ'}</span>
+                        </span>
+                    ))}
+                </div>
+            )}
             {selectedParts.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1.5">
                     {selectedParts.map(part => (
                         <span key={`${part.issueId}-${part.productId}`} className="inline-flex items-center gap-1 rounded bg-white px-2 py-1 text-xs text-sky-900 shadow-sm ring-1 ring-sky-100">
                             {part.productName} ×{part.quantity}
-                            <button type="button" onClick={() => onRemove(part.productId)} className="font-bold text-sky-600 hover:text-red-600" aria-label={`Bỏ ${part.productName}`}>×</button>
+                            {canSelect && <button type="button" onClick={() => onRemove(part.productId)} className="font-bold text-sky-600 hover:text-red-600" aria-label={`Bỏ ${part.productName}`}>×</button>}
                         </span>
                     ))}
                 </div>
             )}
-            <input
-                value={search}
-                onChange={event => setSearch(event.target.value)}
-                placeholder={`Tìm ${PART_CATEGORY_LABEL.toLowerCase()} chính xác…`}
-                className="mt-2 w-full rounded border border-sky-200 bg-white px-2.5 py-1.5 text-xs outline-none focus:border-sky-500"
-            />
-            {search && (
-                <div className="mt-1 max-h-36 divide-y overflow-y-auto rounded border border-sky-100 bg-white">
-                    {isSearching ? <p className="p-2 text-xs text-gray-500">Đang tìm…</p> : results.length > 0 ? results.map(product => {
-                        const available = Math.max(0, Number(product.stock || 0) - Number(product.held || 0));
-                        return (
-                            <button key={product.id} type="button" disabled={available <= 0} onClick={() => { onAdd(product); setSearch(''); }} className="flex w-full items-center justify-between gap-3 p-2 text-left text-xs hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50">
-                                <span className="min-w-0 truncate font-medium text-gray-800">{product.name}</span>
-                                <span className={available > 0 ? 'shrink-0 text-emerald-700' : 'shrink-0 text-red-600'}>Còn {available}</span>
-                            </button>
-                        );
-                    }) : <p className="p-2 text-xs text-gray-500">Không tìm thấy linh kiện phù hợp.</p>}
+            {pendingRequests.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                    {pendingRequests.map(part => (
+                        <span key={part.requestId} className="inline-flex items-center gap-1 rounded bg-amber-50 px-2 py-1 text-xs text-amber-900 shadow-sm ring-1 ring-amber-100">
+                            {part.productName} ×{part.quantity} <span className="font-medium text-amber-700">đề xuất mua</span>
+                            {canRequest && <button type="button" onClick={() => onRemoveRequest(part.requestId)} className="font-bold text-amber-700 hover:text-red-600" aria-label={`Bỏ đề xuất ${part.productName}`}>×</button>}
+                        </span>
+                    ))}
                 </div>
             )}
+            {(canSelect || canRequest) ? <>
+                {(isLoadingSuggestions || suggestedParts.length > 0 || suggestionHint) && !search && (
+                    <div className="mt-2 rounded border border-emerald-100 bg-emerald-50 p-2">
+                        <p className="mb-1 text-[11px] font-semibold text-emerald-800">Gợi ý theo dịch vụ và model máy</p>
+                        {isLoadingSuggestions ? <p className="text-xs text-emerald-700">Đang tải gợi ý…</p>
+                            : suggestionHint ? <p className="text-xs leading-5 text-emerald-800">{suggestionHint}</p>
+                                : <div className="space-y-1">
+                                    {suggestedParts.slice(0, 5).map(product => renderCandidate(product, 'emerald'))}
+                                </div>}
+                    </div>
+                )}
+                <input
+                    value={search}
+                    onChange={event => setSearch(event.target.value)}
+                    placeholder={`${deviceModel.trim() ? `Tìm ${PART_CATEGORY_LABEL.toLowerCase()} cho ${deviceModel.trim()}…` : `Tìm ${PART_CATEGORY_LABEL.toLowerCase()} chính xác…`}`}
+                    className="mt-2 w-full rounded border border-sky-200 bg-white px-2.5 py-1.5 text-xs outline-none focus:border-sky-500"
+                />
+                {search && (
+                    <div className="mt-1 max-h-36 divide-y overflow-y-auto rounded border border-sky-100 bg-white">
+                        {isSearching ? <p className="p-2 text-xs text-gray-500">Đang tìm…</p> : results.length > 0 ? results.slice(0, 10).map(product => renderCandidate(product, 'sky')) : <p className="p-2 text-xs text-gray-500">Không tìm thấy linh kiện khớp model và từ khóa đã nhập.</p>}
+                    </div>
+                )}
+                {search && manualSearchSource === 'unscoped-index' && (
+                    <p className="mt-1 text-[11px] text-amber-700">Danh mục dịch vụ chưa có nhóm linh kiện phù hợp; kết quả này chưa được giới hạn theo nhóm dịch vụ.</p>
+                )}
+                {canRequest && (
+                    <div className="mt-2 grid gap-1.5 rounded border border-amber-100 bg-amber-50 p-2 sm:grid-cols-[minmax(0,1fr)_7rem_auto]">
+                        <input value={customRequestName} onChange={event => setCustomRequestName(event.target.value)} placeholder="Linh kiện cần đặt nếu chưa có trong hệ thống" className="min-w-0 rounded border border-amber-200 bg-white px-2 py-1.5 text-xs outline-none focus:border-amber-500" />
+                        <select value={requestQuality} onChange={event => setRequestQuality(event.target.value)} className="rounded border border-amber-200 bg-white px-2 py-1.5 text-xs">
+                            <option value="Zin">Zin</option>
+                            <option value="Loại 1">Loại 1</option>
+                            <option value="Loại 2">Loại 2</option>
+                            <option value="Bóc máy">Bóc máy</option>
+                            <option value="">Chưa rõ loại</option>
+                        </select>
+                        <button type="button" disabled={!customRequestName.trim()} onClick={() => {
+                            onRequest({ productId: '', productName: customRequestName.trim(), quality: requestQuality });
+                            setCustomRequestName('');
+                        }} className="rounded bg-amber-600 px-2 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">Đề xuất mua</button>
+                    </div>
+                )}
+            </> : blockedReason && <p className="mt-2 text-xs text-sky-800">{blockedReason}</p>}
         </div>
     );
 }

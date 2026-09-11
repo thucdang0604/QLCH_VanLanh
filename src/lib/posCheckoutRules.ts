@@ -8,6 +8,7 @@ export type CheckoutItemInput = Record<string, unknown> & {
     quantity?: unknown;
     price?: unknown;
     lotCode?: unknown;
+    inventoryLotId?: unknown;
     repairTicketId?: unknown;
     orderPaymentId?: unknown;
     productName?: unknown;

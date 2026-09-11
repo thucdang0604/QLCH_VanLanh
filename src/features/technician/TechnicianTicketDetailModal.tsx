@@ -8,6 +8,7 @@ import Modal from '@/components/admin/Modal';
 import CurrencyInput from '@/components/admin/CurrencyInput';
 import CategoryTaxonomySelector from '@/components/admin/CategoryTaxonomySelector';
 import type { Product, RepairIssue, RepairTicket, User, WorkflowNode } from '@/lib/types';
+import type { RepairPartCatalogSearchResult } from '@/lib/repairPartCatalogSearch';
 import { getYouTubeEmbedUrl, isYouTubeUrl } from '@/lib/workflowFeatures';
 import { REPAIR_PART_STATUS, REPAIR_STATUS, isRepairPartStatus, isRepairStatus } from '@/lib/repairStatus';
 import { getAllowedNextWorkflowNodes, getFirstNonTerminalWorkflowTransition } from '@/lib/repairWorkflowConfig';
@@ -43,6 +44,7 @@ interface TechnicianTicketDetailModalProps {
     partSearchQuery: string;
     setPartSearchQuery: (value: string) => void;
     partSearchResults: Product[];
+    partSearchSource: RepairPartCatalogSearchResult['source'];
     isSearchingParts: boolean;
     serviceSuggestedParts: Product[];
     serviceSuggestionHint: string;
@@ -74,6 +76,7 @@ export function TechnicianTicketDetailModal({
     partSearchQuery,
     setPartSearchQuery,
     partSearchResults,
+    partSearchSource,
     isSearchingParts,
     serviceSuggestedParts,
     serviceSuggestionHint,
@@ -546,6 +549,7 @@ export function TechnicianTicketDetailModal({
                                 </div>
 
                                 {partSearchQuery && (
+                                    <>
                                     <div className="mt-2 bg-white border border-gray-200 rounded-md shadow-sm divide-y max-h-48 overflow-y-auto mb-3">
                                         {isSearchingParts ? (
                                             <div className="p-3 text-center text-xs text-gray-500 flex items-center justify-center gap-2">
@@ -601,6 +605,10 @@ export function TechnicianTicketDetailModal({
                                             <div className="p-3 text-center text-xs text-gray-500">Không tìm thấy linh kiện trong hệ thống.</div>
                                         )}
                                     </div>
+                                    {partSearchSource === 'unscoped-index' && (
+                                        <p className="-mt-1 mb-3 text-[11px] leading-4 text-amber-700">Danh mục dịch vụ chưa có nhóm linh kiện phù hợp; cần cấu hình taxonomy trước khi chọn linh kiện.</p>
+                                    )}
+                                    </>
                                 )}
 
                                 <div className="pt-3 border-t border-gray-200">

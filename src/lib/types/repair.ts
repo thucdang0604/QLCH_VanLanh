@@ -309,6 +309,16 @@ export interface RepairTicket {
     pendingTechnicianTransfer?: PendingTechnicianTransfer;
     status: RepairStatus;
     deliveryNote?: string;
+    /** Immutable audit snapshot written by the server when a terminal handover/refund is completed. */
+    handoverRecord?: {
+        action: 'handover' | 'refund';
+        note?: string;
+        paymentConfirmationRequired: boolean;
+        paymentConfirmed: boolean;
+        confirmedBy: string;
+        confirmedByName?: string;
+        confirmedAt: FirestoreDateValue;
+    };
     // [WARRANTY] Phân loại phiếu — undefined = 'repair' (backward-compatible)
     // → 'repair' hoặc undefined: dùng repairStatuses
     // → 'warranty': dùng warrantyStatuses
@@ -338,6 +348,8 @@ export interface RepairTicket {
             refundAmount: number;
         }[];
     };
+    /** Chốt một lần khi bàn giao để giấy bảo hành có cùng mốc với hạn bảo hành. */
+    warrantyStartedAt?: FirestoreDateValue;
     serviceWarrantyExpiresAt?: FirestoreDateValue;
     createdAt: FirestoreDateValue;
     updatedAt: FirestoreDateValue;

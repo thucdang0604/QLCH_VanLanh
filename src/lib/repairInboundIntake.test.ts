@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
     assertInboundArrivalConfirmedForTransition,
     canSelectInitialPartsDuringInboundIntake,
+    canSelectInitialPartsWhenEditingRepair,
     getInboundIntakeDetailsError,
     getInboundArrivalPrerequisiteError,
     getInboundTechnicianHoldMessage,
@@ -97,4 +98,17 @@ test('expected parts can only be selected while reception is completing a receiv
     });
     assert.equal(canSelectInitialPartsDuringInboundIntake(completedTicket, inboundArrivalNode), false);
     assert.equal(canSelectInitialPartsDuringInboundIntake(receivedTicket, { ...inboundArrivalNode, allowedFeatures: [] }), false);
+});
+
+test('editing a walk-in keeps expected-part selection available without relying on a status id', () => {
+    const editableNode = { id: 'custom_inspection', label: 'Kiểm tra', color: '', allowedNext: [] };
+    const terminalNode = { ...editableNode, isTerminal: true };
+
+    assert.equal(canSelectInitialPartsWhenEditingRepair({ appointmentIntakeMethod: 'walk_in' }, editableNode), true);
+    assert.equal(canSelectInitialPartsWhenEditingRepair(incomingTicket(), inboundArrivalNode), false);
+    assert.equal(canSelectInitialPartsWhenEditingRepair(
+        incomingTicket({ inboundShipping: { paidAmount: 50000, lastPaymentMethod: 'CASH', status: 'received' } }),
+        inboundArrivalNode,
+    ), true);
+    assert.equal(canSelectInitialPartsWhenEditingRepair({ appointmentIntakeMethod: 'walk_in' }, terminalNode), false);
 });

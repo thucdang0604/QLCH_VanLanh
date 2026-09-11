@@ -6,7 +6,10 @@ type RepairPartIssueLink = {
 };
 
 function isActivePartForIssue(part: RepairPartIssueLink): boolean {
-    return Boolean(part.issueId) && part.status !== 'rejected';
+    // A shortage request is only a procurement signal. It must not change the
+    // customer's labour estimate until a concrete stock item is selected and
+    // its price is snapshotted on the ticket.
+    return Boolean(part.issueId) && part.status === 'selected';
 }
 
 /**

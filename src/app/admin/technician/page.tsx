@@ -7,14 +7,14 @@ import {
     User as UserIcon, ArrowRightLeft, ShieldAlert, Truck
 } from 'lucide-react';
 import { collection, query, doc, where, orderBy, limit, startAfter, type DocumentSnapshot, type QueryConstraint, type QuerySnapshot } from 'firebase/firestore';
-import { onSnapshot, getDoc, getDocs } from '@/lib/firestoreLogger';
+import { onSnapshot, getDocs } from '@/lib/firestoreLogger';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/lib/AuthContext';
 import { appConfirm } from '@/lib/appDialog';
 import { isChecklistComplete, areAllPartsReady } from '@/lib/workflowFeatures';
 import type { RepairIssue, RepairTicket, Product, WorkflowNode } from '@/lib/types';
 import { toastError, toastSuccess, toastWarning } from '@/lib/toast';
-import { PART_CATEGORY_LABEL, isPartCategory } from '@/lib/constants';
+import { PART_CATEGORY_LABEL } from '@/lib/constants';
 import { REPAIR_PART_STATUS, isPendingRepairPart, isRepairPartStatus } from '@/lib/repairStatus';
 import { isRepairManager } from '@/lib/repairAccess';
 import { getAllowedNextWorkflowNodes, getFirstNonTerminalWorkflowTransition, getWorkflowNormalizationOptions, normalizeRepairWorkflow, normalizeWarrantyWorkflow } from '@/lib/repairWorkflowConfig';
@@ -31,22 +31,14 @@ import {
 import { TechnicianPageHeader } from '@/features/technician/TechnicianPageHeader';
 import { TechnicianTicketDetailModal } from '@/features/technician/TechnicianTicketDetailModal';
 import {
-    filterAvailableCategoryRecommendations,
-    getRecommendedPartCategoryIds,
     getRepairServiceCategoryIds,
     getRepairServiceIds,
-    type ServiceBusinessLink,
 } from '@/lib/serviceRecommendations';
 import {
-    getRepairPartSearchLookupTokens,
-    getScopedRepairPartSearchValues,
+    filterRepairPartCatalogResults,
     normalizeRepairPartSearch,
-    productMatchesRepairDeviceModel,
-    productMatchesRepairPartQuality,
-    productMatchesRepairPartSearch,
-    queryTargetsRepairDeviceModel,
-    rankRepairPartSearchResults,
 } from '@/lib/repairPartSearch';
+import { searchRepairPartCatalog, suggestRepairParts, type RepairPartCatalogSearchResult } from '@/lib/repairPartCatalogSearch';
 
 
 const checklistLabels: Record<string, string> = {
@@ -56,7 +48,6 @@ const checklistLabels: Record<string, string> = {
 const CHECKLIST_VALUES = ['OK', 'Trầy', 'Nứt', 'Móp', 'Lỗi', 'Không có'];
 
 const TECHNICIAN_LIVE_PAGE_SIZE = 20;
-const TECHNICIAN_PART_RESULT_LIMIT = 40;
 
 type RepairTimelineEntry = NonNullable<RepairTicket['statusTimeline']>[number];
 
@@ -89,7 +80,7 @@ function getTimelineTitle(entry: RepairTimelineEntry, workflow: WorkflowNode[]):
         case 'part_selected':
             return `KTV đã chọn ${partName} cho phiếu sửa chữa`;
         case 'part_requested':
-            return `KTV đã yêu cầu ${partName}`;
+            return `Đã đề xuất nhập ${partName}`;
         case 'part_handed_over_to_technician':
             return `Tiếp nhận đã bàn giao ${partName} cho KTV`;
         case 'part_received_by_technician':
@@ -240,6 +231,7 @@ export default function TechnicianPage() {
 
     const [partSearchQuery, setPartSearchQuery] = useState('');
     const [partSearchResults, setPartSearchResults] = useState<Product[]>([]);
+    const [partSearchSource, setPartSearchSource] = useState<RepairPartCatalogSearchResult['source']>('none');
     const [isSearchingParts, setIsSearchingParts] = useState(false);
     const [serviceSuggestedParts, setServiceSuggestedParts] = useState<Product[]>([]);
     const [serviceSuggestedCategoryIds, setServiceSuggestedCategoryIds] = useState<string[]>([]);
@@ -273,11 +265,14 @@ export default function TechnicianPage() {
 
     // Suggestions and manual search must use the same quality decision.
     const qualityFilteredServiceSuggestedParts = useMemo(
-        () => serviceSuggestedParts
-            .filter(product => productMatchesRepairPartQuality(product, selectedPartQuality))
+        () => filterRepairPartCatalogResults(serviceSuggestedParts, {
+            deviceModel: selectedTicket?.deviceInfo?.model || '',
+            quality: selectedPartQuality,
+            categoryIds: serviceSuggestedCategoryIds,
+        })
             .filter(product => !selectedSuggestedPartLeafCategoryIds.has(product.categoryIds?.at(-1) || ''))
             .slice(0, 10),
-        [selectedPartQuality, selectedSuggestedPartLeafCategoryIds, serviceSuggestedParts],
+        [selectedPartQuality, selectedSuggestedPartLeafCategoryIds, selectedTicket?.deviceInfo?.model, serviceSuggestedCategoryIds, serviceSuggestedParts],
     );
 
     const tickets = useMemo(() => {
@@ -295,6 +290,7 @@ export default function TechnicianPage() {
         ...selectedTicketServiceCategoryIds,
         ...selectedTicketServiceIds,
         normalizeRepairPartSearch(selectedTicketDeviceModel),
+        normalizeRepairPartSearch(selectedPartQuality),
     ].join('|');
 
     useEffect(() => {
@@ -332,93 +328,20 @@ export default function TechnicianPage() {
         const loadSuggestions = async () => {
             setIsLoadingServiceSuggestions(true);
             try {
-                const [directServiceSnaps, taxonomyServiceSnaps] = await Promise.all([
-                    Promise.all(serviceIds.map(serviceId => getDoc(doc(db, 'services', serviceId)))),
-                    Promise.all(serviceCategoryIds.slice(0, 10).map(categoryId => getDocs(query(
-                        collection(db, 'services'),
-                        where('categoryIds', 'array-contains', categoryId),
-                        limit(20),
-                    )))),
-                ]);
-                const serviceMap = new Map<string, ServiceBusinessLink & { device_model?: unknown; isActive?: unknown }>();
-                directServiceSnaps
-                    .filter(snapshot => snapshot.exists())
-                    .forEach(snapshot => serviceMap.set(snapshot.id, { id: snapshot.id, ...snapshot.data() } as ServiceBusinessLink & { device_model?: unknown; isActive?: unknown }));
-                taxonomyServiceSnaps.forEach(snapshot => snapshot.docs.forEach(serviceDoc => {
-                    const service = { id: serviceDoc.id, ...serviceDoc.data() } as ServiceBusinessLink & { device_model?: unknown; isActive?: unknown };
-                    if (service.isActive !== false) serviceMap.set(service.id, service);
-                }));
-                const services = Array.from(serviceMap.values()).filter(service => service.isActive !== false);
-                // A repair ticket is classified by its taxonomy. The service
-                // catalog supplies the part-category links for that taxonomy;
-                // model matching happens only after part candidates are read.
-                const categoryIds = getRecommendedPartCategoryIds(services);
-                if (categoryIds.length === 0) {
-                    if (!disposed) {
-                        const hint = `Chưa có cấu hình liên kết linh kiện cho danh mục sửa chữa và model ${selectedTicketDeviceModel}.`;
-                        serviceSuggestionCacheRef.current.set(selectedTicketServiceKey, { products: [], categoryIds: [], hint });
-                        setServiceSuggestedParts([]);
-                        setServiceSuggestedCategoryIds([]);
-                        setServiceSuggestionHint(hint);
-                    }
-                    return;
-                }
-                const scopedSearchValues = getScopedRepairPartSearchValues(categoryIds, selectedTicketDeviceModel);
-                if (scopedSearchValues.length === 0) {
-                    if (!disposed) {
-                        const hint = 'Không xác định được mã model để tìm linh kiện tương thích.';
-                        serviceSuggestionCacheRef.current.set(selectedTicketServiceKey, { products: [], categoryIds, hint });
-                        setServiceSuggestedParts([]);
-                        setServiceSuggestedCategoryIds(categoryIds);
-                        setServiceSuggestionHint(hint);
-                    }
-                    return;
-                }
-                const productSnap = await getDocs(query(
-                    collection(db, 'products'),
-                    where('status', '==', 'active'),
-                    where('searchCategoryKeywords', 'array-contains-any', scopedSearchValues),
-                    limit(TECHNICIAN_PART_RESULT_LIMIT),
-                ));
-                const filterSuggestedProducts = (products: Product[]) => filterAvailableCategoryRecommendations(
-                    products
-                        .filter(product => isPartCategory(product.category, product.categoryIds))
-                        .filter(product => productMatchesRepairDeviceModel(product, selectedTicketDeviceModel)),
-                    categoryIds,
-                );
-                let suggestedProducts = filterSuggestedProducts(
-                    productSnap.docs.map(productDoc => ({ id: productDoc.id, ...productDoc.data() } as Product)),
-                );
-                // Older catalog records may not yet have the combined category
-                // index. Fall back to the regular indexed model lookup and
-                // retain the linked category filter locally; never scan stock.
-                if (suggestedProducts.length === 0) {
-                    const modelTokens = getRepairPartSearchLookupTokens(selectedTicketDeviceModel);
-                    if (modelTokens.length > 0) {
-                        const legacyIndexSnap = await getDocs(query(
-                            collection(db, 'products'),
-                            where('status', '==', 'active'),
-                            where('searchKeywords', 'array-contains-any', modelTokens),
-                            limit(TECHNICIAN_PART_RESULT_LIMIT),
-                        ));
-                        suggestedProducts = filterSuggestedProducts(
-                            legacyIndexSnap.docs.map(productDoc => ({ id: productDoc.id, ...productDoc.data() } as Product)),
-                        );
-                    }
-                }
-                const suggestions = rankRepairPartSearchResults(
-                    suggestedProducts,
-                    selectedTicketDeviceModel,
-                    selectedTicketDeviceModel,
-                );
-                const hint = suggestions.length === 0
-                    ? `Chưa có linh kiện ${selectedTicketDeviceModel} trong nhóm đã liên kết với dịch vụ.`
-                    : '';
-                serviceSuggestionCacheRef.current.set(selectedTicketServiceKey, { products: suggestions, categoryIds, hint });
+                const result = await suggestRepairParts({
+                    ticket: selectedTicket,
+                    deviceModel: selectedTicketDeviceModel,
+                    quality: selectedPartQuality,
+                });
+                serviceSuggestionCacheRef.current.set(selectedTicketServiceKey, {
+                    products: result.products,
+                    categoryIds: result.categoryIds,
+                    hint: result.hint,
+                });
                 if (!disposed) {
-                    setServiceSuggestedParts(suggestions);
-                    setServiceSuggestedCategoryIds(categoryIds);
-                    setServiceSuggestionHint(hint);
+                    setServiceSuggestedParts(result.products);
+                    setServiceSuggestedCategoryIds(result.categoryIds);
+                    setServiceSuggestionHint(result.hint);
                 }
             } catch (error) {
                 console.error('Failed to load service-linked part suggestions', error);
@@ -433,7 +356,7 @@ export default function TechnicianPage() {
         };
         void loadSuggestions();
         return () => { disposed = true; };
-    }, [selectedTicket, selectedTicketDeviceModel, selectedTicketServiceKey]);
+    }, [selectedPartQuality, selectedTicket, selectedTicketDeviceModel, selectedTicketServiceKey]);
 
     const [dynamicStatuses, setDynamicStatuses] = useState<WorkflowNode[]>([]);
     const [warrantyStatuses, setWarrantyStatuses] = useState<WorkflowNode[]>([]);
@@ -458,44 +381,26 @@ export default function TechnicianPage() {
     useEffect(() => {
         if (!partSearchQuery.trim()) {
             setPartSearchResults([]);
+            setPartSearchSource('none');
             return;
         }
         let disposed = false;
         const timer = setTimeout(async () => {
             setIsSearchingParts(true);
             try {
-                const lookupTokens = getRepairPartSearchLookupTokens(partSearchQuery);
-                if (lookupTokens.length === 0) {
-                    setPartSearchResults([]);
-                    return;
+                const result = await searchRepairPartCatalog({
+                    query: partSearchQuery,
+                    deviceModel: selectedTicketDeviceModel,
+                    quality: selectedPartQuality,
+                    categoryIds: serviceSuggestedCategoryIds,
+                });
+                if (!disposed) {
+                    setPartSearchResults(result.products.slice(0, 10));
+                    setPartSearchSource(result.source);
                 }
-                const scopedSearchValues = getScopedRepairPartSearchValues(serviceSuggestedCategoryIds, partSearchQuery);
-                const readProducts = async (scoped: boolean) => {
-                    const searchSnapshot = await getDocs(query(
-                        collection(db, 'products'),
-                        where('status', '==', 'active'),
-                        where(scoped ? 'searchCategoryKeywords' : 'searchKeywords', 'array-contains-any', scoped ? scopedSearchValues : lookupTokens),
-                        limit(TECHNICIAN_PART_RESULT_LIMIT),
-                    ));
-                    return searchSnapshot.docs.map(item => ({ id: item.id, ...item.data() } as Product));
-                };
-                const filterSearchResults = (products: Product[]) => products
-                    .filter(product => isPartCategory(product.category, product.categoryIds))
-                    .filter(product => productMatchesRepairPartQuality(product, selectedPartQuality))
-                    .filter(product => productMatchesRepairPartSearch(product, partSearchQuery))
-                    .filter(product => !queryTargetsRepairDeviceModel(partSearchQuery, selectedTicketDeviceModel)
-                        || productMatchesRepairDeviceModel(product, selectedTicketDeviceModel));
-
-                let results = filterSearchResults(await readProducts(scopedSearchValues.length > 0));
-                // A service link is a strong first scope, not a restriction on
-                // a KTV who discovered an additional issue. The fallback stays
-                // indexed and bounded; it never scans arbitrary active stock.
-                if (results.length === 0 && scopedSearchValues.length > 0) {
-                    results = filterSearchResults(await readProducts(false));
-                }
-                if (!disposed) setPartSearchResults(rankRepairPartSearchResults(results, partSearchQuery, selectedTicketDeviceModel).slice(0, 10));
             } catch (err) {
                 console.error(err);
+                if (!disposed) setPartSearchSource('none');
             } finally {
                 if (!disposed) setIsSearchingParts(false);
             }
@@ -1739,6 +1644,7 @@ export default function TechnicianPage() {
                 partSearchQuery={partSearchQuery}
                 setPartSearchQuery={setPartSearchQuery}
                 partSearchResults={partSearchResults}
+                partSearchSource={partSearchSource}
                 isSearchingParts={isSearchingParts}
                 serviceSuggestedParts={qualityFilteredServiceSuggestedParts}
                 serviceSuggestionHint={serviceSuggestionHint}

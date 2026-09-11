@@ -9,9 +9,10 @@ import { isTechnicianUser } from '@/lib/repairAccess';
 import { incrementRevenueAggregates } from '@/lib/revenueAggregateServer';
 import { reserveSequentialDocumentId } from '@/lib/serverDocumentIds';
 import { getE2ERunMetadata } from '@/lib/e2eRunMetadata';
-import { buildSafeRepairCreateBody, normalizeInitialRepairParts, normalizeRepairPaymentHistory, parseRepairClientTimestamp } from '@/lib/repairCreateInput';
+import { buildSafeRepairCreateBody, normalizeInitialRepairPartRequests, normalizeInitialRepairParts, normalizeRepairPaymentHistory, parseRepairClientTimestamp } from '@/lib/repairCreateInput';
 import { getRepairIssueLaborCost } from '@/lib/repairIssuePricing';
 import type { RepairIssue } from '@/lib/types';
+import { syncRepairPartRequestDraft, type RepairPartRequestDraftItem } from '@/lib/repairPartRequestDraft';
 
 type CreateRepairBody = Record<string, unknown> & {
     ticketType?: 'repair' | 'warranty';
@@ -120,6 +121,7 @@ export const POST = withApi({
             const estimatedReturnAt = parseRepairClientTimestamp(body.timing?.estimatedReturnAt);
             const paymentHistory = normalizeRepairPaymentHistory(body.paymentHistory);
             const initialParts = normalizeInitialRepairParts(body.initialParts);
+            const initialPartRequests = normalizeInitialRepairPartRequests(body.initialPartRequests);
             const safeBody = buildSafeRepairCreateBody(body, paymentHistory);
             const issues = Array.isArray(safeBody.issues) ? safeBody.issues as RepairIssue[] : [];
             const issueIds = new Set(issues.map(issue => String(issue.id || '').trim()).filter(Boolean));
@@ -128,8 +130,16 @@ export const POST = withApi({
                     throw new Error('Linh kiện ban đầu phải được gắn với một lỗi có trên phiếu.');
                 }
             }
+            for (const part of initialPartRequests) {
+                if (!issueIds.has(part.issueId)) {
+                    throw new Error('Đề xuất linh kiện phải được gắn với một lỗi có trên phiếu.');
+                }
+            }
 
-            const productRefs = [...new Set(initialParts.map(part => part.productId))].map(productId => db.collection('products').doc(productId));
+            const productRefs = [...new Set([
+                ...initialParts.map(part => part.productId),
+                ...initialPartRequests.map(part => part.productId).filter(Boolean),
+            ])].map(productId => db.collection('products').doc(productId));
             const productSnaps = productRefs.length > 0 ? await tx.getAll(...productRefs) : [];
             const products = new Map(productSnaps.map(snapshot => [snapshot.id, snapshot]));
             const heldByProduct = new Map<string, number>();
@@ -161,11 +171,25 @@ export const POST = withApi({
                     priceConfirmedAt: new Date(),
                 };
             });
+            const storedRequestedParts = initialPartRequests.map(part => {
+                const product = part.productId ? products.get(part.productId)?.data() : null;
+                if (part.productId && !product) throw new Error(`Linh kiện ${part.productId} không còn tồn tại.`);
+                return {
+                    partLineId: randomUUID(),
+                    issueId: part.issueId,
+                    productId: part.productId,
+                    productName: String(product?.name || part.customName || 'Linh kiện yêu cầu'),
+                    quantity: part.quantity,
+                    quality: part.quality || String(product?.quality || ''),
+                    status: 'requested' as const,
+                };
+            });
+            const allParts = [...storedParts, ...storedRequestedParts];
             const currentPayment = (safeBody.payment && typeof safeBody.payment === 'object'
                 ? safeBody.payment
                 : {}) as Record<string, unknown>;
             const partsCost = storedParts.reduce((total, part) => total + part.unitPriceAtUse * part.quantity, 0);
-            const laborCost = getRepairIssueLaborCost(issues, storedParts, Number(currentPayment.laborCost) || 0);
+            const laborCost = getRepairIssueLaborCost(issues, allParts, Number(currentPayment.laborCost) || 0);
             const additionalFees = Math.max(0, Number(currentPayment.additionalFees) || 0);
             const discountAmount = Math.max(0, Number(currentPayment.discountAmount) || 0);
             const payment = {
@@ -181,8 +205,10 @@ export const POST = withApi({
             const finalData = {
                 ...e2eMetadata,
                 ...safeBody,
+                ...(allParts.length > 0 ? {
+                    parts: allParts,
+                } : {}),
                 ...(storedParts.length > 0 ? {
-                    parts: storedParts,
                     partsLockedAt: FieldValue.serverTimestamp(),
                 } : {}),
                 payment,
@@ -204,7 +230,16 @@ export const POST = withApi({
                     actorRole: caller.role,
                     source: 'repairs',
                     timestamp: Date.now(),
-                }],
+                }, ...storedRequestedParts.map(part => ({
+                    eventType: 'part_requested',
+                    status: entryNode.id,
+                    actorId: caller.uid,
+                    actorName: typeof callerData?.displayName === 'string' ? callerData.displayName : 'Nhân viên',
+                    partLineId: part.partLineId,
+                    partName: part.productName,
+                    source: 'repairs',
+                    timestamp: Date.now(),
+                }))],
                 createdAt: FieldValue.serverTimestamp(),
                 updatedAt: FieldValue.serverTimestamp(),
                 timing: {
@@ -222,6 +257,22 @@ export const POST = withApi({
                 prefix: body.ticketType === 'warranty' ? 'BH' : 'SC',
             });
             const newTicketRef = ticketAllocation.ref;
+            const requestDraftItems: RepairPartRequestDraftItem[] = storedRequestedParts.map(part => ({
+                partLineId: part.partLineId,
+                productId: part.productId,
+                productName: part.productName,
+                quantity: part.quantity,
+                quality: part.quality,
+                importPrice: 0,
+                ticketId: ticketAllocation.id,
+                requestKey: `${ticketAllocation.id}:${part.partLineId}`,
+            }));
+            await syncRepairPartRequestDraft({
+                tx,
+                db,
+                actorId: caller.uid,
+                requestedItems: requestDraftItems,
+            });
             ticketAllocation.commitCounter();
             tx.set(newTicketRef, finalData);
             tx.set(operationRef, {

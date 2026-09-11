@@ -39,7 +39,7 @@ interface RepairTicketBoardProps {
     onHandoverPart: (ticket: RepairTicket, partIndex: number) => void | Promise<void>;
     onConfirmReturnedPart: (ticket: RepairTicket, partIndex: number) => void | Promise<void>;
     handleOpenModal: (ticket?: RepairTicket) => void;
-    openPrint: (ticket: RepairTicket, mode: 'receipt' | 'invoice' | 'warranty', warrantyType?: WarrantyPrintType | null) => void;
+    openPrint: (ticket: RepairTicket, mode: 'receipt' | 'invoice' | 'warranty' | 'handover', warrantyType?: WarrantyPrintType | null) => void;
     setViewingTicket: (ticket: RepairTicket) => void;
     setAssignModal: (modal: { ticket: RepairTicket }) => void;
     setWarrantyModal: (ticket: RepairTicket) => void | Promise<void>;
@@ -280,6 +280,11 @@ export function RepairTicketBoard({
                                             <Printer size={14} /> Phiáº¿u BH
                                         </button>
                                     )}
+                                    {st?.isTerminal && (
+                                        <button onClick={() => openPrint(ticket, 'handover')} className="flex-1 py-2 bg-gray-50 text-gray-700 text-xs font-semibold rounded-lg border border-gray-300 flex items-center justify-center gap-1 active:bg-gray-100">
+                                            <Printer size={14} /> Bàn giao
+                                        </button>
+                                    )}
                                     {canCreateWarranty && (
                                         <button onClick={() => { setWarrantySelectedIndexes([]); void setWarrantyModal(ticket); }} className="w-full py-2 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-semibold rounded-lg flex items-center justify-center gap-1 mt-1">
                                             <AlertCircle size={14} /> Kích hoạt bảo hành
@@ -458,6 +463,13 @@ export function RepairTicketBoard({
                                                     </button>
                                                 );
                                             })()}
+                                            {st?.isTerminal && (
+                                                <button onClick={() => openPrint(ticket, 'handover')}
+                                                    className="flex items-center gap-1 px-2 py-1 text-[10px] font-semibold rounded-lg bg-gray-50 text-gray-700 border border-gray-300 hover:bg-gray-100 transition-colors"
+                                                    title="In phiếu bàn giao máy">
+                                                    <Printer size={12} /> Bàn giao
+                                                </button>
+                                            )}
                                             {canCreateWarranty && (
                                                     <button onClick={() => { setWarrantySelectedIndexes([]); void setWarrantyModal(ticket); }}
                                                         className="flex items-center gap-1 px-2 py-1 text-[10px] font-semibold rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition-colors"

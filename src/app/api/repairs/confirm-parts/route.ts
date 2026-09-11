@@ -10,7 +10,7 @@ import { isRepairManager } from '@/lib/repairAccess';
 import { findSelectedRepairPartIndex, increaseSelectedRepairPartQuantity } from '@/lib/repairPartSelection';
 import { getRepairIssueLaborCost } from '@/lib/repairIssuePricing';
 import { randomUUID } from 'crypto';
-import { reserveSequentialDocumentId, type ReservedSequentialDocumentId } from '@/lib/serverDocumentIds';
+import { syncRepairPartRequestDraft, type RepairPartRequestDraftItem } from '@/lib/repairPartRequestDraft';
 
 type RepairLine = NonNullable<RepairTicket['parts']>[number];
 type ProductData = Record<string, unknown>;
@@ -22,26 +22,6 @@ type RepairUpdateData = {
     updatedAt: FieldValue;
     partsLockedAt?: FirestoreDateValue;
     statusTimeline?: FieldValue;
-};
-type DraftReceiptData = {
-    status: string;
-    source: string;
-    supplierId: string;
-    totalAmount: number;
-    items: Array<Record<string, unknown>>;
-    createdAt?: FieldValue;
-    createdBy?: string;
-    note?: string;
-};
-type RequestedReceiptItem = {
-    partLineId: string;
-    productId: string;
-    productName: string;
-    quantity: number;
-    quality: string;
-    importPrice: number;
-    ticketId: string;
-    requestKey: string;
 };
 type RepairPartCommand = {
     type: string;
@@ -166,17 +146,6 @@ export const POST = withApi({
                     .map((cmd: { partLineId?: string }) => cmd.partLineId)
                     .filter((partLineId: unknown): partLineId is string => typeof partLineId === 'string' && partLineId.length > 0),
             );
-            const receiptsRef = db.collection('import_receipts');
-            const needsDraftReceipt = partLineIdsToUnlink.size > 0
-                || cmdList.some((cmd: { type?: string }) => cmd.type === 'request_part');
-            const draftSnap = needsDraftReceipt
-                ? await tx.get(
-                    receiptsRef.where('status', '==', 'draft')
-                        .where('source', '==', 'repair_request')
-                        .limit(1),
-                )
-                : null;
-
             const productIdsToLoad = new Set<string>();
             for (const cmd of cmdList as Array<{ productId?: string; partLineId?: string }>) {
                 if (cmd.productId) productIdsToLoad.add(cmd.productId);
@@ -204,7 +173,7 @@ export const POST = withApi({
                 if (!product) throw new Error(`Sản phẩm ${productId} chưa được tải trong transaction.`);
                 return product.data;
             };
-            const newRequestedItems: RequestedReceiptItem[] = [];
+            const newRequestedItems: RepairPartRequestDraftItem[] = [];
 
             // Process all commands
             for (const cmd of cmdList) {
@@ -561,13 +530,13 @@ export const POST = withApi({
                 updateData.partsLockedAt = partsLockedAt;
             }
 
-            let draftReceiptAllocation: ReservedSequentialDocumentId | null = null;
-            if (draftSnap?.empty && newRequestedItems.length > 0) {
-                draftReceiptAllocation = await reserveSequentialDocumentId(tx, db, {
-                    collectionName: 'import_receipts',
-                    prefix: 'NH',
-                });
-            }
+            await syncRepairPartRequestDraft({
+                tx,
+                db,
+                actorId: caller.uid,
+                requestedItems: newRequestedItems,
+                removedPartLineIds: partLineIdsToUnlink,
+            });
 
             // ===== START WRITES =====
             for (const productId of dirtyProductIds) {
@@ -585,50 +554,6 @@ export const POST = withApi({
                 commandType: cmdList.length === 1 ? cmdList[0].type : 'batch',
                 completedAt: FieldValue.serverTimestamp()
             });
-
-            // Handle Draft Receipt for requested parts (Consolidated Receipt trigger)
-            if (draftSnap && (newRequestedItems.length > 0 || partLineIdsToUnlink.size > 0)) {
-                let draftRef;
-                let draftData: DraftReceiptData = {
-                    status: 'draft',
-                    source: 'repair_request',
-                    supplierId: '',
-                    totalAmount: 0,
-                    items: [],
-                    createdAt: FieldValue.serverTimestamp(),
-                    createdBy: caller.uid,
-                    note: 'Phiếu nhập tự động từ yêu cầu linh kiện KTV'
-                };
-
-                if (!draftSnap.empty) {
-                    draftRef = draftSnap.docs[0].ref;
-                    draftData = draftSnap.docs[0].data() as unknown as DraftReceiptData;
-                } else if (newRequestedItems.length > 0) {
-                    draftRef = draftReceiptAllocation?.ref;
-                } else {
-                    return { success: true, parts, payment: paymentUpdate, partsLockedAt };
-                }
-                if (!draftRef) {
-                    throw new Error('Khong the tao ma phieu nhap tu dong.');
-                }
-
-                const newRequestKeys = new Set(newRequestedItems.map((item) => item.requestKey));
-                const newPartLineIds = new Set(newRequestedItems.map((item) => item.partLineId));
-                draftData.items = [
-                    ...(draftData.items || []).filter((item) => {
-                        const partLineId = typeof item.partLineId === 'string' ? item.partLineId : '';
-                        const requestKey = typeof item.requestKey === 'string'
-                            ? item.requestKey
-                            : `${typeof item.ticketId === 'string' ? item.ticketId : ''}:${partLineId}`;
-                        return !partLineIdsToUnlink.has(partLineId)
-                            && !newRequestKeys.has(requestKey)
-                            && !newPartLineIds.has(partLineId);
-                    }),
-                    ...newRequestedItems,
-                ];
-                tx.set(draftRef, draftData, { merge: true });
-                draftReceiptAllocation?.commitCounter();
-            }
 
             return { success: true, parts, payment: paymentUpdate, partsLockedAt };
         });

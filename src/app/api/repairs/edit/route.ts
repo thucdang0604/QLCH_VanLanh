@@ -6,9 +6,15 @@ import { getApiErrorMessage, getApiErrorStatus, withApi } from '@/lib/api/handle
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import type { RepairTicket } from '@/lib/types';
 import { loadRepairWorkflow, requireWorkflowNode } from '@/lib/repairWorkflowServer';
-import { canSelectInitialPartsDuringInboundIntake, getInboundIntakeDetailsError } from '@/lib/repairInboundIntake';
+import {
+    canSelectInitialPartsDuringInboundIntake,
+    canSelectInitialPartsWhenEditingRepair,
+    getInboundIntakeDetailsError,
+    requiresInboundArrival,
+} from '@/lib/repairInboundIntake';
 import { getRepairIssueLaborCost } from '@/lib/repairIssuePricing';
-import { normalizeInitialRepairParts } from '@/lib/repairCreateInput';
+import { normalizeInitialRepairPartRequests, normalizeInitialRepairParts } from '@/lib/repairCreateInput';
+import { syncRepairPartRequestDraft, type RepairPartRequestDraftItem } from '@/lib/repairPartRequestDraft';
 
 const PAYMENT_SIGNATURE_FIELDS = ['deposit', 'quote', 'giftDiscount', 'additionalFees', 'laborCost', 'paymentMethod'] as const;
 type RepairEditRequestBody = {
@@ -18,18 +24,19 @@ type RepairEditRequestBody = {
     paymentData?: Record<string, unknown>;
     profileData?: Record<string, unknown>;
     initialParts?: unknown;
+    initialPartRequests?: unknown;
 };
 
 function stableSignature(value: unknown) {
     return createHash('sha256').update(JSON.stringify(value || {})).digest('hex');
 }
 
-function paymentPayloadSignature(paymentData: Record<string, unknown>, profileData: Record<string, unknown>, initialParts: unknown) {
+function paymentPayloadSignature(paymentData: Record<string, unknown>, profileData: Record<string, unknown>, initialParts: unknown, initialPartRequests: unknown) {
     const normalizedPayment = PAYMENT_SIGNATURE_FIELDS.reduce((acc, field) => {
         if (field in paymentData) acc[field] = paymentData[field];
         return acc;
     }, {} as Record<string, unknown>);
-    return stableSignature({ payment: normalizedPayment, profile: profileData, initialParts });
+    return stableSignature({ payment: normalizedPayment, profile: profileData, initialParts, initialPartRequests });
 }
 
 function parseDate(value: unknown) {
@@ -64,12 +71,13 @@ export const POST = withApi({
         const paymentData = (body.paymentData || {}) as Record<string, unknown>;
         const profileData = (body.profileData || {}) as Record<string, unknown>;
         const initialParts = normalizeInitialRepairParts(body.initialParts);
+        const initialPartRequests = normalizeInitialRepairPartRequests(body.initialPartRequests);
 
         if (!ticketId || !profileData || !paymentData) {
             return context.error('Missing parameters');
         }
 
-        const payloadSignature = paymentPayloadSignature(paymentData, profileData, initialParts);
+        const payloadSignature = paymentPayloadSignature(paymentData, profileData, initialParts, initialPartRequests);
         const db = getAdminDb();
 
         const result = await db.runTransaction(async (tx) => {
@@ -139,17 +147,22 @@ export const POST = withApi({
                 issue: profileData.issue || ticket.issue || {},
                 issues: updatedIssues,
             } as unknown as Record<string, unknown>;
-            const canSelectInitialParts = canSelectInitialPartsDuringInboundIntake(ticket, currentNode);
-            const shouldCompleteInboundIntake = canSelectInitialParts
+            const inboundArrivalRequired = requiresInboundArrival(ticket, currentNode);
+            const canSelectInitialParts = canSelectInitialPartsWhenEditingRepair(ticket, currentNode);
+            const shouldCompleteInboundIntake = inboundArrivalRequired
+                && canSelectInitialPartsDuringInboundIntake(ticket, currentNode)
                 && !getInboundIntakeDetailsError(updatedInboundTicket);
 
-            if (initialParts.length > 0 && !canSelectInitialParts) {
-                throw new Error('Chỉ được chọn linh kiện dự kiến khi hoàn tất tiếp nhận máy khách gửi đến shop.');
+            const hasInitialPartsIntakeAction = initialParts.length > 0 || initialPartRequests.length > 0;
+            if (hasInitialPartsIntakeAction && !canSelectInitialParts) {
+                throw new Error(inboundArrivalRequired
+                    ? 'Chỉ được chọn hoặc đề xuất linh kiện khi hoàn tất tiếp nhận máy khách gửi đến shop.'
+                    : 'Trạng thái hiện tại không cho phép chọn hoặc đề xuất linh kiện.');
             }
-            if (initialParts.length > 0 && !shouldCompleteInboundIntake) {
-                throw new Error(getInboundIntakeDetailsError(updatedInboundTicket) || 'Vui lòng hoàn tất thông tin tiếp nhận trước khi chọn linh kiện dự kiến.');
+            if (hasInitialPartsIntakeAction && inboundArrivalRequired && !shouldCompleteInboundIntake) {
+                throw new Error(getInboundIntakeDetailsError(updatedInboundTicket) || 'Vui lòng hoàn tất thông tin tiếp nhận trước khi chọn hoặc đề xuất linh kiện.');
             }
-            if (initialParts.length > 0 && (ticket.parts || []).length > 0) {
+            if (hasInitialPartsIntakeAction && (ticket.parts || []).length > 0) {
                 throw new Error('Phiếu đã có linh kiện. Hãy dùng thao tác linh kiện của KTV để cập nhật.');
             }
 
@@ -159,8 +172,16 @@ export const POST = withApi({
                     throw new Error('Linh kiện dự kiến phải được gắn với một lỗi có trên phiếu.');
                 }
             }
+            for (const part of initialPartRequests) {
+                if (!issueIds.has(part.issueId)) {
+                    throw new Error('Đề xuất linh kiện phải được gắn với một lỗi có trên phiếu.');
+                }
+            }
 
-            const productRefs = [...new Set(initialParts.map(part => part.productId))]
+            const productRefs = [...new Set([
+                ...initialParts.map(part => part.productId),
+                ...initialPartRequests.map(part => part.productId).filter(Boolean),
+            ])]
                 .map(productId => db.collection('products').doc(productId));
             const productSnaps = productRefs.length > 0 ? await tx.getAll(...productRefs) : [];
             const products = new Map(productSnaps.map(snapshot => [snapshot.id, snapshot]));
@@ -195,6 +216,20 @@ export const POST = withApi({
                     priceConfirmedAt: new Date(),
                 };
             });
+            const storedRequestedParts = initialPartRequests.map(part => {
+                const product = part.productId ? products.get(part.productId)?.data() : null;
+                if (part.productId && !product) throw new Error(`Linh kiện ${part.productId} không còn tồn tại.`);
+                return {
+                    partLineId: randomUUID(),
+                    issueId: part.issueId,
+                    productId: part.productId,
+                    productName: String(product?.name || part.customName || 'Linh kiện yêu cầu'),
+                    quantity: part.quantity,
+                    quality: part.quality || String(product?.quality || ''),
+                    status: 'requested' as const,
+                };
+            });
+            const updatedParts = [...(ticket.parts || []), ...storedInitialParts, ...storedRequestedParts];
 
             const currentPayment = ticket.payment || {} as RepairTicket['payment'];
             const updatedPayment = { ...currentPayment };
@@ -203,7 +238,7 @@ export const POST = withApi({
             if ('giftDiscount' in paymentData) updatedPayment.giftDiscount = Number(paymentData.giftDiscount) || 0;
             if ('additionalFees' in paymentData) updatedPayment.additionalFees = Number(paymentData.additionalFees) || 0;
             if (updatedIssues?.length) {
-                updatedPayment.laborCost = getRepairIssueLaborCost(updatedIssues, [...(ticket.parts || []), ...storedInitialParts], Number(paymentData.laborCost) || Number(updatedPayment.laborCost) || 0);
+                updatedPayment.laborCost = getRepairIssueLaborCost(updatedIssues, updatedParts, Number(paymentData.laborCost) || Number(updatedPayment.laborCost) || 0);
             } else if ('laborCost' in paymentData) {
                 updatedPayment.laborCost = Number(paymentData.laborCost) || 0;
             }
@@ -219,6 +254,43 @@ export const POST = withApi({
             updatedPayment.amount = partsCost + laborCost + additionalFees - discountAmount;
 
             const actorName = caller.displayName || caller.name || caller.uid;
+            const statusTimelineEvents = [
+                ...storedRequestedParts.map(part => ({
+                    eventType: 'part_requested',
+                    status: ticket.status,
+                    timestamp: Date.now(),
+                    actorId: caller.uid,
+                    actorName,
+                    partLineId: part.partLineId,
+                    partName: part.productName,
+                    source: 'repairs',
+                })),
+                ...(shouldCompleteInboundIntake ? [{
+                    eventType: 'inbound_device_received',
+                    status: ticket.status,
+                    timestamp: Date.now(),
+                    actorId: caller.uid,
+                    actorName,
+                    source: 'repairs',
+                    note: 'Hoàn tất cập nhật thông tin tiếp nhận sau khi máy đã đến shop',
+                }] : []),
+            ];
+            const requestDraftItems: RepairPartRequestDraftItem[] = storedRequestedParts.map(part => ({
+                partLineId: part.partLineId,
+                productId: part.productId,
+                productName: part.productName,
+                quantity: part.quantity,
+                quality: part.quality,
+                importPrice: 0,
+                ticketId: String(ticketId),
+                requestKey: `${String(ticketId)}:${part.partLineId}`,
+            }));
+            await syncRepairPartRequestDraft({
+                tx,
+                db,
+                actorId: caller.uid,
+                requestedItems: requestDraftItems,
+            });
 
             const nextVersion = (ticket.version || 0) + 1;
             tx.update(ticketRef, {
@@ -243,8 +315,10 @@ export const POST = withApi({
                     assignedTechnicianName: profileData.assignedTechnicianName || '',
                 },
                 payment: updatedPayment,
+                ...((storedInitialParts.length > 0 || storedRequestedParts.length > 0) ? {
+                    parts: updatedParts,
+                } : {}),
                 ...(storedInitialParts.length > 0 ? {
-                    parts: storedInitialParts,
                     partsLockedAt: FieldValue.serverTimestamp(),
                 } : {}),
                 ...(shouldCompleteInboundIntake ? {
@@ -255,15 +329,9 @@ export const POST = withApi({
                         intakeCompletedByName: actorName,
                         updatedAt: FieldValue.serverTimestamp(),
                     },
-                    statusTimeline: FieldValue.arrayUnion({
-                        eventType: 'inbound_device_received',
-                        status: ticket.status,
-                        timestamp: Date.now(),
-                        actorId: caller.uid,
-                        actorName,
-                        source: 'repairs',
-                        note: 'Hoàn tất cập nhật thông tin tiếp nhận sau khi máy đã đến shop',
-                    }),
+                } : {}),
+                ...(statusTimelineEvents.length > 0 ? {
+                    statusTimeline: FieldValue.arrayUnion(...statusTimelineEvents),
                 } : {}),
                 updatedAt: FieldValue.serverTimestamp(),
                 version: nextVersion,

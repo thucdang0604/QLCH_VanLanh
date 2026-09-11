@@ -63,7 +63,7 @@ export interface InventoryLog {
     | 'ORDER_CANCEL' | 'ORDER_COMPLETE' | 'ORDER_REACTIVATE' | 'SUPPLIER_RETURN';
     referenceId: string;
     referenceType: 'import_receipt' | 'order' | 'repair' | 'supplier_return';
-    lotsDeducted?: { lotCode: string | null; supplierId: string | null; qty: number }[];
+    lotsDeducted?: { lotId?: string; lotCode: string | null; supplierId: string | null; qty: number }[];
     createdBy: string;
     createdByName: string;
     createdAt: FirestoreDateValue;
@@ -75,6 +75,7 @@ export interface InventoryLot {
     id: string;
     lotCode: string;             // PN-YYMM-XXXX
     productId: string;
+    productName?: string;
     supplierId: string | null;
     importReceiptId?: string;
     importPrice: number;

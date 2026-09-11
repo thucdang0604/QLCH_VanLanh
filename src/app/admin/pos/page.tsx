@@ -25,7 +25,10 @@ import { PART_CATEGORY, PART_CATEGORY_VALUES, isPartCategory } from '@/lib/const
 import { fetchActiveDiscountRules, calculateAccessoryDiscounts } from '@/lib/discountRuleUtils';
 import { consumeChatWorkflowHandoff } from '@/lib/chatWorkflowHandoff';
 import { extractProductCodeFromScan, getPrimaryProductCode, getProductScanCandidates, productCodeSearchText } from '@/lib/productCodes';
+import { parseInventoryLotTraceCode } from '@/lib/inventoryLotTraceCode';
 import { requiresImeiForPosRetailProduct, resolveProductWarranty } from '@/lib/posCheckoutRules';
+import { parseReceiptPrintTemplate, RECEIPT_PRINT_TEMPLATE_STORAGE_KEY } from '@/lib/receiptPrintPreference';
+import { getReceiptPaymentSummary } from '@/lib/receiptPaymentSummary';
 import { normalizeVietnamPhone } from '@/lib/phone';
 import { resolvePosZaloContactIdentity, type PosCustomerIdentityMode, type PosCustomerSearchMatch } from '@/lib/posCustomerIdentity';
 import { PRODUCT_STATUS, isProductSellable } from '@/lib/productLifecycle';
@@ -62,6 +65,10 @@ const POS_SEARCH_PRODUCT_LIMIT = 60;
 const POS_LEGACY_SCAN_FALLBACK_LIMIT = 500;
 type PosProduct = Product & { id: string };
 type PosTab = 'sales' | 'cashier';
+type SelectedInventoryLot = {
+    inventoryLotId?: string;
+    lotCode?: string;
+};
 
 function toStringArray(value: unknown): string[] {
     return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
@@ -140,6 +147,14 @@ function formatPaymentMethodLabel(paymentMethod: string, paymentBreakdown?: { me
     if (paymentMethod === 'DEBT') return 'Ghi nợ';
     if (paymentMethod === 'MIXED') return 'Thanh toán nhiều kênh';
     return 'Chuyển khoản/MoMo';
+}
+
+function getLastOrderPaymentSummary(order: LastOrderData) {
+    return getReceiptPaymentSummary({
+        total_amount: order.total_amount,
+        deposit_amount: order.deposit_amount,
+        paymentBreakdown: order.paymentBreakdown,
+    });
 }
 
 function normalizeCustomerLookup(value: string) {
@@ -331,6 +346,7 @@ export default function POSPage() {
     const [isProcessing, setIsProcessing] = useState(false);
     const [showReceipt, setShowReceipt] = useState(false);
     const [printTemplate, setPrintTemplate] = useState<'thermal' | 'a5'>('a5');
+    const [hasLoadedPrintTemplate, setHasLoadedPrintTemplate] = useState(false);
     const [lastOrder, setLastOrder] = useState<LastOrderData | null>(null);
     const [showProductModal, setShowProductModal] = useState(false);
     const [bankConfig, setBankConfig] = useState<BankConfig | null>(null);
@@ -339,6 +355,26 @@ export default function POSPage() {
     const [cashierShift, setCashierShift] = useState<CashierShiftView | null>(null);
     const [cashierShiftHistory, setCashierShiftHistory] = useState<CashierShiftView[]>([]);
     const [cashierLoading, setCashierLoading] = useState(true);
+
+    useEffect(() => {
+        try {
+            const savedTemplate = parseReceiptPrintTemplate(window.localStorage.getItem(RECEIPT_PRINT_TEMPLATE_STORAGE_KEY));
+            if (savedTemplate) setPrintTemplate(savedTemplate);
+        } catch {
+            // Storage can be unavailable; keep the existing safe default.
+        } finally {
+            setHasLoadedPrintTemplate(true);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (!hasLoadedPrintTemplate) return;
+        try {
+            window.localStorage.setItem(RECEIPT_PRINT_TEMPLATE_STORAGE_KEY, printTemplate);
+        } catch {
+            // Keep the current selection for this session when storage is unavailable.
+        }
+    }, [hasLoadedPrintTemplate, printTemplate]);
     const [cashierSaving, setCashierSaving] = useState(false);
     const [openingCashAmount, setOpeningCashAmount] = useState(0);
     const [openingBankAmount, setOpeningBankAmount] = useState(0);
@@ -978,14 +1014,18 @@ export default function POSPage() {
     });
 
     // ── Cart helpers ──
-    const addToCart = useCallback((product: Product & { id: string }, preferredLotCode?: string) => {
-        const available = (product.stock || 0) - (product.held || 0);
+    const addToCart = useCallback((product: Product & { id: string }, selectedLot?: SelectedInventoryLot, lotAvailableQuantity?: number) => {
+        const productAvailable = (product.stock || 0) - (product.held || 0);
+        const available = lotAvailableQuantity === undefined
+            ? productAvailable
+            : Math.min(productAvailable, lotAvailableQuantity);
         if (available <= 0) {
-            toastError('Sản phẩm đã hết hàng!');
+            toastError(selectedLot?.lotCode ? `Lô ${selectedLot.lotCode} đã hết hàng!` : 'Sản phẩm đã hết hàng!');
             return;
         }
 
-        const targetCartItemId = preferredLotCode ? `${product.id}_${preferredLotCode}` : product.id;
+        const lotIdentity = selectedLot?.inventoryLotId || selectedLot?.lotCode;
+        const targetCartItemId = lotIdentity ? `${product.id}_${lotIdentity}` : product.id;
 
         setCart(prev => {
             const existing = prev.find(c => c.cartItemId === targetCartItemId);
@@ -1012,7 +1052,8 @@ export default function POSPage() {
                 warrantyType: wType,
                 requiresImei: requiresImeiForPosRetailProduct(product),
                 imeis: [],
-                lotCode: preferredLotCode,
+                lotCode: selectedLot?.lotCode,
+                inventoryLotId: selectedLot?.inventoryLotId,
             }];
         });
     }, [resolveWarranty]);
@@ -1069,23 +1110,79 @@ export default function POSPage() {
         return fallbackProducts.find((product) => getProductScanCandidates(product).some((candidate) => candidate === rawCode.trim() || candidate === code)) || null;
     }, [filterPosProducts, mergeProducts, products]);
 
+    const resolveInventoryLotTraceScan = useCallback(async (rawCode: string) => {
+        const inventoryLotId = parseInventoryLotTraceCode(rawCode);
+        if (!inventoryLotId) return null;
+
+        const auth = await getAuthInstance();
+        const idToken = await auth.currentUser?.getIdToken();
+        if (!idToken) throw new Error('Phiên đăng nhập đã hết hạn.');
+
+        const response = await fetch(`/api/pos/lot-trace?code=${encodeURIComponent(rawCode.trim())}`, {
+            headers: { Authorization: `Bearer ${idToken}` },
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'Không thể tra cứu QR lô hàng.');
+
+        const product = data.product as PosProduct;
+        const [sellableProduct] = filterPosProducts([product], { includeOutOfStock: true });
+        if (!sellableProduct) {
+            throw new Error('Sản phẩm từ QR hiện không còn được phép bán.');
+        }
+
+        const availableQuantity = Math.max(0, Math.floor(Number(data.trace?.availableQuantity) || 0));
+        if (availableQuantity <= 0) {
+            throw new Error(`Lô ${data.trace?.lotCode || inventoryLotId} đã hết hàng.`);
+        }
+
+        mergeProducts([sellableProduct], { includeOutOfStock: true });
+        return {
+            product: sellableProduct,
+            inventoryLotId: String(data.trace?.inventoryLotId || inventoryLotId),
+            lotCode: String(data.trace?.lotCode || ''),
+            availableQuantity,
+        };
+    }, [filterPosProducts, mergeProducts]);
+
     const handleProductScan = useCallback(async (rawCode: string, source: 'keyboard' | 'camera' | 'manual') => {
+        const inventoryLotId = parseInventoryLotTraceCode(rawCode);
+        if (inventoryLotId) {
+            try {
+                const traced = await resolveInventoryLotTraceScan(rawCode);
+                if (!traced) throw new Error('Mã QR lô không hợp lệ.');
+                addToCart(traced.product, {
+                    inventoryLotId: traced.inventoryLotId,
+                    lotCode: traced.lotCode,
+                }, traced.availableQuantity);
+                setScanStatus(`Đã thêm ${traced.product.name}${traced.lotCode ? ` (Lô: ${traced.lotCode})` : ''}`);
+                if (source === 'camera') setShowScanner(false);
+                return true;
+            } catch (error) {
+                const message = error instanceof Error ? error.message : 'Không thể tra cứu QR lô hàng.';
+                setScanStatus(message);
+                toastError(message);
+                return false;
+            }
+        }
+
         const code = extractProductCodeFromScan(rawCode);
         const parts = rawCode.trim().split('#');
         const lotCode = parts.length > 1 ? parts[1] : undefined;
 
-        const found = await findProductByScanCode(rawCode);
+        // Labels printed before VL1 used <product-code>#<lot-code>. Keep the
+        // product scan working during migration, but only VL1 locks a lot id.
+        const found = await findProductByScanCode(parts[0] || rawCode);
         if (!found) {
             const label = code || rawCode.trim();
             setScanStatus(`Không tìm thấy mã ${label}`);
             toastError(`Không tìm thấy sản phẩm với mã ${label}`);
             return false;
         }
-        addToCart(found, lotCode);
+        addToCart(found, lotCode ? { lotCode } : undefined);
         setScanStatus(`Đã thêm ${found.name}${lotCode ? ` (Lô: ${lotCode})` : ''}`);
         if (source === 'camera') setShowScanner(false);
         return true;
-    }, [addToCart, findProductByScanCode]);
+    }, [addToCart, findProductByScanCode, resolveInventoryLotTraceScan]);
     const handleProductScanRef = useRef(handleProductScan);
 
     useEffect(() => {
@@ -1616,7 +1713,8 @@ export default function POSPage() {
                     isOrderPayment: c.isOrderPayment,
                     orderPaymentId: c.orderPaymentId,
                     imeis: c.imeis,
-                    lotCode: c.lotCode
+                    lotCode: c.lotCode,
+                    inventoryLotId: c.inventoryLotId,
                 })),
                 total_amount: total,
                 discount_amount: effectiveDiscount + voucherDiscountAmount,
@@ -1730,6 +1828,7 @@ export default function POSPage() {
     };
 
     const [showMobileCart, setShowMobileCart] = useState(false);
+    const lastOrderPaymentSummary = lastOrder ? getLastOrderPaymentSummary(lastOrder) : null;
 
     if (loading) return (
         <div className="flex items-center justify-center h-[60vh]">
@@ -2323,10 +2422,12 @@ export default function POSPage() {
                             <div className="flex bg-gray-100 p-1 rounded-lg mb-2">
                                 <button
                                     onClick={() => setPrintTemplate('thermal')}
+                                    title="Dùng mẫu này làm lựa chọn in mặc định trên máy này"
                                     className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-all ${printTemplate === 'thermal' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
                                 >Mẫu Nhiệt 80mm</button>
                                 <button
                                     onClick={() => setPrintTemplate('a5')}
+                                    title="Dùng mẫu này làm lựa chọn in mặc định trên máy này"
                                     className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-all ${printTemplate === 'a5' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
                                 >Mẫu A4/A5</button>
                             </div>
@@ -2381,13 +2482,15 @@ export default function POSPage() {
                                             <span>TỔNG CỘNG</span>
                                             <span>{formatPrice(lastOrder.total_amount)}</span>
                                         </div>
-                                        {lastOrder.deposit_amount > 0 && (
+                                        {lastOrderPaymentSummary && lastOrderPaymentSummary.paidAmount > 0 && (
                                             <>
-                                                <div className="flex justify-between text-blue-600 mt-1"><span>Khách đã cọc</span><span>{formatPrice(lastOrder.deposit_amount)}</span></div>
+                                                <div className="flex justify-between text-blue-600 mt-1"><span>{lastOrderPaymentSummary.remainingAmount > 0 ? 'Đã thanh toán/cọc' : 'Đã thanh toán'}</span><span>{formatPrice(lastOrderPaymentSummary.paidAmount)}</span></div>
                                                 {lastOrder.paymentBreakdown?.map((entry, index) => (
                                                     <div key={`${entry.method}-${index}`} className="flex justify-between text-xs text-blue-500"><span>{entry.method === 'CASH' ? 'Tiền mặt' : entry.method === 'BANK' ? 'Chuyển khoản' : entry.method}</span><span>{formatPrice(entry.amount)}</span></div>
                                                 ))}
-                                                <div className="flex justify-between font-bold text-red-600"><span>CÒN LẠI</span><span>{formatPrice(Math.max(0, lastOrder.total_amount - lastOrder.deposit_amount))}</span></div>
+                                                {lastOrderPaymentSummary.remainingAmount > 0 && (
+                                                    <div className="flex justify-between font-bold text-red-600"><span>CÒN LẠI</span><span>{formatPrice(lastOrderPaymentSummary.remainingAmount)}</span></div>
+                                                )}
                                             </>
                                         )}
                                         <div className="flex justify-between text-gray-500 pt-1">
@@ -2431,10 +2534,21 @@ export default function POSPage() {
                                         setTimeout(() => w?.print(), 300);
                                     }
                                 } else {
+                                    const receiptId = escapeReceiptHtml(lastOrder.id.slice(-6).toUpperCase());
+                                    const storeName = escapeReceiptHtml(config.siteName || 'VĂN LÀNH SERVICE');
+                                    const storeAddress = escapeReceiptHtml(config.contact_info?.address || 'An Phú Đông, Q12, TPHCM');
+                                    const storePhone = escapeReceiptHtml(config.contact_info?.main_phone || '0932.242.026');
+                                    const createdByName = escapeReceiptHtml(lastOrder.createdByName || 'Admin');
+                                    const customerName = escapeReceiptHtml(lastOrder.customer_info.name || 'Khách lẻ');
+                                    const customerPhone = escapeReceiptHtml(lastOrder.customer_info.phone || '');
+                                    const customerAddress = escapeReceiptHtml(lastOrder.customer_info.address || '');
+                                    const paymentMethodLabel = escapeReceiptHtml(formatPaymentMethodLabel(lastOrder.payment_method, lastOrder.paymentBreakdown));
+                                    const paymentSummary = getLastOrderPaymentSummary(lastOrder);
+                                    const paidLabel = paymentSummary.remainingAmount > 0 ? 'Đã thanh toán/cọc' : 'Đã thanh toán';
                                     const receiptHtml = `
                                         <html>
                                         <head>
-                                            <title>Hóa đơn bán hàng #${lastOrder.id.slice(-6).toUpperCase()}</title>
+                                            <title>Hóa đơn bán hàng #${receiptId}</title>
                                             <style>
                                                 body { font-family: 'Times New Roman', serif; font-size: 14px; line-height: 1.4; padding: 20px; color: #000; }
                                                 .header { display: flex; justify-content: space-between; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 20px; }
@@ -2464,14 +2578,14 @@ export default function POSPage() {
                                         <body>
                                             <div class="header">
                                                 <div class="store-info">
-                                                    <h2>${config.siteName || 'VĂN LÀNH SERVICE'}</h2>
-                                                    <p><b>Địa chỉ:</b> ${config.contact_info?.address || 'An Phú Đông, Q12, TPHCM'}</p>
-                                                    <p><b>Điện thoại:</b> ${config.contact_info?.main_phone || '0932.242.026'}</p>
+                                                    <h2>${storeName}</h2>
+                                                    <p><b>Địa chỉ:</b> ${storeAddress}</p>
+                                                    <p><b>Điện thoại:</b> ${storePhone}</p>
                                                 </div>
                                                 <div style="text-align: right;">
-                                                    <p><b>Số:</b> #${lastOrder.id.slice(-6).toUpperCase()}</p>
+                                                    <p><b>Số:</b> #${receiptId}</p>
                                                     <p><b>Ngày:</b> ${new Date().toLocaleDateString('vi-VN')}</p>
-                                                    <p><b>Nhân viên:</b> ${lastOrder.createdByName || 'Admin'}</p>
+                                                    <p><b>Nhân viên:</b> ${createdByName}</p>
                                                 </div>
                                             </div>
 
@@ -2480,9 +2594,9 @@ export default function POSPage() {
                                             </div>
 
                                             <div>
-                                                <div class="info-row"><div class="label">Khách hàng:</div><div><b>${lastOrder.customer_info.name}</b></div></div>
-                                                <div class="info-row"><div class="label">Điện thoại:</div><div>${lastOrder.customer_info.phone || ''}</div></div>
-                                                <div class="info-row"><div class="label">Địa chỉ:</div><div>${lastOrder.customer_info.address || ''}</div></div>
+                                                <div class="info-row"><div class="label">Khách hàng:</div><div><b>${customerName}</b></div></div>
+                                                <div class="info-row"><div class="label">Điện thoại:</div><div>${customerPhone}</div></div>
+                                                <div class="info-row"><div class="label">Địa chỉ:</div><div>${customerAddress}</div></div>
                                             </div>
 
                                             <table>
@@ -2515,11 +2629,11 @@ export default function POSPage() {
                                                 <div class="summary-row bold" style="font-size: 16px; margin-top: 5px; border-top: 1px dotted #ccc; padding-top: 5px;">
                                                     <span>Tổng thanh toán:</span><span>${lastOrder.total_amount.toLocaleString('vi-VN')} đ</span>
                                                 </div>
-                                                ${lastOrder.deposit_amount > 0 ? `<div class="summary-row" style="margin-top: 5px;"><span>Đã thanh toán (cọc):</span><span>${lastOrder.deposit_amount.toLocaleString('vi-VN')} đ</span></div>
-                                                <div class="summary-row bold" style="color: red; font-size: 16px;"><span>CÒN LẠI:</span><span>${Math.max(0, lastOrder.total_amount - lastOrder.deposit_amount).toLocaleString('vi-VN')} đ</span></div>` : ''}
+                                                ${paymentSummary.paidAmount > 0 ? `<div class="summary-row" style="margin-top: 5px;"><span>${paidLabel}:</span><span>${paymentSummary.paidAmount.toLocaleString('vi-VN')} đ</span></div>
+                                                ${paymentSummary.remainingAmount > 0 ? `<div class="summary-row bold" style="color: red; font-size: 16px;"><span>CÒN LẠI:</span><span>${paymentSummary.remainingAmount.toLocaleString('vi-VN')} đ</span></div>` : ''}` : ''}
                                             </div>
 
-                                            <p style="text-align: right; font-style: italic; margin-top: 10px;">Hình thức TT: ${formatPaymentMethodLabel(lastOrder.payment_method, lastOrder.paymentBreakdown)}</p>
+                                            <p style="text-align: right; font-style: italic; margin-top: 10px;">Hình thức TT: ${paymentMethodLabel}</p>
 
                                             <div class="signatures" style="display: flex; justify-content: space-between; margin-top: 30px;">
                                                 <div style="flex: 1; text-align: center;">

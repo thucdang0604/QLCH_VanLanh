@@ -382,15 +382,18 @@ export const POST = withApi({
             const preAggregatedForStock = new Map<string, number>();
             const repairAggregatedForStock = new Map<string, { quantity: number; reservedQuantity: number; productName: string }>();
             // Pre-aggregate for FIFO deduction
-            const fifoMap = new Map<string, { productId: string; quantity: number; preferredLotCodes: Map<string, number> }>();
-            const addFifoDeduction = (productId: string, quantity: number, lotCode?: string) => {
+            const fifoMap = new Map<string, { productId: string; quantity: number; preferredLotIds: Map<string, number>; preferredLotCodes: Map<string, number> }>();
+            const addFifoDeduction = (productId: string, quantity: number, lotCode?: string, inventoryLotId?: string) => {
                 let fifoItem = fifoMap.get(productId);
                 if (!fifoItem) {
-                    fifoItem = { productId, quantity: 0, preferredLotCodes: new Map<string, number>() };
+                    fifoItem = { productId, quantity: 0, preferredLotIds: new Map<string, number>(), preferredLotCodes: new Map<string, number>() };
                     fifoMap.set(productId, fifoItem);
                 }
                 fifoItem.quantity += quantity;
-                if (lotCode) {
+                if (inventoryLotId) {
+                    fifoItem.preferredLotIds.set(inventoryLotId, (fifoItem.preferredLotIds.get(inventoryLotId) || 0) + quantity);
+                }
+                if (lotCode && !inventoryLotId) {
                     fifoItem.preferredLotCodes.set(lotCode, (fifoItem.preferredLotCodes.get(lotCode) || 0) + quantity);
                 }
             };
@@ -400,10 +403,14 @@ export const POST = withApi({
                 const pid = String(item.productId || '');
                 const qty = readPositiveQuantity(item.quantity, `So luong san pham ${pid || 'khong ro'}`);
                 const lot = item.lotCode ? String(item.lotCode) : undefined;
+                const inventoryLotId = readString(item.inventoryLotId);
+                if (inventoryLotId && !/^[A-Za-z0-9_-]{1,180}$/.test(inventoryLotId)) {
+                    throw new ApiError(`Dòng hàng ${pid || 'không rõ'} có mã lô truy xuất không hợp lệ.`, 400, 'invalid_inventory_lot_id');
+                }
                 
                 preAggregatedForStock.set(pid, (preAggregatedForStock.get(pid) || 0) + qty);
 
-                addFifoDeduction(pid, qty, lot);
+                addFifoDeduction(pid, qty, lot, inventoryLotId || undefined);
             }
 
             let fifoResultsMap = new Map<string, FifoDeductionResult[]>();
@@ -513,6 +520,8 @@ export const POST = withApi({
                 const pSnap = productDocs.get(pid)!;
                 const d = pSnap.data;
                 const price = getFixedPosRetailPrice(d, `Gia san pham ${pid || 'khong ro'}`);
+                const submittedLotCode = readString(item.lotCode);
+                const submittedInventoryLotId = readString(item.inventoryLotId);
 
                 const warrantyInfo = resolveProductWarranty(d, retailTrees);
                 if (warrantyInfo && warrantyInfo.warrantyMonths <= 0) {
@@ -548,6 +557,8 @@ export const POST = withApi({
                         ...(warrantyExpiresAt ? { warrantyExpiresAt } : {}),
                     } : {}),
                     imeis,
+                    ...(submittedLotCode ? { lotCode: submittedLotCode } : {}),
+                    ...(submittedInventoryLotId ? { inventoryLotId: submittedInventoryLotId } : {}),
                 });
 
                 serverSubtotal += price * qty;
@@ -979,9 +990,11 @@ export const POST = withApi({
             fifoDeductors = Array.from(fifoMap.values()).map(x => ({
                 productId: x.productId,
                 quantityToDeduct: x.quantity,
+                preferredLotIds: Array.from(x.preferredLotIds.entries()).map(([lotId, quantity]) => ({ lotId, quantity })),
                 preferredLotCodes: Array.from(x.preferredLotCodes.entries()).map(([lotCode, quantity]) => ({ lotCode, quantity }))
             }));
             fifoLotReadDeductors = fifoDeductors.filter((deductor) => {
+                if ((deductor.preferredLotIds || []).length > 0) return true;
                 if (productDocs.get(deductor.productId)?.data.inventoryTrackingMode !== 'legacy') return true;
                 recordSkippedLegacyFifoProduct(deductor.productId);
                 return false;
@@ -1086,6 +1099,36 @@ export const POST = withApi({
                         if (productData?.inventoryTrackingMode === undefined && metric) {
                             inventoryTrackingModeUpdates.set(deductor.productId, metric.lotCount > 0 ? 'fifo' : 'legacy');
                         }
+                    }
+
+                    // QR-selected lots are a hard constraint, unlike legacy
+                    // lotCode preferences. Verify the product binding and the
+                    // whole requested quantity before transaction writes.
+                    const traceLotCodes = new Map<string, string>();
+                    for (const deductor of fifoLotReadDeductors) {
+                        const productLots = fifoLogsDataMap.get(deductor.productId) || [];
+                        for (const pref of deductor.preferredLotIds || []) {
+                            const selectedLot = productLots.find(lot => lot.ref.id === pref.lotId);
+                            const available = selectedLot
+                                ? Math.max(0, Math.floor(Number(selectedLot.data.remainingQuantity) || 0))
+                                : 0;
+                            if (!selectedLot || available < pref.quantity) {
+                                const productName = String(productDocs.get(deductor.productId)?.data.name || deductor.productId);
+                                throw new ApiError(
+                                    `Lô QR ${pref.lotId} không còn đủ tồn cho "${productName}". Vui lòng quét lại tem hoặc điều chỉnh số lượng.`,
+                                    409,
+                                    'inventory_lot_unavailable',
+                                );
+                            }
+                            const lotCode = typeof selectedLot.data.lotCode === 'string' ? selectedLot.data.lotCode : '';
+                            traceLotCodes.set(pref.lotId, lotCode);
+                        }
+                    }
+                    for (const normalizedItem of normalizedItems) {
+                        const traceableItem = normalizedItem as { inventoryLotId?: unknown; lotCode?: string };
+                        if (typeof traceableItem.inventoryLotId !== 'string') continue;
+                        const verifiedLotCode = traceLotCodes.get(traceableItem.inventoryLotId);
+                        if (verifiedLotCode !== undefined) traceableItem.lotCode = verifiedLotCode;
                     }
                 }
             } catch (error) {

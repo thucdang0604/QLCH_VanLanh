@@ -57,7 +57,7 @@ function getTimelineTitle(entry: NonNullable<RepairTicket['statusTimeline']>[num
         case 'part_selected':
             return `KTV đã chọn ${partName} cho phiếu sửa chữa`;
         case 'part_requested':
-            return `KTV đã yêu cầu ${partName}`;
+            return `Đã đề xuất nhập ${partName}`;
         case 'part_handed_over_to_technician':
             return `Tiếp nhận đã bàn giao ${partName} cho KTV`;
         case 'part_received_by_technician':

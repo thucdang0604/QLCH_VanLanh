@@ -5,6 +5,19 @@ import type { WarrantyTemplateConfig } from '@/app/admin/settings/receipt/Warran
 
 const formatPrice = (p: number) => p > 0 ? p.toLocaleString('vi-VN') + 'đ' : '—';
 
+function resolveReceiptDate(value: unknown): Date {
+    if (value && typeof value === 'object' && 'toDate' in value && typeof value.toDate === 'function') {
+        const date = value.toDate();
+        if (!Number.isNaN(date.getTime())) return date;
+    }
+    if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+    if (typeof value === 'string' || typeof value === 'number') {
+        const date = new Date(value);
+        if (!Number.isNaN(date.getTime())) return date;
+    }
+    return new Date();
+}
+
 // ── Checkbox helpers ──
 const Check = () => <span className="text-[11px]">☑</span>;
 const Uncheck = () => <span className="text-[11px]">☐</span>;
@@ -68,7 +81,8 @@ interface PrintableReceiptProps {
 
 export default function PrintableReceipt({ ticket, receiptConfig }: PrintableReceiptProps) {
     const cl = ticket.deviceInfo?.checklist;
-    const now = new Date();
+    const receiptDate = resolveReceiptDate(ticket.timing?.receivedAt);
+    const receiptDateLabel = receiptDate.toLocaleDateString('vi-VN');
     const cfg = { ...defaultReceiptConfig, ...receiptConfig };
 
     // ── Body checklist items ──
@@ -166,7 +180,7 @@ export default function PrintableReceipt({ ticket, receiptConfig }: PrintableRec
                 {/* Mã phiếu + Ngày */}
                 <div className="flex justify-between text-[10px] text-gray-600 mb-1">
                     <span>Mã phiếu: <b className="text-black">#{ticket.id.slice(-6).toUpperCase()}</b></span>
-                    <span>Ngày: <b className="text-black">{now.toLocaleDateString('vi-VN')}</b></span>
+                    <span>Ngày tiếp nhận: <b className="text-black">{receiptDateLabel}</b></span>
                 </div>
 
                 {/* ═══════════ THÔNG TIN CHUNG ═══════════ */}
@@ -186,6 +200,12 @@ export default function PrintableReceipt({ ticket, receiptConfig }: PrintableRec
                     <div>
                         Tình trạng: <b>{ticket.issue?.description || '—'}</b>
                     </div>
+                    {ticket.handoverRecord?.note && (
+                        <div>
+                            {ticket.handoverRecord.action === 'refund' ? 'Lý do hoàn phí' : 'Ghi chú bàn giao'}:{' '}
+                            <b>{ticket.handoverRecord.note}</b>
+                        </div>
+                    )}
                     <div className="flex gap-4 flex-wrap">
                         <span>Chuẩn bệnh: <b>{ticket.issue?.notes || '.................................'}</b></span>
                         <span className="ml-auto">Giá dự kiến: <b className="text-[12px]">{formatPrice(ticket.payment?.amount || 0)}</b></span>
@@ -243,7 +263,7 @@ export default function PrintableReceipt({ ticket, receiptConfig }: PrintableRec
 
                 {/* ═══════════ CHỮ KÝ ═══════════ */}
                 <div className="text-center text-[10px] text-gray-500 mb-2">
-                    Ngày {now.getDate()} tháng {now.getMonth() + 1} năm {now.getFullYear()}
+                    Ngày {receiptDate.getDate()} tháng {receiptDate.getMonth() + 1} năm {receiptDate.getFullYear()}
                 </div>
                 <div className="grid grid-cols-2 gap-8">
                     <div className="text-center text-[10px]">

@@ -41,6 +41,17 @@ export function canSelectInitialPartsDuringInboundIntake(ticket: unknown, curren
 }
 
 /**
+ * Walk-in tickets may reserve expected parts while they are still editable.
+ * A ticket with the configurable inbound-arrival gate keeps the stricter
+ * physical-receipt rule above so stock is never held for a shipment in transit.
+ */
+export function canSelectInitialPartsWhenEditingRepair(ticket: unknown, currentNode: WorkflowNode | undefined) {
+    if (currentNode?.isTerminal) return false;
+    return !requiresInboundArrival(ticket, currentNode)
+        || canSelectInitialPartsDuringInboundIntake(ticket, currentNode);
+}
+
+/**
  * Keep the technician view aligned with the physical intake flow. A customer
  * shipment is not available for technical work until reception has both
  * confirmed its arrival and completed the device intake.

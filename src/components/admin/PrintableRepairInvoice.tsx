@@ -197,6 +197,23 @@ export default function PrintableRepairInvoice({ ticket, receiptConfig }: Printa
                     </div>
                 )}
 
+                {ticket.handoverRecord && (ticket.handoverRecord.note || ticket.handoverRecord.paymentConfirmationRequired) && (
+                    <div className="border border-gray-300 rounded-md p-2 mb-2 text-[10px] space-y-1">
+                        {ticket.handoverRecord.note && (
+                            <div>
+                                {ticket.handoverRecord.action === 'refund' ? 'Lý do hoàn phí' : 'Ghi chú bàn giao'}:{' '}
+                                <b>{ticket.handoverRecord.note}</b>
+                            </div>
+                        )}
+                        {ticket.handoverRecord.paymentConfirmationRequired && (
+                            <div>
+                                Xác nhận hoàn/thu phí:{' '}
+                                <b>{ticket.handoverRecord.paymentConfirmed ? 'Đã xác nhận' : 'Chưa xác nhận'}</b>
+                            </div>
+                        )}
+                    </div>
+                )}
+
                 {/* PARTS USED */}
                 {showPartsUsed && (ticket.parts?.length || 0) > 0 && (
                     <div className="border border-gray-300 rounded-md p-2 mb-2 text-[10px]">

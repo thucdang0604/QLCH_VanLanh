@@ -4,6 +4,8 @@ import {
     getRepairDeviceModelTerms,
     getRepairPartSearchLookupTokens,
     getScopedRepairPartSearchValues,
+    filterRepairPartCatalogResults,
+    filterRepairPartSearchResults,
     productMatchesRepairDeviceModel,
     productMatchesRepairPartSearch,
     queryTargetsRepairDeviceModel,
@@ -61,5 +63,34 @@ test('matches all typed words locally and ranks the ticket model first', () => {
     assert.deepEqual(
         rankRepairPartSearchResults([oppoScreen, s23Screen], 'màn hình s23', 'Samsung S23 Ultra').map(item => item.id),
         ['s23-screen', 'oppo-screen'],
+    );
+});
+
+test('excludes a compatible part for another model instead of showing Firestore order', () => {
+    assert.deepEqual(
+        filterRepairPartSearchResults([oppoScreen, s23Screen], 'màn hình', 'Samsung S23 Ultra').map(item => item.id),
+        ['s23-screen'],
+    );
+});
+
+test('uses one category, model, quality, and active-status decision for every repair screen', () => {
+    const iphoneScreen = {
+        ...s23Screen,
+        id: 'iphone-13-screen',
+        name: 'Màn hình Zin',
+        description: 'Tương thích iPhone 13',
+        quality: 'Loại 1',
+        categoryIds: ['dien-thoai', 'dien-thoai/iphone', 'dien-thoai/iphone/man-hinh'],
+    };
+    const inactiveIphoneScreen = { ...iphoneScreen, id: 'inactive-iphone', status: 'inactive' as const };
+
+    assert.deepEqual(
+        filterRepairPartCatalogResults([s23Screen, iphoneScreen, inactiveIphoneScreen], {
+            query: 'màn hình',
+            deviceModel: 'iPhone 13',
+            quality: 'Loại 1',
+            categoryIds: ['dien-thoai/iphone/man-hinh'],
+        }).map(item => item.id),
+        ['iphone-13-screen'],
     );
 });

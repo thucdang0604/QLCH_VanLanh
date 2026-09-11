@@ -10,6 +10,7 @@ export interface OrderItem {
     image?: string;
     imeis?: string[];
     lotCode?: string;
+    inventoryLotId?: string;
     warrantyMonths?: number;
     warrantyStartedAt?: number;
     warrantyExpiresAt?: number;

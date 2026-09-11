@@ -7,6 +7,14 @@ export type InitialRepairPartInput = {
     quantity: number;
 };
 
+export type InitialRepairPartRequestInput = {
+    productId: string;
+    customName: string;
+    issueId: string;
+    quantity: number;
+    quality: string;
+};
+
 const SERVER_MANAGED_REPAIR_FIELDS = [
     'createdAt',
     'updatedAt',
@@ -18,6 +26,7 @@ const SERVER_MANAGED_REPAIR_FIELDS = [
     'pendingTechnicianTransfer',
     'paymentHistory',
     'idempotencyKey',
+    'initialPartRequests',
 ] as const;
 
 export function parseRepairClientTimestamp(value: unknown): Timestamp | null {
@@ -71,6 +80,38 @@ export function normalizeInitialRepairParts(value: unknown): InitialRepairPartIn
         const key = `${productId}\u0000${issueId}`;
         const existing = parts.get(key);
         parts.set(key, { productId, issueId, quantity: (existing?.quantity || 0) + quantity });
+    }
+    return [...parts.values()];
+}
+
+/** Shortage requests never reserve stock; they only create requested repair lines. */
+export function normalizeInitialRepairPartRequests(value: unknown): InitialRepairPartRequestInput[] {
+    if (value === undefined || value === null) return [];
+    if (!Array.isArray(value)) throw new Error('Danh sách đề xuất linh kiện không hợp lệ.');
+
+    const parts = new Map<string, InitialRepairPartRequestInput>();
+    for (const [index, raw] of value.entries()) {
+        if (!raw || typeof raw !== 'object') {
+            throw new Error(`Đề xuất linh kiện #${index + 1} không hợp lệ.`);
+        }
+        const item = raw as Record<string, unknown>;
+        const productId = typeof item.productId === 'string' ? item.productId.trim() : '';
+        const customName = typeof item.customName === 'string' ? item.customName.trim().replace(/\s+/g, ' ') : '';
+        const issueId = typeof item.issueId === 'string' ? item.issueId.trim() : '';
+        const quality = typeof item.quality === 'string' ? item.quality.trim() : '';
+        const quantity = Math.floor(Number(item.quantity) || 0);
+        if ((!productId && !customName) || !issueId || quantity <= 0) {
+            throw new Error(`Đề xuất linh kiện #${index + 1} thiếu tên linh kiện, lỗi sửa chữa hoặc số lượng.`);
+        }
+        const key = `${productId || customName.toLocaleLowerCase('vi-VN')}\u0000${issueId}\u0000${quality.toLocaleLowerCase('vi-VN')}`;
+        const existing = parts.get(key);
+        parts.set(key, {
+            productId,
+            customName: productId ? '' : customName,
+            issueId,
+            quality,
+            quantity: (existing?.quantity || 0) + quantity,
+        });
     }
     return [...parts.values()];
 }

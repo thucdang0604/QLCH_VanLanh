@@ -24,6 +24,8 @@ type HandoverRequestBody = {
     ticketVersion?: number;
     laborCost?: number;
     additionalFees?: number;
+    handoverNote?: string;
+    paymentConfirmed?: boolean;
     idempotencyKey?: string;
     operationKey?: string;
 };
@@ -67,6 +69,10 @@ export const POST = withApi({
         const body = await context.readJson<HandoverRequestBody>(request);
         const { ticketId, targetStatus, ticketVersion, laborCost, additionalFees } = body;
         const idempotencyKey = body.idempotencyKey || body.operationKey;
+        const normalizedHandoverNote = typeof body.handoverNote === 'string'
+            ? body.handoverNote.trim().slice(0, 1000)
+            : '';
+        const paymentConfirmed = body.paymentConfirmed === true;
 
         if (!ticketId || !targetStatus) {
             return context.error('Missing parameters');
@@ -88,7 +94,9 @@ export const POST = withApi({
                             data.referenceId !== ticketId ||
                             data.targetStatus !== targetStatus ||
                             (data.laborCost ?? null) !== requestedLaborCost ||
-                            (data.additionalFees ?? null) !== requestedAdditionalFees
+                            (data.additionalFees ?? null) !== requestedAdditionalFees ||
+                            (data.handoverNote !== undefined && data.handoverNote !== normalizedHandoverNote) ||
+                            (data.paymentConfirmed !== undefined && Boolean(data.paymentConfirmed) !== paymentConfirmed)
                         ) {
                             throw new Error('Idempotency key da duoc dung cho thao tac khac.');
                         }
@@ -214,6 +222,16 @@ export const POST = withApi({
             };
 
             const isWarranty = ticket.ticketType === 'warranty';
+            const paymentConfirmationRequired = Number(ticket.payment?.depositAmount || 0) > 0;
+            updateData.handoverRecord = {
+                action: targetTerminalAction,
+                ...(normalizedHandoverNote ? { note: normalizedHandoverNote } : {}),
+                paymentConfirmationRequired,
+                paymentConfirmed,
+                confirmedBy: caller.uid,
+                ...(caller.displayName || caller.name ? { confirmedByName: caller.displayName || caller.name } : {}),
+                confirmedAt: FieldValue.serverTimestamp(),
+            };
 
             let fifoResultsMap = new Map<string, FifoDeductionResult[]>();
             let fifoLogsDataMap: Awaited<ReturnType<typeof fetchFifoLogsForDeduction>> = new Map();
@@ -313,8 +331,12 @@ export const POST = withApi({
                 }
 
                 // Stamp Warranty
+                // This timestamp is the immutable warranty start for a completed
+                // repair. Use it for both expiry calculations and printed evidence.
+                const warrantyStartedAt = Date.now();
+                updateData.warrantyStartedAt = warrantyStartedAt;
                 if (selectedParts.filter(p => isWarrantyEligibleRepairPart(p)).length === 0) {
-                    const expireDate = new Date();
+                    const expireDate = new Date(warrantyStartedAt);
                     expireDate.setMonth(expireDate.getMonth() + serviceWarrantyMonths);
                     updateData.serviceWarrantyExpiresAt = expireDate.getTime();
                 }
@@ -324,7 +346,7 @@ export const POST = withApi({
                     for (const [productId, productDoc] of productDocs.entries()) {
                         productDataById.set(productId, productDoc.data);
                     }
-                    const stamped = stampRepairWarrantyOnParts(ticket.parts, productDataById, warrantyRules, Date.now());
+                    const stamped = stampRepairWarrantyOnParts(ticket.parts, productDataById, warrantyRules, warrantyStartedAt);
                     if (stamped.changed) {
                         updateData.parts = stamped.parts;
                         ticket.parts = stamped.parts;
@@ -448,7 +470,9 @@ export const POST = withApi({
                     referenceId: ticketId,
                     targetStatus,
                     laborCost: requestedLaborCost,
-                    additionalFees: requestedAdditionalFees
+                    additionalFees: requestedAdditionalFees,
+                    handoverNote: normalizedHandoverNote,
+                    paymentConfirmed,
                 });
             }
             inventoryLogAllocations.at(-1)?.commitCounter();

@@ -474,7 +474,7 @@ export const POST = withApi({
                 }
             };
             
-            let generatedLotsToReturn: { product: { id: string } & Record<string, unknown>, lotCode: string, copies: number }[] | null = null;
+            let generatedLotsToReturn: { product: { id: string } & Record<string, unknown>, lotCode: string, inventoryLotId: string, copies: number }[] | null = null;
 
             if (action === 'order_receipt') {
                 if (receipt.status !== 'draft') {
@@ -768,6 +768,7 @@ export const POST = withApi({
                         lotCode: lotCode,
                         importReceiptId: receiptId,
                         productId: targetProductId,
+                        productName: item.productName || pData.name || targetProductId,
                         supplierId: item.supplierId || receipt.supplierId || null,
                         importPrice: landedUnitCost,
                         purchaseUnitCost: item.importPrice,
@@ -787,6 +788,7 @@ export const POST = withApi({
                             id: targetProductId
                         },
                         lotCode: lotCode,
+                        inventoryLotId: lotRef.id,
                         copies: importedQuantity
                     });
 

@@ -21,3 +21,9 @@ test('explicit parts-and-service mode retains the service fee', () => {
 test('legacy issues without linked parts retain their existing service fee', () => {
     assert.equal(getRepairIssueLaborCost(issues, []), 550_000);
 });
+
+test('a shortage proposal does not suppress the labour estimate before stock is selected', () => {
+    const requestedParts = [{ issueId: 'battery', status: 'requested' }];
+    assert.equal(resolveRepairIssueBillingMode(issues[0], requestedParts), 'service_only');
+    assert.equal(getRepairIssueLaborCost(issues, requestedParts), 550_000);
+});

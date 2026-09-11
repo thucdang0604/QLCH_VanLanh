@@ -22,6 +22,8 @@ import { useConfig } from '@/lib/ConfigContext';
 import { Receipt } from 'lucide-react';
 import { toastError, toastSuccess } from '@/lib/toast';
 import { getWarrantyExpiresAt, resolveProductWarranty, type RetailTaxonomyNode } from '@/lib/posCheckoutRules';
+import { parseReceiptPrintTemplate, RECEIPT_PRINT_TEMPLATE_STORAGE_KEY } from '@/lib/receiptPrintPreference';
+import { getReceiptPaymentSummary } from '@/lib/receiptPaymentSummary';
 
 
 const formatPrice = (price: number) => new Intl.NumberFormat('vi-VN').format(price) + 'đ';
@@ -103,13 +105,8 @@ function isRepairPaymentOrder(order: Order) {
 }
 
 const getOrderDebtInfo = (order: Order) => {
-    const totalAmount = Number(order.total_amount || 0);
-    const paymentHistory = Array.isArray(order.paymentHistory) ? order.paymentHistory : [];
-    const paidFromHistory = paymentHistory.reduce((sum, entry) => sum + (Number(entry?.amount) || 0), 0);
-    const paidAmount = Math.max(Number(order.deposit_amount || 0), paidFromHistory);
-    const remainingDebt = Math.max(0, totalAmount - paidAmount);
-    const isDebt = order.status !== 'Cancelled' && remainingDebt > 0;
-    return { isDebt, remainingDebt };
+    const summary = getReceiptPaymentSummary(order);
+    return { isDebt: summary.isDebt, remainingDebt: summary.remainingAmount };
 };
 
 const getReceiptPaymentHtml = (order: Order, type: 'thermal' | 'a5') => {
@@ -247,12 +244,33 @@ export default function OrdersPage() {
     const [sourceFilter, setSourceFilter] = useState<'all' | 'web' | 'pos'>('all');
     const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
     const [printTemplate, setPrintTemplate] = useState<'thermal' | 'a5'>('thermal');
+    const [hasLoadedPrintTemplate, setHasLoadedPrintTemplate] = useState(false);
     const [printWarrantyPayloads, setPrintWarrantyPayloads] = useState<{ payload: WarrantyPrintPayload, config: WarrantyTemplateConfig, type: 'device'|'accessory' }[] | null>(null);
     const [receiptConfig, setReceiptConfig] = useState<ReceiptConfig | null>(null);
 
     const [lastDoc, setLastDoc] = useState<DocumentSnapshot | null>(null);
     const [hasMore, setHasMore] = useState(true);
     const [isSearchingDB, setIsSearchingDB] = useState(false);
+
+    useEffect(() => {
+        try {
+            const savedTemplate = parseReceiptPrintTemplate(window.localStorage.getItem(RECEIPT_PRINT_TEMPLATE_STORAGE_KEY));
+            if (savedTemplate) setPrintTemplate(savedTemplate);
+        } catch {
+            // Storage can be unavailable; keep the existing safe default.
+        } finally {
+            setHasLoadedPrintTemplate(true);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (!hasLoadedPrintTemplate) return;
+        try {
+            window.localStorage.setItem(RECEIPT_PRINT_TEMPLATE_STORAGE_KEY, printTemplate);
+        } catch {
+            // Keep the current selection for this session when storage is unavailable.
+        }
+    }, [hasLoadedPrintTemplate, printTemplate]);
 
     // Fetch orders realtime from Firestore with limit
     useEffect(() => {
@@ -1067,8 +1085,8 @@ export default function OrdersPage() {
                                     className="w-full md:w-auto p-3 md:p-2.5 border rounded-xl md:rounded-lg bg-gray-50 font-medium outline-none cursor-pointer text-center text-sm"
                                     value={printTemplate}
                                     onChange={e => setPrintTemplate(e.target.value as 'thermal' | 'a5')}
-                                    title="Chọn khổ in"
-                                    aria-label="Chọn khổ in"
+                                    title="Chọn khổ in, được nhớ riêng trên máy này"
+                                    aria-label="Chọn khổ in, được nhớ riêng trên máy này"
                                 >
                                     <option value="thermal">Khổ 80mm</option>
                                     <option value="a5">Khá»• A5</option>
@@ -1076,9 +1094,14 @@ export default function OrdersPage() {
                                 <button
                                     onClick={() => {
                                         if (!selectedOrder) return;
-                                        const cName = selectedOrder.customer?.name || selectedOrder.customer_info?.name || 'KhĂ¡ch láº»';
-                                        const cPhone = selectedOrder.customer?.phone || selectedOrder.customer_info?.phone || '';
+                                        const cName = escapeReceiptHtml(selectedOrder.customer?.name || selectedOrder.customer_info?.name || 'KhĂ¡ch láº»');
+                                        const cPhone = escapeReceiptHtml(selectedOrder.customer?.phone || selectedOrder.customer_info?.phone || '');
                                         const dateStr = formatDate(selectedOrder.createdAt);
+                                        const receiptId = escapeReceiptHtml(selectedOrder.id.slice(-6).toUpperCase());
+                                        const storeName = escapeReceiptHtml(config.siteName || 'VÄƒn LĂ nh Service');
+                                        const storePhone = escapeReceiptHtml(config.contact_info?.main_phone || '0932.242.026');
+                                        const storeAddress = escapeReceiptHtml(config.contact_info?.address || '11 Nguyên Hồng, Bình Lợi Trung (P11 cũ), Bình Thạnh, HCM');
+                                        const createdByName = escapeReceiptHtml(selectedOrder.createdByName || 'Admin');
 
                                         if (printTemplate === 'thermal') {
                                             const itemsHtml = selectedOrder.items?.map((item) => {
@@ -1097,7 +1120,7 @@ export default function OrdersPage() {
                                             const receiptHtml = `
                                                 <html>
                                                 <head>
-                                                    <title>Hóa đơn bán hàng #${selectedOrder.id.slice(-6).toUpperCase()}</title>
+                                                    <title>Hóa đơn bán hàng #${receiptId}</title>
                                                     <style>
                                                         @page { size: 80mm auto; margin: 0; }
                                                         body { font-family: monospace; font-size: 11px; width: 302px; margin: 0 auto; padding: 12px; box-sizing: border-box; }
@@ -1108,10 +1131,10 @@ export default function OrdersPage() {
                                                     </style>
                                                 </head>
                                                 <body>
-                                                    <div class="text-center font-bold" style="font-size: 14px; text-transform: uppercase;">${config.siteName || 'VÄƒn LĂ nh Service'}</div>
-                                                    <div class="text-center">Hotline: ${config.contact_info?.main_phone || '0932.242.026'}</div>
+                                                    <div class="text-center font-bold" style="font-size: 14px; text-transform: uppercase;">${storeName}</div>
+                                                    <div class="text-center">Hotline: ${storePhone}</div>
                                                     <div class="text-center font-bold" style="margin-top: 8px;">HÓA ĐƠN BÁN HÀNG</div>
-                                                    <div class="text-center">${dateStr} | #${selectedOrder.id.slice(-6).toUpperCase()}</div>
+                                                    <div class="text-center">${dateStr} | #${receiptId}</div>
                                                     <hr/>
                                                     <div>KH: ${cName}</div>
                                                     ${cPhone ? `<div>SĐT: ${cPhone}</div>` : ''}
@@ -1137,7 +1160,7 @@ export default function OrdersPage() {
                                             const receiptHtml = `
                                                 <html>
                                                 <head>
-                                                    <title>Hóa đơn bán hàng #${selectedOrder.id.slice(-6).toUpperCase()}</title>
+                                                    <title>Hóa đơn bán hàng #${receiptId}</title>
                                                     <style>
                                                         body { font-family: 'Times New Roman', serif; font-size: 14px; line-height: 1.4; padding: 20px; color: #000; }
                                                         .header { display: flex; justify-content: space-between; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 20px; }
@@ -1167,14 +1190,14 @@ export default function OrdersPage() {
                                                 <body>
                                                     <div class="header">
                                                         <div class="store-info">
-                                                            <h2>${config.siteName || 'VÄ‚N LĂ€NH SERVICE'}</h2>
-                                                            <p><b>Địa chỉ:</b> ${config.contact_info?.address || '11 Nguyên Hồng, Bình Lợi Trung (P11 cũ), Bình Thạnh, HCM'}</p>
-                                                            <p><b>Điện thoại:</b> ${config.contact_info?.main_phone || '0932.242.026'}</p>
+                                                            <h2>${storeName}</h2>
+                                                            <p><b>Địa chỉ:</b> ${storeAddress}</p>
+                                                            <p><b>Điện thoại:</b> ${storePhone}</p>
                                                         </div>
                                                         <div style="text-align: right;">
-                                                            <p><b>Số:</b> #${selectedOrder.id.slice(-6).toUpperCase()}</p>
+                                                            <p><b>Số:</b> #${receiptId}</p>
                                                             <p><b>Ngày:</b> ${dateStr}</p>
-                                                            <p><b>Nhân viên:</b> ${selectedOrder.createdByName || 'Admin'}</p>
+                                                            <p><b>Nhân viên:</b> ${createdByName}</p>
                                                         </div>
                                                     </div>
 

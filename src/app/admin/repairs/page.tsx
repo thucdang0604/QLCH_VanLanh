@@ -28,6 +28,7 @@ import { useClientPagination } from '@/lib/useClientPagination';
 import { getWorkflowNormalizationOptions, normalizeRepairWorkflow, normalizeWarrantyWorkflow } from '@/lib/repairWorkflowConfig';
 import { requiresRepairPaymentAtPos } from '@/lib/repairPaymentGate';
 import { getRepairIssueLaborCost } from '@/lib/repairIssuePricing';
+import { canSelectInitialPartsWhenEditingRepair } from '@/lib/repairInboundIntake';
 import { canAttachBackgroundMedia, createBackgroundRepairMediaSession, type BackgroundRepairMediaSession, type RepairMediaPlacement } from '@/lib/repairMediaSession';
 import {
     canOverrideRepairTerminalStatus,
@@ -163,7 +164,7 @@ export default function RepairPage() {
     const [repairListTab, setRepairListTab] = useState<RepairListTab>('active');
     const [showModal, setShowModal] = useState(false);
     const [editingTicket, setEditingTicket] = useState<RepairTicket | null>(null);
-    const [printMode, setPrintMode] = useState<'receipt' | 'invoice' | 'warranty' | null>(null);
+    const [printMode, setPrintMode] = useState<'receipt' | 'invoice' | 'warranty' | 'handover' | null>(null);
     const [printTicket, setPrintTicket] = useState<RepairTicket | null>(null);
 
     const [noteModal, setNoteModal] = useState<{ ticket: RepairTicket; targetStatus: RepairStatus } | null>(null);
@@ -365,6 +366,7 @@ export default function RepairPage() {
         techNotes: '',
         issues: [] as RepairIssue[],
         initialParts: [],
+        initialPartRequests: [],
         partsCost: '' as string | number,
         laborCost: '' as string | number,
         depositAmount: '' as string | number,
@@ -1194,6 +1196,7 @@ export default function RepairPage() {
                 techNotes: ticket.issue?.notes || '',
                 issues: issuesWithServiceGroups,
                 initialParts: [],
+                initialPartRequests: [],
                 partsCost: ticket.payment?.partsCost || ticket.payment?.amount || '',
                 laborCost: ticket.payment?.laborCost !== undefined ? ticket.payment.laborCost : Math.max(0, (ticket.issues || []).reduce((sum, i) => sum + (Number(i.estimatedPrice) || 0), 0) - (Number(ticket.payment?.partsCost) || 0)),
                 depositAmount: ticket.payment?.depositAmount || '',
@@ -1499,6 +1502,13 @@ export default function RepairPage() {
                             issueId: part.issueId,
                             quantity: part.quantity,
                         })),
+                        initialPartRequests: formData.initialPartRequests.map(part => ({
+                            productId: part.productId,
+                            customName: part.productId ? '' : part.productName,
+                            issueId: part.issueId,
+                            quantity: part.quantity,
+                            quality: part.quality,
+                        })),
                     })
                 });
 
@@ -1554,6 +1564,13 @@ export default function RepairPage() {
                         productId: part.productId,
                         issueId: part.issueId,
                         quantity: part.quantity,
+                    })),
+                    initialPartRequests: formData.initialPartRequests.map(part => ({
+                        productId: part.productId,
+                        customName: part.productId ? '' : part.productName,
+                        issueId: part.issueId,
+                        quantity: part.quantity,
+                        quality: part.quality,
                     })),
                     timing: {
                         receivedAt: serverTimestamp(),
@@ -1645,7 +1662,7 @@ export default function RepairPage() {
             setRepairSaving(false);
         }
     };
-    const openPrint = (ticket: RepairTicket, mode: 'receipt' | 'invoice' | 'warranty', warrantyType: WarrantyPrintType | null = null) => {
+    const openPrint = (ticket: RepairTicket, mode: 'receipt' | 'invoice' | 'warranty' | 'handover', warrantyType: WarrantyPrintType | null = null) => {
         if (mode === 'warranty' && !getWarrantyConfigForType(warrantyType)) {
             toastWarning('Danh mục này chưa có mẫu phiếu bảo hành khả dụng.');
             return;
@@ -1777,6 +1794,11 @@ export default function RepairPage() {
                 isInboundFreightLocked={editingTicket?.appointmentIntakeMethod === 'send_to_store'
                     && dynamicStatuses.find(status => status.id === editingTicket.status)?.allowedFeatures?.includes('requireInboundArrival') === true
                     && editingTicket.inboundShipping?.status === 'received'}
+                canSelectInitialParts={!editingTicket || canSelectInitialPartsWhenEditingRepair(
+                    editingTicket,
+                    getWorkflowForTicketFromLists(editingTicket, dynamicStatuses, warrantyStatuses)
+                        .find(status => status.id === editingTicket.status),
+                )}
                 formData={formData}
                 setFormData={setFormData}
                 dynamicStatuses={dynamicStatuses}

@@ -320,19 +320,35 @@ export default function InventoryPage() {
     }, []);
 
     const handlePrintLot = async (receipt: ImportReceipt & { id: string }) => {
-        const pool = await loadProductsByIds(receipt.items.map(item => item.productId));
+        const [pool, lotSnap] = await Promise.all([
+            loadProductsByIds(receipt.items.map(item => item.productId)),
+            getDocs(query(collection(db, 'inventory_lots'), where('importReceiptId', '==', receipt.id))),
+        ]);
+        const lotsByProductId = new Map<string, { id: string; lotCode: string }[]>();
+        lotSnap.docs
+            .slice()
+            .sort((left, right) => left.id.localeCompare(right.id))
+            .forEach(snapshot => {
+            const lot = snapshot.data();
+            const productId = String(lot.productId || '');
+            const lots = lotsByProductId.get(productId) || [];
+            lots.push({ id: snapshot.id, lotCode: String(lot.lotCode || receipt.lotCode || '') });
+            lotsByProductId.set(productId, lots);
+        });
         const batchItems: PrintBatchItem[] = receipt.items.map(item => {
             const prod = pool.find(p => p.id === item.productId);
-            if (!prod) return null;
+            const inventoryLot = lotsByProductId.get(item.productId)?.shift();
+            if (!prod || !inventoryLot) return null;
             return {
                 product: prod,
-                lotCode: receipt.lotCode || undefined,
+                lotCode: inventoryLot.lotCode || undefined,
+                inventoryLotId: inventoryLot.id,
                 copies: item.quantity
             };
         }).filter(Boolean) as PrintBatchItem[];
         
-        if (batchItems.length === 0) {
-            toastError('Không thể tạo tem in vì không tìm thấy dữ liệu sản phẩm tương ứng.');
+        if (batchItems.length !== receipt.items.length) {
+            toastError('Không thể tạo đủ tem truy xuất vì thiếu dòng lô hàng. Vui lòng kiểm tra dữ liệu phiếu nhập.');
             return;
         }
         setPrintBatchLots(batchItems);

@@ -53,6 +53,8 @@ export interface CartItem {
     requiresImei?: boolean;
     imeis?: string[];
     lotCode?: string;
+    /** Exact inventory-lot allocation selected by a VL1 QR label. */
+    inventoryLotId?: string;
 }
 
 export interface RepairTicketInfo {

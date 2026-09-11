@@ -1,6 +1,7 @@
 import PrintableReceipt from '@/components/admin/PrintableReceipt';
 import PrintableRepairInvoice from '@/components/admin/PrintableRepairInvoice';
 import PrintableWarranty from '@/components/admin/PrintableWarranty';
+import PrintableHandover from '@/components/admin/PrintableHandover';
 import type { ReceiptConfig } from '@/components/admin/PrintableReceipt';
 import type { WarrantyTemplateConfig } from '@/app/admin/settings/receipt/WarrantyComponents';
 import type { RepairTicket } from '@/lib/types';
@@ -10,7 +11,7 @@ import {
     type WarrantyPrintType,
 } from './repairPageUtils';
 
-type RepairPrintMode = 'receipt' | 'invoice' | 'warranty' | null;
+type RepairPrintMode = 'receipt' | 'invoice' | 'warranty' | 'handover' | null;
 
 function getDateMillis(value: unknown): number {
     if (typeof value === 'number') return value;
@@ -51,6 +52,10 @@ export function RepairPrintTemplates({
 
     if (mode === 'invoice') {
         return <PrintableRepairInvoice ticket={ticket} receiptConfig={receiptConfig} />;
+    }
+
+    if (mode === 'handover') {
+        return <PrintableHandover ticket={ticket} receiptConfig={receiptConfig} />;
     }
 
     if (mode !== 'warranty' || !warrantyType || !receiptConfig) {
@@ -96,10 +101,10 @@ export function RepairPrintTemplates({
         deviceModel: ticket.deviceInfo?.model || '—',
         deviceColor: ticket.deviceInfo?.color,
         deviceImei: ticket.deviceInfo?.imei,
-        devicePasscode: ticket.deviceInfo?.passcode,
         services: serviceLines.join(', '),
         totalCost: Number(ticket.payment?.amount || 0),
         createdAt: ticket.createdAt,
+        warrantyStartedAt: ticket.warrantyStartedAt || ticket.createdAt,
         sourceCode: ticket.id.slice(-6).toUpperCase(),
         warrantyLines,
     };

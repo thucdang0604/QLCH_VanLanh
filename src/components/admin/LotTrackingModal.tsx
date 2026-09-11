@@ -6,6 +6,7 @@ import { db } from '@/lib/firebase';
 import { Search, Loader2, Package, Building2, Calendar, FileText, ArrowDownRight, Tag, RotateCcw } from 'lucide-react';
 import type { FirestoreDateValue } from '@/lib/types';
 import { appConfirm } from '@/lib/appDialog';
+import { parseInventoryLotTraceCode } from '@/lib/inventoryLotTraceCode';
 
 interface LotTrackingModalProps {
     isOpen: boolean;
@@ -75,8 +76,8 @@ export default function LotTrackingModal({ isOpen, onClose, initialSearchCode }:
 
     const handleSearch = async (e?: React.FormEvent, forceCode?: string) => {
         if (e) e.preventDefault();
-        const code = (forceCode || searchCode).trim().toUpperCase();
-        if (!code) return;
+        const rawCode = (forceCode || searchCode).trim();
+        if (!rawCode) return;
 
         setLoading(true);
         setError('');
@@ -84,6 +85,22 @@ export default function LotTrackingModal({ isOpen, onClose, initialSearchCode }:
         setUsageLogs([]);
 
         try {
+            let code = rawCode.toUpperCase();
+            const inventoryLotId = parseInventoryLotTraceCode(rawCode);
+            if (inventoryLotId) {
+                const traceLotSnap = await getDoc(doc(db, 'inventory_lots', inventoryLotId));
+                if (!traceLotSnap.exists()) {
+                    setError(`Không tìm thấy dòng lô từ QR: ${inventoryLotId}`);
+                    return;
+                }
+                const traceLotCode = String(traceLotSnap.data().lotCode || '').trim();
+                if (!traceLotCode) {
+                    setError('QR này không có mã lô để truy xuất.');
+                    return;
+                }
+                code = traceLotCode.toUpperCase();
+            }
+
             // 1. Find ALL lots for this lotCode
             const lotQ = query(
                 collection(db, 'inventory_lots'),
@@ -97,16 +114,19 @@ export default function LotTrackingModal({ isOpen, onClose, initialSearchCode }:
                 return;
             }
 
-            // 2. Collect unique supplierIds for batch fetch (dedup)
+            // 2. Collect unique supplier and product IDs for batch fetches.
             const supplierIds = new Set<string>();
+            const productIds = new Set<string>();
             const rawLots = lotSnap.docs.map(d => {
                 const data = d.data();
                 if (data.supplierId) supplierIds.add(data.supplierId);
+                if (data.productId) productIds.add(data.productId);
                 return { docId: d.id, data };
             });
 
-            // 3. Batch fetch supplier names (1 read per unique supplier)
+            // 3. Batch fetch supplier and product display names (dedup).
             const supplierNameMap = new Map<string, string>();
+            const productNameMap = new Map<string, string>();
             const supplierFetches = Array.from(supplierIds).map(async (sid) => {
                 try {
                     const supDoc = await getDoc(doc(db, 'suppliers', sid));
@@ -115,13 +135,21 @@ export default function LotTrackingModal({ isOpen, onClose, initialSearchCode }:
                     supplierNameMap.set(sid, sid);
                 }
             });
-            await Promise.all(supplierFetches);
+            const productFetches = Array.from(productIds).map(async (productId) => {
+                try {
+                    const productDoc = await getDoc(doc(db, 'products', productId));
+                    productNameMap.set(productId, productDoc.exists() ? (productDoc.data().name || productId) : productId);
+                } catch {
+                    productNameMap.set(productId, productId);
+                }
+            });
+            await Promise.all([...supplierFetches, ...productFetches]);
 
             // 4. Build LotInfo array
             const lots: LotInfo[] = rawLots.map(({ docId, data }) => ({
                 id: docId,
                 productId: data.productId,
-                productName: data.productName || data.productId,
+                productName: data.productName || productNameMap.get(data.productId) || data.productId,
                 lotCode: data.lotCode,
                 supplierId: data.supplierId,
                 supplierName: data.supplierId ? (supplierNameMap.get(data.supplierId) || 'Không xác định') : 'Không xác định',
@@ -300,7 +328,7 @@ export default function LotTrackingModal({ isOpen, onClose, initialSearchCode }:
                 <form onSubmit={handleSearch} className="flex gap-2">
                     <input
                         type="text"
-                        placeholder="Nhập mã lô (VD: PN-170123...)"
+                        placeholder="Quét QR tem hoặc nhập mã lô (VD: PN-170123...)"
                         value={searchCode}
                         onChange={(e) => setSearchCode(e.target.value)}
                         className="flex-1 px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 uppercase"

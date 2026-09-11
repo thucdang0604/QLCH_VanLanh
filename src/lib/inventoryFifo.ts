@@ -2,6 +2,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 import type { Transaction } from 'firebase-admin/firestore';
 
 export interface FifoDeductionResult {
+    lotId: string;
     lotCode: string | null;
     supplierId: string | null;
     quantity: number;
@@ -11,6 +12,9 @@ export interface FifoDeductionResult {
 export interface FifoDeductor {
     productId: string;
     quantityToDeduct: number;
+    /** Exact inventory_lots records selected by a QR trace label. */
+    preferredLotIds?: { lotId: string; quantity: number }[];
+    /** Legacy, human-readable lot preference. QR labels must use preferredLotIds. */
     preferredLotCodes?: { lotCode: string; quantity: number }[];
 }
 
@@ -81,7 +85,42 @@ export function executeFifoDeductionsWrites(
         const results: FifoDeductionResult[] = [];
         const productLots = lotsDataByProduct.get(req.productId) || [];
 
-        // Pre-process preferred lots if any
+        // A trace QR selects one exact inventory_lots document. It takes
+        // precedence over the older human lot-code preference because a lot
+        // code can span multiple products in one import receipt.
+        if (req.preferredLotIds && req.preferredLotIds.length > 0) {
+            for (const pref of req.preferredLotIds) {
+                if (remainingToDeduct <= 0) break;
+
+                const lotIndex = productLots.findIndex(doc => doc.ref.id === pref.lotId);
+                if (lotIndex < 0) continue;
+
+                const doc = productLots[lotIndex];
+                const lotRemaining = doc.data.remainingQuantity !== undefined ? Number(doc.data.remainingQuantity) : 0;
+                if (lotRemaining <= 0) continue;
+
+                const deductAmount = Math.min(lotRemaining, pref.quantity, remainingToDeduct);
+                if (deductAmount <= 0) continue;
+
+                const newRemaining = lotRemaining - deductAmount;
+                tx.update(doc.ref, {
+                    remainingQuantity: newRemaining,
+                    status: newRemaining === 0 ? 'empty' : 'active',
+                    updatedAt: FieldValue.serverTimestamp()
+                });
+                doc.data.remainingQuantity = newRemaining;
+                results.push({
+                    lotId: doc.ref.id,
+                    lotCode: doc.data.lotCode || null,
+                    supplierId: doc.data.supplierId || null,
+                    quantity: deductAmount,
+                    logId: doc.ref.id
+                });
+                remainingToDeduct -= deductAmount;
+            }
+        }
+
+        // Pre-process older, human lot-code preferences if any.
         if (req.preferredLotCodes && req.preferredLotCodes.length > 0) {
             for (const pref of req.preferredLotCodes) {
                 if (remainingToDeduct <= 0) break;
@@ -105,6 +144,7 @@ export function executeFifoDeductionsWrites(
                             doc.data.remainingQuantity = newRemaining;
 
                             results.push({
+                                lotId: doc.ref.id,
                                 lotCode: doc.data.lotCode || null,
                                 supplierId: doc.data.supplierId || null,
                                 quantity: deductAmount,
@@ -136,6 +176,7 @@ export function executeFifoDeductionsWrites(
             });
 
             results.push({
+                lotId: doc.ref.id,
                 lotCode: data.lotCode || null,
                 supplierId: data.supplierId || null,
                 quantity: deductAmount,
@@ -147,6 +188,7 @@ export function executeFifoDeductionsWrites(
 
         if (remainingToDeduct > 0) {
             results.push({
+                lotId: 'legacy',
                 lotCode: 'LEGACY_STOCK',
                 supplierId: null,
                 quantity: remainingToDeduct,
